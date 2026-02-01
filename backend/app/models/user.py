@@ -4,9 +4,8 @@ from typing import List
 
 from sqlalchemy import String, Boolean, ForeignKey, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
-from .base import Base, TimestampMixin
+from .base import Base, TimestampMixin, GUID
 
 
 class User(Base, TimestampMixin):
@@ -15,7 +14,7 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
     
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid4,
     )
@@ -52,20 +51,20 @@ class OrganizationMember(Base):
     __tablename__ = "organization_members"
     
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid4,
     )
     
     organization_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     
     user_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,

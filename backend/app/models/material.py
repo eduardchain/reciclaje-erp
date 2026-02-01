@@ -4,9 +4,8 @@ from typing import Optional
 
 from sqlalchemy import String, Boolean, Numeric, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
-from .base import Base, TimestampMixin, OrganizationMixin
+from .base import Base, TimestampMixin, OrganizationMixin, GUID
 
 
 class MaterialCategory(Base, TimestampMixin, OrganizationMixin):
@@ -15,7 +14,7 @@ class MaterialCategory(Base, TimestampMixin, OrganizationMixin):
     __tablename__ = "material_categories"
     
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid4,
     )
@@ -45,7 +44,7 @@ class Material(Base, TimestampMixin, OrganizationMixin):
     __tablename__ = "materials"
     
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid4,
     )
@@ -63,14 +62,14 @@ class Material(Base, TimestampMixin, OrganizationMixin):
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     
     category_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         ForeignKey("material_categories.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
     
     business_unit_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         ForeignKey("business_units.id", ondelete="SET NULL"),
         nullable=True,
         index=True,

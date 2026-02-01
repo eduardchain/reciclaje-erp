@@ -16,21 +16,24 @@ router = APIRouter()
 
 @router.post(
     "/register",
-    response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Register new user",
-    description="Create a new user account",
+    description="Create a new user account with optional organization creation",
 )
 def register(
     user_data: UserCreate,
+    organization_name: str | None = None,
     db: Session = Depends(get_db),
-) -> User:
+) -> dict:
     """
     Register a new user.
     
     - **email**: Valid email address (unique)
     - **password**: Password (minimum 8 characters)
     - **full_name**: Optional full name
+    - **organization_name**: Optional - if provided, creates organization with user as admin
+    
+    Returns user data with optional organization details.
     """
     # Check if user already exists
     existing_user = get_user_by_email(db, user_data.email)
@@ -44,7 +47,27 @@ def register(
     # Create new user
     user = create_user(db, user_data)
     
-    return user
+    # Build response
+    response = {
+        "user": UserResponse.model_validate(user),
+    }
+    
+    # Create organization if name provided
+    if organization_name:
+        from app.services.organization import create_organization
+        from app.schemas.organization import OrganizationCreate, OrganizationResponse
+        
+        org_data = OrganizationCreate(name=organization_name)
+        organization = create_organization(db, org_data, user.id)
+        
+        response["organization"] = {
+            "id": str(organization.id),
+            "name": organization.name,
+            "slug": organization.slug,
+            "role": "admin"
+        }
+    
+    return response
 
 
 @router.post(

@@ -3,9 +3,8 @@ from decimal import Decimal
 
 from sqlalchemy import String, Boolean, Numeric, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
-from .base import Base, TimestampMixin, OrganizationMixin
+from .base import Base, TimestampMixin, OrganizationMixin, GUID
 
 
 class ThirdParty(Base, TimestampMixin, OrganizationMixin):
@@ -17,7 +16,7 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
     __tablename__ = "third_parties"
     
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid4,
     )

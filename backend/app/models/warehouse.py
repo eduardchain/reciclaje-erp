@@ -1,10 +1,9 @@
 from uuid import UUID, uuid4
 
-from sqlalchemy import String, Boolean
+from sqlalchemy import String, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
-from .base import Base, TimestampMixin, OrganizationMixin
+from .base import Base, TimestampMixin, OrganizationMixin, GUID
 
 
 class Warehouse(Base, TimestampMixin, OrganizationMixin):
@@ -16,7 +15,7 @@ class Warehouse(Base, TimestampMixin, OrganizationMixin):
     __tablename__ = "warehouses"
     
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid4,
     )

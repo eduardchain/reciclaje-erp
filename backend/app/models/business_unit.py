@@ -3,9 +3,8 @@ from typing import List, TYPE_CHECKING
 
 from sqlalchemy import String, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
-from .base import Base, TimestampMixin, OrganizationMixin
+from .base import Base, TimestampMixin, OrganizationMixin, GUID
 
 if TYPE_CHECKING:
     from .material import Material
@@ -20,7 +19,7 @@ class BusinessUnit(Base, TimestampMixin, OrganizationMixin):
     __tablename__ = "business_units"
     
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid4,
     )

@@ -3,9 +3,8 @@ from typing import List
 
 from sqlalchemy import String, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
-from .base import Base, TimestampMixin
+from .base import Base, TimestampMixin, GUID
 
 
 class Organization(Base, TimestampMixin):
@@ -14,7 +13,7 @@ class Organization(Base, TimestampMixin):
     __tablename__ = "organizations"
     
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid4,
     )

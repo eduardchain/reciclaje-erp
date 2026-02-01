@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: reciclaje-test-db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: reciclaje_test
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d reciclaje_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - reciclaje_test_network
+
+volumes:
+  postgres_test_data:
+    name: reciclaje_test_data
+
+networks:
+  reciclaje_test_network:
+    name: reciclaje_test_network
+    driver: bridge
