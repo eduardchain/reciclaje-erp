@@ -1,11 +1,15 @@
 from uuid import UUID, uuid4
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import String, Boolean, Numeric, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, OrganizationMixin, GUID
+
+if TYPE_CHECKING:
+    from app.models.inventory_movement import InventoryMovement
+    from app.models.business_unit import BusinessUnit
 
 
 class MaterialCategory(Base, TimestampMixin, OrganizationMixin):
@@ -106,6 +110,12 @@ class Material(Base, TimestampMixin, OrganizationMixin):
     business_unit: Mapped[Optional["BusinessUnit"]] = relationship(
         "BusinessUnit",
         back_populates="materials",
+    )
+    
+    inventory_movements: Mapped[list["InventoryMovement"]] = relationship(
+        "InventoryMovement",
+        back_populates="material",
+        order_by="InventoryMovement.date.desc()",
     )
     
     def __repr__(self) -> str:

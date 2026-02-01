@@ -1,10 +1,14 @@
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 from decimal import Decimal
 
 from sqlalchemy import String, Boolean, Numeric, ForeignKey
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, OrganizationMixin, GUID
+
+if TYPE_CHECKING:
+    from app.models.purchase import Purchase
 
 
 class ThirdParty(Base, TimestampMixin, OrganizationMixin):
@@ -63,6 +67,13 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
     )
     
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    # Relationships
+    purchases: Mapped[list["Purchase"]] = relationship(
+        "Purchase",
+        foreign_keys="Purchase.supplier_id",
+        back_populates="supplier",
+    )
     
     def __repr__(self) -> str:
         types = []

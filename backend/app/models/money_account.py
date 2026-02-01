@@ -1,10 +1,14 @@
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 from decimal import Decimal
 
 from sqlalchemy import String, Boolean, Numeric
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, OrganizationMixin, GUID
+
+if TYPE_CHECKING:
+    from app.models.purchase import Purchase
 
 
 class MoneyAccount(Base, TimestampMixin, OrganizationMixin):
@@ -42,6 +46,13 @@ class MoneyAccount(Base, TimestampMixin, OrganizationMixin):
     )
     
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    # Relationships
+    purchases: Mapped[list["Purchase"]] = relationship(
+        "Purchase",
+        foreign_keys="Purchase.payment_account_id",
+        back_populates="payment_account",
+    )
     
     def __repr__(self) -> str:
         return f"<MoneyAccount(id={self.id}, name='{self.name}', type='{self.account_type}', balance={self.current_balance})>"

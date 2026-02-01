@@ -10,6 +10,8 @@ from .material import Material, MaterialCategory
 from .warehouse import Warehouse
 from .business_unit import BusinessUnit
 from .money_account import MoneyAccount
+from .purchase import Purchase, PurchaseLine
+from .inventory_movement import InventoryMovement
 
 __all__ = [
     "Base",
@@ -24,4 +26,7 @@ __all__ = [
     "Warehouse",
     "BusinessUnit",
     "MoneyAccount",
+    "Purchase",
+    "PurchaseLine",
+    "InventoryMovement",
 ]
