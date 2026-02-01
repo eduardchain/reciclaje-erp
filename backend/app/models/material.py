@@ -25,6 +25,8 @@ class MaterialCategory(Base, TimestampMixin, OrganizationMixin):
     
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
     # Relationships
     materials: Mapped[list["Material"]] = relationship(
         "Material",
