@@ -44,8 +44,8 @@ class PurchaseLineResponse(PurchaseLineBase):
     
     model_config = {"from_attributes": True}
     
-    @field_serializer('total_price')
-    def serialize_decimal(self, value: Decimal) -> float:
+    @field_serializer('quantity', 'unit_price', 'total_price')
+    def serialize_decimals(self, value: Decimal) -> float:
         """Convert Decimal to float for JSON serialization."""
         return float(value)
 

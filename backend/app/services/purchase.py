@@ -5,6 +5,7 @@ Supports 1-step and 2-step purchase workflows:
 - 1-step: create() with auto_liquidate=True
 - 2-step: create() then liquidate() separately
 """
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
@@ -394,6 +395,88 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             )
         
         return purchase
+    
+    def get(
+        self,
+        db: Session,
+        purchase_id: UUID,
+        organization_id: UUID
+    ) -> Optional[Purchase]:
+        """
+        Get a single purchase by ID with eager loading.
+        
+        Returns None if not found or doesn't belong to organization.
+        """
+        return db.query(Purchase).options(
+            joinedload(Purchase.lines).joinedload(PurchaseLine.material),
+            joinedload(Purchase.lines).joinedload(PurchaseLine.warehouse),
+            joinedload(Purchase.supplier),
+            joinedload(Purchase.payment_account),
+        ).filter(
+            Purchase.id == purchase_id,
+            Purchase.organization_id == organization_id
+        ).first()
+    
+    def get_multi(
+        self,
+        db: Session,
+        organization_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        status: Optional[str] = None,
+        supplier_id: Optional[UUID] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        search: Optional[str] = None
+    ) -> tuple[List[Purchase], int]:
+        """
+        Get multiple purchases with filtering and pagination.
+        
+        Returns:
+            Tuple of (purchases, total_count)
+        """
+        from sqlalchemy import or_, cast, String
+        
+        # Base query
+        query = db.query(Purchase).filter(
+            Purchase.organization_id == organization_id
+        )
+        
+        # Apply filters
+        if status:
+            query = query.filter(Purchase.status == status)
+        
+        if supplier_id:
+            query = query.filter(Purchase.supplier_id == supplier_id)
+        
+        if date_from:
+            query = query.filter(Purchase.date >= date_from)
+        
+        if date_to:
+            query = query.filter(Purchase.date <= date_to)
+        
+        if search:
+            # Search in: purchase_number (as text), supplier name, notes
+            query = query.join(Purchase.supplier).filter(
+                or_(
+                    cast(Purchase.purchase_number, String).ilike(f"%{search}%"),
+                    ThirdParty.name.ilike(f"%{search}%"),
+                    Purchase.notes.ilike(f"%{search}%")
+                )
+            )
+        
+        # Get total count before pagination
+        total = query.count()
+        
+        # Apply pagination and eager loading
+        purchases = query.options(
+            joinedload(Purchase.lines).joinedload(PurchaseLine.material),
+            joinedload(Purchase.lines).joinedload(PurchaseLine.warehouse),
+            joinedload(Purchase.supplier),
+            joinedload(Purchase.payment_account),
+        ).order_by(Purchase.date.desc(), Purchase.purchase_number.desc()).offset(skip).limit(limit).all()
+        
+        return purchases, total
     
     def get_by_number(
         self,
