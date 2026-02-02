@@ -11,6 +11,7 @@ from .warehouse import Warehouse
 from .business_unit import BusinessUnit
 from .money_account import MoneyAccount
 from .purchase import Purchase, PurchaseLine
+from .sale import Sale, SaleLine, SaleCommission
 from .inventory_movement import InventoryMovement
 
 __all__ = [
@@ -28,5 +29,8 @@ __all__ = [
     "MoneyAccount",
     "Purchase",
     "PurchaseLine",
+    "Sale",
+    "SaleLine",
+    "SaleCommission",
     "InventoryMovement",
 ]

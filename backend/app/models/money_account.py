@@ -9,6 +9,7 @@ from .base import Base, TimestampMixin, OrganizationMixin, GUID
 
 if TYPE_CHECKING:
     from app.models.purchase import Purchase
+    from app.models.sale import Sale
 
 
 class MoneyAccount(Base, TimestampMixin, OrganizationMixin):
@@ -51,6 +52,12 @@ class MoneyAccount(Base, TimestampMixin, OrganizationMixin):
     purchases: Mapped[list["Purchase"]] = relationship(
         "Purchase",
         foreign_keys="Purchase.payment_account_id",
+        back_populates="payment_account",
+    )
+    
+    sales: Mapped[list["Sale"]] = relationship(
+        "Sale",
+        foreign_keys="Sale.payment_account_id",
         back_populates="payment_account",
     )
     

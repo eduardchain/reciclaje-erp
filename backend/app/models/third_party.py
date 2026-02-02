@@ -9,6 +9,7 @@ from .base import Base, TimestampMixin, OrganizationMixin, GUID
 
 if TYPE_CHECKING:
     from app.models.purchase import Purchase
+    from app.models.sale import Sale, SaleCommission
 
 
 class ThirdParty(Base, TimestampMixin, OrganizationMixin):
@@ -73,6 +74,18 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
         "Purchase",
         foreign_keys="Purchase.supplier_id",
         back_populates="supplier",
+    )
+    
+    sales: Mapped[list["Sale"]] = relationship(
+        "Sale",
+        foreign_keys="Sale.customer_id",
+        back_populates="customer",
+    )
+    
+    sale_commissions: Mapped[list["SaleCommission"]] = relationship(
+        "SaleCommission",
+        foreign_keys="SaleCommission.third_party_id",
+        back_populates="third_party",
     )
     
     def __repr__(self) -> str:

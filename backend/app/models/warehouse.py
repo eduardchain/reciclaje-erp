@@ -8,6 +8,7 @@ from .base import Base, TimestampMixin, OrganizationMixin, GUID
 
 if TYPE_CHECKING:
     from app.models.inventory_movement import InventoryMovement
+    from app.models.sale import Sale
 
 
 class Warehouse(Base, TimestampMixin, OrganizationMixin):
@@ -39,6 +40,12 @@ class Warehouse(Base, TimestampMixin, OrganizationMixin):
         "InventoryMovement",
         back_populates="warehouse",
         order_by="InventoryMovement.date.desc()",
+    )
+    
+    sales: Mapped[list["Sale"]] = relationship(
+        "Sale",
+        foreign_keys="Sale.warehouse_id",
+        back_populates="warehouse",
     )
     
     def __repr__(self) -> str:

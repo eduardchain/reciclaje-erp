@@ -10,6 +10,7 @@ from .base import Base, TimestampMixin, OrganizationMixin, GUID
 if TYPE_CHECKING:
     from app.models.inventory_movement import InventoryMovement
     from app.models.business_unit import BusinessUnit
+    from app.models.sale import SaleLine
 
 
 class MaterialCategory(Base, TimestampMixin, OrganizationMixin):
@@ -116,6 +117,12 @@ class Material(Base, TimestampMixin, OrganizationMixin):
         "InventoryMovement",
         back_populates="material",
         order_by="InventoryMovement.date.desc()",
+    )
+    
+    sale_lines: Mapped[list["SaleLine"]] = relationship(
+        "SaleLine",
+        foreign_keys="SaleLine.material_id",
+        back_populates="material",
     )
     
     def __repr__(self) -> str:
