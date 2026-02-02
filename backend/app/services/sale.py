@@ -437,6 +437,120 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         )
         return list(db.scalars(stmt).all())
     
+    def get_multi(
+        self,
+        db: Session,
+        organization_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        status: Optional[str] = None,
+        customer_id: Optional[UUID] = None,
+        warehouse_id: Optional[UUID] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        search: Optional[str] = None
+    ) -> tuple[List[Sale], int]:
+        """
+        Get multiple sales with filtering and pagination.
+        
+        Args:
+            db: Database session
+            organization_id: Organization UUID
+            skip: Number of records to skip
+            limit: Maximum records to return
+            status: Filter by status
+            customer_id: Filter by customer
+            warehouse_id: Filter by warehouse
+            date_from: Filter sales on or after this date
+            date_to: Filter sales on or before this date
+            search: Search in sale_number, customer name, notes, vehicle_plate, invoice_number
+        
+        Returns:
+            Tuple of (sales, total_count)
+        """
+        from sqlalchemy import or_, cast, String
+        
+        # Base query
+        query = select(Sale).where(Sale.organization_id == organization_id)
+        
+        # Apply filters
+        if status:
+            query = query.where(Sale.status == status)
+        
+        if customer_id:
+            query = query.where(Sale.customer_id == customer_id)
+        
+        if warehouse_id:
+            query = query.where(Sale.warehouse_id == warehouse_id)
+        
+        if date_from:
+            query = query.where(Sale.date >= date_from)
+        
+        if date_to:
+            query = query.where(Sale.date <= date_to)
+        
+        if search:
+            # Search in: sale_number (as text), customer name, notes, vehicle_plate, invoice_number
+            query = query.join(Sale.customer).where(
+                or_(
+                    cast(Sale.sale_number, String).ilike(f"%{search}%"),
+                    ThirdParty.name.ilike(f"%{search}%"),
+                    Sale.notes.ilike(f"%{search}%"),
+                    Sale.vehicle_plate.ilike(f"%{search}%"),
+                    Sale.invoice_number.ilike(f"%{search}%")
+                )
+            )
+        
+        # Get total count before pagination
+        count_query = select(func.count()).select_from(query.subquery())
+        total = db.scalar(count_query)
+        
+        # Apply pagination and eager loading
+        query = (
+            query
+            .options(
+                joinedload(Sale.lines).joinedload(SaleLine.material),
+                joinedload(Sale.commissions).joinedload(SaleCommission.third_party),
+                joinedload(Sale.customer),
+                joinedload(Sale.warehouse),
+                joinedload(Sale.payment_account),
+            )
+            .order_by(Sale.date.desc(), Sale.sale_number.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        
+        sales = list(db.scalars(query).unique().all())
+        
+        return sales, total
+    
+    def get(
+        self,
+        db: Session,
+        sale_id: UUID,
+        organization_id: UUID
+    ) -> Optional[Sale]:
+        """
+        Get a single sale by ID with eager loading.
+        
+        Returns None if not found or doesn't belong to organization.
+        """
+        stmt = (
+            select(Sale)
+            .where(
+                Sale.id == sale_id,
+                Sale.organization_id == organization_id
+            )
+            .options(
+                joinedload(Sale.lines).joinedload(SaleLine.material),
+                joinedload(Sale.commissions).joinedload(SaleCommission.third_party),
+                joinedload(Sale.customer),
+                joinedload(Sale.warehouse),
+                joinedload(Sale.payment_account),
+            )
+        )
+        return db.scalar(stmt)
+    
     # ========================================================================
     # Helper Methods
     # ========================================================================

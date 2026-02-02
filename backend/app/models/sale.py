@@ -287,12 +287,6 @@ class SaleLine(Base, TimestampMixin):
         back_populates="sale_lines"
     )
     
-    # Indexes
-    __table_args__ = (
-        Index("ix_sale_lines_sale_id", "sale_id"),
-        Index("ix_sale_lines_material_id", "material_id"),
-    )
-    
     def __repr__(self) -> str:
         return f"<SaleLine(id={self.id}, material_id={self.material_id}, qty={self.quantity}, price={self.unit_price})>"
     
@@ -393,12 +387,6 @@ class SaleCommission(Base, TimestampMixin):
         "ThirdParty",
         foreign_keys=[third_party_id],
         back_populates="sale_commissions"
-    )
-    
-    # Indexes
-    __table_args__ = (
-        Index("ix_sale_commissions_sale_id", "sale_id"),
-        Index("ix_sale_commissions_third_party_id", "third_party_id"),
     )
     
     def __repr__(self) -> str:

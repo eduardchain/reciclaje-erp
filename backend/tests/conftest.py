@@ -49,11 +49,15 @@ def db_session() -> Generator[Session, None, None]:
     """
     Create a fresh database session for each test.
     
-    Creates tables before test, allows real commits, and drops tables after.
+    Drops tables first to ensure clean state, then creates them before test.
     This works correctly with TestClient which creates its own sessions.
     """
+    # Drop all tables first to ensure clean state
+    # Use checkfirst=True to avoid errors if tables don't exist
+    Base.metadata.drop_all(bind=test_engine, checkfirst=True)
+    
     # Create all tables
-    Base.metadata.create_all(bind=test_engine)
+    Base.metadata.create_all(bind=test_engine, checkfirst=False)
     
     # Create a regular session
     session = TestingSessionLocal()
@@ -62,8 +66,8 @@ def db_session() -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
-        # Drop all tables after test to ensure clean state
-        Base.metadata.drop_all(bind=test_engine)
+        # Drop all tables after test to ensure clean state for next test
+        Base.metadata.drop_all(bind=test_engine, checkfirst=True)
 
 
 @pytest.fixture(scope="function", autouse=True)
