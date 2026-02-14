@@ -3,8 +3,9 @@ from typing import Generator
 from uuid import uuid4
 
 import pytest
+import sqlalchemy
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -51,12 +52,38 @@ def db_session() -> Generator[Session, None, None]:
     
     Drops tables first to ensure clean state, then creates them before test.
     This works correctly with TestClient which creates its own sessions.
-    """
-    # Drop all tables first to ensure clean state
-    # Use checkfirst=True to avoid errors if tables don't exist
-    Base.metadata.drop_all(bind=test_engine, checkfirst=True)
     
-    # Create all tables
+    Note: Uses raw SQL with CASCADE to handle circular dependencies between 
+    double_entries, purchases, sales. Also drops ENUM types for PostgreSQL.
+    """
+    # Drop all tables and types using raw SQL
+    with test_engine.begin() as connection:
+        if test_engine.dialect.name == "postgresql":
+            # Drop all ENUM types first (PostgreSQL-specific)
+            result = connection.execute(text(
+                "SELECT t.typname FROM pg_type t "
+                "JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace "
+                "WHERE t.typtype = 'e' AND n.nspname = 'public'"
+            ))
+            enum_types = [row[0] for row in result]
+            for enum_type in enum_types:
+                connection.execute(text(f'DROP TYPE IF EXISTS "{enum_type}" CASCADE'))
+            
+            # Get all table names and drop them
+            inspector = sqlalchemy.inspect(test_engine)
+            tables = inspector.get_table_names()
+            for table in tables:
+                connection.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+        else:
+            # For SQLite, disable foreign keys first
+            connection.execute(text("PRAGMA foreign_keys = OFF"))
+            inspector = sqlalchemy.inspect(test_engine)
+            tables = inspector.get_table_names()
+            for table in tables:
+                connection.execute(text(f'DROP TABLE IF EXISTS "{table}"'))
+            connection.execute(text("PRAGMA foreign_keys = ON"))
+    
+    # Create all tables using SQLAlchemy
     Base.metadata.create_all(bind=test_engine, checkfirst=False)
     
     # Create a regular session
@@ -66,8 +93,32 @@ def db_session() -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
-        # Drop all tables after test to ensure clean state for next test
-        Base.metadata.drop_all(bind=test_engine, checkfirst=True)
+        
+        # Drop all tables and types after test using the same strategy
+        with test_engine.begin() as connection:
+            if test_engine.dialect.name == "postgresql":
+                # Drop ENUM types first
+                result = connection.execute(text(
+                    "SELECT t.typname FROM pg_type t "
+                    "JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace "
+                    "WHERE t.typtype = 'e' AND n.nspname = 'public'"
+                ))
+                enum_types = [row[0] for row in result]
+                for enum_type in enum_types:
+                    connection.execute(text(f'DROP TYPE IF EXISTS "{enum_type}" CASCADE'))
+                
+                # Drop tables
+                inspector = sqlalchemy.inspect(test_engine)
+                tables = inspector.get_table_names()
+                for table in tables:
+                    connection.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+            else:
+                connection.execute(text("PRAGMA foreign_keys = OFF"))
+                inspector = sqlalchemy.inspect(test_engine)
+                tables = inspector.get_table_names()
+                for table in tables:
+                    connection.execute(text(f'DROP TABLE IF EXISTS "{table}"'))
+                connection.execute(text("PRAGMA foreign_keys = ON"))
 
 
 @pytest.fixture(scope="function", autouse=True)

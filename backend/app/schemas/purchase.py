@@ -18,7 +18,7 @@ class PurchaseLineBase(BaseModel):
     material_id: UUID = Field(..., description="Material UUID")
     quantity: Decimal = Field(..., gt=0, description="Quantity purchased (must be positive)")
     unit_price: Decimal = Field(..., ge=0, description="Price per unit")
-    warehouse_id: UUID = Field(..., description="Destination warehouse UUID")
+    warehouse_id: Optional[UUID] = Field(None, description="Destination warehouse UUID (nullable for double-entry)")
 
 
 class PurchaseLineCreate(PurchaseLineBase):
@@ -40,7 +40,7 @@ class PurchaseLineResponse(PurchaseLineBase):
     # Joined data from related models
     material_code: str = Field(..., description="Material code (e.g., MAT-001)")
     material_name: str = Field(..., description="Material name")
-    warehouse_name: str = Field(..., description="Warehouse name")
+    warehouse_name: Optional[str] = Field(None, description="Warehouse name (null for double-entry)")
     
     model_config = {"from_attributes": True}
     
@@ -59,6 +59,7 @@ class PurchaseBase(BaseModel):
     supplier_id: UUID = Field(..., description="Supplier UUID (must have is_supplier=True)")
     date: datetime = Field(..., description="Purchase date (weighing date)")
     notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
+    double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
 
 
 class PurchaseCreate(PurchaseBase):
@@ -111,6 +112,9 @@ class PurchaseResponse(PurchaseBase):
     
     # Nested lines with joined data
     lines: List[PurchaseLineResponse] = Field(..., description="Purchase lines")
+    
+    # Double-entry link
+    double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
     
     model_config = {"from_attributes": True}
     

@@ -77,6 +77,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             )
         
         # Step 3: Create Purchase
+        # Check if this is a double-entry purchase (skip inventory movements)
+        is_double_entry = hasattr(obj_in, 'double_entry_id') and obj_in.double_entry_id is not None
+        
         purchase = Purchase(
             organization_id=organization_id,
             purchase_number=purchase_number,
@@ -85,11 +88,15 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             total_amount=Decimal("0.00"),
             status="registered",
             notes=obj_in.notes,
+            double_entry_id=obj_in.double_entry_id if is_double_entry else None,
         )
         db.add(purchase)
         db.flush()  # Get purchase.id before creating lines
         
-        print(f"📦 Created purchase #{purchase_number} with ID: {purchase.id}")
+        if is_double_entry:
+            print(f"📦 Created double-entry purchase #{purchase_number} with ID: {purchase.id} (no inventory movement)")
+        else:
+            print(f"📦 Created purchase #{purchase_number} with ID: {purchase.id}")
         
         # Step 4: Process each line
         total_amount = Decimal("0.00")
@@ -103,13 +110,19 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     detail=f"Material {line_data.material_id} not found"
                 )
             
-            # Validate warehouse
-            warehouse = db.get(Warehouse, line_data.warehouse_id)
-            if not warehouse or warehouse.organization_id != organization_id:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Warehouse {line_data.warehouse_id} not found"
-                )
+            # Validate warehouse (skip for double-entry)
+            if not is_double_entry:
+                if not line_data.warehouse_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="warehouse_id is required for normal purchases"
+                    )
+                warehouse = db.get(Warehouse, line_data.warehouse_id)
+                if not warehouse or warehouse.organization_id != organization_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Warehouse {line_data.warehouse_id} not found"
+                    )
             
             # Calculate line total
             quantity = Decimal(str(line_data.quantity))
@@ -121,34 +134,36 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             purchase_line = PurchaseLine(
                 purchase_id=purchase.id,
                 material_id=line_data.material_id,
-                warehouse_id=line_data.warehouse_id,
+                warehouse_id=line_data.warehouse_id,  # Can be None for double-entry
                 quantity=quantity,
                 unit_price=unit_price,
                 total_price=line_total,
             )
             db.add(purchase_line)
             
-            # Create InventoryMovement
-            movement = InventoryMovement(
-                organization_id=organization_id,
-                material_id=line_data.material_id,
-                warehouse_id=line_data.warehouse_id,
-                movement_type="purchase",
-                quantity=quantity,
-                unit_cost=unit_price,
-                reference_type="purchase",
-                reference_id=purchase.id,
-                date=obj_in.date,
-                notes=f"Purchase #{purchase_number}",
-            )
-            db.add(movement)
-            
-            # Update Material stock and average cost
-            self._update_material_stock_and_cost(
-                material=material,
-                quantity_delta=quantity,
-                unit_cost=unit_price,
-            )
+            # Skip inventory operations for double-entry
+            if not is_double_entry:
+                # Create InventoryMovement
+                movement = InventoryMovement(
+                    organization_id=organization_id,
+                    material_id=line_data.material_id,
+                    warehouse_id=line_data.warehouse_id,
+                    movement_type="purchase",
+                    quantity=quantity,
+                    unit_cost=unit_price,
+                    reference_type="purchase",
+                    reference_id=purchase.id,
+                    date=obj_in.date,
+                    notes=f"Purchase #{purchase_number}",
+                )
+                db.add(movement)
+                
+                # Update Material stock and average cost
+                self._update_material_stock_and_cost(
+                    material=material,
+                    quantity_delta=quantity,
+                    unit_cost=unit_price,
+                )
             
             print(f"  📝 Line: {material.code} x {quantity} @ ${unit_price} = ${line_total}")
         
@@ -214,6 +229,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             organization_id,
             detail="Purchase not found"
         )
+        
+        # Validate: Cannot liquidate purchase that belongs to double-entry
+        if purchase.double_entry_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot liquidate purchase that belongs to a double-entry operation. Manage it through the double-entry instead."
+            )
         
         if purchase.status != "registered":
             raise HTTPException(
@@ -301,10 +323,17 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 detail="Purchase not found"
             )
         
+        # Validate: Cannot cancel purchase that belongs to double-entry
+        if purchase.double_entry_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot cancel purchase that belongs to a double-entry operation. Cancel the double-entry instead."
+            )
+        
         if purchase.status == "cancelled":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Purchase already cancelled"
+                detail="Purchase is already cancelled"
             )
         
         if purchase.status == "paid":
@@ -542,6 +571,53 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         next_number = (max_number or 0) + 1
         
         return next_number
+    
+    def delete(
+        self,
+        db: Session,
+        id: UUID,
+        organization_id: UUID
+    ) -> Purchase:
+        """
+        Soft delete purchase (set is_active = False).
+        
+        Validates that purchase is not part of a double-entry operation.
+        
+        Args:
+            db: Database session
+            id: Purchase UUID
+            organization_id: Organization UUID
+            
+        Returns:
+            Deleted (deactivated) purchase instance
+            
+        Raises:
+            HTTPException: 400 if purchase belongs to double-entry
+            HTTPException: 404 if not found
+        """
+        # Get existing purchase
+        purchase = self.get(db, id, organization_id)
+        if not purchase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Purchase not found"
+            )
+        
+        # Validate: Cannot delete purchase that belongs to double-entry
+        if purchase.double_entry_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete purchase that belongs to a double-entry operation. Cancel the double-entry instead."
+            )
+        
+        # Soft delete
+        purchase.is_active = False
+        
+        # Commit changes
+        db.commit()
+        db.refresh(purchase)
+        
+        return purchase
     
     def _update_material_stock_and_cost(
         self,

@@ -74,6 +74,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         # Step 1: Generate next sale_number with advisory lock
         sale_number = self._generate_sale_number(db, organization_id)
         
+        # Check if this is a double-entry sale (skip inventory movements)
+        is_double_entry = hasattr(obj_in, 'double_entry_id') and obj_in.double_entry_id is not None
+        
         # Step 2: Validate customer
         customer = db.get(ThirdParty, obj_in.customer_id)
         if not customer or customer.organization_id != organization_id:
@@ -87,15 +90,61 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 detail="ThirdParty is not marked as customer"
             )
         
-        # Step 3: Validate warehouse
-        warehouse = db.get(Warehouse, obj_in.warehouse_id)
-        if not warehouse or warehouse.organization_id != organization_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Warehouse not found"
-            )
+        # Step 3: Validate warehouse (skip for double-entry)
+        if not is_double_entry:
+            if not obj_in.warehouse_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="warehouse_id is required for normal sales"
+                )
+            warehouse = db.get(Warehouse, obj_in.warehouse_id)
+            if not warehouse or warehouse.organization_id != organization_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Warehouse not found"
+                )
         
-        # Step 4: Validate stock availability for all materials BEFORE creating anything
+        # Step 4: Validate stock availability for all materials BEFORE creating anything (skip for double-entry)
+        if not is_double_entry:
+            for line_data in obj_in.lines:
+                material = db.get(Material, line_data.material_id)
+                if not material or material.organization_id != organization_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Material {line_data.material_id} not found"
+                    )
+                
+                if material.current_stock < line_data.quantity:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Insufficient stock for material {material.name}. Available: {material.current_stock}, Required: {line_data.quantity}"
+                    )
+        
+        # Step 5: Create Sale
+        sale = Sale(
+            organization_id=organization_id,
+            sale_number=sale_number,
+            customer_id=obj_in.customer_id,
+            warehouse_id=obj_in.warehouse_id,  # Can be None for double-entry
+            date=obj_in.date,
+            vehicle_plate=obj_in.vehicle_plate,
+            invoice_number=obj_in.invoice_number,
+            total_amount=Decimal("0.00"),
+            status="registered",
+            notes=obj_in.notes,
+            double_entry_id=obj_in.double_entry_id if is_double_entry else None,
+        )
+        db.add(sale)
+        db.flush()  # Get sale.id before creating lines
+        
+        if is_double_entry:
+            print(f"📦 Created double-entry sale #{sale_number} with ID: {sale.id} (no inventory movement)")
+        else:
+            print(f"📦 Created sale #{sale_number} with ID: {sale.id}")
+        
+        # Step 6: Process each line
+        total_amount = Decimal("0.00")
+        
         for line_data in obj_in.lines:
             material = db.get(Material, line_data.material_id)
             if not material or material.organization_id != organization_id:
@@ -104,42 +153,16 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     detail=f"Material {line_data.material_id} not found"
                 )
             
-            if material.current_stock < line_data.quantity:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Insufficient stock for material {material.name}. Available: {material.current_stock}, Required: {line_data.quantity}"
-                )
-        
-        # Step 5: Create Sale
-        sale = Sale(
-            organization_id=organization_id,
-            sale_number=sale_number,
-            customer_id=obj_in.customer_id,
-            warehouse_id=obj_in.warehouse_id,
-            date=obj_in.date,
-            vehicle_plate=obj_in.vehicle_plate,
-            invoice_number=obj_in.invoice_number,
-            total_amount=Decimal("0.00"),
-            status="registered",
-            notes=obj_in.notes,
-        )
-        db.add(sale)
-        db.flush()  # Get sale.id before creating lines
-        
-        print(f"📦 Created sale #{sale_number} with ID: {sale.id}")
-        
-        # Step 6: Process each line
-        total_amount = Decimal("0.00")
-        
-        for line_data in obj_in.lines:
-            material = db.get(Material, line_data.material_id)
-            
             # Calculate line total
             line_total = line_data.quantity * line_data.unit_price
             total_amount += line_total
             
             # Capture current average cost for profit calculation
-            unit_cost = material.current_average_cost
+            # For double-entry, unit_cost comes from line_data (set by double_entry service)
+            if is_double_entry and hasattr(line_data, 'unit_cost'):
+                unit_cost = line_data.unit_cost
+            else:
+                unit_cost = material.current_average_cost
             
             # Create SaleLine
             sale_line = SaleLine(
@@ -152,27 +175,31 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             )
             db.add(sale_line)
             
-            # Create InventoryMovement (negative quantity = material leaving)
-            inventory_movement = InventoryMovement(
-                organization_id=organization_id,
-                material_id=line_data.material_id,
-                warehouse_id=obj_in.warehouse_id,
-                movement_type="sale",
-                quantity=-line_data.quantity,  # Negative = exit
-                unit_cost=unit_cost,
-                reference_type="sale",
-                reference_id=sale.id,
-                date=obj_in.date,
-                notes=f"Sale #{sale_number}",
-            )
-            db.add(inventory_movement)
-            
-            # Update material stock (decrease)
-            material.current_stock -= line_data.quantity
-            # Note: Do NOT update current_average_cost on sales, only on purchases
-            
-            print(f"  📤 Sold {line_data.quantity} of {material.name} @ ${line_data.unit_price}/unit (cost: ${unit_cost})")
-            print(f"     Stock: {material.current_stock + line_data.quantity} → {material.current_stock}")
+            # Skip inventory operations for double-entry
+            if not is_double_entry:
+                # Create InventoryMovement (negative quantity = material leaving)
+                inventory_movement = InventoryMovement(
+                    organization_id=organization_id,
+                    material_id=line_data.material_id,
+                    warehouse_id=obj_in.warehouse_id,
+                    movement_type="sale",
+                    quantity=-line_data.quantity,  # Negative = exit
+                    unit_cost=unit_cost,
+                    reference_type="sale",
+                    reference_id=sale.id,
+                    date=obj_in.date,
+                    notes=f"Sale #{sale_number}",
+                )
+                db.add(inventory_movement)
+                
+                # Update material stock (decrease)
+                material.current_stock -= line_data.quantity
+                # Note: Do NOT update current_average_cost on sales, only on purchases
+                
+                print(f"  📤 Sold {line_data.quantity} of {material.name} @ ${line_data.unit_price}/unit (cost: ${unit_cost})")
+                print(f"     Stock: {material.current_stock + line_data.quantity} → {material.current_stock}")
+            else:
+                print(f"  📝 Line: {material.code} x {line_data.quantity} @ ${line_data.unit_price} (cost: ${unit_cost})")
         
         # Step 7: Update sale total
         sale.total_amount = total_amount
@@ -231,6 +258,13 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Sale not found"
+            )
+        
+        # Validate: Cannot liquidate sale that belongs to double-entry
+        if sale.double_entry_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot liquidate sale that belongs to a double-entry operation. Manage it through the double-entry instead."
             )
         
         # Step 2: Validate status
@@ -308,6 +342,13 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Sale not found"
+            )
+        
+        # Validate: Cannot cancel sale that belongs to double-entry
+        if sale.double_entry_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot cancel sale that belongs to a double-entry operation. Cancel the double-entry instead."
             )
         
         # Step 2: Validate status
@@ -655,6 +696,53 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             return (sale_total * commission_value) / Decimal("100")
         else:  # fixed
             return commission_value
+    
+    def delete(
+        self,
+        db: Session,
+        id: UUID,
+        organization_id: UUID
+    ) -> Sale:
+        """
+        Soft delete sale (set is_active = False).
+        
+        Validates that sale is not part of a double-entry operation.
+        
+        Args:
+            db: Database session
+            id: Sale UUID
+            organization_id: Organization UUID
+            
+        Returns:
+            Deleted (deactivated) sale instance
+            
+        Raises:
+            HTTPException: 400 if sale belongs to double-entry
+            HTTPException: 404 if not found
+        """
+        # Get existing sale
+        sale = self.get(db, id, organization_id)
+        if not sale:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Sale not found"
+            )
+        
+        # Validate: Cannot delete sale that belongs to double-entry
+        if sale.double_entry_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete sale that belongs to a double-entry operation. Cancel the double-entry instead."
+            )
+        
+        # Soft delete
+        sale.is_active = False
+        
+        # Commit changes
+        db.commit()
+        db.refresh(sale)
+        
+        return sale
     
     def _pay_commissions(self, db: Session, sale: Sale) -> None:
         """

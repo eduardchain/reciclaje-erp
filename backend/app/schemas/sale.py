@@ -98,11 +98,12 @@ class SaleLineResponse(SaleLineBase):
 class SaleBase(BaseModel):
     """Base schema for Sale."""
     customer_id: UUID = Field(..., description="Customer UUID (must have is_customer=True)")
-    warehouse_id: UUID = Field(..., description="Source warehouse UUID for all sale lines")
+    warehouse_id: Optional[UUID] = Field(None, description="Source warehouse UUID (nullable for double-entry)")
     date: datetime = Field(..., description="Sale date")
     vehicle_plate: Optional[str] = Field(None, max_length=20, description="Vehicle plate number for delivery/pickup")
     invoice_number: Optional[str] = Field(None, max_length=50, description="Invoice or bill number")
     notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
+    double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
 
 
 class SaleCreate(SaleBase):
@@ -156,12 +157,15 @@ class SaleResponse(SaleBase):
     
     # Joined data from related models
     customer_name: str = Field(..., description="Customer name")
-    warehouse_name: str = Field(..., description="Warehouse name")
+    warehouse_name: Optional[str] = Field(None, description="Warehouse name (null for double-entry)")
     payment_account_name: Optional[str] = Field(None, description="Payment account name (if liquidated)")
     
     # Nested lines and commissions with joined data
     lines: List[SaleLineResponse] = Field(..., description="Sale lines")
     commissions: List[SaleCommissionResponse] = Field(default_factory=list, description="Sale commissions")
+    
+    # Double-entry link
+    double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
     
     model_config = {"from_attributes": True}
     

@@ -88,6 +88,18 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
         back_populates="third_party",
     )
     
+    double_entries_as_supplier: Mapped[list["DoubleEntry"]] = relationship(
+        "DoubleEntry",
+        foreign_keys="DoubleEntry.supplier_id",
+        back_populates="supplier",
+    )
+    
+    double_entries_as_customer: Mapped[list["DoubleEntry"]] = relationship(
+        "DoubleEntry",
+        foreign_keys="DoubleEntry.customer_id",
+        back_populates="customer",
+    )
+    
     def __repr__(self) -> str:
         types = []
         if self.is_supplier:

@@ -78,12 +78,12 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
         comment="Customer (ThirdParty with is_customer=True)"
     )
     
-    warehouse_id: Mapped[UUID] = mapped_column(
+    warehouse_id: Mapped[Optional[UUID]] = mapped_column(
         GUID(),
         ForeignKey("warehouses.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,  # NULL for double-entry operations (no physical inventory)
         index=True,
-        comment="Source warehouse for all sale lines"
+        comment="Source warehouse for sale lines. NULL for double-entry operations."
     )
     
     payment_account_id: Mapped[Optional[UUID]] = mapped_column(
@@ -136,6 +136,14 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
         comment="Additional notes or observations"
     )
     
+    # Double-entry link (optional)
+    double_entry_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("double_entries.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Link to double-entry operation if applicable"
+    )
+    
     # Relationships
     customer: Mapped["ThirdParty"] = relationship(
         "ThirdParty",
@@ -167,6 +175,13 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
         back_populates="sale",
         cascade="all, delete-orphan",
         order_by="SaleCommission.created_at"
+    )
+    
+    double_entry: Mapped[Optional["DoubleEntry"]] = relationship(
+        "DoubleEntry",
+        foreign_keys="[DoubleEntry.sale_id]",
+        back_populates="sale",
+        uselist=False,
     )
     
     # Constraints and indexes

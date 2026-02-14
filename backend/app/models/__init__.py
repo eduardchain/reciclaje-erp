@@ -13,6 +13,7 @@ from .money_account import MoneyAccount
 from .purchase import Purchase, PurchaseLine
 from .sale import Sale, SaleLine, SaleCommission
 from .inventory_movement import InventoryMovement
+from .double_entry import DoubleEntry
 
 __all__ = [
     "Base",
@@ -33,4 +34,5 @@ __all__ = [
     "SaleLine",
     "SaleCommission",
     "InventoryMovement",
+    "DoubleEntry",
 ]

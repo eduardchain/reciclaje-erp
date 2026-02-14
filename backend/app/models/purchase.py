@@ -102,6 +102,14 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         comment="Account used for payment (required when status='paid')",
     )
     
+    # Double-entry link (optional)
+    double_entry_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("double_entries.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Link to double-entry operation if applicable",
+    )
+    
     notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
@@ -121,6 +129,21 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         back_populates="purchases",
     )
     
+    lines: Mapped[list["PurchaseLine"]] = relationship(
+        "PurchaseLine",
+        back_populates="purchase",
+        cascade="all, delete-orphan",
+        order_by="PurchaseLine.created_at",
+    )
+    
+    double_entry: Mapped[Optional["DoubleEntry"]] = relationship(
+        "DoubleEntry",
+        foreign_keys="[DoubleEntry.purchase_id]",
+        back_populates="purchase",
+        uselist=False,
+    )
+    
+    # Constraints
     lines: Mapped[list["PurchaseLine"]] = relationship(
         "PurchaseLine",
         back_populates="purchase",
@@ -187,11 +210,12 @@ class PurchaseLine(Base, TimestampMixin):
         index=True,
     )
     
-    warehouse_id: Mapped[UUID] = mapped_column(
+    warehouse_id: Mapped[Optional[UUID]] = mapped_column(
         GUID(),
         ForeignKey("warehouses.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
         index=True,
+        comment="Warehouse (nullable for double-entry operations)",
     )
     
     # Line details
@@ -224,7 +248,7 @@ class PurchaseLine(Base, TimestampMixin):
         foreign_keys=[material_id],
     )
     
-    warehouse: Mapped["Warehouse"] = relationship(
+    warehouse: Mapped[Optional["Warehouse"]] = relationship(
         "Warehouse",
         foreign_keys=[warehouse_id],
     )

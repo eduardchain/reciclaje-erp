@@ -125,5 +125,11 @@ class Material(Base, TimestampMixin, OrganizationMixin):
         back_populates="material",
     )
     
+    double_entries: Mapped[list["DoubleEntry"]] = relationship(
+        "DoubleEntry",
+        foreign_keys="DoubleEntry.material_id",
+        back_populates="material",
+    )
+    
     def __repr__(self) -> str:
         return f"<Material(id={self.id}, code='{self.code}', name='{self.name}', stock={self.current_stock})>"
