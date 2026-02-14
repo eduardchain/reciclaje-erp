@@ -91,6 +91,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - **Stock separation**: `current_stock_liquidated` (paid, available for sale) vs `current_stock_transit` (registered but unpaid). `current_stock` = total for backward compat.
 - **Audit fields**: Purchases and Sales track `created_by` and `liquidated_by` (user UUIDs).
 - **Price history**: `PriceList` is append-only — each price update creates a new record. The "current" price is the most recent by `created_at`.
+- **Treasury movements**: `MoneyMovement` tracks all money flows with specific types (payment_to_supplier, collection_from_client, expense, etc.). Each movement affects exactly ONE account. Transfers create a linked pair (transfer_out + transfer_in). Status is `confirmed` or `annulled` (with reason/date/user audit). Independent of purchase/sale liquidation — liquidation handles balance changes directly, money_movements are for manual payments/collections/expenses.
 
 ### Design Decisions
 
@@ -101,6 +102,8 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 3. **Stock liquidado vs transito**: Las compras registradas (sin pagar) crean stock en transito. Solo al liquidar (pagar) el stock se mueve a "liquidado" y queda disponible para venta. Esto refleja la realidad del negocio donde no se puede vender material que aun no se ha pagado.
 
 4. **Categorias de gastos directos vs indirectos**: `is_direct_expense=True` indica gastos que afectan el costo del material (flete, pesaje). `is_direct_expense=False` son gastos administrativos (arriendo, servicios). Esta distincion es clave para calcular rentabilidad real.
+
+5. **Money_movements independiente de liquidacion**: La liquidacion de compras/ventas actualiza saldos directamente (account, third_party). Los money_movements son un modulo SEPARADO para pagos/cobros manuales, gastos, transferencias, etc. Esto refleja que liquidar ≠ pagar/cobrar. Se puede refactorizar en el futuro para unificar.
 
 ### Business Modules (Implemented)
 
@@ -118,6 +121,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Business Units | `/api/v1/business-units/` | P&L analysis segments (Fibras, Chatarra, etc.) |
 | Price Lists | `/api/v1/price-lists/` | Historical purchase/sale prices per material |
 | Expense Categories | `/api/v1/expense-categories/` | Direct/indirect expense classification for treasury |
+| Treasury | `/api/v1/money-movements/` | Supplier payments, customer collections, expenses, transfers, capital, commissions. 9 movement types, annulment with audit |
 
 ### Testing
 

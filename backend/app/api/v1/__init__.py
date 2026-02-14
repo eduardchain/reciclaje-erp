@@ -6,6 +6,7 @@ from .endpoints import (
     purchases, sales, double_entries,
     money_accounts, warehouses, business_units,
     price_lists, expense_categories,
+    money_movements,
 )
 
 api_router = APIRouter()
@@ -23,3 +24,4 @@ api_router.include_router(warehouses.router, prefix="/warehouses", tags=["wareho
 api_router.include_router(business_units.router, prefix="/business-units", tags=["business-units"])
 api_router.include_router(price_lists.router, prefix="/price-lists", tags=["price-lists"])
 api_router.include_router(expense_categories.router, prefix="/expense-categories", tags=["expense-categories"])
+api_router.include_router(money_movements.router, prefix="/money-movements", tags=["treasury"])
