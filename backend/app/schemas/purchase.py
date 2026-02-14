@@ -59,6 +59,8 @@ class PurchaseBase(BaseModel):
     supplier_id: UUID = Field(..., description="Supplier UUID (must have is_supplier=True)")
     date: datetime = Field(..., description="Purchase date (weighing date)")
     notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
+    vehicle_plate: Optional[str] = Field(None, max_length=20, description="Vehicle plate number")
+    invoice_number: Optional[str] = Field(None, max_length=50, description="Invoice or bill number")
     double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
 
 
@@ -88,11 +90,13 @@ class PurchaseCreate(PurchaseBase):
 class PurchaseUpdate(BaseModel):
     """
     Schema for updating a Purchase (partial updates only).
-    
+
     Note: Only metadata can be updated, not lines or amounts.
     """
     notes: Optional[str] = Field(None, max_length=1000)
     date: Optional[datetime] = None
+    vehicle_plate: Optional[str] = Field(None, max_length=20)
+    invoice_number: Optional[str] = Field(None, max_length=50)
 
 
 class PurchaseResponse(PurchaseBase):
@@ -106,10 +110,14 @@ class PurchaseResponse(PurchaseBase):
     created_at: datetime
     updated_at: datetime
     
+    # Audit fields
+    created_by: Optional[UUID] = Field(None, description="User who created the purchase")
+    liquidated_by: Optional[UUID] = Field(None, description="User who liquidated the purchase")
+
     # Joined data from related models
     supplier_name: str = Field(..., description="Supplier name")
     payment_account_name: Optional[str] = Field(None, description="Payment account name (if liquidated)")
-    
+
     # Nested lines with joined data
     lines: List[PurchaseLineResponse] = Field(..., description="Purchase lines")
     

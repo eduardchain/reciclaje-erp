@@ -14,6 +14,8 @@ from .purchase import Purchase, PurchaseLine
 from .sale import Sale, SaleLine, SaleCommission
 from .inventory_movement import InventoryMovement
 from .double_entry import DoubleEntry
+from .price_list import PriceList
+from .expense_category import ExpenseCategory
 
 __all__ = [
     "Base",
@@ -35,4 +37,6 @@ __all__ = [
     "SaleCommission",
     "InventoryMovement",
     "DoubleEntry",
+    "PriceList",
+    "ExpenseCategory",
 ]

@@ -81,14 +81,17 @@ class MaterialResponse(MaterialBase):
     id: UUID
     organization_id: UUID
     current_stock: float
+    current_stock_liquidated: float
+    current_stock_transit: float
     current_average_cost: float
+    sort_order: int = 0
     is_active: bool
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
 
-    @field_serializer('current_stock', 'current_average_cost')
+    @field_serializer('current_stock', 'current_stock_liquidated', 'current_stock_transit', 'current_average_cost')
     def serialize_decimal(self, value: Decimal) -> float:
         """Convert Decimal to float for JSON serialization."""
         return float(value)

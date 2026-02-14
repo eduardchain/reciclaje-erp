@@ -27,6 +27,8 @@ from app.models import (
     Warehouse,
     BusinessUnit,
     MoneyAccount,
+    PriceList,
+    ExpenseCategory,
 )
 
 # Test database URL (PostgreSQL on port 5433)

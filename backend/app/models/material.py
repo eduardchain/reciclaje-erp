@@ -2,7 +2,7 @@ from uuid import UUID, uuid4
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import String, Boolean, Numeric, ForeignKey
+from sqlalchemy import String, Boolean, Integer, Numeric, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, OrganizationMixin, GUID
@@ -92,14 +92,35 @@ class Material(Base, TimestampMixin, OrganizationMixin):
         Numeric(15, 4),
         nullable=False,
         default=0,
+        comment="Total stock (liquidated + transit). Maintained for backward compat.",
     )
-    
+
+    current_stock_liquidated: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=0,
+        comment="Stock from liquidated (paid) purchases. Available for sale.",
+    )
+
+    current_stock_transit: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=0,
+        comment="Stock from registered (unpaid) purchases. Not yet available for sale.",
+    )
+
     current_average_cost: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
         nullable=False,
         default=0,
     )
-    
+
+    sort_order: Mapped[int] = mapped_column(
+        nullable=False,
+        default=0,
+        comment="Display order in lists (lower = first)",
+    )
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     
     # Relationships

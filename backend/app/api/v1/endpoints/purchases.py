@@ -100,6 +100,7 @@ async def create_purchase(
             db=db,
             obj_in=purchase_in,
             organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
         )
         
         # Enrich with joined data
@@ -388,6 +389,7 @@ async def liquidate_purchase(
             purchase_id=purchase_id,
             payment_account_id=liquidate_data.payment_account_id,
             organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
         )
         
         response_data = _enrich_purchase_response(purchase)

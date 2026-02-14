@@ -155,6 +155,10 @@ class SaleResponse(SaleBase):
     created_at: datetime
     updated_at: datetime
     
+    # Audit fields
+    created_by: Optional[UUID] = Field(None, description="User who created the sale")
+    liquidated_by: Optional[UUID] = Field(None, description="User who liquidated the sale")
+
     # Joined data from related models
     customer_name: str = Field(..., description="Customer name")
     warehouse_name: Optional[str] = Field(None, description="Warehouse name (null for double-entry)")

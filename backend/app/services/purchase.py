@@ -31,7 +31,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         self,
         db: Session,
         obj_in: PurchaseCreate,
-        organization_id: UUID
+        organization_id: UUID,
+        user_id: Optional[UUID] = None
     ) -> Purchase:
         """
         Create purchase with lines, inventory movements, and balance updates.
@@ -88,6 +89,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             total_amount=Decimal("0.00"),
             status="registered",
             notes=obj_in.notes,
+            vehicle_plate=getattr(obj_in, 'vehicle_plate', None),
+            invoice_number=getattr(obj_in, 'invoice_number', None),
+            created_by=user_id,
             double_entry_id=obj_in.double_entry_id if is_double_entry else None,
         )
         db.add(purchase)
@@ -184,6 +188,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 purchase_id=purchase.id,
                 payment_account_id=obj_in.payment_account_id,
                 organization_id=organization_id,
+                user_id=user_id,
             )
         
         db.commit()
@@ -196,7 +201,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         db: Session,
         purchase_id: UUID,
         payment_account_id: UUID,
-        organization_id: UUID
+        organization_id: UUID,
+        user_id: Optional[UUID] = None
     ) -> Purchase:
         """
         Liquidate a registered purchase (change status to 'paid').
@@ -267,13 +273,21 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Step 4: Update purchase status and account
         purchase.status = "paid"
         purchase.payment_account_id = payment_account_id
+        purchase.liquidated_by = user_id
         
         # Step 5: Deduct from payment account
         payment_account.current_balance -= purchase.total_amount
-        
+
+        # Step 6: Move stock from transit to liquidated
+        # Load lines if not already loaded
+        purchase_with_lines = db.query(Purchase).options(
+            joinedload(Purchase.lines)
+        ).filter(Purchase.id == purchase_id).first()
+        self._move_stock_transit_to_liquidated(db, purchase_with_lines)
+
         print(f"💳 Liquidated purchase #{purchase.purchase_number} for ${purchase.total_amount}")
         print(f"   Account '{payment_account.name}' balance: ${payment_account.current_balance}")
-        
+
         db.commit()
         db.refresh(purchase)
         
@@ -373,8 +387,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             )
             db.add(reversal)
             
-            # Revert stock
+            # Revert stock (cancelled purchases are always 'registered', so stock is in transit)
             material.current_stock -= line.quantity
+            material.current_stock_transit -= line.quantity
             
             # TODO Phase 3: Implement precise average cost reversal
             # For now, we accept small imprecision in average cost
@@ -623,43 +638,66 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         self,
         material: Material,
         quantity_delta: Decimal,
-        unit_cost: Decimal
+        unit_cost: Decimal,
+        to_transit: bool = True
     ) -> None:
         """
         Update material stock and average cost using weighted average formula.
-        
+
         Formula for weighted average cost:
         new_cost = (old_stock × old_cost + new_quantity × new_cost) / (old_stock + new_quantity)
-        
+
         Special cases:
         - If old_stock = 0, new_cost = unit_cost (first purchase)
         - If new_stock becomes 0 after removal, cost stays unchanged
-        
+
         Args:
             material: Material to update
             quantity_delta: Quantity to add (positive) or remove (negative)
             unit_cost: Cost per unit of the delta
+            to_transit: If True, stock goes to transit; if False, goes to liquidated
         """
         old_stock = material.current_stock
         old_cost = material.current_average_cost
         new_stock = old_stock + quantity_delta
-        
+
         if quantity_delta > 0:  # Adding stock (purchase)
             if old_stock == 0:
-                # First purchase: set cost directly
                 new_cost = unit_cost
             else:
-                # Weighted average formula
                 total_old_value = old_stock * old_cost
                 total_new_value = quantity_delta * unit_cost
                 new_cost = (total_old_value + total_new_value) / new_stock
-            
+
             material.current_average_cost = new_cost
-        
-        # Update stock (always)
+
+            # Track which bucket the stock goes to
+            if to_transit:
+                material.current_stock_transit += quantity_delta
+            else:
+                material.current_stock_liquidated += quantity_delta
+
+        # Update total stock (always)
         material.current_stock = new_stock
-        
+
         print(f"    📊 {material.code}: stock {old_stock} → {new_stock}, cost ${old_cost} → ${material.current_average_cost}")
+
+    def _move_stock_transit_to_liquidated(
+        self,
+        db: Session,
+        purchase: Purchase
+    ) -> None:
+        """
+        Move stock from transit to liquidated when a purchase is liquidated.
+
+        This doesn't change total stock or average cost, just reclassifies it.
+        """
+        for line in purchase.lines:
+            material = db.get(Material, line.material_id)
+            if material:
+                material.current_stock_transit -= line.quantity
+                material.current_stock_liquidated += line.quantity
+                print(f"    📦 {material.code}: transit -{line.quantity}, liquidated +{line.quantity}")
 
 
 # Instance for use in endpoints

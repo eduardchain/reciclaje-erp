@@ -115,42 +115,62 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         nullable=True,
         comment="Additional notes or observations",
     )
-    
+
+    # Audit and traceability fields
+    vehicle_plate: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="Vehicle plate number for delivery",
+    )
+
+    invoice_number: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Invoice or bill number",
+    )
+
+    created_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User who created the purchase (weighing operator)",
+    )
+
+    liquidated_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User who liquidated/paid the purchase",
+    )
+
     # Relationships
     supplier: Mapped["ThirdParty"] = relationship(
         "ThirdParty",
         foreign_keys=[supplier_id],
         back_populates="purchases",
     )
-    
+
     payment_account: Mapped[Optional["MoneyAccount"]] = relationship(
         "MoneyAccount",
         foreign_keys=[payment_account_id],
         back_populates="purchases",
     )
-    
+
     lines: Mapped[list["PurchaseLine"]] = relationship(
         "PurchaseLine",
         back_populates="purchase",
         cascade="all, delete-orphan",
         order_by="PurchaseLine.created_at",
     )
-    
+
     double_entry: Mapped[Optional["DoubleEntry"]] = relationship(
         "DoubleEntry",
         foreign_keys="[DoubleEntry.purchase_id]",
         back_populates="purchase",
         uselist=False,
     )
-    
-    # Constraints
-    lines: Mapped[list["PurchaseLine"]] = relationship(
-        "PurchaseLine",
-        back_populates="purchase",
-        cascade="all, delete-orphan",
-        order_by="PurchaseLine.created_at",
-    )
-    
+
     # Constraints
     __table_args__ = (
         UniqueConstraint(

@@ -135,7 +135,22 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
         nullable=True,
         comment="Additional notes or observations"
     )
-    
+
+    # Audit and traceability fields
+    created_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User who created the sale"
+    )
+
+    liquidated_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User who liquidated/collected the sale"
+    )
+
     # Double-entry link (optional)
     double_entry_id: Mapped[Optional[UUID]] = mapped_column(
         GUID(),

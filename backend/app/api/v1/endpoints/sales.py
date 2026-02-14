@@ -112,6 +112,7 @@ async def create_sale(
             db=db,
             obj_in=sale_in,
             organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
         )
         
         db.commit()
@@ -411,6 +412,7 @@ async def liquidate_sale(
             sale_id=sale_id,
             payment_account_id=liquidate_in.payment_account_id,
             organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
         )
         
         db.commit()

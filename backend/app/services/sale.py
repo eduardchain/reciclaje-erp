@@ -38,7 +38,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         self,
         db: Session,
         obj_in: SaleCreate,
-        organization_id: UUID
+        organization_id: UUID,
+        user_id: Optional[UUID] = None
     ) -> Sale:
         """
         Create sale with lines, inventory movements, commissions, and balance updates.
@@ -114,10 +115,10 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                         detail=f"Material {line_data.material_id} not found"
                     )
                 
-                if material.current_stock < line_data.quantity:
+                if material.current_stock_liquidated < line_data.quantity:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Insufficient stock for material {material.name}. Available: {material.current_stock}, Required: {line_data.quantity}"
+                        detail=f"Insufficient liquidated stock for material {material.name}. Available: {material.current_stock_liquidated}, Required: {line_data.quantity}"
                     )
         
         # Step 5: Create Sale
@@ -132,6 +133,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             total_amount=Decimal("0.00"),
             status="registered",
             notes=obj_in.notes,
+            created_by=user_id,
             double_entry_id=obj_in.double_entry_id if is_double_entry else None,
         )
         db.add(sale)
@@ -192,8 +194,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 )
                 db.add(inventory_movement)
                 
-                # Update material stock (decrease)
+                # Update material stock (decrease from liquidated and total)
                 material.current_stock -= line_data.quantity
+                material.current_stock_liquidated -= line_data.quantity
                 # Note: Do NOT update current_average_cost on sales, only on purchases
                 
                 print(f"  📤 Sold {line_data.quantity} of {material.name} @ ${line_data.unit_price}/unit (cost: ${unit_cost})")
@@ -217,7 +220,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         # Step 10: If auto_liquidate, liquidate immediately
         if obj_in.auto_liquidate:
             print(f"⚡ Auto-liquidating sale #{sale_number}")
-            sale = self.liquidate(db, sale.id, obj_in.payment_account_id, organization_id)
+            sale = self.liquidate(db, sale.id, obj_in.payment_account_id, organization_id, user_id=user_id)
         
         return sale
     
@@ -226,7 +229,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         db: Session,
         sale_id: UUID,
         payment_account_id: UUID,
-        organization_id: UUID
+        organization_id: UUID,
+        user_id: Optional[UUID] = None
     ) -> Sale:
         """
         Liquidate a registered sale (mark as paid and process payments).
@@ -285,6 +289,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         # Step 4: Update sale
         sale.status = "paid"
         sale.payment_account_id = payment_account_id
+        sale.liquidated_by = user_id
         
         # Step 5: Update payment account balance (receive payment)
         payment_account.current_balance += sale.total_amount
@@ -390,8 +395,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             )
             db.add(reversal_movement)
             
-            # Restore material stock
+            # Restore material stock (to liquidated and total)
             material.current_stock += line.quantity
+            material.current_stock_liquidated += line.quantity
             print(f"  🔄 Restored {line.quantity} of {material.name}, stock: {material.current_stock - line.quantity} → {material.current_stock}")
         
         # Step 6: Revert customer balance

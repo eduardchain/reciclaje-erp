@@ -127,8 +127,10 @@ def test_material_with_stock(db_session, test_organization, test_category, test_
         category_id=test_category.id,
         business_unit_id=test_business_unit.id,
         default_unit="kg",
-        current_stock=Decimal("500.000"),  # Stock available for sales
-        current_average_cost=Decimal("45.00"),  # Cost for profit calculation
+        current_stock=Decimal("500.000"),  # Stock total
+        current_stock_liquidated=Decimal("500.000"),  # Stock disponible para venta
+        current_stock_transit=Decimal("0.000"),  # Sin stock en transito
+        current_average_cost=Decimal("45.00"),  # Costo para calculo de utilidad
         organization_id=test_organization.id,
         is_active=True,
     )
@@ -381,7 +383,7 @@ class TestCreateSale:
         
         # Assert
         assert response.status_code == 400
-        assert "Insufficient stock" in response.json()["detail"]
+        assert "Insufficient" in response.json()["detail"]
     
     def test_create_sale_auto_liquidate_without_account_fails(
         self,
