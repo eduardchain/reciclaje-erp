@@ -8,6 +8,7 @@ from .endpoints import (
     price_lists, expense_categories,
     money_movements,
     inventory_adjustments, material_transformations, inventory_views,
+    reports,
 )
 
 api_router = APIRouter()
@@ -29,3 +30,4 @@ api_router.include_router(money_movements.router, prefix="/money-movements", tag
 api_router.include_router(inventory_adjustments.router, prefix="/inventory/adjustments", tags=["inventory"])
 api_router.include_router(material_transformations.router, prefix="/inventory/transformations", tags=["inventory"])
 api_router.include_router(inventory_views.router, prefix="/inventory", tags=["inventory"])
+api_router.include_router(reports.router, prefix="/reports", tags=["reports"])

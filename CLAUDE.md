@@ -114,6 +114,12 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 7. **Stock por bodega on-the-fly**: No hay tabla denormalizada de stock por bodega. Se calcula desde `SUM(inventory_movements.quantity) GROUP BY warehouse_id`. Solo se denormalizara si el rendimiento lo requiere.
 
+8. **COGS metodo directo**: El costo de ventas se calcula como `SUM(sale_lines.unit_cost × quantity)`, capturando el costo promedio movil al momento de cada venta. Mas preciso que el metodo tradicional (inventario inicial + compras - inventario final) dado el sistema de inventario perpetuo.
+
+9. **Doble Partida en P&L como linea separada**: En el Estado de Resultados, la utilidad de operaciones Pasa Mano aparece como "Utilidad Pasa Mano" (linea separada), NO incluida en Sales Revenue ni COGS. Esto da visibilidad clara al margen de cada tipo de operacion.
+
+10. **Cash Flow hibrido**: El flujo de caja combina DOS fuentes independientes: liquidacion de compras/ventas (cambios directos a account.balance) Y money_movements (pagos/cobros manuales). Opening balance se calcula restando todos los cambios desde date_from al balance actual de cuentas.
+
 ### Business Modules (Implemented)
 
 | Module | Endpoints | Description |
@@ -134,10 +140,11 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Inventory Adjustments | `/api/v1/inventory/adjustments/` | Manual stock corrections: increase, decrease, recount, zero-out. Warehouse transfers. Annulment with stock reversal |
 | Material Transformations | `/api/v1/inventory/transformations/` | Material disassembly (e.g., Motor → Copper + Iron + Aluminum + Waste). Proportional/manual cost distribution |
 | Inventory Views | `/api/v1/inventory/` | Consolidated stock view, per-material warehouse breakdown, transit stock, movement history, inventory valuation |
+| Reports & Dashboard | `/api/v1/reports/` | Dashboard with period comparison, P&L, Cash Flow, Balance Sheet, Purchase/Sales reports, Margin Analysis, Third Party Balances. All read-only |
 
 ### Testing
 
-Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 332 tests, 91% coverage.
+Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 360 tests, 92% coverage.
 
 Key fixtures: `test_user`, `auth_headers`, `org_headers` (auth + X-Organization-ID), `db_session`.
 
