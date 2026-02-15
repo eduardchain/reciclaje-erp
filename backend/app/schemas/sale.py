@@ -170,9 +170,12 @@ class SaleResponse(SaleBase):
     
     # Double-entry link
     double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
-    
+
+    # Warnings (stock negativo, etc.) — RN-INV-03
+    warnings: List[str] = Field(default_factory=list, description="Warnings (e.g., negative stock)")
+
     model_config = {"from_attributes": True}
-    
+
     @field_serializer('total_amount', 'total_profit')
     def serialize_decimals(self, value: Decimal) -> float:
         """Convert Decimal to float for JSON serialization."""

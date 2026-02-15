@@ -17,6 +17,8 @@ from .double_entry import DoubleEntry
 from .price_list import PriceList
 from .expense_category import ExpenseCategory
 from .money_movement import MoneyMovement
+from .inventory_adjustment import InventoryAdjustment
+from .material_transformation import MaterialTransformation, MaterialTransformationLine
 
 __all__ = [
     "Base",
@@ -41,4 +43,7 @@ __all__ = [
     "PriceList",
     "ExpenseCategory",
     "MoneyMovement",
+    "InventoryAdjustment",
+    "MaterialTransformation",
+    "MaterialTransformationLine",
 ]

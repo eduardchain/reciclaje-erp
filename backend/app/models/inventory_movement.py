@@ -92,6 +92,7 @@ class InventoryMovement(Base, OrganizationMixin, TimestampMixin):
             "purchase_reversal",
             "sale_reversal",
             "transformation",
+            "adjustment_reversal",
             name="inventory_movement_type",
         ),
         nullable=False,

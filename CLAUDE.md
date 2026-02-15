@@ -92,6 +92,11 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - **Audit fields**: Purchases and Sales track `created_by` and `liquidated_by` (user UUIDs).
 - **Price history**: `PriceList` is append-only — each price update creates a new record. The "current" price is the most recent by `created_at`.
 - **Treasury movements**: `MoneyMovement` tracks all money flows with specific types (payment_to_supplier, collection_from_client, expense, etc.). Each movement affects exactly ONE account. Transfers create a linked pair (transfer_out + transfer_in). Status is `confirmed` or `annulled` (with reason/date/user audit). Independent of purchase/sale liquidation — liquidation handles balance changes directly, money_movements are for manual payments/collections/expenses.
+- **Negative stock allowed (RN-INV-03)**: Sales, adjustments, and transformations PERMIT negative stock. Instead of blocking, they return a `warnings[]` field in the response with descriptive messages. This is a global policy decision.
+- **Inventory adjustments**: 4 types (increase, decrease, recount, zero_out). All affect `current_stock_liquidated` only (not transit). Increase recalculates avg cost; decrease/recount/zero_out use current avg cost.
+- **Material transformation**: Disassembly of composite materials into components. Cost distribution: proportional by weight (default) or manual. Validation: `sum(destination_quantities) + waste == source_quantity`. Creates InventoryMovement for source and each destination.
+- **Per-warehouse stock**: Calculated on-the-fly from `SUM(inventory_movements.quantity) GROUP BY warehouse_id`. No denormalized table.
+- **Warehouse transfers**: Creates pair of InventoryMovement (transfer type, -qty source / +qty destination). Global stock unchanged.
 
 ### Design Decisions
 
@@ -104,6 +109,10 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 4. **Categorias de gastos directos vs indirectos**: `is_direct_expense=True` indica gastos que afectan el costo del material (flete, pesaje). `is_direct_expense=False` son gastos administrativos (arriendo, servicios). Esta distincion es clave para calcular rentabilidad real.
 
 5. **Money_movements independiente de liquidacion**: La liquidacion de compras/ventas actualiza saldos directamente (account, third_party). Los money_movements son un modulo SEPARADO para pagos/cobros manuales, gastos, transferencias, etc. Esto refleja que liquidar ≠ pagar/cobrar. Se puede refactorizar en el futuro para unificar.
+
+6. **Stock negativo permitido (RN-INV-03)**: Ventas, ajustes y transformaciones permiten stock negativo. No bloquean la operacion. Retornan `warnings[]` en la respuesta con mensajes descriptivos. El frontend puede mostrar estas advertencias al usuario.
+
+7. **Stock por bodega on-the-fly**: No hay tabla denormalizada de stock por bodega. Se calcula desde `SUM(inventory_movements.quantity) GROUP BY warehouse_id`. Solo se denormalizara si el rendimiento lo requiere.
 
 ### Business Modules (Implemented)
 
@@ -122,10 +131,13 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Price Lists | `/api/v1/price-lists/` | Historical purchase/sale prices per material |
 | Expense Categories | `/api/v1/expense-categories/` | Direct/indirect expense classification for treasury |
 | Treasury | `/api/v1/money-movements/` | Supplier payments, customer collections, expenses, transfers, capital, commissions. 9 movement types, annulment with audit |
+| Inventory Adjustments | `/api/v1/inventory/adjustments/` | Manual stock corrections: increase, decrease, recount, zero-out. Warehouse transfers. Annulment with stock reversal |
+| Material Transformations | `/api/v1/inventory/transformations/` | Material disassembly (e.g., Motor → Copper + Iron + Aluminum + Waste). Proportional/manual cost distribution |
+| Inventory Views | `/api/v1/inventory/` | Consolidated stock view, per-material warehouse breakdown, transit stock, movement history, inventory valuation |
 
 ### Testing
 
-Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 264 tests, 90% coverage.
+Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 332 tests, 91% coverage.
 
 Key fixtures: `test_user`, `auth_headers`, `org_headers` (auth + X-Organization-ID), `db_session`.
 

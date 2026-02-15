@@ -353,7 +353,7 @@ class TestCreateSale:
         assert data["payment_account_id"] == str(test_money_account.id)
         assert data["payment_account_name"] == "Cash Account"
     
-    def test_create_sale_insufficient_stock_fails(
+    def test_create_sale_insufficient_stock_warns(
         self,
         client,
         org_headers,
@@ -361,7 +361,7 @@ class TestCreateSale:
         test_material_with_stock,
         test_warehouse,
     ):
-        """Test that creating a sale with insufficient stock fails."""
+        """Test that creating a sale with insufficient stock succeeds with warnings (RN-INV-03)."""
         # Arrange
         sale_data = {
             "customer_id": str(test_customer.id),
@@ -377,13 +377,16 @@ class TestCreateSale:
             "commissions": [],
             "auto_liquidate": False,
         }
-        
+
         # Act
         response = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
-        
-        # Assert
-        assert response.status_code == 400
-        assert "Insufficient" in response.json()["detail"]
+
+        # Assert — negative stock allowed with warning
+        assert response.status_code == 201
+        data = response.json()
+        assert data["status"] == "registered"
+        assert len(data["warnings"]) > 0
+        assert any("stock" in w.lower() for w in data["warnings"])
     
     def test_create_sale_auto_liquidate_without_account_fails(
         self,

@@ -106,6 +106,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 )
         
         # Step 4: Validate stock availability for all materials BEFORE creating anything (skip for double-entry)
+        # RN-INV-03: Stock negativo PERMITIDO con warning (no bloquea la operacion)
+        warnings: list[str] = []
         if not is_double_entry:
             for line_data in obj_in.lines:
                 material = db.get(Material, line_data.material_id)
@@ -114,11 +116,14 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"Material {line_data.material_id} not found"
                     )
-                
+
                 if material.current_stock_liquidated < line_data.quantity:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Insufficient liquidated stock for material {material.name}. Available: {material.current_stock_liquidated}, Required: {line_data.quantity}"
+                    resulting_stock = material.current_stock_liquidated - line_data.quantity
+                    warnings.append(
+                        f"Insufficient stock for '{material.name}'. "
+                        f"Available: {material.current_stock_liquidated}, "
+                        f"Required: {line_data.quantity}. "
+                        f"Stock will be {resulting_stock}"
                     )
         
         # Step 5: Create Sale
@@ -221,7 +226,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         if obj_in.auto_liquidate:
             print(f"⚡ Auto-liquidating sale #{sale_number}")
             sale = self.liquidate(db, sale.id, obj_in.payment_account_id, organization_id, user_id=user_id)
-        
+
+        # Attach warnings as transient attribute (no se persiste en BD)
+        sale._warnings = warnings
         return sale
     
     def liquidate(

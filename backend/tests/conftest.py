@@ -30,6 +30,9 @@ from app.models import (
     PriceList,
     ExpenseCategory,
     MoneyMovement,
+    InventoryAdjustment,
+    MaterialTransformation,
+    MaterialTransformationLine,
 )
 
 # Test database URL (PostgreSQL on port 5433)

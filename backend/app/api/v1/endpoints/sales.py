@@ -37,10 +37,10 @@ router = APIRouter()
 # Helper Functions
 # ============================================================================
 
-def _enrich_sale_response(sale: Sale) -> dict:
+def _enrich_sale_response(sale: Sale, warnings: list[str] | None = None) -> dict:
     """
     Enrich sale object with joined data for response.
-    
+
     Assumes sale was loaded with proper joinedload options.
     """
     return {
@@ -49,6 +49,7 @@ def _enrich_sale_response(sale: Sale) -> dict:
         "warehouse_name": sale.warehouse.name if sale.warehouse else None,
         "payment_account_name": sale.payment_account.name if sale.payment_account else None,
         "total_profit": float(sale.calculate_total_profit()),
+        "warnings": warnings or getattr(sale, "_warnings", []),
         "lines": [
             {
                 **line.__dict__,
@@ -114,19 +115,22 @@ async def create_sale(
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
         )
-        
+
+        # Capturar warnings antes de reload (atributo transiente)
+        warnings = getattr(sale, "_warnings", [])
+
         db.commit()
         db.refresh(sale)
-        
+
         # Reload with eager loading to get all relationships
         sale = crud_sale.get(
             db=db,
             sale_id=sale.id,
             organization_id=org_context["organization_id"],
         )
-        
-        # Enrich with joined data
-        response_data = _enrich_sale_response(sale)
+
+        # Enrich with joined data (incluir warnings)
+        response_data = _enrich_sale_response(sale, warnings=warnings)
         
         logger.info(
             f"Sale #{sale.sale_number} created by user {org_context['user_id']} "
