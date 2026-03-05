@@ -74,11 +74,44 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 ### Frontend (`frontend/src/`)
 
 - React 18 + TypeScript + Vite
-- State management: Zustand
+- State management: Zustand (`stores/authStore.ts` — token, user, organizationId persisted in localStorage)
 - Data fetching: TanStack React Query + Axios
-- Styling: Tailwind CSS + shadcn/ui
-- `services/api.ts` — Axios client with JWT auto-attach and 401 redirect
-- `hooks/useApi.ts` — Custom hook wrapping React Query
+- Styling: Tailwind CSS + shadcn/ui (all components installed)
+- Icons: lucide-react (no inline SVGs)
+- Toasts: sonner
+- Tables: @tanstack/react-table via `DataTable` shared component
+- Forms: useState pattern (react-hook-form installed but not used yet)
+
+**Architecture:**
+- `services/api.ts` — Axios client with JWT auto-attach, X-Organization-ID header from authStore, 401 redirect. Default export `apiClient`.
+- `services/*.ts` — 14 service files (auth, organizations, purchases, sales, doubleEntries, moneyMovements, inventory, reports, thirdParties, materials, warehouses, moneyAccounts, masterData)
+- `hooks/use*.ts` — 10 hook files wrapping React Query with toast notifications on mutations
+- `types/*.ts` — 15 type files matching backend Pydantic schemas exactly
+- `components/shared/` — 10 reusable components (DataTable, PageHeader, StatusBadge, MoneyDisplay, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList)
+- `components/auth/` — ProtectedRoute (token + org check), OrganizationSelector
+- `components/layout/` — Layout, Header (user dropdown), Sidebar (collapsible submenus)
+- `pages/` — 42 page components organized by module
+
+**Modules (all complete, 45+ routes):**
+- Auth: Login, org selection, protected routes
+- Dashboard: 6 metric cards + top materials/suppliers/customers + alerts
+- Purchases: List (status tabs, search, date range) + Create (dynamic lines, auto-liquidate) + Detail (liquidate/cancel)
+- Sales: Like purchases + commissions + profit display + stock warnings
+- Double Entries: Simultaneous buy+sell form with real-time profit calculation
+- Treasury: 8 movement types with dynamic form, annulment with reason
+- Inventory: Stock view (warehouse breakdown), movement history, adjustments (4 types), transformations (multi-line destinations, balance validation), warehouse transfers
+- Reports: P&L, Cash Flow, Balance Sheet, Purchase Report, Sales Report, Margin Analysis, Third Party Balances — all with date range pickers
+- Third Parties: CRUD with role badges (supplier/customer/investor/provision), balance display
+- Materials: CRUD + categories page
+- Config: Warehouses, Money Accounts (cash/bank/digital), Business Units, Expense Categories (direct/indirect toggle), Price Lists (append-only)
+
+**Query Key Convention:**
+```
+['purchases', 'list', filters] / ['purchases', 'detail', id]
+['inventory', 'stock', params] / ['inventory', 'adjustments', 'list', filters]
+['reports', 'dashboard', params]
+['third-parties', 'suppliers', search]
+```
 
 ### Key Patterns
 

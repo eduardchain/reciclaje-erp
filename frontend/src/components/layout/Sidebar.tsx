@@ -1,86 +1,179 @@
-import { Link, useLocation } from 'react-router-dom';
-import { ROUTES } from '@/utils/constants';
+import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import {
+  LayoutDashboard,
+  ShoppingCart,
+  DollarSign,
+  ArrowLeftRight,
+  Wallet,
+  Package,
+  BarChart3,
+  Users,
+  Boxes,
+  Settings,
+  ChevronDown,
+  ChevronRight,
+  Warehouse,
+  CreditCard,
+  Building,
+  Tag,
+  ListOrdered,
+  ClipboardList,
+  ArrowDownUp,
+  Shuffle,
+} from "lucide-react";
+import { cn } from "@/utils";
+import { ROUTES } from "@/utils/constants";
 
 interface NavItem {
   name: string;
   path: string;
-  icon: JSX.Element;
+  icon: React.ReactNode;
+  children?: { name: string; path: string; icon: React.ReactNode }[];
 }
 
 const navItems: NavItem[] = [
   {
-    name: 'Dashboard',
+    name: "Dashboard",
     path: ROUTES.DASHBOARD,
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-      </svg>
-    ),
+    icon: <LayoutDashboard className="w-5 h-5" />,
   },
   {
-    name: 'Compras',
+    name: "Compras",
     path: ROUTES.PURCHASES,
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-      </svg>
-    ),
+    icon: <ShoppingCart className="w-5 h-5" />,
   },
   {
-    name: 'Ventas',
+    name: "Ventas",
     path: ROUTES.SALES,
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    ),
+    icon: <DollarSign className="w-5 h-5" />,
   },
   {
-    name: 'Inventario',
-    path: ROUTES.INVENTORY,
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-      </svg>
-    ),
+    name: "Doble Partida",
+    path: ROUTES.DOUBLE_ENTRIES,
+    icon: <ArrowLeftRight className="w-5 h-5" />,
   },
   {
-    name: 'Tesorería',
+    name: "Tesoreria",
     path: ROUTES.TREASURY,
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-      </svg>
-    ),
+    icon: <Wallet className="w-5 h-5" />,
   },
   {
-    name: 'Reportes',
+    name: "Inventario",
+    path: ROUTES.INVENTORY,
+    icon: <Package className="w-5 h-5" />,
+    children: [
+      { name: "Stock", path: ROUTES.INVENTORY, icon: <Boxes className="w-4 h-4" /> },
+      { name: "Movimientos", path: ROUTES.INVENTORY_MOVEMENTS, icon: <ArrowDownUp className="w-4 h-4" /> },
+      { name: "Ajustes", path: ROUTES.INVENTORY_ADJUSTMENTS, icon: <ClipboardList className="w-4 h-4" /> },
+      { name: "Transformaciones", path: ROUTES.INVENTORY_TRANSFORMATIONS, icon: <Shuffle className="w-4 h-4" /> },
+    ],
+  },
+  {
+    name: "Reportes",
     path: ROUTES.REPORTS,
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
+    icon: <BarChart3 className="w-5 h-5" />,
+  },
+  {
+    name: "Terceros",
+    path: ROUTES.THIRD_PARTIES,
+    icon: <Users className="w-5 h-5" />,
+  },
+  {
+    name: "Materiales",
+    path: ROUTES.MATERIALS,
+    icon: <Boxes className="w-5 h-5" />,
+  },
+  {
+    name: "Configuracion",
+    path: ROUTES.CONFIG,
+    icon: <Settings className="w-5 h-5" />,
+    children: [
+      { name: "Bodegas", path: ROUTES.CONFIG_WAREHOUSES, icon: <Warehouse className="w-4 h-4" /> },
+      { name: "Cuentas", path: ROUTES.CONFIG_ACCOUNTS, icon: <CreditCard className="w-4 h-4" /> },
+      { name: "Unidades Negocio", path: ROUTES.CONFIG_BUSINESS_UNITS, icon: <Building className="w-4 h-4" /> },
+      { name: "Cat. Gastos", path: ROUTES.CONFIG_EXPENSE_CATEGORIES, icon: <Tag className="w-4 h-4" /> },
+      { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" /> },
+    ],
   },
 ];
 
 export default function Sidebar() {
   const location = useLocation();
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (name: string) => {
+    setExpanded((prev) => ({ ...prev, [name]: !prev[name] }));
+  };
+
+  const isActive = (path: string) => {
+    if (path === "/") return location.pathname === "/";
+    return location.pathname.startsWith(path);
+  };
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 h-full">
+    <aside className="w-64 bg-white border-r border-gray-200 h-full overflow-y-auto">
       <nav className="p-4 space-y-1">
         {navItems.map((item) => {
-          const isActive = location.pathname === item.path;
+          const active = isActive(item.path);
+          const hasChildren = item.children && item.children.length > 0;
+          const isExpanded = expanded[item.name] || (hasChildren && isActive(item.path));
+
+          if (hasChildren) {
+            return (
+              <div key={item.name}>
+                <button
+                  onClick={() => toggleExpand(item.name)}
+                  className={cn(
+                    "flex items-center justify-between w-full px-4 py-3 rounded-lg transition-colors",
+                    active
+                      ? "bg-green-50 text-green-700 font-medium"
+                      : "text-gray-700 hover:bg-gray-50"
+                  )}
+                >
+                  <div className="flex items-center space-x-3">
+                    {item.icon}
+                    <span>{item.name}</span>
+                  </div>
+                  {isExpanded ? (
+                    <ChevronDown className="w-4 h-4" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4" />
+                  )}
+                </button>
+                {isExpanded && (
+                  <div className="ml-4 mt-1 space-y-1">
+                    {item.children!.map((child) => (
+                      <Link
+                        key={child.path}
+                        to={child.path}
+                        className={cn(
+                          "flex items-center space-x-3 px-4 py-2 rounded-lg text-sm transition-colors",
+                          location.pathname === child.path
+                            ? "bg-green-50 text-green-700 font-medium"
+                            : "text-gray-600 hover:bg-gray-50"
+                        )}
+                      >
+                        {child.icon}
+                        <span>{child.name}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
           return (
             <Link
               key={item.path}
               to={item.path}
-              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-                isActive
-                  ? 'bg-green-50 text-green-700 font-medium'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
+              className={cn(
+                "flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors",
+                active
+                  ? "bg-green-50 text-green-700 font-medium"
+                  : "text-gray-700 hover:bg-gray-50"
+              )}
             >
               {item.icon}
               <span>{item.name}</span>

@@ -1,0 +1,89 @@
+import type { BaseEntity } from "./common";
+
+export type SaleStatus = "registered" | "paid" | "cancelled";
+
+export interface SaleCommissionCreate {
+  third_party_id: string;
+  concept: string;
+  commission_type: "percentage" | "fixed";
+  commission_value: number;
+}
+
+export interface SaleCommissionResponse {
+  id: string;
+  sale_id: string;
+  third_party_id: string;
+  concept: string;
+  commission_type: "percentage" | "fixed";
+  commission_value: number;
+  commission_amount: number;
+  created_at: string;
+  third_party_name: string;
+}
+
+export interface SaleLineCreate {
+  material_id: string;
+  quantity: number;
+  unit_price: number;
+}
+
+export interface SaleLineResponse {
+  id: string;
+  sale_id: string;
+  material_id: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  unit_cost: number;
+  profit: number;
+  created_at: string;
+  material_code: string;
+  material_name: string;
+}
+
+export interface SaleCreate {
+  customer_id: string;
+  warehouse_id?: string | null;
+  date: string;
+  vehicle_plate?: string | null;
+  invoice_number?: string | null;
+  notes?: string | null;
+  lines: SaleLineCreate[];
+  commissions?: SaleCommissionCreate[];
+  auto_liquidate?: boolean;
+  payment_account_id?: string | null;
+}
+
+export interface SaleUpdate {
+  notes?: string | null;
+  vehicle_plate?: string | null;
+  invoice_number?: string | null;
+}
+
+export interface SaleResponse extends BaseEntity {
+  organization_id: string;
+  sale_number: number;
+  customer_id: string;
+  warehouse_id: string | null;
+  date: string;
+  vehicle_plate: string | null;
+  invoice_number: string | null;
+  notes: string | null;
+  double_entry_id: string | null;
+  total_amount: number;
+  total_profit: number;
+  status: SaleStatus;
+  payment_account_id: string | null;
+  created_by: string | null;
+  liquidated_by: string | null;
+  customer_name: string;
+  warehouse_name: string | null;
+  payment_account_name: string | null;
+  lines: SaleLineResponse[];
+  commissions: SaleCommissionResponse[];
+  warnings: string[];
+}
+
+export interface SaleLiquidateRequest {
+  payment_account_id: string;
+}

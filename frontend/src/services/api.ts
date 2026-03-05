@@ -1,65 +1,52 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
-import { API_BASE_URL } from '@/utils/constants';
-import type { HealthResponse } from '@/types';
+import axios, { type AxiosError } from "axios";
+import { API_BASE_URL } from "@/utils/constants";
+import type { HealthResponse } from "@/types/common";
 
-// Create axios instance
-const apiClient: AxiosInstance = axios.create({
+const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 15000,
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 });
 
-// Request interceptor
+// Request interceptor: JWT token + Organization ID
 apiClient.interceptors.request.use(
   (config) => {
-    // Add auth token if available
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem("token");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    const orgId = localStorage.getItem("organizationId");
+    if (orgId) {
+      config.headers["X-Organization-ID"] = orgId;
+    }
+
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error),
 );
 
-// Response interceptor
+// Response interceptor: handle 401
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    if (error.response) {
-      // Server responded with error status
-      console.error('API Error:', error.response.status, error.response.data);
-      
-      // Handle specific status codes
-      if (error.response.status === 401) {
-        // Unauthorized - clear token and redirect to login
-        localStorage.removeItem('token');
-        window.location.href = '/login';
-      }
-    } else if (error.request) {
-      // Request was made but no response received
-      console.error('Network Error:', error.message);
-    } else {
-      // Something else happened
-      console.error('Error:', error.message);
+    if (error.response?.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("organizationId");
+      window.location.href = "/login";
     }
     return Promise.reject(error);
-  }
+  },
 );
 
-// API endpoints
+// Health check (mantenido para compatibilidad con Dashboard actual)
 export const api = {
-  // Health check
   health: async (): Promise<HealthResponse> => {
-    const response = await apiClient.get<HealthResponse>('/api/v1/health');
+    const response = await apiClient.get<HealthResponse>("/api/v1/health");
     return response.data;
   },
-
-  // Add more endpoints here as needed
 };
 
 export default apiClient;
