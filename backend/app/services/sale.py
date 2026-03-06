@@ -1,16 +1,16 @@
 """
 CRUD operations for Sale model with business logic.
 
-Supports 1-step and 2-step sale workflows:
-- 1-step: create() with auto_liquidate=True
-- 2-step: create() then liquidate() separately
+Workflow de 3 pasos (igual que compras):
+1. CREATE → registered: Stock se resta, unit_cost se captura. SIN efecto en saldo cliente.
+2. LIQUIDATE → liquidated: Confirmar precios, actualizar saldo cliente (+deuda), pagar comisiones.
+3. COLLECT → Via POST /money-movements/customer-collection (modulo tesoreria).
 
-Business Rules:
-- Stock decreases immediately on sale creation
-- Customer balance increases (they owe us)
-- unit_cost captured at moment of sale for profit tracking
-- Commission balances increase when sale is liquidated
-- Paid sales cannot be cancelled (require reversal sale)
+auto_liquidate=True ejecuta paso 1+2 en una sola llamada.
+
+Cancelacion:
+- registered: revierte stock solamente
+- liquidated: revierte stock + saldo cliente + comisiones pagadas
 """
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -224,16 +224,14 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         if obj_in.commissions:
             self._process_commissions(db, sale, obj_in.commissions, total_amount, organization_id)
         
-        # Step 9: Update customer balance (increase debt)
-        customer.current_balance += total_amount
-        print(f"💰 Customer balance: ${customer.current_balance - total_amount} → ${customer.current_balance}")
-        
+        # Step 9: Customer balance NO se actualiza aqui — se hace en liquidate()
+
         db.flush()
-        
+
         # Step 10: If auto_liquidate, liquidate immediately
         if obj_in.auto_liquidate:
             print(f"⚡ Auto-liquidating sale #{sale_number}")
-            sale = self.liquidate(db, sale.id, obj_in.payment_account_id, organization_id, user_id=user_id)
+            sale = self.liquidate(db, sale.id, organization_id, user_id=user_id)
 
         # Attach warnings as transient attribute (no se persiste en BD)
         sale._warnings = warnings
@@ -243,20 +241,21 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         self,
         db: Session,
         sale_id: UUID,
-        payment_account_id: UUID,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
         line_updates: Optional[List] = None,
         commissions_data: Optional[List] = None
     ) -> Sale:
         """
-        Liquidar venta registrada (cobrar y marcar como pagada).
+        Liquidar venta registrada: confirmar precios, actualizar saldo cliente, pagar comisiones.
+
+        NO recibe payment_account_id — el cobro es un paso separado via MoneyMovement.
 
         Acepta opcionalmente:
-        - line_updates: precios editados por línea (para ventas creadas con precio=0)
+        - line_updates: precios editados por linea (para ventas creadas con precio=0)
         - commissions_data: comisiones nuevas que REEMPLAZAN las existentes
 
-        V-VENTA-04: Todas las líneas deben tener unit_price > 0 al liquidar.
+        V-VENTA-04: Todas las lineas deben tener unit_price > 0 al liquidar.
         """
         # Step 1: Get sale
         sale = db.get(Sale, sale_id)
@@ -280,16 +279,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 detail=f"Cannot liquidate sale with status '{sale.status}'. Must be 'registered'"
             )
 
-        # Step 3: Validate payment account
-        payment_account = db.get(MoneyAccount, payment_account_id)
-        if not payment_account or payment_account.organization_id != organization_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Payment account not found"
-            )
-
-        # Step 4: Si hay line_updates, actualizar precios de las líneas
-        old_total = sale.total_amount
+        # Step 3: Si hay line_updates, actualizar precios de las lineas
         if line_updates:
             price_map = {str(lu.line_id): lu.unit_price for lu in line_updates}
             stmt = select(SaleLine).where(SaleLine.sale_id == sale.id)
@@ -304,24 +294,17 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
 
             sale.total_amount = new_total
 
-            # Ajustar saldo del cliente por el delta
-            delta = new_total - old_total
-            if delta != 0:
-                customer_for_delta = db.get(ThirdParty, sale.customer_id)
-                customer_for_delta.current_balance += delta
-                print(f"👤 Customer balance adjusted by delta ${delta}")
-
-        # V-VENTA-04: Validar que todas las líneas tengan precio > 0
+        # V-VENTA-04: Validar que todas las lineas tengan precio > 0
         stmt = select(SaleLine).where(SaleLine.sale_id == sale.id)
         all_lines = db.scalars(stmt).all()
         zero_price_lines = [l for l in all_lines if l.unit_price <= 0]
         if zero_price_lines:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Todas las líneas deben tener precio > 0 para liquidar (V-VENTA-04)"
+                detail="Todas las lineas deben tener precio > 0 para liquidar (V-VENTA-04)"
             )
 
-        # Step 5: Si hay commissions_data, reemplazar comisiones existentes
+        # Step 4: Si hay commissions_data, reemplazar comisiones existentes
         if commissions_data is not None:
             # Eliminar comisiones existentes (nunca fueron pagadas en status=registered)
             db.query(SaleCommission).filter(
@@ -333,27 +316,22 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             if commissions_data:
                 self._process_commissions(db, sale, commissions_data, sale.total_amount, organization_id)
 
-        # Step 6: Update sale status
-        sale.status = "paid"
-        sale.payment_account_id = payment_account_id
+        # Step 5: Update sale status
+        sale.status = "liquidated"
         sale.liquidated_by = user_id
         sale.liquidated_at = datetime.now(timezone.utc)
 
-        # Step 7: Update payment account balance (receive payment)
-        payment_account.current_balance += sale.total_amount
-        print(f"💳 Payment account '{payment_account.name}': ${payment_account.current_balance - sale.total_amount} → ${payment_account.current_balance}")
-
-        # Step 8: Update customer balance (they paid their debt)
+        # Step 6: Update customer balance (ahora el cliente nos debe)
         customer = db.get(ThirdParty, sale.customer_id)
-        customer.current_balance -= sale.total_amount
-        print(f"👤 Customer '{customer.name}' balance: ${customer.current_balance + sale.total_amount} → ${customer.current_balance}")
+        customer.current_balance += sale.total_amount
+        print(f"  💰 Customer '{customer.name}' balance: ${customer.current_balance - sale.total_amount} -> ${customer.current_balance}")
 
-        # Step 9: Pay commissions (increase recipient balances)
+        # Step 7: Pay commissions (increase recipient balances — les debemos la comision)
         self._pay_commissions(db, sale)
 
         db.flush()
 
-        print(f"✅ Sale #{sale.sale_number} liquidated successfully")
+        print(f"✅ Sale #{sale.sale_number} liquidated for ${sale.total_amount}")
 
         return sale
     
@@ -361,80 +339,72 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         self,
         db: Session,
         sale_id: UUID,
-        organization_id: UUID
+        organization_id: UUID,
+        user_id: UUID = None
     ) -> Sale:
         """
-        Cancel a sale and reverse all changes.
-        
-        Rules:
-        - Can only cancel sales with status='registered'
-        - Paid sales cannot be cancelled (require reversal sale instead)
-        
-        Workflow:
-        1. Validate sale status is 'registered' (not paid)
-        2. Update status to 'cancelled'
-        3. Create reversal inventory movements
-        4. Restore material stock
-        5. Revert customer balance
-        
+        Cancelar venta y revertir todos los efectos.
+
+        Permite cancelar ventas en estado 'registered' o 'liquidated'.
+        - registered: solo revierte stock (saldo cliente nunca se aplico)
+        - liquidated: revierte stock + saldo cliente + comisiones pagadas
+
         Args:
             db: Database session
             sale_id: Sale UUID
             organization_id: Organization UUID
-            
+            user_id: Usuario que cancela (para auditoria)
+
         Returns:
-            Cancelled Sale
-            
+            Venta cancelada
+
         Raises:
-            HTTPException: 404 if sale not found
-            HTTPException: 400 if sale is paid or already cancelled
+            HTTPException: 404 si no existe
+            HTTPException: 400 si ya esta cancelada o pertenece a doble partida
         """
-        # Step 1: Get sale with lines
+        # Step 1: Get sale with lines and commissions
         sale = db.get(Sale, sale_id)
         if not sale or sale.organization_id != organization_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Sale not found"
             )
-        
+
         # Validate: Cannot cancel sale that belongs to double-entry
         if sale.double_entry_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot cancel sale that belongs to a double-entry operation. Cancel the double-entry instead."
             )
-        
+
         # Step 2: Validate status
         if sale.status == "cancelled":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Sale is already cancelled"
             )
-        
-        if sale.status == "paid":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot cancel paid sale. Create a reversal sale instead"
-            )
-        
+
+        was_liquidated = sale.status == "liquidated"
+
         # Step 3: Load lines
         stmt = select(SaleLine).where(SaleLine.sale_id == sale_id)
         lines = db.scalars(stmt).all()
-        
-        # Step 4: Update status
+
+        # Step 4: Update status and audit
         sale.status = "cancelled"
-        
+        sale.cancelled_by = user_id
+        sale.cancelled_at = datetime.now(timezone.utc)
+
         # Step 5: Reverse inventory movements and restore stock
         for line in lines:
             material = db.get(Material, line.material_id)
-            
-            # Create reversal movement (positive quantity = material returning)
+
             reversal_movement = InventoryMovement(
                 organization_id=organization_id,
                 material_id=line.material_id,
                 warehouse_id=sale.warehouse_id,
                 movement_type="sale_reversal",
-                quantity=line.quantity,  # Positive = entry
+                quantity=line.quantity,  # Positivo = material regresa
                 unit_cost=line.unit_cost,
                 reference_type="sale",
                 reference_id=sale.id,
@@ -442,23 +412,28 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 notes=f"Reversal of sale #{sale.sale_number}",
             )
             db.add(reversal_movement)
-            
-            # Restore material stock (to liquidated and total)
+
             material.current_stock += line.quantity
             material.current_stock_liquidated += line.quantity
             print(f"  🔄 Restored {line.quantity} of {material.name}, stock: {material.current_stock - line.quantity} → {material.current_stock}")
-        
-        # Step 6: Revert customer balance
-        customer = db.get(ThirdParty, sale.customer_id)
-        customer.current_balance -= sale.total_amount
-        print(f"👤 Customer '{customer.name}' balance reverted: ${customer.current_balance + sale.total_amount} → ${customer.current_balance}")
-        
-        # Note: Commissions are NOT reverted because they were never paid
-        # (sale was 'registered', not 'paid')
-        
+
+        # Step 6: Si estaba liquidada, revertir saldo cliente y comisiones
+        if was_liquidated:
+            customer = db.get(ThirdParty, sale.customer_id)
+            customer.current_balance -= sale.total_amount
+            print(f"👤 Customer '{customer.name}' balance reverted: ${customer.current_balance + sale.total_amount} → ${customer.current_balance}")
+
+            # Revertir comisiones pagadas
+            stmt_comm = select(SaleCommission).where(SaleCommission.sale_id == sale_id)
+            commissions = db.scalars(stmt_comm).all()
+            for comm in commissions:
+                recipient = db.get(ThirdParty, comm.third_party_id)
+                recipient.current_balance -= comm.commission_amount
+                print(f"  💰 Commission reverted for '{recipient.name}': -${comm.commission_amount}")
+
         db.flush()
-        
-        print(f"❌ Sale #{sale.sale_number} cancelled successfully")
+
+        print(f"❌ Sale #{sale.sale_number} cancelled (was {('liquidated' if was_liquidated else 'registered')})")
 
         return sale
 
@@ -631,21 +606,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             if obj_in.commissions:
                 self._process_commissions(db, sale, obj_in.commissions, new_total, organization_id)
 
-        # Step 5: Ajustar saldo de cliente
+        # Step 5: Si cambio de cliente, actualizar FK (sin ajuste de saldo — se aplica en liquidate)
         if new_customer:
-            # Revertir saldo del cliente original
-            old_customer = db.get(ThirdParty, old_customer_id)
-            old_customer.current_balance -= old_total
-            # Aplicar saldo al nuevo cliente
-            new_customer.current_balance += new_total
             sale.customer_id = obj_in.customer_id
-            # Cliente cambiado
-        elif obj_in.lines is not None:
-            # Mismo cliente pero lineas cambiaron: ajustar diferencia
-            customer = db.get(ThirdParty, old_customer_id)
-            balance_diff = new_total - old_total
-            customer.current_balance += balance_diff
-            # Saldo cliente ajustado por diferencia
 
         # Step 6: Actualizar metadata
         if obj_in.date is not None:

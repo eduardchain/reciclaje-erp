@@ -123,11 +123,11 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
     )
     
     status: Mapped[str] = mapped_column(
-        Enum("registered", "paid", "cancelled", name="sale_status"),
+        Enum("registered", "liquidated", "cancelled", name="sale_status"),
         nullable=False,
         default="registered",
         index=True,
-        comment="Sale status: registered (pending payment) | paid | cancelled"
+        comment="Sale status: registered | liquidated (confirmada, cliente debe) | cancelled"
     )
     
     notes: Mapped[Optional[str]] = mapped_column(
@@ -161,7 +161,20 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
     liquidated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        comment="Timestamp when the sale was liquidated/collected"
+        comment="Timestamp when the sale was liquidated"
+    )
+
+    cancelled_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User who cancelled the sale"
+    )
+
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when the sale was cancelled"
     )
 
     # Double-entry link (optional)

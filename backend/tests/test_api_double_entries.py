@@ -904,12 +904,11 @@ class TestDoubleEntryAPI:
         test_double_entry,
         db_session,
     ):
-        """Test that cancelling fails if Sale is paid."""
-        # Mark sale as paid
+        """Test that cancelling fails if Sale is liquidated."""
         sale = db_session.query(Sale).filter(
             Sale.id == test_double_entry.sale_id
         ).first()
-        sale.status = "paid"
+        sale.status = "liquidated"
         db_session.commit()
 
         response = client.patch(
@@ -917,7 +916,7 @@ class TestDoubleEntryAPI:
             headers=org_headers,
         )
         assert response.status_code == 400
-        assert "paid" in response.json()["detail"].lower()
+        assert "liquidated" in response.json()["detail"].lower()
 
     # ========================================================================
     # PATCH /double-entries/{id} - Update metadata

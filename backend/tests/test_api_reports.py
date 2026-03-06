@@ -209,7 +209,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         sale_number=1, organization_id=org_id,
         customer_id=cliente1.id, warehouse_id=warehouse.id,
         date=now - timedelta(days=8), total_amount=Decimal("1050000"),
-        status="paid", payment_account_id=cuenta_efectivo.id,
+        status="liquidated", payment_account_id=cuenta_efectivo.id,
     )
     db_session.add(venta1)
     db_session.flush()
@@ -225,7 +225,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         sale_number=2, organization_id=org_id,
         customer_id=cliente2.id, warehouse_id=warehouse.id,
         date=now - timedelta(days=6), total_amount=Decimal("480000"),
-        status="paid", payment_account_id=cuenta_banco.id,
+        status="liquidated", payment_account_id=cuenta_banco.id,
     )
     db_session.add(venta2)
     db_session.flush()
@@ -241,7 +241,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         sale_number=3, organization_id=org_id,
         customer_id=cliente1.id, warehouse_id=warehouse.id,
         date=now - timedelta(days=2), total_amount=Decimal("550000"),
-        status="paid", payment_account_id=cuenta_efectivo.id,
+        status="liquidated", payment_account_id=cuenta_efectivo.id,
     )
     db_session.add(venta3)
     db_session.flush()

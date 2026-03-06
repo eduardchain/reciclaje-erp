@@ -339,19 +339,16 @@ class TestCreateSale:
             ],
             "commissions": [],
             "auto_liquidate": True,
-            "payment_account_id": str(test_money_account.id),
         }
-        
+
         # Act
         response = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
-        
+
         # Assert
         assert response.status_code == 201
         data = response.json()
-        assert data["status"] == "paid"
+        assert data["status"] == "liquidated"
         assert data["total_amount"] == 1500.0  # 20 * 75
-        assert data["payment_account_id"] == str(test_money_account.id)
-        assert data["payment_account_name"] == "Cash Account"
     
     def test_create_sale_insufficient_stock_warns(
         self,
@@ -388,16 +385,19 @@ class TestCreateSale:
         assert len(data["warnings"]) > 0
         assert any("stock" in w.lower() for w in data["warnings"])
     
-    def test_create_sale_auto_liquidate_without_account_fails(
+    def test_create_sale_no_customer_balance_change(
         self,
         client,
         org_headers,
         test_customer,
         test_material_with_stock,
         test_warehouse,
+        db_session,
     ):
-        """Test that auto_liquidate=True without payment_account_id fails validation."""
-        # Arrange
+        """Crear venta NO afecta saldo del cliente (se aplica en liquidacion)."""
+        db_session.refresh(test_customer)
+        initial_balance = float(test_customer.current_balance)
+
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
@@ -409,16 +409,14 @@ class TestCreateSale:
                     "unit_price": 50.00,
                 }
             ],
-            "commissions": [],
-            "auto_liquidate": True,
-            # Missing payment_account_id
+            "auto_liquidate": False,
         }
-        
-        # Act
+
         response = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
-        
-        # Assert
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 201
+
+        db_session.refresh(test_customer)
+        assert float(test_customer.current_balance) == initial_balance
 
 
 class TestListSales:
@@ -590,63 +588,50 @@ class TestListPendingSales:
 class TestLiquidateSale:
     """Tests for PATCH /api/v1/sales/{id}/liquidate"""
     
-    def test_liquidate_sale(self, client, org_headers, test_sale, test_money_account, db_session):
-        """Test liquidating a registered sale."""
-        # Arrange
-        initial_balance = test_money_account.current_balance
-        liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
-        }
-        
-        # Act
+    def test_liquidate_sale(self, client, org_headers, test_sale, test_customer, db_session):
+        """Liquidar venta: status → liquidated, saldo cliente aumenta."""
+        db_session.refresh(test_customer)
+        initial_balance = float(test_customer.current_balance)
+        liquidate_data = {}
+
         response = client.patch(
             f"/api/v1/sales/{test_sale.id}/liquidate",
             json=liquidate_data,
             headers=org_headers,
         )
-        
-        # Assert
+
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "paid"
-        assert data["payment_account_id"] == str(test_money_account.id)
-        
-        # Verify account balance increased
-        db_session.refresh(test_money_account)
-        assert test_money_account.current_balance > initial_balance
+        assert data["status"] == "liquidated"
+
+        # Saldo cliente aumento (deuda)
+        db_session.refresh(test_customer)
+        assert float(test_customer.current_balance) == initial_balance + data["total_amount"]
     
-    def test_liquidate_already_paid_sale_fails(
+    def test_liquidate_already_liquidated_sale_fails(
         self,
         client,
         org_headers,
         test_sale,
-        test_money_account,
         db_session,
     ):
-        """Test that liquidating an already paid sale fails."""
-        # Arrange - liquidate first time
+        """Liquidar venta ya liquidada falla."""
         from app.services.sale import crud_sale
-        
+
         crud_sale.liquidate(
             db=db_session,
             sale_id=test_sale.id,
-            payment_account_id=test_money_account.id,
             organization_id=test_sale.organization_id,
         )
         db_session.commit()
-        
-        liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
-        }
-        
-        # Act - try to liquidate again
+
+        # Act - intentar liquidar de nuevo
         response = client.patch(
             f"/api/v1/sales/{test_sale.id}/liquidate",
-            json=liquidate_data,
+            json={},
             headers=org_headers,
         )
-        
-        # Assert
+
         assert response.status_code == 400
         assert "registered" in response.json()["detail"].lower()
 
@@ -678,32 +663,44 @@ class TestCancelSale:
         db_session.refresh(test_material_with_stock)
         assert test_material_with_stock.current_stock > initial_stock
     
-    def test_cancel_paid_sale_fails(
+    def test_cancel_liquidated_sale_succeeds(
         self,
         client,
         org_headers,
         test_sale,
-        test_money_account,
+        test_customer,
+        test_material_with_stock,
         db_session,
     ):
-        """Test that cancelling a paid sale fails."""
-        # Arrange - liquidate the sale first
+        """Cancelar venta liquidada: revierte saldo cliente + stock."""
         from app.services.sale import crud_sale
-        
+
         crud_sale.liquidate(
             db=db_session,
             sale_id=test_sale.id,
-            payment_account_id=test_money_account.id,
             organization_id=test_sale.organization_id,
         )
         db_session.commit()
-        
-        # Act
+
+        db_session.refresh(test_customer)
+        balance_after_liquidate = float(test_customer.current_balance)
+        db_session.refresh(test_material_with_stock)
+        stock_after_sale = float(test_material_with_stock.current_stock)
+
+        # Act - cancelar venta liquidada
         response = client.patch(f"/api/v1/sales/{test_sale.id}/cancel", headers=org_headers)
-        
-        # Assert
-        assert response.status_code == 400
-        assert "paid" in response.json()["detail"].lower()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "cancelled"
+
+        # Saldo cliente revertido
+        db_session.refresh(test_customer)
+        assert float(test_customer.current_balance) == balance_after_liquidate - data["total_amount"]
+
+        # Stock restaurado
+        db_session.refresh(test_material_with_stock)
+        assert float(test_material_with_stock.current_stock) > stock_after_sale
     
     def test_cancel_already_cancelled_sale_fails(
         self,
@@ -810,9 +807,11 @@ class TestUpdateSale:
         test_customer2,
         db_session,
     ):
-        """Cambiar cliente y verificar saldos."""
+        """Cambiar cliente sin afectar saldos (sale es registered, sin saldo aplicado)."""
         db_session.refresh(test_customer)
-        old_balance = float(test_customer.current_balance)
+        old_balance_c1 = float(test_customer.current_balance)
+        db_session.refresh(test_customer2)
+        old_balance_c2 = float(test_customer2.current_balance)
 
         update_data = {
             "customer_id": str(test_customer2.id),
@@ -828,11 +827,11 @@ class TestUpdateSale:
         data = response.json()
         assert data["customer_id"] == str(test_customer2.id)
 
-        # Saldos: cliente viejo pierde la deuda, cliente nuevo la gana
+        # Saldos NO cambian (registered = sin efecto en saldo)
         db_session.refresh(test_customer)
         db_session.refresh(test_customer2)
-        assert float(test_customer.current_balance) == old_balance - 6000.0
-        assert float(test_customer2.current_balance) == 6000.0
+        assert float(test_customer.current_balance) == old_balance_c1
+        assert float(test_customer2.current_balance) == old_balance_c2
 
     def test_update_sale_change_commissions(
         self,
@@ -867,21 +866,19 @@ class TestUpdateSale:
         # 5% de 6000 = 300
         assert float(data["commissions"][0]["commission_amount"]) == 300.0
 
-    def test_update_paid_sale_fails(
+    def test_update_liquidated_sale_fails(
         self,
         client,
         org_headers,
         test_sale,
-        test_money_account,
         db_session,
     ):
-        """No se puede editar venta pagada."""
+        """No se puede editar venta liquidada."""
         from app.services.sale import crud_sale
 
         crud_sale.liquidate(
             db=db_session,
             sale_id=test_sale.id,
-            payment_account_id=test_money_account.id,
             organization_id=test_sale.organization_id,
         )
         db_session.commit()
@@ -990,11 +987,9 @@ class TestEnhancedLiquidation:
         test_customer,
         test_material_with_stock,
         test_warehouse,
-        test_money_account,
         db_session,
     ):
         """Crear venta con precio=0, liquidar con precios, verificar totales."""
-        # Crear venta con precio 0
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
@@ -1014,9 +1009,7 @@ class TestEnhancedLiquidation:
         assert sale["total_amount"] == 0
         line_id = sale["lines"][0]["id"]
 
-        # Liquidar con precio actualizado
         liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
             "lines": [{"line_id": line_id, "unit_price": 80.0}],
         }
         resp = client.patch(
@@ -1026,7 +1019,7 @@ class TestEnhancedLiquidation:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "paid"
+        assert data["status"] == "liquidated"
         assert data["total_amount"] == 8000.0  # 100 * 80
         assert data["lines"][0]["unit_price"] == 80.0
 
@@ -1037,11 +1030,9 @@ class TestEnhancedLiquidation:
         test_customer,
         test_material_with_stock,
         test_warehouse,
-        test_money_account,
         db_session,
     ):
         """V-VENTA-04: liquidar sin precios > 0 falla."""
-        # Crear venta con precio 0
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
@@ -1059,8 +1050,7 @@ class TestEnhancedLiquidation:
         assert resp.status_code == 201
         sale = resp.json()
 
-        # Intentar liquidar sin actualizar precios (siguen en 0)
-        liquidate_data = {"payment_account_id": str(test_money_account.id)}
+        liquidate_data = {}
         resp = client.patch(
             f"/api/v1/sales/{sale['id']}/liquidate",
             json=liquidate_data,
@@ -1074,18 +1064,14 @@ class TestEnhancedLiquidation:
         client,
         org_headers,
         test_sale,
-        test_money_account,
         test_commission_recipient,
         db_session,
     ):
         """Agregar comisiones durante liquidación."""
-        line_id = None
-        # Obtener line_id
         resp = client.get(f"/api/v1/sales/{test_sale.id}", headers=org_headers)
         line_id = resp.json()["lines"][0]["id"]
 
         liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
             "lines": [{"line_id": line_id, "unit_price": 60.0}],
             "commissions": [
                 {
@@ -1103,7 +1089,7 @@ class TestEnhancedLiquidation:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "paid"
+        assert data["status"] == "liquidated"
         assert len(data["commissions"]) == 1
         assert data["commissions"][0]["commission_amount"] == 300.0  # 5% de 6000
 
@@ -1114,10 +1100,9 @@ class TestEnhancedLiquidation:
         test_customer,
         test_material_with_stock,
         test_warehouse,
-        test_money_account,
         db_session,
     ):
-        """Delta de saldo correcto al cambiar precios en liquidación."""
+        """Liquidar aplica saldo completo al cliente (con precios actualizados)."""
         # Crear venta con precio 50 -> total 5000
         sale_data = {
             "customer_id": str(test_customer.id),
@@ -1137,13 +1122,12 @@ class TestEnhancedLiquidation:
         sale = resp.json()
         line_id = sale["lines"][0]["id"]
 
-        # Saldo del cliente despues de crear: +5000
+        # Create NO afecta saldo
         db_session.refresh(test_customer)
         balance_after_create = float(test_customer.current_balance)
 
-        # Liquidar con precio 80 -> total 8000 (delta +3000)
+        # Liquidar con precio 80 -> total 8000
         liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
             "lines": [{"line_id": line_id, "unit_price": 80.0}],
         }
         resp = client.patch(
@@ -1153,10 +1137,9 @@ class TestEnhancedLiquidation:
         )
         assert resp.status_code == 200
 
-        # Despues de liquidar: balance_after_create + delta(3000) - total(8000) = balance_after_create - 5000
+        # Saldo = balance_after_create + 8000 (total despues de update de precios)
         db_session.refresh(test_customer)
-        # El saldo deberia ser: balance_after_create + (8000 - 5000) - 8000 = balance_after_create - 5000
-        expected_balance = balance_after_create + 3000 - 8000
+        expected_balance = balance_after_create + 8000.0
         assert abs(float(test_customer.current_balance) - expected_balance) < 0.01
 
     def test_liquidate_replaces_commissions(
@@ -1166,7 +1149,6 @@ class TestEnhancedLiquidation:
         test_customer,
         test_material_with_stock,
         test_warehouse,
-        test_money_account,
         test_commission_recipient,
         db_session,
     ):
@@ -1201,7 +1183,6 @@ class TestEnhancedLiquidation:
 
         # Liquidar con comisiones nuevas (reemplaza las originales)
         liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
             "lines": [{"line_id": line_id, "unit_price": 60.0}],
             "commissions": [
                 {

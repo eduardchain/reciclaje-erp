@@ -136,13 +136,13 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 1. **Doble Partida SIN movimientos de inventario**: En operaciones "Pasa Mano" (compra+venta simultanea), el material NO toca bodega. Crear movimientos de inventario inflaria el costo promedio y distorsionaria estadisticas. La doble partida solo afecta saldos de terceros y cuentas.
 
-2. **Estados**: Compras usan `registered | liquidated | cancelled`. Ventas usan `registered | paid | cancelled`. No se necesita un estado `collected` separado para ventas.
+2. **Estados**: Compras y Ventas usan `registered | liquidated | cancelled`. Workflow identico de 3 pasos: CREATE (stock) → LIQUIDATE (confirmar precios, saldo tercero, comisiones) → PAY/COLLECT (MoneyMovement separado).
 
 3. **Stock liquidado vs transito**: Las compras registradas crean stock en transito (sin efectos financieros: ni saldo proveedor, ni costo promedio). Al LIQUIDAR se confirman precios, se recalcula costo promedio, se actualiza saldo proveedor, y stock pasa de transito a liquidado. El PAGO al proveedor es una operacion separada via MoneyMovement (`payment_to_supplier`).
 
 4. **Categorias de gastos directos vs indirectos**: `is_direct_expense=True` indica gastos que afectan el costo del material (flete, pesaje). `is_direct_expense=False` son gastos administrativos (arriendo, servicios). Esta distincion es clave para calcular rentabilidad real.
 
-5. **Liquidacion ≠ Pago**: La liquidacion de compras actualiza saldo del proveedor y costo promedio, pero NO mueve dinero de ninguna cuenta. El pago es una operacion separada via MoneyMovement (`payment_to_supplier`, ya soportado con `purchase_id` FK). Para ventas, la liquidacion/cobro actualiza saldo del cliente directamente. Los money_movements son un modulo SEPARADO para pagos/cobros manuales, gastos, transferencias, etc.
+5. **Liquidacion ≠ Pago**: La liquidacion (compras y ventas) confirma precios, actualiza saldo del tercero, y en compras recalcula costo promedio. NO mueve dinero de ninguna cuenta. El pago/cobro es una operacion separada via MoneyMovement. Los money_movements son un modulo SEPARADO para pagos/cobros manuales, gastos, transferencias, etc.
 
 6. **Stock negativo permitido (RN-INV-03)**: Ventas, ajustes y transformaciones permiten stock negativo. No bloquean la operacion. Retornan `warnings[]` en la respuesta con mensajes descriptivos. El frontend puede mostrar estas advertencias al usuario.
 

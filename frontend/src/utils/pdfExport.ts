@@ -5,7 +5,6 @@ import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 
 const STATUS_LABELS: Record<string, string> = {
   registered: "Registrada",
-  paid: "Pagada",
   liquidated: "Liquidada",
   cancelled: "Cancelada",
 };
@@ -126,7 +125,7 @@ export function exportPurchasePDF(purchase: PurchaseResponse, orgName?: string) 
 
 const SALE_STATUS_LABELS: Record<string, string> = {
   registered: "Registrada",
-  paid: "Cobrada",
+  liquidated: "Liquidada",
   cancelled: "Cancelada",
 };
 

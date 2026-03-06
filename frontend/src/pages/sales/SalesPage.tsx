@@ -39,6 +39,7 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
   const cancelMutation = useCancelSale();
 
   const canEdit = sale.status === "registered" && !sale.double_entry_id;
+  const canCancel = (sale.status === "registered" || sale.status === "liquidated") && !sale.double_entry_id;
 
   return (
     <>
@@ -67,10 +68,10 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
           {canEdit && (
             <DropdownMenuItem onClick={() => navigate(`/sales/${sale.id}/liquidate`)}>
               <DollarSign className="h-4 w-4 mr-2" />
-              Cobrar
+              Liquidar
             </DropdownMenuItem>
           )}
-          {canEdit && (
+          {canCancel && (
             <DropdownMenuItem onClick={() => setCancelOpen(true)} className="text-red-600">
               <XCircle className="h-4 w-4 mr-2" />
               Cancelar
@@ -264,7 +265,7 @@ export default function SalesPage() {
         <TabsList>
           <TabsTrigger value="all">Todas</TabsTrigger>
           <TabsTrigger value="registered">Registradas</TabsTrigger>
-          <TabsTrigger value="paid">Cobradas</TabsTrigger>
+          <TabsTrigger value="liquidated">Liquidadas</TabsTrigger>
           <TabsTrigger value="cancelled">Canceladas</TabsTrigger>
         </TabsList>
       </Tabs>

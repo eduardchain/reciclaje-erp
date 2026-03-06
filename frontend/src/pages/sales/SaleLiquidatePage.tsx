@@ -12,7 +12,7 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { useSale, useLiquidateSale } from "@/hooks/useSales";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useMoneyAccounts, useMaterials, useCustomers, useSuppliers } from "@/hooks/useMasterData";
+import { useMaterials, useCustomers, useSuppliers } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import type { SaleCommissionCreate } from "@/types/sale";
 
@@ -41,18 +41,15 @@ export default function SaleLiquidatePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: sale, isLoading } = useSale(id!);
-  const { data: accountsData } = useMoneyAccounts();
   const { data: materialsData } = useMaterials();
   const { data: customersData } = useCustomers();
   const { data: suppliersData } = useSuppliers();
   const { getSuggestedPrice } = usePriceSuggestions();
   const liquidate = useLiquidateSale();
 
-  const accounts = accountsData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const thirdParties = [...(customersData?.items ?? []), ...(suppliersData?.items ?? [])];
 
-  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [lines, setLines] = useState<LiquidationLine[]>([]);
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
 
@@ -129,7 +126,7 @@ export default function SaleLiquidatePage() {
   const netTotal = subtotal - totalCommissions;
 
   const allPricesValid = lines.every((l) => l.unit_price > 0);
-  const canSubmit = paymentAccountId && allPricesValid && lines.length > 0;
+  const canSubmit = allPricesValid && lines.length > 0;
 
   const handleSubmit = () => {
     if (!canSubmit || !id) return;
@@ -137,7 +134,6 @@ export default function SaleLiquidatePage() {
       {
         id,
         data: {
-          payment_account_id: paymentAccountId,
           lines: lines.map((l) => ({
             line_id: l.line_id,
             unit_price: l.unit_price,
@@ -167,7 +163,7 @@ export default function SaleLiquidatePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`Cobrar Venta #${sale.sale_number}`}
+        title={`Liquidar Venta #${sale.sale_number}`}
         description={`Cliente: ${sale.customer_name} | Fecha: ${formatDate(sale.date)}`}
       >
         <Button variant="outline" onClick={() => navigate(`/sales/${id}`)}>
@@ -361,22 +357,6 @@ export default function SaleLiquidatePage() {
         </CardContent>
       </Card>
 
-      {/* Cuenta de cobro */}
-      <Card className="shadow-sm">
-        <CardContent className="pt-6">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta de Cobro *</Label>
-          <EntitySelect
-            value={paymentAccountId}
-            onChange={setPaymentAccountId}
-            options={accounts.map((a) => ({
-              id: a.id,
-              label: `${a.name} (${formatCurrency(a.current_balance)})`,
-            }))}
-            placeholder="Seleccionar cuenta de cobro..."
-          />
-        </CardContent>
-      </Card>
-
       {/* Resumen y acciones */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
         <div className="flex items-center justify-between">
@@ -409,7 +389,7 @@ export default function SaleLiquidatePage() {
               className="bg-emerald-600 hover:bg-emerald-700"
             >
               <CreditCard className="h-4 w-4 mr-2" />
-              {liquidate.isPending ? "Cobrando..." : "Confirmar Cobro"}
+              {liquidate.isPending ? "Liquidando..." : "Confirmar Liquidacion"}
             </Button>
           </div>
         </div>

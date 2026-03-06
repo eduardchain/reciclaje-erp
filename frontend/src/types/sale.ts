@@ -1,6 +1,6 @@
 import type { BaseEntity } from "./common";
 
-export type SaleStatus = "registered" | "paid" | "cancelled";
+export type SaleStatus = "registered" | "liquidated" | "cancelled";
 
 export interface SaleCommissionCreate {
   third_party_id: string;
@@ -51,7 +51,6 @@ export interface SaleCreate {
   lines: SaleLineCreate[];
   commissions?: SaleCommissionCreate[];
   auto_liquidate?: boolean;
-  payment_account_id?: string | null;
 }
 
 export interface SaleUpdate {
@@ -89,6 +88,8 @@ export interface SaleResponse extends BaseEntity {
   liquidated_by: string | null;
   updated_by: string | null;
   liquidated_at: string | null;
+  cancelled_by: string | null;
+  cancelled_at: string | null;
   created_by_name: string | null;
   liquidated_by_name: string | null;
   updated_by_name: string | null;
@@ -106,7 +107,6 @@ export interface SaleLiquidateLineUpdate {
 }
 
 export interface SaleLiquidateRequest {
-  payment_account_id: string;
   lines?: SaleLiquidateLineUpdate[];
   commissions?: SaleCommissionCreate[];
 }

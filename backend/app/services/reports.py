@@ -285,7 +285,7 @@ class ReportService:
                 select(func.coalesce(func.sum(Sale.total_amount), 0))
                 .where(
                     Sale.organization_id == organization_id,
-                    Sale.status == "paid",
+                    Sale.status == "liquidated",
                     Sale.date >= dt_from,
                     Sale.date < dt_to,
                 )
@@ -346,7 +346,7 @@ class ReportService:
                 select(func.coalesce(func.sum(Sale.total_amount), 0))
                 .where(
                     Sale.organization_id == organization_id,
-                    Sale.status == "paid",
+                    Sale.status == "liquidated",
                     Sale.date >= dt_from,
                 )
             )

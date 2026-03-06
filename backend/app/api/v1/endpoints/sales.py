@@ -96,27 +96,18 @@ def _enrich_sale_response(sale: Sale, db: Session = None, warnings: list[str] | 
     status_code=status.HTTP_201_CREATED,
     summary="Create new sale",
     description="""
-    Create a new sale with support for 1-step and 2-step workflows.
-    
-    **1-step workflow (auto-liquidate):**
-    - Set `auto_liquidate=True`
-    - Provide `payment_account_id`
-    - Sale is created and immediately liquidated (status='paid')
-    
-    **2-step workflow:**
-    - Set `auto_liquidate=False` (default)
-    - Sale is created with status='registered'
-    - Use PATCH /sales/{id}/liquidate later to complete payment
-    
-    **Effects:**
-    - Generates sequential sale_number
-    - Validates stock availability (blocks if insufficient)
-    - Updates material stock (decreases)
-    - Captures unit_cost for profit calculation
-    - Creates inventory movements (audit trail)
-    - Updates customer balance (increases debt)
-    - Creates commissions (if provided)
-    - If auto_liquidate: Credits payment account, pays commissions
+    Crear venta con workflow de 1 o 2 pasos.
+
+    **1-step (auto_liquidate=True):** Crea y liquida en un paso (status='liquidated').
+    **2-step (default):** Crea con status='registered', luego PATCH /liquidate.
+
+    **Efectos en CREATE:**
+    - Genera sale_number secuencial
+    - Resta stock del material (current_stock, current_stock_liquidated)
+    - Captura unit_cost para calculo de utilidad
+    - Crea movimientos de inventario (auditoria)
+    - Crea comisiones (sin pagar)
+    - NO afecta saldo del cliente (se aplica en liquidacion)
     """,
 )
 async def create_sale(
@@ -202,7 +193,7 @@ async def create_sale(
 async def list_sales(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum records to return"),
-    status: Optional[str] = Query(None, description="Filter by status: registered, paid, cancelled"),
+    status: Optional[str] = Query(None, description="Filter by status: registered, liquidated, cancelled"),
     customer_id: Optional[UUID] = Query(None, description="Filter by customer UUID"),
     warehouse_id: Optional[UUID] = Query(None, description="Filter by warehouse UUID"),
     date_from: Optional[date] = Query(None, description="Filter sales on or after this date"),
@@ -502,19 +493,19 @@ async def update_sale(
 @router.patch(
     "/{sale_id}/liquidate",
     response_model=SaleResponse,
-    summary="Liquidate sale (2-step workflow)",
+    summary="Liquidar venta (paso 2)",
     description="""
-    Liquidate a registered sale (complete payment).
-    
-    **Effects:**
-    - Updates status to 'paid'
-    - Credits payment account (receives money)
-    - Debits customer balance (they paid)
-    - Pays commissions to recipients (increases their balances)
-    
-    **Requirements:**
+    Liquidar venta registrada: confirmar precios y aplicar saldo.
+
+    **Efectos:**
+    - Status → 'liquidated'
+    - Actualiza saldo cliente (+deuda)
+    - Paga comisiones (actualiza saldo recipients)
+    - Permite actualizar precios por linea y reemplazar comisiones
+
+    **Requisitos:**
     - Sale must have status='registered'
-    - Payment account must belong to organization
+    - Todos los precios deben ser > 0 (V-VENTA-04)
     """,
 )
 async def liquidate_sale(
@@ -528,7 +519,6 @@ async def liquidate_sale(
         sale = crud_sale.liquidate(
             db=db,
             sale_id=sale_id,
-            payment_account_id=liquidate_in.payment_account_id,
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
             line_updates=liquidate_in.lines,
@@ -569,20 +559,18 @@ async def liquidate_sale(
 @router.patch(
     "/{sale_id}/cancel",
     response_model=SaleResponse,
-    summary="Cancel sale",
+    summary="Cancelar venta",
     description="""
-    Cancel a sale and reverse all effects.
-    
-    **Effects:**
-    - Updates status to 'cancelled'
-    - Creates reversal inventory movements
-    - Restores material stock
-    - Reverts customer balance
-    
-    **Restrictions:**
-    - Cannot cancel paid sales (use reversal sale instead)
-    - Cannot cancel already cancelled sales
-    - Must have status='registered'
+    Cancelar venta y revertir todos los efectos.
+
+    **Permite cancelar:** registered y liquidated.
+
+    **Efectos (registered):** Revierte stock solamente.
+    **Efectos (liquidated):** Revierte stock + saldo cliente + comisiones pagadas.
+
+    **Restricciones:**
+    - No se puede cancelar ventas ya canceladas
+    - No se puede cancelar ventas de doble partida
     """,
 )
 async def cancel_sale(
@@ -596,6 +584,7 @@ async def cancel_sale(
             db=db,
             sale_id=sale_id,
             organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
         )
         
         db.commit()

@@ -115,21 +115,12 @@ class SaleCreate(SaleBase):
     - auto_liquidate=True: Creates and liquidates in one step (1-step workflow)
     
     Validation:
-    - If auto_liquidate=True, payment_account_id is required
     - At least one line is required
     - Stock validation: All materials must have sufficient stock
     """
     lines: List[SaleLineCreate] = Field(..., min_length=1, description="Sale lines (at least 1)")
     commissions: List[SaleCommissionCreate] = Field(default_factory=list, description="Optional sale commissions")
     auto_liquidate: bool = Field(False, description="Auto-liquidate after creation (1-step workflow)")
-    payment_account_id: Optional[UUID] = Field(None, description="Payment account (required if auto_liquidate=True)")
-    
-    @model_validator(mode='after')
-    def validate_auto_liquidate(self):
-        """Validate that payment_account_id is provided when auto_liquidate=True."""
-        if self.auto_liquidate and not self.payment_account_id:
-            raise ValueError("payment_account_id is required when auto_liquidate=True")
-        return self
 
 
 class SaleUpdate(BaseModel):
@@ -168,7 +159,7 @@ class SaleResponse(SaleBase):
     sale_number: int
     total_amount: float
     total_profit: float = Field(..., description="Total profit (sum of all line profits)")
-    status: str = Field(..., description="registered | paid | cancelled")
+    status: str = Field(..., description="registered | liquidated | cancelled")
     payment_account_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
@@ -178,6 +169,8 @@ class SaleResponse(SaleBase):
     liquidated_by: Optional[UUID] = Field(None, description="User who liquidated the sale")
     updated_by: Optional[UUID] = Field(None, description="User who last edited the sale")
     liquidated_at: Optional[datetime] = Field(None, description="Timestamp when the sale was liquidated")
+    cancelled_by: Optional[UUID] = Field(None, description="User who cancelled the sale")
+    cancelled_at: Optional[datetime] = Field(None, description="Timestamp when the sale was cancelled")
 
     # Audit names (joined from User model)
     created_by_name: Optional[str] = Field(None, description="Name of user who created the sale")
@@ -214,8 +207,7 @@ class SaleLiquidateLineUpdate(BaseModel):
 
 
 class SaleLiquidateRequest(BaseModel):
-    """Schema for liquidating a sale (2-step workflow) con precios y comisiones opcionales."""
-    payment_account_id: UUID = Field(..., description="Payment account to receive funds")
+    """Schema para liquidar venta (confirmar precios, actualizar saldo cliente). Sin pago a cuenta."""
     lines: Optional[List[SaleLiquidateLineUpdate]] = Field(None, description="Precios actualizados por línea")
     commissions: Optional[List[SaleCommissionCreate]] = Field(None, description="Comisiones (reemplazan las existentes)")
 

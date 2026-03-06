@@ -19,7 +19,7 @@ import { exportSalePDF } from "@/utils/pdfExport";
 
 const statusBorderMap: Record<string, string> = {
   registered: "border-t-[3px] border-t-amber-400",
-  paid: "border-t-[3px] border-t-emerald-400",
+  liquidated: "border-t-[3px] border-t-emerald-400",
   cancelled: "border-t-[3px] border-t-rose-400",
 };
 
@@ -56,12 +56,14 @@ export default function SaleDetailPage() {
                 <Pencil className="h-4 w-4 mr-2" />Editar
               </Button>
               <Button onClick={() => navigate(`/sales/${id}/liquidate`)} className="bg-emerald-600 hover:bg-emerald-700">
-                <CreditCard className="h-4 w-4 mr-2" />Cobrar
-              </Button>
-              <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50">
-                <XCircle className="h-4 w-4 mr-2" />Cancelar
+                <CreditCard className="h-4 w-4 mr-2" />Liquidar
               </Button>
             </>
+          )}
+          {(sale.status === "registered" || sale.status === "liquidated") && !sale.double_entry_id && (
+            <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50">
+              <XCircle className="h-4 w-4 mr-2" />Cancelar
+            </Button>
           )}
           <Button variant="outline" onClick={() => exportSalePDF(sale, orgName)}>
             <FileText className="h-4 w-4 mr-2" />PDF
