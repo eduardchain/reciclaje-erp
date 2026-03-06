@@ -119,9 +119,12 @@ export default function SaleEditPage() {
 
   const total = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
 
+  const isFutureDate = date ? new Date(date) > new Date() : false;
+
   const canSubmit =
     customerId &&
     date &&
+    !isFutureDate &&
     lines.length > 0 &&
     lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
     commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0);
@@ -201,7 +204,8 @@ export default function SaleEditPage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
-              <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} />
+              <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} className={isFutureDate ? "border-red-300" : ""} />
+              {isFutureDate && <p className="text-xs text-red-500 mt-0.5">La fecha no puede ser futura</p>}
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa Vehiculo</Label>
@@ -229,12 +233,16 @@ export default function SaleEditPage() {
           </Button>
         </CardHeader>
         <CardContent className="space-y-0">
-          {lines.map((line, idx) => (
+          {lines.map((line, idx) => {
+            const mat = materials.find((m) => m.id === line.material_id);
+            const avgCost = mat?.current_average_cost ?? 0;
+            const lineProfit = line.unit_price > 0 && avgCost > 0 ? (line.unit_price - avgCost) * line.quantity : 0;
+            return (
             <div
               key={line._key}
               className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
             >
-              <div className="col-span-4">
+              <div className="col-span-3">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
                 <EntitySelect
                   value={line.material_id}
@@ -243,7 +251,7 @@ export default function SaleEditPage() {
                   placeholder="Material..."
                 />
               </div>
-              <div className="col-span-3">
+              <div className="col-span-2">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
                 <Input
                   type="number"
@@ -254,8 +262,12 @@ export default function SaleEditPage() {
                   placeholder="0.00"
                 />
               </div>
+              <div className="col-span-1">
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo</Label>}
+                <p className="h-10 flex items-center text-sm tabular-nums text-slate-400">{avgCost > 0 ? formatCurrency(avgCost) : "-"}</p>
+              </div>
               <div className="col-span-2">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit. *</Label>}
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio *</Label>}
                 <Input
                   type="number"
                   min={0}
@@ -275,6 +287,12 @@ export default function SaleEditPage() {
                   {formatCurrency(line.quantity * line.unit_price)}
                 </p>
               </div>
+              <div className="col-span-1 text-right">
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Utilidad</Label>}
+                <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                  {line.unit_price > 0 && avgCost > 0 ? formatCurrency(lineProfit) : "-"}
+                </p>
+              </div>
               <div className="col-span-1">
                 {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
                 <Button
@@ -288,13 +306,41 @@ export default function SaleEditPage() {
                 </Button>
               </div>
             </div>
-          ))}
+            );
+          })}
 
-          <div className="bg-slate-50 rounded-lg p-3 mt-2">
-            <div className="flex justify-end">
-              <span className="text-lg font-bold">Total: {formatCurrency(total)}</span>
-            </div>
-          </div>
+          {(() => {
+            const estProfit = lines.reduce((sum, l) => {
+              const mat = materials.find((m) => m.id === l.material_id);
+              const avgCost = mat?.current_average_cost ?? 0;
+              return sum + (l.unit_price > 0 && avgCost > 0 ? (l.unit_price - avgCost) * l.quantity : 0);
+            }, 0);
+            const totalComm = commissions.reduce((sum, c) => {
+              return sum + (c.commission_type === "percentage" ? (total * c.commission_value) / 100 : c.commission_value);
+            }, 0);
+            const netProfit = estProfit - totalComm;
+            const margin = total > 0 ? (estProfit / total) * 100 : 0;
+            return (
+              <div className="bg-slate-50 rounded-lg p-3 mt-2 space-y-1">
+                <div className="flex justify-end gap-6">
+                  <span className="text-lg font-bold">Total: {formatCurrency(total)}</span>
+                  {estProfit !== 0 && (
+                    <span className={`text-lg font-bold ${estProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                      Util. Bruta: {formatCurrency(estProfit)} ({margin.toFixed(1)}%)
+                    </span>
+                  )}
+                </div>
+                {totalComm > 0 && (
+                  <div className="flex justify-end gap-6 text-sm">
+                    <span className="text-amber-600">Comisiones: -{formatCurrency(totalComm)}</span>
+                    <span className={`font-semibold ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                      Util. Neta: {formatCurrency(netProfit)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 

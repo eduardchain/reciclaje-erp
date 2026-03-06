@@ -318,10 +318,10 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             )
         
         # Step 4: Validate Purchase and Sale are not paid
-        if purchase.status == "paid":
+        if purchase.status == "liquidated":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot cancel: Purchase #{purchase.purchase_number} is already paid"
+                detail=f"Cannot cancel: Purchase #{purchase.purchase_number} is already liquidated"
             )
         
         if sale.status == "paid":
@@ -495,7 +495,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             query = query.filter(DoubleEntry.date >= date_from)
         
         if date_to:
-            query = query.filter(DoubleEntry.date <= date_to)
+            query = query.filter(DoubleEntry.date < date_to)
         
         # Search filter (double_entry_number, notes, invoice_number)
         # Note: Searching by supplier/customer name requires JOINs that conflict with eager loading

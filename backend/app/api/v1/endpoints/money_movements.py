@@ -5,7 +5,7 @@ Modulo independiente de la liquidacion de compras/ventas.
 Endpoints especializados por tipo de operacion con un endpoint
 generico de listado y filtros.
 """
-from datetime import datetime
+from datetime import date, datetime, time as dt_time, timedelta, timezone as tz
 from typing import Optional
 from uuid import UUID
 
@@ -263,13 +263,15 @@ def list_money_movements(
     status_filter: Optional[str] = Query(None, alias="status", description="Filtrar por estado"),
     account_id: Optional[UUID] = Query(None, description="Filtrar por cuenta"),
     third_party_id: Optional[UUID] = Query(None, description="Filtrar por tercero"),
-    date_from: Optional[datetime] = Query(None, description="Fecha desde"),
-    date_to: Optional[datetime] = Query(None, description="Fecha hasta"),
+    date_from: Optional[date] = Query(None, description="Fecha desde"),
+    date_to: Optional[date] = Query(None, description="Fecha hasta"),
     search: Optional[str] = Query(None, description="Buscar en descripcion o referencia"),
     org_context: dict = Depends(get_required_org_context),
     db: Session = Depends(get_db),
 ):
     """Listar movimientos de dinero con filtros y paginacion."""
+    date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
+    date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
     movements, total = money_movement.get_multi(
         db=db,
         organization_id=org_context["organization_id"],
@@ -279,8 +281,8 @@ def list_money_movements(
         status_filter=status_filter,
         account_id=account_id,
         third_party_id=third_party_id,
-        date_from=date_from,
-        date_to=date_to,
+        date_from=date_from_dt,
+        date_to=date_to_dt,
         search=search,
     )
     return {
@@ -293,17 +295,19 @@ def list_money_movements(
 
 @router.get("/summary", response_model=list[MoneyMovementSummary])
 def get_movements_summary(
-    date_from: Optional[datetime] = Query(None),
-    date_to: Optional[datetime] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     org_context: dict = Depends(get_required_org_context),
     db: Session = Depends(get_db),
 ):
     """Resumen de movimientos agrupados por tipo para un periodo."""
+    date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
+    date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
     return money_movement.get_summary(
         db=db,
         organization_id=org_context["organization_id"],
-        date_from=date_from,
-        date_to=date_to,
+        date_from=date_from_dt,
+        date_to=date_to_dt,
     )
 
 

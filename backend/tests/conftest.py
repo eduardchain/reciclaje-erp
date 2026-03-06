@@ -33,6 +33,7 @@ from app.models import (
     InventoryAdjustment,
     MaterialTransformation,
     MaterialTransformationLine,
+    MaterialCostHistory,
 )
 
 # Test database URL (PostgreSQL on port 5433)

@@ -564,7 +564,7 @@ class CRUDMoneyMovement:
         if date_from:
             query = query.where(MoneyMovement.date >= date_from)
         if date_to:
-            query = query.where(MoneyMovement.date <= date_to)
+            query = query.where(MoneyMovement.date < date_to)
         if search:
             search_term = f"%{search}%"
             query = query.where(
@@ -652,7 +652,7 @@ class CRUDMoneyMovement:
         if date_from:
             query = query.where(MoneyMovement.date >= date_from)
         if date_to:
-            query = query.where(MoneyMovement.date <= date_to)
+            query = query.where(MoneyMovement.date < date_to)
 
         rows = db.execute(query).all()
         return [

@@ -6,6 +6,7 @@ import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 const STATUS_LABELS: Record<string, string> = {
   registered: "Registrada",
   paid: "Pagada",
+  liquidated: "Liquidada",
   cancelled: "Cancelada",
 };
 

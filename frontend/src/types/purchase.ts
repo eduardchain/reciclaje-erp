@@ -1,6 +1,6 @@
 import type { BaseEntity } from "./common";
 
-export type PurchaseStatus = "registered" | "paid" | "cancelled";
+export type PurchaseStatus = "registered" | "liquidated" | "cancelled";
 
 export interface PurchaseLineCreate {
   material_id: string;
@@ -31,7 +31,6 @@ export interface PurchaseCreate {
   invoice_number?: string | null;
   lines: PurchaseLineCreate[];
   auto_liquidate?: boolean;
-  payment_account_id?: string | null;
 }
 
 export interface PurchaseUpdate {
@@ -56,9 +55,12 @@ export interface PurchaseResponse extends BaseEntity {
   created_by: string | null;
   liquidated_by: string | null;
   liquidated_at: string | null;
+  cancelled_by: string | null;
+  cancelled_at: string | null;
   updated_by: string | null;
   created_by_name: string | null;
   liquidated_by_name: string | null;
+  cancelled_by_name: string | null;
   updated_by_name: string | null;
   supplier_name: string;
   payment_account_name: string | null;
@@ -81,6 +83,5 @@ export interface PurchaseLiquidateLineUpdate {
 }
 
 export interface PurchaseLiquidateRequest {
-  payment_account_id: string;
   lines?: PurchaseLiquidateLineUpdate[];
 }

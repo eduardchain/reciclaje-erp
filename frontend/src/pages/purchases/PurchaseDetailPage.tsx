@@ -23,7 +23,7 @@ import { exportPurchasePDF } from "@/utils/pdfExport";
 
 const statusBorderMap: Record<string, string> = {
   registered: "border-t-[3px] border-t-amber-400",
-  paid: "border-t-[3px] border-t-emerald-400",
+  liquidated: "border-t-[3px] border-t-emerald-400",
   cancelled: "border-t-[3px] border-t-rose-400",
 };
 
@@ -45,7 +45,7 @@ export default function PurchaseDetailPage() {
   };
 
   const canEdit = purchase?.status === "registered" && !purchase?.double_entry_id;
-  const canCancel = (purchase?.status === "registered" || purchase?.status === "paid") && !purchase?.double_entry_id;
+  const canCancel = (purchase?.status === "registered" || purchase?.status === "liquidated") && !purchase?.double_entry_id;
 
   if (isLoading) {
     return (
@@ -222,6 +222,13 @@ export default function PurchaseDetailPage() {
                 <dd className="text-xs text-slate-400">{formatDateTime(purchase.liquidated_at)}</dd>
               </div>
             )}
+            {purchase.cancelled_at && (
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cancelada por</dt>
+                <dd className="mt-0.5">{purchase.cancelled_by_name ?? "-"}</dd>
+                <dd className="text-xs text-slate-400">{formatDateTime(purchase.cancelled_at)}</dd>
+              </div>
+            )}
             {purchase.updated_by_name && (
               <div>
                 <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Editada por</dt>
@@ -239,9 +246,9 @@ export default function PurchaseDetailPage() {
         onOpenChange={setShowCancel}
         title="Cancelar Compra"
         description={
-          purchase.status === "paid"
-            ? "Esta accion revertira los movimientos de inventario, saldos y devolvera el pago a la cuenta. Esta seguro?"
-            : "Esta accion revertira los movimientos de inventario y saldos asociados. Esta seguro?"
+          purchase.status === "liquidated"
+            ? "Esta accion revertira los movimientos de inventario y saldos del proveedor. Esta seguro?"
+            : "Esta accion revertira los movimientos de inventario. Esta seguro?"
         }
         confirmLabel="Si, cancelar"
         variant="destructive"

@@ -2,8 +2,10 @@
 Purchase models for procurement and inventory management.
 
 Supports both 1-step and 2-step purchase workflows:
-- 1-step: Create purchase with status='paid' and payment_account_id set
-- 2-step: Create with status='registered', later PATCH to 'paid'
+- 1-step: Create purchase with auto_liquidate=True (status='liquidated' directly)
+- 2-step: Create with status='registered', later liquidate to 'liquidated'
+
+Payment to supplier is a separate treasury operation (MoneyMovement type='payment_to_supplier').
 """
 from datetime import datetime
 from decimal import Decimal
@@ -37,15 +39,16 @@ if TYPE_CHECKING:
 class Purchase(Base, OrganizationMixin, TimestampMixin):
     """
     Purchase model for procurement transactions.
-    
+
     Workflow:
-    1. Register purchase (status='registered'): Inventory enters warehouse, supplier balance increases
-    2. Liquidate (status='paid'): Payment account deducted, purchase fully completed
-    
+    1. Register purchase (status='registered'): Stock enters transit, no financial effects
+    2. Liquidate (status='liquidated'): Confirm prices, move stock to liquidated, update supplier balance and avg cost
+    3. Pay supplier: Separate MoneyMovement operation (type='payment_to_supplier')
+
     Status transitions:
-    - registered → paid (liquidation)
-    - registered → cancelled (reversal)
-    - paid → cancelled (reversal with refund logic)
+    - registered -> liquidated (liquidation: prices confirmed)
+    - registered -> cancelled (reversal: only stock transit)
+    - liquidated -> cancelled (reversal: stock + supplier balance)
     """
     __tablename__ = "purchases"
     
@@ -87,11 +90,11 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
     )
     
     status: Mapped[str] = mapped_column(
-        Enum("registered", "paid", "cancelled", name="purchase_status"),
+        Enum("registered", "liquidated", "cancelled", name="purchase_status"),
         nullable=False,
         default="registered",
         index=True,
-        comment="registered=pending payment, paid=completed, cancelled=voided",
+        comment="registered=pending liquidation, liquidated=prices confirmed+stock available, cancelled=voided",
     )
     
     payment_account_id: Mapped[Optional[UUID]] = mapped_column(
@@ -99,7 +102,7 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         ForeignKey("money_accounts.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
-        comment="Account used for payment (required when status='paid')",
+        comment="Legacy: previously used for payment. Payment now via MoneyMovement.",
     )
     
     # Double-entry link (optional)
@@ -148,6 +151,19 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
         comment="Timestamp when the purchase was liquidated/paid",
+    )
+
+    cancelled_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User who cancelled the purchase",
+    )
+
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when the purchase was cancelled",
     )
 
     updated_by: Mapped[Optional[UUID]] = mapped_column(

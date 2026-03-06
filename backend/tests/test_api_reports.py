@@ -135,12 +135,12 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     db_session.add_all([proveedor1, proveedor2, cliente1, cliente2, inversor, comisionista])
     db_session.flush()
 
-    # --- Compras (3 pagadas + 1 registrada) ---
+    # --- Compras (3 liquidadas + 1 registrada) ---
     # Compra 1: Proveedor Alfa, 200kg Cobre @ $8000 = $1,600,000
     compra1 = Purchase(
         purchase_number=1, organization_id=org_id,
         supplier_id=proveedor1.id, date=now - timedelta(days=10),
-        total_amount=Decimal("1600000"), status="paid",
+        total_amount=Decimal("1600000"), status="liquidated",
         payment_account_id=cuenta_efectivo.id,
     )
     db_session.add(compra1)
@@ -157,7 +157,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     compra2 = Purchase(
         purchase_number=2, organization_id=org_id,
         supplier_id=proveedor2.id, date=now - timedelta(days=5),
-        total_amount=Decimal("600000"), status="paid",
+        total_amount=Decimal("600000"), status="liquidated",
         payment_account_id=cuenta_efectivo.id,
     )
     db_session.add(compra2)
@@ -174,7 +174,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     compra3 = Purchase(
         purchase_number=3, organization_id=org_id,
         supplier_id=proveedor1.id, date=now - timedelta(days=3),
-        total_amount=Decimal("850000"), status="paid",
+        total_amount=Decimal("850000"), status="liquidated",
         payment_account_id=cuenta_banco.id,
     )
     db_session.add(compra3)
@@ -646,11 +646,9 @@ class TestPurchaseReport:
         assert response.status_code == 200
         data = response.json()
 
-        # Todas las compras no canceladas (incluye DE): 6 purchases total
-        # Lines qty: 200+500+100+250 (normal) + 0 (DE purchases don't have lines in this fixture)
-        # Actually DE purchases don't have purchase_lines in our fixture
-        # Normal purchases: c1(200 CU) + c2(500 FE) + c3(100 CU) + c4(250 FE) = 1050 kg
-        assert data["purchase_count"] >= 4
+        # Solo compras liquidadas (no registradas ni canceladas)
+        # c1(liquidated) + c2(liquidated) + c3(liquidated) = 3 normales + DE purchases
+        assert data["purchase_count"] >= 3
         assert data["total_amount"] > 0
 
     def test_purchases_by_supplier(self, client: TestClient, org_headers: dict, report_data: dict):

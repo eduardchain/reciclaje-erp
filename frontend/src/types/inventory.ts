@@ -30,7 +30,7 @@ export interface InventoryMovementResponse extends BaseEntity {
 // --- Inventory Adjustments ---
 
 export type AdjustmentType = "increase" | "decrease" | "recount" | "zero_out";
-export type AdjustmentStatus = "completed" | "annulled";
+export type AdjustmentStatus = "confirmed" | "annulled";
 
 export interface IncreaseCreate {
   material_id: string;
@@ -128,7 +128,7 @@ export interface WarehouseTransferResponse {
 // --- Material Transformations ---
 
 export type CostDistribution = "proportional_weight" | "manual";
-export type TransformationStatus = "completed" | "annulled";
+export type TransformationStatus = "confirmed" | "annulled";
 
 export interface TransformationLineCreate {
   destination_material_id: string;

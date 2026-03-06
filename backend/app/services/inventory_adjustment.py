@@ -35,6 +35,9 @@ from app.schemas.inventory_adjustment import (
 )
 
 
+from app.services.material_cost_history import material_cost_history_service
+
+
 class CRUDInventoryAdjustment:
     """
     Operaciones para ajustes manuales de inventario.
@@ -69,21 +72,21 @@ class CRUDInventoryAdjustment:
         previous_stock = material.current_stock_liquidated
         new_stock = previous_stock + data.quantity
 
-        # Recalcular costo promedio (formula de promedio ponderado)
-        old_total = material.current_stock
+        # Recalcular costo promedio (solo stock liquidado, transito no afecta costo)
+        old_liquidated = material.current_stock_liquidated
         old_cost = material.current_average_cost
-        if old_total <= 0:
+        if old_liquidated <= 0:
             material.current_average_cost = data.unit_cost
         else:
-            total_old_value = old_total * old_cost
+            total_old_value = old_liquidated * old_cost
             total_new_value = data.quantity * data.unit_cost
-            material.current_average_cost = (total_old_value + total_new_value) / (old_total + data.quantity)
+            material.current_average_cost = (total_old_value + total_new_value) / (old_liquidated + data.quantity)
 
         # Aplicar cambio de stock
         material.current_stock_liquidated = new_stock
         material.current_stock += data.quantity
 
-        # Crear ajuste
+        # Crear ajuste (necesitamos el ID para el historial de costo)
         adjustment = self._create_adjustment(
             db=db,
             organization_id=organization_id,
@@ -99,6 +102,19 @@ class CRUDInventoryAdjustment:
             reason=data.reason,
             notes=data.notes,
             user_id=user_id,
+        )
+
+        # Registrar cambio de costo en historial
+        material_cost_history_service.record_cost_change(
+            db=db,
+            material=material,
+            previous_cost=old_cost,
+            previous_stock=old_liquidated,
+            new_cost=material.current_average_cost,
+            new_stock=material.current_stock_liquidated,
+            source_type="adjustment_increase",
+            source_id=adjustment.id,
+            organization_id=organization_id,
         )
 
         # Crear InventoryMovement
@@ -338,10 +354,11 @@ class CRUDInventoryAdjustment:
         user_id: Optional[UUID] = None,
     ) -> InventoryAdjustment:
         """
-        Anular ajuste — revierte cambios de stock.
+        Anular ajuste — revierte cambios de stock y costo promedio.
 
         Crea un InventoryMovement de tipo adjustment_reversal.
-        No recalcula costo promedio (acepta imprecision menor).
+        Si fue ajuste tipo increase, revierte costo promedio usando historial.
+        Bloquea si hay operaciones posteriores de costo.
         """
         adjustment = self._get_or_404(db, adjustment_id, organization_id)
 
@@ -353,9 +370,33 @@ class CRUDInventoryAdjustment:
 
         material = db.get(Material, adjustment.material_id)
 
+        # Si fue increase, verificar que no hay operaciones posteriores de costo
+        if adjustment.adjustment_type == "increase":
+            can_revert, blocking = material_cost_history_service.check_can_revert(
+                db=db,
+                material_id=adjustment.material_id,
+                source_type="adjustment_increase",
+                source_id=adjustment.id,
+            )
+            if not can_revert:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No se puede anular: existen operaciones posteriores que afectaron "
+                           f"el costo de '{material.name}'. Cancele primero: {', '.join(blocking)}"
+                )
+
         # Revertir cambio de stock (restar el delta que fue aplicado)
         material.current_stock_liquidated -= adjustment.quantity
         material.current_stock -= adjustment.quantity
+
+        # Revertir costo promedio si fue increase
+        if adjustment.adjustment_type == "increase":
+            material_cost_history_service.revert_cost_change(
+                db=db,
+                material=material,
+                source_type="adjustment_increase",
+                source_id=adjustment.id,
+            )
 
         # Crear movimiento de reversal
         self._create_inventory_movement(
@@ -531,7 +572,7 @@ class CRUDInventoryAdjustment:
         if date_from:
             query = query.where(InventoryAdjustment.date >= date_from)
         if date_to:
-            query = query.where(InventoryAdjustment.date <= date_to)
+            query = query.where(InventoryAdjustment.date < date_to)
 
         count_query = select(func.count()).select_from(query.subquery())
         total = db.scalar(count_query)

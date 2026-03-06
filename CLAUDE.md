@@ -117,10 +117,10 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 - **Multi-tenancy**: Every query filters by `organization_id`. The `X-Organization-ID` header is required on most endpoints. `CRUDBase._base_query()` enforces this automatically.
 - **Soft delete**: Records use `is_active` flag instead of hard deletion.
-- **2-step workflows**: Purchases and Sales support immediate completion (`auto_liquidate=True`) or deferred payment (register → liquidate/collect).
+- **3-step purchase workflow**: register (stock to transit, no financial effects) → liquidate (confirm prices, avg cost, supplier balance, stock transit→liquidated) → pay (separate MoneyMovement `payment_to_supplier`). Sales use 2-step: register → collect/pay.
 - **Sequential numbering**: Purchase/sale/double-entry numbers are auto-incremented per organization.
 - **Inventory audit trail**: All stock changes create `InventoryMovement` records.
-- **Moving average cost**: Material `current_average_cost` is recalculated on each purchase.
+- **Moving average cost**: Material `current_average_cost` is recalculated at purchase LIQUIDATION (not creation). Creation sets `unit_cost=0` on InventoryMovement.
 - **Stock separation**: `current_stock_liquidated` (paid, available for sale) vs `current_stock_transit` (registered but unpaid). `current_stock` = total for backward compat.
 - **Audit fields**: Purchases and Sales track `created_by` and `liquidated_by` (user UUIDs).
 - **Price history & suggestions**: `PriceList` is append-only — each price update creates a new record. The "current" price is the most recent by `created_at`. Bulk endpoint `GET /price-lists/current` returns all current prices. Frontend `usePriceSuggestions()` hook auto-fills prices on material selection in purchase/sale/double-entry forms via `PriceSuggestion` component.
@@ -130,18 +130,19 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - **Material transformation**: Disassembly of composite materials into components. Cost distribution: proportional by weight (default) or manual. Validation: `sum(destination_quantities) + waste == source_quantity`. Creates InventoryMovement for source and each destination.
 - **Per-warehouse stock**: Calculated on-the-fly from `SUM(inventory_movements.quantity) GROUP BY warehouse_id`. No denormalized table.
 - **Warehouse transfers**: Creates pair of InventoryMovement (transfer type, -qty source / +qty destination). Global stock unchanged.
+- **Material cost history**: `MaterialCostHistory` table records every change to `current_average_cost`. Source types: `purchase_liquidation`, `adjustment_increase`, `transformation_in`. Enables precise cost reversal on cancellation and blocks cancellation if subsequent operations affected the same material's cost. Ordering uses `created_at` (monotonic) with `id` tiebreaker.
 
 ### Design Decisions
 
 1. **Doble Partida SIN movimientos de inventario**: En operaciones "Pasa Mano" (compra+venta simultanea), el material NO toca bodega. Crear movimientos de inventario inflaria el costo promedio y distorsionaria estadisticas. La doble partida solo afecta saldos de terceros y cuentas.
 
-2. **3 estados de venta** (`registered | paid | cancelled`): No se necesita un estado `collected` separado. El cobro al cliente se maneja como cambio de estado a `paid`, no como un paso adicional.
+2. **Estados**: Compras usan `registered | liquidated | cancelled`. Ventas usan `registered | paid | cancelled`. No se necesita un estado `collected` separado para ventas.
 
-3. **Stock liquidado vs transito**: Las compras registradas (sin pagar) crean stock en transito. Solo al liquidar (pagar) el stock se mueve a "liquidado" y queda disponible para venta. Esto refleja la realidad del negocio donde no se puede vender material que aun no se ha pagado.
+3. **Stock liquidado vs transito**: Las compras registradas crean stock en transito (sin efectos financieros: ni saldo proveedor, ni costo promedio). Al LIQUIDAR se confirman precios, se recalcula costo promedio, se actualiza saldo proveedor, y stock pasa de transito a liquidado. El PAGO al proveedor es una operacion separada via MoneyMovement (`payment_to_supplier`).
 
 4. **Categorias de gastos directos vs indirectos**: `is_direct_expense=True` indica gastos que afectan el costo del material (flete, pesaje). `is_direct_expense=False` son gastos administrativos (arriendo, servicios). Esta distincion es clave para calcular rentabilidad real.
 
-5. **Money_movements independiente de liquidacion**: La liquidacion de compras/ventas actualiza saldos directamente (account, third_party). Los money_movements son un modulo SEPARADO para pagos/cobros manuales, gastos, transferencias, etc. Esto refleja que liquidar ≠ pagar/cobrar. Se puede refactorizar en el futuro para unificar.
+5. **Liquidacion ≠ Pago**: La liquidacion de compras actualiza saldo del proveedor y costo promedio, pero NO mueve dinero de ninguna cuenta. El pago es una operacion separada via MoneyMovement (`payment_to_supplier`, ya soportado con `purchase_id` FK). Para ventas, la liquidacion/cobro actualiza saldo del cliente directamente. Los money_movements son un modulo SEPARADO para pagos/cobros manuales, gastos, transferencias, etc.
 
 6. **Stock negativo permitido (RN-INV-03)**: Ventas, ajustes y transformaciones permiten stock negativo. No bloquean la operacion. Retornan `warnings[]` en la respuesta con mensajes descriptivos. El frontend puede mostrar estas advertencias al usuario.
 
@@ -157,7 +158,9 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 12. **PDF export con jsPDF**: `utils/pdfExport.ts` exporta compras y ventas a PDF con header, info general, tabla de lineas (con comisiones en ventas), y totales. Se usa desde el menu de acciones en listados y boton en detalle.
 
-13. **Precio sugerido desde lista de precios**: Al seleccionar un material en formularios de compra/venta/doble partida, el precio se auto-llena desde la lista de precios vigente (solo si el campo esta vacio). Un hint clickable `"Lista: $ X"` permite restaurar el precio sugerido. Materiales sin precio en la lista no muestran sugerencia.
+13. **Cancelacion con reversal de costo**: Al cancelar compras liquidadas, ajustes increase, o transformaciones, el costo promedio se revierte al valor anterior usando `MaterialCostHistory`. Si hay operaciones posteriores que afectaron el mismo material, la cancelacion se BLOQUEA con HTTP 400 y mensaje descriptivo indicando que operaciones deben cancelarse primero. El COGS de ventas ya registradas NO se recalcula (correcto por diseno: COGS refleja costo al momento de la venta).
+
+14. **Precio sugerido desde lista de precios**: Al seleccionar un material en formularios de compra/venta/doble partida, el precio se auto-llena desde la lista de precios vigente (solo si el campo esta vacio). Un hint clickable `"Lista: $ X"` permite restaurar el precio sugerido. Materiales sin precio en la lista no muestran sugerencia.
 
 ### Business Modules (Implemented)
 
@@ -167,7 +170,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Organizations | `/api/v1/organizations/` | CRUD + member management, roles (admin/manager/user/accountant/viewer) |
 | Materials | `/api/v1/materials/` | Materials + categories + business units, stock tracking |
 | Third Parties | `/api/v1/third-parties/` | Multi-role entities (supplier/customer/investor/provision) with balance tracking |
-| Purchases | `/api/v1/purchases/` | 2-step buy workflow, supplier debt, inventory movements, full edit (PATCH) |
+| Purchases | `/api/v1/purchases/` | 3-step buy workflow (register→liquidate→pay), supplier debt, inventory movements, full edit (PATCH) |
 | Sales | `/api/v1/sales/` | 2-step sell workflow, commissions (percentage/fixed), profit calculation, full edit (PATCH) |
 | Double Entries | `/api/v1/double-entries/` | Simultaneous buy+sell ("Pasa Mano"), no inventory movement |
 | Money Accounts | `/api/v1/money-accounts/` | Cash, bank, digital accounts (Nequi, etc.) |
@@ -183,7 +186,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 ### Testing
 
-Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 380+ tests. Run with `./venv/bin/pytest` from backend dir.
+Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 406 tests. Run with `./venv/bin/pytest` from backend dir.
 
 Key fixtures: `test_user`, `auth_headers`, `org_headers` (auth + X-Organization-ID), `db_session`.
 

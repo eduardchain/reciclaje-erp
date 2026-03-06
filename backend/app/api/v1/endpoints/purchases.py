@@ -60,16 +60,23 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None) -> dict:
         ],
         "created_by_name": None,
         "liquidated_by_name": None,
+        "cancelled_by_name": None,
         "updated_by_name": None,
     }
 
     # Resolver nombres de usuarios de auditoria
     if db:
-        user_ids = {uid for uid in [purchase.created_by, purchase.liquidated_by, getattr(purchase, 'updated_by', None)] if uid}
+        user_ids = {uid for uid in [
+            purchase.created_by,
+            purchase.liquidated_by,
+            getattr(purchase, 'cancelled_by', None),
+            getattr(purchase, 'updated_by', None),
+        ] if uid}
         if user_ids:
             users = {u.id: u.full_name or u.email for u in db.query(User).filter(User.id.in_(user_ids)).all()}
             data["created_by_name"] = users.get(purchase.created_by)
             data["liquidated_by_name"] = users.get(purchase.liquidated_by)
+            data["cancelled_by_name"] = users.get(getattr(purchase, 'cancelled_by', None))
             data["updated_by_name"] = users.get(getattr(purchase, 'updated_by', None))
 
     return data
@@ -87,15 +94,19 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None) -> dict:
 async def check_duplicate(
     supplier_id: UUID = Query(...),
     date: datetime = Query(...),
+    total_quantity: Optional[float] = Query(None, description="Cantidad total para comparacion ±20%"),
     db: Session = Depends(get_db),
     org_context: dict = Depends(get_required_org_context),
 ) -> dict:
-    """Retorna la cantidad de compras existentes del mismo proveedor en la misma fecha."""
+    """Retorna la cantidad de compras existentes del mismo proveedor en la misma fecha (y cantidad similar si se proporciona)."""
+    from decimal import Decimal
+    qty = Decimal(str(total_quantity)) if total_quantity is not None else None
     count = purchase_service.check_duplicate(
         db=db,
         supplier_id=supplier_id,
         date=date,
         organization_id=org_context["organization_id"],
+        total_quantity=qty,
     )
     return {"count": count}
 
@@ -206,9 +217,19 @@ async def list_purchases(
 ) -> PaginatedPurchaseResponse:
     """List purchases with filters and pagination."""
     try:
-        # Convert date to datetime if provided
-        date_from_dt = datetime.combine(date_from, datetime.min.time()) if date_from else None
-        date_to_dt = datetime.combine(date_to, datetime.max.time()) if date_to else None
+        # Convert date to datetime with timezone (covering full day in UTC-5 Colombia)
+        # Colombia is UTC-5, so to capture all purchases on a given local date,
+        # we extend the range by +1 day on date_to to cover timezone offsets
+        from datetime import time as dt_time, timezone as tz, timedelta
+        if date_from:
+            date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc)
+        else:
+            date_from_dt = None
+        if date_to:
+            # Include the full day even with timezone offsets (up to UTC+14)
+            date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc)
+        else:
+            date_to_dt = None
         
         purchases, total = purchase_service.get_multi(
             db=db,
@@ -453,21 +474,22 @@ async def update_purchase(
 @router.patch(
     "/{purchase_id}/liquidate",
     response_model=PurchaseResponse,
-    summary="Liquidate purchase (2-step workflow)",
+    summary="Liquidar compra (confirmar precios)",
     description="""
-    Liquidate a registered purchase (complete payment).
-    
+    Liquidar una compra registrada: confirmar precios, mover stock a liquidado,
+    recalcular costo promedio, actualizar saldo del proveedor.
+
     **Requirements:**
     - Purchase status must be 'registered'
-    - Payment account must have sufficient funds
-    
+    - All line prices must be > 0 (V-LIQ-01)
+
     **Effects:**
-    - Changes purchase status to 'paid'
-    - Deducts total_amount from payment_account
-    - Sets payment_account_id on purchase
-    
-    **Use case:** 
-    For 2-step workflow where purchase is created first, then paid later.
+    - Changes purchase status to 'liquidated'
+    - Moves stock from transit to liquidated
+    - Recalculates material average cost
+    - Updates supplier balance (debt)
+
+    **Note:** Payment to supplier is a separate operation via MoneyMovement.
     """,
 )
 async def liquidate_purchase(
@@ -476,7 +498,7 @@ async def liquidate_purchase(
     db: Session = Depends(get_db),
     org_context: dict = Depends(get_required_org_context),
 ) -> PurchaseResponse:
-    """Liquidate a purchase (2-step workflow)."""
+    """Liquidar compra (confirmar precios, mover stock, actualizar saldo)."""
     try:
         # Convertir line updates a lista de dicts si se proporcionan
         line_updates = None
@@ -489,7 +511,6 @@ async def liquidate_purchase(
         purchase = purchase_service.liquidate(
             db=db,
             purchase_id=purchase_id,
-            payment_account_id=liquidate_data.payment_account_id,
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
             line_updates=line_updates,
@@ -549,6 +570,7 @@ async def cancel_purchase(
             db=db,
             purchase_id=purchase_id,
             organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
         )
         
         response_data = _enrich_purchase_response(purchase, db)

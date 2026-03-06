@@ -4,7 +4,7 @@ Endpoints API para Transformacion de Materiales.
 Permite desintegrar materiales compuestos en sus componentes.
 Ejemplo: Motor 500kg → Cobre 200kg + Hierro 180kg + Aluminio 100kg + Merma 20kg
 """
-from datetime import datetime
+from datetime import date, datetime, time as dt_time, timedelta, timezone as tz
 from typing import Optional
 from uuid import UUID
 
@@ -111,12 +111,14 @@ def list_transformations(
     limit: int = Query(100, ge=1, le=1000),
     source_material_id: Optional[UUID] = Query(None),
     status: Optional[str] = Query(None, alias="status"),
-    date_from: Optional[datetime] = Query(None),
-    date_to: Optional[datetime] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     org_context: dict = Depends(get_required_org_context),
     db: Session = Depends(get_db),
 ):
     """Listar transformaciones con filtros."""
+    date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
+    date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
     transformations, total = material_transformation.get_multi(
         db=db,
         organization_id=org_context["organization_id"],
@@ -124,8 +126,8 @@ def list_transformations(
         limit=limit,
         source_material_id=source_material_id,
         status_filter=status,
-        date_from=date_from,
-        date_to=date_to,
+        date_from=date_from_dt,
+        date_to=date_to_dt,
     )
 
     items = [MaterialTransformationResponse(**_to_response(t)) for t in transformations]

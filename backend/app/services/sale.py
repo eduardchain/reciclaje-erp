@@ -72,6 +72,14 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             HTTPException: 403 if resources don't belong to organization
             HTTPException: 400 if insufficient stock or invalid data
         """
+        # Validar fecha no futura
+        sale_date = obj_in.date.replace(tzinfo=None) if obj_in.date.tzinfo else obj_in.date
+        if sale_date > datetime.now(timezone.utc).replace(tzinfo=None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La fecha de venta no puede ser futura"
+            )
+
         # Step 1: Generate next sale_number with advisory lock
         sale_number = self._generate_sale_number(db, organization_id)
         
@@ -237,31 +245,18 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         sale_id: UUID,
         payment_account_id: UUID,
         organization_id: UUID,
-        user_id: Optional[UUID] = None
+        user_id: Optional[UUID] = None,
+        line_updates: Optional[List] = None,
+        commissions_data: Optional[List] = None
     ) -> Sale:
         """
-        Liquidate a registered sale (mark as paid and process payments).
-        
-        Workflow:
-        1. Validate sale status is 'registered'
-        2. Validate payment account belongs to organization
-        3. Update sale status to 'paid'
-        4. Credit payment account (receive money)
-        5. Debit customer balance (they paid)
-        6. Pay commissions (increase recipient balances)
-        
-        Args:
-            db: Database session
-            sale_id: Sale UUID
-            payment_account_id: Payment account to receive funds
-            organization_id: Organization UUID
-            
-        Returns:
-            Updated Sale with status='paid'
-            
-        Raises:
-            HTTPException: 404 if sale/account not found
-            HTTPException: 400 if sale is not 'registered'
+        Liquidar venta registrada (cobrar y marcar como pagada).
+
+        Acepta opcionalmente:
+        - line_updates: precios editados por línea (para ventas creadas con precio=0)
+        - commissions_data: comisiones nuevas que REEMPLAZAN las existentes
+
+        V-VENTA-04: Todas las líneas deben tener unit_price > 0 al liquidar.
         """
         # Step 1: Get sale
         sale = db.get(Sale, sale_id)
@@ -270,21 +265,21 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Sale not found"
             )
-        
+
         # Validate: Cannot liquidate sale that belongs to double-entry
         if sale.double_entry_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot liquidate sale that belongs to a double-entry operation. Manage it through the double-entry instead."
             )
-        
+
         # Step 2: Validate status
         if sale.status != "registered":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot liquidate sale with status '{sale.status}'. Must be 'registered'"
             )
-        
+
         # Step 3: Validate payment account
         payment_account = db.get(MoneyAccount, payment_account_id)
         if not payment_account or payment_account.organization_id != organization_id:
@@ -292,29 +287,74 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Payment account not found"
             )
-        
-        # Step 4: Update sale
+
+        # Step 4: Si hay line_updates, actualizar precios de las líneas
+        old_total = sale.total_amount
+        if line_updates:
+            price_map = {str(lu.line_id): lu.unit_price for lu in line_updates}
+            stmt = select(SaleLine).where(SaleLine.sale_id == sale.id)
+            lines = db.scalars(stmt).all()
+
+            new_total = Decimal("0.00")
+            for line in lines:
+                if str(line.id) in price_map:
+                    line.unit_price = price_map[str(line.id)]
+                    line.total_price = line.quantity * line.unit_price
+                new_total += line.total_price
+
+            sale.total_amount = new_total
+
+            # Ajustar saldo del cliente por el delta
+            delta = new_total - old_total
+            if delta != 0:
+                customer_for_delta = db.get(ThirdParty, sale.customer_id)
+                customer_for_delta.current_balance += delta
+                print(f"👤 Customer balance adjusted by delta ${delta}")
+
+        # V-VENTA-04: Validar que todas las líneas tengan precio > 0
+        stmt = select(SaleLine).where(SaleLine.sale_id == sale.id)
+        all_lines = db.scalars(stmt).all()
+        zero_price_lines = [l for l in all_lines if l.unit_price <= 0]
+        if zero_price_lines:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Todas las líneas deben tener precio > 0 para liquidar (V-VENTA-04)"
+            )
+
+        # Step 5: Si hay commissions_data, reemplazar comisiones existentes
+        if commissions_data is not None:
+            # Eliminar comisiones existentes (nunca fueron pagadas en status=registered)
+            db.query(SaleCommission).filter(
+                SaleCommission.sale_id == sale.id
+            ).delete(synchronize_session=False)
+            db.flush()
+
+            # Crear nuevas comisiones con el total actualizado
+            if commissions_data:
+                self._process_commissions(db, sale, commissions_data, sale.total_amount, organization_id)
+
+        # Step 6: Update sale status
         sale.status = "paid"
         sale.payment_account_id = payment_account_id
         sale.liquidated_by = user_id
         sale.liquidated_at = datetime.now(timezone.utc)
-        
-        # Step 5: Update payment account balance (receive payment)
+
+        # Step 7: Update payment account balance (receive payment)
         payment_account.current_balance += sale.total_amount
         print(f"💳 Payment account '{payment_account.name}': ${payment_account.current_balance - sale.total_amount} → ${payment_account.current_balance}")
-        
-        # Step 6: Update customer balance (they paid their debt)
+
+        # Step 8: Update customer balance (they paid their debt)
         customer = db.get(ThirdParty, sale.customer_id)
         customer.current_balance -= sale.total_amount
         print(f"👤 Customer '{customer.name}' balance: ${customer.current_balance + sale.total_amount} → ${customer.current_balance}")
-        
-        # Step 7: Pay commissions (increase recipient balances)
+
+        # Step 9: Pay commissions (increase recipient balances)
         self._pay_commissions(db, sale)
-        
+
         db.flush()
-        
+
         print(f"✅ Sale #{sale.sale_number} liquidated successfully")
-        
+
         return sale
     
     def cancel(
@@ -629,6 +669,23 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
 
         return sale
 
+    def check_duplicate(
+        self,
+        db: Session,
+        customer_id: UUID,
+        date: datetime,
+        organization_id: UUID
+    ) -> int:
+        """Contar ventas del mismo cliente en la misma fecha (no canceladas)."""
+        sale_date = date.date() if hasattr(date, 'date') else date
+        stmt = select(func.count()).select_from(Sale).where(
+            Sale.organization_id == organization_id,
+            Sale.customer_id == customer_id,
+            func.date(Sale.date) == sale_date,
+            Sale.status != "cancelled"
+        )
+        return db.scalar(stmt) or 0
+
     def get_by_number(
         self,
         db: Session,
@@ -749,7 +806,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             query = query.where(Sale.date >= date_from)
         
         if date_to:
-            query = query.where(Sale.date <= date_to)
+            query = query.where(Sale.date < date_to)
         
         if search:
             # Search in: sale_number (as text), customer name, notes, vehicle_plate, invoice_number

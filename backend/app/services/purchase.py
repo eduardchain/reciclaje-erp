@@ -2,8 +2,11 @@
 CRUD operations for Purchase model with business logic.
 
 Supports 1-step and 2-step purchase workflows:
-- 1-step: create() with auto_liquidate=True
+- 1-step: create() with auto_liquidate=True (prices must be > 0)
 - 2-step: create() then liquidate() separately
+
+Liquidation confirms prices, moves stock transit->liquidated, updates avg cost and supplier balance.
+Payment to supplier is a separate operation via MoneyMovement (type='payment_to_supplier').
 """
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -18,10 +21,10 @@ from app.models.purchase import Purchase, PurchaseLine
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
 from app.models.third_party import ThirdParty
-from app.models.money_account import MoneyAccount
 from app.models.warehouse import Warehouse
 from app.schemas.purchase import PurchaseCreate, PurchaseUpdate, PurchaseFullUpdate
 from app.services.base import CRUDBase
+from app.services.material_cost_history import material_cost_history_service
 
 
 class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
@@ -33,17 +36,37 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         supplier_id: UUID,
         date: datetime,
         organization_id: UUID,
+        total_quantity: Optional[Decimal] = None,
     ) -> int:
-        """Verifica si existen compras del mismo proveedor en la misma fecha (RN-COMP-02)."""
+        """
+        Verifica si existen compras del mismo proveedor en la misma fecha (RN-COMP-02).
+
+        Si se proporciona total_quantity, solo cuenta como duplicado si la cantidad
+        total esta dentro de ±20% de tolerancia.
+        """
         same_day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
         same_day_end = date.replace(hour=23, minute=59, second=59, microsecond=999999)
-        return db.query(func.count(Purchase.id)).filter(
+
+        base_query = db.query(Purchase).filter(
             Purchase.organization_id == organization_id,
             Purchase.supplier_id == supplier_id,
             Purchase.date >= same_day_start,
             Purchase.date <= same_day_end,
             Purchase.status != "cancelled",
-        ).scalar() or 0
+        )
+
+        if total_quantity is not None and total_quantity > 0:
+            # Filtrar por cantidad total dentro de ±20%
+            min_qty = total_quantity * Decimal("0.8")
+            max_qty = total_quantity * Decimal("1.2")
+            count = 0
+            for p in base_query.options(joinedload(Purchase.lines)).all():
+                p_qty = sum(line.quantity for line in p.lines)
+                if min_qty <= p_qty <= max_qty:
+                    count += 1
+            return count
+
+        return base_query.count()
 
     def create(
         self,
@@ -104,7 +127,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
         # Step 2b: Deteccion de duplicados (RN-COMP-02) - warning, no bloquea
         warnings = []
-        existing_count = self.check_duplicate(db, obj_in.supplier_id, obj_in.date, organization_id)
+        total_quantity = sum(Decimal(str(l.quantity)) for l in obj_in.lines)
+        existing_count = self.check_duplicate(db, obj_in.supplier_id, obj_in.date, organization_id, total_quantity)
         if existing_count > 0:
             warnings.append(
                 f"Ya existen {existing_count} compra(s) del mismo proveedor en esta fecha"
@@ -180,46 +204,41 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             
             # Skip inventory operations for double-entry
             if not is_double_entry:
-                # Create InventoryMovement
+                # Create InventoryMovement (unit_cost=0 hasta liquidar)
                 movement = InventoryMovement(
                     organization_id=organization_id,
                     material_id=line_data.material_id,
                     warehouse_id=line_data.warehouse_id,
                     movement_type="purchase",
                     quantity=quantity,
-                    unit_cost=unit_price,
+                    unit_cost=Decimal("0"),
                     reference_type="purchase",
                     reference_id=purchase.id,
                     date=obj_in.date,
                     notes=f"Purchase #{purchase_number}",
                 )
                 db.add(movement)
-                
-                # Update Material stock and average cost
-                self._update_material_stock_and_cost(
-                    material=material,
-                    quantity_delta=quantity,
-                    unit_cost=unit_price,
-                )
+
+                # Solo agregar stock a transito (sin recalcular costo promedio)
+                material.current_stock += quantity
+                material.current_stock_transit += quantity
             
             print(f"  📝 Line: {material.code} x {quantity} @ ${unit_price} = ${line_total}")
         
         # Step 5: Update purchase total
         purchase.total_amount = total_amount
-        
-        # Step 6: Update Supplier balance (increase debt)
-        supplier.current_balance -= total_amount  # Negative balance = debt
-        print(f"  💰 Supplier balance: {supplier.current_balance} (debt increased by ${total_amount})")
-        
+
+        # Nota: NO se actualiza saldo del proveedor al crear.
+        # El saldo se actualiza al liquidar (cuando se confirman precios).
+
         db.flush()
         
-        # Step 7: Auto-liquidate if requested
+        # Step 7: Auto-liquidate if requested (precios ya validados > 0 en schema)
         if obj_in.auto_liquidate:
             print(f"  🔄 Auto-liquidating purchase...")
             purchase = self.liquidate(
                 db=db,
                 purchase_id=purchase.id,
-                payment_account_id=obj_in.payment_account_id,
                 organization_id=organization_id,
                 user_id=user_id,
             )
@@ -233,23 +252,26 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         self,
         db: Session,
         purchase_id: UUID,
-        payment_account_id: UUID,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
         line_updates: Optional[List[dict]] = None,
     ) -> Purchase:
         """
-        Liquidar compra registrada (cambiar status a 'paid').
+        Liquidar compra registrada (cambiar status a 'liquidated').
+
+        Confirma precios, mueve stock de transito a liquidado, recalcula costo
+        promedio, y actualiza saldo del proveedor. NO involucra pago (cuenta de dinero).
 
         Workflow:
         1. Validar compra existe y status='registered'
-        2. Si hay line_updates: actualizar precios, recalcular totales y costo promedio
-        3. Validar todos los precios > 0 (V-LIQ-01)
-        4. Validar cuenta de pago con fondos suficientes
-        5. Actualizar status, descontar de cuenta, mover stock transit→liquidated
-
-        Args:
-            line_updates: Lista opcional de {line_id, unit_price} para actualizar precios
+        2. Si hay line_updates: actualizar precios en lineas
+        3. Validar V-LIQ-01: todos los precios > 0
+        4. Recalcular total
+        5. Actualizar InventoryMovement.unit_cost con precio confirmado
+        6. Recalcular costo promedio por material
+        7. Mover stock transit -> liquidated
+        8. Actualizar saldo proveedor
+        9. Cambiar status a 'liquidated'
         """
         # Step 1: Get and validate purchase
         purchase = db.query(Purchase).options(
@@ -267,7 +289,6 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 detail="Purchase not found"
             )
 
-        # Validate: Cannot liquidate purchase that belongs to double-entry
         if purchase.double_entry_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -281,54 +302,12 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             )
 
         # Step 2: Actualizar precios si se proporcionan line_updates
-        old_total = purchase.total_amount
         if line_updates:
             price_map = {lu["line_id"]: Decimal(str(lu["unit_price"])) for lu in line_updates}
-
             for line in purchase.lines:
                 if line.id in price_map:
-                    old_price = line.unit_price
-                    new_price = price_map[line.id]
-
-                    if old_price != new_price:
-                        # Actualizar linea
-                        line.unit_price = new_price
-                        line.total_price = line.quantity * new_price
-
-                        # Actualizar costo en InventoryMovement correspondiente
-                        inv_movement = db.query(InventoryMovement).filter(
-                            InventoryMovement.reference_type == "purchase",
-                            InventoryMovement.reference_id == purchase.id,
-                            InventoryMovement.material_id == line.material_id,
-                            InventoryMovement.movement_type == "purchase",
-                        ).first()
-                        if inv_movement:
-                            inv_movement.unit_cost = new_price
-
-                        # Ajustar costo promedio del material
-                        material = line.material
-                        if material.current_stock > 0:
-                            delta_value = line.quantity * (new_price - old_price)
-                            material.current_average_cost = (
-                                material.current_stock * material.current_average_cost + delta_value
-                            ) / material.current_stock
-
-                        print(f"  💲 Precio actualizado {material.code}: ${old_price} → ${new_price}")
-
-            # Recalcular total de la compra
-            new_total = sum(
-                line.quantity * line.unit_price for line in purchase.lines
-            )
-            purchase.total_amount = new_total
-
-            # Ajustar saldo del proveedor si el total cambio
-            total_diff = new_total - old_total
-            if total_diff != 0:
-                supplier = purchase.supplier
-                supplier.current_balance -= total_diff  # Mas deuda si subio, menos si bajo
-                print(f"  💰 Saldo proveedor ajustado por ${total_diff}")
-
-            db.flush()
+                    line.unit_price = price_map[line.id]
+                    line.total_price = line.quantity * line.unit_price
 
         # Step 3: Validar V-LIQ-01 - todos los precios > 0
         for line in purchase.lines:
@@ -340,41 +319,57 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                            f"Material '{material.name}' tiene precio ${line.unit_price}"
                 )
 
-        # Step 4: Validate payment account
-        payment_account = db.get(MoneyAccount, payment_account_id)
-        if not payment_account:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Payment account not found"
+        # Step 4: Recalcular total
+        purchase.total_amount = sum(
+            line.quantity * line.unit_price for line in purchase.lines
+        )
+
+        # Step 5 y 6: Actualizar InventoryMovement.unit_cost y recalcular costo promedio
+        for line in purchase.lines:
+            # Actualizar costo en movimiento de inventario
+            inv_movement = db.query(InventoryMovement).filter(
+                InventoryMovement.reference_type == "purchase",
+                InventoryMovement.reference_id == purchase.id,
+                InventoryMovement.material_id == line.material_id,
+                InventoryMovement.movement_type == "purchase",
+            ).first()
+            if inv_movement:
+                inv_movement.unit_cost = line.unit_price
+
+            # Recalcular costo promedio del material (con historial)
+            material = line.material
+            old_cost = material.current_average_cost
+            old_liquidated_stock = material.current_stock_liquidated
+            self._apply_cost_at_liquidation(material, line.quantity, line.unit_price)
+
+            material_cost_history_service.record_cost_change(
+                db=db,
+                material=material,
+                previous_cost=old_cost,
+                previous_stock=old_liquidated_stock,
+                new_cost=material.current_average_cost,
+                new_stock=old_liquidated_stock + line.quantity,
+                source_type="purchase_liquidation",
+                source_id=purchase.id,
+                organization_id=organization_id,
             )
 
-        if payment_account.organization_id != organization_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Payment account does not belong to your organization"
-            )
+            print(f"  💲 {material.code}: precio=${line.unit_price}, nuevo costo_prom=${material.current_average_cost}")
 
-        # Step 5: Validate sufficient funds
-        if payment_account.current_balance < purchase.total_amount:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Insufficient funds in payment account. Available: ${payment_account.current_balance}, Required: ${purchase.total_amount}"
-            )
+        # Step 7: Mover stock de transito a liquidado
+        self._move_stock_transit_to_liquidated(db, purchase)
 
-        # Step 6: Update purchase status and account
-        purchase.status = "paid"
-        purchase.payment_account_id = payment_account_id
+        # Step 8: Actualizar saldo del proveedor (deuda)
+        supplier = purchase.supplier
+        supplier.current_balance -= purchase.total_amount
+        print(f"  💰 Saldo proveedor: {supplier.current_balance} (deuda +${purchase.total_amount})")
+
+        # Step 9: Cambiar status
+        purchase.status = "liquidated"
         purchase.liquidated_by = user_id
         purchase.liquidated_at = datetime.now(timezone.utc)
 
-        # Step 7: Deduct from payment account
-        payment_account.current_balance -= purchase.total_amount
-
-        # Step 8: Move stock from transit to liquidated
-        self._move_stock_transit_to_liquidated(db, purchase)
-
-        print(f"💳 Liquidated purchase #{purchase.purchase_number} for ${purchase.total_amount}")
-        print(f"   Account '{payment_account.name}' balance: ${payment_account.current_balance}")
+        print(f"✅ Liquidated purchase #{purchase.purchase_number} for ${purchase.total_amount}")
 
         db.commit()
         db.refresh(purchase)
@@ -385,7 +380,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         self,
         db: Session,
         purchase_id: UUID,
-        organization_id: UUID
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
     ) -> Purchase:
         """
         Cancel a purchase and reverse all effects.
@@ -397,7 +393,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         4. Create reversal InventoryMovements (negative quantity)
         5. Revert Material.current_stock
         6. Revert Supplier.current_balance
-        7. Note: Average cost NOT reverted (small imprecision acceptable)
+        7. Revert average cost using MaterialCostHistory (blocks if subsequent operations exist)
         
         Args:
             db: Database session
@@ -438,10 +434,27 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 detail="Purchase is already cancelled"
             )
 
-        was_paid = purchase.status == "paid"
+        was_liquidated = purchase.status == "liquidated"
 
-        # Step 2: Validate sufficient stock to reverse (para registered, estricto; para paid, permitir negativo con warning)
-        if not was_paid:
+        # Step 2a: Si liquidada, verificar que no hay operaciones posteriores de costo
+        if was_liquidated:
+            for line in purchase.lines:
+                can_revert, blocking = material_cost_history_service.check_can_revert(
+                    db=db,
+                    material_id=line.material_id,
+                    source_type="purchase_liquidation",
+                    source_id=purchase.id,
+                )
+                if not can_revert:
+                    material = line.material
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"No se puede cancelar: existen operaciones posteriores que afectaron "
+                               f"el costo de '{material.name}'. Cancele primero: {', '.join(blocking)}"
+                    )
+
+        # Step 2b: Validate sufficient stock to reverse (para registered, estricto; para liquidated, permitir negativo con warning)
+        if not was_liquidated:
             for line in purchase.lines:
                 material = line.material
                 if material.current_stock < line.quantity:
@@ -450,15 +463,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                         detail=f"Cannot cancel: insufficient stock for {material.code}. Current: {material.current_stock}, Required: {line.quantity}"
                     )
 
-        # Step 3: Update status
+        # Step 3: Update status and audit
         purchase.status = "cancelled"
+        purchase.cancelled_by = user_id
+        purchase.cancelled_at = datetime.now(timezone.utc)
 
-        # Step 4: Si estaba pagada, devolver dinero a la cuenta de pago
-        if was_paid and purchase.payment_account_id:
-            payment_account = db.get(MoneyAccount, purchase.payment_account_id)
-            if payment_account:
-                payment_account.current_balance += purchase.total_amount
-                print(f"  💰 Reembolso ${purchase.total_amount} a cuenta '{payment_account.name}'")
+        # Nota: NO se reembolsa a cuenta de pago. El pago es operacion separada
+        # via MoneyMovement y debe anularse por separado si corresponde.
 
         # Step 5: Create reversal movements and revert stock
         for line in purchase.lines:
@@ -481,16 +492,24 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
             # Revert stock del bucket correcto segun estado previo
             material.current_stock -= line.quantity
-            if was_paid:
+            if was_liquidated:
                 material.current_stock_liquidated -= line.quantity
+                # Revertir costo promedio usando historial
+                material_cost_history_service.revert_cost_change(
+                    db=db,
+                    material=material,
+                    source_type="purchase_liquidation",
+                    source_id=purchase.id,
+                )
             else:
                 material.current_stock_transit -= line.quantity
 
-            print(f"  ↩️  Reversed: {material.code} -{line.quantity} (new stock: {material.current_stock})")
+            print(f"  ↩️  Reversed: {material.code} -{line.quantity} (new stock: {material.current_stock}, cost: {material.current_average_cost})")
 
-        # Step 6: Revert supplier balance
+        # Step 6: Revert supplier balance (solo si estaba liquidada, ya que al crear no se modifica)
         supplier = db.get(ThirdParty, purchase.supplier_id)
-        supplier.current_balance += purchase.total_amount  # Reduce debt
+        if was_liquidated:
+            supplier.current_balance += purchase.total_amount  # Reduce debt
         
         print(f"❌ Cancelled purchase #{purchase.purchase_number}")
         print(f"   Supplier balance: {supplier.current_balance} (debt reduced by ${purchase.total_amount})")
@@ -642,14 +661,14 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 )
                 db.add(new_line)
 
-                # Crear InventoryMovement
+                # Crear InventoryMovement (unit_cost=0, se confirma al liquidar)
                 movement = InventoryMovement(
                     organization_id=organization_id,
                     material_id=line_data.material_id,
                     warehouse_id=line_data.warehouse_id,
                     movement_type="purchase",
                     quantity=quantity,
-                    unit_cost=unit_price,
+                    unit_cost=Decimal("0"),
                     reference_type="purchase",
                     reference_id=purchase.id,
                     date=obj_in.date or purchase.date,
@@ -657,12 +676,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 )
                 db.add(movement)
 
-                # Actualizar stock y costo promedio
-                self._update_material_stock_and_cost(
-                    material=material,
-                    quantity_delta=quantity,
-                    unit_cost=unit_price,
-                )
+                # Solo agregar stock a transito (sin costo promedio)
+                material.current_stock += quantity
+                material.current_stock_transit += quantity
 
                 print(f"  📝 New line: {material.code} x {quantity} @ ${unit_price} = ${line_total}")
 
@@ -670,23 +686,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         else:
             new_total = old_total
 
-        # Step 4: Actualizar saldos de proveedor
+        # Step 4: Actualizar proveedor si cambio (sin tocar saldos - se actualizan al liquidar)
         if new_supplier:
-            # Revertir saldo del proveedor original
-            old_supplier = db.get(ThirdParty, old_supplier_id)
-            old_supplier.current_balance += old_total  # Reducir deuda
-
-            # Aplicar saldo al nuevo proveedor
-            new_supplier.current_balance -= new_total  # Aumentar deuda
-
             purchase.supplier_id = obj_in.supplier_id
-            print(f"  🔄 Proveedor cambiado: {old_supplier.name} → {new_supplier.name}")
-        elif obj_in.lines is not None:
-            # Mismo proveedor pero lineas cambiaron: ajustar diferencia
-            supplier = db.get(ThirdParty, old_supplier_id)
-            balance_diff = new_total - old_total
-            supplier.current_balance -= balance_diff  # Ajustar deuda
-            print(f"  💰 Saldo proveedor ajustado por ${balance_diff}")
+            print(f"  🔄 Proveedor cambiado a: {new_supplier.name}")
 
         # Step 5: Actualizar metadata
         if obj_in.date is not None:
@@ -797,7 +800,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             query = query.filter(Purchase.date >= date_from)
         
         if date_to:
-            query = query.filter(Purchase.date <= date_to)
+            query = query.filter(Purchase.date < date_to)
         
         if search:
             # Search in: purchase_number (as text), supplier name, notes
@@ -934,6 +937,29 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         
         return purchase
     
+    def _apply_cost_at_liquidation(
+        self,
+        material: Material,
+        quantity: Decimal,
+        confirmed_price: Decimal,
+    ) -> None:
+        """
+        Incorporar costo confirmado al promedio ponderado durante liquidacion.
+
+        Usa current_stock_liquidated (NO current_stock) para que el stock en
+        transito de compras registradas no diluya el costo promedio.
+        Se llama ANTES de _move_stock_transit_to_liquidated, asi que
+        current_stock_liquidated aun tiene el valor pre-liquidacion.
+        """
+        old_liquidated = material.current_stock_liquidated
+        if old_liquidated <= 0:
+            # Primera liquidacion o todo el stock liquidado es de esta compra
+            material.current_average_cost = confirmed_price
+        else:
+            old_value = old_liquidated * material.current_average_cost
+            new_value = old_value + quantity * confirmed_price
+            material.current_average_cost = new_value / (old_liquidated + quantity)
+
     def _update_material_stock_and_cost(
         self,
         material: Material,

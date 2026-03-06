@@ -10,10 +10,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { EntitySelect } from "@/components/shared/EntitySelect";
 import { WarningsList } from "@/components/shared/WarningsList";
-import { useSale, useLiquidateSale, useCancelSale } from "@/hooks/useSales";
-import { useMoneyAccounts } from "@/hooks/useMasterData";
+import { useSale, useCancelSale } from "@/hooks/useSales";
 import { formatCurrency, formatDate, formatDateTime, formatWeight, formatPercentage } from "@/utils/formatters";
 import { useAuthStore } from "@/stores/authStore";
 import { ROUTES } from "@/utils/constants";
@@ -31,23 +29,9 @@ export default function SaleDetailPage() {
   const { data: sale, isLoading } = useSale(id!);
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
-  const { data: accountsData } = useMoneyAccounts();
-  const liquidate = useLiquidateSale();
   const cancel = useCancelSale();
 
-  const [showLiquidate, setShowLiquidate] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
-  const [paymentAccountId, setPaymentAccountId] = useState("");
-
-  const accounts = accountsData?.items ?? [];
-
-  const handleLiquidate = () => {
-    if (!id || !paymentAccountId) return;
-    liquidate.mutate(
-      { id, data: { payment_account_id: paymentAccountId } },
-      { onSuccess: () => { setShowLiquidate(false); setPaymentAccountId(""); } },
-    );
-  };
 
   const handleCancel = () => {
     if (!id) return;
@@ -71,7 +55,7 @@ export default function SaleDetailPage() {
               <Button variant="outline" onClick={() => navigate(`/sales/${id}/edit`)}>
                 <Pencil className="h-4 w-4 mr-2" />Editar
               </Button>
-              <Button onClick={() => setShowLiquidate(true)} className="bg-emerald-600 hover:bg-emerald-700">
+              <Button onClick={() => navigate(`/sales/${id}/liquidate`)} className="bg-emerald-600 hover:bg-emerald-700">
                 <CreditCard className="h-4 w-4 mr-2" />Cobrar
               </Button>
               <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50">
@@ -228,27 +212,6 @@ export default function SaleDetailPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Liquidate Dialog */}
-      <ConfirmDialog
-        open={showLiquidate}
-        onOpenChange={setShowLiquidate}
-        title="Cobrar Venta"
-        description="Seleccione la cuenta donde se recibira el pago."
-        confirmLabel="Cobrar"
-        onConfirm={handleLiquidate}
-        loading={liquidate.isPending}
-        disabled={!paymentAccountId}
-      >
-        <div className="py-2">
-          <EntitySelect
-            value={paymentAccountId}
-            onChange={setPaymentAccountId}
-            options={accounts.map((a) => ({ id: a.id, label: a.name }))}
-            placeholder="Seleccionar cuenta..."
-          />
-        </div>
-      </ConfirmDialog>
 
       {/* Cancel Dialog */}
       <ConfirmDialog

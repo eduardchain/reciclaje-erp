@@ -67,23 +67,23 @@ class PurchaseBase(BaseModel):
 class PurchaseCreate(PurchaseBase):
     """
     Schema for creating a Purchase.
-    
+
     Workflow:
     - auto_liquidate=False: Creates purchase with status='registered', liquidate later
-    - auto_liquidate=True: Creates and liquidates in one step (1-step workflow)
-    
-    Validation:
-    - If auto_liquidate=True, payment_account_id is required
+    - auto_liquidate=True: Creates and liquidates in one step (requires all prices > 0)
+
+    Payment to supplier is a separate operation via MoneyMovement.
     """
     lines: List[PurchaseLineCreate] = Field(..., min_length=1, description="Purchase lines (at least 1)")
     auto_liquidate: bool = Field(False, description="Auto-liquidate after creation (1-step workflow)")
-    payment_account_id: Optional[UUID] = Field(None, description="Payment account (required if auto_liquidate=True)")
-    
+
     @model_validator(mode='after')
     def validate_auto_liquidate(self):
-        """Validate that payment_account_id is provided when auto_liquidate=True."""
-        if self.auto_liquidate and not self.payment_account_id:
-            raise ValueError("payment_account_id is required when auto_liquidate=True")
+        """Si auto_liquidate=True, todos los precios deben ser > 0."""
+        if self.auto_liquidate:
+            for i, line in enumerate(self.lines):
+                if line.unit_price <= 0:
+                    raise ValueError(f"Todos los precios deben ser > 0 para auto-liquidar. Linea {i+1} tiene precio {line.unit_price}")
         return self
 
 
@@ -120,7 +120,7 @@ class PurchaseResponse(PurchaseBase):
     organization_id: UUID
     purchase_number: int
     total_amount: float
-    status: str = Field(..., description="registered | paid | cancelled")
+    status: str = Field(..., description="registered | liquidated | cancelled")
     payment_account_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
@@ -129,11 +129,14 @@ class PurchaseResponse(PurchaseBase):
     created_by: Optional[UUID] = Field(None, description="User who created the purchase")
     liquidated_by: Optional[UUID] = Field(None, description="User who liquidated the purchase")
     liquidated_at: Optional[datetime] = Field(None, description="Timestamp when the purchase was liquidated")
+    cancelled_by: Optional[UUID] = Field(None, description="User who cancelled the purchase")
+    cancelled_at: Optional[datetime] = Field(None, description="Timestamp when the purchase was cancelled")
     updated_by: Optional[UUID] = Field(None, description="User who last edited the purchase")
 
     # Audit names (joined from User model)
     created_by_name: Optional[str] = Field(None, description="Name of user who created the purchase")
     liquidated_by_name: Optional[str] = Field(None, description="Name of user who liquidated the purchase")
+    cancelled_by_name: Optional[str] = Field(None, description="Name of user who cancelled the purchase")
     updated_by_name: Optional[str] = Field(None, description="Name of user who last edited the purchase")
 
     # Warnings (duplicados, stock negativo, etc.)
@@ -164,8 +167,7 @@ class PurchaseLiquidateLineUpdate(BaseModel):
 
 
 class PurchaseLiquidateRequest(BaseModel):
-    """Schema for liquidating a purchase (2-step workflow) con edicion opcional de precios."""
-    payment_account_id: UUID = Field(..., description="Payment account to deduct funds from")
+    """Schema for liquidating a purchase (confirmar precios, mover stock, actualizar saldo proveedor)."""
     lines: Optional[List[PurchaseLiquidateLineUpdate]] = Field(None, description="Actualizacion opcional de precios por linea")
 
 

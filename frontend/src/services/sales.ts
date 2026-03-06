@@ -42,4 +42,11 @@ export const saleService = {
     const response = await apiClient.patch<SaleResponse>(`/api/v1/sales/${id}/cancel`);
     return response.data;
   },
+
+  checkDuplicate: async (customerId: string, date: string): Promise<{ count: number }> => {
+    const response = await apiClient.get<{ count: number }>("/api/v1/sales/check-duplicate", {
+      params: { customer_id: customerId, date },
+    });
+    return response.data;
+  },
 };

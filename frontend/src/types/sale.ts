@@ -100,6 +100,13 @@ export interface SaleResponse extends BaseEntity {
   warnings: string[];
 }
 
+export interface SaleLiquidateLineUpdate {
+  line_id: string;
+  unit_price: number;
+}
+
 export interface SaleLiquidateRequest {
   payment_account_id: string;
+  lines?: SaleLiquidateLineUpdate[];
+  commissions?: SaleCommissionCreate[];
 }

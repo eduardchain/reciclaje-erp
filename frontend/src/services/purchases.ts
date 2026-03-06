@@ -28,9 +28,9 @@ export const purchaseService = {
     return response.data;
   },
 
-  checkDuplicate: async (supplierId: string, date: string): Promise<{ count: number }> => {
+  checkDuplicate: async (supplierId: string, date: string, totalQuantity?: number): Promise<{ count: number }> => {
     const response = await apiClient.get<{ count: number }>("/api/v1/purchases/check-duplicate", {
-      params: { supplier_id: supplierId, date },
+      params: { supplier_id: supplierId, date, total_quantity: totalQuantity },
     });
     return response.data;
   },

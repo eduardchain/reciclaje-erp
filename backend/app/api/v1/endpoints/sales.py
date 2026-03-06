@@ -6,7 +6,7 @@ Supports 1-step and 2-step sale workflows:
 - 2-step: POST then PATCH /liquidate
 """
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, time as dt_time, timedelta, timezone as tz
 from typing import Optional
 from uuid import UUID
 
@@ -213,9 +213,9 @@ async def list_sales(
 ) -> PaginatedSaleResponse:
     """List sales with filters and pagination."""
     try:
-        # Convert date to datetime if provided
-        date_from_dt = datetime.combine(date_from, datetime.min.time()) if date_from else None
-        date_to_dt = datetime.combine(date_to, datetime.max.time()) if date_to else None
+        # Exclusive upper bound para cubrir todas las horas del dia en cualquier timezone
+        date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
+        date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
         
         sales, total = crud_sale.get_multi(
             db=db,
@@ -368,6 +368,27 @@ async def list_sales_by_customer(
 
 
 @router.get(
+    "/check-duplicate",
+    summary="Check for duplicate sales",
+    description="Cuenta ventas del mismo cliente en la misma fecha (no canceladas).",
+)
+async def check_duplicate_sale(
+    customer_id: UUID = Query(..., description="Customer UUID"),
+    date: date = Query(..., description="Sale date"),
+    db: Session = Depends(get_db),
+    org_context: dict = Depends(get_required_org_context),
+) -> dict:
+    """Verificar si ya existe una venta para el mismo cliente en la misma fecha."""
+    count = crud_sale.check_duplicate(
+        db=db,
+        customer_id=customer_id,
+        date=date,
+        organization_id=org_context["organization_id"],
+    )
+    return {"count": count}
+
+
+@router.get(
     "/{sale_id}",
     response_model=SaleResponse,
     summary="Get single sale",
@@ -510,6 +531,8 @@ async def liquidate_sale(
             payment_account_id=liquidate_in.payment_account_id,
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
+            line_updates=liquidate_in.lines,
+            commissions_data=liquidate_in.commissions,
         )
         
         db.commit()

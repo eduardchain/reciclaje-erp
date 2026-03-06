@@ -13,7 +13,7 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useCreatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useSuppliers, useMaterials, useWarehouses, useMoneyAccounts } from "@/hooks/useMasterData";
+import { useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { purchaseService } from "@/services/purchases";
 import { formatCurrency, toLocalDatetimeInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
@@ -42,12 +42,10 @@ export default function PurchaseCreatePage() {
   const { data: suppliersData } = useSuppliers();
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
-  const { data: accountsData } = useMoneyAccounts();
 
   const suppliers = suppliersData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
-  const accounts = accountsData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
 
   const [supplierId, setSupplierId] = useState("");
@@ -56,7 +54,6 @@ export default function PurchaseCreatePage() {
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [autoLiquidate, setAutoLiquidate] = useState(false);
-  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [duplicateCount, setDuplicateCount] = useState(0);
@@ -94,7 +91,7 @@ export default function PurchaseCreatePage() {
     !isFutureDate &&
     lines.length > 0 &&
     lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
-    (!autoLiquidate || paymentAccountId);
+    (!autoLiquidate || lines.every((l) => l.unit_price > 0));
 
   const doCreate = () => {
     createPurchase.mutate(
@@ -105,7 +102,6 @@ export default function PurchaseCreatePage() {
         invoice_number: invoiceNumber || null,
         notes: notes || null,
         auto_liquidate: autoLiquidate,
-        payment_account_id: autoLiquidate ? paymentAccountId : null,
         lines: lines.map(({ _key, ...rest }) => rest),
       },
       {
@@ -120,7 +116,8 @@ export default function PurchaseCreatePage() {
     if (!canSubmit) return;
     setCheckingDuplicate(true);
     try {
-      const { count } = await purchaseService.checkDuplicate(supplierId, date);
+      const totalQuantity = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0);
+      const { count } = await purchaseService.checkDuplicate(supplierId, date, totalQuantity);
       if (count > 0) {
         setDuplicateCount(count);
         setDuplicateOpen(true);
@@ -294,21 +291,12 @@ export default function PurchaseCreatePage() {
           <div className="flex items-center justify-between">
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidar inmediatamente</Label>
-              <p className="text-xs text-slate-500 mt-1">Si se activa, la compra se pagara al crearla</p>
+              <p className="text-xs text-slate-500 mt-1">Confirma precios y mueve stock a liquidado. Requiere precios &gt; 0.</p>
             </div>
             <Switch checked={autoLiquidate} onCheckedChange={setAutoLiquidate} />
           </div>
-
-          {autoLiquidate && (
-            <div className="mt-4">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta de Pago *</Label>
-              <EntitySelect
-                value={paymentAccountId}
-                onChange={setPaymentAccountId}
-                options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
-                placeholder="Seleccionar cuenta..."
-              />
-            </div>
+          {autoLiquidate && lines.some((l) => l.unit_price <= 0) && (
+            <p className="text-xs text-amber-600 mt-2">Todos los precios deben ser mayores a 0 para liquidar inmediatamente.</p>
           )}
         </CardContent>
       </Card>

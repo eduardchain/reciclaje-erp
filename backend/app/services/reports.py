@@ -90,10 +90,14 @@ class ReportService:
 
     @staticmethod
     def _date_range(d_from: date, d_to: date):
-        """Convierte date a datetime range con UTC timezone."""
+        """Convierte date a datetime range [dt_from, dt_to) con UTC timezone.
+
+        dt_to es exclusivo (dia siguiente a medianoche UTC) para cubrir
+        offsets negativos como Colombia UTC-5.
+        """
         return (
             datetime.combine(d_from, time.min, tzinfo=timezone.utc),
-            datetime.combine(d_to, time(23, 59, 59, 999999), tzinfo=timezone.utc),
+            datetime.combine(d_to + timedelta(days=1), time.min, tzinfo=timezone.utc),
         )
 
     @staticmethod
@@ -125,7 +129,7 @@ class ReportService:
                 Sale.status != "cancelled",
                 Sale.double_entry_id.is_(None),
                 Sale.date >= dt_from,
-                Sale.date <= dt_to,
+                Sale.date < dt_to,
             )
         ).one()
         sales_revenue = Decimal(str(row[0]))
@@ -142,7 +146,7 @@ class ReportService:
                 Sale.status != "cancelled",
                 Sale.double_entry_id.is_(None),
                 Sale.date >= dt_from,
-                Sale.date <= dt_to,
+                Sale.date < dt_to,
             )
         )
         cogs = Decimal(str(cogs_val))
@@ -183,7 +187,7 @@ class ReportService:
                 MoneyMovement.status == "confirmed",
                 MoneyMovement.movement_type.in_(["expense", "commission_payment", "service_income"]),
                 MoneyMovement.date >= dt_from,
-                MoneyMovement.date <= dt_to,
+                MoneyMovement.date < dt_to,
             )
             .group_by(
                 MoneyMovement.movement_type,
@@ -283,7 +287,7 @@ class ReportService:
                     Sale.organization_id == organization_id,
                     Sale.status == "paid",
                     Sale.date >= dt_from,
-                    Sale.date <= dt_to,
+                    Sale.date < dt_to,
                 )
             )
         ))
@@ -294,9 +298,9 @@ class ReportService:
                 select(func.coalesce(func.sum(Purchase.total_amount), 0))
                 .where(
                     Purchase.organization_id == organization_id,
-                    Purchase.status == "paid",
+                    Purchase.status == "liquidated",
                     Purchase.date >= dt_from,
-                    Purchase.date <= dt_to,
+                    Purchase.date < dt_to,
                 )
             )
         ))
@@ -310,7 +314,7 @@ class ReportService:
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.status == "confirmed",
                 MoneyMovement.date >= dt_from,
-                MoneyMovement.date <= dt_to,
+                MoneyMovement.date < dt_to,
             ).group_by(MoneyMovement.movement_type)
         ).all()
 
@@ -354,7 +358,7 @@ class ReportService:
                 select(func.coalesce(func.sum(Purchase.total_amount), 0))
                 .where(
                     Purchase.organization_id == organization_id,
-                    Purchase.status == "paid",
+                    Purchase.status == "liquidated",
                     Purchase.date >= dt_from,
                 )
             )
@@ -514,12 +518,12 @@ class ReportService:
     ) -> PurchaseReportResponse:
         dt_from, dt_to = self._date_range(date_from, date_to)
 
-        # Base filters
+        # Base filters — solo compras liquidadas (con precios confirmados)
         base_filters = [
             Purchase.organization_id == organization_id,
-            Purchase.status != "cancelled",
+            Purchase.status == "liquidated",
             Purchase.date >= dt_from,
-            Purchase.date <= dt_to,
+            Purchase.date < dt_to,
         ]
         if supplier_id:
             base_filters.append(Purchase.supplier_id == supplier_id)
@@ -641,7 +645,7 @@ class ReportService:
             Sale.organization_id == organization_id,
             Sale.status != "cancelled",
             Sale.date >= dt_from,
-            Sale.date <= dt_to,
+            Sale.date < dt_to,
         ]
         if customer_id:
             base_filters.append(Sale.customer_id == customer_id)
@@ -796,7 +800,7 @@ class ReportService:
                 Sale.status != "cancelled",
                 Sale.double_entry_id.is_(None),
                 Sale.date >= dt_from,
-                Sale.date <= dt_to,
+                Sale.date < dt_to,
             )
             .group_by(SaleLine.material_id, Material.code, Material.name, MaterialCategory.name)
         ).all()
@@ -812,10 +816,10 @@ class ReportService:
             .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
             .where(
                 Purchase.organization_id == organization_id,
-                Purchase.status != "cancelled",
+                Purchase.status == "liquidated",
                 Purchase.double_entry_id.is_(None),
                 Purchase.date >= dt_from,
-                Purchase.date <= dt_to,
+                Purchase.date < dt_to,
             )
             .group_by(PurchaseLine.material_id)
         ).all()
@@ -995,7 +999,7 @@ class ReportService:
                         Sale.organization_id == organization_id,
                         Sale.status != "cancelled",
                         Sale.date >= dt_f,
-                        Sale.date <= dt_t,
+                        Sale.date < dt_t,
                     )
                 )
             ))
@@ -1006,9 +1010,9 @@ class ReportService:
                     select(func.coalesce(func.sum(Purchase.total_amount), 0))
                     .where(
                         Purchase.organization_id == organization_id,
-                        Purchase.status != "cancelled",
+                        Purchase.status == "liquidated",
                         Purchase.date >= dt_f,
-                        Purchase.date <= dt_t,
+                        Purchase.date < dt_t,
                     )
                 )
             ))
@@ -1028,7 +1032,7 @@ class ReportService:
                         Sale.status != "cancelled",
                         Sale.double_entry_id.is_(None),
                         Sale.date >= dt_f,
-                        Sale.date <= dt_t,
+                        Sale.date < dt_t,
                     )
                 )
             ))
@@ -1142,7 +1146,7 @@ class ReportService:
                 Sale.organization_id == organization_id,
                 Sale.status != "cancelled",
                 Sale.date >= dt_from,
-                Sale.date <= dt_to,
+                Sale.date < dt_to,
             )
             .group_by(SaleLine.material_id, Material.name)
             .order_by(func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity).desc())
@@ -1169,9 +1173,9 @@ class ReportService:
             .join(PurchaseLine, PurchaseLine.purchase_id == Purchase.id)
             .where(
                 Purchase.organization_id == organization_id,
-                Purchase.status != "cancelled",
+                Purchase.status == "liquidated",
                 Purchase.date >= dt_from,
-                Purchase.date <= dt_to,
+                Purchase.date < dt_to,
             )
             .group_by(Purchase.supplier_id, ThirdParty.name)
             .order_by(func.sum(Purchase.total_amount).desc())
@@ -1201,7 +1205,7 @@ class ReportService:
                 Sale.organization_id == organization_id,
                 Sale.status != "cancelled",
                 Sale.date >= dt_from,
-                Sale.date <= dt_to,
+                Sale.date < dt_to,
             )
             .group_by(Sale.customer_id, ThirdParty.name)
             .order_by(func.sum(Sale.total_amount).desc())

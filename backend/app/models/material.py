@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.inventory_movement import InventoryMovement
     from app.models.business_unit import BusinessUnit
     from app.models.sale import SaleLine
+    from app.models.material_cost_history import MaterialCostHistory
 
 
 class MaterialCategory(Base, TimestampMixin, OrganizationMixin):
@@ -150,6 +151,12 @@ class Material(Base, TimestampMixin, OrganizationMixin):
         "DoubleEntry",
         foreign_keys="DoubleEntry.material_id",
         back_populates="material",
+    )
+
+    cost_history: Mapped[list["MaterialCostHistory"]] = relationship(
+        "MaterialCostHistory",
+        back_populates="material",
+        order_by="MaterialCostHistory.created_at.desc()",
     )
     
     def __repr__(self) -> str:

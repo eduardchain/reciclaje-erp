@@ -2,18 +2,27 @@ import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, ArrowLeft, Calculator, Hash, ClipboardCheck } from "lucide-react";
+import { Plus, ArrowLeft, Calculator, Hash, ClipboardCheck, MoreHorizontal, Eye, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { KpiCard } from "@/components/shared/KpiCard";
-import { useAdjustments } from "@/hooks/useInventory";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { useAdjustments, useAnnulAdjustment } from "@/hooks/useInventory";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { InventoryAdjustmentResponse } from "@/types/inventory";
@@ -35,16 +44,32 @@ const typeColors: Record<string, string> = {
   zero_out: "bg-orange-100 text-orange-800",
 };
 
-const columns: ColumnDef<InventoryAdjustmentResponse, unknown>[] = [
-  { accessorKey: "adjustment_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.adjustment_number}</span> },
-  { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
-  { accessorKey: "adjustment_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.adjustment_type] ?? ""}>{typeLabels[row.original.adjustment_type] ?? row.original.adjustment_type}</Badge> },
-  { accessorKey: "material_name", header: "Material", cell: ({ row }) => `${row.original.material_code ?? ""} - ${row.original.material_name ?? ""}` },
-  { accessorKey: "warehouse_name", header: "Bodega" },
-  { accessorKey: "quantity", header: "Cantidad", enableSorting: true, cell: ({ row }) => <span className="tabular-nums">{row.original.quantity.toFixed(2)}</span> },
-  { accessorKey: "total_value", header: "Valor", enableSorting: true, cell: ({ row }) => formatCurrency(row.original.total_value) },
-  { accessorKey: "status", header: "Estado", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
-];
+function ActionsCell({ adjustment, onAnnul }: { adjustment: InventoryAdjustmentResponse; onAnnul: (adj: InventoryAdjustmentResponse) => void }) {
+  const navigate = useNavigate();
+  const canAnnul = adjustment.status === "confirmed";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuItem onClick={() => navigate(`/inventory/adjustments/${adjustment.id}`)}>
+          <Eye className="h-4 w-4 mr-2" />
+          Ver Detalle
+        </DropdownMenuItem>
+        {canAnnul && (
+          <DropdownMenuItem onClick={() => onAnnul(adjustment)} className="text-red-600">
+            <XCircle className="h-4 w-4 mr-2" />
+            Anular
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export default function AdjustmentsPage() {
   const navigate = useNavigate();
@@ -52,6 +77,9 @@ export default function AdjustmentsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
+  const [annulTarget, setAnnulTarget] = useState<InventoryAdjustmentResponse | null>(null);
+  const [annulReason, setAnnulReason] = useState("");
+  const annulMutation = useAnnulAdjustment();
 
   const { data, isLoading } = useAdjustments({
     skip: page * PAGE_SIZE,
@@ -67,13 +95,29 @@ export default function AdjustmentsPage() {
     const items = data?.items ?? [];
     const totalValue = items.reduce((sum, a) => sum + a.total_value, 0);
     const count = data?.total ?? 0;
-    const completed = items.filter(a => a.status === "completed").length;
+    const completed = items.filter(a => a.status === "confirmed").length;
     return {
       total: { current_value: totalValue, previous_value: 0, change_percentage: null } as MetricCard,
       count: { current_value: count, previous_value: 0, change_percentage: null } as MetricCard,
       completed: { current_value: completed, previous_value: 0, change_percentage: null } as MetricCard,
     };
   }, [data]);
+
+  const columns: ColumnDef<InventoryAdjustmentResponse, unknown>[] = [
+    { accessorKey: "adjustment_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.adjustment_number}</span> },
+    { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
+    { accessorKey: "adjustment_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.adjustment_type] ?? ""}>{typeLabels[row.original.adjustment_type] ?? row.original.adjustment_type}</Badge> },
+    { accessorKey: "material_name", header: "Material", cell: ({ row }) => `${row.original.material_code ?? ""} - ${row.original.material_name ?? ""}` },
+    { accessorKey: "warehouse_name", header: "Bodega" },
+    { accessorKey: "quantity", header: "Cantidad", enableSorting: true, cell: ({ row }) => <span className="tabular-nums">{row.original.quantity.toFixed(2)}</span> },
+    { accessorKey: "total_value", header: "Valor", enableSorting: true, cell: ({ row }) => formatCurrency(row.original.total_value) },
+    { accessorKey: "status", header: "Estado", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => <ActionsCell adjustment={row.original} onAnnul={(adj) => { setAnnulTarget(adj); setAnnulReason(""); }} />,
+    },
+  ];
 
   return (
     <div className="space-y-4">
@@ -110,7 +154,7 @@ export default function AdjustmentsPage() {
             formatValue={(n) => String(n)}
           />
           <KpiCard
-            label="Completados"
+            label="Confirmados"
             metric={kpis.completed}
             icon={<ClipboardCheck className="h-4 w-4" />}
             accentColor="emerald"
@@ -122,7 +166,7 @@ export default function AdjustmentsPage() {
       <Tabs value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(0); }}>
         <TabsList>
           <TabsTrigger value="all">Todos</TabsTrigger>
-          <TabsTrigger value="completed">Completados</TabsTrigger>
+          <TabsTrigger value="confirmed">Confirmados</TabsTrigger>
           <TabsTrigger value="annulled">Anulados</TabsTrigger>
         </TabsList>
       </Tabs>
@@ -147,6 +191,28 @@ export default function AdjustmentsPage() {
           </div>
         }
       />
+
+      <ConfirmDialog
+        open={!!annulTarget}
+        onOpenChange={(open) => { if (!open) setAnnulTarget(null); }}
+        title="Anular Ajuste"
+        description={`Esta accion revertira los cambios de stock del ajuste #${annulTarget?.adjustment_number ?? ""}. No se puede deshacer.`}
+        confirmLabel="Anular Ajuste"
+        variant="destructive"
+        disabled={annulReason.length < 1}
+        onConfirm={() => {
+          if (!annulTarget) return;
+          annulMutation.mutate({ id: annulTarget.id, data: { reason: annulReason } }, {
+            onSuccess: () => setAnnulTarget(null),
+          });
+        }}
+        loading={annulMutation.isPending}
+      >
+        <div className="space-y-2 mt-2">
+          <Label>Razon de anulacion *</Label>
+          <Input value={annulReason} onChange={(e) => setAnnulReason(e.target.value)} placeholder="Razon..." />
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

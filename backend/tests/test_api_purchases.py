@@ -24,6 +24,7 @@ from app.models import (
     Purchase,
     MaterialCategory,
     BusinessUnit,
+    MaterialCostHistory,
 )
 
 
@@ -255,21 +256,18 @@ class TestCreatePurchase:
                 }
             ],
             "auto_liquidate": True,
-            "payment_account_id": str(test_money_account.id),
         }
-        
+
         # Act
         response = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
-        
+
         # Assert
         assert response.status_code == 201
         data = response.json()
-        assert data["status"] == "paid"
+        assert data["status"] == "liquidated"
         assert data["total_amount"] == 1500.0  # 20 * 75
-        assert data["payment_account_id"] == str(test_money_account.id)
-        assert data["payment_account_name"] == "Cash Account"
     
-    def test_create_purchase_auto_liquidate_without_account_fails(
+    def test_create_purchase_auto_liquidate_with_zero_price_fails(
         self,
         client,
         org_headers,
@@ -277,8 +275,7 @@ class TestCreatePurchase:
         test_material,
         test_warehouse,
     ):
-        """Test that auto_liquidate=True without payment_account_id fails validation."""
-        # Arrange
+        """Test that auto_liquidate=True with price=0 fails validation."""
         purchase_data = {
             "supplier_id": str(test_supplier.id),
             "date": datetime.now().isoformat(),
@@ -286,18 +283,14 @@ class TestCreatePurchase:
                 {
                     "material_id": str(test_material.id),
                     "quantity": 10.0,
-                    "unit_price": 50.00,
+                    "unit_price": 0,
                     "warehouse_id": str(test_warehouse.id),
                 }
             ],
             "auto_liquidate": True,
-            # Missing payment_account_id
         }
-        
-        # Act
+
         response = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
-        
-        # Assert
         assert response.status_code == 422  # Validation error
     
     def test_create_purchase_without_auth_fails(
@@ -445,7 +438,7 @@ class TestListPurchases:
         # Act - Filter by paid (should be empty)
         response = client.get(
             "/api/v1/purchases",
-            params={"status": "paid"},
+            params={"status": "liquidated"},
             headers=org_headers,
         )
         
@@ -669,91 +662,43 @@ class TestLiquidatePurchase:
         client,
         org_headers,
         test_purchase,
-        test_money_account,
     ):
         """Test liquidating a registered purchase successfully."""
-        # Arrange
-        liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
-        }
-        
         # Act
         response = client.patch(
             f"/api/v1/purchases/{test_purchase.id}/liquidate",
-            json=liquidate_data,
+            json={},
             headers=org_headers,
         )
-        
+
         # Assert
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "paid"
-        assert data["payment_account_id"] == str(test_money_account.id)
+        assert data["status"] == "liquidated"
     
-    def test_liquidate_purchase_already_paid_fails(
+    def test_liquidate_purchase_already_liquidated_fails(
         self,
         client,
         org_headers,
         test_purchase,
-        test_money_account,
-        db_session,
     ):
-        """Test that liquidating an already paid purchase fails."""
+        """Test that liquidating an already liquidated purchase fails."""
         # Arrange - Liquidate first time
-        liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
-        }
         client.patch(
             f"/api/v1/purchases/{test_purchase.id}/liquidate",
-            json=liquidate_data,
+            json={},
             headers=org_headers,
         )
-        
+
         # Act - Try to liquidate again
         response = client.patch(
             f"/api/v1/purchases/{test_purchase.id}/liquidate",
-            json=liquidate_data,
+            json={},
             headers=org_headers,
         )
-        
+
         # Assert
         assert response.status_code == 400
-    
-    def test_liquidate_purchase_insufficient_funds_fails(
-        self,
-        client,
-        org_headers,
-        test_purchase,
-        db_session,
-        test_organization,
-    ):
-        """Test that liquidating with insufficient funds fails."""
-        # Arrange - Create account with low balance
-        poor_account = MoneyAccount(
-            id=uuid4(),
-            name="Poor Account",
-            account_type="cash",
-            current_balance=Decimal("10.00"),  # Not enough for purchase
-            organization_id=test_organization.id,
-            is_active=True,
-        )
-        db_session.add(poor_account)
-        db_session.commit()
-        
-        liquidate_data = {
-            "payment_account_id": str(poor_account.id),
-        }
-        
-        # Act
-        response = client.patch(
-            f"/api/v1/purchases/{test_purchase.id}/liquidate",
-            json=liquidate_data,
-            headers=org_headers,
-        )
-        
-        # Assert
-        assert response.status_code == 400
-        assert "insufficient funds" in response.json()["detail"].lower()
 
 
 class TestCancelPurchase:
@@ -777,27 +722,25 @@ class TestCancelPurchase:
         data = response.json()
         assert data["status"] == "cancelled"
     
-    def test_cancel_paid_purchase_succeeds(
+    def test_cancel_liquidated_purchase_succeeds(
         self,
         client,
         org_headers,
         test_purchase,
-        test_money_account,
+        test_supplier,
         db_session,
     ):
-        """Test that canceling a paid purchase succeeds and refunds money."""
+        """Test that canceling a liquidated purchase succeeds and reverts supplier balance."""
         # Arrange - Liquidate first
-        initial_balance = test_money_account.current_balance
-        liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
-        }
         client.patch(
             f"/api/v1/purchases/{test_purchase.id}/liquidate",
-            json=liquidate_data,
+            json={},
             headers=org_headers,
         )
+        db_session.refresh(test_supplier)
+        supplier_balance_after_liquidation = test_supplier.current_balance
 
-        # Act - Cancel the paid purchase
+        # Act - Cancel the liquidated purchase
         response = client.patch(
             f"/api/v1/purchases/{test_purchase.id}/cancel",
             headers=org_headers,
@@ -808,9 +751,9 @@ class TestCancelPurchase:
         data = response.json()
         assert data["status"] == "cancelled"
 
-        # Verify money was refunded
-        db_session.refresh(test_money_account)
-        assert test_money_account.current_balance == initial_balance
+        # Verify supplier balance was reverted (debt removed)
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == supplier_balance_after_liquidation + Decimal("5000")
     
     def test_cancel_purchase_already_cancelled_fails(
         self,
@@ -864,9 +807,9 @@ class TestPurchaseOrganizationIsolation:
 
 
 class TestPurchaseWeightedAverageCost:
-    """Tests for weighted average cost calculation."""
-    
-    def test_weighted_average_cost_calculation(
+    """Tests for weighted average cost calculation (at liquidation, not at create)."""
+
+    def test_cost_not_updated_at_create(
         self,
         client,
         org_headers,
@@ -875,9 +818,10 @@ class TestPurchaseWeightedAverageCost:
         test_warehouse,
         db_session,
     ):
-        """Test that weighted average cost is calculated correctly."""
-        # Arrange - First purchase
-        purchase1_data = {
+        """Crear compra NO debe cambiar costo promedio del material."""
+        initial_cost = test_material.current_average_cost
+
+        purchase_data = {
             "supplier_id": str(test_supplier.id),
             "date": datetime.now().isoformat(),
             "lines": [
@@ -890,31 +834,63 @@ class TestPurchaseWeightedAverageCost:
             ],
             "auto_liquidate": False,
         }
-        
-        # Act - Create first purchase
-        response1 = client.post("/api/v1/purchases", json=purchase1_data, headers=org_headers)
-        assert response1.status_code == 201
-        
-        # Arrange - Second purchase
-        purchase2_data = {
+
+        response = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert response.status_code == 201
+
+        db_session.refresh(test_material)
+        assert test_material.current_stock == Decimal("100.0000")
+        assert test_material.current_stock_transit == Decimal("100.0000")
+        assert test_material.current_average_cost == initial_cost  # NO CAMBIO
+
+    def test_cost_updated_at_liquidation(
+        self,
+        client,
+        org_headers,
+        test_supplier,
+        test_material,
+        test_warehouse,
+        db_session,
+    ):
+        """Liquidar compra DEBE recalcular costo promedio correctamente."""
+        # Crear primera compra y liquidar
+        p1 = client.post("/api/v1/purchases", json={
             "supplier_id": str(test_supplier.id),
             "date": datetime.now().isoformat(),
-            "lines": [
-                {
-                    "material_id": str(test_material.id),
-                    "quantity": 50.0,
-                    "unit_price": 60.00,
-                    "warehouse_id": str(test_warehouse.id),
-                }
-            ],
-            "auto_liquidate": False,
-        }
-        
-        # Act - Create second purchase
-        response2 = client.post("/api/v1/purchases", json=purchase2_data, headers=org_headers)
-        assert response2.status_code == 201
-        
-        # Assert - Check material cost
+            "lines": [{
+                "material_id": str(test_material.id),
+                "quantity": 100.0,
+                "unit_price": 50.00,
+                "warehouse_id": str(test_warehouse.id),
+            }],
+        }, headers=org_headers)
+        assert p1.status_code == 201
+        p1_id = p1.json()["id"]
+
+        # Liquidar primera compra
+        client.patch(f"/api/v1/purchases/{p1_id}/liquidate", json={}, headers=org_headers)
+
+        db_session.refresh(test_material)
+        assert test_material.current_average_cost == Decimal("50.00")
+        assert test_material.current_stock_liquidated == Decimal("100.0000")
+        assert test_material.current_stock_transit == Decimal("0.0000")
+
+        # Crear segunda compra y liquidar
+        p2 = client.post("/api/v1/purchases", json={
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [{
+                "material_id": str(test_material.id),
+                "quantity": 50.0,
+                "unit_price": 60.00,
+                "warehouse_id": str(test_warehouse.id),
+            }],
+        }, headers=org_headers)
+        assert p2.status_code == 201
+        p2_id = p2.json()["id"]
+
+        client.patch(f"/api/v1/purchases/{p2_id}/liquidate", json={}, headers=org_headers)
+
         # Weighted average: (100*50 + 50*60) / 150 = 8000/150 = 53.33
         db_session.refresh(test_material)
         assert test_material.current_stock == Decimal("150.0000")
@@ -988,10 +964,9 @@ class TestUpdatePurchase:
         db_session.refresh(test_material)
         assert test_material.current_stock == Decimal("200.0000")
 
-        # Saldo proveedor: fue -5000, revertido a 0, luego -12000
+        # Saldo proveedor: NO debe cambiar al editar (se actualiza al liquidar)
         db_session.refresh(test_supplier)
-        expected_balance = old_supplier_balance + Decimal("5000") - Decimal("12000")
-        assert test_supplier.current_balance == expected_balance
+        assert test_supplier.current_balance == old_supplier_balance
 
     def test_update_purchase_add_remove_lines(
         self, client, org_headers, db_session,
@@ -1047,7 +1022,7 @@ class TestUpdatePurchase:
         self, client, org_headers, db_session,
         test_purchase, test_supplier, test_supplier2, test_material, test_warehouse
     ):
-        """Cambiar proveedor, verificar saldos de ambos."""
+        """Cambiar proveedor. Saldos no cambian (se actualizan al liquidar)."""
         db_session.refresh(test_supplier)
         db_session.refresh(test_supplier2)
         old_balance_s1 = test_supplier.current_balance
@@ -1063,23 +1038,21 @@ class TestUpdatePurchase:
         data = response.json()
         assert data["supplier_name"] == "Second Supplier LLC"
 
-        # Proveedor original: deuda revertida
+        # Saldos no deben cambiar (se actualizan al liquidar)
         db_session.refresh(test_supplier)
-        assert test_supplier.current_balance == old_balance_s1 + Decimal("5000")
-
-        # Nuevo proveedor: deuda aplicada
+        assert test_supplier.current_balance == old_balance_s1
         db_session.refresh(test_supplier2)
-        assert test_supplier2.current_balance == old_balance_s2 - Decimal("5000")
+        assert test_supplier2.current_balance == old_balance_s2
 
-    def test_update_paid_purchase_fails(
+    def test_update_liquidated_purchase_fails(
         self, client, org_headers, db_session,
-        test_purchase, test_money_account
+        test_purchase,
     ):
-        """No se puede editar compra pagada."""
+        """No se puede editar compra liquidada."""
         # Primero liquidar
         client.patch(
             f"/api/v1/purchases/{test_purchase.id}/liquidate",
-            json={"payment_account_id": str(test_money_account.id)},
+            json={},
             headers=org_headers,
         )
 
@@ -1209,7 +1182,6 @@ class TestLiquidateWithPriceUpdates:
 
         # Liquidate with new price
         liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
             "lines": [
                 {"line_id": line_id, "unit_price": 200.0}
             ],
@@ -1222,7 +1194,7 @@ class TestLiquidateWithPriceUpdates:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "paid"
+        assert data["status"] == "liquidated"
         assert data["total_amount"] == 20000.0  # 100 * 200
         assert data["lines"][0]["unit_price"] == 200.0
 
@@ -1254,9 +1226,7 @@ class TestLiquidateWithPriceUpdates:
         purchase = resp.json()
 
         # Try to liquidate without updating prices
-        liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
-        }
+        liquidate_data = {}
         resp = client.patch(
             f"/api/v1/purchases/{purchase['id']}/liquidate",
             json=liquidate_data,
@@ -1271,12 +1241,9 @@ class TestLiquidateWithPriceUpdates:
         client,
         org_headers,
         test_purchase,
-        test_money_account,
     ):
         """Test that liquidated_at timestamp is set on liquidation."""
-        liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
-        }
+        liquidate_data = {}
         resp = client.patch(
             f"/api/v1/purchases/{test_purchase.id}/liquidate",
             json=liquidate_data,
@@ -1295,7 +1262,6 @@ class TestLiquidateWithPriceUpdates:
         test_supplier,
         test_material,
         test_warehouse,
-        test_money_account,
     ):
         """Test that updating prices on liquidation adjusts material average cost."""
         # Create purchase with price 100
@@ -1316,9 +1282,8 @@ class TestLiquidateWithPriceUpdates:
         purchase = resp.json()
         line_id = purchase["lines"][0]["id"]
 
-        # Liquidate with price 200 (cost should adjust upward)
+        # Liquidate with price 200 (cost should be set to 200)
         liquidate_data = {
-            "payment_account_id": str(test_money_account.id),
             "lines": [
                 {"line_id": line_id, "unit_price": 200.0}
             ],
@@ -1335,10 +1300,10 @@ class TestLiquidateWithPriceUpdates:
         assert float(test_material.current_average_cost) == 200.0
 
 
-class TestCancelPaidPurchase:
-    """Tests for canceling paid purchases with refund."""
+class TestCancelLiquidatedPurchase:
+    """Tests for canceling liquidated purchases."""
 
-    def test_cancel_paid_purchase_returns_money(
+    def test_cancel_liquidated_purchase_reverts_supplier_balance(
         self,
         client,
         org_headers,
@@ -1346,10 +1311,9 @@ class TestCancelPaidPurchase:
         test_supplier,
         test_material,
         test_warehouse,
-        test_money_account,
     ):
-        """Test that canceling a paid purchase returns money to the account."""
-        initial_balance = float(test_money_account.current_balance)
+        """Test that canceling a liquidated purchase reverts supplier balance (no money refund)."""
+        initial_supplier_balance = float(test_supplier.current_balance)
 
         # Create and liquidate
         purchase_data = {
@@ -1364,12 +1328,15 @@ class TestCancelPaidPurchase:
                 }
             ],
             "auto_liquidate": True,
-            "payment_account_id": str(test_money_account.id),
         }
         resp = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
         assert resp.status_code == 201
         purchase = resp.json()
-        assert purchase["status"] == "paid"
+        assert purchase["status"] == "liquidated"
+
+        # Verify supplier balance decreased (debt increased)
+        db_session.refresh(test_supplier)
+        assert float(test_supplier.current_balance) == initial_supplier_balance - 5000.0
 
         # Cancel
         resp = client.patch(
@@ -1379,11 +1346,11 @@ class TestCancelPaidPurchase:
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelled"
 
-        # Verify money refunded
-        db_session.refresh(test_money_account)
-        assert float(test_money_account.current_balance) == initial_balance
+        # Verify supplier balance reverted
+        db_session.refresh(test_supplier)
+        assert float(test_supplier.current_balance) == initial_supplier_balance
 
-    def test_cancel_paid_purchase_reverses_liquidated_stock(
+    def test_cancel_liquidated_purchase_reverses_liquidated_stock(
         self,
         client,
         org_headers,
@@ -1391,9 +1358,8 @@ class TestCancelPaidPurchase:
         test_supplier,
         test_material,
         test_warehouse,
-        test_money_account,
     ):
-        """Test that canceling a paid purchase reverses stock from liquidated bucket."""
+        """Test that canceling a liquidated purchase reverses stock from liquidated bucket."""
         initial_stock = float(test_material.current_stock)
         initial_liquidated = float(test_material.current_stock_liquidated)
 
@@ -1410,7 +1376,6 @@ class TestCancelPaidPurchase:
                 }
             ],
             "auto_liquidate": True,
-            "payment_account_id": str(test_money_account.id),
         }
         resp = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
         assert resp.status_code == 201
@@ -1500,3 +1465,455 @@ class TestPurchaseValidations:
         assert data.get("warnings") is not None
         assert len(data["warnings"]) > 0
         assert "mismo proveedor" in data["warnings"][0].lower()
+
+
+class TestPurchaseWorkflowSeparation:
+    """Tests para verificar que create no produce efectos financieros y liquidate si."""
+
+    def test_create_no_supplier_balance_change(
+        self, client, org_headers, db_session, test_supplier, test_material, test_warehouse
+    ):
+        """Crear compra NO debe cambiar saldo del proveedor."""
+        initial_balance = test_supplier.current_balance
+
+        resp = client.post("/api/v1/purchases", json={
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [{
+                "material_id": str(test_material.id),
+                "quantity": 100.0,
+                "unit_price": 50.0,
+                "warehouse_id": str(test_warehouse.id),
+            }],
+        }, headers=org_headers)
+        assert resp.status_code == 201
+
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == initial_balance
+
+    def test_create_no_avg_cost_change_with_zero_price(
+        self, client, org_headers, db_session, test_supplier, test_material, test_warehouse
+    ):
+        """Crear compra con precio=0 NO debe corromper el costo promedio."""
+        initial_cost = test_material.current_average_cost
+
+        resp = client.post("/api/v1/purchases", json={
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [{
+                "material_id": str(test_material.id),
+                "quantity": 500.0,
+                "unit_price": 0,
+                "warehouse_id": str(test_warehouse.id),
+            }],
+        }, headers=org_headers)
+        assert resp.status_code == 201
+
+        db_session.refresh(test_material)
+        assert test_material.current_average_cost == initial_cost
+        assert test_material.current_stock_transit == Decimal("500.0000")
+
+    def test_liquidate_updates_supplier_balance(
+        self, client, org_headers, db_session, test_supplier, test_material, test_warehouse
+    ):
+        """Liquidar compra DEBE actualizar saldo del proveedor."""
+        initial_balance = test_supplier.current_balance
+
+        # Crear
+        resp = client.post("/api/v1/purchases", json={
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [{
+                "material_id": str(test_material.id),
+                "quantity": 100.0,
+                "unit_price": 50.0,
+                "warehouse_id": str(test_warehouse.id),
+            }],
+        }, headers=org_headers)
+        assert resp.status_code == 201
+        purchase_id = resp.json()["id"]
+
+        # Saldo no cambio al crear
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == initial_balance
+
+        # Liquidar
+        resp = client.patch(
+            f"/api/v1/purchases/{purchase_id}/liquidate",
+            json={},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+
+        # Ahora si cambio
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == initial_balance - Decimal("5000")
+
+    def test_liquidate_moves_stock_to_liquidated(
+        self, client, org_headers, db_session, test_supplier, test_material, test_warehouse
+    ):
+        """Liquidar debe mover stock de transito a liquidado."""
+        # Crear
+        resp = client.post("/api/v1/purchases", json={
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [{
+                "material_id": str(test_material.id),
+                "quantity": 100.0,
+                "unit_price": 50.0,
+                "warehouse_id": str(test_warehouse.id),
+            }],
+        }, headers=org_headers)
+        purchase_id = resp.json()["id"]
+
+        db_session.refresh(test_material)
+        assert test_material.current_stock_transit == Decimal("100.0000")
+        assert test_material.current_stock_liquidated == Decimal("0.0000")
+
+        # Liquidar
+        client.patch(f"/api/v1/purchases/{purchase_id}/liquidate", json={}, headers=org_headers)
+
+        db_session.refresh(test_material)
+        assert test_material.current_stock_transit == Decimal("0.0000")
+        assert test_material.current_stock_liquidated == Decimal("100.0000")
+
+    def test_cancel_registered_no_balance_revert(
+        self, client, org_headers, db_session, test_supplier, test_material, test_warehouse
+    ):
+        """Cancelar compra registrada NO debe revertir saldo (nunca cambio)."""
+        initial_balance = test_supplier.current_balance
+
+        resp = client.post("/api/v1/purchases", json={
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [{
+                "material_id": str(test_material.id),
+                "quantity": 100.0,
+                "unit_price": 50.0,
+                "warehouse_id": str(test_warehouse.id),
+            }],
+        }, headers=org_headers)
+        purchase_id = resp.json()["id"]
+
+        # Cancelar
+        resp = client.patch(f"/api/v1/purchases/{purchase_id}/cancel", headers=org_headers)
+        assert resp.status_code == 200
+
+        # Saldo sigue igual
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == initial_balance
+
+        # Stock revertido
+        db_session.refresh(test_material)
+        assert test_material.current_stock == Decimal("0.0000")
+        assert test_material.current_stock_transit == Decimal("0.0000")
+
+
+# ============================================================================
+# Tests: Material Cost History
+# ============================================================================
+
+class TestCostHistory:
+    """Tests para historial de costo y reversion precisa."""
+
+    def test_cost_history_created_on_liquidation(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """Verificar que se crea MaterialCostHistory al liquidar."""
+        # Crear compra auto-liquidada
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.utcnow().isoformat(),
+            "auto_liquidate": True,
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 1000,
+                    "unit_price": 2000,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        purchase_id = response.json()["id"]
+
+        # Verificar que se creo registro en historial
+        history = db_session.query(MaterialCostHistory).filter(
+            MaterialCostHistory.source_type == "purchase_liquidation",
+            MaterialCostHistory.source_id == purchase_id,
+        ).first()
+        assert history is not None
+        assert history.new_cost == Decimal("2000.0000")
+        assert history.material_id == test_material.id
+
+    def test_cancel_liquidated_reverts_average_cost(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """
+        Cancelar compra liquidada revierte el costo promedio al valor anterior.
+
+        1. Material empieza en costo=0, stock=0
+        2. Compra 1: 1000kg @ $2000 → costo=$2000
+        3. Cancelar Compra 1 → costo vuelve a $0
+        """
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.utcnow().isoformat(),
+            "auto_liquidate": True,
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 1000,
+                    "unit_price": 2000,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        purchase_id = response.json()["id"]
+
+        db_session.refresh(test_material)
+        assert test_material.current_average_cost == Decimal("2000.0000")
+
+        # Cancelar
+        response = client.patch(
+            f"/api/v1/purchases/{purchase_id}/cancel",
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+
+        db_session.refresh(test_material)
+        assert test_material.current_average_cost == Decimal("0.0000")
+
+    def test_cancel_most_recent_allowed(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """
+        Cancelar la compra mas reciente esta permitido.
+
+        1. Compra 1: 1000kg @ $2000 → costo=$2000
+        2. Compra 2: 1000kg @ $2400 → costo=$2200
+        3. Cancelar Compra 2 → OK, costo=$2000
+        """
+        base_payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.utcnow().isoformat(),
+            "auto_liquidate": True,
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 1000,
+                    "unit_price": 2000,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        # Compra 1
+        r1 = client.post("/api/v1/purchases", json=base_payload, headers=org_headers)
+        assert r1.status_code == 201
+
+        db_session.refresh(test_material)
+        assert test_material.current_average_cost == Decimal("2000.0000")
+
+        # Compra 2
+        payload2 = {**base_payload, "lines": [
+            {
+                "material_id": str(test_material.id),
+                "quantity": 1000,
+                "unit_price": 2400,
+                "warehouse_id": str(test_warehouse.id),
+            }
+        ]}
+        r2 = client.post("/api/v1/purchases", json=payload2, headers=org_headers)
+        assert r2.status_code == 201
+        purchase2_id = r2.json()["id"]
+
+        db_session.refresh(test_material)
+        assert test_material.current_average_cost == Decimal("2200.0000")
+
+        # Cancelar Compra 2 (la mas reciente) → debe funcionar
+        response = client.patch(
+            f"/api/v1/purchases/{purchase2_id}/cancel",
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+
+        db_session.refresh(test_material)
+        assert test_material.current_average_cost == Decimal("2000.0000")
+
+    def test_cancel_blocked_by_subsequent_purchase(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """
+        Cancelar compra bloqueada por operacion posterior.
+
+        1. Compra 1: 1000kg @ $2000 → costo=$2000
+        2. Compra 2: 1000kg @ $2400 → costo=$2200
+        3. Intentar cancelar Compra 1 → HTTP 400
+        """
+        base_payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.utcnow().isoformat(),
+            "auto_liquidate": True,
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 1000,
+                    "unit_price": 2000,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        # Compra 1
+        r1 = client.post("/api/v1/purchases", json=base_payload, headers=org_headers)
+        assert r1.status_code == 201
+        purchase1_id = r1.json()["id"]
+
+        # Compra 2
+        payload2 = {**base_payload, "lines": [
+            {
+                "material_id": str(test_material.id),
+                "quantity": 1000,
+                "unit_price": 2400,
+                "warehouse_id": str(test_warehouse.id),
+            }
+        ]}
+        r2 = client.post("/api/v1/purchases", json=payload2, headers=org_headers)
+        assert r2.status_code == 201
+
+        # Intentar cancelar Compra 1 → debe fallar
+        response = client.patch(
+            f"/api/v1/purchases/{purchase1_id}/cancel",
+            headers=org_headers,
+        )
+        assert response.status_code == 400
+        assert "operaciones posteriores" in response.json()["detail"]
+
+    def test_cost_history_deleted_on_reversal(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """Verificar que el registro de historial se elimina al revertir."""
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.utcnow().isoformat(),
+            "auto_liquidate": True,
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 1000,
+                    "unit_price": 2000,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        purchase_id = response.json()["id"]
+
+        # Verificar historial existe
+        count_before = db_session.query(MaterialCostHistory).filter(
+            MaterialCostHistory.source_id == purchase_id,
+        ).count()
+        assert count_before == 1
+
+        # Cancelar
+        client.patch(f"/api/v1/purchases/{purchase_id}/cancel", headers=org_headers)
+
+        # Historial debe estar eliminado
+        count_after = db_session.query(MaterialCostHistory).filter(
+            MaterialCostHistory.source_id == purchase_id,
+        ).count()
+        assert count_after == 0
+
+    def test_cancel_registered_no_history_check(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """Cancelar compra registrada (no liquidada) no necesita historial de costo."""
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.utcnow().isoformat(),
+            "auto_liquidate": False,
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 1000,
+                    "unit_price": 0,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        purchase_id = response.json()["id"]
+
+        # No debe haber historial (no se liquido)
+        count = db_session.query(MaterialCostHistory).filter(
+            MaterialCostHistory.source_id == purchase_id,
+        ).count()
+        assert count == 0
+
+        # Cancelar → debe funcionar sin problemas
+        response = client.patch(
+            f"/api/v1/purchases/{purchase_id}/cancel",
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+
+    def test_average_cost_ignores_transit_stock(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """El stock en transito (compras registradas) NO debe afectar el costo promedio."""
+        # Resetear material
+        test_material.current_stock = 0
+        test_material.current_stock_liquidated = 0
+        test_material.current_stock_transit = 0
+        test_material.current_average_cost = 0
+        db_session.commit()
+
+        # Compra 1: 1000 kg @ $2000, registrada (NO liquidar)
+        payload1 = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.utcnow().isoformat(),
+            "auto_liquidate": False,
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 1000,
+                    "unit_price": 2000,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        r1 = client.post("/api/v1/purchases", json=payload1, headers=org_headers)
+        assert r1.status_code == 201
+
+        # Verificar: transito=1000, liquidado=0, costo=$0
+        db_session.refresh(test_material)
+        assert test_material.current_stock_transit == 1000
+        assert test_material.current_stock_liquidated == 0
+        assert test_material.current_average_cost == 0
+
+        # Compra 2: 500 kg @ $2500, liquidar
+        payload2 = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.utcnow().isoformat(),
+            "auto_liquidate": True,
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 500,
+                    "unit_price": 2500,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        r2 = client.post("/api/v1/purchases", json=payload2, headers=org_headers)
+        assert r2.status_code == 201
+
+        # Verificar: costo = $2500 (NO $833 que seria con transito)
+        db_session.refresh(test_material)
+        assert test_material.current_stock_transit == 1000
+        assert test_material.current_stock_liquidated == 500
+        assert test_material.current_average_cost == 2500

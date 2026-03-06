@@ -207,9 +207,17 @@ class SaleResponse(SaleBase):
         return float(value)
 
 
+class SaleLiquidateLineUpdate(BaseModel):
+    """Precio actualizado para una línea durante liquidación."""
+    line_id: UUID = Field(..., description="ID de la línea de venta")
+    unit_price: Decimal = Field(..., gt=0, description="Nuevo precio unitario (debe ser > 0)")
+
+
 class SaleLiquidateRequest(BaseModel):
-    """Schema for liquidating a sale (2-step workflow)."""
+    """Schema for liquidating a sale (2-step workflow) con precios y comisiones opcionales."""
     payment_account_id: UUID = Field(..., description="Payment account to receive funds")
+    lines: Optional[List[SaleLiquidateLineUpdate]] = Field(None, description="Precios actualizados por línea")
+    commissions: Optional[List[SaleCommissionCreate]] = Field(None, description="Comisiones (reemplazan las existentes)")
 
 
 class PaginatedSaleResponse(BaseModel):

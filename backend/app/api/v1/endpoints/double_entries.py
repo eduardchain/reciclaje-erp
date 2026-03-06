@@ -5,7 +5,7 @@ A double-entry operation represents buying from a supplier and immediately
 selling to a customer without the material entering inventory.
 """
 import logging
-from datetime import date
+from datetime import date, datetime, time as dt_time, timedelta, timezone as tz
 from typing import Optional
 from uuid import UUID
 
@@ -181,6 +181,8 @@ async def list_double_entries(
     search: Optional[str] = Query(None, description="Search in number, names, notes, invoice"),
 ) -> PaginatedDoubleEntryResponse:
     """Get paginated list of double-entries with filters."""
+    date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
+    date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
     double_entries, total = double_entry_service.get_multi(
         db=db,
         organization_id=org_context["organization_id"],
@@ -190,8 +192,8 @@ async def list_double_entries(
         material_id=material_id,
         supplier_id=supplier_id,
         customer_id=customer_id,
-        date_from=date_from,
-        date_to=date_to,
+        date_from=date_from_dt,
+        date_to=date_to_dt,
         search=search,
     )
     

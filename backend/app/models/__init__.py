@@ -19,6 +19,7 @@ from .expense_category import ExpenseCategory
 from .money_movement import MoneyMovement
 from .inventory_adjustment import InventoryAdjustment
 from .material_transformation import MaterialTransformation, MaterialTransformationLine
+from .material_cost_history import MaterialCostHistory
 
 __all__ = [
     "Base",
@@ -46,4 +47,5 @@ __all__ = [
     "InventoryAdjustment",
     "MaterialTransformation",
     "MaterialTransformationLine",
+    "MaterialCostHistory",
 ]

@@ -44,7 +44,7 @@ export default function AdjustmentDetailPage() {
           <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY_ADJUSTMENTS)}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
-          {adj.status === "completed" && (
+          {adj.status === "confirmed" && (
             <Button variant="destructive" onClick={() => setShowAnnul(true)}>Anular</Button>
           )}
         </div>

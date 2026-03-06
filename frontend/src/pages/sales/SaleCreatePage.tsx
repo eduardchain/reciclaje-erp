@@ -11,7 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useCreateSale } from "@/hooks/useSales";
+import { saleService } from "@/services/sales";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useCustomers, useSuppliers, useMaterials, useWarehouses, useMoneyAccounts } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDatetimeInput } from "@/utils/formatters";
@@ -84,16 +86,22 @@ export default function SaleCreatePage() {
 
   const total = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
 
+  const isFutureDate = date ? new Date(date) > new Date() : false;
+
   const canSubmit =
     customerId &&
     date &&
+    !isFutureDate &&
     lines.length > 0 &&
     lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
     commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0) &&
     (!autoLiquidate || paymentAccountId);
 
-  const handleSubmit = () => {
-    if (!canSubmit) return;
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateCount, setDuplicateCount] = useState(0);
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
+
+  const doCreate = () => {
     createSale.mutate(
       {
         customer_id: customerId,
@@ -109,6 +117,24 @@ export default function SaleCreatePage() {
       },
       { onSuccess: (sale) => navigate(`/sales/${sale.id}`) },
     );
+  };
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setCheckingDuplicate(true);
+    try {
+      const { count } = await saleService.checkDuplicate(customerId, date);
+      if (count > 0) {
+        setDuplicateCount(count);
+        setDuplicateOpen(true);
+      } else {
+        doCreate();
+      }
+    } catch {
+      doCreate();
+    } finally {
+      setCheckingDuplicate(false);
+    }
   };
 
   return (
@@ -134,7 +160,8 @@ export default function SaleCreatePage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
-              <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} />
+              <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} className={isFutureDate ? "border-red-300" : ""} />
+              {isFutureDate && <p className="text-xs text-red-500 mt-0.5">La fecha no puede ser futura</p>}
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa Vehiculo</Label>
@@ -161,18 +188,26 @@ export default function SaleCreatePage() {
           </Button>
         </CardHeader>
         <CardContent className="space-y-0">
-          {lines.map((line, idx) => (
+          {lines.map((line, idx) => {
+            const mat = materials.find((m) => m.id === line.material_id);
+            const avgCost = mat?.current_average_cost ?? 0;
+            const lineProfit = line.unit_price > 0 && avgCost > 0 ? (line.unit_price - avgCost) * line.quantity : 0;
+            return (
             <div key={line._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}>
-              <div className="col-span-4">
+              <div className="col-span-3">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
                 <EntitySelect value={line.material_id} onChange={(v) => handleMaterialChange(line._key, v)} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Material..." />
               </div>
-              <div className="col-span-3">
+              <div className="col-span-2">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
                 <Input type="number" min={0} step="0.01" value={line.quantity || ""} onChange={(e) => updateLine(line._key, "quantity", parseFloat(e.target.value) || 0)} placeholder="0.00" />
               </div>
+              <div className="col-span-1">
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo</Label>}
+                <p className="h-10 flex items-center text-sm tabular-nums text-slate-400">{avgCost > 0 ? formatCurrency(avgCost) : "-"}</p>
+              </div>
               <div className="col-span-2">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit. *</Label>}
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio *</Label>}
                 <Input type="number" min={0} step="1" value={line.unit_price || ""} onChange={(e) => updateLine(line._key, "unit_price", parseFloat(e.target.value) || 0)} placeholder="0" />
                 <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "unit_price", p)} />
               </div>
@@ -180,15 +215,51 @@ export default function SaleCreatePage() {
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}
                 <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">{formatCurrency(line.quantity * line.unit_price)}</p>
               </div>
+              <div className="col-span-1 text-right">
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Utilidad</Label>}
+                <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                  {line.unit_price > 0 && avgCost > 0 ? formatCurrency(lineProfit) : "-"}
+                </p>
+              </div>
               <div className="col-span-1">
                 {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
                 <Button variant="ghost" size="sm" onClick={() => setLines((p) => p.filter((l) => l._key !== line._key))} disabled={lines.length === 1} className="text-red-500 hover:text-red-700"><Trash2 className="h-4 w-4" /></Button>
               </div>
             </div>
-          ))}
-          <div className="bg-slate-50 rounded-lg p-3 mt-2">
-            <div className="flex justify-end"><span className="text-lg font-bold">Total: {formatCurrency(total)}</span></div>
-          </div>
+            );
+          })}
+          {(() => {
+            const estProfit = lines.reduce((sum, l) => {
+              const mat = materials.find((m) => m.id === l.material_id);
+              const avgCost = mat?.current_average_cost ?? 0;
+              return sum + (l.unit_price > 0 && avgCost > 0 ? (l.unit_price - avgCost) * l.quantity : 0);
+            }, 0);
+            const totalComm = commissions.reduce((sum, c) => {
+              return sum + (c.commission_type === "percentage" ? (total * c.commission_value) / 100 : c.commission_value);
+            }, 0);
+            const netProfit = estProfit - totalComm;
+            const margin = total > 0 ? (estProfit / total) * 100 : 0;
+            return (
+              <div className="bg-slate-50 rounded-lg p-3 mt-2 space-y-1">
+                <div className="flex justify-end gap-6">
+                  <span className="text-lg font-bold">Total: {formatCurrency(total)}</span>
+                  {estProfit !== 0 && (
+                    <span className={`text-lg font-bold ${estProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                      Util. Bruta: {formatCurrency(estProfit)} ({margin.toFixed(1)}%)
+                    </span>
+                  )}
+                </div>
+                {totalComm > 0 && (
+                  <div className="flex justify-end gap-6 text-sm">
+                    <span className="text-amber-600">Comisiones: -{formatCurrency(totalComm)}</span>
+                    <span className={`font-semibold ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                      Util. Neta: {formatCurrency(netProfit)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 
@@ -267,11 +338,20 @@ export default function SaleCreatePage() {
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={() => navigate(ROUTES.SALES)}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit || createSale.isPending} className="bg-emerald-600 hover:bg-emerald-700">
-            {createSale.isPending ? "Creando..." : "Crear Venta"}
+          <Button onClick={handleSubmit} disabled={!canSubmit || createSale.isPending || checkingDuplicate} className="bg-emerald-600 hover:bg-emerald-700">
+            {createSale.isPending || checkingDuplicate ? "Creando..." : "Crear Venta"}
           </Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={duplicateOpen}
+        onOpenChange={setDuplicateOpen}
+        title="Posible venta duplicada"
+        description={`Ya existen ${duplicateCount} venta(s) del mismo cliente en esta fecha. ¿Desea crear la venta de todas formas?`}
+        confirmLabel="Sí, crear"
+        onConfirm={() => { setDuplicateOpen(false); doCreate(); }}
+      />
     </div>
   );
 }

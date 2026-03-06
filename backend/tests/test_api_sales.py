@@ -978,3 +978,346 @@ class TestUpdateSale:
         data = response.json()
         assert len(data["warnings"]) > 0
         assert any("stock" in w.lower() for w in data["warnings"])
+
+
+class TestEnhancedLiquidation:
+    """Tests para liquidación mejorada con precios editables, comisiones y validaciones."""
+
+    def test_liquidate_with_line_price_updates(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+        test_money_account,
+        db_session,
+    ):
+        """Crear venta con precio=0, liquidar con precios, verificar totales."""
+        # Crear venta con precio 0
+        sale_data = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material_with_stock.id),
+                    "quantity": 100.0,
+                    "unit_price": 0,
+                }
+            ],
+            "auto_liquidate": False,
+        }
+        resp = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
+        assert resp.status_code == 201
+        sale = resp.json()
+        assert sale["total_amount"] == 0
+        line_id = sale["lines"][0]["id"]
+
+        # Liquidar con precio actualizado
+        liquidate_data = {
+            "payment_account_id": str(test_money_account.id),
+            "lines": [{"line_id": line_id, "unit_price": 80.0}],
+        }
+        resp = client.patch(
+            f"/api/v1/sales/{sale['id']}/liquidate",
+            json=liquidate_data,
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "paid"
+        assert data["total_amount"] == 8000.0  # 100 * 80
+        assert data["lines"][0]["unit_price"] == 80.0
+
+    def test_liquidate_with_zero_price_fails(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+        test_money_account,
+        db_session,
+    ):
+        """V-VENTA-04: liquidar sin precios > 0 falla."""
+        # Crear venta con precio 0
+        sale_data = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material_with_stock.id),
+                    "quantity": 50.0,
+                    "unit_price": 0,
+                }
+            ],
+            "auto_liquidate": False,
+        }
+        resp = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
+        assert resp.status_code == 201
+        sale = resp.json()
+
+        # Intentar liquidar sin actualizar precios (siguen en 0)
+        liquidate_data = {"payment_account_id": str(test_money_account.id)}
+        resp = client.patch(
+            f"/api/v1/sales/{sale['id']}/liquidate",
+            json=liquidate_data,
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "V-VENTA-04" in resp.json()["detail"]
+
+    def test_liquidate_with_commissions(
+        self,
+        client,
+        org_headers,
+        test_sale,
+        test_money_account,
+        test_commission_recipient,
+        db_session,
+    ):
+        """Agregar comisiones durante liquidación."""
+        line_id = None
+        # Obtener line_id
+        resp = client.get(f"/api/v1/sales/{test_sale.id}", headers=org_headers)
+        line_id = resp.json()["lines"][0]["id"]
+
+        liquidate_data = {
+            "payment_account_id": str(test_money_account.id),
+            "lines": [{"line_id": line_id, "unit_price": 60.0}],
+            "commissions": [
+                {
+                    "third_party_id": str(test_commission_recipient.id),
+                    "concept": "Comisión liquidación",
+                    "commission_type": "percentage",
+                    "commission_value": 5.0,
+                }
+            ],
+        }
+        resp = client.patch(
+            f"/api/v1/sales/{test_sale.id}/liquidate",
+            json=liquidate_data,
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "paid"
+        assert len(data["commissions"]) == 1
+        assert data["commissions"][0]["commission_amount"] == 300.0  # 5% de 6000
+
+    def test_liquidate_price_adjusts_customer_balance(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+        test_money_account,
+        db_session,
+    ):
+        """Delta de saldo correcto al cambiar precios en liquidación."""
+        # Crear venta con precio 50 -> total 5000
+        sale_data = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material_with_stock.id),
+                    "quantity": 100.0,
+                    "unit_price": 50.0,
+                }
+            ],
+            "auto_liquidate": False,
+        }
+        resp = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
+        assert resp.status_code == 201
+        sale = resp.json()
+        line_id = sale["lines"][0]["id"]
+
+        # Saldo del cliente despues de crear: +5000
+        db_session.refresh(test_customer)
+        balance_after_create = float(test_customer.current_balance)
+
+        # Liquidar con precio 80 -> total 8000 (delta +3000)
+        liquidate_data = {
+            "payment_account_id": str(test_money_account.id),
+            "lines": [{"line_id": line_id, "unit_price": 80.0}],
+        }
+        resp = client.patch(
+            f"/api/v1/sales/{sale['id']}/liquidate",
+            json=liquidate_data,
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+
+        # Despues de liquidar: balance_after_create + delta(3000) - total(8000) = balance_after_create - 5000
+        db_session.refresh(test_customer)
+        # El saldo deberia ser: balance_after_create + (8000 - 5000) - 8000 = balance_after_create - 5000
+        expected_balance = balance_after_create + 3000 - 8000
+        assert abs(float(test_customer.current_balance) - expected_balance) < 0.01
+
+    def test_liquidate_replaces_commissions(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+        test_money_account,
+        test_commission_recipient,
+        db_session,
+    ):
+        """Comisiones existentes reemplazadas al liquidar."""
+        # Crear venta con comisión
+        sale_data = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material_with_stock.id),
+                    "quantity": 100.0,
+                    "unit_price": 60.0,
+                }
+            ],
+            "commissions": [
+                {
+                    "third_party_id": str(test_commission_recipient.id),
+                    "concept": "Comisión original",
+                    "commission_type": "fixed",
+                    "commission_value": 100.0,
+                }
+            ],
+            "auto_liquidate": False,
+        }
+        resp = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
+        assert resp.status_code == 201
+        sale = resp.json()
+        assert len(sale["commissions"]) == 1
+        line_id = sale["lines"][0]["id"]
+
+        # Liquidar con comisiones nuevas (reemplaza las originales)
+        liquidate_data = {
+            "payment_account_id": str(test_money_account.id),
+            "lines": [{"line_id": line_id, "unit_price": 60.0}],
+            "commissions": [
+                {
+                    "third_party_id": str(test_commission_recipient.id),
+                    "concept": "Comisión nueva",
+                    "commission_type": "percentage",
+                    "commission_value": 10.0,
+                }
+            ],
+        }
+        resp = client.patch(
+            f"/api/v1/sales/{sale['id']}/liquidate",
+            json=liquidate_data,
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["commissions"]) == 1
+        assert data["commissions"][0]["concept"] == "Comisión nueva"
+        assert data["commissions"][0]["commission_amount"] == 600.0  # 10% de 6000
+
+
+class TestFutureDateAndDuplicate:
+    """Tests para validación de fecha futura y detección de duplicados."""
+
+    def test_create_sale_future_date_fails(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+    ):
+        """Fecha futura en creación devuelve error 400."""
+        from datetime import timedelta
+        future = (datetime.now() + timedelta(days=2)).isoformat()
+
+        sale_data = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": future,
+            "lines": [
+                {
+                    "material_id": str(test_material_with_stock.id),
+                    "quantity": 10.0,
+                    "unit_price": 50.0,
+                }
+            ],
+            "auto_liquidate": False,
+        }
+        resp = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
+        assert resp.status_code == 400
+        assert "futura" in resp.json()["detail"].lower()
+
+    def test_check_duplicate_sale(
+        self,
+        client,
+        org_headers,
+        test_sale,
+        test_customer,
+    ):
+        """Crear venta, luego check-duplicate devuelve count=1."""
+        date_str = test_sale.date.strftime("%Y-%m-%d")
+        resp = client.get(
+            f"/api/v1/sales/check-duplicate?customer_id={test_customer.id}&date={date_str}",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["count"] >= 1
+
+    def test_check_duplicate_sale_cancelled_excluded(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+        db_session,
+    ):
+        """Venta cancelada no cuenta como duplicado."""
+        from app.services.sale import crud_sale
+        from app.schemas.sale import SaleCreate, SaleLineCreate
+
+        sale_date = datetime.now()
+
+        # Crear y cancelar una venta
+        sale_data = SaleCreate(
+            customer_id=test_customer.id,
+            warehouse_id=test_warehouse.id,
+            date=sale_date,
+            lines=[SaleLineCreate(
+                material_id=test_material_with_stock.id,
+                quantity=Decimal("10"),
+                unit_price=Decimal("50"),
+            )],
+            auto_liquidate=False,
+        )
+        sale = crud_sale.create(
+            db=db_session,
+            obj_in=sale_data,
+            organization_id=test_customer.organization_id,
+        )
+        db_session.commit()
+
+        crud_sale.cancel(
+            db=db_session,
+            sale_id=sale.id,
+            organization_id=test_customer.organization_id,
+        )
+        db_session.commit()
+
+        # Verificar que no cuenta como duplicado
+        date_str = sale_date.strftime("%Y-%m-%d")
+        resp = client.get(
+            f"/api/v1/sales/check-duplicate?customer_id={test_customer.id}&date={date_str}",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 0

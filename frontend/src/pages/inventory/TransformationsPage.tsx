@@ -2,17 +2,26 @@ import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, ArrowLeft, Calculator, Hash, Puzzle } from "lucide-react";
+import { Plus, ArrowLeft, Calculator, Hash, Puzzle, MoreHorizontal, Eye, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { KpiCard } from "@/components/shared/KpiCard";
-import { useTransformations } from "@/hooks/useInventory";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { useTransformations, useAnnulTransformation } from "@/hooks/useInventory";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { MaterialTransformationResponse } from "@/types/inventory";
@@ -20,16 +29,32 @@ import type { MetricCard } from "@/types/reports";
 
 const PAGE_SIZE = 20;
 
-const columns: ColumnDef<MaterialTransformationResponse, unknown>[] = [
-  { accessorKey: "transformation_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.transformation_number}</span> },
-  { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
-  { accessorKey: "source_material_name", header: "Material Origen", cell: ({ row }) => `${row.original.source_material_code ?? ""} - ${row.original.source_material_name ?? ""}` },
-  { accessorKey: "source_quantity", header: "Cantidad", enableSorting: true, cell: ({ row }) => <span className="tabular-nums">{row.original.source_quantity.toFixed(2)}</span> },
-  { accessorKey: "waste_quantity", header: "Merma", cell: ({ row }) => <span className="tabular-nums text-orange-600">{row.original.waste_quantity.toFixed(2)}</span> },
-  { accessorKey: "source_total_value", header: "Valor", enableSorting: true, cell: ({ row }) => formatCurrency(row.original.source_total_value) },
-  { accessorKey: "lines", header: "Destinos", cell: ({ row }) => <span>{row.original.lines.length} material(es)</span> },
-  { accessorKey: "status", header: "Estado", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
-];
+function ActionsCell({ transformation, onAnnul }: { transformation: MaterialTransformationResponse; onAnnul: (t: MaterialTransformationResponse) => void }) {
+  const navigate = useNavigate();
+  const canAnnul = transformation.status === "confirmed";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuItem onClick={() => navigate(`/inventory/transformations/${transformation.id}`)}>
+          <Eye className="h-4 w-4 mr-2" />
+          Ver Detalle
+        </DropdownMenuItem>
+        {canAnnul && (
+          <DropdownMenuItem onClick={() => onAnnul(transformation)} className="text-red-600">
+            <XCircle className="h-4 w-4 mr-2" />
+            Anular
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export default function TransformationsPage() {
   const navigate = useNavigate();
@@ -37,6 +62,9 @@ export default function TransformationsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
+  const [annulTarget, setAnnulTarget] = useState<MaterialTransformationResponse | null>(null);
+  const [annulReason, setAnnulReason] = useState("");
+  const annulMutation = useAnnulTransformation();
 
   const { data, isLoading } = useTransformations({
     skip: page * PAGE_SIZE,
@@ -59,6 +87,22 @@ export default function TransformationsPage() {
       waste: { current_value: totalWaste, previous_value: 0, change_percentage: null } as MetricCard,
     };
   }, [data]);
+
+  const columns: ColumnDef<MaterialTransformationResponse, unknown>[] = [
+    { accessorKey: "transformation_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.transformation_number}</span> },
+    { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
+    { accessorKey: "source_material_name", header: "Material Origen", cell: ({ row }) => `${row.original.source_material_code ?? ""} - ${row.original.source_material_name ?? ""}` },
+    { accessorKey: "source_quantity", header: "Cantidad", enableSorting: true, cell: ({ row }) => <span className="tabular-nums">{row.original.source_quantity.toFixed(2)}</span> },
+    { accessorKey: "waste_quantity", header: "Merma", cell: ({ row }) => <span className="tabular-nums text-orange-600">{row.original.waste_quantity.toFixed(2)}</span> },
+    { accessorKey: "source_total_value", header: "Valor", enableSorting: true, cell: ({ row }) => formatCurrency(row.original.source_total_value) },
+    { accessorKey: "lines", header: "Destinos", cell: ({ row }) => <span>{row.original.lines.length} material(es)</span> },
+    { accessorKey: "status", header: "Estado", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => <ActionsCell transformation={row.original} onAnnul={(t) => { setAnnulTarget(t); setAnnulReason(""); }} />,
+    },
+  ];
 
   return (
     <div className="space-y-4">
@@ -107,7 +151,7 @@ export default function TransformationsPage() {
       <Tabs value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(0); }}>
         <TabsList>
           <TabsTrigger value="all">Todos</TabsTrigger>
-          <TabsTrigger value="completed">Completados</TabsTrigger>
+          <TabsTrigger value="confirmed">Confirmados</TabsTrigger>
           <TabsTrigger value="annulled">Anulados</TabsTrigger>
         </TabsList>
       </Tabs>
@@ -132,6 +176,28 @@ export default function TransformationsPage() {
           </div>
         }
       />
+
+      <ConfirmDialog
+        open={!!annulTarget}
+        onOpenChange={(open) => { if (!open) setAnnulTarget(null); }}
+        title="Anular Transformacion"
+        description={`Esta accion revertira los movimientos de inventario de la transformacion #${annulTarget?.transformation_number ?? ""}. No se puede deshacer.`}
+        confirmLabel="Anular Transformacion"
+        variant="destructive"
+        disabled={annulReason.length < 1}
+        onConfirm={() => {
+          if (!annulTarget) return;
+          annulMutation.mutate({ id: annulTarget.id, data: { reason: annulReason } }, {
+            onSuccess: () => setAnnulTarget(null),
+          });
+        }}
+        loading={annulMutation.isPending}
+      >
+        <div className="space-y-2 mt-2">
+          <Label>Razon de anulacion *</Label>
+          <Input value={annulReason} onChange={(e) => setAnnulReason(e.target.value)} placeholder="Razon..." />
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

@@ -20,9 +20,7 @@ import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { EntitySelect } from "@/components/shared/EntitySelect";
-import { useSales, useLiquidateSale, useCancelSale } from "@/hooks/useSales";
-import { useMoneyAccounts } from "@/hooks/useMasterData";
+import { useSales, useCancelSale } from "@/hooks/useSales";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { SaleResponse } from "@/types/sale";
@@ -36,16 +34,11 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
   const navigate = useNavigate();
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
-  const [liquidateOpen, setLiquidateOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [paymentAccountId, setPaymentAccountId] = useState("");
 
-  const { data: accountsData } = useMoneyAccounts();
-  const liquidateMutation = useLiquidateSale();
   const cancelMutation = useCancelSale();
 
   const canEdit = sale.status === "registered" && !sale.double_entry_id;
-  const accounts = accountsData?.items ?? [];
 
   return (
     <>
@@ -72,7 +65,7 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
             </DropdownMenuItem>
           )}
           {canEdit && (
-            <DropdownMenuItem onClick={() => setLiquidateOpen(true)}>
+            <DropdownMenuItem onClick={() => navigate(`/sales/${sale.id}/liquidate`)}>
               <DollarSign className="h-4 w-4 mr-2" />
               Cobrar
             </DropdownMenuItem>
@@ -90,38 +83,6 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      {/* Dialog Cobrar */}
-      <ConfirmDialog
-        open={liquidateOpen}
-        onOpenChange={setLiquidateOpen}
-        title="Cobrar Venta"
-        description={`Cobrar venta #${sale.sale_number} por ${formatCurrency(sale.total_amount)}`}
-        confirmLabel="Cobrar"
-        onConfirm={() => {
-          liquidateMutation.mutate(
-            { id: sale.id, data: { payment_account_id: paymentAccountId } },
-            {
-              onSuccess: () => {
-                setLiquidateOpen(false);
-                setPaymentAccountId("");
-              },
-            }
-          );
-        }}
-        loading={liquidateMutation.isPending}
-        disabled={!paymentAccountId}
-      >
-        <div className="py-2">
-          <label className="text-sm font-medium mb-1.5 block">Cuenta de cobro</label>
-          <EntitySelect
-            value={paymentAccountId}
-            onChange={setPaymentAccountId}
-            options={accounts.map((a) => ({ id: a.id, label: a.name }))}
-            placeholder="Seleccionar cuenta..."
-          />
-        </div>
-      </ConfirmDialog>
 
       {/* Dialog Cancelar */}
       <ConfirmDialog

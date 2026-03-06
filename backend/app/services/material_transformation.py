@@ -27,6 +27,9 @@ from app.models.warehouse import Warehouse
 from app.schemas.material_transformation import MaterialTransformationCreate
 
 
+from app.services.material_cost_history import material_cost_history_service
+
+
 class CRUDMaterialTransformation:
     """
     Operaciones para transformacion/desintegracion de materiales.
@@ -194,17 +197,30 @@ class CRUDMaterialTransformation:
             dest_material = db.get(Material, line_data.destination_material_id)
             unit_cost, total_cost = line_costs[i]
 
-            # Recalcular costo promedio del destino (formula promedio ponderado)
-            old_total = dest_material.current_stock
+            # Recalcular costo promedio del destino (solo stock liquidado, transito no afecta)
+            old_liquidated = dest_material.current_stock_liquidated
             old_cost = dest_material.current_average_cost
-            if old_total <= 0:
+            if old_liquidated <= 0:
                 dest_material.current_average_cost = unit_cost
             else:
-                total_old_value = old_total * old_cost
-                dest_material.current_average_cost = (total_old_value + total_cost) / (old_total + line_data.quantity)
+                total_old_value = old_liquidated * old_cost
+                dest_material.current_average_cost = (total_old_value + total_cost) / (old_liquidated + line_data.quantity)
 
             dest_material.current_stock_liquidated += line_data.quantity
             dest_material.current_stock += line_data.quantity
+
+            # Registrar cambio de costo en historial
+            material_cost_history_service.record_cost_change(
+                db=db,
+                material=dest_material,
+                previous_cost=old_cost,
+                previous_stock=old_liquidated,
+                new_cost=dest_material.current_average_cost,
+                new_stock=dest_material.current_stock_liquidated,
+                source_type="transformation_in",
+                source_id=transformation.id,
+                organization_id=organization_id,
+            )
 
             # Crear InventoryMovement de entrada
             self._create_inventory_movement(
@@ -235,7 +251,8 @@ class CRUDMaterialTransformation:
         """
         Anular transformacion — revierte stock de origen y destinos.
 
-        No recalcula costo promedio (acepta imprecision, mismo patron que cancelacion de compras).
+        Revierte costo promedio de materiales destino usando historial.
+        Bloquea si hay operaciones posteriores de costo.
         """
         transformation = self._get_or_404(db, transformation_id, organization_id)
 
@@ -252,6 +269,22 @@ class CRUDMaterialTransformation:
             .where(MaterialTransformation.id == transformation_id)
         )
         transformation = db.scalar(stmt)
+
+        # Verificar que no hay operaciones posteriores de costo por cada material destino
+        for line in transformation.lines:
+            can_revert, blocking = material_cost_history_service.check_can_revert(
+                db=db,
+                material_id=line.destination_material_id,
+                source_type="transformation_in",
+                source_id=transformation.id,
+            )
+            if not can_revert:
+                dest_material = db.get(Material, line.destination_material_id)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No se puede anular: existen operaciones posteriores que afectaron "
+                           f"el costo de '{dest_material.name}'. Cancele primero: {', '.join(blocking)}"
+                )
 
         # Revertir: restaurar stock del material de origen
         source_material = db.get(Material, transformation.source_material_id)
@@ -271,11 +304,19 @@ class CRUDMaterialTransformation:
             notes=f"Anulacion transformacion #{transformation.transformation_number}: restaurar {source_material.name}",
         )
 
-        # Revertir: descontar stock de cada material destino
+        # Revertir: descontar stock y costo de cada material destino
         for line in transformation.lines:
             dest_material = db.get(Material, line.destination_material_id)
             dest_material.current_stock_liquidated -= line.quantity
             dest_material.current_stock -= line.quantity
+
+            # Revertir costo promedio usando historial
+            material_cost_history_service.revert_cost_change(
+                db=db,
+                material=dest_material,
+                source_type="transformation_in",
+                source_id=transformation.id,
+            )
 
             self._create_inventory_movement(
                 db=db,
@@ -387,7 +428,7 @@ class CRUDMaterialTransformation:
         if date_from:
             query = query.where(MaterialTransformation.date >= date_from)
         if date_to:
-            query = query.where(MaterialTransformation.date <= date_to)
+            query = query.where(MaterialTransformation.date < date_to)
 
         count_query = select(func.count()).select_from(query.subquery())
         total = db.scalar(count_query)

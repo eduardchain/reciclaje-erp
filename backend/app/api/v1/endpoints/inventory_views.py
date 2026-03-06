@@ -8,7 +8,7 @@ Vistas de lectura para consultar stock, movimientos y valorizacion:
 - GET /movements: Historial de movimientos con filtros
 - GET /valuation: Valorizacion del inventario
 """
-from datetime import datetime
+from datetime import date, datetime, time as dt_time, timedelta, timezone as tz
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -322,8 +322,8 @@ def list_movements(
     material_id: Optional[UUID] = Query(None),
     warehouse_id: Optional[UUID] = Query(None),
     movement_type: Optional[str] = Query(None),
-    date_from: Optional[datetime] = Query(None),
-    date_to: Optional[datetime] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     org_context: dict = Depends(get_required_org_context),
     db: Session = Depends(get_db),
 ):
@@ -343,9 +343,11 @@ def list_movements(
     if movement_type:
         query = query.where(InventoryMovement.movement_type == movement_type)
     if date_from:
-        query = query.where(InventoryMovement.date >= date_from)
+        date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc)
+        query = query.where(InventoryMovement.date >= date_from_dt)
     if date_to:
-        query = query.where(InventoryMovement.date <= date_to)
+        date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc)
+        query = query.where(InventoryMovement.date < date_to_dt)
 
     count_query = select(func.count()).select_from(query.subquery())
     total = db.scalar(count_query)

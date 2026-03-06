@@ -37,7 +37,7 @@ export default function TransformationDetailPage() {
           <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY_TRANSFORMATIONS)}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
-          {t.status === "completed" && (
+          {t.status === "confirmed" && (
             <Button variant="destructive" onClick={() => setShowAnnul(true)}>Anular</Button>
           )}
         </div>

@@ -39,7 +39,7 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
 
   const canEdit = purchase.status === "registered" && !purchase.double_entry_id;
   const canLiquidate = purchase.status === "registered" && !purchase.double_entry_id;
-  const canCancel = (purchase.status === "registered" || purchase.status === "paid") && !purchase.double_entry_id;
+  const canCancel = (purchase.status === "registered" || purchase.status === "liquidated") && !purchase.double_entry_id;
 
   return (
     <>
@@ -91,8 +91,8 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
         onOpenChange={setCancelOpen}
         title="Cancelar Compra"
         description={
-          purchase.status === "paid"
-            ? `Esta accion cancelara la compra #${purchase.purchase_number}, revertira inventario, saldos y devolvera el pago. No se puede deshacer.`
+          purchase.status === "liquidated"
+            ? `Esta accion cancelara la compra #${purchase.purchase_number}, revertira inventario y saldos del proveedor. No se puede deshacer.`
             : `Esta accion cancelara la compra #${purchase.purchase_number} y revertira los movimientos de inventario. No se puede deshacer.`
         }
         confirmLabel="Cancelar Compra"
@@ -243,7 +243,7 @@ export default function PurchasesPage() {
         <TabsList>
           <TabsTrigger value="all">Todas</TabsTrigger>
           <TabsTrigger value="registered">Registradas</TabsTrigger>
-          <TabsTrigger value="paid">Pagadas</TabsTrigger>
+          <TabsTrigger value="liquidated">Liquidadas</TabsTrigger>
           <TabsTrigger value="cancelled">Canceladas</TabsTrigger>
         </TabsList>
       </Tabs>

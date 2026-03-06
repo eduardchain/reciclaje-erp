@@ -882,12 +882,12 @@ class TestDoubleEntryAPI:
         test_double_entry,
         db_session,
     ):
-        """Test that cancelling fails if Purchase is paid."""
-        # Mark purchase as paid
+        """Test that cancelling fails if Purchase is liquidated."""
+        # Mark purchase as liquidated
         purchase = db_session.query(Purchase).filter(
             Purchase.id == test_double_entry.purchase_id
         ).first()
-        purchase.status = "paid"
+        purchase.status = "liquidated"
         db_session.commit()
 
         response = client.patch(
@@ -895,7 +895,7 @@ class TestDoubleEntryAPI:
             headers=org_headers,
         )
         assert response.status_code == 400
-        assert "paid" in response.json()["detail"].lower()
+        assert "liquidat" in response.json()["detail"].lower()
 
     def test_cancel_double_entry_with_paid_sale_fails(
         self,

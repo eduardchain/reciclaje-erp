@@ -1,17 +1,15 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, CreditCard } from "lucide-react";
+import { ArrowLeft, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { usePurchase, useLiquidatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 
 interface LiquidationLine {
@@ -28,12 +26,9 @@ export default function PurchaseLiquidatePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: purchase, isLoading } = usePurchase(id!);
-  const { data: accountsData } = useMoneyAccounts();
   const { getSuggestedPrice } = usePriceSuggestions();
   const liquidate = useLiquidatePurchase();
 
-  const accounts = accountsData?.items ?? [];
-  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [lines, setLines] = useState<LiquidationLine[]>([]);
 
   // Inicializar lineas desde la compra cargada
@@ -76,7 +71,7 @@ export default function PurchaseLiquidatePage() {
 
   const total = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
   const allPricesValid = lines.every((l) => l.unit_price > 0);
-  const canSubmit = paymentAccountId && allPricesValid && lines.length > 0;
+  const canSubmit = allPricesValid && lines.length > 0;
 
   const handleSubmit = () => {
     if (!canSubmit || !id) return;
@@ -84,7 +79,6 @@ export default function PurchaseLiquidatePage() {
       {
         id,
         data: {
-          payment_account_id: paymentAccountId,
           lines: lines.map((l) => ({
             line_id: l.line_id,
             unit_price: l.unit_price,
@@ -156,7 +150,7 @@ export default function PurchaseLiquidatePage() {
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
-            Materiales a Liquidar
+            Confirmar Precios
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-0">
@@ -220,22 +214,6 @@ export default function PurchaseLiquidatePage() {
         </CardContent>
       </Card>
 
-      {/* Cuenta de pago */}
-      <Card className="shadow-sm">
-        <CardContent className="pt-6">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta de Pago *</Label>
-          <EntitySelect
-            value={paymentAccountId}
-            onChange={setPaymentAccountId}
-            options={accounts.map((a) => ({
-              id: a.id,
-              label: `${a.name} (${formatCurrency(a.current_balance)})`,
-            }))}
-            placeholder="Seleccionar cuenta de pago..."
-          />
-        </CardContent>
-      </Card>
-
       {/* Acciones */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
         <div className="flex justify-end gap-2">
@@ -247,7 +225,7 @@ export default function PurchaseLiquidatePage() {
             disabled={!canSubmit || liquidate.isPending}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
-            <CreditCard className="h-4 w-4 mr-2" />
+            <CheckCircle className="h-4 w-4 mr-2" />
             {liquidate.isPending ? "Liquidando..." : "Confirmar Liquidacion"}
           </Button>
         </div>
