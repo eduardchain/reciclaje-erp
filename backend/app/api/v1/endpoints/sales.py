@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_required_org_context
 from app.models.sale import Sale
+from app.models.user import User
 from app.schemas.sale import (
     PaginatedSaleResponse,
     SaleCreate,
@@ -38,19 +39,23 @@ router = APIRouter()
 # Helper Functions
 # ============================================================================
 
-def _enrich_sale_response(sale: Sale, warnings: list[str] | None = None) -> dict:
+def _enrich_sale_response(sale: Sale, db: Session = None, warnings: list[str] | None = None) -> dict:
     """
     Enrich sale object with joined data for response.
 
     Assumes sale was loaded with proper joinedload options.
+    If db is provided, resolves audit user names (created_by, liquidated_by, updated_by).
     """
-    return {
+    data = {
         **sale.__dict__,
         "customer_name": sale.customer.name if sale.customer else None,
         "warehouse_name": sale.warehouse.name if sale.warehouse else None,
         "payment_account_name": sale.payment_account.name if sale.payment_account else None,
         "total_profit": float(sale.calculate_total_profit()),
         "warnings": warnings or getattr(sale, "_warnings", []),
+        "created_by_name": None,
+        "liquidated_by_name": None,
+        "updated_by_name": None,
         "lines": [
             {
                 **line.__dict__,
@@ -68,6 +73,17 @@ def _enrich_sale_response(sale: Sale, warnings: list[str] | None = None) -> dict
             for comm in sale.commissions
         ],
     }
+
+    # Resolver nombres de usuarios de auditoria
+    if db:
+        user_ids = {uid for uid in [sale.created_by, sale.liquidated_by, getattr(sale, 'updated_by', None)] if uid}
+        if user_ids:
+            users = {u.id: u.full_name or u.email for u in db.query(User).filter(User.id.in_(user_ids)).all()}
+            data["created_by_name"] = users.get(sale.created_by)
+            data["liquidated_by_name"] = users.get(sale.liquidated_by)
+            data["updated_by_name"] = users.get(getattr(sale, 'updated_by', None))
+
+    return data
 
 
 # ============================================================================
@@ -131,8 +147,8 @@ async def create_sale(
         )
 
         # Enrich with joined data (incluir warnings)
-        response_data = _enrich_sale_response(sale, warnings=warnings)
-        
+        response_data = _enrich_sale_response(sale, db=db, warnings=warnings)
+
         logger.info(
             f"Sale #{sale.sale_number} created by user {org_context['user_id']} "
             f"in org {org_context['organization_id']}"
@@ -215,7 +231,7 @@ async def list_sales(
         )
         
         # Enrich each sale with joined data
-        items = [SaleResponse(**_enrich_sale_response(s)) for s in sales]
+        items = [SaleResponse(**_enrich_sale_response(s, db=db)) for s in sales]
         
         return PaginatedSaleResponse(
             items=items,
@@ -259,7 +275,7 @@ async def list_pending_sales(
             status="registered",
         )
         
-        items = [SaleResponse(**_enrich_sale_response(s)) for s in sales]
+        items = [SaleResponse(**_enrich_sale_response(s, db=db)) for s in sales]
         
         return PaginatedSaleResponse(
             items=items,
@@ -307,7 +323,7 @@ async def get_sale_by_number(
         organization_id=org_context["organization_id"],
     )
     
-    response_data = _enrich_sale_response(sale)
+    response_data = _enrich_sale_response(sale, db=db)
     return SaleResponse(**response_data)
 
 
@@ -334,7 +350,7 @@ async def list_sales_by_customer(
             customer_id=customer_id,
         )
         
-        items = [SaleResponse(**_enrich_sale_response(s)) for s in sales]
+        items = [SaleResponse(**_enrich_sale_response(s, db=db)) for s in sales]
         
         return PaginatedSaleResponse(
             items=items,
@@ -382,7 +398,7 @@ async def get_sale(
             detail="Sale not found",
         )
     
-    response_data = _enrich_sale_response(sale)
+    response_data = _enrich_sale_response(sale, db=db)
     return SaleResponse(**response_data)
 
 
@@ -417,6 +433,7 @@ async def update_sale(
             sale_id=sale_id,
             obj_in=sale_in,
             organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
         )
 
         # Capturar warnings antes de reload
@@ -432,7 +449,7 @@ async def update_sale(
             organization_id=org_context["organization_id"],
         )
 
-        response_data = _enrich_sale_response(sale, warnings=warnings)
+        response_data = _enrich_sale_response(sale, db=db, warnings=warnings)
 
         logger.info(
             f"Sale #{sale.sale_number} updated by user {org_context['user_id']}"
@@ -505,7 +522,7 @@ async def liquidate_sale(
             organization_id=org_context["organization_id"],
         )
         
-        response_data = _enrich_sale_response(sale)
+        response_data = _enrich_sale_response(sale, db=db)
         
         logger.info(
             f"Sale #{sale.sale_number} liquidated by user {org_context['user_id']}"
@@ -568,7 +585,7 @@ async def cancel_sale(
             organization_id=org_context["organization_id"],
         )
         
-        response_data = _enrich_sale_response(sale)
+        response_data = _enrich_sale_response(sale, db=db)
         
         logger.info(
             f"Sale #{sale.sale_number} cancelled by user {org_context['user_id']}"

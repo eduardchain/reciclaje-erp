@@ -150,6 +150,13 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         comment="Timestamp when the purchase was liquidated/paid",
     )
 
+    updated_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User who last edited the purchase",
+    )
+
     # Relationships
     supplier: Mapped["ThirdParty"] = relationship(
         "ThirdParty",

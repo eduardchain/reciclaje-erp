@@ -56,6 +56,10 @@ export interface PurchaseResponse extends BaseEntity {
   created_by: string | null;
   liquidated_by: string | null;
   liquidated_at: string | null;
+  updated_by: string | null;
+  created_by_name: string | null;
+  liquidated_by_name: string | null;
+  updated_by_name: string | null;
   supplier_name: string;
   payment_account_name: string | null;
   lines: PurchaseLineResponse[];

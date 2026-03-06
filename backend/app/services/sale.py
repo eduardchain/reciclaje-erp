@@ -12,7 +12,7 @@ Business Rules:
 - Commission balances increase when sale is liquidated
 - Paid sales cannot be cancelled (require reversal sale)
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
@@ -297,6 +297,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         sale.status = "paid"
         sale.payment_account_id = payment_account_id
         sale.liquidated_by = user_id
+        sale.liquidated_at = datetime.now(timezone.utc)
         
         # Step 5: Update payment account balance (receive payment)
         payment_account.current_balance += sale.total_amount
@@ -397,7 +398,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 unit_cost=line.unit_cost,
                 reference_type="sale",
                 reference_id=sale.id,
-                date=datetime.now(),
+                date=datetime.now(timezone.utc),
                 notes=f"Reversal of sale #{sale.sale_number}",
             )
             db.add(reversal_movement)
@@ -617,6 +618,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             sale.invoice_number = obj_in.invoice_number
         if obj_in.warehouse_id is not None:
             sale.warehouse_id = obj_in.warehouse_id
+
+        if user_id:
+            sale.updated_by = user_id
 
         db.flush()
 

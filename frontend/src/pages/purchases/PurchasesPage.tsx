@@ -25,6 +25,7 @@ import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { PurchaseResponse } from "@/types/purchase";
 import type { MetricCard } from "@/types/reports";
+import { useAuthStore } from "@/stores/authStore";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 
 const PAGE_SIZE = 20;
@@ -32,6 +33,8 @@ const PAGE_SIZE = 20;
 function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
   const navigate = useNavigate();
   const [cancelOpen, setCancelOpen] = useState(false);
+  const { organizationId, organizations } = useAuthStore();
+  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
   const cancelMutation = useCancelPurchase();
 
   const canEdit = purchase.status === "registered" && !purchase.double_entry_id;
@@ -75,7 +78,7 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => exportPurchasePDF(purchase)}>
+          <DropdownMenuItem onClick={() => exportPurchasePDF(purchase, orgName)}>
             <FileText className="h-4 w-4 mr-2" />
             Exportar PDF
           </DropdownMenuItem>

@@ -176,6 +176,13 @@ class SaleResponse(SaleBase):
     # Audit fields
     created_by: Optional[UUID] = Field(None, description="User who created the sale")
     liquidated_by: Optional[UUID] = Field(None, description="User who liquidated the sale")
+    updated_by: Optional[UUID] = Field(None, description="User who last edited the sale")
+    liquidated_at: Optional[datetime] = Field(None, description="Timestamp when the sale was liquidated")
+
+    # Audit names (joined from User model)
+    created_by_name: Optional[str] = Field(None, description="Name of user who created the sale")
+    liquidated_by_name: Optional[str] = Field(None, description="Name of user who liquidated the sale")
+    updated_by_name: Optional[str] = Field(None, description="Name of user who last edited the sale")
 
     # Joined data from related models
     customer_name: str = Field(..., description="Customer name")

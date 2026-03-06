@@ -27,12 +27,15 @@ import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/ut
 import { ROUTES } from "@/utils/constants";
 import type { SaleResponse } from "@/types/sale";
 import type { MetricCard } from "@/types/reports";
+import { useAuthStore } from "@/stores/authStore";
 import { exportSalePDF } from "@/utils/pdfExport";
 
 const PAGE_SIZE = 20;
 
 function ActionsCell({ sale }: { sale: SaleResponse }) {
   const navigate = useNavigate();
+  const { organizationId, organizations } = useAuthStore();
+  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
   const [liquidateOpen, setLiquidateOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [paymentAccountId, setPaymentAccountId] = useState("");
@@ -81,7 +84,7 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => exportSalePDF(sale)}>
+          <DropdownMenuItem onClick={() => exportSalePDF(sale, orgName)}>
             <FileText className="h-4 w-4 mr-2" />
             Exportar PDF
           </DropdownMenuItem>

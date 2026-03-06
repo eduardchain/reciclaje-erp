@@ -28,6 +28,13 @@ export const purchaseService = {
     return response.data;
   },
 
+  checkDuplicate: async (supplierId: string, date: string): Promise<{ count: number }> => {
+    const response = await apiClient.get<{ count: number }>("/api/v1/purchases/check-duplicate", {
+      params: { supplier_id: supplierId, date },
+    });
+    return response.data;
+  },
+
   create: async (data: PurchaseCreate): Promise<PurchaseResponse> => {
     const response = await apiClient.post<PurchaseResponse>("/api/v1/purchases", data);
     return response.data;

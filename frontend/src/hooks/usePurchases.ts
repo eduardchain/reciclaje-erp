@@ -38,9 +38,12 @@ export function useCreatePurchase() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: PurchaseCreate) => purchaseService.create(data),
-    onSuccess: () => {
+    onSuccess: (purchase) => {
       queryClient.invalidateQueries({ queryKey: ["purchases"] });
       toast.success("Compra creada exitosamente");
+      if (purchase.warnings && purchase.warnings.length > 0) {
+        purchase.warnings.forEach((w) => toast.warning(w));
+      }
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al crear la compra"));

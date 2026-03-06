@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_required_org_context
 from app.models.purchase import Purchase
+from app.models.user import User
 from app.schemas.purchase import (
     PaginatedPurchaseResponse,
     PurchaseCreate,
@@ -38,13 +39,13 @@ router = APIRouter()
 # Helper Functions
 # ============================================================================
 
-def _enrich_purchase_response(purchase: Purchase) -> dict:
+def _enrich_purchase_response(purchase: Purchase, db: Session = None) -> dict:
     """
     Enrich purchase object with joined data for response.
-    
+
     Assumes purchase was loaded with proper joinedload options.
     """
-    return {
+    data = {
         **purchase.__dict__,
         "supplier_name": purchase.supplier.name if purchase.supplier else None,
         "payment_account_name": purchase.payment_account.name if purchase.payment_account else None,
@@ -57,12 +58,47 @@ def _enrich_purchase_response(purchase: Purchase) -> dict:
             }
             for line in purchase.lines
         ],
+        "created_by_name": None,
+        "liquidated_by_name": None,
+        "updated_by_name": None,
     }
+
+    # Resolver nombres de usuarios de auditoria
+    if db:
+        user_ids = {uid for uid in [purchase.created_by, purchase.liquidated_by, getattr(purchase, 'updated_by', None)] if uid}
+        if user_ids:
+            users = {u.id: u.full_name or u.email for u in db.query(User).filter(User.id.in_(user_ids)).all()}
+            data["created_by_name"] = users.get(purchase.created_by)
+            data["liquidated_by_name"] = users.get(purchase.liquidated_by)
+            data["updated_by_name"] = users.get(getattr(purchase, 'updated_by', None))
+
+    return data
 
 
 # ============================================================================
 # Endpoints
 # ============================================================================
+
+@router.get(
+    "/check-duplicate",
+    summary="Check for duplicate purchases",
+    description="Verifica si ya existen compras del mismo proveedor en la misma fecha (RN-COMP-02).",
+)
+async def check_duplicate(
+    supplier_id: UUID = Query(...),
+    date: datetime = Query(...),
+    db: Session = Depends(get_db),
+    org_context: dict = Depends(get_required_org_context),
+) -> dict:
+    """Retorna la cantidad de compras existentes del mismo proveedor en la misma fecha."""
+    count = purchase_service.check_duplicate(
+        db=db,
+        supplier_id=supplier_id,
+        date=date,
+        organization_id=org_context["organization_id"],
+    )
+    return {"count": count}
+
 
 @router.post(
     "",
@@ -105,7 +141,7 @@ async def create_purchase(
         )
 
         # Enrich with joined data
-        response_data = _enrich_purchase_response(purchase)
+        response_data = _enrich_purchase_response(purchase, db)
         if warnings:
             response_data["warnings"] = warnings
         
@@ -187,7 +223,7 @@ async def list_purchases(
         )
         
         # Enrich each purchase with joined data
-        items = [PurchaseResponse(**_enrich_purchase_response(p)) for p in purchases]
+        items = [PurchaseResponse(**_enrich_purchase_response(p, db)) for p in purchases]
         
         return PaginatedPurchaseResponse(
             items=items,
@@ -231,7 +267,7 @@ async def list_pending_purchases(
             status="registered",
         )
         
-        items = [PurchaseResponse(**_enrich_purchase_response(p)) for p in purchases]
+        items = [PurchaseResponse(**_enrich_purchase_response(p, db)) for p in purchases]
         
         return PaginatedPurchaseResponse(
             items=items,
@@ -279,7 +315,7 @@ async def get_purchase_by_number(
         organization_id=org_context["organization_id"],
     )
     
-    response_data = _enrich_purchase_response(purchase)
+    response_data = _enrich_purchase_response(purchase, db)
     return PurchaseResponse(**response_data)
 
 
@@ -306,7 +342,7 @@ async def list_purchases_by_supplier(
             supplier_id=supplier_id,
         )
         
-        items = [PurchaseResponse(**_enrich_purchase_response(p)) for p in purchases]
+        items = [PurchaseResponse(**_enrich_purchase_response(p, db)) for p in purchases]
         
         return PaginatedPurchaseResponse(
             items=items,
@@ -355,7 +391,7 @@ async def get_purchase(
             detail="Purchase not found",
         )
     
-    response_data = _enrich_purchase_response(purchase)
+    response_data = _enrich_purchase_response(purchase, db)
     return PurchaseResponse(**response_data)
 
 
@@ -394,7 +430,7 @@ async def update_purchase(
             user_id=org_context["user_id"],
         )
 
-        response_data = _enrich_purchase_response(purchase)
+        response_data = _enrich_purchase_response(purchase, db)
 
         logger.info(
             f"Purchase #{purchase.purchase_number} updated by user {org_context['user_id']}"
@@ -459,7 +495,7 @@ async def liquidate_purchase(
             line_updates=line_updates,
         )
         
-        response_data = _enrich_purchase_response(purchase)
+        response_data = _enrich_purchase_response(purchase, db)
         
         logger.info(
             f"Purchase #{purchase.purchase_number} liquidated by user {org_context['user_id']}"
@@ -515,7 +551,7 @@ async def cancel_purchase(
             organization_id=org_context["organization_id"],
         )
         
-        response_data = _enrich_purchase_response(purchase)
+        response_data = _enrich_purchase_response(purchase, db)
         
         logger.info(
             f"Purchase #{purchase.purchase_number} cancelled by user {org_context['user_id']}"

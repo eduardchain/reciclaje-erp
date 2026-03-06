@@ -16,7 +16,8 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
-import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
+import { useAuthStore } from "@/stores/authStore";
+import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 
@@ -31,6 +32,8 @@ export default function PurchaseDetailPage() {
   const navigate = useNavigate();
   const { data: purchase, isLoading } = usePurchase(id!);
   const cancel = useCancelPurchase();
+  const { organizationId, organizations } = useAuthStore();
+  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
 
   const [showCancel, setShowCancel] = useState(false);
 
@@ -82,7 +85,7 @@ export default function PurchaseDetailPage() {
               Cancelar
             </Button>
           )}
-          <Button variant="outline" onClick={() => exportPurchasePDF(purchase)}>
+          <Button variant="outline" onClick={() => exportPurchasePDF(purchase, orgName)}>
             <FileText className="h-4 w-4 mr-2" />
             PDF
           </Button>
@@ -152,10 +155,6 @@ export default function PurchaseDetailPage() {
                   <dd className="text-slate-700">{purchase.notes}</dd>
                 </div>
               )}
-              <div className="flex justify-between">
-                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Creada</dt>
-                <dd>{formatDate(purchase.created_at)}</dd>
-              </div>
             </dl>
           </CardContent>
         </Card>
@@ -200,6 +199,36 @@ export default function PurchaseDetailPage() {
             <div className="flex justify-end">
               <span className="text-lg font-bold">{formatCurrency(purchase.total_amount)}</span>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Auditoria */}
+      <Card className="shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Auditoria</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Creada por</dt>
+              <dd className="mt-0.5">{purchase.created_by_name ?? "-"}</dd>
+              <dd className="text-xs text-slate-400">{formatDateTime(purchase.created_at)}</dd>
+            </div>
+            {purchase.liquidated_at && (
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidada por</dt>
+                <dd className="mt-0.5">{purchase.liquidated_by_name ?? "-"}</dd>
+                <dd className="text-xs text-slate-400">{formatDateTime(purchase.liquidated_at)}</dd>
+              </div>
+            )}
+            {purchase.updated_by_name && (
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Editada por</dt>
+                <dd className="mt-0.5">{purchase.updated_by_name}</dd>
+                <dd className="text-xs text-slate-400">{formatDateTime(purchase.updated_at)}</dd>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

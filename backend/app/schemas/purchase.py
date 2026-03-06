@@ -129,6 +129,12 @@ class PurchaseResponse(PurchaseBase):
     created_by: Optional[UUID] = Field(None, description="User who created the purchase")
     liquidated_by: Optional[UUID] = Field(None, description="User who liquidated the purchase")
     liquidated_at: Optional[datetime] = Field(None, description="Timestamp when the purchase was liquidated")
+    updated_by: Optional[UUID] = Field(None, description="User who last edited the purchase")
+
+    # Audit names (joined from User model)
+    created_by_name: Optional[str] = Field(None, description="Name of user who created the purchase")
+    liquidated_by_name: Optional[str] = Field(None, description="Name of user who liquidated the purchase")
+    updated_by_name: Optional[str] = Field(None, description="Name of user who last edited the purchase")
 
     # Warnings (duplicados, stock negativo, etc.)
     warnings: Optional[List[str]] = Field(None, description="Advertencias no bloqueantes")

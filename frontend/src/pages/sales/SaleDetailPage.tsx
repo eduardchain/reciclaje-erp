@@ -14,7 +14,8 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { WarningsList } from "@/components/shared/WarningsList";
 import { useSale, useLiquidateSale, useCancelSale } from "@/hooks/useSales";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
-import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
+import { formatCurrency, formatDate, formatDateTime, formatWeight, formatPercentage } from "@/utils/formatters";
+import { useAuthStore } from "@/stores/authStore";
 import { ROUTES } from "@/utils/constants";
 import { exportSalePDF } from "@/utils/pdfExport";
 
@@ -28,6 +29,8 @@ export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: sale, isLoading } = useSale(id!);
+  const { organizationId, organizations } = useAuthStore();
+  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
   const { data: accountsData } = useMoneyAccounts();
   const liquidate = useLiquidateSale();
   const cancel = useCancelSale();
@@ -76,7 +79,7 @@ export default function SaleDetailPage() {
               </Button>
             </>
           )}
-          <Button variant="outline" onClick={() => exportSalePDF(sale)}>
+          <Button variant="outline" onClick={() => exportSalePDF(sale, orgName)}>
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
           <Button variant="outline" onClick={() => navigate(ROUTES.SALES)}>
@@ -116,7 +119,6 @@ export default function SaleDetailPage() {
             <dl className="space-y-2 text-sm">
               {sale.payment_account_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta Cobro</dt><dd>{sale.payment_account_name}</dd></div>}
               {sale.notes && <div><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Notas</dt><dd className="text-slate-700">{sale.notes}</dd></div>}
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Creada</dt><dd>{formatDate(sale.created_at)}</dd></div>
             </dl>
           </CardContent>
         </Card>
@@ -198,6 +200,34 @@ export default function SaleDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Auditoria */}
+      <Card className="shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Auditoria</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Creada por</dt>
+              <dd className="mt-0.5">{sale.created_by_name ?? "-"}</dd>
+              <dd className="text-xs text-slate-400">{formatDateTime(sale.created_at)}</dd>
+            </div>
+            {sale.liquidated_at && (
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cobrada por</dt>
+                <dd className="mt-0.5">{sale.liquidated_by_name ?? "-"}</dd>
+                <dd className="text-xs text-slate-400">{formatDateTime(sale.liquidated_at)}</dd>
+              </div>
+            )}
+            {sale.updated_by_name && (
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Editada por</dt>
+                <dd className="mt-0.5">{sale.updated_by_name}</dd>
+                <dd className="text-xs text-slate-400">{formatDateTime(sale.updated_at)}</dd>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Liquidate Dialog */}
       <ConfirmDialog

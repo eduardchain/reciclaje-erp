@@ -151,6 +151,19 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
         comment="User who liquidated/collected the sale"
     )
 
+    updated_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User who last edited the sale"
+    )
+
+    liquidated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when the sale was liquidated/collected"
+    )
+
     # Double-entry link (optional)
     double_entry_id: Mapped[Optional[UUID]] = mapped_column(
         GUID(),

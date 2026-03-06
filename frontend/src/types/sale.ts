@@ -87,6 +87,11 @@ export interface SaleResponse extends BaseEntity {
   payment_account_id: string | null;
   created_by: string | null;
   liquidated_by: string | null;
+  updated_by: string | null;
+  liquidated_at: string | null;
+  created_by_name: string | null;
+  liquidated_by_name: string | null;
+  updated_by_name: string | null;
   customer_name: string;
   warehouse_name: string | null;
   payment_account_name: string | null;

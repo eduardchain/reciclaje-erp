@@ -9,7 +9,7 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelada",
 };
 
-export function exportPurchasePDF(purchase: PurchaseResponse) {
+export function exportPurchasePDF(purchase: PurchaseResponse, orgName?: string) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 20;
@@ -17,7 +17,7 @@ export function exportPurchasePDF(purchase: PurchaseResponse) {
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text("EcoBalance ERP", 14, y);
+  doc.text(orgName || "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);
@@ -129,7 +129,7 @@ const SALE_STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelada",
 };
 
-export function exportSalePDF(sale: SaleResponse) {
+export function exportSalePDF(sale: SaleResponse, orgName?: string) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 20;
@@ -137,7 +137,7 @@ export function exportSalePDF(sale: SaleResponse) {
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text("EcoBalance ERP", 14, y);
+  doc.text(orgName || "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);

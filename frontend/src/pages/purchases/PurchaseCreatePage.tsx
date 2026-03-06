@@ -10,9 +10,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useCreatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, useMaterials, useWarehouses, useMoneyAccounts } from "@/hooks/useMasterData";
+import { purchaseService } from "@/services/purchases";
 import { formatCurrency, toLocalDatetimeInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { PurchaseLineCreate } from "@/types/purchase";
@@ -56,6 +58,9 @@ export default function PurchaseCreatePage() {
   const [autoLiquidate, setAutoLiquidate] = useState(false);
   const [paymentAccountId, setPaymentAccountId] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateCount, setDuplicateCount] = useState(0);
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
 
   const updateLine = (key: number, field: keyof PurchaseLineCreate, value: string | number | null) => {
     setLines((prev) =>
@@ -91,8 +96,7 @@ export default function PurchaseCreatePage() {
     lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
     (!autoLiquidate || paymentAccountId);
 
-  const handleSubmit = () => {
-    if (!canSubmit) return;
+  const doCreate = () => {
     createPurchase.mutate(
       {
         supplier_id: supplierId,
@@ -110,6 +114,24 @@ export default function PurchaseCreatePage() {
         },
       },
     );
+  };
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setCheckingDuplicate(true);
+    try {
+      const { count } = await purchaseService.checkDuplicate(supplierId, date);
+      if (count > 0) {
+        setDuplicateCount(count);
+        setDuplicateOpen(true);
+      } else {
+        doCreate();
+      }
+    } catch {
+      doCreate();
+    } finally {
+      setCheckingDuplicate(false);
+    }
   };
 
   return (
@@ -299,13 +321,26 @@ export default function PurchaseCreatePage() {
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={!canSubmit || createPurchase.isPending}
+            disabled={!canSubmit || createPurchase.isPending || checkingDuplicate}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
-            {createPurchase.isPending ? "Creando..." : "Crear Compra"}
+            {checkingDuplicate ? "Verificando..." : createPurchase.isPending ? "Creando..." : "Crear Compra"}
           </Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={duplicateOpen}
+        onOpenChange={setDuplicateOpen}
+        title="Posible compra duplicada"
+        description={`Ya existen ${duplicateCount} compra(s) del mismo proveedor en esta fecha. ¿Desea crear la compra de todas formas?`}
+        confirmLabel="Si, crear"
+        variant="default"
+        onConfirm={() => {
+          setDuplicateOpen(false);
+          doCreate();
+        }}
+      />
     </div>
   );
 }

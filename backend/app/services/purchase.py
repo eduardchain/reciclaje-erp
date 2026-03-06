@@ -5,7 +5,7 @@ Supports 1-step and 2-step purchase workflows:
 - 1-step: create() with auto_liquidate=True
 - 2-step: create() then liquidate() separately
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
@@ -26,7 +26,25 @@ from app.services.base import CRUDBase
 
 class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
     """CRUD operations for Purchase with inventory and financial logic."""
-    
+
+    def check_duplicate(
+        self,
+        db: Session,
+        supplier_id: UUID,
+        date: datetime,
+        organization_id: UUID,
+    ) -> int:
+        """Verifica si existen compras del mismo proveedor en la misma fecha (RN-COMP-02)."""
+        same_day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
+        same_day_end = date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return db.query(func.count(Purchase.id)).filter(
+            Purchase.organization_id == organization_id,
+            Purchase.supplier_id == supplier_id,
+            Purchase.date >= same_day_start,
+            Purchase.date <= same_day_end,
+            Purchase.status != "cancelled",
+        ).scalar() or 0
+
     def create(
         self,
         db: Session,
@@ -62,7 +80,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             HTTPException: 403 if resources don't belong to organization
         """
         # Step 0: Validar fecha no futura (V-COMP-04)
-        if obj_in.date.replace(tzinfo=None) > datetime.utcnow():
+        if obj_in.date.replace(tzinfo=None) > datetime.now(timezone.utc).replace(tzinfo=None):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="La fecha de la compra no puede ser futura"
@@ -86,15 +104,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
         # Step 2b: Deteccion de duplicados (RN-COMP-02) - warning, no bloquea
         warnings = []
-        same_day_start = obj_in.date.replace(hour=0, minute=0, second=0, microsecond=0)
-        same_day_end = obj_in.date.replace(hour=23, minute=59, second=59, microsecond=999999)
-        existing_count = db.query(func.count(Purchase.id)).filter(
-            Purchase.organization_id == organization_id,
-            Purchase.supplier_id == obj_in.supplier_id,
-            Purchase.date >= same_day_start,
-            Purchase.date <= same_day_end,
-            Purchase.status != "cancelled",
-        ).scalar()
+        existing_count = self.check_duplicate(db, obj_in.supplier_id, obj_in.date, organization_id)
         if existing_count > 0:
             warnings.append(
                 f"Ya existen {existing_count} compra(s) del mismo proveedor en esta fecha"
@@ -355,7 +365,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         purchase.status = "paid"
         purchase.payment_account_id = payment_account_id
         purchase.liquidated_by = user_id
-        purchase.liquidated_at = datetime.utcnow()
+        purchase.liquidated_at = datetime.now(timezone.utc)
 
         # Step 7: Deduct from payment account
         payment_account.current_balance -= purchase.total_amount
@@ -687,6 +697,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             purchase.vehicle_plate = obj_in.vehicle_plate
         if obj_in.invoice_number is not None:
             purchase.invoice_number = obj_in.invoice_number
+
+        if user_id:
+            purchase.updated_by = user_id
 
         db.commit()
         db.refresh(purchase)
