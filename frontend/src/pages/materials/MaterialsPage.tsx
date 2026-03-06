@@ -16,10 +16,10 @@ const columns: ColumnDef<MaterialResponse, unknown>[] = [
   { accessorKey: "code", header: "Codigo", cell: ({ row }) => <span className="font-medium">{row.original.code}</span> },
   { accessorKey: "name", header: "Nombre" },
   { accessorKey: "default_unit", header: "Unidad" },
-  { accessorKey: "current_stock_liquidated", header: "Stock Liq.", cell: ({ row }) => <span className="tabular-nums">{row.original.current_stock_liquidated.toFixed(2)}</span> },
-  { accessorKey: "current_stock_transit", header: "Stock Trans.", cell: ({ row }) => <span className="tabular-nums">{row.original.current_stock_transit.toFixed(2)}</span> },
-  { accessorKey: "current_average_cost", header: "Costo Prom.", cell: ({ row }) => formatCurrency(row.original.current_average_cost) },
-  { accessorKey: "total_value", header: "Valor", cell: ({ row }) => formatCurrency(row.original.current_stock_liquidated * row.original.current_average_cost) },
+  { accessorKey: "current_stock_liquidated", header: "Stock Liq.", enableSorting: true, cell: ({ row }) => <span className="tabular-nums">{(row.original.current_stock_liquidated ?? 0).toFixed(2)}</span> },
+  { accessorKey: "current_stock_transit", header: "Stock Trans.", cell: ({ row }) => <span className="tabular-nums">{(row.original.current_stock_transit ?? 0).toFixed(2)}</span> },
+  { accessorKey: "current_average_cost", header: "Costo Prom.", enableSorting: true, cell: ({ row }) => formatCurrency(row.original.current_average_cost ?? 0) },
+  { accessorKey: "total_value", header: "Valor", cell: ({ row }) => formatCurrency((row.original.current_stock_liquidated ?? 0) * (row.original.current_average_cost ?? 0)) },
 ];
 
 export default function MaterialsPage() {
@@ -35,17 +35,11 @@ export default function MaterialsPage() {
       <PageHeader title="Materiales" description="Catalogo de materiales">
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => navigate(ROUTES.MATERIALS_CATEGORIES)}>Categorias</Button>
-          <Button onClick={() => { setEditItem(null); setDialogOpen(true); }} className="bg-green-600 hover:bg-green-700">
+          <Button onClick={() => { setEditItem(null); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
             <Plus className="h-4 w-4 mr-2" />Nuevo Material
           </Button>
         </div>
       </PageHeader>
-
-      <div className="flex justify-end">
-        <div className="w-64">
-          <SearchInput value={search} onChange={setSearch} placeholder="Buscar material..." />
-        </div>
-      </div>
 
       <DataTable
         columns={columns}
@@ -58,6 +52,8 @@ export default function MaterialsPage() {
         onRowClick={(row) => { setEditItem(row); setDialogOpen(true); }}
         emptyTitle="Sin materiales"
         emptyDescription="No se encontraron materiales."
+        exportFilename="ecobalance_materiales"
+        toolbar={<SearchInput value={search} onChange={setSearch} placeholder="Buscar material..." />}
       />
 
       <MaterialFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editItem={editItem} />

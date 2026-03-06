@@ -27,7 +27,7 @@ from app.models.material import Material
 from app.models.third_party import ThirdParty
 from app.models.money_account import MoneyAccount
 from app.models.warehouse import Warehouse
-from app.schemas.sale import SaleCreate, SaleUpdate
+from app.schemas.sale import SaleCreate, SaleUpdate, SaleFullUpdate
 from app.services.base import CRUDBase
 
 
@@ -418,9 +418,213 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         db.flush()
         
         print(f"❌ Sale #{sale.sale_number} cancelled successfully")
-        
+
         return sale
-    
+
+    def update(
+        self,
+        db: Session,
+        sale_id: UUID,
+        obj_in: SaleFullUpdate,
+        organization_id: UUID,
+        user_id: UUID = None
+    ) -> Sale:
+        """
+        Edicion completa de venta con estrategia Revert and Re-apply.
+
+        Solo aplica a ventas status='registered' sin doble partida.
+        Si se envian lineas, revierte efectos de inventario y re-aplica.
+        Si se envian comisiones, las reemplaza todas.
+        Stock negativo genera warning, no error (RN-INV-03).
+        """
+        # Step 1: Validar venta existe y es editable
+        sale = db.query(Sale).options(
+            joinedload(Sale.lines).joinedload(SaleLine.material),
+            joinedload(Sale.commissions),
+        ).filter(
+            Sale.id == sale_id,
+            Sale.organization_id == organization_id
+        ).first()
+
+        if not sale:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Sale not found"
+            )
+
+        if sale.status != "registered":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Solo se pueden editar ventas con estado 'registered'. Estado actual: '{sale.status}'"
+            )
+
+        if sale.double_entry_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No se puede editar una venta vinculada a doble partida"
+            )
+
+        old_total = sale.total_amount
+        old_customer_id = sale.customer_id
+        warnings: list[str] = []
+
+        # Step 2: Si hay cambio de cliente, validar el nuevo
+        new_customer = None
+        if obj_in.customer_id and obj_in.customer_id != old_customer_id:
+            new_customer = db.get(ThirdParty, obj_in.customer_id)
+            if not new_customer or new_customer.organization_id != organization_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Nuevo cliente no encontrado"
+                )
+            if not new_customer.is_customer:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El tercero seleccionado no es cliente"
+                )
+
+        # Step 2b: Si hay cambio de bodega, validar
+        if obj_in.warehouse_id is not None:
+            warehouse = db.get(Warehouse, obj_in.warehouse_id)
+            if not warehouse or warehouse.organization_id != organization_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Bodega no encontrada"
+                )
+
+        # Step 3: Si hay lineas nuevas, hacer revert+reapply
+        if obj_in.lines is not None:
+            # 3a. Revertir efectos de lineas actuales (devolver stock)
+            for line in sale.lines:
+                material = line.material
+                material.current_stock += line.quantity
+                material.current_stock_liquidated += line.quantity
+                # Stock revertido para material {material.code}
+
+            # 3b. Eliminar movimientos de inventario originales
+            db.query(InventoryMovement).filter(
+                InventoryMovement.reference_type == "sale",
+                InventoryMovement.reference_id == sale.id,
+                InventoryMovement.movement_type == "sale",
+            ).delete(synchronize_session=False)
+
+            # 3c. Eliminar lineas antiguas
+            db.query(SaleLine).filter(
+                SaleLine.sale_id == sale.id
+            ).delete(synchronize_session=False)
+
+            db.flush()
+
+            # 3d. Crear nuevas lineas
+            new_total = Decimal("0.00")
+            effective_warehouse_id = obj_in.warehouse_id or sale.warehouse_id
+
+            for line_data in obj_in.lines:
+                material = db.get(Material, line_data.material_id)
+                if not material or material.organization_id != organization_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Material {line_data.material_id} no encontrado"
+                    )
+
+                quantity = Decimal(str(line_data.quantity))
+                unit_price = Decimal(str(line_data.unit_price))
+                line_total = quantity * unit_price
+                new_total += line_total
+                unit_cost = material.current_average_cost
+
+                # Check stock (RN-INV-03: warning, no bloqueo)
+                if material.current_stock_liquidated < quantity:
+                    resulting_stock = material.current_stock_liquidated - quantity
+                    warnings.append(
+                        f"Stock insuficiente para '{material.name}'. "
+                        f"Disponible: {material.current_stock_liquidated}, "
+                        f"Requerido: {quantity}. "
+                        f"Stock resultante: {resulting_stock}"
+                    )
+
+                # Crear SaleLine
+                new_line = SaleLine(
+                    sale_id=sale.id,
+                    material_id=line_data.material_id,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    total_price=line_total,
+                    unit_cost=unit_cost,
+                )
+                db.add(new_line)
+
+                # Crear InventoryMovement
+                movement = InventoryMovement(
+                    organization_id=organization_id,
+                    material_id=line_data.material_id,
+                    warehouse_id=effective_warehouse_id,
+                    movement_type="sale",
+                    quantity=-quantity,
+                    unit_cost=unit_cost,
+                    reference_type="sale",
+                    reference_id=sale.id,
+                    date=obj_in.date or sale.date,
+                    notes=f"Sale #{sale.sale_number} (edited)",
+                )
+                db.add(movement)
+
+                # Actualizar stock
+                material.current_stock -= quantity
+                material.current_stock_liquidated -= quantity
+                # Nueva linea: {material.code} x {quantity}
+
+            sale.total_amount = new_total
+        else:
+            new_total = old_total
+
+        # Step 4: Si hay comisiones nuevas, reemplazar
+        if obj_in.commissions is not None:
+            # Eliminar comisiones existentes (nunca fueron pagadas en status=registered)
+            db.query(SaleCommission).filter(
+                SaleCommission.sale_id == sale.id
+            ).delete(synchronize_session=False)
+            db.flush()
+
+            # Crear nuevas comisiones
+            if obj_in.commissions:
+                self._process_commissions(db, sale, obj_in.commissions, new_total, organization_id)
+
+        # Step 5: Ajustar saldo de cliente
+        if new_customer:
+            # Revertir saldo del cliente original
+            old_customer = db.get(ThirdParty, old_customer_id)
+            old_customer.current_balance -= old_total
+            # Aplicar saldo al nuevo cliente
+            new_customer.current_balance += new_total
+            sale.customer_id = obj_in.customer_id
+            # Cliente cambiado
+        elif obj_in.lines is not None:
+            # Mismo cliente pero lineas cambiaron: ajustar diferencia
+            customer = db.get(ThirdParty, old_customer_id)
+            balance_diff = new_total - old_total
+            customer.current_balance += balance_diff
+            # Saldo cliente ajustado por diferencia
+
+        # Step 6: Actualizar metadata
+        if obj_in.date is not None:
+            sale.date = obj_in.date
+        if obj_in.notes is not None:
+            sale.notes = obj_in.notes
+        if obj_in.vehicle_plate is not None:
+            sale.vehicle_plate = obj_in.vehicle_plate
+        if obj_in.invoice_number is not None:
+            sale.invoice_number = obj_in.invoice_number
+        if obj_in.warehouse_id is not None:
+            sale.warehouse_id = obj_in.warehouse_id
+
+        db.flush()
+
+        # Adjuntar warnings
+        sale._warnings = warnings
+
+        return sale
+
     def get_by_number(
         self,
         db: Session,

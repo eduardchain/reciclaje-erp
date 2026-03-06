@@ -8,14 +8,14 @@ import { expenseCategoryService } from "@/services/masterData";
 export function useSuppliers(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "suppliers", search],
-    queryFn: () => thirdPartyService.getAll({ role: "supplier", search, limit: 100 }),
+    queryFn: () => thirdPartyService.getSuppliers({ search, limit: 100 }),
   });
 }
 
 export function useCustomers(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "customers", search],
-    queryFn: () => thirdPartyService.getAll({ role: "customer", search, limit: 100 }),
+    queryFn: () => thirdPartyService.getCustomers({ search, limit: 100 }),
   });
 }
 

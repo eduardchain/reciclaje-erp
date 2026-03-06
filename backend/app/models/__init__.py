@@ -1,5 +1,5 @@
 """
-SQLAlchemy models for ReciclaTrac ERP system.
+SQLAlchemy models for EcoBalance ERP system.
 """
 
 from .base import Base, TimestampMixin, OrganizationMixin

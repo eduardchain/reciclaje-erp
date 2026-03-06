@@ -135,12 +135,30 @@ class SaleCreate(SaleBase):
 class SaleUpdate(BaseModel):
     """
     Schema for updating a Sale (partial updates only).
-    
+
     Note: Only metadata can be updated, not lines, amounts, or status.
     """
     notes: Optional[str] = Field(None, max_length=1000)
     vehicle_plate: Optional[str] = Field(None, max_length=20)
     invoice_number: Optional[str] = Field(None, max_length=50)
+
+
+class SaleFullUpdate(BaseModel):
+    """
+    Edicion completa de venta: metadata + cliente + bodega + lineas + comisiones.
+
+    Solo aplica a ventas con status='registered' y sin doble partida.
+    Si lines se envia, reemplaza todas las lineas (revert + re-apply).
+    Si commissions se envia, reemplaza todas las comisiones.
+    """
+    customer_id: Optional[UUID] = Field(None, description="Nuevo cliente")
+    warehouse_id: Optional[UUID] = Field(None, description="Nueva bodega")
+    date: Optional[datetime] = Field(None, description="Nueva fecha")
+    notes: Optional[str] = Field(None, max_length=1000)
+    vehicle_plate: Optional[str] = Field(None, max_length=20)
+    invoice_number: Optional[str] = Field(None, max_length=50)
+    lines: Optional[List[SaleLineCreate]] = Field(None, min_length=1, description="Nuevas lineas (reemplazan todas)")
+    commissions: Optional[List[SaleCommissionCreate]] = Field(None, description="Nuevas comisiones (reemplazan todas)")
 
 
 class SaleResponse(SaleBase):

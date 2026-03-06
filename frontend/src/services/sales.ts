@@ -1,5 +1,5 @@
 import apiClient from "./api";
-import type { SaleResponse, SaleCreate, SaleLiquidateRequest } from "@/types/sale";
+import type { SaleResponse, SaleCreate, SaleFullUpdate, SaleLiquidateRequest } from "@/types/sale";
 import type { PaginatedResponse } from "@/types/common";
 
 interface SaleFilters {
@@ -25,6 +25,11 @@ export const saleService = {
 
   create: async (data: SaleCreate): Promise<SaleResponse> => {
     const response = await apiClient.post<SaleResponse>("/api/v1/sales", data);
+    return response.data;
+  },
+
+  update: async (id: string, data: SaleFullUpdate): Promise<SaleResponse> => {
+    const response = await apiClient.patch<SaleResponse>(`/api/v1/sales/${id}`, data);
     return response.data;
   },
 

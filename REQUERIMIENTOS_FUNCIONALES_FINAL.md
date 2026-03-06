@@ -1,5 +1,5 @@
 # DOCUMENTO DE REQUERIMIENTOS FUNCIONALES - VERSIÓN FINAL
-## Sistema de Gestión para Empresa de Reciclaje - "ReciclaTrac"
+## Sistema de Gestión para Empresa de Reciclaje - "EcoBalance"
 
 **Fecha:** Enero 2026  
 **Versión:** 2.0 - FINAL para Implementación  
@@ -80,7 +80,7 @@
 
 ### 1.1 Propósito del Documento
 
-Este documento define los requerimientos funcionales COMPLETOS para el desarrollo del sistema de gestión "ReciclaTrac", especializado para empresas del sector de reciclaje de metales y materiales.
+Este documento define los requerimientos funcionales COMPLETOS para el desarrollo del sistema de gestión "EcoBalance", especializado para empresas del sector de reciclaje de metales y materiales.
 
 **Audiencia:**
 - Equipo de desarrollo

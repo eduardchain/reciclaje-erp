@@ -9,7 +9,7 @@ interface MoneyDisplayProps {
 
 export function MoneyDisplay({ amount, className, showSign = false }: MoneyDisplayProps) {
   const colorClass =
-    amount > 0 ? "text-green-700" : amount < 0 ? "text-red-700" : "text-gray-500";
+    amount > 0 ? "text-emerald-700" : amount < 0 ? "text-red-700" : "text-slate-500";
 
   const prefix = showSign && amount > 0 ? "+" : "";
 

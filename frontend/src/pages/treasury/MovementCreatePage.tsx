@@ -144,8 +144,8 @@ export default function MovementCreatePage() {
       </PageHeader>
 
       {/* Tipo de movimiento */}
-      <Card>
-        <CardHeader><CardTitle className="text-base">Tipo de Movimiento</CardTitle></CardHeader>
+      <Card className="shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Tipo de Movimiento</CardTitle></CardHeader>
         <CardContent>
           <Select value={type} onValueChange={handleTypeChange}>
             <SelectTrigger className="w-full max-w-md">
@@ -161,36 +161,36 @@ export default function MovementCreatePage() {
       </Card>
 
       {/* Formulario dinamico */}
-      <Card>
-        <CardHeader><CardTitle className="text-base">{typeLabels[type]}</CardTitle></CardHeader>
+      <Card className="shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">{typeLabels[type]}</CardTitle></CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <Label>Monto *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Monto *</Label>
               <Input type="number" min={0} step="1" value={amount || ""} onChange={(e) => setAmount(parseFloat(e.target.value) || 0)} placeholder="0" />
             </div>
             <div>
-              <Label>Fecha *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
               <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
 
             {needsThirdParty && (
               <div>
-                <Label>{getThirdPartyLabel()}</Label>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">{getThirdPartyLabel()}</Label>
                 <EntitySelect value={thirdPartyId} onChange={setThirdPartyId} options={getThirdPartyOptions()} placeholder="Seleccionar..." />
               </div>
             )}
 
             {needsExpenseCategory && (
               <div>
-                <Label>Categoria de Gasto *</Label>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria de Gasto *</Label>
                 <EntitySelect value={expCategoryId} onChange={setExpCategoryId} options={expenseCategories.map((c) => ({ id: c.id, label: c.name }))} placeholder="Seleccionar categoria..." />
               </div>
             )}
 
             {!needsDestAccount && (
               <div>
-                <Label>Cuenta *</Label>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta *</Label>
                 <EntitySelect value={accountId} onChange={setAccountId} options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))} placeholder="Seleccionar cuenta..." />
               </div>
             )}
@@ -198,11 +198,11 @@ export default function MovementCreatePage() {
             {needsDestAccount && (
               <>
                 <div>
-                  <Label>Cuenta Origen *</Label>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta Origen *</Label>
                   <EntitySelect value={accountId} onChange={setAccountId} options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))} placeholder="Cuenta origen..." />
                 </div>
                 <div>
-                  <Label>Cuenta Destino *</Label>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta Destino *</Label>
                   <EntitySelect value={destAccountId} onChange={setDestAccountId} options={accounts.filter((a) => a.id !== accountId).map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))} placeholder="Cuenta destino..." />
                 </div>
               </>
@@ -210,35 +210,37 @@ export default function MovementCreatePage() {
 
             {needsDescription && (
               <div className="md:col-span-2">
-                <Label>Descripcion *</Label>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Descripcion *</Label>
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descripcion del movimiento" />
               </div>
             )}
 
             {!needsDescription && type !== "expense" && (
               <div className="md:col-span-2">
-                <Label>Descripcion</Label>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Descripcion</Label>
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descripcion (opcional)" />
               </div>
             )}
 
             <div>
-              <Label>Referencia</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Referencia</Label>
               <Input value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} placeholder="Numero de referencia" />
             </div>
             <div>
-              <Label>Notas</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Notas adicionales..." />
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>Cancelar</Button>
-        <Button onClick={handleSubmit} disabled={create.isPending || amount <= 0} className="bg-green-600 hover:bg-green-700">
-          {create.isPending ? "Creando..." : "Crear Movimiento"}
-        </Button>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={create.isPending || amount <= 0} className="bg-emerald-600 hover:bg-emerald-700">
+            {create.isPending ? "Creando..." : "Crear Movimiento"}
+          </Button>
+        </div>
       </div>
     </div>
   );

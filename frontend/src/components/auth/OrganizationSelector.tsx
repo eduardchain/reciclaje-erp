@@ -15,7 +15,7 @@ export function OrganizationSelector() {
   };
 
   return (
-    <div className="h-screen flex items-center justify-center bg-gray-50 p-4">
+    <div className="h-screen flex items-center justify-center bg-slate-50 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">{APP_NAME}</CardTitle>
@@ -29,7 +29,7 @@ export function OrganizationSelector() {
               className="w-full justify-start h-auto py-3 px-4"
               onClick={() => handleSelect(org.id)}
             >
-              <Building2 className="mr-3 h-5 w-5 text-green-600" />
+              <Building2 className="mr-3 h-5 w-5 text-emerald-600" />
               <div className="text-left">
                 <div className="font-medium">{org.name}</div>
                 {org.member_role && (

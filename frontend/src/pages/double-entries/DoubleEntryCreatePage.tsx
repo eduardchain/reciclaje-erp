@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
@@ -41,7 +40,7 @@ export default function DoubleEntryCreatePage() {
   const [purchaseUnitPrice, setPurchaseUnitPrice] = useState(0);
   const [customerId, setCustomerId] = useState("");
   const [saleUnitPrice, setSaleUnitPrice] = useState(0);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 16));
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [notes, setNotes] = useState("");
@@ -84,21 +83,21 @@ export default function DoubleEntryCreatePage() {
       </PageHeader>
 
       {/* Material y Cantidad */}
-      <Card>
-        <CardHeader><CardTitle className="text-base">Material</CardTitle></CardHeader>
+      <Card className="shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Material</CardTitle></CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <Label>Material *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>
               <EntitySelect value={materialId} onChange={setMaterialId} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Seleccionar material..." />
             </div>
             <div>
-              <Label>Cantidad (kg) *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>
               <Input type="number" min={0} step="0.01" value={quantity || ""} onChange={(e) => setQuantity(parseFloat(e.target.value) || 0)} />
             </div>
             <div>
-              <Label>Fecha *</Label>
-              <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} />
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
           </div>
         </CardContent>
@@ -106,43 +105,72 @@ export default function DoubleEntryCreatePage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Compra */}
-        <Card>
-          <CardHeader><CardTitle className="text-base text-blue-700">Lado Compra</CardTitle></CardHeader>
+        <Card className="border-l-[3px] border-l-blue-500 shadow-sm">
+          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-blue-700">Lado Compra</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div><Label>Proveedor *</Label><EntitySelect value={supplierId} onChange={setSupplierId} options={suppliers.map((s) => ({ id: s.id, label: s.name }))} placeholder="Seleccionar proveedor..." /></div>
-            <div><Label>Precio Compra Unit. *</Label><Input type="number" min={0} step="1" value={purchaseUnitPrice || ""} onChange={(e) => setPurchaseUnitPrice(parseFloat(e.target.value) || 0)} /></div>
-            <Separator />
-            <div className="flex justify-between"><span className="text-gray-500">Total Compra</span><span className="font-bold text-lg">{formatCurrency(totalPurchase)}</span></div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor *</Label>
+              <EntitySelect value={supplierId} onChange={setSupplierId} options={suppliers.map((s) => ({ id: s.id, label: s.name }))} placeholder="Seleccionar proveedor..." />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Compra Unit. *</Label>
+              <Input type="number" min={0} step="1" value={purchaseUnitPrice || ""} onChange={(e) => setPurchaseUnitPrice(parseFloat(e.target.value) || 0)} />
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3">
+              <div className="flex justify-between"><span className="text-slate-500">Total Compra</span><span className="font-bold text-lg">{formatCurrency(totalPurchase)}</span></div>
+            </div>
           </CardContent>
         </Card>
 
         {/* Venta */}
-        <Card>
-          <CardHeader><CardTitle className="text-base text-green-700">Lado Venta</CardTitle></CardHeader>
+        <Card className="border-l-[3px] border-l-emerald-500 shadow-sm">
+          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Lado Venta</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div><Label>Cliente *</Label><EntitySelect value={customerId} onChange={setCustomerId} options={customers.map((c) => ({ id: c.id, label: c.name }))} placeholder="Seleccionar cliente..." /></div>
-            <div><Label>Precio Venta Unit. *</Label><Input type="number" min={0} step="1" value={saleUnitPrice || ""} onChange={(e) => setSaleUnitPrice(parseFloat(e.target.value) || 0)} /></div>
-            <Separator />
-            <div className="flex justify-between"><span className="text-gray-500">Total Venta</span><span className="font-bold text-lg">{formatCurrency(totalSale)}</span></div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente *</Label>
+              <EntitySelect value={customerId} onChange={setCustomerId} options={customers.map((c) => ({ id: c.id, label: c.name }))} placeholder="Seleccionar cliente..." />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Venta Unit. *</Label>
+              <Input type="number" min={0} step="1" value={saleUnitPrice || ""} onChange={(e) => setSaleUnitPrice(parseFloat(e.target.value) || 0)} />
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3">
+              <div className="flex justify-between"><span className="text-slate-500">Total Venta</span><span className="font-bold text-lg">{formatCurrency(totalSale)}</span></div>
+            </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Comisiones */}
-      <Card>
+      <Card className="shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Comisiones (Opcional)</CardTitle>
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones (Opcional)</CardTitle>
           <Button variant="outline" size="sm" onClick={() => setCommissions((p) => [...p, createEmptyCommission()])}><Plus className="h-4 w-4 mr-1" />Agregar</Button>
         </CardHeader>
         {commissions.length > 0 && (
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-0">
             {commissions.map((comm, idx) => (
-              <div key={comm._key} className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-3">{idx === 0 && <Label className="text-xs">Comisionista</Label>}<EntitySelect value={comm.third_party_id} onChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, third_party_id: v } : c))} options={allThirdParties.map((t) => ({ id: t.id, label: t.name }))} placeholder="Tercero..." /></div>
-                <div className="col-span-3">{idx === 0 && <Label className="text-xs">Concepto</Label>}<Input value={comm.concept} onChange={(e) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, concept: e.target.value } : c))} /></div>
-                <div className="col-span-2">{idx === 0 && <Label className="text-xs">Tipo</Label>}<Select value={comm.commission_type} onValueChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, commission_type: v as "percentage" | "fixed" } : c))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">%</SelectItem><SelectItem value="fixed">$</SelectItem></SelectContent></Select></div>
-                <div className="col-span-2">{idx === 0 && <Label className="text-xs">Valor</Label>}<Input type="number" min={0} value={comm.commission_value || ""} onChange={(e) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, commission_value: parseFloat(e.target.value) || 0 } : c))} /></div>
-                <div className="col-span-1">{idx === 0 && <Label className="text-xs">&nbsp;</Label>}<Button variant="ghost" size="sm" onClick={() => setCommissions((p) => p.filter((c) => c._key !== comm._key))} className="text-red-500"><Trash2 className="h-4 w-4" /></Button></div>
+              <div key={comm._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < commissions.length - 1 ? "border-b border-slate-100" : ""}`}>
+                <div className="col-span-3">
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comisionista</Label>}
+                  <EntitySelect value={comm.third_party_id} onChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, third_party_id: v } : c))} options={allThirdParties.map((t) => ({ id: t.id, label: t.name }))} placeholder="Tercero..." />
+                </div>
+                <div className="col-span-3">
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto</Label>}
+                  <Input value={comm.concept} onChange={(e) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, concept: e.target.value } : c))} />
+                </div>
+                <div className="col-span-2">
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</Label>}
+                  <Select value={comm.commission_type} onValueChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, commission_type: v as "percentage" | "fixed" } : c))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">%</SelectItem><SelectItem value="fixed">$</SelectItem></SelectContent></Select>
+                </div>
+                <div className="col-span-2">
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor</Label>}
+                  <Input type="number" min={0} value={comm.commission_value || ""} onChange={(e) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, commission_value: parseFloat(e.target.value) || 0 } : c))} />
+                </div>
+                <div className="col-span-1">
+                  {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
+                  <Button variant="ghost" size="sm" onClick={() => setCommissions((p) => p.filter((c) => c._key !== comm._key))} className="text-red-500"><Trash2 className="h-4 w-4" /></Button>
+                </div>
               </div>
             ))}
           </CardContent>
@@ -150,18 +178,18 @@ export default function DoubleEntryCreatePage() {
       </Card>
 
       {/* Info adicional */}
-      <Card>
+      <Card className="shadow-sm">
         <CardContent className="pt-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div><Label>Placa</Label><Input value={vehiclePlate} onChange={(e) => setVehiclePlate(e.target.value)} /></div>
-            <div><Label>Factura</Label><Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} /></div>
-            <div><Label>Notas</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={1} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa</Label><Input value={vehiclePlate} onChange={(e) => setVehiclePlate(e.target.value)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Factura</Label><Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={1} /></div>
           </div>
         </CardContent>
       </Card>
 
       {/* Resumen */}
-      <Card className="border-2 border-green-200 bg-green-50">
+      <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
         <CardContent className="pt-6">
           <div className="flex justify-between items-center">
             <div className="space-y-1 text-sm">
@@ -170,16 +198,18 @@ export default function DoubleEntryCreatePage() {
               {totalCommissions > 0 && <div>Comisiones: <span className="font-medium text-red-600">-{formatCurrency(totalCommissions)}</span></div>}
             </div>
             <div className="text-right">
-              <p className="text-sm text-gray-500">Utilidad estimada</p>
-              <p className={`text-3xl font-bold ${profit >= 0 ? "text-green-700" : "text-red-700"}`}>{formatCurrency(profit)}</p>
+              <p className="text-sm text-slate-500">Utilidad estimada</p>
+              <p className={`text-3xl font-bold ${profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(profit)}</p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => navigate(ROUTES.DOUBLE_ENTRIES)}>Cancelar</Button>
-        <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-green-600 hover:bg-green-700">{create.isPending ? "Creando..." : "Crear Doble Partida"}</Button>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(ROUTES.DOUBLE_ENTRIES)}>Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-emerald-600 hover:bg-emerald-700">{create.isPending ? "Creando..." : "Crear Doble Partida"}</Button>
+        </div>
       </div>
     </div>
   );

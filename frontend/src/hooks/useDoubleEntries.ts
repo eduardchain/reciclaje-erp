@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { doubleEntryService } from "@/services/doubleEntries";
+import { getApiErrorMessage } from "@/utils/formatters";
 import type { DoubleEntryCreate } from "@/types/double-entry";
 
 interface DoubleEntryFilters {
@@ -36,10 +37,7 @@ export function useCreateDoubleEntry() {
       toast.success("Doble partida creada exitosamente");
     },
     onError: (error: unknown) => {
-      const message =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        "Error al crear la doble partida";
-      toast.error(message);
+      toast.error(getApiErrorMessage(error, "Error al crear la doble partida"));
     },
   });
 }
@@ -53,10 +51,7 @@ export function useCancelDoubleEntry() {
       toast.success("Doble partida cancelada exitosamente");
     },
     onError: (error: unknown) => {
-      const message =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        "Error al cancelar la doble partida";
-      toast.error(message);
+      toast.error(getApiErrorMessage(error, "Error al cancelar la doble partida"));
     },
   });
 }

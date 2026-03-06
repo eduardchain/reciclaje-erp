@@ -16,14 +16,14 @@ export function DateRangePicker({
 }: DateRangePickerProps) {
   return (
     <div className="flex items-center gap-2">
-      <Calendar className="h-4 w-4 text-gray-400" />
+      <Calendar className="h-4 w-4 text-slate-400" />
       <Input
         type="date"
         value={dateFrom}
         onChange={(e) => onDateFromChange(e.target.value)}
         className="w-40"
       />
-      <span className="text-gray-400">-</span>
+      <span className="text-slate-400">-</span>
       <Input
         type="date"
         value={dateTo}

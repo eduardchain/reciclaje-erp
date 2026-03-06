@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
-import { Recycle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLogin } from "@/hooks/useAuth";
 import { useAuthStore } from "@/stores/authStore";
-import { APP_NAME } from "@/utils/constants";
+import EcoBalanceLogo from "@/components/EcoBalanceLogo";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -24,16 +23,11 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
-        <div>
-          <div className="mx-auto h-16 w-16 bg-green-600 rounded-lg flex items-center justify-center">
-            <Recycle className="h-10 w-10 text-white" />
-          </div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            {APP_NAME}
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
+        <div className="flex flex-col items-center">
+          <EcoBalanceLogo textColor="dark" size="lg" />
+          <p className="mt-4 text-center text-sm text-slate-600">
             Iniciar sesion en el sistema
           </p>
         </div>
@@ -68,7 +62,7 @@ export default function Login() {
 
           <Button
             type="submit"
-            className="w-full bg-green-600 hover:bg-green-700"
+            className="w-full bg-emerald-600 hover:bg-emerald-700"
             disabled={login.isPending}
           >
             {login.isPending ? "Ingresando..." : "Iniciar sesion"}
@@ -76,7 +70,7 @@ export default function Login() {
         </form>
 
         <div className="text-center">
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-slate-500">
             &copy; 2026 Eduardo Chain. Todos los derechos reservados.
           </p>
         </div>

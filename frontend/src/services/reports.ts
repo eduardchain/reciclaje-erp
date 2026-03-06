@@ -43,5 +43,5 @@ export const reportsService = {
     get<MarginAnalysisResponse>("/api/v1/reports/margins", params),
 
   getThirdPartyBalances: () =>
-    get<ThirdPartyBalancesResponse>("/api/v1/reports/balances"),
+    get<ThirdPartyBalancesResponse>("/api/v1/reports/third-party-balances"),
 };

@@ -13,6 +13,11 @@ import { useDoubleEntry, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
+const statusBorderMap: Record<string, string> = {
+  completed: "border-t-[3px] border-t-emerald-400",
+  cancelled: "border-t-[3px] border-t-rose-400",
+};
+
 export default function DoubleEntryDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -21,7 +26,7 @@ export default function DoubleEntryDetailPage() {
   const [showCancel, setShowCancel] = useState(false);
 
   if (isLoading) return <div className="space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>;
-  if (!de) return <div className="text-center py-12 text-gray-500">Doble partida no encontrada</div>;
+  if (!de) return <div className="text-center py-12 text-slate-500">Doble partida no encontrada</div>;
 
   return (
     <div className="space-y-6">
@@ -35,42 +40,42 @@ export default function DoubleEntryDetailPage() {
       </PageHeader>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
+        <Card className={`shadow-sm ${statusBorderMap[de.status] ?? ""}`}>
           <CardContent className="pt-6">
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-gray-500">Estado</dt><dd><StatusBadge status={de.status} /></dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Fecha</dt><dd>{formatDate(de.date)}</dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Material</dt><dd>{de.material_name} ({de.material_code})</dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Cantidad</dt><dd>{formatWeight(de.quantity)}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Estado</dt><dd><StatusBadge status={de.status} /></dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</dt><dd>{formatDate(de.date)}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</dt><dd>{de.material_name} ({de.material_code})</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad</dt><dd>{formatWeight(de.quantity)}</dd></div>
             </dl>
           </CardContent>
         </Card>
 
-        <Card className="border-blue-200">
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-blue-700">Compra</CardTitle></CardHeader>
+        <Card className="border-l-[3px] border-l-blue-500 shadow-sm">
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold uppercase tracking-wider text-blue-700">Compra</CardTitle></CardHeader>
           <CardContent>
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-gray-500">Proveedor</dt><dd>{de.supplier_name}</dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Precio Unit.</dt><dd>{formatCurrency(de.purchase_unit_price)}</dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Total</dt><dd className="font-bold">{formatCurrency(de.total_purchase_cost)}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</dt><dd>{de.supplier_name}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit.</dt><dd>{formatCurrency(de.purchase_unit_price)}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold">{formatCurrency(de.total_purchase_cost)}</dd></div>
             </dl>
           </CardContent>
         </Card>
 
-        <Card className="border-green-200">
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-green-700">Venta</CardTitle></CardHeader>
+        <Card className="border-l-[3px] border-l-emerald-500 shadow-sm">
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Venta</CardTitle></CardHeader>
           <CardContent>
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-gray-500">Cliente</dt><dd>{de.customer_name}</dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Precio Unit.</dt><dd>{formatCurrency(de.sale_unit_price)}</dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Total</dt><dd className="font-bold">{formatCurrency(de.total_sale_amount)}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</dt><dd>{de.customer_name}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit.</dt><dd>{formatCurrency(de.sale_unit_price)}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold">{formatCurrency(de.total_sale_amount)}</dd></div>
             </dl>
           </CardContent>
         </Card>
       </div>
 
       {/* Resumen Utilidad */}
-      <Card className="border-2 border-green-200 bg-green-50">
+      <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
         <CardContent className="pt-6 flex justify-between items-center">
           <div className="text-sm space-y-1">
             <div>Compra: {formatCurrency(de.total_purchase_cost)}</div>
@@ -78,31 +83,39 @@ export default function DoubleEntryDetailPage() {
             <div>Margen: {formatPercentage(de.profit_margin)}</div>
           </div>
           <div className="text-right">
-            <p className="text-sm text-gray-500">Utilidad</p>
-            <p className={`text-3xl font-bold ${de.profit >= 0 ? "text-green-700" : "text-red-700"}`}>{formatCurrency(de.profit)}</p>
+            <p className="text-sm text-slate-500">Utilidad</p>
+            <p className={`text-3xl font-bold ${de.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(de.profit)}</p>
           </div>
         </CardContent>
       </Card>
 
       {/* Comisiones */}
       {de.commissions.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">Comisiones</CardTitle></CardHeader>
+        <Card className="shadow-sm">
+          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones</CardTitle></CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader><TableRow><TableHead>Comisionista</TableHead><TableHead>Concepto</TableHead><TableHead className="text-right">Monto</TableHead></TableRow></TableHeader>
-              <TableBody>
-                {de.commissions.map((c) => (
-                  <TableRow key={c.id}><TableCell>{c.third_party_name}</TableCell><TableCell>{c.concept}</TableCell><TableCell className="text-right font-medium">{formatCurrency(c.commission_amount)}</TableCell></TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <div className="rounded-lg border border-slate-200/80 overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Comisionista</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Concepto</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Monto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {de.commissions.map((c) => (
+                    <TableRow key={c.id}><TableCell>{c.third_party_name}</TableCell><TableCell>{c.concept}</TableCell><TableCell className="text-right font-medium">{formatCurrency(c.commission_amount)}</TableCell></TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}
 
       {de.notes && (
-        <Card><CardContent className="pt-6"><Label className="text-gray-500">Notas</Label><p className="mt-1 text-sm">{de.notes}</p></CardContent></Card>
+        <Card className="shadow-sm"><CardContent className="pt-6"><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label><p className="mt-1 text-sm">{de.notes}</p></CardContent></Card>
       )}
 
       <ConfirmDialog

@@ -20,6 +20,7 @@ from app.models.purchase import Purchase
 from app.schemas.purchase import (
     PaginatedPurchaseResponse,
     PurchaseCreate,
+    PurchaseFullUpdate,
     PurchaseLiquidateRequest,
     PurchaseResponse,
     PurchaseUpdate,
@@ -354,6 +355,61 @@ async def get_purchase(
     
     response_data = _enrich_purchase_response(purchase)
     return PurchaseResponse(**response_data)
+
+
+@router.patch(
+    "/{purchase_id}",
+    response_model=PurchaseResponse,
+    summary="Update purchase",
+    description="""
+    Edicion completa de compra: metadata, proveedor y/o lineas.
+
+    **Requisitos:**
+    - La compra debe tener status='registered'
+    - No puede estar vinculada a una doble partida
+
+    **Estrategia para lineas:**
+    Si se envian lineas, se reemplazan TODAS las existentes usando
+    la estrategia Revert-and-Reapply (revertir inventario antiguo,
+    aplicar inventario nuevo).
+
+    **Campos opcionales:** Solo se actualizan los campos enviados.
+    """,
+)
+async def update_purchase(
+    purchase_id: UUID,
+    purchase_in: PurchaseFullUpdate,
+    db: Session = Depends(get_db),
+    org_context: dict = Depends(get_required_org_context),
+) -> PurchaseResponse:
+    """Editar compra registrada (metadata + proveedor + lineas)."""
+    try:
+        purchase = purchase_service.update(
+            db=db,
+            purchase_id=purchase_id,
+            obj_in=purchase_in,
+            organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
+        )
+
+        response_data = _enrich_purchase_response(purchase)
+
+        logger.info(
+            f"Purchase #{purchase.purchase_number} updated by user {org_context['user_id']}"
+        )
+
+        return PurchaseResponse(**response_data)
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Unexpected error updating purchase: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error. Please contact support.",
+        )
 
 
 @router.patch(

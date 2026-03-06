@@ -45,24 +45,24 @@ export default function PriceListsPage() {
   return (
     <ConfigLayout>
       <div className="flex justify-end">
-        <Button onClick={() => setDialogOpen(true)} className="bg-green-600 hover:bg-green-700"><Plus className="h-4 w-4 mr-2" />Nuevo Precio</Button>
+        <Button onClick={() => setDialogOpen(true)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nuevo Precio</Button>
       </div>
 
       <DataTable columns={priceColumns} data={data?.items ?? []} loading={isLoading} pageCount={1} pageIndex={0} pageSize={200} onPageChange={() => {}}
-        emptyTitle="Sin precios" emptyDescription="No hay precios registrados." />
+        emptyTitle="Sin precios" emptyDescription="No hay precios registrados." exportFilename="ecobalance_lista-precios" />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Registrar Precio</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div><Label>Material *</Label><EntitySelect value={materialId} onChange={setMaterialId} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Seleccionar..." /></div>
-            <div><Label>Precio Compra</Label><Input type="number" min={0} step="1" value={purchasePrice || ""} onChange={(e) => setPurchasePrice(parseFloat(e.target.value) || 0)} /></div>
-            <div><Label>Precio Venta</Label><Input type="number" min={0} step="1" value={salePrice || ""} onChange={(e) => setSalePrice(parseFloat(e.target.value) || 0)} /></div>
-            <div><Label>Notas</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label><EntitySelect value={materialId} onChange={setMaterialId} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Seleccionar..." /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Compra</Label><Input type="number" min={0} step="1" value={purchasePrice || ""} onChange={(e) => setPurchasePrice(parseFloat(e.target.value) || 0)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Venta</Label><Input type="number" min={0} step="1" value={salePrice || ""} onChange={(e) => setSalePrice(parseFloat(e.target.value) || 0)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={!materialId || create.isPending} className="bg-green-600 hover:bg-green-700">
+            <Button onClick={handleSubmit} disabled={!materialId || create.isPending} className="bg-emerald-600 hover:bg-emerald-700">
               {create.isPending ? "Guardando..." : "Registrar"}
             </Button>
           </DialogFooter>

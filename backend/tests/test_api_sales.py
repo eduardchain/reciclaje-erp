@@ -715,17 +715,266 @@ class TestCancelSale:
         """Test that cancelling an already cancelled sale fails."""
         # Arrange - cancel first time
         from app.services.sale import crud_sale
-        
+
         crud_sale.cancel(
             db=db_session,
             sale_id=test_sale.id,
             organization_id=test_sale.organization_id,
         )
         db_session.commit()
-        
+
         # Act - try to cancel again
         response = client.patch(f"/api/v1/sales/{test_sale.id}/cancel", headers=org_headers)
-        
+
         # Assert
         assert response.status_code == 400
         assert "cancelled" in response.json()["detail"].lower()
+
+
+class TestUpdateSale:
+    """Tests for PATCH /api/v1/sales/{id} — edicion completa"""
+
+    def test_update_sale_metadata_only(
+        self, client, org_headers, test_sale,
+    ):
+        """Actualizar solo metadata sin afectar inventario."""
+        update_data = {
+            "notes": "Updated notes",
+            "vehicle_plate": "NEW-999",
+            "invoice_number": "FV-UPDATED",
+        }
+
+        response = client.patch(
+            f"/api/v1/sales/{test_sale.id}",
+            json=update_data,
+            headers=org_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["notes"] == "Updated notes"
+        assert data["vehicle_plate"] == "NEW-999"
+        assert data["invoice_number"] == "FV-UPDATED"
+        # Lineas no cambiaron
+        assert len(data["lines"]) == 1
+        assert data["total_amount"] == 6000.0  # 100 * 60 original
+
+    def test_update_sale_lines(
+        self,
+        client,
+        org_headers,
+        test_sale,
+        test_material_with_stock,
+        db_session,
+    ):
+        """Cambiar qty/precio de lineas, verificar stock y unit_cost recalculado."""
+        # Stock antes: 500 - 100 (test_sale) = 400
+        db_session.refresh(test_material_with_stock)
+        stock_before = float(test_material_with_stock.current_stock)
+
+        update_data = {
+            "lines": [
+                {
+                    "material_id": str(test_material_with_stock.id),
+                    "quantity": 200.0,
+                    "unit_price": 70.00,
+                }
+            ],
+        }
+
+        response = client.patch(
+            f"/api/v1/sales/{test_sale.id}",
+            json=update_data,
+            headers=org_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_amount"] == 14000.0  # 200 * 70
+        assert len(data["lines"]) == 1
+        assert float(data["lines"][0]["quantity"]) == 200.0
+        assert float(data["lines"][0]["unit_price"]) == 70.0
+        assert float(data["lines"][0]["unit_cost"]) == 45.0  # recaptured avg cost
+
+        # Stock: +100 (revert) -200 (new) = stock_before - 100
+        db_session.refresh(test_material_with_stock)
+        expected_stock = stock_before + 100 - 200
+        assert float(test_material_with_stock.current_stock) == expected_stock
+
+    def test_update_sale_change_customer(
+        self,
+        client,
+        org_headers,
+        test_sale,
+        test_customer,
+        test_customer2,
+        db_session,
+    ):
+        """Cambiar cliente y verificar saldos."""
+        db_session.refresh(test_customer)
+        old_balance = float(test_customer.current_balance)
+
+        update_data = {
+            "customer_id": str(test_customer2.id),
+        }
+
+        response = client.patch(
+            f"/api/v1/sales/{test_sale.id}",
+            json=update_data,
+            headers=org_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["customer_id"] == str(test_customer2.id)
+
+        # Saldos: cliente viejo pierde la deuda, cliente nuevo la gana
+        db_session.refresh(test_customer)
+        db_session.refresh(test_customer2)
+        assert float(test_customer.current_balance) == old_balance - 6000.0
+        assert float(test_customer2.current_balance) == 6000.0
+
+    def test_update_sale_change_commissions(
+        self,
+        client,
+        org_headers,
+        test_sale,
+        test_commission_recipient,
+    ):
+        """Cambiar comisiones — reemplazar todas."""
+        update_data = {
+            "commissions": [
+                {
+                    "third_party_id": str(test_commission_recipient.id),
+                    "concept": "Comision nueva",
+                    "commission_type": "percentage",
+                    "commission_value": 5.0,
+                }
+            ],
+        }
+
+        response = client.patch(
+            f"/api/v1/sales/{test_sale.id}",
+            json=update_data,
+            headers=org_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["commissions"]) == 1
+        assert data["commissions"][0]["concept"] == "Comision nueva"
+        assert float(data["commissions"][0]["commission_value"]) == 5.0
+        # 5% de 6000 = 300
+        assert float(data["commissions"][0]["commission_amount"]) == 300.0
+
+    def test_update_paid_sale_fails(
+        self,
+        client,
+        org_headers,
+        test_sale,
+        test_money_account,
+        db_session,
+    ):
+        """No se puede editar venta pagada."""
+        from app.services.sale import crud_sale
+
+        crud_sale.liquidate(
+            db=db_session,
+            sale_id=test_sale.id,
+            payment_account_id=test_money_account.id,
+            organization_id=test_sale.organization_id,
+        )
+        db_session.commit()
+
+        response = client.patch(
+            f"/api/v1/sales/{test_sale.id}",
+            json={"notes": "try edit"},
+            headers=org_headers,
+        )
+
+        assert response.status_code == 400
+        assert "registered" in response.json()["detail"].lower()
+
+    def test_update_cancelled_sale_fails(
+        self,
+        client,
+        org_headers,
+        test_sale,
+        db_session,
+    ):
+        """No se puede editar venta cancelada."""
+        from app.services.sale import crud_sale
+
+        crud_sale.cancel(
+            db=db_session,
+            sale_id=test_sale.id,
+            organization_id=test_sale.organization_id,
+        )
+        db_session.commit()
+
+        response = client.patch(
+            f"/api/v1/sales/{test_sale.id}",
+            json={"notes": "try edit"},
+            headers=org_headers,
+        )
+
+        assert response.status_code == 400
+        assert "registered" in response.json()["detail"].lower()
+
+    def test_update_double_entry_sale_fails(
+        self,
+        client,
+        org_headers,
+        test_sale,
+        db_session,
+    ):
+        """No se puede editar venta vinculada a doble partida."""
+        from sqlalchemy import text as sql_text
+
+        # Bypass FK para poner double_entry_id falso
+        db_session.execute(sql_text("SET session_replication_role = replica"))
+        db_session.execute(
+            sql_text("UPDATE sales SET double_entry_id = :de_id WHERE id = :sale_id"),
+            {"de_id": str(uuid4()), "sale_id": str(test_sale.id)},
+        )
+        db_session.commit()
+        db_session.execute(sql_text("SET session_replication_role = DEFAULT"))
+
+        response = client.patch(
+            f"/api/v1/sales/{test_sale.id}",
+            json={"notes": "try edit"},
+            headers=org_headers,
+        )
+
+        assert response.status_code == 400
+        assert "doble partida" in response.json()["detail"].lower()
+
+    def test_update_sale_negative_stock_warning(
+        self,
+        client,
+        org_headers,
+        test_sale,
+        test_material_with_stock,
+        db_session,
+    ):
+        """Stock insuficiente genera warning, no error (RN-INV-03)."""
+        update_data = {
+            "lines": [
+                {
+                    "material_id": str(test_material_with_stock.id),
+                    "quantity": 9999.0,  # Mucho mas que el stock
+                    "unit_price": 60.00,
+                }
+            ],
+        }
+
+        response = client.patch(
+            f"/api/v1/sales/{test_sale.id}",
+            json=update_data,
+            headers=org_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["warnings"]) > 0
+        assert any("stock" in w.lower() for w in data["warnings"])

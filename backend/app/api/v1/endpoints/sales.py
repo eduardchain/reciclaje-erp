@@ -20,6 +20,7 @@ from app.models.sale import Sale
 from app.schemas.sale import (
     PaginatedSaleResponse,
     SaleCreate,
+    SaleFullUpdate,
     SaleLiquidateRequest,
     SaleResponse,
     SaleUpdate,
@@ -383,6 +384,81 @@ async def get_sale(
     
     response_data = _enrich_sale_response(sale)
     return SaleResponse(**response_data)
+
+
+@router.patch(
+    "/{sale_id}",
+    response_model=SaleResponse,
+    summary="Update sale (full edit)",
+    description="""
+    Edicion completa de una venta registrada: metadata, cliente, bodega, lineas y comisiones.
+
+    **Restricciones:**
+    - Solo ventas con status='registered'
+    - No aplica a ventas creadas por doble partida (double_entry_id != null)
+
+    **Estrategia Revert & Re-apply:**
+    - Si se envian lineas nuevas, se revierten los movimientos de inventario originales
+      y se re-aplican con las nuevas cantidades/materiales.
+    - Si se envian comisiones nuevas, se reemplazan todas las existentes.
+    - Stock negativo PERMITIDO: genera warnings, no bloquea la operacion (RN-INV-03).
+    """,
+)
+async def update_sale(
+    sale_id: UUID,
+    sale_in: SaleFullUpdate,
+    db: Session = Depends(get_db),
+    org_context: dict = Depends(get_required_org_context),
+) -> SaleResponse:
+    """Edicion completa de venta registrada."""
+    try:
+        sale = crud_sale.update(
+            db=db,
+            sale_id=sale_id,
+            obj_in=sale_in,
+            organization_id=org_context["organization_id"],
+        )
+
+        # Capturar warnings antes de reload
+        warnings = getattr(sale, "_warnings", [])
+
+        db.commit()
+        db.refresh(sale)
+
+        # Reload con eager loading
+        sale = crud_sale.get(
+            db=db,
+            sale_id=sale.id,
+            organization_id=org_context["organization_id"],
+        )
+
+        response_data = _enrich_sale_response(sale, warnings=warnings)
+
+        logger.info(
+            f"Sale #{sale.sale_number} updated by user {org_context['user_id']}"
+        )
+
+        return SaleResponse(**response_data)
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except IntegrityError as e:
+        db.rollback()
+        logger.error(f"Integrity error updating sale: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Error de integridad al actualizar la venta.",
+        )
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Unexpected error updating sale: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error. Please contact support.",
+        )
 
 
 @router.patch(

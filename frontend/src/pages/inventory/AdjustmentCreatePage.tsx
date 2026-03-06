@@ -80,8 +80,8 @@ export default function AdjustmentCreatePage() {
         </Button>
       </PageHeader>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Tipo de Ajuste</CardTitle></CardHeader>
+      <Card className="shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Tipo de Ajuste</CardTitle></CardHeader>
         <CardContent>
           <Select value={adjType} onValueChange={handleTypeChange}>
             <SelectTrigger className="w-full max-w-md">
@@ -96,61 +96,63 @@ export default function AdjustmentCreatePage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">{typeLabels[adjType]}</CardTitle></CardHeader>
+      <Card className="shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">{typeLabels[adjType]}</CardTitle></CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <Label>Material *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>
               <EntitySelect value={materialId} onChange={setMaterialId} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Seleccionar material..." />
             </div>
             <div>
-              <Label>Bodega *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega *</Label>
               <EntitySelect value={warehouseId} onChange={setWarehouseId} options={warehouses.map((w) => ({ id: w.id, label: w.name }))} placeholder="Seleccionar bodega..." />
             </div>
             <div>
-              <Label>Fecha *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
               <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
 
             {(adjType === "increase" || adjType === "decrease") && (
               <div>
-                <Label>Cantidad *</Label>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad *</Label>
                 <Input type="number" min={0} step="0.01" value={quantity || ""} onChange={(e) => setQuantity(parseFloat(e.target.value) || 0)} placeholder="0" />
               </div>
             )}
 
             {adjType === "increase" && (
               <div>
-                <Label>Costo Unitario *</Label>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Unitario *</Label>
                 <Input type="number" min={0} step="1" value={unitCost || ""} onChange={(e) => setUnitCost(parseFloat(e.target.value) || 0)} placeholder="0" />
               </div>
             )}
 
             {adjType === "recount" && (
               <div>
-                <Label>Cantidad Contada *</Label>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad Contada *</Label>
                 <Input type="number" min={0} step="0.01" value={countedQuantity || ""} onChange={(e) => setCountedQuantity(parseFloat(e.target.value) || 0)} placeholder="0" />
               </div>
             )}
 
             <div className="md:col-span-2">
-              <Label>Razon *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Razon *</Label>
               <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Razon del ajuste (minimo 3 caracteres)" />
             </div>
             <div className="md:col-span-2">
-              <Label>Notas</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Notas adicionales..." />
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY_ADJUSTMENTS)}>Cancelar</Button>
-        <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-green-600 hover:bg-green-700">
-          {create.isPending ? "Creando..." : "Crear Ajuste"}
-        </Button>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY_ADJUSTMENTS)}>Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-emerald-600 hover:bg-emerald-700">
+            {create.isPending ? "Creando..." : "Crear Ajuste"}
+          </Button>
+        </div>
       </div>
     </div>
   );

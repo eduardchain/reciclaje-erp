@@ -1,4 +1,4 @@
-# 🧪 Tests - ReciclaTrac ERP
+# 🧪 Tests - EcoBalance ERP
 
 Documentación completa para ejecutar los tests del sistema multi-tenant.
 

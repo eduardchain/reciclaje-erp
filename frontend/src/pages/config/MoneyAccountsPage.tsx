@@ -16,14 +16,14 @@ import ConfigLayout from "./ConfigLayout";
 import type { MoneyAccountResponse, MoneyAccountType } from "@/types/money-account";
 
 const typeLabels: Record<MoneyAccountType, string> = { cash: "Efectivo", bank: "Banco", digital: "Digital" };
-const typeColors: Record<MoneyAccountType, string> = { cash: "bg-green-100 text-green-800", bank: "bg-blue-100 text-blue-800", digital: "bg-purple-100 text-purple-800" };
+const typeColors: Record<MoneyAccountType, string> = { cash: "bg-emerald-100 text-emerald-800", bank: "bg-blue-100 text-blue-800", digital: "bg-purple-100 text-purple-800" };
 
 const columns: ColumnDef<MoneyAccountResponse, unknown>[] = [
   { accessorKey: "name", header: "Nombre", cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
   { accessorKey: "account_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.account_type]}>{typeLabels[row.original.account_type]}</Badge> },
   { accessorKey: "bank_name", header: "Banco", cell: ({ row }) => row.original.bank_name ?? "-" },
   { accessorKey: "account_number", header: "Numero", cell: ({ row }) => row.original.account_number ?? "-" },
-  { accessorKey: "current_balance", header: "Saldo", cell: ({ row }) => <span className="font-medium">{formatCurrency(row.original.current_balance)}</span> },
+  { accessorKey: "current_balance", header: "Saldo", enableSorting: true, cell: ({ row }) => <span className="font-medium">{formatCurrency(row.original.current_balance)}</span> },
 ];
 
 export default function MoneyAccountsPage() {
@@ -70,19 +70,19 @@ export default function MoneyAccountsPage() {
             <TabsTrigger value="digital">Digital</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button onClick={() => openDialog(null)} className="bg-green-600 hover:bg-green-700"><Plus className="h-4 w-4 mr-2" />Nueva Cuenta</Button>
+        <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Cuenta</Button>
       </div>
 
       <DataTable columns={columns} data={filteredItems} loading={isLoading} pageCount={1} pageIndex={0} pageSize={100} onPageChange={() => {}}
-        onRowClick={(row) => openDialog(row)} emptyTitle="Sin cuentas" emptyDescription="No hay cuentas de dinero." />
+        onRowClick={(row) => openDialog(row)} emptyTitle="Sin cuentas" emptyDescription="No hay cuentas de dinero." exportFilename="ecobalance_cuentas-dinero" />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>{editItem ? "Editar Cuenta" : "Nueva Cuenta"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div><Label>Nombre *</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
             <div>
-              <Label>Tipo *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo *</Label>
               <Select value={accountType} onValueChange={(v) => setAccountType(v as MoneyAccountType)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -94,15 +94,15 @@ export default function MoneyAccountsPage() {
             </div>
             {accountType !== "cash" && (
               <>
-                <div><Label>Banco</Label><Input value={bankName} onChange={(e) => setBankName(e.target.value)} /></div>
-                <div><Label>Numero de Cuenta</Label><Input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} /></div>
+                <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Banco</Label><Input value={bankName} onChange={(e) => setBankName(e.target.value)} /></div>
+                <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Numero de Cuenta</Label><Input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} /></div>
               </>
             )}
-            {!editItem && <div><Label>Saldo Inicial</Label><Input type="number" value={initialBalance || ""} onChange={(e) => setInitialBalance(parseFloat(e.target.value) || 0)} /></div>}
+            {!editItem && <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><Input type="number" value={initialBalance || ""} onChange={(e) => setInitialBalance(parseFloat(e.target.value) || 0)} /></div>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={!name || create.isPending || update.isPending} className="bg-green-600 hover:bg-green-700">
+            <Button onClick={handleSubmit} disabled={!name || create.isPending || update.isPending} className="bg-emerald-600 hover:bg-emerald-700">
               {create.isPending || update.isPending ? "Guardando..." : editItem ? "Actualizar" : "Crear"}
             </Button>
           </DialogFooter>

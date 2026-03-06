@@ -71,3 +71,17 @@ export function toISODate(date: Date): string {
 export function toISODateTime(date: Date): string {
   return date.toISOString();
 }
+
+type PydanticError = { msg: string; loc?: string[] };
+type ApiErrorResponse = { detail?: string | PydanticError[] };
+
+/** Extrae un mensaje legible de cualquier error de API (string o array Pydantic). */
+export function getApiErrorMessage(error: unknown, fallback = "Error inesperado"): string {
+  const detail = (error as { response?: { data?: ApiErrorResponse } })?.response?.data?.detail;
+  if (!detail) return fallback;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    return detail.map((e) => e.msg).join(", ");
+  }
+  return fallback;
+}

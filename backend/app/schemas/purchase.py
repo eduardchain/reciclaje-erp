@@ -99,6 +99,21 @@ class PurchaseUpdate(BaseModel):
     invoice_number: Optional[str] = Field(None, max_length=50)
 
 
+class PurchaseFullUpdate(BaseModel):
+    """
+    Edicion completa de compra: metadata + proveedor + lineas.
+
+    Solo permitido para compras con status='registered' y sin double_entry_id.
+    Si lines se proporciona, reemplaza TODAS las lineas existentes (estrategia revert+reapply).
+    """
+    supplier_id: Optional[UUID] = Field(None, description="Nuevo proveedor (debe tener is_supplier=True)")
+    date: Optional[datetime] = Field(None, description="Nueva fecha")
+    notes: Optional[str] = Field(None, max_length=1000)
+    vehicle_plate: Optional[str] = Field(None, max_length=20)
+    invoice_number: Optional[str] = Field(None, max_length=50)
+    lines: Optional[List[PurchaseLineCreate]] = Field(None, min_length=1, description="Nuevas lineas (reemplazan todas las existentes)")
+
+
 class PurchaseResponse(PurchaseBase):
     """Schema for Purchase responses with all details."""
     id: UUID

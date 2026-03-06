@@ -2,6 +2,7 @@ import apiClient from "./api";
 import type {
   PurchaseResponse,
   PurchaseCreate,
+  PurchaseFullUpdate,
   PurchaseLiquidateRequest,
 } from "@/types/purchase";
 import type { PaginatedResponse } from "@/types/common";
@@ -34,6 +35,11 @@ export const purchaseService = {
 
   liquidate: async (id: string, data: PurchaseLiquidateRequest): Promise<PurchaseResponse> => {
     const response = await apiClient.patch<PurchaseResponse>(`/api/v1/purchases/${id}/liquidate`, data);
+    return response.data;
+  },
+
+  update: async (id: string, data: PurchaseFullUpdate): Promise<PurchaseResponse> => {
+    const response = await apiClient.patch<PurchaseResponse>(`/api/v1/purchases/${id}`, data);
     return response.data;
   },
 

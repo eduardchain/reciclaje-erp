@@ -21,6 +21,11 @@ const typeLabels: Record<string, string> = {
   zero_out: "Llevar a Cero",
 };
 
+const statusBorderMap: Record<string, string> = {
+  completed: "border-t-[3px] border-t-emerald-400",
+  annulled: "border-t-[3px] border-t-rose-400",
+};
+
 export default function AdjustmentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -29,8 +34,8 @@ export default function AdjustmentDetailPage() {
   const [showAnnul, setShowAnnul] = useState(false);
   const [annulReason, setAnnulReason] = useState("");
 
-  if (isLoading) return <div className="p-8 text-center text-gray-500">Cargando...</div>;
-  if (!adj) return <div className="p-8 text-center text-gray-500">Ajuste no encontrado</div>;
+  if (isLoading) return <div className="p-8 text-center text-slate-500">Cargando...</div>;
+  if (!adj) return <div className="p-8 text-center text-slate-500">Ajuste no encontrado</div>;
 
   return (
     <div className="space-y-6">
@@ -48,39 +53,39 @@ export default function AdjustmentDetailPage() {
       {adj.warnings.length > 0 && <WarningsList warnings={adj.warnings} />}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader><CardTitle className="text-sm text-gray-500">Informacion General</CardTitle></CardHeader>
+        <Card className={`shadow-sm ${statusBorderMap[adj.status] ?? ""}`}>
+          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Informacion General</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-gray-500">Fecha</span><span>{formatDate(adj.date)}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Tipo</span><Badge variant="outline">{typeLabels[adj.adjustment_type]}</Badge></div>
-            <div className="flex justify-between"><span className="text-gray-500">Estado</span><StatusBadge status={adj.status} /></div>
-            <div className="flex justify-between"><span className="text-gray-500">Razon</span><span className="text-right max-w-[200px]">{adj.reason}</span></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</span><span>{formatDate(adj.date)}</span></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</span><Badge variant="outline">{typeLabels[adj.adjustment_type]}</Badge></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Estado</span><StatusBadge status={adj.status} /></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Razon</span><span className="text-right max-w-[200px]">{adj.reason}</span></div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-sm text-gray-500">Material y Bodega</CardTitle></CardHeader>
+        <Card className="shadow-sm">
+          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Material y Bodega</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-gray-500">Material</span><span>{adj.material_code} - {adj.material_name}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Bodega</span><span>{adj.warehouse_name}</span></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</span><span>{adj.material_code} - {adj.material_name}</span></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega</span><span>{adj.warehouse_name}</span></div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-sm text-gray-500">Cantidades</CardTitle></CardHeader>
+        <Card className="shadow-sm">
+          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Cantidades</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-gray-500">Stock Anterior</span><span className="tabular-nums">{adj.previous_stock.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Cantidad</span><span className="font-medium tabular-nums">{adj.quantity >= 0 ? "+" : ""}{adj.quantity.toFixed(2)}</span></div>
-            {adj.counted_quantity !== null && <div className="flex justify-between"><span className="text-gray-500">Conteo</span><span className="tabular-nums">{adj.counted_quantity.toFixed(2)}</span></div>}
-            <div className="flex justify-between"><span className="text-gray-500">Stock Nuevo</span><span className="font-bold tabular-nums">{adj.new_stock.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Costo Unit.</span><span>{formatCurrency(adj.unit_cost)}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Valor Total</span><span className="font-bold">{formatCurrency(adj.total_value)}</span></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Stock Anterior</span><span className="tabular-nums">{adj.previous_stock.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad</span><span className="font-medium tabular-nums">{adj.quantity >= 0 ? "+" : ""}{adj.quantity.toFixed(2)}</span></div>
+            {adj.counted_quantity !== null && <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Conteo</span><span className="tabular-nums">{adj.counted_quantity.toFixed(2)}</span></div>}
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Stock Nuevo</span><span className="font-bold tabular-nums">{adj.new_stock.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Unit.</span><span>{formatCurrency(adj.unit_cost)}</span></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor Total</span><span className="font-bold">{formatCurrency(adj.total_value)}</span></div>
           </CardContent>
         </Card>
       </div>
 
       {adj.annulled_reason && (
-        <Card className="border-red-200 bg-red-50">
+        <Card className="shadow-sm border-red-200 bg-red-50">
           <CardContent className="pt-6">
             <p className="text-sm text-red-800"><strong>Anulado:</strong> {adj.annulled_reason}</p>
             {adj.annulled_at && <p className="text-xs text-red-600 mt-1">Fecha: {formatDate(adj.annulled_at)}</p>}
@@ -89,9 +94,9 @@ export default function AdjustmentDetailPage() {
       )}
 
       {adj.notes && (
-        <Card>
+        <Card className="shadow-sm">
           <CardContent className="pt-6">
-            <p className="text-sm text-gray-500">Notas</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</p>
             <p className="text-sm mt-1">{adj.notes}</p>
           </CardContent>
         </Card>

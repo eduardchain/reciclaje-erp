@@ -1,7 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { purchaseService } from "@/services/purchases";
-import type { PurchaseCreate, PurchaseLiquidateRequest } from "@/types/purchase";
+import type { PurchaseCreate, PurchaseFullUpdate, PurchaseLiquidateRequest } from "@/types/purchase";
+import axios from "axios";
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) return error.response?.data?.detail || fallback;
+  return fallback;
+}
 
 interface PurchaseFilters {
   skip?: number;
@@ -37,10 +43,22 @@ export function useCreatePurchase() {
       toast.success("Compra creada exitosamente");
     },
     onError: (error: unknown) => {
-      const message =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        "Error al crear la compra";
-      toast.error(message);
+      toast.error(getApiErrorMessage(error, "Error al crear la compra"));
+    },
+  });
+}
+
+export function useUpdatePurchase() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: PurchaseFullUpdate }) =>
+      purchaseService.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      toast.success("Compra actualizada exitosamente");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al actualizar la compra"));
     },
   });
 }
@@ -55,10 +73,7 @@ export function useLiquidatePurchase() {
       toast.success("Compra liquidada exitosamente");
     },
     onError: (error: unknown) => {
-      const message =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        "Error al liquidar la compra";
-      toast.error(message);
+      toast.error(getApiErrorMessage(error, "Error al liquidar la compra"));
     },
   });
 }
@@ -72,10 +87,7 @@ export function useCancelPurchase() {
       toast.success("Compra cancelada exitosamente");
     },
     onError: (error: unknown) => {
-      const message =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        "Error al cancelar la compra";
-      toast.error(message);
+      toast.error(getApiErrorMessage(error, "Error al cancelar la compra"));
     },
   });
 }

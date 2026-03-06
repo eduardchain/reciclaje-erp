@@ -20,7 +20,7 @@ from app.models.material import Material
 from app.models.third_party import ThirdParty
 from app.models.money_account import MoneyAccount
 from app.models.warehouse import Warehouse
-from app.schemas.purchase import PurchaseCreate, PurchaseUpdate
+from app.schemas.purchase import PurchaseCreate, PurchaseUpdate, PurchaseFullUpdate
 from app.services.base import CRUDBase
 
 
@@ -408,6 +408,211 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         
         return purchase
     
+    def update(
+        self,
+        db: Session,
+        purchase_id: UUID,
+        obj_in: PurchaseFullUpdate,
+        organization_id: UUID,
+        user_id: Optional[UUID] = None
+    ) -> Purchase:
+        """
+        Edicion completa de compra (metadata + proveedor + lineas).
+
+        Estrategia Revert-and-Reapply:
+        1. Revertir efectos de lineas actuales (inventario, stock, costo)
+        2. Eliminar lineas y movimientos antiguos
+        3. Aplicar nuevas lineas (inventario, stock, costo)
+        4. Actualizar saldos de proveedor(es)
+        5. Actualizar metadata
+
+        Solo permitido para compras con status='registered' y sin double_entry_id.
+        """
+        # Step 1: Cargar compra con lineas y relaciones
+        purchase = db.query(Purchase).options(
+            joinedload(Purchase.lines).joinedload(PurchaseLine.material),
+            joinedload(Purchase.lines).joinedload(PurchaseLine.warehouse),
+            joinedload(Purchase.supplier),
+            joinedload(Purchase.payment_account),
+        ).filter(
+            Purchase.id == purchase_id,
+            Purchase.organization_id == organization_id
+        ).first()
+
+        if not purchase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Purchase not found"
+            )
+
+        if purchase.status != "registered":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Solo se pueden editar compras con estado 'registered'. Estado actual: '{purchase.status}'"
+            )
+
+        if purchase.double_entry_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No se puede editar una compra vinculada a doble partida"
+            )
+
+        old_total = purchase.total_amount
+        old_supplier_id = purchase.supplier_id
+
+        # Step 2: Si hay cambio de proveedor, validar el nuevo
+        new_supplier = None
+        if obj_in.supplier_id and obj_in.supplier_id != old_supplier_id:
+            new_supplier = db.get(ThirdParty, obj_in.supplier_id)
+            if not new_supplier or new_supplier.organization_id != organization_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Nuevo proveedor no encontrado"
+                )
+            if not new_supplier.is_supplier:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El tercero seleccionado no es proveedor"
+                )
+
+        # Step 3: Si hay lineas nuevas, hacer revert+reapply
+        if obj_in.lines is not None:
+            # 3a. Validar stock suficiente para revertir cada linea actual
+            for line in purchase.lines:
+                material = line.material
+                if material.current_stock < line.quantity:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Stock insuficiente para revertir {material.code}. "
+                               f"Actual: {material.current_stock}, Requerido: {line.quantity}"
+                    )
+
+            # 3b. Revertir efectos de lineas actuales
+            for line in purchase.lines:
+                material = line.material
+                # Revertir stock
+                material.current_stock -= line.quantity
+                material.current_stock_transit -= line.quantity
+                # Nota: costo promedio no se revierte (limitacion conocida)
+                print(f"  ↩️  Revert: {material.code} -{line.quantity} (stock: {material.current_stock})")
+
+            # 3c. Eliminar movimientos de inventario originales
+            db.query(InventoryMovement).filter(
+                InventoryMovement.reference_type == "purchase",
+                InventoryMovement.reference_id == purchase.id,
+                InventoryMovement.movement_type == "purchase",
+            ).delete(synchronize_session=False)
+
+            # 3d. Eliminar lineas antiguas
+            db.query(PurchaseLine).filter(
+                PurchaseLine.purchase_id == purchase.id
+            ).delete(synchronize_session=False)
+
+            db.flush()
+
+            # 3e. Crear nuevas lineas
+            new_total = Decimal("0.00")
+            for line_data in obj_in.lines:
+                # Validar material
+                material = db.get(Material, line_data.material_id)
+                if not material or material.organization_id != organization_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Material {line_data.material_id} no encontrado"
+                    )
+
+                # Validar warehouse
+                if not line_data.warehouse_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="warehouse_id es requerido para compras normales"
+                    )
+                warehouse = db.get(Warehouse, line_data.warehouse_id)
+                if not warehouse or warehouse.organization_id != organization_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Bodega {line_data.warehouse_id} no encontrada"
+                    )
+
+                quantity = Decimal(str(line_data.quantity))
+                unit_price = Decimal(str(line_data.unit_price))
+                line_total = quantity * unit_price
+                new_total += line_total
+
+                # Crear PurchaseLine
+                new_line = PurchaseLine(
+                    purchase_id=purchase.id,
+                    material_id=line_data.material_id,
+                    warehouse_id=line_data.warehouse_id,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    total_price=line_total,
+                )
+                db.add(new_line)
+
+                # Crear InventoryMovement
+                movement = InventoryMovement(
+                    organization_id=organization_id,
+                    material_id=line_data.material_id,
+                    warehouse_id=line_data.warehouse_id,
+                    movement_type="purchase",
+                    quantity=quantity,
+                    unit_cost=unit_price,
+                    reference_type="purchase",
+                    reference_id=purchase.id,
+                    date=obj_in.date or purchase.date,
+                    notes=f"Purchase #{purchase.purchase_number} (edited)",
+                )
+                db.add(movement)
+
+                # Actualizar stock y costo promedio
+                self._update_material_stock_and_cost(
+                    material=material,
+                    quantity_delta=quantity,
+                    unit_cost=unit_price,
+                )
+
+                print(f"  📝 New line: {material.code} x {quantity} @ ${unit_price} = ${line_total}")
+
+            purchase.total_amount = new_total
+        else:
+            new_total = old_total
+
+        # Step 4: Actualizar saldos de proveedor
+        if new_supplier:
+            # Revertir saldo del proveedor original
+            old_supplier = db.get(ThirdParty, old_supplier_id)
+            old_supplier.current_balance += old_total  # Reducir deuda
+
+            # Aplicar saldo al nuevo proveedor
+            new_supplier.current_balance -= new_total  # Aumentar deuda
+
+            purchase.supplier_id = obj_in.supplier_id
+            print(f"  🔄 Proveedor cambiado: {old_supplier.name} → {new_supplier.name}")
+        elif obj_in.lines is not None:
+            # Mismo proveedor pero lineas cambiaron: ajustar diferencia
+            supplier = db.get(ThirdParty, old_supplier_id)
+            balance_diff = new_total - old_total
+            supplier.current_balance -= balance_diff  # Ajustar deuda
+            print(f"  💰 Saldo proveedor ajustado por ${balance_diff}")
+
+        # Step 5: Actualizar metadata
+        if obj_in.date is not None:
+            purchase.date = obj_in.date
+        if obj_in.notes is not None:
+            purchase.notes = obj_in.notes
+        if obj_in.vehicle_plate is not None:
+            purchase.vehicle_plate = obj_in.vehicle_plate
+        if obj_in.invoice_number is not None:
+            purchase.invoice_number = obj_in.invoice_number
+
+        db.commit()
+        db.refresh(purchase)
+
+        print(f"✏️ Purchase #{purchase.purchase_number} updated")
+
+        return purchase
+
     def get_with_details(
         self,
         db: Session,

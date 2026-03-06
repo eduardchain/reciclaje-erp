@@ -74,15 +74,15 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
           <DialogTitle>{editItem ? "Editar Tercero" : "Nuevo Tercero"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div><Label>Nombre *</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-          <div><Label>Identificacion</Label><Input value={identification} onChange={(e) => setIdentification(e.target.value)} /></div>
+          <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Identificacion</Label><Input value={identification} onChange={(e) => setIdentification(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-4">
-            <div><Label>Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-            <div><Label>Telefono</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Telefono</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
           </div>
-          <div><Label>Direccion</Label><Input value={address} onChange={(e) => setAddress(e.target.value)} /></div>
+          <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Direccion</Label><Input value={address} onChange={(e) => setAddress(e.target.value)} /></div>
           <div className="space-y-3">
-            <Label className="text-sm font-medium">Roles</Label>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Roles</Label>
             <div className="flex items-center justify-between"><span className="text-sm">Proveedor</span><Switch checked={isSupplier} onCheckedChange={setIsSupplier} /></div>
             <div className="flex items-center justify-between"><span className="text-sm">Cliente</span><Switch checked={isCustomer} onCheckedChange={setIsCustomer} /></div>
             <div className="flex items-center justify-between"><span className="text-sm">Inversionista</span><Switch checked={isInvestor} onCheckedChange={setIsInvestor} /></div>
@@ -91,7 +91,7 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={!name || isPending} className="bg-green-600 hover:bg-green-700">
+          <Button onClick={handleSubmit} disabled={!name || isPending} className="bg-emerald-600 hover:bg-emerald-700">
             {isPending ? "Guardando..." : editItem ? "Actualizar" : "Crear"}
           </Button>
         </DialogFooter>

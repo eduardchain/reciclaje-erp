@@ -60,6 +60,17 @@ export interface SaleUpdate {
   invoice_number?: string | null;
 }
 
+export interface SaleFullUpdate {
+  customer_id?: string | null;
+  warehouse_id?: string | null;
+  date?: string | null;
+  notes?: string | null;
+  vehicle_plate?: string | null;
+  invoice_number?: string | null;
+  lines?: SaleLineCreate[] | null;
+  commissions?: SaleCommissionCreate[] | null;
+}
+
 export interface SaleResponse extends BaseEntity {
   organization_id: string;
   sale_number: number;

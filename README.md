@@ -1,4 +1,4 @@
-# 🔄 ReciclaTrac - Sistema ERP para Empresas de Reciclaje
+# 🔄 EcoBalance - Sistema ERP para Empresas de Reciclaje
 
 ## 📋 Descripción
 

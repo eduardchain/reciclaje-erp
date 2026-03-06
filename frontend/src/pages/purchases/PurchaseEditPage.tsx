@@ -1,25 +1,24 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
-import { useCreatePurchase } from "@/hooks/usePurchases";
-import { useSuppliers, useMaterials, useWarehouses, useMoneyAccounts } from "@/hooks/useMasterData";
+import { usePurchase, useUpdatePurchase } from "@/hooks/usePurchases";
+import { useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { formatCurrency } from "@/utils/formatters";
-import { ROUTES } from "@/utils/constants";
 import type { PurchaseLineCreate } from "@/types/purchase";
 
 interface LineFormData extends PurchaseLineCreate {
   _key: number;
 }
 
-let lineKeyCounter = 0;
+let lineKeyCounter = 1000;
 
 function createEmptyLine(): LineFormData {
   return {
@@ -31,32 +30,59 @@ function createEmptyLine(): LineFormData {
   };
 }
 
-export default function PurchaseCreatePage() {
+export default function PurchaseEditPage() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const createPurchase = useCreatePurchase();
+  const updatePurchase = useUpdatePurchase();
 
+  const { data: purchase, isLoading: loadingPurchase } = usePurchase(id!);
   const { data: suppliersData } = useSuppliers();
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
-  const { data: accountsData } = useMoneyAccounts();
 
   const suppliers = suppliersData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
-  const accounts = accountsData?.items ?? [];
 
   const [supplierId, setSupplierId] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 16));
+  const [date, setDate] = useState("");
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
-  const [autoLiquidate, setAutoLiquidate] = useState(false);
-  const [paymentAccountId, setPaymentAccountId] = useState("");
-  const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
+  const [lines, setLines] = useState<LineFormData[]>([]);
+  const [initialized, setInitialized] = useState(false);
+
+  // Pre-populate form with purchase data
+  useEffect(() => {
+    if (purchase && !initialized) {
+      setSupplierId(purchase.supplier_id);
+      setDate(purchase.date.slice(0, 16));
+      setVehiclePlate(purchase.vehicle_plate ?? "");
+      setInvoiceNumber(purchase.invoice_number ?? "");
+      setNotes(purchase.notes ?? "");
+      setLines(
+        purchase.lines.map((line) => ({
+          _key: ++lineKeyCounter,
+          material_id: line.material_id,
+          quantity: line.quantity,
+          unit_price: line.unit_price,
+          warehouse_id: line.warehouse_id,
+        }))
+      );
+      setInitialized(true);
+    }
+  }, [purchase, initialized]);
+
+  // Redirect si no se puede editar
+  useEffect(() => {
+    if (purchase && (purchase.status !== "registered" || purchase.double_entry_id)) {
+      navigate(`/purchases/${id}`, { replace: true });
+    }
+  }, [purchase, id, navigate]);
 
   const updateLine = (key: number, field: keyof PurchaseLineCreate, value: string | number | null) => {
     setLines((prev) =>
-      prev.map((l) => (l._key === key ? { ...l, [field]: value } : l)),
+      prev.map((l) => (l._key === key ? { ...l, [field]: value } : l))
     );
   };
 
@@ -74,34 +100,49 @@ export default function PurchaseCreatePage() {
     supplierId &&
     date &&
     lines.length > 0 &&
-    lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
-    (!autoLiquidate || paymentAccountId);
+    lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0);
 
   const handleSubmit = () => {
-    if (!canSubmit) return;
-    createPurchase.mutate(
+    if (!canSubmit || !id) return;
+    updatePurchase.mutate(
       {
-        supplier_id: supplierId,
-        date,
-        vehicle_plate: vehiclePlate || null,
-        invoice_number: invoiceNumber || null,
-        notes: notes || null,
-        auto_liquidate: autoLiquidate,
-        payment_account_id: autoLiquidate ? paymentAccountId : null,
-        lines: lines.map(({ _key, ...rest }) => rest),
-      },
-      {
-        onSuccess: (purchase) => {
-          navigate(`/purchases/${purchase.id}`);
+        id,
+        data: {
+          supplier_id: supplierId,
+          date,
+          vehicle_plate: vehiclePlate || null,
+          invoice_number: invoiceNumber || null,
+          notes: notes || null,
+          lines: lines.map(({ _key, ...rest }) => rest),
         },
       },
+      {
+        onSuccess: () => {
+          navigate(`/purchases/${id}`);
+        },
+      }
     );
   };
 
+  if (loadingPurchase) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-64 rounded-lg" />
+        <Skeleton className="h-48 rounded-lg" />
+      </div>
+    );
+  }
+
+  if (!purchase) return null;
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Nueva Compra" description="Registrar una compra de material">
-        <Button variant="outline" onClick={() => navigate(ROUTES.PURCHASES)}>
+      <PageHeader
+        title={`Editar Compra #${purchase.purchase_number}`}
+        description="Modificar datos y lineas de la compra"
+      >
+        <Button variant="outline" onClick={() => navigate(`/purchases/${id}`)}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Volver
         </Button>
@@ -244,43 +285,18 @@ export default function PurchaseCreatePage() {
         </CardContent>
       </Card>
 
-      {/* Liquidacion */}
-      <Card className="shadow-sm">
-        <CardContent className="pt-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidar inmediatamente</Label>
-              <p className="text-xs text-slate-500 mt-1">Si se activa, la compra se pagara al crearla</p>
-            </div>
-            <Switch checked={autoLiquidate} onCheckedChange={setAutoLiquidate} />
-          </div>
-
-          {autoLiquidate && (
-            <div className="mt-4">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta de Pago *</Label>
-              <EntitySelect
-                value={paymentAccountId}
-                onChange={setPaymentAccountId}
-                options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
-                placeholder="Seleccionar cuenta..."
-              />
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* Acciones */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.PURCHASES)}>
+          <Button variant="outline" onClick={() => navigate(`/purchases/${id}`)}>
             Cancelar
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={!canSubmit || createPurchase.isPending}
+            disabled={!canSubmit || updatePurchase.isPending}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
-            {createPurchase.isPending ? "Creando..." : "Crear Compra"}
+            {updatePurchase.isPending ? "Guardando..." : "Guardar Cambios"}
           </Button>
         </div>
       </div>

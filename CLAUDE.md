@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ReciclaTrac is a multi-tenant ERP system for recycling companies (buying/selling metal and material scraps). The project has a Python/FastAPI backend and a React/TypeScript frontend.
+EcoBalance is a multi-tenant ERP system for recycling companies (buying/selling metal and material scraps). The project has a Python/FastAPI backend and a React/TypeScript frontend.
 
 ## Common Commands
 

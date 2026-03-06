@@ -26,6 +26,11 @@ const typeLabels: Record<string, string> = {
   commission_payment: "Pago de Comision",
 };
 
+const statusBorderMap: Record<string, string> = {
+  confirmed: "border-t-[3px] border-t-emerald-400",
+  annulled: "border-t-[3px] border-t-rose-400",
+};
+
 export default function MovementDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -36,7 +41,7 @@ export default function MovementDetailPage() {
   const [annulReason, setAnnulReason] = useState("");
 
   if (isLoading) return <div className="space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>;
-  if (!movement) return <div className="text-center py-12 text-gray-500">Movimiento no encontrado</div>;
+  if (!movement) return <div className="text-center py-12 text-slate-500">Movimiento no encontrado</div>;
 
   const handleAnnul = () => {
     if (!id || !annulReason) return;
@@ -62,38 +67,38 @@ export default function MovementDetailPage() {
       </PageHeader>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
+        <Card className={`shadow-sm ${statusBorderMap[movement.status] ?? ""}`}>
           <CardContent className="pt-6">
             <dl className="space-y-3 text-sm">
-              <div className="flex justify-between"><dt className="text-gray-500">Estado</dt><dd><StatusBadge status={movement.status} /></dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Tipo</dt><dd><Badge variant="outline">{typeLabels[movement.movement_type]}</Badge></dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Fecha</dt><dd>{formatDate(movement.date)}</dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Monto</dt><dd className="font-bold text-lg">{formatCurrency(movement.amount)}</dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">Descripcion</dt><dd>{movement.description}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Estado</dt><dd><StatusBadge status={movement.status} /></dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</dt><dd><Badge variant="outline">{typeLabels[movement.movement_type]}</Badge></dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</dt><dd>{formatDate(movement.date)}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Monto</dt><dd className="font-bold text-lg">{formatCurrency(movement.amount)}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Descripcion</dt><dd>{movement.description}</dd></div>
             </dl>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-sm">
           <CardContent className="pt-6">
             <dl className="space-y-3 text-sm">
-              <div className="flex justify-between"><dt className="text-gray-500">Cuenta</dt><dd>{movement.account_name}</dd></div>
-              {movement.third_party_name && <div className="flex justify-between"><dt className="text-gray-500">Tercero</dt><dd>{movement.third_party_name}</dd></div>}
-              {movement.expense_category_name && <div className="flex justify-between"><dt className="text-gray-500">Categoria</dt><dd>{movement.expense_category_name}</dd></div>}
-              {movement.reference_number && <div className="flex justify-between"><dt className="text-gray-500">Referencia</dt><dd>{movement.reference_number}</dd></div>}
-              {movement.notes && <div><dt className="text-gray-500 mb-1">Notas</dt><dd>{movement.notes}</dd></div>}
-              <div className="flex justify-between"><dt className="text-gray-500">Creado</dt><dd>{formatDate(movement.created_at)}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta</dt><dd>{movement.account_name}</dd></div>
+              {movement.third_party_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero</dt><dd>{movement.third_party_name}</dd></div>}
+              {movement.expense_category_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria</dt><dd>{movement.expense_category_name}</dd></div>}
+              {movement.reference_number && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Referencia</dt><dd>{movement.reference_number}</dd></div>}
+              {movement.notes && <div><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Notas</dt><dd>{movement.notes}</dd></div>}
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Creado</dt><dd>{formatDate(movement.created_at)}</dd></div>
             </dl>
           </CardContent>
         </Card>
       </div>
 
       {movement.status === "annulled" && (
-        <Card className="border-red-200 bg-red-50">
+        <Card className="shadow-sm border-red-200 bg-red-50">
           <CardContent className="pt-6">
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-red-600 font-medium">Razon de anulacion</dt><dd className="text-red-800">{movement.annulled_reason}</dd></div>
-              {movement.annulled_at && <div className="flex justify-between"><dt className="text-red-600">Anulado el</dt><dd className="text-red-800">{formatDate(movement.annulled_at)}</dd></div>}
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-red-600">Razon de anulacion</dt><dd className="text-red-800">{movement.annulled_reason}</dd></div>
+              {movement.annulled_at && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-red-600">Anulado el</dt><dd className="text-red-800">{formatDate(movement.annulled_at)}</dd></div>}
             </dl>
           </CardContent>
         </Card>

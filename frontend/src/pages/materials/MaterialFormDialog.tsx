@@ -66,17 +66,17 @@ export default function MaterialFormDialog({ open, onOpenChange, editItem }: Pro
         </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <div><Label>Codigo *</Label><Input value={code} onChange={(e) => setCode(e.target.value)} /></div>
-            <div><Label>Unidad *</Label><Input value={defaultUnit} onChange={(e) => setDefaultUnit(e.target.value)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Codigo *</Label><Input value={code} onChange={(e) => setCode(e.target.value)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Unidad *</Label><Input value={defaultUnit} onChange={(e) => setDefaultUnit(e.target.value)} /></div>
           </div>
-          <div><Label>Nombre *</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-          <div><Label>Descripcion</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} /></div>
-          <div><Label>Categoria *</Label><EntitySelect value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ id: c.id, label: c.name }))} placeholder="Seleccionar..." /></div>
-          <div><Label>Unidad de Negocio *</Label><EntitySelect value={businessUnitId} onChange={setBusinessUnitId} options={businessUnits.map((b) => ({ id: b.id, label: b.name }))} placeholder="Seleccionar..." /></div>
+          <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Descripcion</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+          <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria *</Label><EntitySelect value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ id: c.id, label: c.name }))} placeholder="Seleccionar..." /></div>
+          <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Unidad de Negocio *</Label><EntitySelect value={businessUnitId} onChange={setBusinessUnitId} options={businessUnits.map((b) => ({ id: b.id, label: b.name }))} placeholder="Seleccionar..." /></div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit || isPending} className="bg-green-600 hover:bg-green-700">
+          <Button onClick={handleSubmit} disabled={!canSubmit || isPending} className="bg-emerald-600 hover:bg-emerald-700">
             {isPending ? "Guardando..." : editItem ? "Actualizar" : "Crear"}
           </Button>
         </DialogFooter>

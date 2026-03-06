@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@/stores/authStore";
+import { getApiErrorMessage } from "@/utils/formatters";
 import { authService } from "@/services/auth";
 import { organizationService } from "@/services/organizations";
 import type { UserLogin } from "@/types/auth";
@@ -39,10 +40,7 @@ export function useLogin() {
       // Si hay multiples orgs, el componente OrgSelector se mostrara
     },
     onError: (error: unknown) => {
-      const message =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        "Error al iniciar sesion";
-      toast.error(message);
+      toast.error(getApiErrorMessage(error, "Error al iniciar sesion"));
     },
   });
 }

@@ -9,9 +9,11 @@ import NotFound from "@/pages/NotFound";
 import PurchasesPage from "@/pages/purchases/PurchasesPage";
 import PurchaseCreatePage from "@/pages/purchases/PurchaseCreatePage";
 import PurchaseDetailPage from "@/pages/purchases/PurchaseDetailPage";
+import PurchaseEditPage from "@/pages/purchases/PurchaseEditPage";
 import SalesPage from "@/pages/sales/SalesPage";
 import SaleCreatePage from "@/pages/sales/SaleCreatePage";
 import SaleDetailPage from "@/pages/sales/SaleDetailPage";
+import SaleEditPage from "@/pages/sales/SaleEditPage";
 import DoubleEntriesPage from "@/pages/double-entries/DoubleEntriesPage";
 import DoubleEntryCreatePage from "@/pages/double-entries/DoubleEntryCreatePage";
 import DoubleEntryDetailPage from "@/pages/double-entries/DoubleEntryDetailPage";
@@ -69,11 +71,13 @@ function App() {
               {/* Compras */}
               <Route path={ROUTES.PURCHASES} element={<PurchasesPage />} />
               <Route path={ROUTES.PURCHASES_NEW} element={<PurchaseCreatePage />} />
+              <Route path="/purchases/:id/edit" element={<PurchaseEditPage />} />
               <Route path="/purchases/:id" element={<PurchaseDetailPage />} />
               {/* Ventas */}
               <Route path={ROUTES.SALES} element={<SalesPage />} />
               <Route path={ROUTES.SALES_NEW} element={<SaleCreatePage />} />
               <Route path="/sales/:id" element={<SaleDetailPage />} />
+              <Route path="/sales/:id/edit" element={<SaleEditPage />} />
               {/* Doble Partida */}
               <Route path={ROUTES.DOUBLE_ENTRIES} element={<DoubleEntriesPage />} />
               <Route path={ROUTES.DOUBLE_ENTRIES_NEW} element={<DoubleEntryCreatePage />} />

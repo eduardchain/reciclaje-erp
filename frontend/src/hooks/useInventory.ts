@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { inventoryService } from "@/services/inventory";
+import { getApiErrorMessage } from "@/utils/formatters";
 import type {
   IncreaseCreate,
   DecreaseCreate,
@@ -11,6 +12,7 @@ import type {
   AnnulAdjustmentRequest,
   AnnulTransformationRequest,
 } from "@/types/inventory";
+
 
 // --- Views ---
 
@@ -99,8 +101,8 @@ export function useCreateAdjustment(type: string) {
       toast.success("Ajuste creado exitosamente");
       qc.invalidateQueries({ queryKey: ["inventory"] });
     },
-    onError: (error: Error & { response?: { data?: { detail?: string } } }) => {
-      toast.error(error.response?.data?.detail ?? "Error al crear ajuste");
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al crear ajuste"));
     },
   });
 }
@@ -114,8 +116,8 @@ export function useAnnulAdjustment() {
       toast.success("Ajuste anulado");
       qc.invalidateQueries({ queryKey: ["inventory"] });
     },
-    onError: (error: Error & { response?: { data?: { detail?: string } } }) => {
-      toast.error(error.response?.data?.detail ?? "Error al anular ajuste");
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al anular ajuste"));
     },
   });
 }
@@ -128,8 +130,8 @@ export function useCreateTransfer() {
       toast.success("Traslado realizado");
       qc.invalidateQueries({ queryKey: ["inventory"] });
     },
-    onError: (error: Error & { response?: { data?: { detail?: string } } }) => {
-      toast.error(error.response?.data?.detail ?? "Error al crear traslado");
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al crear traslado"));
     },
   });
 }
@@ -166,8 +168,8 @@ export function useCreateTransformation() {
       toast.success("Transformacion creada exitosamente");
       qc.invalidateQueries({ queryKey: ["inventory"] });
     },
-    onError: (error: Error & { response?: { data?: { detail?: string } } }) => {
-      toast.error(error.response?.data?.detail ?? "Error al crear transformacion");
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al crear transformacion"));
     },
   });
 }
@@ -181,8 +183,8 @@ export function useAnnulTransformation() {
       toast.success("Transformacion anulada");
       qc.invalidateQueries({ queryKey: ["inventory"] });
     },
-    onError: (error: Error & { response?: { data?: { detail?: string } } }) => {
-      toast.error(error.response?.data?.detail ?? "Error al anular transformacion");
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al anular transformacion"));
     },
   });
 }

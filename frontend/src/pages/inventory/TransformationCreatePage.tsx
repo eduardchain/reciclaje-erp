@@ -86,24 +86,24 @@ export default function TransformationCreatePage() {
       </PageHeader>
 
       {/* Origen */}
-      <Card>
-        <CardHeader><CardTitle className="text-base text-blue-700">Material Origen</CardTitle></CardHeader>
+      <Card className="shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-blue-700">Material Origen</CardTitle></CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <Label>Material *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>
               <EntitySelect value={sourceMaterialId} onChange={setSourceMaterialId} options={materialOptions} placeholder="Seleccionar..." />
             </div>
             <div>
-              <Label>Bodega *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega *</Label>
               <EntitySelect value={sourceWarehouseId} onChange={setSourceWarehouseId} options={warehouseOptions} placeholder="Seleccionar..." />
             </div>
             <div>
-              <Label>Cantidad *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad *</Label>
               <Input type="number" min={0} step="0.01" value={sourceQuantity || ""} onChange={(e) => setSourceQuantity(parseFloat(e.target.value) || 0)} />
             </div>
             <div>
-              <Label>Fecha *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
               <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
           </div>
@@ -111,9 +111,9 @@ export default function TransformationCreatePage() {
       </Card>
 
       {/* Destinos */}
-      <Card>
+      <Card className="shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base text-green-700">Materiales Destino</CardTitle>
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Materiales Destino</CardTitle>
           <div className="flex items-center gap-4">
             <Select value={costDistribution} onValueChange={(v) => setCostDistribution(v as "proportional_weight" | "manual")}>
               <SelectTrigger className="w-[200px]"><SelectValue /></SelectTrigger>
@@ -129,27 +129,27 @@ export default function TransformationCreatePage() {
         </CardHeader>
         <CardContent className="space-y-3">
           {lines.map((line, idx) => (
-            <div key={line._key} className="grid grid-cols-12 gap-2 items-end">
+            <div key={line._key} className={`grid grid-cols-12 gap-2 items-end ${idx < lines.length - 1 ? "border-b border-slate-100" : ""} pb-3 mb-3`}>
               <div className="col-span-3">
-                {idx === 0 && <Label className="text-xs">Material</Label>}
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</Label>}
                 <EntitySelect value={line.destination_material_id} onChange={(v) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, destination_material_id: v } : l))} options={materialOptions} placeholder="Material..." />
               </div>
               <div className="col-span-3">
-                {idx === 0 && <Label className="text-xs">Bodega</Label>}
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega</Label>}
                 <EntitySelect value={line.destination_warehouse_id} onChange={(v) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, destination_warehouse_id: v } : l))} options={warehouseOptions} placeholder="Bodega..." />
               </div>
               <div className="col-span-2">
-                {idx === 0 && <Label className="text-xs">Cantidad</Label>}
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad</Label>}
                 <Input type="number" min={0} step="0.01" value={line.quantity || ""} onChange={(e) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, quantity: parseFloat(e.target.value) || 0 } : l))} />
               </div>
               {costDistribution === "manual" && (
                 <div className="col-span-2">
-                  {idx === 0 && <Label className="text-xs">Costo Unit.</Label>}
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Unit.</Label>}
                   <Input type="number" min={0} step="1" value={line.unit_cost ?? ""} onChange={(e) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, unit_cost: parseFloat(e.target.value) || 0 } : l))} />
                 </div>
               )}
               <div className={costDistribution === "manual" ? "col-span-2" : "col-span-4"}>
-                {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">&nbsp;</Label>}
                 <Button variant="ghost" size="sm" onClick={() => setLines((p) => p.filter((l) => l._key !== line._key))} className="text-red-500" disabled={lines.length <= 1}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -160,21 +160,21 @@ export default function TransformationCreatePage() {
       </Card>
 
       {/* Merma y Balance */}
-      <Card className={`border-2 ${isBalanced ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+      <Card className={`shadow-sm border-2 ${isBalanced ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
         <CardContent className="pt-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
             <div>
-              <Label>Merma/Desperdicio</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Merma/Desperdicio</Label>
               <Input type="number" min={0} step="0.01" value={wasteQuantity || ""} onChange={(e) => setWasteQuantity(parseFloat(e.target.value) || 0)} />
             </div>
             <div className="text-sm">
-              <p className="text-gray-500">Origen: <span className="font-medium">{sourceQuantity.toFixed(2)}</span></p>
-              <p className="text-gray-500">Destinos: <span className="font-medium">{totalDestQty.toFixed(2)}</span></p>
-              <p className="text-gray-500">Merma: <span className="font-medium">{wasteQuantity.toFixed(2)}</span></p>
+              <p className="text-slate-500">Origen: <span className="font-medium">{sourceQuantity.toFixed(2)}</span></p>
+              <p className="text-slate-500">Destinos: <span className="font-medium">{totalDestQty.toFixed(2)}</span></p>
+              <p className="text-slate-500">Merma: <span className="font-medium">{wasteQuantity.toFixed(2)}</span></p>
             </div>
             <div className="md:col-span-2 text-right">
-              <p className="text-sm text-gray-500">Balance</p>
-              <p className={`text-2xl font-bold ${isBalanced ? "text-green-700" : "text-red-700"}`}>
+              <p className="text-sm text-slate-500">Balance</p>
+              <p className={`text-2xl font-bold ${isBalanced ? "text-emerald-700" : "text-red-700"}`}>
                 {isBalanced ? "Cuadra" : `Diferencia: ${balance.toFixed(2)}`}
               </p>
             </div>
@@ -183,26 +183,28 @@ export default function TransformationCreatePage() {
       </Card>
 
       {/* Razon y notas */}
-      <Card>
+      <Card className="shadow-sm">
         <CardContent className="pt-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <Label>Razon *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Razon *</Label>
               <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Razon de la transformacion..." />
             </div>
             <div>
-              <Label>Notas</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={1} />
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY_TRANSFORMATIONS)}>Cancelar</Button>
-        <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-green-600 hover:bg-green-700">
-          {create.isPending ? "Creando..." : "Crear Transformacion"}
-        </Button>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY_TRANSFORMATIONS)}>Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-emerald-600 hover:bg-emerald-700">
+            {create.isPending ? "Creando..." : "Crear Transformacion"}
+          </Button>
+        </div>
       </div>
     </div>
   );

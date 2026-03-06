@@ -60,6 +60,15 @@ export interface PurchaseResponse extends BaseEntity {
   lines: PurchaseLineResponse[];
 }
 
+export interface PurchaseFullUpdate {
+  supplier_id?: string;
+  date?: string;
+  notes?: string | null;
+  vehicle_plate?: string | null;
+  invoice_number?: string | null;
+  lines?: PurchaseLineCreate[];
+}
+
 export interface PurchaseLiquidateRequest {
   payment_account_id: string;
 }

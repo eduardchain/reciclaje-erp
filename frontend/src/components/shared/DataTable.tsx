@@ -1,7 +1,10 @@
+import { useCallback } from "react";
 import {
   type ColumnDef,
+  type SortingState,
   flexRender,
   getCoreRowModel,
+  getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 import {
@@ -14,8 +17,18 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Download,
+} from "lucide-react";
 import { EmptyState } from "./EmptyState";
+import { useState } from "react";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -24,10 +37,43 @@ interface DataTableProps<TData, TValue> {
   pageCount?: number;
   pageIndex?: number;
   pageSize?: number;
+  totalItems?: number;
   onPageChange?: (page: number) => void;
   onRowClick?: (row: TData) => void;
   emptyTitle?: string;
   emptyDescription?: string;
+  exportFilename?: string;
+  toolbar?: React.ReactNode;
+}
+
+function exportToCsv<TData>(columns: ColumnDef<TData, unknown>[], data: TData[], filename: string) {
+  const headers = columns
+    .filter((col) => col.id !== "actions" && col.id !== "select")
+    .map((col) => {
+      if (typeof col.header === "string") return col.header;
+      return col.id || "";
+    });
+
+  const rows = data.map((row) =>
+    columns
+      .filter((col) => col.id !== "actions" && col.id !== "select")
+      .map((col) => {
+        const key = (col as { accessorKey?: string }).accessorKey || col.id || "";
+        const value = (row as Record<string, unknown>)[key];
+        if (value == null) return "";
+        const str = String(value);
+        return str.includes(",") || str.includes('"') ? `"${str.replace(/"/g, '""')}"` : str;
+      })
+  );
+
+  const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${filename}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export function DataTable<TData, TValue>({
@@ -37,31 +83,45 @@ export function DataTable<TData, TValue>({
   pageCount = 1,
   pageIndex = 0,
   pageSize = 20,
+  totalItems,
   onPageChange,
   onRowClick,
   emptyTitle,
   emptyDescription,
+  exportFilename,
+  toolbar,
 }: DataTableProps<TData, TValue>) {
+  const [sorting, setSorting] = useState<SortingState>([]);
+
   const table = useReactTable({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onSortingChange: setSorting,
     manualPagination: true,
     pageCount,
     state: {
       pagination: { pageIndex, pageSize },
+      sorting,
     },
   });
 
+  const handleExport = useCallback(() => {
+    if (exportFilename) {
+      exportToCsv(columns as ColumnDef<TData, unknown>[], data, exportFilename);
+    }
+  }, [columns, data, exportFilename]);
+
   if (loading) {
     return (
-      <div className="rounded-md border">
+      <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm overflow-hidden">
         <Table>
           <TableHeader>
-            <TableRow>
+            <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
               {columns.map((_, i) => (
                 <TableHead key={i}>
-                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-3 w-20" />
                 </TableHead>
               ))}
             </TableRow>
@@ -82,33 +142,81 @@ export function DataTable<TData, TValue>({
     );
   }
 
+  const showFrom = pageIndex * pageSize + 1;
+  const showTo = Math.min((pageIndex + 1) * pageSize, totalItems || data.length);
+  const total = totalItems || data.length;
+
   return (
-    <div>
-      <div className="rounded-md border">
+    <div className="space-y-3">
+      {/* Toolbar */}
+      {(toolbar || exportFilename) && (
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex-1">{toolbar}</div>
+          {exportFilename && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              className="text-slate-600 shrink-0"
+            >
+              <Download className="h-4 w-4 mr-1.5" />
+              Exportar
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm overflow-hidden">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
-                  </TableHead>
-                ))}
+              <TableRow key={headerGroup.id} className="bg-slate-50/80 hover:bg-slate-50/80 border-b border-slate-200/80">
+                {headerGroup.headers.map((header) => {
+                  const canSort = header.column.getCanSort();
+                  const sorted = header.column.getIsSorted();
+                  return (
+                    <TableHead
+                      key={header.id}
+                      className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10"
+                    >
+                      {header.isPlaceholder ? null : canSort ? (
+                        <button
+                          className="flex items-center gap-1.5 hover:text-slate-900 transition-colors"
+                          onClick={header.column.getToggleSortingHandler()}
+                        >
+                          {flexRender(header.column.columnDef.header, header.getContext())}
+                          {sorted === "asc" ? (
+                            <ArrowUp className="h-3.5 w-3.5 text-emerald-600" />
+                          ) : sorted === "desc" ? (
+                            <ArrowDown className="h-3.5 w-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="h-3.5 w-3.5 opacity-30" />
+                          )}
+                        </button>
+                      ) : (
+                        flexRender(header.column.columnDef.header, header.getContext())
+                      )}
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             ))}
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
+              table.getRowModel().rows.map((row, i) => (
                 <TableRow
                   key={row.id}
-                  className={onRowClick ? "cursor-pointer" : undefined}
+                  className={`
+                    ${onRowClick ? "cursor-pointer" : ""}
+                    ${i % 2 === 1 ? "bg-slate-50/40" : ""}
+                    hover:bg-slate-100/60 transition-colors
+                  `}
                   onClick={() => onRowClick?.(row.original)}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
+                    <TableCell key={cell.id} className="py-3">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}
@@ -116,7 +224,7 @@ export function DataTable<TData, TValue>({
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center">
+                <TableCell colSpan={columns.length} className="h-32 text-center">
                   <EmptyState title={emptyTitle} description={emptyDescription} />
                 </TableCell>
               </TableRow>
@@ -125,27 +233,51 @@ export function DataTable<TData, TValue>({
         </Table>
       </div>
 
+      {/* Pagination */}
       {onPageChange && pageCount > 1 && (
-        <div className="flex items-center justify-between px-2 py-4">
-          <p className="text-sm text-gray-500">
-            Pagina {pageIndex + 1} de {pageCount}
+        <div className="flex items-center justify-between text-sm">
+          <p className="text-slate-500 tabular-nums">
+            Mostrando {showFrom}-{showTo} de {total} registros
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Button
-              variant="outline"
+              variant="ghost"
+              size="sm"
+              onClick={() => onPageChange(0)}
+              disabled={pageIndex === 0}
+              className="h-8 w-8 p-0 text-slate-500"
+            >
+              <ChevronsLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
               size="sm"
               onClick={() => onPageChange(pageIndex - 1)}
               disabled={pageIndex === 0}
+              className="h-8 w-8 p-0 text-slate-500"
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
+            <span className="px-3 py-1 text-sm font-medium text-slate-700 tabular-nums">
+              {pageIndex + 1} / {pageCount}
+            </span>
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => onPageChange(pageIndex + 1)}
               disabled={pageIndex >= pageCount - 1}
+              className="h-8 w-8 p-0 text-slate-500"
             >
               <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onPageChange(pageCount - 1)}
+              disabled={pageIndex >= pageCount - 1}
+              className="h-8 w-8 p-0 text-slate-500"
+            >
+              <ChevronsRight className="h-4 w-4" />
             </Button>
           </div>
         </div>

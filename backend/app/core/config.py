@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # Project
-    PROJECT_NAME: str = "ReciclaTrac API"
+    PROJECT_NAME: str = "EcoBalance API"
     VERSION: str = "0.1.0"
 
     # CORS

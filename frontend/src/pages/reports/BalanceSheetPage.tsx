@@ -9,15 +9,15 @@ export default function BalanceSheetPage() {
 
   return (
     <ReportsLayout>
-      {isLoading && <div className="text-center text-gray-500 py-8">Cargando...</div>}
+      {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}
 
       {data && (
         <div className="space-y-4">
-          <p className="text-sm text-gray-500">Corte al: {formatDate(data.as_of_date)}</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Corte al: {formatDate(data.as_of_date)}</p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
-              <CardHeader><CardTitle className="text-base text-blue-700">Activos</CardTitle></CardHeader>
+            <Card className="shadow-sm">
+              <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-blue-700">Activos</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <div className="flex justify-between"><span>Efectivo y Bancos</span><span>{formatCurrency(data.assets.cash_and_bank)}</span></div>
                 <div className="flex justify-between"><span>Cuentas por Cobrar</span><span>{formatCurrency(data.assets.accounts_receivable)}</span></div>
@@ -27,8 +27,8 @@ export default function BalanceSheetPage() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader><CardTitle className="text-base text-red-700">Pasivos</CardTitle></CardHeader>
+            <Card className="shadow-sm">
+              <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-red-700">Pasivos</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <div className="flex justify-between"><span>Cuentas por Pagar</span><span>{formatCurrency(data.liabilities.accounts_payable)}</span></div>
                 <div className="flex justify-between"><span>Deuda Inversionistas</span><span>{formatCurrency(data.liabilities.investor_debt)}</span></div>
@@ -37,11 +37,11 @@ export default function BalanceSheetPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-2 border-green-200 bg-green-50">
-              <CardHeader><CardTitle className="text-base text-green-700">Patrimonio</CardTitle></CardHeader>
+            <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
+              <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Patrimonio</CardTitle></CardHeader>
               <CardContent>
-                <p className="text-3xl font-bold text-green-700 text-center mt-4">{formatCurrency(data.equity)}</p>
-                <p className="text-xs text-gray-500 text-center mt-2">Activos - Pasivos</p>
+                <p className="text-3xl font-bold text-emerald-700 text-center mt-4">{formatCurrency(data.equity)}</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 text-center mt-2">Activos - Pasivos</p>
               </CardContent>
             </Card>
           </div>

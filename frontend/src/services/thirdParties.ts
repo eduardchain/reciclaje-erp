@@ -29,4 +29,14 @@ export const thirdPartyService = {
     const response = await apiClient.patch<ThirdPartyResponse>(`/api/v1/third-parties/${id}`, data);
     return response.data;
   },
+
+  getSuppliers: async (filters: Omit<ThirdPartyFilters, "role"> = {}): Promise<PaginatedResponse<ThirdPartyResponse>> => {
+    const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties/suppliers", { params: filters });
+    return response.data;
+  },
+
+  getCustomers: async (filters: Omit<ThirdPartyFilters, "role"> = {}): Promise<PaginatedResponse<ThirdPartyResponse>> => {
+    const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties/customers", { params: filters });
+    return response.data;
+  },
 };

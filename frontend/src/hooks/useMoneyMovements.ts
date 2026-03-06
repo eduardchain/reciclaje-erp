@@ -2,6 +2,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { moneyMovementService } from "@/services/moneyMovements";
 import type { AnnulMovementRequest } from "@/types/money-movement";
+import axios from "axios";
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) return error.response?.data?.detail || fallback;
+  return fallback;
+}
 
 interface MovementFilters {
   skip?: number;
@@ -54,10 +60,7 @@ export function useCreateMovement(type: string) {
       toast.success("Movimiento creado exitosamente");
     },
     onError: (error: unknown) => {
-      const message =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        "Error al crear el movimiento";
-      toast.error(message);
+      toast.error(getApiErrorMessage(error, "Error al crear el movimiento"));
     },
   });
 }
@@ -73,10 +76,7 @@ export function useAnnulMovement() {
       toast.success("Movimiento anulado exitosamente");
     },
     onError: (error: unknown) => {
-      const message =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        "Error al anular el movimiento";
-      toast.error(message);
+      toast.error(getApiErrorMessage(error, "Error al anular el movimiento"));
     },
   });
 }

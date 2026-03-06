@@ -42,7 +42,7 @@ export function ProtectedRoute() {
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
       </div>
     );
   }
@@ -61,8 +61,8 @@ export function ProtectedRoute() {
     return (
       <div className="h-screen flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-900">Sin organizacion</h2>
-          <p className="mt-2 text-gray-600">No perteneces a ninguna organizacion.</p>
+          <h2 className="text-xl font-semibold text-slate-900">Sin organizacion</h2>
+          <p className="mt-2 text-slate-600">No perteneces a ninguna organizacion.</p>
         </div>
       </div>
     );

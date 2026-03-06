@@ -912,3 +912,258 @@ class TestPurchaseWeightedAverageCost:
         db_session.refresh(test_material)
         assert test_material.current_stock == Decimal("150.0000")
         assert abs(test_material.current_average_cost - Decimal("53.3333")) < Decimal("0.01")
+
+
+# ============================================================================
+# Test Update Purchase
+# ============================================================================
+
+class TestUpdatePurchase:
+    """Tests for PATCH /api/v1/purchases/{id}"""
+
+    def test_update_purchase_metadata_only(
+        self, client, org_headers, db_session, test_purchase, test_material
+    ):
+        """Editar solo metadata (notas, fecha, placa) sin tocar lineas ni inventario."""
+        old_stock = test_material.current_stock
+
+        response = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}",
+            json={
+                "notes": "Nota actualizada",
+                "vehicle_plate": "ABC-123",
+                "invoice_number": "FAC-001",
+            },
+            headers=org_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["notes"] == "Nota actualizada"
+        assert data["vehicle_plate"] == "ABC-123"
+        assert data["invoice_number"] == "FAC-001"
+
+        # Stock no debe cambiar
+        db_session.refresh(test_material)
+        assert test_material.current_stock == old_stock
+
+    def test_update_purchase_lines(
+        self, client, org_headers, db_session,
+        test_purchase, test_supplier, test_material, test_warehouse
+    ):
+        """Cambiar cantidad y precio de lineas, verificar inventario."""
+        db_session.refresh(test_material)
+        db_session.refresh(test_supplier)
+        old_supplier_balance = test_supplier.current_balance
+
+        response = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}",
+            json={
+                "lines": [
+                    {
+                        "material_id": str(test_material.id),
+                        "quantity": 200,
+                        "unit_price": 60,
+                        "warehouse_id": str(test_warehouse.id),
+                    }
+                ]
+            },
+            headers=org_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_amount"] == 12000.0  # 200 * 60
+        assert len(data["lines"]) == 1
+        assert data["lines"][0]["quantity"] == 200.0
+
+        # Stock: fue 100, revertido a 0, luego +200 = 200
+        db_session.refresh(test_material)
+        assert test_material.current_stock == Decimal("200.0000")
+
+        # Saldo proveedor: fue -5000, revertido a 0, luego -12000
+        db_session.refresh(test_supplier)
+        expected_balance = old_supplier_balance + Decimal("5000") - Decimal("12000")
+        assert test_supplier.current_balance == expected_balance
+
+    def test_update_purchase_add_remove_lines(
+        self, client, org_headers, db_session,
+        test_purchase, test_supplier, test_material, test_warehouse,
+        test_category, test_business_unit, test_organization
+    ):
+        """Reemplazar lineas: eliminar la original, agregar nueva con material diferente."""
+        # Crear segundo material
+        material2 = Material(
+            id=uuid4(),
+            code="IRON-001",
+            name="Iron Scrap",
+            category_id=test_category.id,
+            business_unit_id=test_business_unit.id,
+            default_unit="kg",
+            current_stock=Decimal("0.0000"),
+            current_average_cost=Decimal("0.0000"),
+            organization_id=test_organization.id,
+            is_active=True,
+        )
+        db_session.add(material2)
+        db_session.commit()
+
+        response = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}",
+            json={
+                "lines": [
+                    {
+                        "material_id": str(material2.id),
+                        "quantity": 50,
+                        "unit_price": 30,
+                        "warehouse_id": str(test_warehouse.id),
+                    }
+                ]
+            },
+            headers=org_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_amount"] == 1500.0  # 50 * 30
+        assert data["lines"][0]["material_code"] == "IRON-001"
+
+        # Material original: stock revertido a 0
+        db_session.refresh(test_material)
+        assert test_material.current_stock == Decimal("0.0000")
+
+        # Material2: stock = 50
+        db_session.refresh(material2)
+        assert material2.current_stock == Decimal("50.0000")
+
+    def test_update_purchase_change_supplier(
+        self, client, org_headers, db_session,
+        test_purchase, test_supplier, test_supplier2, test_material, test_warehouse
+    ):
+        """Cambiar proveedor, verificar saldos de ambos."""
+        db_session.refresh(test_supplier)
+        db_session.refresh(test_supplier2)
+        old_balance_s1 = test_supplier.current_balance
+        old_balance_s2 = test_supplier2.current_balance
+
+        response = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}",
+            json={"supplier_id": str(test_supplier2.id)},
+            headers=org_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["supplier_name"] == "Second Supplier LLC"
+
+        # Proveedor original: deuda revertida
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == old_balance_s1 + Decimal("5000")
+
+        # Nuevo proveedor: deuda aplicada
+        db_session.refresh(test_supplier2)
+        assert test_supplier2.current_balance == old_balance_s2 - Decimal("5000")
+
+    def test_update_paid_purchase_fails(
+        self, client, org_headers, db_session,
+        test_purchase, test_money_account
+    ):
+        """No se puede editar compra pagada."""
+        # Primero liquidar
+        client.patch(
+            f"/api/v1/purchases/{test_purchase.id}/liquidate",
+            json={"payment_account_id": str(test_money_account.id)},
+            headers=org_headers,
+        )
+
+        response = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}",
+            json={"notes": "intento editar pagada"},
+            headers=org_headers,
+        )
+
+        assert response.status_code == 400
+        assert "registered" in response.json()["detail"].lower()
+
+    def test_update_cancelled_purchase_fails(
+        self, client, org_headers, db_session, test_purchase
+    ):
+        """No se puede editar compra cancelada."""
+        # Primero cancelar
+        client.patch(
+            f"/api/v1/purchases/{test_purchase.id}/cancel",
+            headers=org_headers,
+        )
+
+        response = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}",
+            json={"notes": "intento editar cancelada"},
+            headers=org_headers,
+        )
+
+        assert response.status_code == 400
+        assert "registered" in response.json()["detail"].lower()
+
+    def test_update_double_entry_purchase_fails(
+        self, client, org_headers, db_session, test_purchase
+    ):
+        """No se puede editar compra vinculada a doble partida."""
+        from sqlalchemy import text
+
+        # Setear double_entry_id directamente via SQL (bypass FK para test)
+        fake_de_id = uuid4()
+        db_session.execute(text(
+            "SET session_replication_role = replica"
+        ))
+        db_session.execute(text(
+            "UPDATE purchases SET double_entry_id = :de_id WHERE id = :pid"
+        ), {"de_id": str(fake_de_id), "pid": str(test_purchase.id)})
+        db_session.commit()
+        db_session.refresh(test_purchase)
+
+        response = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}",
+            json={"notes": "intento editar DP"},
+            headers=org_headers,
+        )
+
+        assert response.status_code == 400
+        assert "doble partida" in response.json()["detail"].lower()
+
+        # Limpiar
+        db_session.execute(text(
+            "UPDATE purchases SET double_entry_id = NULL WHERE id = :pid"
+        ), {"pid": str(test_purchase.id)})
+        db_session.execute(text(
+            "SET session_replication_role = DEFAULT"
+        ))
+        db_session.commit()
+        db_session.refresh(test_purchase)
+
+    def test_update_insufficient_stock_fails(
+        self, client, org_headers, db_session,
+        test_purchase, test_material, test_warehouse
+    ):
+        """Si no hay stock suficiente para revertir, falla."""
+        # Forzar stock bajo (como si ya se hubiera vendido parte)
+        test_material.current_stock = Decimal("10.0000")
+        test_material.current_stock_transit = Decimal("10.0000")
+        db_session.commit()
+
+        response = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}",
+            json={
+                "lines": [
+                    {
+                        "material_id": str(test_material.id),
+                        "quantity": 50,
+                        "unit_price": 50,
+                        "warehouse_id": str(test_warehouse.id),
+                    }
+                ]
+            },
+            headers=org_headers,
+        )
+
+        assert response.status_code == 400
+        assert "stock insuficiente" in response.json()["detail"].lower()

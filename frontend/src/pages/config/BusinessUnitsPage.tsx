@@ -40,22 +40,22 @@ export default function BusinessUnitsPage() {
   return (
     <ConfigLayout>
       <div className="flex justify-end">
-        <Button onClick={() => openDialog(null)} className="bg-green-600 hover:bg-green-700"><Plus className="h-4 w-4 mr-2" />Nueva Unidad</Button>
+        <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Unidad</Button>
       </div>
 
       <DataTable columns={columns} data={data?.items ?? []} loading={isLoading} pageCount={1} pageIndex={0} pageSize={100} onPageChange={() => {}}
-        onRowClick={(row) => openDialog(row)} emptyTitle="Sin unidades" emptyDescription="No hay unidades de negocio." />
+        onRowClick={(row) => openDialog(row)} emptyTitle="Sin unidades" emptyDescription="No hay unidades de negocio." exportFilename="ecobalance_unidades-negocio" />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>{editItem ? "Editar Unidad" : "Nueva Unidad de Negocio"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div><Label>Nombre *</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-            <div><Label>Descripcion</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Descripcion</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={!name || create.isPending || update.isPending} className="bg-green-600 hover:bg-green-700">
+            <Button onClick={handleSubmit} disabled={!name || create.isPending || update.isPending} className="bg-emerald-600 hover:bg-emerald-700">
               {create.isPending || update.isPending ? "Guardando..." : editItem ? "Actualizar" : "Crear"}
             </Button>
           </DialogFooter>

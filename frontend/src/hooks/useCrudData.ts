@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { getApiErrorMessage } from "@/utils/formatters";
 import { thirdPartyService } from "@/services/thirdParties";
 import { materialService } from "@/services/materials";
 import { warehouseService } from "@/services/warehouses";
@@ -11,8 +12,6 @@ import type { WarehouseCreate, WarehouseUpdate } from "@/types/warehouse";
 import type { MoneyAccountCreate, MoneyAccountUpdate } from "@/types/money-account";
 import type { BusinessUnitCreate, BusinessUnitUpdate, ExpenseCategoryCreate, ExpenseCategoryUpdate, PriceListCreate } from "@/types/config";
 
-type ErrorWithResponse = Error & { response?: { data?: { detail?: string } } };
-
 // --- Third Parties ---
 
 export function useCreateThirdParty() {
@@ -20,7 +19,7 @@ export function useCreateThirdParty() {
   return useMutation({
     mutationFn: (data: ThirdPartyCreate) => thirdPartyService.create(data),
     onSuccess: () => { toast.success("Tercero creado"); qc.invalidateQueries({ queryKey: ["third-parties"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -29,7 +28,7 @@ export function useUpdateThirdParty() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ThirdPartyUpdate }) => thirdPartyService.update(id, data),
     onSuccess: () => { toast.success("Tercero actualizado"); qc.invalidateQueries({ queryKey: ["third-parties"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -40,7 +39,7 @@ export function useCreateMaterial() {
   return useMutation({
     mutationFn: (data: MaterialCreate) => materialService.create(data),
     onSuccess: () => { toast.success("Material creado"); qc.invalidateQueries({ queryKey: ["materials"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -49,7 +48,7 @@ export function useUpdateMaterial() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: MaterialUpdate }) => materialService.update(id, data),
     onSuccess: () => { toast.success("Material actualizado"); qc.invalidateQueries({ queryKey: ["materials"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -67,7 +66,7 @@ export function useCreateMaterialCategory() {
   return useMutation({
     mutationFn: (data: MaterialCategoryCreate) => materialCategoryService.create(data),
     onSuccess: () => { toast.success("Categoria creada"); qc.invalidateQueries({ queryKey: ["materials", "categories"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -76,7 +75,7 @@ export function useUpdateMaterialCategory() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: MaterialCategoryUpdate }) => materialCategoryService.update(id, data),
     onSuccess: () => { toast.success("Categoria actualizada"); qc.invalidateQueries({ queryKey: ["materials", "categories"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -87,7 +86,7 @@ export function useCreateWarehouse() {
   return useMutation({
     mutationFn: (data: WarehouseCreate) => warehouseService.create(data),
     onSuccess: () => { toast.success("Bodega creada"); qc.invalidateQueries({ queryKey: ["warehouses"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -96,7 +95,7 @@ export function useUpdateWarehouse() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: WarehouseUpdate }) => warehouseService.update(id, data),
     onSuccess: () => { toast.success("Bodega actualizada"); qc.invalidateQueries({ queryKey: ["warehouses"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -107,7 +106,7 @@ export function useCreateMoneyAccount() {
   return useMutation({
     mutationFn: (data: MoneyAccountCreate) => moneyAccountService.create(data),
     onSuccess: () => { toast.success("Cuenta creada"); qc.invalidateQueries({ queryKey: ["money-accounts"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -116,7 +115,7 @@ export function useUpdateMoneyAccount() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: MoneyAccountUpdate }) => moneyAccountService.update(id, data),
     onSuccess: () => { toast.success("Cuenta actualizada"); qc.invalidateQueries({ queryKey: ["money-accounts"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -134,7 +133,7 @@ export function useCreateBusinessUnit() {
   return useMutation({
     mutationFn: (data: BusinessUnitCreate) => businessUnitService.create(data),
     onSuccess: () => { toast.success("Unidad de negocio creada"); qc.invalidateQueries({ queryKey: ["business-units"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -143,7 +142,7 @@ export function useUpdateBusinessUnit() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: BusinessUnitUpdate }) => businessUnitService.update(id, data),
     onSuccess: () => { toast.success("Unidad de negocio actualizada"); qc.invalidateQueries({ queryKey: ["business-units"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -161,7 +160,7 @@ export function useCreateExpenseCategory() {
   return useMutation({
     mutationFn: (data: ExpenseCategoryCreate) => expenseCategoryService.create(data),
     onSuccess: () => { toast.success("Categoria de gasto creada"); qc.invalidateQueries({ queryKey: ["expense-categories"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -170,7 +169,7 @@ export function useUpdateExpenseCategory() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ExpenseCategoryUpdate }) => expenseCategoryService.update(id, data),
     onSuccess: () => { toast.success("Categoria actualizada"); qc.invalidateQueries({ queryKey: ["expense-categories"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
 
@@ -188,6 +187,6 @@ export function useCreatePriceList() {
   return useMutation({
     mutationFn: (data: PriceListCreate) => priceListService.create(data),
     onSuccess: () => { toast.success("Precio registrado"); qc.invalidateQueries({ queryKey: ["price-lists"] }); },
-    onError: (e: ErrorWithResponse) => toast.error(e.response?.data?.detail ?? "Error"),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
