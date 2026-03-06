@@ -79,6 +79,23 @@ class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
         result = db.execute(statement)
         return result.scalar_one_or_none()
 
+    def get_all_current_prices(
+        self,
+        db: Session,
+        organization_id: UUID,
+    ) -> list[PriceList]:
+        """
+        Obtener el precio vigente de TODOS los materiales.
+        Usa DISTINCT ON para retornar solo el registro mas reciente por material.
+        """
+        statement = (
+            self._base_query(organization_id)
+            .distinct(self.model.material_id)
+            .order_by(self.model.material_id, self.model.created_at.desc())
+        )
+        result = db.execute(statement)
+        return list(result.scalars().all())
+
     def get_by_material(
         self,
         db: Session,

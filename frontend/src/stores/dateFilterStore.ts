@@ -1,12 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { toLocalDateInput } from "@/utils/formatters";
 
 function getDefaultDates() {
   const now = new Date();
   const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
   return {
-    dateFrom: firstDay.toISOString().slice(0, 10),
-    dateTo: now.toISOString().slice(0, 10),
+    dateFrom: toLocalDateInput(firstDay),
+    dateTo: toLocalDateInput(now),
   };
 }
 

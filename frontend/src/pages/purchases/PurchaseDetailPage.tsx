@@ -15,9 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { EntitySelect } from "@/components/shared/EntitySelect";
-import { usePurchase, useLiquidatePurchase, useCancelPurchase } from "@/hooks/usePurchases";
-import { useMoneyAccounts } from "@/hooks/useMasterData";
+import { usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import { exportPurchasePDF } from "@/utils/pdfExport";
@@ -32,28 +30,9 @@ export default function PurchaseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: purchase, isLoading } = usePurchase(id!);
-  const { data: accountsData } = useMoneyAccounts();
-  const liquidate = useLiquidatePurchase();
   const cancel = useCancelPurchase();
 
-  const [showLiquidate, setShowLiquidate] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
-  const [paymentAccountId, setPaymentAccountId] = useState("");
-
-  const accounts = accountsData?.items ?? [];
-
-  const handleLiquidate = () => {
-    if (!id || !paymentAccountId) return;
-    liquidate.mutate(
-      { id, data: { payment_account_id: paymentAccountId } },
-      {
-        onSuccess: () => {
-          setShowLiquidate(false);
-          setPaymentAccountId("");
-        },
-      },
-    );
-  };
 
   const handleCancel = () => {
     if (!id) return;
@@ -61,6 +40,9 @@ export default function PurchaseDetailPage() {
       onSuccess: () => setShowCancel(false),
     });
   };
+
+  const canEdit = purchase?.status === "registered" && !purchase?.double_entry_id;
+  const canCancel = (purchase?.status === "registered" || purchase?.status === "paid") && !purchase?.double_entry_id;
 
   if (isLoading) {
     return (
@@ -82,21 +64,23 @@ export default function PurchaseDetailPage() {
         description={`Proveedor: ${purchase.supplier_name}`}
       >
         <div className="flex items-center gap-2">
-          {purchase.status === "registered" && !purchase.double_entry_id && (
+          {canEdit && (
             <>
               <Button variant="outline" onClick={() => navigate(`/purchases/${id}/edit`)}>
                 <Pencil className="h-4 w-4 mr-2" />
                 Editar
               </Button>
-              <Button onClick={() => setShowLiquidate(true)} className="bg-emerald-600 hover:bg-emerald-700">
+              <Button onClick={() => navigate(`/purchases/${id}/liquidate`)} className="bg-emerald-600 hover:bg-emerald-700">
                 <CreditCard className="h-4 w-4 mr-2" />
                 Liquidar
               </Button>
-              <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50">
-                <XCircle className="h-4 w-4 mr-2" />
-                Cancelar
-              </Button>
             </>
+          )}
+          {canCancel && (
+            <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50">
+              <XCircle className="h-4 w-4 mr-2" />
+              Cancelar
+            </Button>
           )}
           <Button variant="outline" onClick={() => exportPurchasePDF(purchase)}>
             <FileText className="h-4 w-4 mr-2" />
@@ -220,33 +204,16 @@ export default function PurchaseDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Liquidate Dialog */}
-      <ConfirmDialog
-        open={showLiquidate}
-        onOpenChange={setShowLiquidate}
-        title="Liquidar Compra"
-        description="Seleccione la cuenta de pago para liquidar esta compra."
-        confirmLabel="Liquidar"
-        onConfirm={handleLiquidate}
-        loading={liquidate.isPending}
-        disabled={!paymentAccountId}
-      >
-        <div className="py-2">
-          <EntitySelect
-            value={paymentAccountId}
-            onChange={setPaymentAccountId}
-            options={accounts.map((a) => ({ id: a.id, label: a.name }))}
-            placeholder="Seleccionar cuenta de pago..."
-          />
-        </div>
-      </ConfirmDialog>
-
       {/* Cancel Dialog */}
       <ConfirmDialog
         open={showCancel}
         onOpenChange={setShowCancel}
         title="Cancelar Compra"
-        description="Esta accion revertira los movimientos de inventario y saldos asociados. Esta seguro?"
+        description={
+          purchase.status === "paid"
+            ? "Esta accion revertira los movimientos de inventario, saldos y devolvera el pago a la cuenta. Esta seguro?"
+            : "Esta accion revertira los movimientos de inventario y saldos asociados. Esta seguro?"
+        }
         confirmLabel="Si, cancelar"
         variant="destructive"
         onConfirm={handleCancel}

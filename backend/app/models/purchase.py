@@ -144,6 +144,12 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         comment="User who liquidated/paid the purchase",
     )
 
+    liquidated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when the purchase was liquidated/paid",
+    )
+
     # Relationships
     supplier: Mapped["ThirdParty"] = relationship(
         "ThirdParty",

@@ -97,15 +97,17 @@ async def create_purchase(
 ) -> PurchaseResponse:
     """Create a new purchase (1-step or 2-step workflow)."""
     try:
-        purchase = purchase_service.create(
+        purchase, warnings = purchase_service.create(
             db=db,
             obj_in=purchase_in,
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
         )
-        
+
         # Enrich with joined data
         response_data = _enrich_purchase_response(purchase)
+        if warnings:
+            response_data["warnings"] = warnings
         
         logger.info(
             f"Purchase #{purchase.purchase_number} created by user {org_context['user_id']} "
@@ -440,12 +442,21 @@ async def liquidate_purchase(
 ) -> PurchaseResponse:
     """Liquidate a purchase (2-step workflow)."""
     try:
+        # Convertir line updates a lista de dicts si se proporcionan
+        line_updates = None
+        if liquidate_data.lines:
+            line_updates = [
+                {"line_id": lu.line_id, "unit_price": lu.unit_price}
+                for lu in liquidate_data.lines
+            ]
+
         purchase = purchase_service.liquidate(
             db=db,
             purchase_id=purchase_id,
             payment_account_id=liquidate_data.payment_account_id,
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
+            line_updates=line_updates,
         )
         
         response_data = _enrich_purchase_response(purchase)
@@ -474,22 +485,21 @@ async def liquidate_purchase(
     summary="Cancel purchase",
     description="""
     Cancel a purchase and reverse all effects.
-    
+
     **Requirements:**
-    - Purchase status must NOT be 'paid'
-    - Sufficient stock must exist to reverse movements
-    
+    - Purchase status must be 'registered' or 'paid'
+    - For registered: sufficient stock must exist to reverse
+    - For paid: stock reversal from liquidated bucket + refund to payment account
+
     **Effects:**
     - Changes purchase status to 'cancelled'
     - Creates reversal inventory movements
-    - Reverts material stock
+    - Reverts material stock (transit for registered, liquidated for paid)
     - Reverts supplier balance
-    
-    **Note:** 
-    Cannot cancel paid purchases. Create a reversal transaction instead.
-    
+    - If paid: returns funds to payment account
+
     **Warning:**
-    Does NOT revert average cost (TODO: Phase 3).
+    Does NOT revert average cost.
     """,
 )
 async def cancel_purchase(

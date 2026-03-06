@@ -72,6 +72,38 @@ export function toISODateTime(date: Date): string {
   return date.toISOString();
 }
 
+/**
+ * Convierte un Date a formato "YYYY-MM-DD" en fecha LOCAL del cliente.
+ * Para usar como valor inicial de inputs type="date".
+ */
+export function toLocalDateInput(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Convierte un Date a formato "YYYY-MM-DDTHH:MM" en hora LOCAL del cliente.
+ * Para usar como valor inicial de inputs type="datetime-local".
+ */
+export function toLocalDatetimeInput(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${d}T${h}:${min}`;
+}
+
+/**
+ * Convierte un ISO string UTC del backend a formato "YYYY-MM-DDTHH:MM" en hora LOCAL.
+ * Para pre-popular inputs datetime-local en formularios de edicion.
+ */
+export function utcToLocalDatetimeInput(isoStr: string): string {
+  return toLocalDatetimeInput(new Date(isoStr));
+}
+
 type PydanticError = { msg: string; loc?: string[] };
 type ApiErrorResponse = { detail?: string | PydanticError[] };
 

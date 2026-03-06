@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { useCreateMovement } from "@/hooks/useMoneyMovements";
 import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategories, useThirdParties } from "@/hooks/useMasterData";
-import { formatCurrency } from "@/utils/formatters";
+import { formatCurrency, toLocalDatetimeInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
 type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment";
@@ -52,7 +52,7 @@ export default function MovementCreatePage() {
   const [expCategoryId, setExpCategoryId] = useState("");
   const [destAccountId, setDestAccountId] = useState("");
   const [description, setDescription] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 16));
+  const [date, setDate] = useState(toLocalDatetimeInput());
   const [referenceNumber, setReferenceNumber] = useState("");
   const [notes, setNotes] = useState("");
 

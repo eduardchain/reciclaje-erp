@@ -10,9 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
+import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { useSale, useUpdateSale } from "@/hooks/useSales";
+import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useCustomers, useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
-import { formatCurrency } from "@/utils/formatters";
+import { formatCurrency, utcToLocalDatetimeInput } from "@/utils/formatters";
 import type { SaleLineCreate, SaleCommissionCreate } from "@/types/sale";
 
 interface LineFormData extends SaleLineCreate {
@@ -49,6 +51,7 @@ export default function SaleEditPage() {
   const thirdParties = [...(customersData?.items ?? []), ...(suppliersData?.items ?? [])];
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
+  const { getSuggestedPrice } = usePriceSuggestions();
 
   const [customerId, setCustomerId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
@@ -65,7 +68,7 @@ export default function SaleEditPage() {
     if (sale && !initialized) {
       setCustomerId(sale.customer_id);
       setWarehouseId(sale.warehouse_id ?? "");
-      setDate(sale.date.slice(0, 16));
+      setDate(utcToLocalDatetimeInput(sale.date));
       setVehiclePlate(sale.vehicle_plate ?? "");
       setInvoiceNumber(sale.invoice_number ?? "");
       setNotes(sale.notes ?? "");
@@ -99,6 +102,15 @@ export default function SaleEditPage() {
 
   const updateLine = (key: number, field: keyof SaleLineCreate, value: string | number) => {
     setLines((prev) => prev.map((l) => (l._key === key ? { ...l, [field]: value } : l)));
+  };
+
+  const handleMaterialChange = (key: number, materialId: string) => {
+    updateLine(key, "material_id", materialId);
+    const line = lines.find((l) => l._key === key);
+    if (line && line.unit_price === 0) {
+      const suggested = getSuggestedPrice(materialId, "sale");
+      if (suggested) updateLine(key, "unit_price", suggested);
+    }
   };
 
   const updateCommission = (key: number, field: keyof SaleCommissionCreate, value: string | number) => {
@@ -226,7 +238,7 @@ export default function SaleEditPage() {
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
                 <EntitySelect
                   value={line.material_id}
-                  onChange={(v) => updateLine(line._key, "material_id", v)}
+                  onChange={(v) => handleMaterialChange(line._key, v)}
                   options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
                   placeholder="Material..."
                 />
@@ -251,6 +263,10 @@ export default function SaleEditPage() {
                   value={line.unit_price || ""}
                   onChange={(e) => updateLine(line._key, "unit_price", parseFloat(e.target.value) || 0)}
                   placeholder="0"
+                />
+                <PriceSuggestion
+                  suggestedPrice={getSuggestedPrice(line.material_id, "sale")}
+                  onApply={(p) => updateLine(line._key, "unit_price", p)}
                 />
               </div>
               <div className="col-span-2 text-right">

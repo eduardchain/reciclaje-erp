@@ -20,9 +20,7 @@ import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { EntitySelect } from "@/components/shared/EntitySelect";
-import { usePurchases, useLiquidatePurchase, useCancelPurchase } from "@/hooks/usePurchases";
-import { useMoneyAccounts } from "@/hooks/useMasterData";
+import { usePurchases, useCancelPurchase } from "@/hooks/usePurchases";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { PurchaseResponse } from "@/types/purchase";
@@ -33,16 +31,12 @@ const PAGE_SIZE = 20;
 
 function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
   const navigate = useNavigate();
-  const [liquidateOpen, setLiquidateOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [paymentAccountId, setPaymentAccountId] = useState("");
-
-  const { data: accountsData } = useMoneyAccounts();
-  const liquidateMutation = useLiquidatePurchase();
   const cancelMutation = useCancelPurchase();
 
   const canEdit = purchase.status === "registered" && !purchase.double_entry_id;
-  const accounts = accountsData?.items ?? [];
+  const canLiquidate = purchase.status === "registered" && !purchase.double_entry_id;
+  const canCancel = (purchase.status === "registered" || purchase.status === "paid") && !purchase.double_entry_id;
 
   return (
     <>
@@ -68,13 +62,13 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
               Editar
             </DropdownMenuItem>
           )}
-          {canEdit && (
-            <DropdownMenuItem onClick={() => setLiquidateOpen(true)}>
+          {canLiquidate && (
+            <DropdownMenuItem onClick={() => navigate(`/purchases/${purchase.id}/liquidate`)}>
               <DollarSign className="h-4 w-4 mr-2" />
               Liquidar
             </DropdownMenuItem>
           )}
-          {canEdit && (
+          {canCancel && (
             <DropdownMenuItem onClick={() => setCancelOpen(true)} className="text-red-600">
               <XCircle className="h-4 w-4 mr-2" />
               Cancelar
@@ -88,44 +82,16 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Dialog Liquidar */}
-      <ConfirmDialog
-        open={liquidateOpen}
-        onOpenChange={setLiquidateOpen}
-        title="Liquidar Compra"
-        description={`Liquidar compra #${purchase.purchase_number} por ${formatCurrency(purchase.total_amount)}`}
-        confirmLabel="Liquidar"
-        onConfirm={() => {
-          liquidateMutation.mutate(
-            { id: purchase.id, data: { payment_account_id: paymentAccountId } },
-            {
-              onSuccess: () => {
-                setLiquidateOpen(false);
-                setPaymentAccountId("");
-              },
-            }
-          );
-        }}
-        loading={liquidateMutation.isPending}
-        disabled={!paymentAccountId}
-      >
-        <div className="py-2">
-          <label className="text-sm font-medium mb-1.5 block">Cuenta de pago</label>
-          <EntitySelect
-            value={paymentAccountId}
-            onChange={setPaymentAccountId}
-            options={accounts.map((a) => ({ id: a.id, label: a.name }))}
-            placeholder="Seleccionar cuenta..."
-          />
-        </div>
-      </ConfirmDialog>
-
       {/* Dialog Cancelar */}
       <ConfirmDialog
         open={cancelOpen}
         onOpenChange={setCancelOpen}
         title="Cancelar Compra"
-        description={`Esta accion cancelara la compra #${purchase.purchase_number} y revertira los movimientos de inventario. Esta accion no se puede deshacer.`}
+        description={
+          purchase.status === "paid"
+            ? `Esta accion cancelara la compra #${purchase.purchase_number}, revertira inventario, saldos y devolvera el pago. No se puede deshacer.`
+            : `Esta accion cancelara la compra #${purchase.purchase_number} y revertira los movimientos de inventario. No se puede deshacer.`
+        }
         confirmLabel="Cancelar Compra"
         variant="destructive"
         onConfirm={() => {

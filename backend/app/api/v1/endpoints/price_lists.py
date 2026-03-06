@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_required_org_context, get_db
 from app.schemas.price_list import (
+    CurrentPriceItem,
+    CurrentPricesResponse,
     PriceListCreate,
     PriceListResponse,
 )
@@ -58,6 +60,30 @@ def create_price_list(
         obj_in=price_in,
         organization_id=org_context["organization_id"],
         user_id=org_context["user_id"],
+    )
+
+
+@router.get("/current", response_model=CurrentPricesResponse)
+def get_all_current_prices(
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Obtener precios vigentes de todos los materiales.
+    Retorna el precio mas reciente por material para la organizacion.
+    """
+    items = price_list.get_all_current_prices(
+        db=db, organization_id=org_context["organization_id"]
+    )
+    return CurrentPricesResponse(
+        items=[
+            CurrentPriceItem(
+                material_id=item.material_id,
+                purchase_price=float(item.purchase_price),
+                sale_price=float(item.sale_price),
+            )
+            for item in items
+        ]
     )
 
 

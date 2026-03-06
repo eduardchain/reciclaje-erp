@@ -85,9 +85,9 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 **Architecture:**
 - `services/api.ts` — Axios client with JWT auto-attach, X-Organization-ID header from authStore, 401 redirect. Default export `apiClient`.
 - `services/*.ts` — 14 service files (auth, organizations, purchases, sales, doubleEntries, moneyMovements, inventory, reports, thirdParties, materials, warehouses, moneyAccounts, masterData)
-- `hooks/use*.ts` — 10 hook files wrapping React Query with toast notifications on mutations
+- `hooks/use*.ts` — 11 hook files wrapping React Query with toast notifications on mutations (includes `usePriceSuggestions`)
 - `types/*.ts` — 15 type files matching backend Pydantic schemas exactly
-- `components/shared/` — 10 reusable components (DataTable, PageHeader, StatusBadge, MoneyDisplay, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList)
+- `components/shared/` — 12 reusable components (DataTable, PageHeader, StatusBadge, MoneyDisplay, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList, PriceSuggestion, KpiCard)
 - `components/auth/` — ProtectedRoute (token + org check), OrganizationSelector
 - `components/layout/` — Layout, Header (user dropdown), Sidebar (collapsible submenus)
 - `pages/` — 42 page components organized by module
@@ -95,8 +95,8 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 **Modules (all complete, 45+ routes):**
 - Auth: Login, org selection, protected routes
 - Dashboard: 6 metric cards + top materials/suppliers/customers + alerts
-- Purchases: List (status tabs, search, date range) + Create (dynamic lines, auto-liquidate) + Detail (liquidate/cancel)
-- Sales: Like purchases + commissions + profit display + stock warnings
+- Purchases: List (status tabs, search, date range, Items/DP/Actions columns) + Create (dynamic lines, auto-liquidate, price suggestions) + Edit (full revert-and-reapply) + Detail (liquidate/cancel/PDF)
+- Sales: Like purchases + commissions + profit display + stock warnings + Edit (lines + commissions)
 - Double Entries: Simultaneous buy+sell form with real-time profit calculation
 - Treasury: 8 movement types with dynamic form, annulment with reason
 - Inventory: Stock view (warehouse breakdown), movement history, adjustments (4 types), transformations (multi-line destinations, balance validation), warehouse transfers
@@ -123,7 +123,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - **Moving average cost**: Material `current_average_cost` is recalculated on each purchase.
 - **Stock separation**: `current_stock_liquidated` (paid, available for sale) vs `current_stock_transit` (registered but unpaid). `current_stock` = total for backward compat.
 - **Audit fields**: Purchases and Sales track `created_by` and `liquidated_by` (user UUIDs).
-- **Price history**: `PriceList` is append-only — each price update creates a new record. The "current" price is the most recent by `created_at`.
+- **Price history & suggestions**: `PriceList` is append-only — each price update creates a new record. The "current" price is the most recent by `created_at`. Bulk endpoint `GET /price-lists/current` returns all current prices. Frontend `usePriceSuggestions()` hook auto-fills prices on material selection in purchase/sale/double-entry forms via `PriceSuggestion` component.
 - **Treasury movements**: `MoneyMovement` tracks all money flows with specific types (payment_to_supplier, collection_from_client, expense, etc.). Each movement affects exactly ONE account. Transfers create a linked pair (transfer_out + transfer_in). Status is `confirmed` or `annulled` (with reason/date/user audit). Independent of purchase/sale liquidation — liquidation handles balance changes directly, money_movements are for manual payments/collections/expenses.
 - **Negative stock allowed (RN-INV-03)**: Sales, adjustments, and transformations PERMIT negative stock. Instead of blocking, they return a `warnings[]` field in the response with descriptive messages. This is a global policy decision.
 - **Inventory adjustments**: 4 types (increase, decrease, recount, zero_out). All affect `current_stock_liquidated` only (not transit). Increase recalculates avg cost; decrease/recount/zero_out use current avg cost.
@@ -153,6 +153,12 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 10. **Cash Flow hibrido**: El flujo de caja combina DOS fuentes independientes: liquidacion de compras/ventas (cambios directos a account.balance) Y money_movements (pagos/cobros manuales). Opening balance se calcula restando todos los cambios desde date_from al balance actual de cuentas.
 
+11. **Edicion de compras/ventas con Revert and Re-apply**: Las compras y ventas en estado `registered` (sin doble partida) se pueden editar completamente (metadata + lineas + proveedor/cliente). La estrategia es revertir todos los efectos colaterales (stock, movimientos de inventario, saldos de terceros), eliminar las lineas y movimientos originales, y re-aplicar las nuevas lineas con calculos frescos. Compras bloquean si no hay stock suficiente para revertir; ventas permiten stock negativo con warnings.
+
+12. **PDF export con jsPDF**: `utils/pdfExport.ts` exporta compras y ventas a PDF con header, info general, tabla de lineas (con comisiones en ventas), y totales. Se usa desde el menu de acciones en listados y boton en detalle.
+
+13. **Precio sugerido desde lista de precios**: Al seleccionar un material en formularios de compra/venta/doble partida, el precio se auto-llena desde la lista de precios vigente (solo si el campo esta vacio). Un hint clickable `"Lista: $ X"` permite restaurar el precio sugerido. Materiales sin precio en la lista no muestran sugerencia.
+
 ### Business Modules (Implemented)
 
 | Module | Endpoints | Description |
@@ -161,8 +167,8 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Organizations | `/api/v1/organizations/` | CRUD + member management, roles (admin/manager/user/accountant/viewer) |
 | Materials | `/api/v1/materials/` | Materials + categories + business units, stock tracking |
 | Third Parties | `/api/v1/third-parties/` | Multi-role entities (supplier/customer/investor/provision) with balance tracking |
-| Purchases | `/api/v1/purchases/` | 2-step buy workflow, supplier debt, inventory movements |
-| Sales | `/api/v1/sales/` | 2-step sell workflow, commissions (percentage/fixed), profit calculation |
+| Purchases | `/api/v1/purchases/` | 2-step buy workflow, supplier debt, inventory movements, full edit (PATCH) |
+| Sales | `/api/v1/sales/` | 2-step sell workflow, commissions (percentage/fixed), profit calculation, full edit (PATCH) |
 | Double Entries | `/api/v1/double-entries/` | Simultaneous buy+sell ("Pasa Mano"), no inventory movement |
 | Money Accounts | `/api/v1/money-accounts/` | Cash, bank, digital accounts (Nequi, etc.) |
 | Warehouses | `/api/v1/warehouses/` | Physical storage locations |
@@ -177,7 +183,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 ### Testing
 
-Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 360 tests, 92% coverage.
+Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 380+ tests. Run with `./venv/bin/pytest` from backend dir.
 
 Key fixtures: `test_user`, `auth_headers`, `org_headers` (auth + X-Organization-ID), `db_session`.
 

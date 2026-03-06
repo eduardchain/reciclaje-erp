@@ -8,6 +8,7 @@ This module provides a reusable base class for CRUD operations with:
 - Pagination support
 - Soft delete (is_active flag)
 """
+from decimal import Decimal
 from typing import Generic, TypeVar, Type, Optional, Any
 from uuid import UUID
 
@@ -182,7 +183,10 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         for item in items:
             # Use Pydantic's model_validate if item is an ORM model
             if hasattr(item, '__dict__'):
-                item_dict = {c.name: getattr(item, c.name) for c in item.__table__.columns}
+                item_dict = {
+                    c.name: float(v) if isinstance(v := getattr(item, c.name), Decimal) else v
+                    for c in item.__table__.columns
+                }
                 items_data.append(item_dict)
             else:
                 items_data.append(item)

@@ -1,5 +1,5 @@
 import apiClient from "./api";
-import type { BusinessUnitResponse, BusinessUnitCreate, BusinessUnitUpdate, ExpenseCategoryResponse, ExpenseCategoryCreate, ExpenseCategoryUpdate, PriceListResponse, PriceListCreate } from "@/types/config";
+import type { BusinessUnitResponse, BusinessUnitCreate, BusinessUnitUpdate, CurrentPricesResponse, ExpenseCategoryResponse, ExpenseCategoryCreate, ExpenseCategoryUpdate, PriceListResponse, PriceListCreate } from "@/types/config";
 import type { MaterialCategoryResponse, MaterialCategoryCreate, MaterialCategoryUpdate } from "@/types/material";
 import type { PaginatedResponse } from "@/types/common";
 
@@ -38,6 +38,10 @@ export const priceListService = {
     const response = await apiClient.get<PaginatedResponse<PriceListResponse>>("/api/v1/price-lists", { params: { material_id: materialId, limit: 200 } });
     return response.data;
   },
+  getCurrentPrices: async (): Promise<CurrentPricesResponse> => {
+    const response = await apiClient.get<CurrentPricesResponse>("/api/v1/price-lists/current");
+    return response.data;
+  },
   create: async (data: PriceListCreate): Promise<PriceListResponse> => {
     const response = await apiClient.post<PriceListResponse>("/api/v1/price-lists", data);
     return response.data;
@@ -46,15 +50,15 @@ export const priceListService = {
 
 export const materialCategoryService = {
   getAll: async (): Promise<PaginatedResponse<MaterialCategoryResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<MaterialCategoryResponse>>("/api/v1/materials/categories", { params: { limit: 100 } });
+    const response = await apiClient.get<PaginatedResponse<MaterialCategoryResponse>>("/api/v1/material-categories", { params: { limit: 100 } });
     return response.data;
   },
   create: async (data: MaterialCategoryCreate): Promise<MaterialCategoryResponse> => {
-    const response = await apiClient.post<MaterialCategoryResponse>("/api/v1/materials/categories", data);
+    const response = await apiClient.post<MaterialCategoryResponse>("/api/v1/material-categories", data);
     return response.data;
   },
   update: async (id: string, data: MaterialCategoryUpdate): Promise<MaterialCategoryResponse> => {
-    const response = await apiClient.patch<MaterialCategoryResponse>(`/api/v1/materials/categories/${id}`, data);
+    const response = await apiClient.patch<MaterialCategoryResponse>(`/api/v1/material-categories/${id}`, data);
     return response.data;
   },
 };

@@ -10,6 +10,7 @@ import PurchasesPage from "@/pages/purchases/PurchasesPage";
 import PurchaseCreatePage from "@/pages/purchases/PurchaseCreatePage";
 import PurchaseDetailPage from "@/pages/purchases/PurchaseDetailPage";
 import PurchaseEditPage from "@/pages/purchases/PurchaseEditPage";
+import PurchaseLiquidatePage from "@/pages/purchases/PurchaseLiquidatePage";
 import SalesPage from "@/pages/sales/SalesPage";
 import SaleCreatePage from "@/pages/sales/SaleCreatePage";
 import SaleDetailPage from "@/pages/sales/SaleDetailPage";
@@ -72,6 +73,7 @@ function App() {
               <Route path={ROUTES.PURCHASES} element={<PurchasesPage />} />
               <Route path={ROUTES.PURCHASES_NEW} element={<PurchaseCreatePage />} />
               <Route path="/purchases/:id/edit" element={<PurchaseEditPage />} />
+              <Route path="/purchases/:id/liquidate" element={<PurchaseLiquidatePage />} />
               <Route path="/purchases/:id" element={<PurchaseDetailPage />} />
               {/* Ventas */}
               <Route path={ROUTES.SALES} element={<SalesPage />} />

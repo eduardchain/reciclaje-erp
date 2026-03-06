@@ -50,6 +50,18 @@ class PriceListResponse(PriceListBase):
         return float(value)
 
 
+class CurrentPriceItem(BaseModel):
+    """Precio vigente de un material (version ligera)."""
+    material_id: UUID
+    purchase_price: float
+    sale_price: float
+
+
+class CurrentPricesResponse(BaseModel):
+    """Respuesta con todos los precios vigentes."""
+    items: list[CurrentPriceItem]
+
+
 class PaginatedPriceListResponse(BaseModel):
     """Respuesta paginada de listas de precios."""
     items: list[PriceListResponse]

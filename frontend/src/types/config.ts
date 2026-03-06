@@ -59,6 +59,16 @@ export interface PriceListCreate {
   notes?: string | null;
 }
 
+export interface CurrentPriceItem {
+  material_id: string;
+  purchase_price: number;
+  sale_price: number;
+}
+
+export interface CurrentPricesResponse {
+  items: CurrentPriceItem[];
+}
+
 export interface PriceListUpdate {
   purchase_price?: number | null;
   sale_price?: number | null;

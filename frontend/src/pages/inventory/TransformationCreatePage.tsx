@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { useCreateTransformation } from "@/hooks/useInventory";
 import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { toLocalDatetimeInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
 interface LineForm {
@@ -41,7 +42,7 @@ export default function TransformationCreatePage() {
   const [wasteQuantity, setWasteQuantity] = useState(0);
   const [costDistribution, setCostDistribution] = useState<"proportional_weight" | "manual">("proportional_weight");
   const [lines, setLines] = useState<LineForm[]>([createEmptyLine()]);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 16));
+  const [date, setDate] = useState(toLocalDatetimeInput());
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
 

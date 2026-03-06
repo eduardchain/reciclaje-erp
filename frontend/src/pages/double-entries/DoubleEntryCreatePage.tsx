@@ -9,9 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
+import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { useCreateDoubleEntry } from "@/hooks/useDoubleEntries";
+import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, useCustomers, useMaterials } from "@/hooks/useMasterData";
-import { formatCurrency } from "@/utils/formatters";
+import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { SaleCommissionCreate } from "@/types/sale";
 
@@ -33,6 +35,7 @@ export default function DoubleEntryCreatePage() {
   const customers = customersData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const allThirdParties = [...suppliers, ...customers];
+  const { getSuggestedPrice } = usePriceSuggestions();
 
   const [materialId, setMaterialId] = useState("");
   const [quantity, setQuantity] = useState(0);
@@ -40,11 +43,23 @@ export default function DoubleEntryCreatePage() {
   const [purchaseUnitPrice, setPurchaseUnitPrice] = useState(0);
   const [customerId, setCustomerId] = useState("");
   const [saleUnitPrice, setSaleUnitPrice] = useState(0);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(toLocalDateInput());
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [notes, setNotes] = useState("");
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
+
+  const handleMaterialChange = (id: string) => {
+    setMaterialId(id);
+    if (purchaseUnitPrice === 0) {
+      const sp = getSuggestedPrice(id, "purchase");
+      if (sp) setPurchaseUnitPrice(sp);
+    }
+    if (saleUnitPrice === 0) {
+      const sp = getSuggestedPrice(id, "sale");
+      if (sp) setSaleUnitPrice(sp);
+    }
+  };
 
   const totalPurchase = quantity * purchaseUnitPrice;
   const totalSale = quantity * saleUnitPrice;
@@ -89,7 +104,7 @@ export default function DoubleEntryCreatePage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>
-              <EntitySelect value={materialId} onChange={setMaterialId} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Seleccionar material..." />
+              <EntitySelect value={materialId} onChange={handleMaterialChange} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Seleccionar material..." />
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>
@@ -115,6 +130,7 @@ export default function DoubleEntryCreatePage() {
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Compra Unit. *</Label>
               <Input type="number" min={0} step="1" value={purchaseUnitPrice || ""} onChange={(e) => setPurchaseUnitPrice(parseFloat(e.target.value) || 0)} />
+              <PriceSuggestion suggestedPrice={getSuggestedPrice(materialId, "purchase")} onApply={setPurchaseUnitPrice} />
             </div>
             <div className="bg-slate-50 rounded-lg p-3">
               <div className="flex justify-between"><span className="text-slate-500">Total Compra</span><span className="font-bold text-lg">{formatCurrency(totalPurchase)}</span></div>
@@ -133,6 +149,7 @@ export default function DoubleEntryCreatePage() {
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Venta Unit. *</Label>
               <Input type="number" min={0} step="1" value={saleUnitPrice || ""} onChange={(e) => setSaleUnitPrice(parseFloat(e.target.value) || 0)} />
+              <PriceSuggestion suggestedPrice={getSuggestedPrice(materialId, "sale")} onApply={setSaleUnitPrice} />
             </div>
             <div className="bg-slate-50 rounded-lg p-3">
               <div className="flex justify-between"><span className="text-slate-500">Total Venta</span><span className="font-bold text-lg">{formatCurrency(totalSale)}</span></div>

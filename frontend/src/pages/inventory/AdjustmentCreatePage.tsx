@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { useCreateAdjustment } from "@/hooks/useInventory";
 import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { toLocalDatetimeInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
 type AdjType = "increase" | "decrease" | "recount" | "zero_out";
@@ -37,7 +38,7 @@ export default function AdjustmentCreatePage() {
   const [quantity, setQuantity] = useState(0);
   const [unitCost, setUnitCost] = useState(0);
   const [countedQuantity, setCountedQuantity] = useState(0);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 16));
+  const [date, setDate] = useState(toLocalDatetimeInput());
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
 

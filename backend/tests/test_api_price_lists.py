@@ -298,6 +298,103 @@ class TestGetPriceList:
 
 
 # ---------------------------------------------------------------------------
+# Tests de precios vigentes bulk
+# ---------------------------------------------------------------------------
+
+class TestGetAllCurrentPrices:
+    """Tests para GET /api/v1/price-lists/current."""
+
+    def test_empty_when_no_prices(
+        self, client: TestClient, org_headers: dict,
+    ):
+        """Sin precios registrados retorna lista vacia."""
+        response = client.get("/api/v1/price-lists/current", headers=org_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["items"] == []
+
+    def test_returns_latest_per_material(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_organization, test_material, test_material2,
+    ):
+        """Retorna solo el precio mas reciente por material."""
+        # Precio viejo para material 1
+        old = PriceList(
+            material_id=test_material.id,
+            purchase_price=Decimal("100.00"),
+            sale_price=Decimal("200.00"),
+            organization_id=test_organization.id,
+        )
+        db_session.add(old)
+        db_session.commit()
+
+        # Precio nuevo para material 1 (via API para timestamp posterior)
+        client.post("/api/v1/price-lists", json={
+            "material_id": str(test_material.id),
+            "purchase_price": 500.0,
+            "sale_price": 800.0,
+        }, headers=org_headers)
+
+        # Precio unico para material 2
+        client.post("/api/v1/price-lists", json={
+            "material_id": str(test_material2.id),
+            "purchase_price": 300.0,
+            "sale_price": 450.0,
+        }, headers=org_headers)
+
+        response = client.get("/api/v1/price-lists/current", headers=org_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) == 2
+
+        price_map = {item["material_id"]: item for item in data["items"]}
+        assert price_map[str(test_material.id)]["purchase_price"] == 500.0
+        assert price_map[str(test_material.id)]["sale_price"] == 800.0
+        assert price_map[str(test_material2.id)]["purchase_price"] == 300.0
+        assert price_map[str(test_material2.id)]["sale_price"] == 450.0
+
+    def test_org_isolation(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_organization2, test_material,
+    ):
+        """No retorna precios de otra organizacion."""
+        # Crear precio en org1
+        client.post("/api/v1/price-lists", json={
+            "material_id": str(test_material.id),
+            "purchase_price": 1000.0,
+            "sale_price": 1500.0,
+        }, headers=org_headers)
+
+        # Crear material + precio en org2 directamente en DB
+        mat2 = Material(
+            code="ORG2-001",
+            name="Material Org2",
+            default_unit="kg",
+            organization_id=test_organization2.id,
+        )
+        db_session.add(mat2)
+        db_session.flush()
+        price2 = PriceList(
+            material_id=mat2.id,
+            purchase_price=Decimal("999.00"),
+            sale_price=Decimal("999.00"),
+            organization_id=test_organization2.id,
+        )
+        db_session.add(price2)
+        db_session.commit()
+
+        # Solo debe ver precios de org1
+        response = client.get("/api/v1/price-lists/current", headers=org_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) == 1
+        assert data["items"][0]["material_id"] == str(test_material.id)
+
+
+# ---------------------------------------------------------------------------
 # Tests de aislamiento multi-tenant
 # ---------------------------------------------------------------------------
 

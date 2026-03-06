@@ -9,9 +9,11 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
+import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { useCreatePurchase } from "@/hooks/usePurchases";
+import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, useMaterials, useWarehouses, useMoneyAccounts } from "@/hooks/useMasterData";
-import { formatCurrency } from "@/utils/formatters";
+import { formatCurrency, toLocalDatetimeInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { PurchaseLineCreate } from "@/types/purchase";
 
@@ -44,9 +46,10 @@ export default function PurchaseCreatePage() {
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
   const accounts = accountsData?.items ?? [];
+  const { getSuggestedPrice } = usePriceSuggestions();
 
   const [supplierId, setSupplierId] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 16));
+  const [date, setDate] = useState(toLocalDatetimeInput());
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
@@ -60,6 +63,15 @@ export default function PurchaseCreatePage() {
     );
   };
 
+  const handleMaterialChange = (key: number, materialId: string) => {
+    updateLine(key, "material_id", materialId);
+    const line = lines.find((l) => l._key === key);
+    if (line && line.unit_price === 0) {
+      const suggested = getSuggestedPrice(materialId, "purchase");
+      if (suggested) updateLine(key, "unit_price", suggested);
+    }
+  };
+
   const removeLine = (key: number) => {
     setLines((prev) => prev.filter((l) => l._key !== key));
   };
@@ -69,10 +81,12 @@ export default function PurchaseCreatePage() {
   };
 
   const total = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
+  const isFutureDate = date ? new Date(date) > new Date() : false;
 
   const canSubmit =
     supplierId &&
     date &&
+    !isFutureDate &&
     lines.length > 0 &&
     lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
     (!autoLiquidate || paymentAccountId);
@@ -129,7 +143,11 @@ export default function PurchaseCreatePage() {
                 type="datetime-local"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
+                className={isFutureDate ? "border-red-300" : ""}
               />
+              {isFutureDate && (
+                <p className="text-xs text-red-500 mt-0.5">La fecha no puede ser futura</p>
+              )}
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa Vehiculo</Label>
@@ -179,7 +197,7 @@ export default function PurchaseCreatePage() {
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
                 <EntitySelect
                   value={line.material_id}
-                  onChange={(v) => updateLine(line._key, "material_id", v)}
+                  onChange={(v) => handleMaterialChange(line._key, v)}
                   options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
                   placeholder="Material..."
                 />
@@ -213,6 +231,10 @@ export default function PurchaseCreatePage() {
                   value={line.unit_price || ""}
                   onChange={(e) => updateLine(line._key, "unit_price", parseFloat(e.target.value) || 0)}
                   placeholder="0"
+                />
+                <PriceSuggestion
+                  suggestedPrice={getSuggestedPrice(line.material_id, "purchase")}
+                  onApply={(p) => updateLine(line._key, "unit_price", p)}
                 />
               </div>
               <div className="col-span-1 text-right">

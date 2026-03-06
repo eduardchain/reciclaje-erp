@@ -55,9 +55,11 @@ export interface PurchaseResponse extends BaseEntity {
   payment_account_id: string | null;
   created_by: string | null;
   liquidated_by: string | null;
+  liquidated_at: string | null;
   supplier_name: string;
   payment_account_name: string | null;
   lines: PurchaseLineResponse[];
+  warnings?: string[];
 }
 
 export interface PurchaseFullUpdate {
@@ -69,6 +71,12 @@ export interface PurchaseFullUpdate {
   lines?: PurchaseLineCreate[];
 }
 
+export interface PurchaseLiquidateLineUpdate {
+  line_id: string;
+  unit_price: number;
+}
+
 export interface PurchaseLiquidateRequest {
   payment_account_id: string;
+  lines?: PurchaseLiquidateLineUpdate[];
 }

@@ -128,6 +128,10 @@ class PurchaseResponse(PurchaseBase):
     # Audit fields
     created_by: Optional[UUID] = Field(None, description="User who created the purchase")
     liquidated_by: Optional[UUID] = Field(None, description="User who liquidated the purchase")
+    liquidated_at: Optional[datetime] = Field(None, description="Timestamp when the purchase was liquidated")
+
+    # Warnings (duplicados, stock negativo, etc.)
+    warnings: Optional[List[str]] = Field(None, description="Advertencias no bloqueantes")
 
     # Joined data from related models
     supplier_name: str = Field(..., description="Supplier name")
@@ -147,9 +151,16 @@ class PurchaseResponse(PurchaseBase):
         return float(value)
 
 
+class PurchaseLiquidateLineUpdate(BaseModel):
+    """Actualizacion de precio por linea al liquidar."""
+    line_id: UUID = Field(..., description="ID de la linea a actualizar")
+    unit_price: Decimal = Field(..., gt=0, description="Precio unitario (debe ser > 0)")
+
+
 class PurchaseLiquidateRequest(BaseModel):
-    """Schema for liquidating a purchase (2-step workflow)."""
+    """Schema for liquidating a purchase (2-step workflow) con edicion opcional de precios."""
     payment_account_id: UUID = Field(..., description="Payment account to deduct funds from")
+    lines: Optional[List[PurchaseLiquidateLineUpdate]] = Field(None, description="Actualizacion opcional de precios por linea")
 
 
 class PaginatedPurchaseResponse(BaseModel):

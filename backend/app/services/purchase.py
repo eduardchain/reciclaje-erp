@@ -61,9 +61,16 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             HTTPException: 404 if supplier/material/warehouse not found
             HTTPException: 403 if resources don't belong to organization
         """
+        # Step 0: Validar fecha no futura (V-COMP-04)
+        if obj_in.date.replace(tzinfo=None) > datetime.utcnow():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La fecha de la compra no puede ser futura"
+            )
+
         # Step 1: Generate next purchase_number with lock
         purchase_number = self._generate_purchase_number(db, organization_id)
-        
+
         # Step 2: Validate supplier
         supplier = db.get(ThirdParty, obj_in.supplier_id)
         if not supplier or supplier.organization_id != organization_id:
@@ -76,7 +83,23 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="ThirdParty is not a supplier"
             )
-        
+
+        # Step 2b: Deteccion de duplicados (RN-COMP-02) - warning, no bloquea
+        warnings = []
+        same_day_start = obj_in.date.replace(hour=0, minute=0, second=0, microsecond=0)
+        same_day_end = obj_in.date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        existing_count = db.query(func.count(Purchase.id)).filter(
+            Purchase.organization_id == organization_id,
+            Purchase.supplier_id == obj_in.supplier_id,
+            Purchase.date >= same_day_start,
+            Purchase.date <= same_day_end,
+            Purchase.status != "cancelled",
+        ).scalar()
+        if existing_count > 0:
+            warnings.append(
+                f"Ya existen {existing_count} compra(s) del mismo proveedor en esta fecha"
+            )
+
         # Step 3: Create Purchase
         # Check if this is a double-entry purchase (skip inventory movements)
         is_double_entry = hasattr(obj_in, 'double_entry_id') and obj_in.double_entry_id is not None
@@ -193,104 +216,159 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         
         db.commit()
         db.refresh(purchase)
-        
-        return purchase
-    
+
+        return purchase, warnings
+
     def liquidate(
         self,
         db: Session,
         purchase_id: UUID,
         payment_account_id: UUID,
         organization_id: UUID,
-        user_id: Optional[UUID] = None
+        user_id: Optional[UUID] = None,
+        line_updates: Optional[List[dict]] = None,
     ) -> Purchase:
         """
-        Liquidate a registered purchase (change status to 'paid').
-        
+        Liquidar compra registrada (cambiar status a 'paid').
+
         Workflow:
-        1. Validate purchase exists and status='registered'
-        2. Validate payment account has sufficient funds
-        3. Update purchase status to 'paid'
-        4. Deduct amount from payment account
-        5. Supplier balance already updated in create(), don't touch again
-        
+        1. Validar compra existe y status='registered'
+        2. Si hay line_updates: actualizar precios, recalcular totales y costo promedio
+        3. Validar todos los precios > 0 (V-LIQ-01)
+        4. Validar cuenta de pago con fondos suficientes
+        5. Actualizar status, descontar de cuenta, mover stock transit→liquidated
+
         Args:
-            db: Database session
-            purchase_id: Purchase UUID
-            payment_account_id: Payment account UUID
-            organization_id: Organization UUID
-            
-        Returns:
-            Updated Purchase
-            
-        Raises:
-            HTTPException: 400 if already liquidated/cancelled or insufficient funds
-            HTTPException: 403 if account not from organization
-            HTTPException: 404 if purchase/account not found
+            line_updates: Lista opcional de {line_id, unit_price} para actualizar precios
         """
         # Step 1: Get and validate purchase
-        purchase = self.get_or_404(
-            db,
-            purchase_id,
-            organization_id,
-            detail="Purchase not found"
-        )
-        
+        purchase = db.query(Purchase).options(
+            joinedload(Purchase.lines).joinedload(PurchaseLine.material),
+            joinedload(Purchase.lines).joinedload(PurchaseLine.warehouse),
+            joinedload(Purchase.supplier),
+        ).filter(
+            Purchase.id == purchase_id,
+            Purchase.organization_id == organization_id
+        ).first()
+
+        if not purchase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Purchase not found"
+            )
+
         # Validate: Cannot liquidate purchase that belongs to double-entry
         if purchase.double_entry_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot liquidate purchase that belongs to a double-entry operation. Manage it through the double-entry instead."
             )
-        
+
         if purchase.status != "registered":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Purchase already {purchase.status}. Can only liquidate registered purchases."
             )
-        
-        # Step 2: Validate payment account
+
+        # Step 2: Actualizar precios si se proporcionan line_updates
+        old_total = purchase.total_amount
+        if line_updates:
+            price_map = {lu["line_id"]: Decimal(str(lu["unit_price"])) for lu in line_updates}
+
+            for line in purchase.lines:
+                if line.id in price_map:
+                    old_price = line.unit_price
+                    new_price = price_map[line.id]
+
+                    if old_price != new_price:
+                        # Actualizar linea
+                        line.unit_price = new_price
+                        line.total_price = line.quantity * new_price
+
+                        # Actualizar costo en InventoryMovement correspondiente
+                        inv_movement = db.query(InventoryMovement).filter(
+                            InventoryMovement.reference_type == "purchase",
+                            InventoryMovement.reference_id == purchase.id,
+                            InventoryMovement.material_id == line.material_id,
+                            InventoryMovement.movement_type == "purchase",
+                        ).first()
+                        if inv_movement:
+                            inv_movement.unit_cost = new_price
+
+                        # Ajustar costo promedio del material
+                        material = line.material
+                        if material.current_stock > 0:
+                            delta_value = line.quantity * (new_price - old_price)
+                            material.current_average_cost = (
+                                material.current_stock * material.current_average_cost + delta_value
+                            ) / material.current_stock
+
+                        print(f"  💲 Precio actualizado {material.code}: ${old_price} → ${new_price}")
+
+            # Recalcular total de la compra
+            new_total = sum(
+                line.quantity * line.unit_price for line in purchase.lines
+            )
+            purchase.total_amount = new_total
+
+            # Ajustar saldo del proveedor si el total cambio
+            total_diff = new_total - old_total
+            if total_diff != 0:
+                supplier = purchase.supplier
+                supplier.current_balance -= total_diff  # Mas deuda si subio, menos si bajo
+                print(f"  💰 Saldo proveedor ajustado por ${total_diff}")
+
+            db.flush()
+
+        # Step 3: Validar V-LIQ-01 - todos los precios > 0
+        for line in purchase.lines:
+            if line.unit_price <= 0:
+                material = line.material
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Todos los precios deben ser mayores a 0 al liquidar. "
+                           f"Material '{material.name}' tiene precio ${line.unit_price}"
+                )
+
+        # Step 4: Validate payment account
         payment_account = db.get(MoneyAccount, payment_account_id)
         if not payment_account:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Payment account not found"
             )
-        
+
         if payment_account.organization_id != organization_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Payment account does not belong to your organization"
             )
-        
-        # Step 3: Validate sufficient funds
+
+        # Step 5: Validate sufficient funds
         if payment_account.current_balance < purchase.total_amount:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Insufficient funds in payment account. Available: ${payment_account.current_balance}, Required: ${purchase.total_amount}"
             )
-        
-        # Step 4: Update purchase status and account
+
+        # Step 6: Update purchase status and account
         purchase.status = "paid"
         purchase.payment_account_id = payment_account_id
         purchase.liquidated_by = user_id
-        
-        # Step 5: Deduct from payment account
+        purchase.liquidated_at = datetime.utcnow()
+
+        # Step 7: Deduct from payment account
         payment_account.current_balance -= purchase.total_amount
 
-        # Step 6: Move stock from transit to liquidated
-        # Load lines if not already loaded
-        purchase_with_lines = db.query(Purchase).options(
-            joinedload(Purchase.lines)
-        ).filter(Purchase.id == purchase_id).first()
-        self._move_stock_transit_to_liquidated(db, purchase_with_lines)
+        # Step 8: Move stock from transit to liquidated
+        self._move_stock_transit_to_liquidated(db, purchase)
 
         print(f"💳 Liquidated purchase #{purchase.purchase_number} for ${purchase.total_amount}")
         print(f"   Account '{payment_account.name}' balance: ${payment_account.current_balance}")
 
         db.commit()
         db.refresh(purchase)
-        
+
         return purchase
     
     def cancel(
@@ -349,29 +427,33 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Purchase is already cancelled"
             )
-        
-        if purchase.status == "paid":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot cancel paid purchase. Create a reversal transaction instead."
-            )
-        
-        # Step 2: Validate sufficient stock to reverse
-        for line in purchase.lines:
-            material = line.material
-            if material.current_stock < line.quantity:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Cannot cancel: insufficient stock for {material.code}. Current: {material.current_stock}, Required: {line.quantity}"
-                )
-        
+
+        was_paid = purchase.status == "paid"
+
+        # Step 2: Validate sufficient stock to reverse (para registered, estricto; para paid, permitir negativo con warning)
+        if not was_paid:
+            for line in purchase.lines:
+                material = line.material
+                if material.current_stock < line.quantity:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot cancel: insufficient stock for {material.code}. Current: {material.current_stock}, Required: {line.quantity}"
+                    )
+
         # Step 3: Update status
         purchase.status = "cancelled"
-        
-        # Step 4-5: Create reversal movements and revert stock
+
+        # Step 4: Si estaba pagada, devolver dinero a la cuenta de pago
+        if was_paid and purchase.payment_account_id:
+            payment_account = db.get(MoneyAccount, purchase.payment_account_id)
+            if payment_account:
+                payment_account.current_balance += purchase.total_amount
+                print(f"  💰 Reembolso ${purchase.total_amount} a cuenta '{payment_account.name}'")
+
+        # Step 5: Create reversal movements and revert stock
         for line in purchase.lines:
             material = line.material
-            
+
             # Create reversal movement
             reversal = InventoryMovement(
                 organization_id=organization_id,
@@ -386,16 +468,16 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 notes=f"Cancellation of purchase #{purchase.purchase_number}",
             )
             db.add(reversal)
-            
-            # Revert stock (cancelled purchases are always 'registered', so stock is in transit)
+
+            # Revert stock del bucket correcto segun estado previo
             material.current_stock -= line.quantity
-            material.current_stock_transit -= line.quantity
-            
-            # TODO Phase 3: Implement precise average cost reversal
-            # For now, we accept small imprecision in average cost
-            
+            if was_paid:
+                material.current_stock_liquidated -= line.quantity
+            else:
+                material.current_stock_transit -= line.quantity
+
             print(f"  ↩️  Reversed: {material.code} -{line.quantity} (new stock: {material.current_stock})")
-        
+
         # Step 6: Revert supplier balance
         supplier = db.get(ThirdParty, purchase.supplier_id)
         supplier.current_balance += purchase.total_amount  # Reduce debt

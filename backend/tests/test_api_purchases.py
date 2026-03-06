@@ -174,12 +174,12 @@ def test_purchase(db_session, test_organization, test_supplier, test_material, t
         auto_liquidate=False,
     )
     
-    purchase = purchase_service.create(
+    purchase, _warnings = purchase_service.create(
         db=db_session,
         obj_in=purchase_data,
         organization_id=test_organization.id,
     )
-    
+
     return purchase
 
 
@@ -777,15 +777,17 @@ class TestCancelPurchase:
         data = response.json()
         assert data["status"] == "cancelled"
     
-    def test_cancel_paid_purchase_fails(
+    def test_cancel_paid_purchase_succeeds(
         self,
         client,
         org_headers,
         test_purchase,
         test_money_account,
+        db_session,
     ):
-        """Test that canceling a paid purchase fails."""
+        """Test that canceling a paid purchase succeeds and refunds money."""
         # Arrange - Liquidate first
+        initial_balance = test_money_account.current_balance
         liquidate_data = {
             "payment_account_id": str(test_money_account.id),
         }
@@ -794,16 +796,21 @@ class TestCancelPurchase:
             json=liquidate_data,
             headers=org_headers,
         )
-        
-        # Act - Try to cancel
+
+        # Act - Cancel the paid purchase
         response = client.patch(
             f"/api/v1/purchases/{test_purchase.id}/cancel",
             headers=org_headers,
         )
-        
+
         # Assert
-        assert response.status_code == 400
-        assert "cannot cancel paid purchase" in response.json()["detail"].lower()
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "cancelled"
+
+        # Verify money was refunded
+        db_session.refresh(test_money_account)
+        assert test_money_account.current_balance == initial_balance
     
     def test_cancel_purchase_already_cancelled_fails(
         self,
@@ -1167,3 +1174,329 @@ class TestUpdatePurchase:
 
         assert response.status_code == 400
         assert "stock insuficiente" in response.json()["detail"].lower()
+
+
+class TestLiquidateWithPriceUpdates:
+    """Tests for liquidation with price editing (V-LIQ-01)."""
+
+    def test_liquidate_with_line_price_updates(
+        self,
+        client,
+        org_headers,
+        test_supplier,
+        test_material,
+        test_warehouse,
+        test_money_account,
+    ):
+        """Test liquidating with updated prices recalculates totals."""
+        # Create purchase with price 0
+        purchase_data = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 100.0,
+                    "unit_price": 0,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        resp = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert resp.status_code == 201
+        purchase = resp.json()
+        line_id = purchase["lines"][0]["id"]
+
+        # Liquidate with new price
+        liquidate_data = {
+            "payment_account_id": str(test_money_account.id),
+            "lines": [
+                {"line_id": line_id, "unit_price": 200.0}
+            ],
+        }
+        resp = client.patch(
+            f"/api/v1/purchases/{purchase['id']}/liquidate",
+            json=liquidate_data,
+            headers=org_headers,
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "paid"
+        assert data["total_amount"] == 20000.0  # 100 * 200
+        assert data["lines"][0]["unit_price"] == 200.0
+
+    def test_liquidate_with_zero_price_fails(
+        self,
+        client,
+        org_headers,
+        test_supplier,
+        test_material,
+        test_warehouse,
+        test_money_account,
+    ):
+        """Test that liquidation fails if any line has price 0 (V-LIQ-01)."""
+        # Create purchase with price 0
+        purchase_data = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 50.0,
+                    "unit_price": 0,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        resp = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert resp.status_code == 201
+        purchase = resp.json()
+
+        # Try to liquidate without updating prices
+        liquidate_data = {
+            "payment_account_id": str(test_money_account.id),
+        }
+        resp = client.patch(
+            f"/api/v1/purchases/{purchase['id']}/liquidate",
+            json=liquidate_data,
+            headers=org_headers,
+        )
+
+        assert resp.status_code == 400
+        assert "mayores a 0" in resp.json()["detail"].lower()
+
+    def test_liquidate_sets_liquidated_at(
+        self,
+        client,
+        org_headers,
+        test_purchase,
+        test_money_account,
+    ):
+        """Test that liquidated_at timestamp is set on liquidation."""
+        liquidate_data = {
+            "payment_account_id": str(test_money_account.id),
+        }
+        resp = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}/liquidate",
+            json=liquidate_data,
+            headers=org_headers,
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["liquidated_at"] is not None
+
+    def test_liquidate_recalculates_average_cost(
+        self,
+        client,
+        org_headers,
+        db_session,
+        test_supplier,
+        test_material,
+        test_warehouse,
+        test_money_account,
+    ):
+        """Test that updating prices on liquidation adjusts material average cost."""
+        # Create purchase with price 100
+        purchase_data = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 100.0,
+                    "unit_price": 100.0,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        resp = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert resp.status_code == 201
+        purchase = resp.json()
+        line_id = purchase["lines"][0]["id"]
+
+        # Liquidate with price 200 (cost should adjust upward)
+        liquidate_data = {
+            "payment_account_id": str(test_money_account.id),
+            "lines": [
+                {"line_id": line_id, "unit_price": 200.0}
+            ],
+        }
+        resp = client.patch(
+            f"/api/v1/purchases/{purchase['id']}/liquidate",
+            json=liquidate_data,
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+
+        # Verify material avg cost was updated
+        db_session.refresh(test_material)
+        assert float(test_material.current_average_cost) == 200.0
+
+
+class TestCancelPaidPurchase:
+    """Tests for canceling paid purchases with refund."""
+
+    def test_cancel_paid_purchase_returns_money(
+        self,
+        client,
+        org_headers,
+        db_session,
+        test_supplier,
+        test_material,
+        test_warehouse,
+        test_money_account,
+    ):
+        """Test that canceling a paid purchase returns money to the account."""
+        initial_balance = float(test_money_account.current_balance)
+
+        # Create and liquidate
+        purchase_data = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 50.0,
+                    "unit_price": 100.0,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+            "auto_liquidate": True,
+            "payment_account_id": str(test_money_account.id),
+        }
+        resp = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert resp.status_code == 201
+        purchase = resp.json()
+        assert purchase["status"] == "paid"
+
+        # Cancel
+        resp = client.patch(
+            f"/api/v1/purchases/{purchase['id']}/cancel",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
+        # Verify money refunded
+        db_session.refresh(test_money_account)
+        assert float(test_money_account.current_balance) == initial_balance
+
+    def test_cancel_paid_purchase_reverses_liquidated_stock(
+        self,
+        client,
+        org_headers,
+        db_session,
+        test_supplier,
+        test_material,
+        test_warehouse,
+        test_money_account,
+    ):
+        """Test that canceling a paid purchase reverses stock from liquidated bucket."""
+        initial_stock = float(test_material.current_stock)
+        initial_liquidated = float(test_material.current_stock_liquidated)
+
+        # Create and liquidate
+        purchase_data = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 75.0,
+                    "unit_price": 80.0,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+            "auto_liquidate": True,
+            "payment_account_id": str(test_money_account.id),
+        }
+        resp = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert resp.status_code == 201
+
+        # Verify stock increased
+        db_session.refresh(test_material)
+        assert float(test_material.current_stock) == initial_stock + 75.0
+        assert float(test_material.current_stock_liquidated) == initial_liquidated + 75.0
+
+        purchase = resp.json()
+
+        # Cancel
+        resp = client.patch(
+            f"/api/v1/purchases/{purchase['id']}/cancel",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+
+        # Verify stock reverted
+        db_session.refresh(test_material)
+        assert float(test_material.current_stock) == initial_stock
+        assert float(test_material.current_stock_liquidated) == initial_liquidated
+
+
+class TestPurchaseValidations:
+    """Tests for purchase validations (V-COMP-04, RN-COMP-02)."""
+
+    def test_create_purchase_future_date_fails(
+        self,
+        client,
+        org_headers,
+        test_supplier,
+        test_material,
+        test_warehouse,
+    ):
+        """Test that creating a purchase with future date fails (V-COMP-04)."""
+        from datetime import timedelta
+        future_date = (datetime.now() + timedelta(days=1)).isoformat()
+
+        purchase_data = {
+            "supplier_id": str(test_supplier.id),
+            "date": future_date,
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 10.0,
+                    "unit_price": 50.0,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+
+        resp = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert resp.status_code == 400
+        assert "futura" in resp.json()["detail"].lower()
+
+    def test_create_purchase_duplicate_warning(
+        self,
+        client,
+        org_headers,
+        test_supplier,
+        test_material,
+        test_warehouse,
+    ):
+        """Test that duplicate purchases generate warnings (RN-COMP-02)."""
+        purchase_data = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 10.0,
+                    "unit_price": 50.0,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+
+        # Create first purchase
+        resp1 = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert resp1.status_code == 201
+
+        # Create second purchase (same supplier, same day)
+        resp2 = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert resp2.status_code == 201
+        data = resp2.json()
+        assert data.get("warnings") is not None
+        assert len(data["warnings"]) > 0
+        assert "mismo proveedor" in data["warnings"][0].lower()

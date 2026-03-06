@@ -10,9 +10,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
+import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { useCreateSale } from "@/hooks/useSales";
+import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useCustomers, useSuppliers, useMaterials, useWarehouses, useMoneyAccounts } from "@/hooks/useMasterData";
-import { formatCurrency } from "@/utils/formatters";
+import { formatCurrency, toLocalDatetimeInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { SaleLineCreate, SaleCommissionCreate } from "@/types/sale";
 
@@ -50,10 +52,11 @@ export default function SaleCreatePage() {
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
   const accounts = accountsData?.items ?? [];
+  const { getSuggestedPrice } = usePriceSuggestions();
 
   const [customerId, setCustomerId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 16));
+  const [date, setDate] = useState(toLocalDatetimeInput());
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
@@ -64,6 +67,15 @@ export default function SaleCreatePage() {
 
   const updateLine = (key: number, field: keyof SaleLineCreate, value: string | number) => {
     setLines((prev) => prev.map((l) => (l._key === key ? { ...l, [field]: value } : l)));
+  };
+
+  const handleMaterialChange = (key: number, materialId: string) => {
+    updateLine(key, "material_id", materialId);
+    const line = lines.find((l) => l._key === key);
+    if (line && line.unit_price === 0) {
+      const suggested = getSuggestedPrice(materialId, "sale");
+      if (suggested) updateLine(key, "unit_price", suggested);
+    }
   };
 
   const updateCommission = (key: number, field: keyof SaleCommissionCreate, value: string | number) => {
@@ -153,7 +165,7 @@ export default function SaleCreatePage() {
             <div key={line._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}>
               <div className="col-span-4">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
-                <EntitySelect value={line.material_id} onChange={(v) => updateLine(line._key, "material_id", v)} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Material..." />
+                <EntitySelect value={line.material_id} onChange={(v) => handleMaterialChange(line._key, v)} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Material..." />
               </div>
               <div className="col-span-3">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
@@ -162,6 +174,7 @@ export default function SaleCreatePage() {
               <div className="col-span-2">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit. *</Label>}
                 <Input type="number" min={0} step="1" value={line.unit_price || ""} onChange={(e) => updateLine(line._key, "unit_price", parseFloat(e.target.value) || 0)} placeholder="0" />
+                <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "unit_price", p)} />
               </div>
               <div className="col-span-2 text-right">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}
