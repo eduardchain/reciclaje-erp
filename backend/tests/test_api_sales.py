@@ -25,6 +25,8 @@ from app.models import (
     MaterialCategory,
     BusinessUnit,
 )
+from app.models.inventory_movement import InventoryMovement
+from app.models.material_cost_history import MaterialCostHistory
 
 
 # ============================================================================
@@ -118,8 +120,8 @@ def test_business_unit(db_session, test_organization):
 
 
 @pytest.fixture
-def test_material_with_stock(db_session, test_organization, test_category, test_business_unit):
-    """Create a test material with stock."""
+def test_material_with_stock(db_session, test_organization, test_category, test_business_unit, test_warehouse):
+    """Create a test material with stock (500kg in test_warehouse)."""
     material = Material(
         id=uuid4(),
         code="COPPER-001",
@@ -135,6 +137,23 @@ def test_material_with_stock(db_session, test_organization, test_category, test_
         is_active=True,
     )
     db_session.add(material)
+    db_session.flush()
+
+    # Seed InventoryMovement para que stock por bodega coincida con stock global
+    seed_movement = InventoryMovement(
+        id=uuid4(),
+        organization_id=test_organization.id,
+        material_id=material.id,
+        warehouse_id=test_warehouse.id,
+        movement_type="adjustment",
+        quantity=Decimal("500.000"),
+        unit_cost=Decimal("45.00"),
+        reference_type="adjustment",
+        reference_id=uuid4(),
+        date=datetime.now(),
+        notes="Seed stock for test",
+    )
+    db_session.add(seed_movement)
     db_session.commit()
     db_session.refresh(material)
     return material
@@ -378,12 +397,12 @@ class TestCreateSale:
         # Act
         response = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
 
-        # Assert — negative stock allowed with warning
+        # Assert — negative stock allowed with warning (per-warehouse validation)
         assert response.status_code == 201
         data = response.json()
         assert data["status"] == "registered"
         assert len(data["warnings"]) > 0
-        assert any("stock" in w.lower() for w in data["warnings"])
+        assert any("en bodega" in w.lower() for w in data["warnings"])
     
     def test_create_sale_no_customer_balance_change(
         self,
@@ -1302,3 +1321,164 @@ class TestFutureDateAndDuplicate:
         )
         assert resp.status_code == 200
         assert resp.json()["count"] == 0
+
+
+class TestWarehouseStockValidation:
+    """Tests para validacion de stock por bodega y fallback de costo."""
+
+    def test_create_sale_insufficient_warehouse_stock_warns(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+        test_organization,
+        db_session,
+    ):
+        """Venta en bodega sin stock suficiente genera warning con 'en bodega'."""
+        # Crear segunda bodega SIN stock del material
+        warehouse2 = Warehouse(
+            id=uuid4(),
+            name="Empty Warehouse",
+            address="456 Empty St",
+            organization_id=test_organization.id,
+            is_active=True,
+        )
+        db_session.add(warehouse2)
+        db_session.commit()
+
+        sale_data = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(warehouse2.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material_with_stock.id),
+                    "quantity": 10.0,
+                    "unit_price": 50.00,
+                }
+            ],
+            "commissions": [],
+            "auto_liquidate": False,
+        }
+
+        response = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
+        assert response.status_code == 201
+        data = response.json()
+        assert len(data["warnings"]) > 0
+        assert any("en bodega" in w.lower() for w in data["warnings"])
+        # Stock global es 500 (suficiente), pero en bodega2 es 0
+        assert any("disponible en bodega: 0" in w.lower() for w in data["warnings"])
+
+    def test_create_sale_sufficient_warehouse_stock_no_warning(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+    ):
+        """Venta con stock suficiente en bodega NO genera warning."""
+        sale_data = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(test_material_with_stock.id),
+                    "quantity": 10.0,
+                    "unit_price": 50.00,
+                }
+            ],
+            "commissions": [],
+            "auto_liquidate": False,
+        }
+
+        response = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
+        assert response.status_code == 201
+        data = response.json()
+        assert len(data["warnings"]) == 0
+
+    def test_create_sale_zero_avg_cost_uses_last_known(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_warehouse,
+        test_organization,
+        db_session,
+        test_category,
+        test_business_unit,
+    ):
+        """Material con avg_cost=0 usa ultimo costo conocido de MaterialCostHistory."""
+        # Material con avg_cost=0
+        material = Material(
+            id=uuid4(),
+            code="ZERO-COST-001",
+            name="Zero Cost Material",
+            category_id=test_category.id,
+            business_unit_id=test_business_unit.id,
+            default_unit="kg",
+            current_stock=Decimal("100.000"),
+            current_stock_liquidated=Decimal("100.000"),
+            current_stock_transit=Decimal("0.000"),
+            current_average_cost=Decimal("0"),
+            organization_id=test_organization.id,
+            is_active=True,
+        )
+        db_session.add(material)
+        db_session.flush()
+
+        # Seed inventory movement para stock por bodega
+        seed = InventoryMovement(
+            id=uuid4(),
+            organization_id=test_organization.id,
+            material_id=material.id,
+            warehouse_id=test_warehouse.id,
+            movement_type="adjustment",
+            quantity=Decimal("100.000"),
+            unit_cost=Decimal("0"),
+            reference_type="adjustment",
+            reference_id=uuid4(),
+            date=datetime.now(),
+            notes="Seed",
+        )
+        db_session.add(seed)
+
+        # Crear MaterialCostHistory con ultimo costo conocido de $30
+        cost_history = MaterialCostHistory(
+            id=uuid4(),
+            organization_id=test_organization.id,
+            material_id=material.id,
+            previous_cost=Decimal("25.00"),
+            new_cost=Decimal("30.00"),
+            previous_stock=Decimal("50.000"),
+            new_stock=Decimal("100.000"),
+            source_type="purchase_liquidation",
+            source_id=uuid4(),
+        )
+        db_session.add(cost_history)
+        db_session.commit()
+
+        sale_data = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(material.id),
+                    "quantity": 10.0,
+                    "unit_price": 50.00,
+                }
+            ],
+            "commissions": [],
+            "auto_liquidate": False,
+        }
+
+        response = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
+        assert response.status_code == 201
+        data = response.json()
+        # Verificar que unit_cost capturo el ultimo costo conocido ($30), no $0
+        line = data["lines"][0]
+        assert float(line["unit_cost"]) == 30.0

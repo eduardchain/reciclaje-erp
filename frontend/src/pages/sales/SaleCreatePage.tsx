@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,9 +15,10 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useCreateSale } from "@/hooks/useSales";
 import { saleService } from "@/services/sales";
+import { inventoryService } from "@/services/inventory";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useCustomers, useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
-import { formatCurrency, toLocalDatetimeInput } from "@/utils/formatters";
+import { formatCurrency, formatWeight, toLocalDatetimeInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { SaleLineCreate, SaleCommissionCreate } from "@/types/sale";
 
@@ -26,6 +28,32 @@ interface LineFormData extends SaleLineCreate {
 
 interface CommissionFormData extends SaleCommissionCreate {
   _key: number;
+}
+
+function WarehouseStockIndicator({ materialId, warehouseId, quantity }: { materialId: string; warehouseId: string; quantity: number }) {
+  const { data } = useQuery({
+    queryKey: ["inventory", "stock-detail", materialId],
+    queryFn: () => inventoryService.getStockDetail(materialId),
+    enabled: !!materialId && !!warehouseId,
+    staleTime: 30_000,
+  });
+  if (!data || !warehouseId) return null;
+  const wh = data.warehouses?.find((w) => w.warehouse_id === warehouseId);
+  const stock = wh?.stock ?? 0;
+  const insufficient = quantity > 0 && stock < quantity;
+  return (
+    <div className="text-xs mt-1">
+      <span className="text-slate-500">Stock en bodega: </span>
+      <span className={insufficient ? "text-amber-600 font-medium" : "text-emerald-600"}>
+        {formatWeight(stock)}
+      </span>
+      {insufficient && (
+        <span className="text-amber-600 ml-2">
+          — Insuficiente (faltan {formatWeight(quantity - stock)})
+        </span>
+      )}
+    </div>
+  );
 }
 
 let lineKeyCounter = 0;
@@ -196,6 +224,7 @@ export default function SaleCreatePage() {
               <div className="col-span-2">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
                 <Input type="number" min={0} step="0.01" value={line.quantity || ""} onChange={(e) => updateLine(line._key, "quantity", parseFloat(e.target.value) || 0)} placeholder="0.00" />
+                <WarehouseStockIndicator materialId={line.material_id} warehouseId={warehouseId} quantity={line.quantity} />
               </div>
               <div className="col-span-1">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo</Label>}

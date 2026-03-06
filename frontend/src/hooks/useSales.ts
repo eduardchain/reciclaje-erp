@@ -38,9 +38,12 @@ export function useCreateSale() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: SaleCreate) => saleService.create(data),
-    onSuccess: () => {
+    onSuccess: (sale) => {
       queryClient.invalidateQueries({ queryKey: ["sales"] });
       toast.success("Venta creada exitosamente");
+      if (sale.warnings && sale.warnings.length > 0) {
+        sale.warnings.forEach((w: string) => toast.warning(w));
+      }
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al crear la venta"));
@@ -53,9 +56,12 @@ export function useUpdateSale() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: SaleFullUpdate }) =>
       saleService.update(id, data),
-    onSuccess: () => {
+    onSuccess: (sale) => {
       queryClient.invalidateQueries({ queryKey: ["sales"] });
       toast.success("Venta actualizada exitosamente");
+      if (sale.warnings && sale.warnings.length > 0) {
+        sale.warnings.forEach((w: string) => toast.warning(w));
+      }
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al actualizar la venta"));
@@ -70,10 +76,10 @@ export function useLiquidateSale() {
       saleService.liquidate(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sales"] });
-      toast.success("Venta cobrada exitosamente");
+      toast.success("Venta liquidada exitosamente");
     },
     onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, "Error al cobrar la venta"));
+      toast.error(getApiErrorMessage(error, "Error al liquidar la venta"));
     },
   });
 }

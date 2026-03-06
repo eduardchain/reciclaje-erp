@@ -28,11 +28,20 @@ from app.models.third_party import ThirdParty
 from app.models.money_account import MoneyAccount
 from app.models.warehouse import Warehouse
 from app.schemas.sale import SaleCreate, SaleUpdate, SaleFullUpdate
+from app.models.material_cost_history import MaterialCostHistory
 from app.services.base import CRUDBase
 
 
 class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
     """CRUD operations for Sale with inventory, financial, and commission logic."""
+
+    def _get_last_known_cost(self, db: Session, material_id: UUID, organization_id: UUID) -> Decimal:
+        """Busca el ultimo costo conocido desde MaterialCostHistory cuando avg_cost = 0."""
+        last = db.query(MaterialCostHistory.new_cost).filter(
+            MaterialCostHistory.material_id == material_id,
+            MaterialCostHistory.organization_id == organization_id,
+        ).order_by(MaterialCostHistory.created_at.desc()).first()
+        return last[0] if last else Decimal("0")
     
     def create(
         self,
@@ -125,13 +134,23 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                         detail=f"Material {line_data.material_id} not found"
                     )
 
-                if material.current_stock_liquidated < line_data.quantity:
-                    resulting_stock = material.current_stock_liquidated - line_data.quantity
+                # Validacion por bodega (stock especifico en la bodega de la venta)
+                warehouse_stock = db.execute(
+                    select(func.coalesce(func.sum(InventoryMovement.quantity), 0)).where(
+                        InventoryMovement.material_id == material.id,
+                        InventoryMovement.warehouse_id == obj_in.warehouse_id,
+                        InventoryMovement.organization_id == organization_id,
+                    )
+                ).scalar()
+                warehouse_stock = Decimal(str(warehouse_stock))
+
+                if warehouse_stock < line_data.quantity:
+                    resulting_stock = warehouse_stock - line_data.quantity
                     warnings.append(
-                        f"Insufficient stock for '{material.name}'. "
-                        f"Available: {material.current_stock_liquidated}, "
-                        f"Required: {line_data.quantity}. "
-                        f"Stock will be {resulting_stock}"
+                        f"Stock insuficiente de '{material.name}' en bodega. "
+                        f"Disponible en bodega: {warehouse_stock}, "
+                        f"Requerido: {line_data.quantity}. "
+                        f"Stock resultante: {resulting_stock}"
                     )
         
         # Step 5: Create Sale
@@ -178,6 +197,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 unit_cost = line_data.unit_cost
             else:
                 unit_cost = material.current_average_cost
+                if unit_cost == 0:
+                    unit_cost = self._get_last_known_cost(db, material.id, organization_id)
             
             # Create SaleLine
             sale_line = SaleLine(
@@ -548,13 +569,24 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 line_total = quantity * unit_price
                 new_total += line_total
                 unit_cost = material.current_average_cost
+                if unit_cost == 0:
+                    unit_cost = self._get_last_known_cost(db, material.id, organization_id)
 
-                # Check stock (RN-INV-03: warning, no bloqueo)
-                if material.current_stock_liquidated < quantity:
-                    resulting_stock = material.current_stock_liquidated - quantity
+                # Check stock por bodega (RN-INV-03: warning, no bloqueo)
+                warehouse_stock = db.execute(
+                    select(func.coalesce(func.sum(InventoryMovement.quantity), 0)).where(
+                        InventoryMovement.material_id == material.id,
+                        InventoryMovement.warehouse_id == effective_warehouse_id,
+                        InventoryMovement.organization_id == organization_id,
+                    )
+                ).scalar()
+                warehouse_stock = Decimal(str(warehouse_stock))
+
+                if warehouse_stock < quantity:
+                    resulting_stock = warehouse_stock - quantity
                     warnings.append(
-                        f"Stock insuficiente para '{material.name}'. "
-                        f"Disponible: {material.current_stock_liquidated}, "
+                        f"Stock insuficiente de '{material.name}' en bodega. "
+                        f"Disponible en bodega: {warehouse_stock}, "
                         f"Requerido: {quantity}. "
                         f"Stock resultante: {resulting_stock}"
                     )
