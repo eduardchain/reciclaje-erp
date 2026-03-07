@@ -1,7 +1,8 @@
 import { jsPDF } from "jspdf";
 import type { PurchaseResponse } from "@/types/purchase";
 import type { SaleResponse } from "@/types/sale";
-import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
+import type { DoubleEntryResponse } from "@/types/double-entry";
+import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 
 const STATUS_LABELS: Record<string, string> = {
   registered: "Registrada",
@@ -284,4 +285,184 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string) {
   doc.text(`Utilidad: ${formatCurrency(sale.total_profit)}`, pageWidth - 14, y + 2, { align: "right" });
 
   doc.save(`venta_${sale.sale_number}.pdf`);
+}
+
+const DE_STATUS_LABELS: Record<string, string> = {
+  completed: "Completada",
+  cancelled: "Cancelada",
+};
+
+export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string) {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let y = 20;
+
+  // Header
+  doc.setFontSize(18);
+  doc.setFont("helvetica", "bold");
+  doc.text(orgName || "EcoBalance ERP", 14, y);
+  y += 8;
+
+  doc.setFontSize(14);
+  doc.text(`Doble Partida #${de.double_entry_number}`, 14, y);
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  const statusText = DE_STATUS_LABELS[de.status] ?? de.status;
+  doc.text(statusText, pageWidth - 14, y, { align: "right" });
+  y += 12;
+
+  doc.setDrawColor(200);
+  doc.line(14, y, pageWidth - 14, y);
+  y += 8;
+
+  // Info general — Proveedor y Cliente
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("Proveedor:", 14, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(de.supplier_name, 55, y);
+
+  doc.setFont("helvetica", "bold");
+  doc.text("Fecha:", pageWidth / 2 + 10, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(formatDate(de.date), pageWidth / 2 + 35, y);
+  y += 6;
+
+  doc.setFont("helvetica", "bold");
+  doc.text("Cliente:", 14, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(de.customer_name, 55, y);
+  y += 6;
+
+  if (de.vehicle_plate) {
+    doc.setFont("helvetica", "bold");
+    doc.text("Placa:", 14, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(de.vehicle_plate, 55, y);
+    y += 6;
+  }
+
+  if (de.invoice_number) {
+    doc.setFont("helvetica", "bold");
+    doc.text("Factura:", 14, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(de.invoice_number, 55, y);
+    y += 6;
+  }
+
+  if (de.notes) {
+    doc.setFont("helvetica", "bold");
+    doc.text("Notas:", 14, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(de.notes, 55, y);
+    y += 6;
+  }
+
+  y += 6;
+
+  // Tabla de materiales — Header
+  const colX = { material: 14, qty: 72, pCompra: 98, pVenta: 124, tCompra: 150, tVenta: 172 };
+  doc.setFillColor(245, 245, 245);
+  doc.rect(14, y - 4, pageWidth - 28, 8, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("Material", colX.material, y);
+  doc.text("Cantidad", colX.qty, y, { align: "right" });
+  doc.text("P. Compra", colX.pCompra, y, { align: "right" });
+  doc.text("P. Venta", colX.pVenta, y, { align: "right" });
+  doc.text("T. Compra", colX.tCompra, y, { align: "right" });
+  doc.text("T. Venta", colX.tVenta, y, { align: "right" });
+  doc.text("Ganancia", pageWidth - 14, y, { align: "right" });
+  y += 7;
+
+  // Tabla de materiales — Rows
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  for (const line of de.lines) {
+    if (y > 270) {
+      doc.addPage();
+      y = 20;
+    }
+    doc.text(`${line.material_code} - ${line.material_name}`.substring(0, 28), colX.material, y);
+    doc.text(formatWeight(line.quantity), colX.qty, y, { align: "right" });
+    doc.text(formatCurrency(line.purchase_unit_price), colX.pCompra, y, { align: "right" });
+    doc.text(formatCurrency(line.sale_unit_price), colX.pVenta, y, { align: "right" });
+    doc.text(formatCurrency(line.total_purchase), colX.tCompra, y, { align: "right" });
+    doc.text(formatCurrency(line.total_sale), colX.tVenta, y, { align: "right" });
+    doc.text(formatCurrency(line.profit), pageWidth - 14, y, { align: "right" });
+    y += 6;
+  }
+
+  // Comisiones
+  if (de.commissions.length > 0) {
+    y += 6;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Comisiones", 14, y);
+    y += 6;
+
+    doc.setFillColor(245, 245, 245);
+    doc.rect(14, y - 4, pageWidth - 28, 8, "F");
+    doc.setFontSize(9);
+    doc.text("Comisionista", 14, y);
+    doc.text("Concepto", 70, y);
+    doc.text("Tipo", 120, y);
+    doc.text("Valor", 150, y, { align: "right" });
+    doc.text("Monto", pageWidth - 14, y, { align: "right" });
+    y += 7;
+
+    doc.setFont("helvetica", "normal");
+    for (const comm of de.commissions) {
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.text(comm.third_party_name.substring(0, 28), 14, y);
+      doc.text(comm.concept.substring(0, 24), 70, y);
+      doc.text(comm.commission_type === "percentage" ? "%" : "Fijo", 120, y);
+      doc.text(String(comm.commission_value), 150, y, { align: "right" });
+      doc.text(formatCurrency(comm.commission_amount), pageWidth - 14, y, { align: "right" });
+      y += 6;
+    }
+  }
+
+  // Resumen final
+  y += 6;
+  doc.setDrawColor(200);
+  doc.line(colX.tCompra - 10, y - 3, pageWidth - 14, y - 3);
+
+  const totalCommissions = de.commissions.reduce((sum, c) => sum + c.commission_amount, 0);
+  const netProfit = de.profit - totalCommissions;
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Total Compra: ${formatCurrency(de.total_purchase_cost)}`, pageWidth - 14, y + 2, { align: "right" });
+  y += 6;
+  doc.text(`Total Venta: ${formatCurrency(de.total_sale_amount)}`, pageWidth - 14, y + 2, { align: "right" });
+
+  if (totalCommissions > 0) {
+    y += 6;
+    doc.text(`Comisiones: -${formatCurrency(totalCommissions)}`, pageWidth - 14, y + 2, { align: "right" });
+  }
+
+  y += 8;
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text(
+    `Ganancia Neta: ${formatCurrency(totalCommissions > 0 ? netProfit : de.profit)}  (${formatPercentage(de.profit_margin)})`,
+    pageWidth - 14,
+    y + 2,
+    { align: "right" },
+  );
+
+  // Footer
+  y += 14;
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(150);
+  doc.text(`Generado: ${new Date().toLocaleString("es-CO")}`, 14, y);
+  doc.setTextColor(0);
+
+  doc.save(`doble_partida_${de.double_entry_number}.pdf`);
 }

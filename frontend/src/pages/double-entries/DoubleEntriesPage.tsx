@@ -2,22 +2,85 @@ import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, TrendingUp, Hash, Percent } from "lucide-react";
+import { Plus, TrendingUp, Hash, Percent, MoreHorizontal, Eye, XCircle, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { KpiCard } from "@/components/shared/KpiCard";
-import { useDoubleEntries } from "@/hooks/useDoubleEntries";
+import { useDoubleEntries, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
+import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatPercentage } from "@/utils/formatters";
+import { exportDoubleEntryPDF } from "@/utils/pdfExport";
 import { ROUTES } from "@/utils/constants";
 import type { DoubleEntryResponse } from "@/types/double-entry";
 import type { MetricCard } from "@/types/reports";
 
 const PAGE_SIZE = 20;
+
+function ActionsCell({ de }: { de: DoubleEntryResponse }) {
+  const navigate = useNavigate();
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const cancel = useCancelDoubleEntry();
+  const { organizationId, organizations } = useAuthStore();
+  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuItem onClick={() => navigate(`/double-entries/${de.id}`)}>
+            <Eye className="h-4 w-4 mr-2" />
+            Ver detalle
+          </DropdownMenuItem>
+          {de.status === "completed" && (
+            <DropdownMenuItem onClick={() => setCancelOpen(true)} className="text-red-600">
+              <XCircle className="h-4 w-4 mr-2" />
+              Cancelar
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => exportDoubleEntryPDF(de, orgName)}>
+            <FileText className="h-4 w-4 mr-2" />
+            Exportar PDF
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <ConfirmDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        title="Cancelar Doble Partida"
+        description={`Esto revertira la compra y venta de la Doble Partida #${de.double_entry_number}. Esta seguro?`}
+        confirmLabel="Si, cancelar"
+        variant="destructive"
+        onConfirm={() => cancel.mutate(de.id, { onSuccess: () => setCancelOpen(false) })}
+        loading={cancel.isPending}
+      />
+    </>
+  );
+}
 
 const columns: ColumnDef<DoubleEntryResponse, unknown>[] = [
   { accessorKey: "double_entry_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.double_entry_number}</span> },
@@ -28,6 +91,11 @@ const columns: ColumnDef<DoubleEntryResponse, unknown>[] = [
   { accessorKey: "profit", header: "Utilidad", enableSorting: true, cell: ({ row }) => <span className={`font-medium tabular-nums ${row.original.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(row.original.profit)}</span> },
   { accessorKey: "profit_margin", header: "Margen", enableSorting: true, cell: ({ row }) => formatPercentage(row.original.profit_margin) },
   { accessorKey: "status", header: "Estado", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+  {
+    id: "actions",
+    header: "",
+    cell: ({ row }) => <ActionsCell de={row.original} />,
+  },
 ];
 
 export default function DoubleEntriesPage() {

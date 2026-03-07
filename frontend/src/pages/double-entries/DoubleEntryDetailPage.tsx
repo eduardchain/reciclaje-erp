@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, XCircle } from "lucide-react";
+import { ArrowLeft, FileText, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,8 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useDoubleEntry, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
+import { exportDoubleEntryPDF } from "@/utils/pdfExport";
+import { useAuthStore } from "@/stores/authStore";
 import { ROUTES } from "@/utils/constants";
 
 const statusBorderMap: Record<string, string> = {
@@ -24,6 +26,8 @@ export default function DoubleEntryDetailPage() {
   const { data: de, isLoading } = useDoubleEntry(id!);
   const cancel = useCancelDoubleEntry();
   const [showCancel, setShowCancel] = useState(false);
+  const { organizationId, organizations } = useAuthStore();
+  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
 
   if (isLoading) return <div className="space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>;
   if (!de) return <div className="text-center py-12 text-slate-500">Doble partida no encontrada</div>;
@@ -32,6 +36,7 @@ export default function DoubleEntryDetailPage() {
     <div className="space-y-6">
       <PageHeader title={`Doble Partida #${de.double_entry_number}`} description={de.materials_summary}>
         <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => exportDoubleEntryPDF(de, orgName)}><FileText className="h-4 w-4 mr-2" />Exportar PDF</Button>
           {de.status === "completed" && (
             <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50"><XCircle className="h-4 w-4 mr-2" />Cancelar</Button>
           )}
