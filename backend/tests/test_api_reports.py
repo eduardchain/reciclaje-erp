@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models.double_entry import DoubleEntry
+from app.models.double_entry import DoubleEntry, DoubleEntryLine
 from app.models.expense_category import ExpenseCategory
 from app.models.material import Material, MaterialCategory
 from app.models.money_account import MoneyAccount
@@ -274,7 +274,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     de_purchase = Purchase(
         purchase_number=5, organization_id=org_id,
         supplier_id=proveedor1.id, date=now - timedelta(days=7),
-        total_amount=Decimal("220000"), status="registered",
+        total_amount=Decimal("220000"), status="liquidated",
     )
     db_session.add(de_purchase)
     db_session.flush()
@@ -283,7 +283,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         sale_number=5, organization_id=org_id,
         customer_id=cliente2.id, warehouse_id=None,
         date=now - timedelta(days=7), total_amount=Decimal("300000"),
-        status="registered",
+        status="liquidated",
     )
     db_session.add(de_sale)
     db_session.flush()
@@ -291,14 +291,18 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     doble_partida = DoubleEntry(
         double_entry_number=1, organization_id=org_id,
         date=(now - timedelta(days=7)).date(),
-        material_id=mat_hierro.id, quantity=Decimal("200"),
         supplier_id=proveedor1.id, customer_id=cliente2.id,
-        purchase_unit_price=Decimal("1100"), sale_unit_price=Decimal("1500"),
         purchase_id=de_purchase.id, sale_id=de_sale.id,
         status="completed",
     )
     db_session.add(doble_partida)
     db_session.flush()
+    de_line1 = DoubleEntryLine(
+        double_entry_id=doble_partida.id, material_id=mat_hierro.id,
+        quantity=Decimal("200"), purchase_unit_price=Decimal("1100"),
+        sale_unit_price=Decimal("1500"),
+    )
+    db_session.add(de_line1)
 
     # Vincular purchase y sale a la DE
     de_purchase.double_entry_id = doble_partida.id
@@ -308,7 +312,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     de_purchase2 = Purchase(
         purchase_number=6, organization_id=org_id,
         supplier_id=proveedor2.id, date=now - timedelta(days=4),
-        total_amount=Decimal("100000"), status="registered",
+        total_amount=Decimal("100000"), status="cancelled",
     )
     db_session.add(de_purchase2)
     db_session.flush()
@@ -316,7 +320,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         sale_number=6, organization_id=org_id,
         customer_id=cliente1.id, warehouse_id=None,
         date=now - timedelta(days=4), total_amount=Decimal("150000"),
-        status="registered",
+        status="cancelled",
     )
     db_session.add(de_sale2)
     db_session.flush()
@@ -324,14 +328,18 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     doble_partida_cancelada = DoubleEntry(
         double_entry_number=2, organization_id=org_id,
         date=(now - timedelta(days=4)).date(),
-        material_id=mat_cobre.id, quantity=Decimal("50"),
         supplier_id=proveedor2.id, customer_id=cliente1.id,
-        purchase_unit_price=Decimal("2000"), sale_unit_price=Decimal("3000"),
         purchase_id=de_purchase2.id, sale_id=de_sale2.id,
         status="cancelled",
     )
     db_session.add(doble_partida_cancelada)
     db_session.flush()
+    de_line2 = DoubleEntryLine(
+        double_entry_id=doble_partida_cancelada.id, material_id=mat_cobre.id,
+        quantity=Decimal("50"), purchase_unit_price=Decimal("2000"),
+        sale_unit_price=Decimal("3000"),
+    )
+    db_session.add(de_line2)
     de_purchase2.double_entry_id = doble_partida_cancelada.id
     de_sale2.double_entry_id = doble_partida_cancelada.id
 
@@ -571,10 +579,10 @@ class TestCashFlow:
         )
         data = response.json()
 
-        # 3 compras pagadas: 1,600,000 + 600,000 + 850,000 = 3,050,000
-        assert data["outflows"]["purchase_payments"] == pytest.approx(3050000, abs=1)
-        # 3 ventas pagadas: 1,050,000 + 480,000 + 550,000 = 2,080,000
-        assert data["inflows"]["sale_collections"] == pytest.approx(2080000, abs=1)
+        # 3 compras pagadas + DE liquidada: 1,600,000 + 600,000 + 850,000 + 220,000 = 3,270,000
+        assert data["outflows"]["purchase_payments"] == pytest.approx(3270000, abs=1)
+        # 3 ventas pagadas + DE liquidada: 1,050,000 + 480,000 + 550,000 + 300,000 = 2,380,000
+        assert data["inflows"]["sale_collections"] == pytest.approx(2380000, abs=1)
 
     def test_cf_empty_period(self, client: TestClient, org_headers: dict, report_data: dict):
         """Periodo vacio retorna zeros con opening balance correcto."""

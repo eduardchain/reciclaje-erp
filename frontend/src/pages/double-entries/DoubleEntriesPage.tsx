@@ -12,7 +12,7 @@ import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { useDoubleEntries } from "@/hooks/useDoubleEntries";
-import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
+import { formatCurrency, formatDate, formatPercentage } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { DoubleEntryResponse } from "@/types/double-entry";
 import type { MetricCard } from "@/types/reports";
@@ -22,7 +22,7 @@ const PAGE_SIZE = 20;
 const columns: ColumnDef<DoubleEntryResponse, unknown>[] = [
   { accessorKey: "double_entry_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.double_entry_number}</span> },
   { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
-  { accessorKey: "material_name", header: "Material", cell: ({ row }) => <><span className="font-medium">{row.original.material_name}</span><span className="text-slate-400 ml-2 text-xs">{formatWeight(row.original.quantity)}</span></> },
+  { accessorKey: "materials_summary", header: "Materiales", cell: ({ row }) => <span className="font-medium">{row.original.materials_summary}</span> },
   { accessorKey: "supplier_name", header: "Proveedor" },
   { accessorKey: "customer_name", header: "Cliente" },
   { accessorKey: "profit", header: "Utilidad", enableSorting: true, cell: ({ row }) => <span className={`font-medium tabular-nums ${row.original.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(row.original.profit)}</span> },

@@ -147,9 +147,9 @@ class Material(Base, TimestampMixin, OrganizationMixin):
         back_populates="material",
     )
     
-    double_entries: Mapped[list["DoubleEntry"]] = relationship(
-        "DoubleEntry",
-        foreign_keys="DoubleEntry.material_id",
+    double_entry_lines: Mapped[list["DoubleEntryLine"]] = relationship(
+        "DoubleEntryLine",
+        foreign_keys="DoubleEntryLine.material_id",
         back_populates="material",
     )
 

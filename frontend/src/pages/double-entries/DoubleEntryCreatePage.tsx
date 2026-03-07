@@ -15,10 +15,18 @@ import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, useCustomers, useMaterials } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
+import type { DoubleEntryLineCreate } from "@/types/double-entry";
 import type { SaleCommissionCreate } from "@/types/sale";
 
+interface LineFormData extends DoubleEntryLineCreate { _key: number; }
 interface CommissionFormData extends SaleCommissionCreate { _key: number; }
+
+let lineKeyCounter = 0;
 let commKeyCounter = 0;
+
+function createEmptyLine(): LineFormData {
+  return { _key: ++lineKeyCounter, material_id: "", quantity: 0, purchase_unit_price: 0, sale_unit_price: 0 };
+}
 function createEmptyCommission(): CommissionFormData {
   return { _key: ++commKeyCounter, third_party_id: "", concept: "", commission_type: "percentage", commission_value: 0 };
 }
@@ -37,50 +45,65 @@ export default function DoubleEntryCreatePage() {
   const allThirdParties = [...suppliers, ...customers];
   const { getSuggestedPrice } = usePriceSuggestions();
 
-  const [materialId, setMaterialId] = useState("");
-  const [quantity, setQuantity] = useState(0);
+  const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
   const [supplierId, setSupplierId] = useState("");
-  const [purchaseUnitPrice, setPurchaseUnitPrice] = useState(0);
   const [customerId, setCustomerId] = useState("");
-  const [saleUnitPrice, setSaleUnitPrice] = useState(0);
   const [date, setDate] = useState(toLocalDateInput());
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [notes, setNotes] = useState("");
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
 
-  const handleMaterialChange = (id: string) => {
-    setMaterialId(id);
-    if (purchaseUnitPrice === 0) {
-      const sp = getSuggestedPrice(id, "purchase");
-      if (sp) setPurchaseUnitPrice(sp);
+  const updateLine = (key: number, field: keyof DoubleEntryLineCreate, value: string | number) => {
+    setLines((prev) => prev.map((l) => l._key === key ? { ...l, [field]: value } : l));
+  };
+
+  const handleLineMaterialChange = (key: number, materialId: string) => {
+    const line = lines.find((l) => l._key === key);
+    updateLine(key, "material_id", materialId);
+    if (!line || line.purchase_unit_price === 0) {
+      const sp = getSuggestedPrice(materialId, "purchase");
+      if (sp) updateLine(key, "purchase_unit_price", sp);
     }
-    if (saleUnitPrice === 0) {
-      const sp = getSuggestedPrice(id, "sale");
-      if (sp) setSaleUnitPrice(sp);
+    if (!line || line.sale_unit_price === 0) {
+      const sp = getSuggestedPrice(materialId, "sale");
+      if (sp) updateLine(key, "sale_unit_price", sp);
     }
   };
 
-  const totalPurchase = quantity * purchaseUnitPrice;
-  const totalSale = quantity * saleUnitPrice;
+  const removeLine = (key: number) => {
+    if (lines.length <= 1) return;
+    setLines((prev) => prev.filter((l) => l._key !== key));
+  };
+
+  // Materiales ya usados en otras lineas
+  const usedMaterialIds = (excludeKey: number) =>
+    lines.filter((l) => l._key !== excludeKey && l.material_id).map((l) => l.material_id);
+
+  const totalPurchase = useMemo(() => lines.reduce((sum, l) => sum + l.quantity * l.purchase_unit_price, 0), [lines]);
+  const totalSale = useMemo(() => lines.reduce((sum, l) => sum + l.quantity * l.sale_unit_price, 0), [lines]);
   const totalCommissions = useMemo(
     () => commissions.reduce((sum, c) => sum + (c.commission_type === "percentage" ? (totalSale * c.commission_value) / 100 : c.commission_value), 0),
     [commissions, totalSale],
   );
   const profit = totalSale - totalPurchase - totalCommissions;
 
-  const canSubmit = materialId && quantity > 0 && supplierId && purchaseUnitPrice >= 0 && customerId && saleUnitPrice >= 0 && date && commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0);
+  const canSubmit =
+    lines.length > 0 &&
+    lines.every((l) => l.material_id && l.quantity > 0 && l.purchase_unit_price > 0 && l.sale_unit_price > 0) &&
+    supplierId &&
+    customerId &&
+    supplierId !== customerId &&
+    date &&
+    commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0);
 
   const handleSubmit = () => {
     if (!canSubmit) return;
     create.mutate(
       {
-        material_id: materialId,
-        quantity,
+        lines: lines.map(({ _key, ...rest }) => rest),
         supplier_id: supplierId,
-        purchase_unit_price: purchaseUnitPrice,
         customer_id: customerId,
-        sale_unit_price: saleUnitPrice,
         date,
         invoice_number: invoiceNumber || null,
         vehicle_plate: vehiclePlate || null,
@@ -97,66 +120,114 @@ export default function DoubleEntryCreatePage() {
         <Button variant="outline" onClick={() => navigate(ROUTES.DOUBLE_ENTRIES)}><ArrowLeft className="h-4 w-4 mr-2" />Volver</Button>
       </PageHeader>
 
-      {/* Material y Cantidad */}
+      {/* Datos Generales */}
       <Card className="shadow-sm">
-        <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Material</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Datos Generales</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>
-              <EntitySelect value={materialId} onChange={handleMaterialChange} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Seleccionar material..." />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>
-              <Input type="number" min={0} step="0.01" value={quantity || ""} onChange={(e) => setQuantity(parseFloat(e.target.value) || 0)} />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
-              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Compra */}
-        <Card className="border-l-[3px] border-l-blue-500 shadow-sm">
-          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-blue-700">Lado Compra</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor *</Label>
               <EntitySelect value={supplierId} onChange={setSupplierId} options={suppliers.map((s) => ({ id: s.id, label: s.name }))} placeholder="Seleccionar proveedor..." />
             </div>
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Compra Unit. *</Label>
-              <Input type="number" min={0} step="1" value={purchaseUnitPrice || ""} onChange={(e) => setPurchaseUnitPrice(parseFloat(e.target.value) || 0)} />
-              <PriceSuggestion suggestedPrice={getSuggestedPrice(materialId, "purchase")} onApply={setPurchaseUnitPrice} />
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3">
-              <div className="flex justify-between"><span className="text-slate-500">Total Compra</span><span className="font-bold text-lg">{formatCurrency(totalPurchase)}</span></div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Venta */}
-        <Card className="border-l-[3px] border-l-emerald-500 shadow-sm">
-          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Lado Venta</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente *</Label>
               <EntitySelect value={customerId} onChange={setCustomerId} options={customers.map((c) => ({ id: c.id, label: c.name }))} placeholder="Seleccionar cliente..." />
             </div>
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Venta Unit. *</Label>
-              <Input type="number" min={0} step="1" value={saleUnitPrice || ""} onChange={(e) => setSaleUnitPrice(parseFloat(e.target.value) || 0)} />
-              <PriceSuggestion suggestedPrice={getSuggestedPrice(materialId, "sale")} onApply={setSaleUnitPrice} />
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
-            <div className="bg-slate-50 rounded-lg p-3">
-              <div className="flex justify-between"><span className="text-slate-500">Total Venta</span><span className="font-bold text-lg">{formatCurrency(totalSale)}</span></div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa</Label>
+              <Input value={vehiclePlate} onChange={(e) => setVehiclePlate(e.target.value)} />
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Factura</Label>
+              <Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
+              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={1} />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Materiales (lineas) */}
+      <Card className="shadow-sm">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Materiales</CardTitle>
+          <Button variant="outline" size="sm" onClick={() => setLines((p) => [...p, createEmptyLine()])}><Plus className="h-4 w-4 mr-1" />Agregar Linea</Button>
+        </CardHeader>
+        <CardContent className="space-y-0">
+          {/* Header */}
+          <div className="grid grid-cols-12 gap-2 pb-2 border-b border-slate-200 mb-2">
+            <div className="col-span-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Material</div>
+            <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg)</div>
+            <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">P. Compra</div>
+            <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">P. Venta</div>
+            <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 text-right">Ganancia</div>
+            <div className="col-span-1" />
+          </div>
+
+          {lines.map((line) => {
+            const lineProfit = (line.sale_unit_price - line.purchase_unit_price) * line.quantity;
+            const used = usedMaterialIds(line._key);
+            const availableMaterials = materials.filter((m) => !used.includes(m.id));
+
+            return (
+              <div key={line._key} className="grid grid-cols-12 gap-2 items-start py-2 border-b border-slate-100 last:border-0">
+                <div className="col-span-3">
+                  <EntitySelect
+                    value={line.material_id}
+                    onChange={(v) => handleLineMaterialChange(line._key, v)}
+                    options={availableMaterials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
+                    placeholder="Material..."
+                  />
+                </div>
+                <div className="col-span-2">
+                  <Input type="number" min={0} step="0.01" value={line.quantity || ""} onChange={(e) => updateLine(line._key, "quantity", parseFloat(e.target.value) || 0)} />
+                </div>
+                <div className="col-span-2">
+                  <Input type="number" min={0} step="1" value={line.purchase_unit_price || ""} onChange={(e) => updateLine(line._key, "purchase_unit_price", parseFloat(e.target.value) || 0)} />
+                  <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "purchase")} onApply={(p) => updateLine(line._key, "purchase_unit_price", p)} />
+                </div>
+                <div className="col-span-2">
+                  <Input type="number" min={0} step="1" value={line.sale_unit_price || ""} onChange={(e) => updateLine(line._key, "sale_unit_price", parseFloat(e.target.value) || 0)} />
+                  <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "sale_unit_price", p)} />
+                </div>
+                <div className="col-span-2 text-right pt-2">
+                  <span className={`font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                    {formatCurrency(lineProfit)}
+                  </span>
+                </div>
+                <div className="col-span-1 text-center pt-1">
+                  {lines.length > 1 && (
+                    <Button variant="ghost" size="sm" onClick={() => removeLine(line._key)} className="text-red-500 h-8 w-8 p-0">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Totales */}
+          <div className="grid grid-cols-12 gap-2 pt-3 mt-2 border-t border-slate-300">
+            <div className="col-span-5 text-right text-sm font-semibold text-slate-600">Totales:</div>
+            <div className="col-span-2 text-sm font-bold">{formatCurrency(totalPurchase)}</div>
+            <div className="col-span-2 text-sm font-bold">{formatCurrency(totalSale)}</div>
+            <div className="col-span-2 text-right">
+              <span className={`text-sm font-bold ${totalSale - totalPurchase >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                {formatCurrency(totalSale - totalPurchase)}
+              </span>
+            </div>
+            <div className="col-span-1" />
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Comisiones */}
       <Card className="shadow-sm">
@@ -192,17 +263,6 @@ export default function DoubleEntryCreatePage() {
             ))}
           </CardContent>
         )}
-      </Card>
-
-      {/* Info adicional */}
-      <Card className="shadow-sm">
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa</Label><Input value={vehiclePlate} onChange={(e) => setVehiclePlate(e.target.value)} /></div>
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Factura</Label><Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} /></div>
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={1} /></div>
-          </div>
-        </CardContent>
       </Card>
 
       {/* Resumen */}

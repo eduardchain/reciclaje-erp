@@ -4,7 +4,7 @@ import { ArrowLeft, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -30,7 +30,7 @@ export default function DoubleEntryDetailPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title={`Doble Partida #${de.double_entry_number}`} description={`${de.material_name} - ${formatWeight(de.quantity)}`}>
+      <PageHeader title={`Doble Partida #${de.double_entry_number}`} description={de.materials_summary}>
         <div className="flex items-center gap-2">
           {de.status === "completed" && (
             <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50"><XCircle className="h-4 w-4 mr-2" />Cancelar</Button>
@@ -39,14 +39,15 @@ export default function DoubleEntryDetailPage() {
         </div>
       </PageHeader>
 
+      {/* Info general + Proveedor + Cliente */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className={`shadow-sm ${statusBorderMap[de.status] ?? ""}`}>
           <CardContent className="pt-6">
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Estado</dt><dd><StatusBadge status={de.status} /></dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</dt><dd>{formatDate(de.date)}</dd></div>
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</dt><dd>{de.material_name} ({de.material_code})</dd></div>
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad</dt><dd>{formatWeight(de.quantity)}</dd></div>
+              {de.invoice_number && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Factura</dt><dd>{de.invoice_number}</dd></div>}
+              {de.vehicle_plate && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa</dt><dd>{de.vehicle_plate}</dd></div>}
             </dl>
           </CardContent>
         </Card>
@@ -56,7 +57,6 @@ export default function DoubleEntryDetailPage() {
           <CardContent>
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</dt><dd>{de.supplier_name}</dd></div>
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit.</dt><dd>{formatCurrency(de.purchase_unit_price)}</dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold">{formatCurrency(de.total_purchase_cost)}</dd></div>
             </dl>
           </CardContent>
@@ -67,12 +67,54 @@ export default function DoubleEntryDetailPage() {
           <CardContent>
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</dt><dd>{de.customer_name}</dd></div>
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit.</dt><dd>{formatCurrency(de.sale_unit_price)}</dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold">{formatCurrency(de.total_sale_amount)}</dd></div>
             </dl>
           </CardContent>
         </Card>
       </div>
+
+      {/* Tabla de Materiales (lineas) */}
+      <Card className="shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Materiales</CardTitle></CardHeader>
+        <CardContent>
+          <div className="rounded-lg border border-slate-200/80 overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Material</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Cantidad</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">P. Compra</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">P. Venta</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total Compra</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total Venta</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Ganancia</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {de.lines.map((line) => (
+                  <TableRow key={line.id}>
+                    <TableCell><span className="font-medium">{line.material_name}</span> <span className="text-slate-400 text-xs">{line.material_code}</span></TableCell>
+                    <TableCell className="text-right tabular-nums">{formatWeight(line.quantity)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatCurrency(line.purchase_unit_price)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatCurrency(line.sale_unit_price)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatCurrency(line.total_purchase)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatCurrency(line.total_sale)}</TableCell>
+                    <TableCell className={`text-right tabular-nums font-medium ${line.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(line.profit)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+              <TableFooter>
+                <TableRow className="bg-slate-50/80 font-bold">
+                  <TableCell colSpan={4}>Totales</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatCurrency(de.total_purchase_cost)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatCurrency(de.total_sale_amount)}</TableCell>
+                  <TableCell className={`text-right tabular-nums ${de.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(de.profit)}</TableCell>
+                </TableRow>
+              </TableFooter>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Resumen Utilidad */}
       <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">

@@ -37,19 +37,32 @@ router = APIRouter()
 def _enrich_double_entry_response(double_entry: DoubleEntry) -> dict:
     """
     Enrich double_entry object with joined data for response.
-    
-    Assumes double_entry was loaded with proper joinedload options.
+
+    Assumes double_entry was loaded with proper joinedload options
+    (lines + materials, supplier, customer, sale.commissions).
     """
+    lines_data = [
+        {
+            **line.__dict__,
+            "total_purchase": line.total_purchase,
+            "total_sale": line.total_sale,
+            "profit": line.profit,
+            "material_code": line.material.code if line.material else "",
+            "material_name": line.material.name if line.material else "",
+        }
+        for line in double_entry.lines
+    ]
+
+    material_names = [line.material.name for line in double_entry.lines if line.material]
+
     return {
         **double_entry.__dict__,
-        # Include calculated properties (not in __dict__)
+        "lines": lines_data,
+        "materials_summary": ", ".join(material_names),
         "total_purchase_cost": double_entry.total_purchase_cost,
         "total_sale_amount": double_entry.total_sale_amount,
         "profit": double_entry.profit,
         "profit_margin": double_entry.profit_margin,
-        # Include joined data
-        "material_code": double_entry.material.code if double_entry.material else None,
-        "material_name": double_entry.material.name if double_entry.material else None,
         "supplier_name": double_entry.supplier.name if double_entry.supplier else None,
         "customer_name": double_entry.customer.name if double_entry.customer else None,
         "commissions": [
@@ -109,6 +122,7 @@ async def create_double_entry(
             db=db,
             obj_in=double_entry_in,
             organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
         )
         
         # Reload with eager loading to get all relationships

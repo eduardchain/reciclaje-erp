@@ -12,7 +12,7 @@ from uuid import UUID
 from sqlalchemy import select, func, case, cast, Date
 from sqlalchemy.orm import Session
 
-from app.models.double_entry import DoubleEntry
+from app.models.double_entry import DoubleEntry, DoubleEntryLine
 from app.models.expense_category import ExpenseCategory
 from app.models.material import Material, MaterialCategory
 from app.models.money_account import MoneyAccount
@@ -151,18 +151,21 @@ class ReportService:
         )
         cogs = Decimal(str(cogs_val))
 
-        # 3. Double Entry Profit
+        # 3. Double Entry Profit (via DoubleEntryLine)
         de_row = db.execute(
             select(
                 func.coalesce(
                     func.sum(
-                        (DoubleEntry.sale_unit_price - DoubleEntry.purchase_unit_price)
-                        * DoubleEntry.quantity
+                        (DoubleEntryLine.sale_unit_price - DoubleEntryLine.purchase_unit_price)
+                        * DoubleEntryLine.quantity
                     ),
                     0,
                 ),
-                func.count(),
-            ).where(
+                func.count(func.distinct(DoubleEntry.id)),
+            )
+            .select_from(DoubleEntryLine)
+            .join(DoubleEntry, DoubleEntryLine.double_entry_id == DoubleEntry.id)
+            .where(
                 DoubleEntry.organization_id == organization_id,
                 DoubleEntry.status == "completed",
                 DoubleEntry.date >= date_from,
@@ -825,25 +828,28 @@ class ReportService:
         ).all()
         purchase_map = {r[0]: (Decimal(str(r[1])), Decimal(str(r[2]))) for r in purchase_rows}
 
-        # 3. Double entry side
+        # 3. Double entry side (via DoubleEntryLine)
         de_rows = db.execute(
             select(
-                DoubleEntry.material_id,
-                func.coalesce(func.sum(DoubleEntry.quantity), 0),
+                DoubleEntryLine.material_id,
+                func.coalesce(func.sum(DoubleEntryLine.quantity), 0),
                 func.coalesce(
                     func.sum(
-                        (DoubleEntry.sale_unit_price - DoubleEntry.purchase_unit_price)
-                        * DoubleEntry.quantity
+                        (DoubleEntryLine.sale_unit_price - DoubleEntryLine.purchase_unit_price)
+                        * DoubleEntryLine.quantity
                     ),
                     0,
                 ),
-            ).where(
+            )
+            .select_from(DoubleEntryLine)
+            .join(DoubleEntry, DoubleEntryLine.double_entry_id == DoubleEntry.id)
+            .where(
                 DoubleEntry.organization_id == organization_id,
                 DoubleEntry.status == "completed",
                 DoubleEntry.date >= date_from,
                 DoubleEntry.date <= date_to,
             )
-            .group_by(DoubleEntry.material_id)
+            .group_by(DoubleEntryLine.material_id)
         ).all()
         de_map = {r[0]: (Decimal(str(r[1])), Decimal(str(r[2]))) for r in de_rows}
 
@@ -1040,11 +1046,13 @@ class ReportService:
                 db.scalar(
                     select(func.coalesce(
                         func.sum(
-                            (DoubleEntry.sale_unit_price - DoubleEntry.purchase_unit_price)
-                            * DoubleEntry.quantity
+                            (DoubleEntryLine.sale_unit_price - DoubleEntryLine.purchase_unit_price)
+                            * DoubleEntryLine.quantity
                         ),
                         0,
                     ))
+                    .select_from(DoubleEntryLine)
+                    .join(DoubleEntry, DoubleEntryLine.double_entry_id == DoubleEntry.id)
                     .where(
                         DoubleEntry.organization_id == organization_id,
                         DoubleEntry.status == "completed",

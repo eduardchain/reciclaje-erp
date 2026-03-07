@@ -13,7 +13,7 @@ from .money_account import MoneyAccount
 from .purchase import Purchase, PurchaseLine
 from .sale import Sale, SaleLine, SaleCommission
 from .inventory_movement import InventoryMovement
-from .double_entry import DoubleEntry
+from .double_entry import DoubleEntry, DoubleEntryLine
 from .price_list import PriceList
 from .expense_category import ExpenseCategory
 from .money_movement import MoneyMovement
@@ -41,6 +41,7 @@ __all__ = [
     "SaleCommission",
     "InventoryMovement",
     "DoubleEntry",
+    "DoubleEntryLine",
     "PriceList",
     "ExpenseCategory",
     "MoneyMovement",

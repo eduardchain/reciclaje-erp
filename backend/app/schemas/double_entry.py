@@ -1,8 +1,7 @@
 """
 Pydantic schemas for DoubleEntry (Pasa Mano) model.
 
-A double-entry operation represents a simultaneous purchase from supplier
-and sale to customer without the material entering inventory.
+Soporta multiples materiales por operacion via DoubleEntryLine.
 """
 from datetime import date as date_type, datetime
 from decimal import Decimal
@@ -15,108 +14,123 @@ from app.schemas.sale import SaleCommissionCreate, SaleCommissionResponse
 
 
 # ============================================================================
+# DoubleEntryLine Schemas
+# ============================================================================
+
+class DoubleEntryLineCreate(BaseModel):
+    """Schema para crear una linea de doble partida."""
+    material_id: UUID = Field(..., description="Material UUID")
+    quantity: Decimal = Field(..., gt=0, description="Cantidad (positiva)")
+    purchase_unit_price: Decimal = Field(..., gt=0, description="Precio de compra por unidad")
+    sale_unit_price: Decimal = Field(..., gt=0, description="Precio de venta por unidad")
+
+
+class DoubleEntryLineResponse(BaseModel):
+    """Schema para linea de doble partida en respuestas."""
+    id: UUID
+    material_id: UUID
+    quantity: float
+    purchase_unit_price: float
+    sale_unit_price: float
+    total_purchase: float
+    total_sale: float
+    profit: float
+    material_code: str
+    material_name: str
+
+    model_config = {"from_attributes": True}
+
+    @field_serializer('quantity', 'purchase_unit_price', 'sale_unit_price',
+                      'total_purchase', 'total_sale', 'profit')
+    def serialize_decimals(self, value: Decimal) -> float:
+        return float(value)
+
+
+# ============================================================================
 # DoubleEntry Schemas
 # ============================================================================
 
-class DoubleEntryBase(BaseModel):
-    """Base schema for DoubleEntry."""
-    material_id: UUID = Field(..., description="Material UUID")
-    quantity: Decimal = Field(..., gt=0, description="Quantity traded (must be positive)")
-    supplier_id: UUID = Field(..., description="Supplier UUID (must have is_supplier=True)")
-    purchase_unit_price: Decimal = Field(..., gt=0, description="Purchase price per unit (must be positive)")
-    customer_id: UUID = Field(..., description="Customer UUID (must have is_customer=True)")
-    sale_unit_price: Decimal = Field(..., gt=0, description="Sale price per unit (must be positive)")
-    date: date_type = Field(..., description="Date of the double-entry operation")
-    invoice_number: Optional[str] = Field(None, max_length=50, description="Invoice number (optional)")
-    vehicle_plate: Optional[str] = Field(None, max_length=20, description="Vehicle plate for transport (optional)")
-    notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
-
-
-class DoubleEntryCreate(DoubleEntryBase):
+class DoubleEntryCreate(BaseModel):
     """
-    Schema for creating a DoubleEntry.
-    
-    Validation:
-    - supplier_id != customer_id (cannot buy and sell to the same party)
-    - purchase_unit_price > 0
-    - sale_unit_price > 0
-    - quantity > 0
-    
-    Business Flow:
-    1. Creates Purchase (status='registered', no inventory movement)
-    2. Creates Sale (status='registered', no inventory movement)
-    3. Updates supplier balance (debt increases)
-    4. Updates customer balance (receivable increases)
-    5. Creates commissions (if provided, but balances not updated until sale liquidation)
+    Schema para crear una doble partida con multiples materiales.
+
+    Validaciones:
+    - supplier_id != customer_id
+    - Al menos 1 linea (min_length=1)
+    - No duplicar material_id entre lineas
     """
+    lines: List[DoubleEntryLineCreate] = Field(..., min_length=1, description="Lineas de materiales")
+    supplier_id: UUID = Field(..., description="Supplier UUID")
+    customer_id: UUID = Field(..., description="Customer UUID")
+    date: date_type = Field(..., description="Fecha de la operacion")
+    invoice_number: Optional[str] = Field(None, max_length=50)
+    vehicle_plate: Optional[str] = Field(None, max_length=20)
+    notes: Optional[str] = Field(None, max_length=1000)
     commissions: List[SaleCommissionCreate] = Field(
         default_factory=list,
-        description="Optional sale commissions (balances updated when sale is liquidated)"
+        description="Comisiones de venta (se pagan al liquidar la venta)"
     )
-    
+
     @model_validator(mode='after')
-    def validate_supplier_not_customer(self):
-        """Validate that supplier and customer are different parties."""
+    def validate_create(self):
         if self.supplier_id == self.customer_id:
             raise ValueError("Supplier and customer cannot be the same third party")
+        # V-DP-02: No permitir materiales duplicados entre lineas
+        material_ids = [line.material_id for line in self.lines]
+        if len(material_ids) != len(set(material_ids)):
+            raise ValueError("No se permite repetir el mismo material en diferentes lineas")
         return self
 
 
 class DoubleEntryUpdate(BaseModel):
-    """
-    Schema for updating a DoubleEntry (partial updates only).
-    
-    Note: Only metadata can be updated. Status changes via /cancel endpoint.
-    """
+    """Schema para actualizar metadata de una doble partida."""
     notes: Optional[str] = Field(None, max_length=1000)
     invoice_number: Optional[str] = Field(None, max_length=50)
     vehicle_plate: Optional[str] = Field(None, max_length=20)
 
 
-class DoubleEntryResponse(DoubleEntryBase):
-    """Schema for DoubleEntry responses with all details."""
+class DoubleEntryResponse(BaseModel):
+    """Schema completo de respuesta de doble partida."""
     id: UUID
     organization_id: UUID
-    double_entry_number: int = Field(..., description="Sequential number within organization")
-    purchase_id: UUID = Field(..., description="Linked purchase record UUID")
-    sale_id: UUID = Field(..., description="Linked sale record UUID")
+    double_entry_number: int
+    date: date_type
+    supplier_id: UUID
+    customer_id: UUID
+    invoice_number: Optional[str] = None
+    vehicle_plate: Optional[str] = None
+    notes: Optional[str] = None
+    purchase_id: UUID
+    sale_id: UUID
     status: str = Field(..., description="completed | cancelled")
-    
-    # Calculated properties
-    total_purchase_cost: float = Field(..., description="purchase_unit_price × quantity")
-    total_sale_amount: float = Field(..., description="sale_unit_price × quantity")
-    profit: float = Field(..., description="(sale_unit_price - purchase_unit_price) × quantity")
-    profit_margin: float = Field(..., description="(profit / total_purchase_cost) × 100")
-    
+
+    # Lineas
+    lines: List[DoubleEntryLineResponse] = Field(default_factory=list)
+
+    # Resumen para listado
+    materials_summary: str = Field("", description="Nombres de materiales concatenados")
+
+    # Totales calculados (desde lineas)
+    total_purchase_cost: float
+    total_sale_amount: float
+    profit: float
+    profit_margin: float
+
     # Timestamps
     created_at: datetime
     updated_at: datetime
-    
-    # Joined data from related models
-    material_code: str = Field(..., description="Material code (e.g., MAT-001)")
-    material_name: str = Field(..., description="Material name")
-    supplier_name: str = Field(..., description="Supplier name")
-    customer_name: str = Field(..., description="Customer name")
-    
-    # Commissions from linked sale
-    commissions: List[SaleCommissionResponse] = Field(
-        default_factory=list,
-        description="Sale commissions (paid when sale is liquidated)"
-    )
-    
+
+    # Joined data
+    supplier_name: str
+    customer_name: str
+
+    # Comisiones de la venta vinculada
+    commissions: List[SaleCommissionResponse] = Field(default_factory=list)
+
     model_config = {"from_attributes": True}
-    
-    @field_serializer(
-        'quantity',
-        'purchase_unit_price',
-        'sale_unit_price',
-        'total_purchase_cost',
-        'total_sale_amount',
-        'profit',
-        'profit_margin'
-    )
+
+    @field_serializer('total_purchase_cost', 'total_sale_amount', 'profit', 'profit_margin')
     def serialize_decimals(self, value: Decimal) -> float:
-        """Convert Decimal to float for JSON serialization."""
         return float(value)
 
 
