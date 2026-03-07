@@ -126,7 +126,7 @@ class ReportService:
                 func.count(),
             ).where(
                 Sale.organization_id == organization_id,
-                Sale.status != "cancelled",
+                Sale.status == "liquidated",
                 Sale.double_entry_id.is_(None),
                 Sale.date >= dt_from,
                 Sale.date < dt_to,
@@ -143,7 +143,7 @@ class ReportService:
             .join(Sale, SaleLine.sale_id == Sale.id)
             .where(
                 Sale.organization_id == organization_id,
-                Sale.status != "cancelled",
+                Sale.status == "liquidated",
                 Sale.double_entry_id.is_(None),
                 Sale.date >= dt_from,
                 Sale.date < dt_to,
@@ -646,7 +646,7 @@ class ReportService:
 
         base_filters = [
             Sale.organization_id == organization_id,
-            Sale.status != "cancelled",
+            Sale.status == "liquidated",
             Sale.date >= dt_from,
             Sale.date < dt_to,
         ]
@@ -800,7 +800,7 @@ class ReportService:
             .outerjoin(MaterialCategory, Material.category_id == MaterialCategory.id)
             .where(
                 Sale.organization_id == organization_id,
-                Sale.status != "cancelled",
+                Sale.status == "liquidated",
                 Sale.double_entry_id.is_(None),
                 Sale.date >= dt_from,
                 Sale.date < dt_to,
@@ -1003,7 +1003,7 @@ class ReportService:
                     select(func.coalesce(func.sum(Sale.total_amount), 0))
                     .where(
                         Sale.organization_id == organization_id,
-                        Sale.status != "cancelled",
+                        Sale.status == "liquidated",
                         Sale.date >= dt_f,
                         Sale.date < dt_t,
                     )
@@ -1035,7 +1035,7 @@ class ReportService:
                     .join(Sale, SaleLine.sale_id == Sale.id)
                     .where(
                         Sale.organization_id == organization_id,
-                        Sale.status != "cancelled",
+                        Sale.status == "liquidated",
                         Sale.double_entry_id.is_(None),
                         Sale.date >= dt_f,
                         Sale.date < dt_t,
@@ -1152,7 +1152,7 @@ class ReportService:
             .join(Material, SaleLine.material_id == Material.id)
             .where(
                 Sale.organization_id == organization_id,
-                Sale.status != "cancelled",
+                Sale.status == "liquidated",
                 Sale.date >= dt_from,
                 Sale.date < dt_to,
             )
@@ -1211,7 +1211,7 @@ class ReportService:
             .join(SaleLine, SaleLine.sale_id == Sale.id)
             .where(
                 Sale.organization_id == organization_id,
-                Sale.status != "cancelled",
+                Sale.status == "liquidated",
                 Sale.date >= dt_from,
                 Sale.date < dt_to,
             )

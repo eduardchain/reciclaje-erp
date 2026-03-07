@@ -268,6 +268,22 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     )
     db_session.add(linea_vc)
 
+    # Venta registrada (NO debe contar en reportes financieros, SI en alertas)
+    venta_registrada = Sale(
+        sale_number=7, organization_id=org_id,
+        customer_id=cliente2.id, warehouse_id=warehouse.id,
+        date=now - timedelta(days=1), total_amount=Decimal("777777"),
+        status="registered",
+    )
+    db_session.add(venta_registrada)
+    db_session.flush()
+    linea_vr = SaleLine(
+        sale_id=venta_registrada.id, material_id=mat_hierro.id,
+        quantity=Decimal("500"), unit_price=Decimal("1555"),
+        total_price=Decimal("777777"), unit_cost=Decimal("1200"),
+    )
+    db_session.add(linea_vr)
+
     # --- Doble Partida ---
     # DE completada: 200kg Hierro, compra@1100, venta@1500 = profit $80,000
     # Crear purchase y sale vinculados
@@ -503,8 +519,8 @@ class TestProfitAndLoss:
         assert "Fletes" in cat_names
         assert "Arriendo" in cat_names
 
-    def test_pl_excludes_cancelled(self, client: TestClient, org_headers: dict, report_data: dict):
-        """Ventas canceladas no aparecen en revenue."""
+    def test_pl_excludes_non_liquidated(self, client: TestClient, org_headers: dict, report_data: dict):
+        """Ventas canceladas y registradas no aparecen en revenue."""
         response = client.get(
             "/api/v1/reports/profit-and-loss",
             params={"date_from": str(report_data["date_from"]), "date_to": str(report_data["date_to"])},
@@ -512,7 +528,7 @@ class TestProfitAndLoss:
         )
         data = response.json()
 
-        # sales_count should be 3 (normal paid, excl DE and cancelled)
+        # sales_count should be 3 (only liquidated, excl DE, cancelled, and registered)
         assert data["sales_count"] == 3
 
     def test_pl_empty_period(self, client: TestClient, org_headers: dict, report_data: dict):
@@ -859,8 +875,9 @@ class TestDashboard:
         data = response.json()
 
         alert_types = {a["alert_type"] for a in data["alerts"]}
-        # Hay 1 compra registrada (pending)
+        # Hay 1 compra registrada (pending) y 1 venta registrada (pending)
         assert "pending_purchases" in alert_types
+        assert "pending_sales" in alert_types
 
 
 # ---------------------------------------------------------------------------
