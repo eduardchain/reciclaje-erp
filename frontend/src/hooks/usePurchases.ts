@@ -1,13 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { purchaseService } from "@/services/purchases";
+import { getApiErrorMessage } from "@/utils/formatters";
+import { invalidateAfterPurchase, invalidateAfterPurchaseLiquidateOrCancel } from "@/utils/queryInvalidation";
 import type { PurchaseCreate, PurchaseFullUpdate, PurchaseLiquidateRequest } from "@/types/purchase";
-import axios from "axios";
-
-function getApiErrorMessage(error: unknown, fallback: string): string {
-  if (axios.isAxiosError(error)) return error.response?.data?.detail || fallback;
-  return fallback;
-}
 
 interface PurchaseFilters {
   skip?: number;
@@ -39,7 +35,7 @@ export function useCreatePurchase() {
   return useMutation({
     mutationFn: (data: PurchaseCreate) => purchaseService.create(data),
     onSuccess: (purchase) => {
-      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      invalidateAfterPurchase(queryClient);
       toast.success("Compra creada exitosamente");
       if (purchase.warnings && purchase.warnings.length > 0) {
         purchase.warnings.forEach((w) => toast.warning(w));
@@ -57,7 +53,7 @@ export function useUpdatePurchase() {
     mutationFn: ({ id, data }: { id: string; data: PurchaseFullUpdate }) =>
       purchaseService.update(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      invalidateAfterPurchase(queryClient);
       toast.success("Compra actualizada exitosamente");
     },
     onError: (error: unknown) => {
@@ -72,7 +68,7 @@ export function useLiquidatePurchase() {
     mutationFn: ({ id, data }: { id: string; data: PurchaseLiquidateRequest }) =>
       purchaseService.liquidate(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      invalidateAfterPurchaseLiquidateOrCancel(queryClient);
       toast.success("Compra liquidada exitosamente");
     },
     onError: (error: unknown) => {
@@ -86,7 +82,7 @@ export function useCancelPurchase() {
   return useMutation({
     mutationFn: (id: string) => purchaseService.cancel(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      invalidateAfterPurchaseLiquidateOrCancel(queryClient);
       toast.success("Compra cancelada exitosamente");
     },
     onError: (error: unknown) => {

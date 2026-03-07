@@ -1,13 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { saleService } from "@/services/sales";
+import { getApiErrorMessage } from "@/utils/formatters";
+import { invalidateAfterSale, invalidateAfterSaleLiquidateOrCancel } from "@/utils/queryInvalidation";
 import type { SaleCreate, SaleFullUpdate, SaleLiquidateRequest } from "@/types/sale";
-import axios from "axios";
-
-function getApiErrorMessage(error: unknown, fallback: string): string {
-  if (axios.isAxiosError(error)) return error.response?.data?.detail || fallback;
-  return fallback;
-}
 
 interface SaleFilters {
   skip?: number;
@@ -39,7 +35,7 @@ export function useCreateSale() {
   return useMutation({
     mutationFn: (data: SaleCreate) => saleService.create(data),
     onSuccess: (sale) => {
-      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      invalidateAfterSale(queryClient);
       toast.success("Venta creada exitosamente");
       if (sale.warnings && sale.warnings.length > 0) {
         sale.warnings.forEach((w: string) => toast.warning(w));
@@ -57,7 +53,7 @@ export function useUpdateSale() {
     mutationFn: ({ id, data }: { id: string; data: SaleFullUpdate }) =>
       saleService.update(id, data),
     onSuccess: (sale) => {
-      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      invalidateAfterSale(queryClient);
       toast.success("Venta actualizada exitosamente");
       if (sale.warnings && sale.warnings.length > 0) {
         sale.warnings.forEach((w: string) => toast.warning(w));
@@ -75,7 +71,7 @@ export function useLiquidateSale() {
     mutationFn: ({ id, data }: { id: string; data: SaleLiquidateRequest }) =>
       saleService.liquidate(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      invalidateAfterSaleLiquidateOrCancel(queryClient);
       toast.success("Venta liquidada exitosamente");
     },
     onError: (error: unknown) => {
@@ -89,7 +85,7 @@ export function useCancelSale() {
   return useMutation({
     mutationFn: (id: string) => saleService.cancel(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      invalidateAfterSaleLiquidateOrCancel(queryClient);
       toast.success("Venta cancelada exitosamente");
     },
     onError: (error: unknown) => {

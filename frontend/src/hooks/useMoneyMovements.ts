@@ -1,13 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { moneyMovementService } from "@/services/moneyMovements";
+import { getApiErrorMessage } from "@/utils/formatters";
+import { invalidateAfterTreasury } from "@/utils/queryInvalidation";
 import type { AnnulMovementRequest } from "@/types/money-movement";
-import axios from "axios";
-
-function getApiErrorMessage(error: unknown, fallback: string): string {
-  if (axios.isAxiosError(error)) return error.response?.data?.detail || fallback;
-  return fallback;
-}
 
 interface MovementFilters {
   skip?: number;
@@ -55,8 +51,7 @@ export function useCreateMovement(type: string) {
       return fn(data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["money-movements"] });
-      queryClient.invalidateQueries({ queryKey: ["money-accounts"] });
+      invalidateAfterTreasury(queryClient);
       toast.success("Movimiento creado exitosamente");
     },
     onError: (error: unknown) => {
@@ -71,8 +66,7 @@ export function useAnnulMovement() {
     mutationFn: ({ id, data }: { id: string; data: AnnulMovementRequest }) =>
       moneyMovementService.annul(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["money-movements"] });
-      queryClient.invalidateQueries({ queryKey: ["money-accounts"] });
+      invalidateAfterTreasury(queryClient);
       toast.success("Movimiento anulado exitosamente");
     },
     onError: (error: unknown) => {

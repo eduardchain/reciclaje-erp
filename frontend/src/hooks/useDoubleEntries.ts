@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { doubleEntryService } from "@/services/doubleEntries";
 import { getApiErrorMessage } from "@/utils/formatters";
+import { invalidateAfterDoubleEntry } from "@/utils/queryInvalidation";
 import type { DoubleEntryCreate } from "@/types/double-entry";
 
 interface DoubleEntryFilters {
@@ -33,7 +34,7 @@ export function useCreateDoubleEntry() {
   return useMutation({
     mutationFn: (data: DoubleEntryCreate) => doubleEntryService.create(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["double-entries"] });
+      invalidateAfterDoubleEntry(queryClient);
       toast.success("Doble partida creada exitosamente");
     },
     onError: (error: unknown) => {
@@ -47,7 +48,7 @@ export function useCancelDoubleEntry() {
   return useMutation({
     mutationFn: (id: string) => doubleEntryService.cancel(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["double-entries"] });
+      invalidateAfterDoubleEntry(queryClient);
       toast.success("Doble partida cancelada exitosamente");
     },
     onError: (error: unknown) => {

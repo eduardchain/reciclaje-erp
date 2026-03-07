@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { inventoryService } from "@/services/inventory";
 import { getApiErrorMessage } from "@/utils/formatters";
+import { invalidateAfterInventoryChange } from "@/utils/queryInvalidation";
 import type {
   IncreaseCreate,
   DecreaseCreate,
@@ -99,7 +100,7 @@ export function useCreateAdjustment(type: string) {
       fnMap[type](data as never),
     onSuccess: () => {
       toast.success("Ajuste creado exitosamente");
-      qc.invalidateQueries({ queryKey: ["inventory"] });
+      invalidateAfterInventoryChange(qc);
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al crear ajuste"));
@@ -114,7 +115,7 @@ export function useAnnulAdjustment() {
       inventoryService.annulAdjustment(id, data),
     onSuccess: () => {
       toast.success("Ajuste anulado");
-      qc.invalidateQueries({ queryKey: ["inventory"] });
+      invalidateAfterInventoryChange(qc);
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al anular ajuste"));
@@ -128,7 +129,7 @@ export function useCreateTransfer() {
     mutationFn: (data: WarehouseTransferCreate) => inventoryService.createTransfer(data),
     onSuccess: () => {
       toast.success("Traslado realizado");
-      qc.invalidateQueries({ queryKey: ["inventory"] });
+      invalidateAfterInventoryChange(qc);
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al crear traslado"));
@@ -166,7 +167,7 @@ export function useCreateTransformation() {
     mutationFn: (data: MaterialTransformationCreate) => inventoryService.createTransformation(data),
     onSuccess: () => {
       toast.success("Transformacion creada exitosamente");
-      qc.invalidateQueries({ queryKey: ["inventory"] });
+      invalidateAfterInventoryChange(qc);
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al crear transformacion"));
@@ -181,7 +182,7 @@ export function useAnnulTransformation() {
       inventoryService.annulTransformation(id, data),
     onSuccess: () => {
       toast.success("Transformacion anulada");
-      qc.invalidateQueries({ queryKey: ["inventory"] });
+      invalidateAfterInventoryChange(qc);
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al anular transformacion"));
