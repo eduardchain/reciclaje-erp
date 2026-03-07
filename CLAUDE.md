@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**IMPORTANTE: Siempre actualizar este archivo con decisiones importantes, cambios arquitectonicos, y nueva funcionalidad implementada. Esto es critico para mantener contexto entre sesiones.**
+
 ## Project Overview
 
 EcoBalance is a multi-tenant ERP system for recycling companies (buying/selling metal and material scraps). The project has a Python/FastAPI backend and a React/TypeScript frontend.
@@ -90,7 +92,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - `components/shared/` — 12 reusable components (DataTable, PageHeader, StatusBadge, MoneyDisplay, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList, PriceSuggestion, KpiCard)
 - `components/auth/` — ProtectedRoute (token + org check), OrganizationSelector
 - `components/layout/` — Layout, Header (user dropdown), Sidebar (collapsible submenus)
-- `pages/` — 42 page components organized by module
+- `pages/` — 44 page components organized by module
 
 **Modules (all complete, 45+ routes):**
 - Auth: Login, org selection, protected routes
@@ -99,7 +101,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - Sales: Like purchases + commissions + profit display + stock warnings + Edit (lines + commissions)
 - Double Entries: Simultaneous buy+sell form with real-time profit calculation
 - Treasury: 8 movement types with dynamic form, annulment with reason
-- Inventory: Stock view (warehouse breakdown), movement history, adjustments (4 types), transformations (multi-line destinations, balance validation), warehouse transfers
+- Inventory: Stock view (expandable rows with warehouse breakdown, category/warehouse filters, transfer modal), movement history (material/warehouse filters, running balance/avg cost), adjustments (4 types), transformations (multi-line destinations, balance validation), warehouse transfers, valuation page, transit page (pending purchases/sales, bottleneck alerts)
 - Reports: P&L, Cash Flow, Balance Sheet, Purchase Report, Sales Report, Margin Analysis, Third Party Balances — all with date range pickers
 - Third Parties: CRUD with role badges (supplier/customer/investor/provision), balance display
 - Materials: CRUD + categories page
@@ -181,18 +183,41 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Treasury | `/api/v1/money-movements/` | Supplier payments, customer collections, expenses, transfers, capital, commissions. 9 movement types, annulment with audit |
 | Inventory Adjustments | `/api/v1/inventory/adjustments/` | Manual stock corrections: increase, decrease, recount, zero-out. Warehouse transfers. Annulment with stock reversal |
 | Material Transformations | `/api/v1/inventory/transformations/` | Material disassembly (e.g., Motor → Copper + Iron + Aluminum + Waste). Proportional/manual cost distribution |
-| Inventory Views | `/api/v1/inventory/` | Consolidated stock view, per-material warehouse breakdown, transit stock, movement history, inventory valuation |
+| Inventory Views | `/api/v1/inventory/` | Consolidated stock (filterable by category/warehouse), per-material warehouse breakdown, transit stock (pending purchases/sales/bottleneck alerts), movement history (with running balance/avg cost per material), inventory valuation |
 | Reports & Dashboard | `/api/v1/reports/` | Dashboard with period comparison, P&L, Cash Flow, Balance Sheet, Purchase/Sales reports, Margin Analysis, Third Party Balances. All read-only |
 
 ### Testing
 
-Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 406 tests. Run with `./venv/bin/pytest` from backend dir.
+Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 413 tests. Run with `./venv/bin/pytest` from backend dir.
 
 Key fixtures: `test_user`, `auth_headers`, `org_headers` (auth + X-Organization-ID), `db_session`.
 
 ### Database
 
 PostgreSQL 16 with Alembic migrations in `backend/alembic/`. All IDs are UUIDs (using custom `GUID` type for cross-database compatibility). Foreign keys use `CASCADE` on delete. Decimal fields use 4-decimal precision for quantities (kg) and 2-decimal for monetary values.
+
+### Inventory Module — UX & Architecture Details
+
+**StockPage (`/inventory`):**
+- Uses manual `<Table>` (not DataTable) with Fragment-based expandable rows. Click a material row to expand inline warehouse breakdown with per-warehouse stock.
+- Filters: Category (Select), Warehouse (Select), Search (text). Category and search are client-side; warehouse filter calls backend `GET /stock?warehouse_id=`.
+- Expanded rows show "Trasladar" button per warehouse, "Ver Movimientos" and "Ajustar Stock" action buttons. These navigate with `?material_id=` query param.
+- `WarehouseTransferModal` (Dialog) pre-fills material and source warehouse from expanded row. Uses existing `POST /inventory/adjustments/warehouse-transfer`.
+
+**MovementHistoryPage (`/inventory/movements`):**
+- Filters: Material (EntitySelect), Warehouse (Select). No client-side search — filters passed to backend.
+- When `material_id` filter active, backend returns `balance_after` and `avg_cost_after` fields (running balance calculated iteratively over all movements for that material, not SQL window function). Frontend shows conditional "Balance" and "Costo Prom." columns.
+- Reads `material_id` from URL search params for cross-navigation from StockPage.
+
+**TransitPage (`/inventory/transit`):**
+- Backend `GET /inventory/transit` returns: `materials` (summary), `pending_purchases` (from Purchase+PurchaseLine joins where status=registered), `pending_sales` (from Sale+SaleLine joins where status=registered), `bottleneck_alerts` (materials where `stock_transit > stock_liquidated * 0.3`).
+- Frontend: 3 KpiCards + amber alert Card for bottleneck warnings + 2 DataTables (compras/ventas pendientes). Rows clickable to navigate to purchase/sale detail.
+
+**ValuationPage (`/inventory/valuation`):**
+- Frontend-only page using existing `GET /inventory/valuation` endpoint. 2 KpiCards (Valor Total, Materiales) + DataTable with client-side search.
+
+**AdjustmentCreatePage:**
+- Reads `material_id` from URL search params (`useSearchParams`) to pre-select material when navigating from StockPage.
 
 ### Comments and Language
 

@@ -240,9 +240,42 @@ export interface TransitItem {
   current_stock_liquidated: number;
 }
 
+export interface TransitPurchaseItem {
+  purchase_id: string;
+  purchase_number: number;
+  date: string;
+  supplier_name: string;
+  material_code: string;
+  material_name: string;
+  quantity: number;
+}
+
+export interface TransitSaleItem {
+  sale_id: string;
+  sale_number: number;
+  date: string;
+  customer_name: string;
+  material_code: string;
+  material_name: string;
+  quantity: number;
+}
+
+export interface TransitBottleneckAlert {
+  material_code: string;
+  material_name: string;
+  stock_transit: number;
+  stock_liquidated: number;
+  ratio: number;
+}
+
 export interface TransitResponse {
-  items: TransitItem[];
-  total: number;
+  materials: TransitItem[];
+  pending_purchases: TransitPurchaseItem[];
+  pending_sales: TransitSaleItem[];
+  bottleneck_alerts: TransitBottleneckAlert[];
+  total_transit_kg: number;
+  total_pending_purchases: number;
+  total_pending_sales: number;
 }
 
 export interface MovementItem {
@@ -260,6 +293,8 @@ export interface MovementItem {
   date: string;
   notes: string | null;
   created_at: string;
+  balance_after: number | null;
+  avg_cost_after: number | null;
 }
 
 export interface PaginatedMovementResponse {

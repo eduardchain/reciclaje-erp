@@ -29,6 +29,8 @@ export const ROUTES = {
   INVENTORY_ADJUSTMENTS_NEW: "/inventory/adjustments/new",
   INVENTORY_TRANSFORMATIONS: "/inventory/transformations",
   INVENTORY_TRANSFORMATIONS_NEW: "/inventory/transformations/new",
+  INVENTORY_VALUATION: "/inventory/valuation",
+  INVENTORY_TRANSIT: "/inventory/transit",
 
   // Reportes
   REPORTS: "/reports",

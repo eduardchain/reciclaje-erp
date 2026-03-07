@@ -261,10 +261,16 @@ class TestTransit:
         # Assert
         assert response.status_code == 200
         data = response.json()
-        assert data["total"] == 1
-        assert len(data["items"]) == 1
+        # Verificar estructura nueva con materials, pending_purchases, pending_sales, bottleneck_alerts
+        assert "materials" in data
+        assert "pending_purchases" in data
+        assert "pending_sales" in data
+        assert "bottleneck_alerts" in data
+        assert data["total_transit_kg"] > 0
 
-        transit_item = data["items"][0]
+        # Solo materiales con stock_transit > 0
+        assert len(data["materials"]) == 1
+        transit_item = data["materials"][0]
         assert transit_item["material_id"] == str(m2.id)
         assert transit_item["material_code"] == "FE-001"
         assert transit_item["material_name"] == "Hierro"

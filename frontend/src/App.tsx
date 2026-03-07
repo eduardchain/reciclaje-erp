@@ -30,6 +30,8 @@ import AdjustmentDetailPage from "@/pages/inventory/AdjustmentDetailPage";
 import TransformationsPage from "@/pages/inventory/TransformationsPage";
 import TransformationCreatePage from "@/pages/inventory/TransformationCreatePage";
 import TransformationDetailPage from "@/pages/inventory/TransformationDetailPage";
+import ValuationPage from "@/pages/inventory/ValuationPage";
+import TransitPage from "@/pages/inventory/TransitPage";
 import ProfitAndLossPage from "@/pages/reports/ProfitAndLossPage";
 import CashFlowPage from "@/pages/reports/CashFlowPage";
 import BalanceSheetPage from "@/pages/reports/BalanceSheetPage";
@@ -99,6 +101,8 @@ function App() {
               <Route path={ROUTES.INVENTORY_TRANSFORMATIONS} element={<TransformationsPage />} />
               <Route path={ROUTES.INVENTORY_TRANSFORMATIONS_NEW} element={<TransformationCreatePage />} />
               <Route path="/inventory/transformations/:id" element={<TransformationDetailPage />} />
+              <Route path={ROUTES.INVENTORY_VALUATION} element={<ValuationPage />} />
+              <Route path={ROUTES.INVENTORY_TRANSIT} element={<TransitPage />} />
               {/* Reportes */}
               <Route path={ROUTES.REPORTS} element={<ProfitAndLossPage />} />
               <Route path={ROUTES.REPORTS_PL} element={<ProfitAndLossPage />} />

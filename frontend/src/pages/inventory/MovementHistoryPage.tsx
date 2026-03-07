@@ -1,18 +1,19 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useDateFilter } from "@/stores/dateFilterStore";
-import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { ArrowLeft, ArrowDownUp, TrendingUp, TrendingDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
-import { SearchInput } from "@/components/shared/SearchInput";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { useInventoryMovements } from "@/hooks/useInventory";
+import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { MovementItem } from "@/types/inventory";
@@ -25,6 +26,7 @@ const typeLabels: Record<string, string> = {
   sale: "Venta",
   adjustment: "Ajuste",
   transfer: "Traslado",
+  warehouse_transfer: "Traslado Bodega",
   purchase_reversal: "Rev. Compra",
   sale_reversal: "Rev. Venta",
   transformation: "Transformacion",
@@ -35,33 +37,38 @@ const typeColors: Record<string, string> = {
   sale: "bg-emerald-100 text-emerald-800",
   adjustment: "bg-yellow-100 text-yellow-800",
   transfer: "bg-purple-100 text-purple-800",
+  warehouse_transfer: "bg-purple-100 text-purple-800",
   purchase_reversal: "bg-red-100 text-red-800",
   sale_reversal: "bg-red-100 text-red-800",
   transformation: "bg-orange-100 text-orange-800",
 };
 
-const columns: ColumnDef<MovementItem, unknown>[] = [
-  { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
-  { accessorKey: "movement_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.movement_type] ?? ""}>{typeLabels[row.original.movement_type] ?? row.original.movement_type}</Badge> },
-  { accessorKey: "material_code", header: "Codigo", cell: ({ row }) => <span className="font-medium">{row.original.material_code}</span> },
-  { accessorKey: "material_name", header: "Material" },
-  { accessorKey: "warehouse_name", header: "Bodega" },
-  { accessorKey: "quantity", header: "Cantidad", enableSorting: true, cell: ({ row }) => <span className={`font-medium tabular-nums ${row.original.quantity >= 0 ? "text-emerald-700" : "text-red-700"}`}>{row.original.quantity >= 0 ? "+" : ""}{row.original.quantity.toFixed(2)}</span> },
-  { accessorKey: "unit_cost", header: "Costo Unit.", enableSorting: true, cell: ({ row }) => formatCurrency(row.original.unit_cost) },
-  { accessorKey: "notes", header: "Notas", cell: ({ row }) => <span className="text-sm text-slate-500 truncate max-w-[200px] block">{row.original.notes ?? "-"}</span> },
-];
-
 export default function MovementHistoryPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(0);
   const [typeFilter, setTypeFilter] = useState("all");
-  const [search, setSearch] = useState("");
+  const [materialFilter, setMaterialFilter] = useState<string>("");
+  const [warehouseFilter, setWarehouseFilter] = useState<string>("");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
+
+  // Leer material_id desde URL params (navegacion desde StockPage)
+  useEffect(() => {
+    const urlMaterialId = searchParams.get("material_id");
+    if (urlMaterialId) setMaterialFilter(urlMaterialId);
+  }, [searchParams]);
+
+  const { data: materialsData } = useMaterials();
+  const { data: warehousesData } = useWarehouses();
+  const materials = materialsData?.items ?? [];
+  const warehouses = warehousesData?.items ?? [];
 
   const { data, isLoading } = useInventoryMovements({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
     movement_type: typeFilter === "all" ? undefined : typeFilter,
+    material_id: materialFilter || undefined,
+    warehouse_id: warehouseFilter || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
@@ -80,6 +87,54 @@ export default function MovementHistoryPage() {
     };
   }, [data]);
 
+  // Columnas base + condicionales (balance y costo prom solo con filtro de material)
+  const columns = useMemo(() => {
+    const base: ColumnDef<MovementItem, unknown>[] = [
+      { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
+      { accessorKey: "movement_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.movement_type] ?? ""}>{typeLabels[row.original.movement_type] ?? row.original.movement_type}</Badge> },
+      { accessorKey: "material_code", header: "Codigo", cell: ({ row }) => <span className="font-medium">{row.original.material_code}</span> },
+      { accessorKey: "material_name", header: "Material" },
+      { accessorKey: "warehouse_name", header: "Bodega" },
+      { accessorKey: "quantity", header: "Cantidad", enableSorting: true, cell: ({ row }) => <span className={`font-medium tabular-nums ${row.original.quantity >= 0 ? "text-emerald-700" : "text-red-700"}`}>{row.original.quantity >= 0 ? "+" : ""}{row.original.quantity.toFixed(2)}</span> },
+      { accessorKey: "unit_cost", header: "Costo Unit.", enableSorting: true, cell: ({ row }) => formatCurrency(row.original.unit_cost) },
+    ];
+
+    if (materialFilter) {
+      base.push(
+        {
+          accessorKey: "balance_after",
+          header: "Balance",
+          cell: ({ row }) => {
+            const balance = row.original.balance_after;
+            if (balance === null) return "-";
+            return (
+              <span className={`tabular-nums font-medium ${balance < 0 ? "text-red-600" : ""}`}>
+                {balance.toFixed(2)}
+              </span>
+            );
+          },
+        },
+        {
+          accessorKey: "avg_cost_after",
+          header: "Costo Prom.",
+          cell: ({ row }) => {
+            const cost = row.original.avg_cost_after;
+            if (cost === null) return "-";
+            return formatCurrency(cost);
+          },
+        },
+      );
+    }
+
+    base.push({
+      accessorKey: "notes",
+      header: "Notas",
+      cell: ({ row }) => <span className="text-sm text-slate-500 truncate max-w-[200px] block">{row.original.notes ?? "-"}</span>,
+    });
+
+    return base;
+  }, [materialFilter]);
+
   return (
     <div className="space-y-4">
       <PageHeader title="Movimientos de Inventario" description="Historial completo de entradas y salidas">
@@ -96,27 +151,9 @@ export default function MovementHistoryPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <KpiCard
-            label="Movimientos"
-            metric={kpis.total}
-            icon={<ArrowDownUp className="h-4 w-4" />}
-            accentColor="sky"
-            formatValue={(n) => String(n)}
-          />
-          <KpiCard
-            label="Entradas"
-            metric={kpis.entries}
-            icon={<TrendingUp className="h-4 w-4" />}
-            accentColor="emerald"
-            formatValue={(n) => String(n)}
-          />
-          <KpiCard
-            label="Salidas"
-            metric={kpis.exits}
-            icon={<TrendingDown className="h-4 w-4" />}
-            accentColor="rose"
-            formatValue={(n) => String(n)}
-          />
+          <KpiCard label="Movimientos" metric={kpis.total} icon={<ArrowDownUp className="h-4 w-4" />} accentColor="sky" formatValue={(n) => String(n)} />
+          <KpiCard label="Entradas" metric={kpis.entries} icon={<TrendingUp className="h-4 w-4" />} accentColor="emerald" formatValue={(n) => String(n)} />
+          <KpiCard label="Salidas" metric={kpis.exits} icon={<TrendingDown className="h-4 w-4" />} accentColor="rose" formatValue={(n) => String(n)} />
         </div>
       )}
 
@@ -144,8 +181,29 @@ export default function MovementHistoryPage() {
         exportFilename="ecobalance_movimientos-inventario"
         totalItems={data?.total}
         toolbar={
-          <div className="flex items-center gap-3">
-            <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(0); }} placeholder="Buscar movimiento..." />
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={materialFilter} onValueChange={(v) => { setMaterialFilter(v === "all" ? "" : v); setPage(0); }}>
+              <SelectTrigger className="w-52">
+                <SelectValue placeholder="Todos los materiales" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los materiales</SelectItem>
+                {materials.map((m: { id: string; code: string; name: string }) => (
+                  <SelectItem key={m.id} value={m.id}>{m.code} - {m.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={warehouseFilter} onValueChange={(v) => { setWarehouseFilter(v === "all" ? "" : v); setPage(0); }}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Todas las bodegas" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las bodegas</SelectItem>
+                {(warehouses as { id: string; name: string }[]).map((w) => (
+                  <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
           </div>
         }

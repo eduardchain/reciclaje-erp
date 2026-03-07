@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ const typeLabels: Record<AdjType, string> = {
 
 export default function AdjustmentCreatePage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [adjType, setAdjType] = useState<AdjType>("increase");
   const create = useCreateAdjustment(adjType);
 
@@ -34,6 +35,12 @@ export default function AdjustmentCreatePage() {
   const warehouses = warehousesData?.items ?? [];
 
   const [materialId, setMaterialId] = useState("");
+
+  // Pre-seleccionar material desde URL params (navegacion desde StockPage)
+  useEffect(() => {
+    const urlMaterialId = searchParams.get("material_id");
+    if (urlMaterialId && !materialId) setMaterialId(urlMaterialId);
+  }, [searchParams, materialId]);
   const [warehouseId, setWarehouseId] = useState("");
   const [quantity, setQuantity] = useState(0);
   const [unitCost, setUnitCost] = useState(0);

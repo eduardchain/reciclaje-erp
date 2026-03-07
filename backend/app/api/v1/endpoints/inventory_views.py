@@ -86,10 +86,46 @@ class TransitItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TransitPurchaseItem(BaseModel):
+    """Compra pendiente de liquidar."""
+    purchase_id: UUID
+    purchase_number: int
+    date: datetime
+    supplier_name: str
+    material_code: str
+    material_name: str
+    quantity: float
+
+
+class TransitSaleItem(BaseModel):
+    """Venta pendiente de liquidar."""
+    sale_id: UUID
+    sale_number: int
+    date: datetime
+    customer_name: str
+    material_code: str
+    material_name: str
+    quantity: float
+
+
+class TransitBottleneckAlert(BaseModel):
+    """Alerta de cuello de botella: transit > 30% del liquidado."""
+    material_code: str
+    material_name: str
+    stock_transit: float
+    stock_liquidated: float
+    ratio: float
+
+
 class TransitResponse(BaseModel):
-    """Respuesta de materiales en transito."""
-    items: list[TransitItem]
-    total: int
+    """Respuesta de inventario en transito con compras/ventas pendientes."""
+    materials: list[TransitItem]
+    pending_purchases: list[TransitPurchaseItem]
+    pending_sales: list[TransitSaleItem]
+    bottleneck_alerts: list[TransitBottleneckAlert]
+    total_transit_kg: float
+    total_pending_purchases: int
+    total_pending_sales: int
 
 
 class MovementItem(BaseModel):
@@ -108,6 +144,9 @@ class MovementItem(BaseModel):
     date: datetime
     notes: Optional[str] = None
     created_at: datetime
+    # Solo se calculan cuando se filtra por material_id
+    balance_after: Optional[float] = None
+    avg_cost_after: Optional[float] = None
 
     model_config = {"from_attributes": True}
 
@@ -152,6 +191,7 @@ class ValuationResponse(BaseModel):
 )
 def get_stock_consolidated(
     category_id: Optional[UUID] = Query(None, description="Filtrar por categoria"),
+    warehouse_id: Optional[UUID] = Query(None, description="Filtrar por bodega"),
     active_only: bool = Query(True, description="Solo materiales activos"),
     org_context: dict = Depends(get_required_org_context),
     db: Session = Depends(get_db),
@@ -160,9 +200,12 @@ def get_stock_consolidated(
     Vista consolidada de stock por material.
 
     Muestra stock liquidado, en transito, total, costo promedio y valorizacion.
+    Si se filtra por bodega, calcula stock desde InventoryMovement.
     """
+    organization_id = org_context["organization_id"]
+
     query = select(Material).where(
-        Material.organization_id == org_context["organization_id"]
+        Material.organization_id == organization_id
     )
 
     if active_only:
@@ -176,25 +219,56 @@ def get_stock_consolidated(
     items = []
     total_valuation = Decimal("0")
 
-    for m in materials:
-        stock_liq = float(m.current_stock_liquidated)
-        stock_transit = float(m.current_stock_transit)
-        avg_cost = float(m.current_average_cost)
-        value = float(m.current_stock_liquidated * m.current_average_cost)
-        total_valuation += m.current_stock_liquidated * m.current_average_cost
+    if warehouse_id:
+        # Calcular stock por material desde InventoryMovement para bodega especifica
+        for m in materials:
+            stock_in_wh = db.scalar(
+                select(func.coalesce(func.sum(InventoryMovement.quantity), 0))
+                .where(
+                    InventoryMovement.organization_id == organization_id,
+                    InventoryMovement.material_id == m.id,
+                    InventoryMovement.warehouse_id == warehouse_id,
+                )
+            ) or Decimal("0")
 
-        items.append(StockItem(
-            material_id=m.id,
-            material_code=m.code,
-            material_name=m.name,
-            default_unit=m.default_unit,
-            current_stock_liquidated=stock_liq,
-            current_stock_transit=stock_transit,
-            current_stock_total=stock_liq + stock_transit,
-            current_average_cost=avg_cost,
-            total_value=value,
-            is_active=m.is_active,
-        ))
+            if stock_in_wh == 0 and active_only:
+                continue
+
+            value = float(stock_in_wh * m.current_average_cost)
+            total_valuation += stock_in_wh * m.current_average_cost
+
+            items.append(StockItem(
+                material_id=m.id,
+                material_code=m.code,
+                material_name=m.name,
+                default_unit=m.default_unit,
+                current_stock_liquidated=float(stock_in_wh),
+                current_stock_transit=0,
+                current_stock_total=float(stock_in_wh),
+                current_average_cost=float(m.current_average_cost),
+                total_value=value,
+                is_active=m.is_active,
+            ))
+    else:
+        for m in materials:
+            stock_liq = float(m.current_stock_liquidated)
+            stock_transit = float(m.current_stock_transit)
+            avg_cost = float(m.current_average_cost)
+            value = float(m.current_stock_liquidated * m.current_average_cost)
+            total_valuation += m.current_stock_liquidated * m.current_average_cost
+
+            items.append(StockItem(
+                material_id=m.id,
+                material_code=m.code,
+                material_name=m.name,
+                default_unit=m.default_unit,
+                current_stock_liquidated=stock_liq,
+                current_stock_transit=stock_transit,
+                current_stock_total=stock_liq + stock_transit,
+                current_average_cost=avg_cost,
+                total_value=value,
+                is_active=m.is_active,
+            ))
 
     return StockConsolidatedResponse(
         items=items,
@@ -285,19 +359,26 @@ def get_transit_stock(
     db: Session = Depends(get_db),
 ):
     """
-    Materiales con stock en transito (compras no liquidadas).
+    Inventario en transito: materiales, compras/ventas pendientes y alertas.
     """
-    query = (
+    from app.models.purchase import Purchase, PurchaseLine
+    from app.models.sale import Sale, SaleLine
+    from app.models.third_party import ThirdParty
+
+    organization_id = org_context["organization_id"]
+
+    # 1. Materiales con stock en transito
+    mat_query = (
         select(Material)
         .where(
-            Material.organization_id == org_context["organization_id"],
+            Material.organization_id == organization_id,
             Material.current_stock_transit > 0,
         )
         .order_by(Material.name)
     )
-    materials = list(db.scalars(query).all())
+    transit_materials = list(db.scalars(mat_query).all())
 
-    items = [
+    materials_items = [
         TransitItem(
             material_id=m.id,
             material_code=m.code,
@@ -306,10 +387,102 @@ def get_transit_stock(
             current_stock_transit=float(m.current_stock_transit),
             current_stock_liquidated=float(m.current_stock_liquidated),
         )
-        for m in materials
+        for m in transit_materials
     ]
 
-    return TransitResponse(items=items, total=len(items))
+    total_transit_kg = sum(float(m.current_stock_transit) for m in transit_materials)
+
+    # 2. Compras pendientes (status = registered)
+    purchase_rows = db.execute(
+        select(
+            Purchase.id,
+            Purchase.purchase_number,
+            Purchase.date,
+            ThirdParty.name.label("supplier_name"),
+            Material.code.label("material_code"),
+            Material.name.label("material_name"),
+            PurchaseLine.quantity,
+        )
+        .join(PurchaseLine, PurchaseLine.purchase_id == Purchase.id)
+        .join(Material, Material.id == PurchaseLine.material_id)
+        .join(ThirdParty, ThirdParty.id == Purchase.supplier_id)
+        .where(
+            Purchase.organization_id == organization_id,
+            Purchase.status == "registered",
+        )
+        .order_by(Purchase.date.desc(), Purchase.purchase_number.desc())
+    ).all()
+
+    pending_purchases = [
+        TransitPurchaseItem(
+            purchase_id=r.id,
+            purchase_number=r.purchase_number,
+            date=r.date,
+            supplier_name=r.supplier_name,
+            material_code=r.material_code,
+            material_name=r.material_name,
+            quantity=float(r.quantity),
+        )
+        for r in purchase_rows
+    ]
+
+    # 3. Ventas pendientes (status = registered)
+    sale_rows = db.execute(
+        select(
+            Sale.id,
+            Sale.sale_number,
+            Sale.date,
+            ThirdParty.name.label("customer_name"),
+            Material.code.label("material_code"),
+            Material.name.label("material_name"),
+            SaleLine.quantity,
+        )
+        .join(SaleLine, SaleLine.sale_id == Sale.id)
+        .join(Material, Material.id == SaleLine.material_id)
+        .join(ThirdParty, ThirdParty.id == Sale.customer_id)
+        .where(
+            Sale.organization_id == organization_id,
+            Sale.status == "registered",
+        )
+        .order_by(Sale.date.desc(), Sale.sale_number.desc())
+    ).all()
+
+    pending_sales = [
+        TransitSaleItem(
+            sale_id=r.id,
+            sale_number=r.sale_number,
+            date=r.date,
+            customer_name=r.customer_name,
+            material_code=r.material_code,
+            material_name=r.material_name,
+            quantity=float(r.quantity),
+        )
+        for r in sale_rows
+    ]
+
+    # 4. Alertas de cuello de botella: transit > 30% del liquidado
+    bottleneck_alerts = []
+    for m in transit_materials:
+        if m.current_stock_liquidated > 0:
+            ratio = float(m.current_stock_transit / m.current_stock_liquidated)
+            if ratio > 0.3:
+                bottleneck_alerts.append(TransitBottleneckAlert(
+                    material_code=m.code,
+                    material_name=m.name,
+                    stock_transit=float(m.current_stock_transit),
+                    stock_liquidated=float(m.current_stock_liquidated),
+                    ratio=round(ratio, 2),
+                ))
+
+    return TransitResponse(
+        materials=materials_items,
+        pending_purchases=pending_purchases,
+        pending_sales=pending_sales,
+        bottleneck_alerts=bottleneck_alerts,
+        total_transit_kg=total_transit_kg,
+        total_pending_purchases=len(pending_purchases),
+        total_pending_sales=len(pending_sales),
+    )
 
 
 @router.get(
@@ -373,6 +546,46 @@ def list_movements(
         for wh in db.scalars(select(Warehouse).where(Warehouse.id.in_(warehouse_ids))).all():
             warehouses_map[wh.id] = wh
 
+    # Calcular balance acumulado cuando se filtra por material_id
+    balance_map: dict = {}
+    avg_cost_map: dict = {}
+    if material_id:
+        all_movs = list(db.scalars(
+            select(InventoryMovement)
+            .where(
+                InventoryMovement.organization_id == org_context["organization_id"],
+                InventoryMovement.material_id == material_id,
+            )
+            .order_by(
+                InventoryMovement.date.asc(),
+                InventoryMovement.created_at.asc(),
+            )
+        ).all())
+
+        running_balance = Decimal("0")
+        running_value = Decimal("0")
+        running_avg_cost = Decimal("0")
+
+        for mov in all_movs:
+            qty = mov.quantity
+            cost = mov.unit_cost or Decimal("0")
+
+            if qty > 0:  # Entrada
+                running_value += qty * cost
+                running_balance += qty
+                if running_balance > 0:
+                    running_avg_cost = running_value / running_balance
+            else:  # Salida
+                exit_qty = abs(qty)
+                running_value -= exit_qty * running_avg_cost
+                running_balance += qty  # qty es negativo
+                if running_balance <= 0:
+                    running_value = Decimal("0")
+                    # Mantener ultimo costo conocido
+
+            balance_map[mov.id] = running_balance
+            avg_cost_map[mov.id] = running_avg_cost
+
     items = []
     for mov in movements:
         mat = materials_map.get(mov.material_id)
@@ -392,6 +605,8 @@ def list_movements(
             date=mov.date,
             notes=mov.notes,
             created_at=mov.created_at,
+            balance_after=float(balance_map[mov.id]) if mov.id in balance_map else None,
+            avg_cost_after=float(avg_cost_map[mov.id]) if mov.id in avg_cost_map else None,
         ))
 
     return PaginatedMovementResponse(

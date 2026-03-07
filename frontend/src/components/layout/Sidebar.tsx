@@ -21,6 +21,8 @@ import {
   ClipboardList,
   ArrowDownUp,
   Shuffle,
+  Truck,
+  Calculator,
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";
@@ -79,6 +81,8 @@ const navItems: NavItem[] = [
       { name: "Movimientos", path: ROUTES.INVENTORY_MOVEMENTS, icon: <ArrowDownUp className="w-4 h-4" /> },
       { name: "Ajustes", path: ROUTES.INVENTORY_ADJUSTMENTS, icon: <ClipboardList className="w-4 h-4" /> },
       { name: "Transformaciones", path: ROUTES.INVENTORY_TRANSFORMATIONS, icon: <Shuffle className="w-4 h-4" /> },
+      { name: "Valorizacion", path: ROUTES.INVENTORY_VALUATION, icon: <Calculator className="w-4 h-4" /> },
+      { name: "En Transito", path: ROUTES.INVENTORY_TRANSIT, icon: <Truck className="w-4 h-4" /> },
     ],
   },
   {
