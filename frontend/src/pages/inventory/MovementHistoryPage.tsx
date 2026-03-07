@@ -94,10 +94,17 @@ export default function MovementHistoryPage() {
       { accessorKey: "movement_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.movement_type] ?? ""}>{typeLabels[row.original.movement_type] ?? row.original.movement_type}</Badge> },
       { accessorKey: "material_code", header: "Codigo", cell: ({ row }) => <span className="font-medium">{row.original.material_code}</span> },
       { accessorKey: "material_name", header: "Material" },
-      { accessorKey: "warehouse_name", header: "Bodega" },
+    ];
+
+    // Mostrar columna Bodega solo cuando hay filtro de bodega o no hay filtro de material
+    if (warehouseFilter || !materialFilter) {
+      base.push({ accessorKey: "warehouse_name", header: "Bodega" });
+    }
+
+    base.push(
       { accessorKey: "quantity", header: "Cantidad", enableSorting: true, cell: ({ row }) => <span className={`font-medium tabular-nums ${row.original.quantity >= 0 ? "text-emerald-700" : "text-red-700"}`}>{row.original.quantity >= 0 ? "+" : ""}{row.original.quantity.toFixed(2)}</span> },
       { accessorKey: "unit_cost", header: "Costo Unit.", enableSorting: true, cell: ({ row }) => formatCurrency(row.original.unit_cost) },
-    ];
+    );
 
     if (materialFilter) {
       base.push(
@@ -133,7 +140,7 @@ export default function MovementHistoryPage() {
     });
 
     return base;
-  }, [materialFilter]);
+  }, [materialFilter, warehouseFilter]);
 
   return (
     <div className="space-y-4">

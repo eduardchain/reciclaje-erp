@@ -9,7 +9,7 @@ Tests all 5 read-only endpoints:
 5. GET /api/v1/inventory/valuation    - Inventory valuation
 """
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -385,6 +385,140 @@ class TestMovements:
         )
         assert response_all.status_code == 200
         assert response_all.json()["total"] == 3
+
+    def test_balance_filtered_by_warehouse(
+        self,
+        client,
+        org_headers,
+        db_session,
+        test_organization,
+        test_warehouse,
+        test_warehouse2,
+    ):
+        """Running balance debe calcularse solo con movimientos de la bodega filtrada."""
+        # Arrange — material con movimientos en 2 bodegas
+        mat = Material(
+            id=uuid4(),
+            code="BAL-WH",
+            name="Balance Warehouse Test",
+            default_unit="kg",
+            current_stock=Decimal("0"),
+            current_stock_liquidated=Decimal("0"),
+            current_stock_transit=Decimal("0"),
+            current_average_cost=Decimal("0"),
+            organization_id=test_organization.id,
+            is_active=True,
+        )
+        db_session.add(mat)
+        db_session.commit()
+        db_session.refresh(mat)
+
+        base_date = datetime(2026, 1, 10, 12, 0, 0, tzinfo=timezone.utc)
+
+        # Bodega Principal: +1000, -1000 (traslado), +500 (traslado), -500 (venta) = 0
+        # Bodega Secundaria: +1000 (traslado), -500 (traslado) = 500
+        movs = [
+            InventoryMovement(
+                id=uuid4(), organization_id=test_organization.id,
+                material_id=mat.id, warehouse_id=test_warehouse.id,
+                movement_type="purchase", quantity=Decimal("1000"),
+                unit_cost=Decimal("100"), reference_type="purchase",
+                date=base_date,
+            ),
+            InventoryMovement(
+                id=uuid4(), organization_id=test_organization.id,
+                material_id=mat.id, warehouse_id=test_warehouse.id,
+                movement_type="transfer", quantity=Decimal("-1000"),
+                unit_cost=Decimal("100"), reference_type="adjustment",
+                date=base_date + timedelta(hours=1),
+            ),
+            InventoryMovement(
+                id=uuid4(), organization_id=test_organization.id,
+                material_id=mat.id, warehouse_id=test_warehouse2.id,
+                movement_type="transfer", quantity=Decimal("1000"),
+                unit_cost=Decimal("100"), reference_type="adjustment",
+                date=base_date + timedelta(hours=1),
+            ),
+            InventoryMovement(
+                id=uuid4(), organization_id=test_organization.id,
+                material_id=mat.id, warehouse_id=test_warehouse.id,
+                movement_type="transfer", quantity=Decimal("500"),
+                unit_cost=Decimal("100"), reference_type="adjustment",
+                date=base_date + timedelta(hours=2),
+            ),
+            InventoryMovement(
+                id=uuid4(), organization_id=test_organization.id,
+                material_id=mat.id, warehouse_id=test_warehouse2.id,
+                movement_type="transfer", quantity=Decimal("-500"),
+                unit_cost=Decimal("100"), reference_type="adjustment",
+                date=base_date + timedelta(hours=2),
+            ),
+            InventoryMovement(
+                id=uuid4(), organization_id=test_organization.id,
+                material_id=mat.id, warehouse_id=test_warehouse.id,
+                movement_type="sale", quantity=Decimal("-500"),
+                unit_cost=Decimal("100"), reference_type="sale",
+                date=base_date + timedelta(hours=3),
+            ),
+        ]
+        db_session.add_all(movs)
+        db_session.commit()
+
+        # Act — filtrar por material + Bodega Principal
+        resp = client.get(
+            "/api/v1/inventory/movements",
+            params={
+                "material_id": str(mat.id),
+                "warehouse_id": str(test_warehouse.id),
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 4  # 4 movimientos en Bodega Principal
+
+        # Items vienen en orden DESC — el mas reciente primero
+        items = data["items"]
+        # Orden DESC: sale(-500), transfer(+500), transfer(-1000), purchase(+1000)
+        # Balance esperado por bodega: 1000, 0, 500, 0
+        # En DESC el primero es sale con balance=0 (ultimo cronologicamente)
+        balances = [it["balance_after"] for it in items]
+        assert balances == [0.0, 500.0, 0.0, 1000.0]
+
+        # Act — filtrar por material + Bodega Secundaria
+        resp2 = client.get(
+            "/api/v1/inventory/movements",
+            params={
+                "material_id": str(mat.id),
+                "warehouse_id": str(test_warehouse2.id),
+            },
+            headers=org_headers,
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert data2["total"] == 2  # 2 movimientos en Bodega Secundaria
+
+        # Orden DESC: transfer(-500), transfer(+1000)
+        # Balance esperado: 1000, 500
+        balances2 = [it["balance_after"] for it in data2["items"]]
+        assert balances2 == [500.0, 1000.0]
+
+        # Act — sin filtro de bodega = balance global (traslados excluidos)
+        resp3 = client.get(
+            "/api/v1/inventory/movements",
+            params={"material_id": str(mat.id)},
+            headers=org_headers,
+        )
+        assert resp3.status_code == 200
+        data3 = resp3.json()
+        # Solo 2 movimientos: purchase(+1000) y sale(-500), traslados excluidos
+        assert data3["total"] == 2
+        global_balances = [it["balance_after"] for it in data3["items"]]
+        # DESC: sale(-500) balance=500, purchase(+1000) balance=1000
+        assert global_balances == [500.0, 1000.0]
+        # Verificar que no hay traslados en los resultados
+        types = [it["movement_type"] for it in data3["items"]]
+        assert "transfer" not in types
 
 
 class TestValuation:

@@ -513,6 +513,9 @@ def list_movements(
         query = query.where(InventoryMovement.material_id == material_id)
     if warehouse_id:
         query = query.where(InventoryMovement.warehouse_id == warehouse_id)
+    elif material_id:
+        # Vista global del material: excluir traslados (son suma cero entre bodegas)
+        query = query.where(InventoryMovement.movement_type != "transfer")
     if movement_type:
         query = query.where(InventoryMovement.movement_type == movement_type)
     if date_from:
@@ -550,13 +553,21 @@ def list_movements(
     balance_map: dict = {}
     avg_cost_map: dict = {}
     if material_id:
-        all_movs = list(db.scalars(
+        balance_query = (
             select(InventoryMovement)
             .where(
                 InventoryMovement.organization_id == org_context["organization_id"],
                 InventoryMovement.material_id == material_id,
             )
-            .order_by(
+        )
+        if warehouse_id:
+            balance_query = balance_query.where(InventoryMovement.warehouse_id == warehouse_id)
+        else:
+            # Vista global: excluir traslados (suma cero entre bodegas)
+            balance_query = balance_query.where(InventoryMovement.movement_type != "transfer")
+
+        all_movs = list(db.scalars(
+            balance_query.order_by(
                 InventoryMovement.date.asc(),
                 InventoryMovement.created_at.asc(),
             )
