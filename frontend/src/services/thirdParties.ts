@@ -39,4 +39,9 @@ export const thirdPartyService = {
     const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties/customers", { params: filters });
     return response.data;
   },
+
+  getProvisions: async (filters: Omit<ThirdPartyFilters, "role"> = {}): Promise<PaginatedResponse<ThirdPartyResponse>> => {
+    const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties/provisions", { params: filters });
+    return response.data;
+  },
 };

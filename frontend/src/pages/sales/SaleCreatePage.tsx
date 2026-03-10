@@ -18,7 +18,7 @@ import { saleService } from "@/services/sales";
 import { inventoryService } from "@/services/inventory";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useCustomers, useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
-import { formatCurrency, formatWeight, toLocalDatetimeInput } from "@/utils/formatters";
+import { formatCurrency, formatWeight, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { SaleLineCreate, SaleCommissionCreate } from "@/types/sale";
 
@@ -84,7 +84,7 @@ export default function SaleCreatePage() {
 
   const [customerId, setCustomerId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
-  const [date, setDate] = useState(toLocalDatetimeInput());
+  const [date, setDate] = useState(toLocalDateInput());
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
@@ -111,7 +111,7 @@ export default function SaleCreatePage() {
 
   const total = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
 
-  const isFutureDate = date ? new Date(date) > new Date() : false;
+  const isFutureDate = date ? date > toLocalDateInput() : false;
 
   const canSubmit =
     customerId &&
@@ -183,7 +183,7 @@ export default function SaleCreatePage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
-              <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} className={isFutureDate ? "border-red-300" : ""} />
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={isFutureDate ? "border-red-300" : ""} />
               {isFutureDate && <p className="text-xs text-red-500 mt-0.5">La fecha no puede ser futura</p>}
             </div>
             <div>

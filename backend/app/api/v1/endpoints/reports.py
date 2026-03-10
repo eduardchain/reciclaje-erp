@@ -20,6 +20,7 @@ from app.schemas.reports import (
     PurchaseReportResponse,
     SalesReportResponse,
     ThirdPartyBalancesResponse,
+    TreasuryDashboardResponse,
 )
 from app.services.reports import report_service
 
@@ -195,4 +196,21 @@ def get_third_party_balances(
         db=db,
         organization_id=org_context["organization_id"],
         type_filter=type,
+    )
+
+
+@router.get("/treasury-dashboard", response_model=TreasuryDashboardResponse)
+def get_treasury_dashboard(
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Dashboard financiero de tesoreria.
+
+    Incluye: cuentas por tipo, CxC/CxP, provisiones, MTD ingresos/egresos,
+    y ultimos 10 movimientos.
+    """
+    return report_service.get_treasury_dashboard(
+        db=db,
+        organization_id=org_context["organization_id"],
     )

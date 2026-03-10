@@ -49,7 +49,7 @@ export default function ThirdPartiesPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Terceros" description="Proveedores, clientes e inversionistas">
+      <PageHeader title="Terceros" description="Proveedores, clientes, inversionistas y provisiones">
         <Button onClick={() => { setEditItem(null); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
           <Plus className="h-4 w-4 mr-2" />Nuevo Tercero
         </Button>
@@ -61,6 +61,7 @@ export default function ThirdPartiesPage() {
           <TabsTrigger value="supplier">Proveedores</TabsTrigger>
           <TabsTrigger value="customer">Clientes</TabsTrigger>
           <TabsTrigger value="investor">Inversionistas</TabsTrigger>
+          <TabsTrigger value="provision">Provisiones</TabsTrigger>
         </TabsList>
       </Tabs>
 

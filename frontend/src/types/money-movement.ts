@@ -9,7 +9,9 @@ export type MoneyMovementType =
   | "transfer_in"
   | "capital_injection"
   | "capital_return"
-  | "commission_payment";
+  | "commission_payment"
+  | "provision_deposit"
+  | "provision_expense";
 
 export type MovementStatus = "confirmed" | "annulled";
 
@@ -20,7 +22,7 @@ export interface MoneyMovementResponse extends BaseEntity {
   movement_type: MoneyMovementType;
   amount: number;
   description: string;
-  account_id: string;
+  account_id: string | null;
   account_name: string | null;
   third_party_id: string | null;
   third_party_name: string | null;
@@ -125,6 +127,30 @@ export interface CommissionPaymentCreate {
   notes?: string | null;
 }
 
+export interface ProvisionDepositCreate {
+  provision_id: string;
+  amount: number;
+  account_id: string;
+  date: string;
+  description?: string | null;
+  reference_number?: string | null;
+  notes?: string | null;
+}
+
+export interface ProvisionExpenseCreate {
+  provision_id: string;
+  amount: number;
+  expense_category_id: string;
+  date: string;
+  description: string;
+  reference_number?: string | null;
+  notes?: string | null;
+}
+
 export interface AnnulMovementRequest {
   reason: string;
+}
+
+export interface MoneyMovementWithBalance extends MoneyMovementResponse {
+  balance_after: number | null;
 }

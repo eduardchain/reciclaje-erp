@@ -22,6 +22,7 @@ from app.models.sale import Sale, SaleLine
 from app.models.third_party import ThirdParty
 
 from app.schemas.reports import (
+    AccountSummary,
     BalanceSheetAssets,
     BalanceSheetLiabilities,
     BalanceSheetResponse,
@@ -40,15 +41,18 @@ from app.schemas.reports import (
     MaterialProfitSummary,
     MetricCard,
     ProfitAndLossResponse,
+    ProvisionSummary,
     PurchaseByMaterial,
     PurchaseBySupplier,
     PurchaseReportResponse,
+    RecentMovementItem,
     SaleByCustomer,
     SaleByMaterial,
     SalesReportResponse,
     SupplierBalance,
     SupplierVolumeSummary,
     ThirdPartyBalancesResponse,
+    TreasuryDashboardResponse,
 )
 
 # Tipos de money_movement que representan inflows a cuentas
@@ -66,7 +70,9 @@ OUTFLOW_TYPES = frozenset([
     "commission_payment",
     "capital_return",
     "transfer_out",
+    "provision_deposit",  # Sale dinero de cuenta hacia provision
 ])
+# Nota: provision_expense NO va aqui — no afecta cuentas de dinero
 
 
 class ReportService:
@@ -1293,6 +1299,162 @@ class ReportService:
             top_suppliers_by_volume=top_suppliers_list,
             top_customers_by_revenue=top_customers_list,
             alerts=alerts,
+        )
+
+
+    # ------------------------------------------------------------------
+    # Treasury Dashboard
+    # ------------------------------------------------------------------
+
+    def get_treasury_dashboard(
+        self,
+        db: Session,
+        organization_id: UUID,
+    ) -> TreasuryDashboardResponse:
+        """Dashboard financiero de tesoreria con datos actuales y MTD."""
+        from sqlalchemy.orm import joinedload
+
+        # 1. Cuentas agrupadas por tipo
+        accounts_query = (
+            select(MoneyAccount)
+            .where(
+                MoneyAccount.organization_id == organization_id,
+                MoneyAccount.is_active == True,
+            )
+            .order_by(MoneyAccount.name)
+        )
+        accounts = list(db.scalars(accounts_query).all())
+
+        cash_accounts = []
+        bank_accounts = []
+        digital_accounts = []
+        for a in accounts:
+            summary = AccountSummary(
+                id=a.id, name=a.name,
+                account_type=a.account_type,
+                current_balance=float(a.current_balance),
+            )
+            if a.account_type == "cash":
+                cash_accounts.append(summary)
+            elif a.account_type == "bank":
+                bank_accounts.append(summary)
+            else:
+                digital_accounts.append(summary)
+
+        total_cash = sum(a.current_balance for a in cash_accounts)
+        total_bank = sum(a.current_balance for a in bank_accounts)
+        total_digital = sum(a.current_balance for a in digital_accounts)
+
+        # 2. CxC / CxP (reutilizar logica existente)
+        total_receivable = float(db.scalar(
+            select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
+            .where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.is_customer == True,
+                ThirdParty.current_balance > 0,
+            )
+        ))
+        total_payable = float(db.scalar(
+            select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
+            .where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.is_supplier == True,
+                ThirdParty.current_balance < 0,
+            )
+        ))
+
+        # 3. Provisiones
+        prov_rows = db.execute(
+            select(ThirdParty.id, ThirdParty.name, ThirdParty.provision_type, ThirdParty.current_balance)
+            .where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.is_provision == True,
+                ThirdParty.is_active == True,
+            )
+            .order_by(ThirdParty.name)
+        ).all()
+        provisions = []
+        total_provision_available = Decimal("0")
+        for r in prov_rows:
+            bal = Decimal(str(r[3]))
+            available = abs(bal) if bal < 0 else Decimal("0")
+            provisions.append(ProvisionSummary(
+                id=r[0], name=r[1], provision_type=r[2],
+                current_balance=float(bal),
+                available_funds=float(available),
+            ))
+            total_provision_available += available
+
+        # 4. MTD (mes en curso)
+        now = datetime.now(tz=timezone.utc)
+        first_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+
+        mtd_rows = db.execute(
+            select(
+                MoneyMovement.movement_type,
+                func.coalesce(func.sum(MoneyMovement.amount), 0),
+            )
+            .where(
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.status == "confirmed",
+                MoneyMovement.date >= first_of_month,
+            )
+            .group_by(MoneyMovement.movement_type)
+        ).all()
+
+        mtd_income = Decimal("0")
+        mtd_expense = Decimal("0")
+        for mt, total in mtd_rows:
+            if mt in INFLOW_TYPES:
+                mtd_income += Decimal(str(total))
+            elif mt in OUTFLOW_TYPES:
+                mtd_expense += Decimal(str(total))
+
+        # 5. Ultimos 10 movimientos
+        recent_query = (
+            select(MoneyMovement)
+            .where(
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.status == "confirmed",
+            )
+            .options(
+                joinedload(MoneyMovement.account),
+                joinedload(MoneyMovement.third_party),
+            )
+            .order_by(MoneyMovement.date.desc(), MoneyMovement.movement_number.desc())
+            .limit(10)
+        )
+        recent = list(db.scalars(recent_query).unique().all())
+        recent_items = [
+            RecentMovementItem(
+                id=m.id,
+                movement_number=m.movement_number,
+                date=m.date,
+                movement_type=m.movement_type,
+                amount=float(m.amount),
+                description=m.description,
+                account_name=m.account.name if m.account else None,
+                third_party_name=m.third_party.name if m.third_party else None,
+            )
+            for m in recent
+        ]
+
+        return TreasuryDashboardResponse(
+            cash_accounts=cash_accounts,
+            bank_accounts=bank_accounts,
+            digital_accounts=digital_accounts,
+            total_cash=total_cash,
+            total_bank=total_bank,
+            total_digital=total_digital,
+            total_all_accounts=total_cash + total_bank + total_digital,
+            total_receivable=total_receivable,
+            total_payable=total_payable,
+            net_position=total_receivable - total_payable,
+            provisions=provisions,
+            total_provision_available=float(total_provision_available),
+            mtd_income=float(mtd_income),
+            mtd_expense=float(mtd_expense),
+            recent_movements=recent_items,
         )
 
 

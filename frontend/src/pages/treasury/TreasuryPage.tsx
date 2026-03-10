@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, Wallet, Hash, Calculator } from "lucide-react";
+import { Plus, Wallet, Hash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +31,8 @@ const typeLabels: Record<MoneyMovementType, string> = {
   capital_injection: "Aporte Capital",
   capital_return: "Devolucion Capital",
   commission_payment: "Pago Comision",
+  provision_deposit: "Deposito Provision",
+  provision_expense: "Gasto Provision",
 };
 
 const typeColors: Record<string, string> = {
@@ -43,6 +45,8 @@ const typeColors: Record<string, string> = {
   capital_injection: "bg-teal-100 text-teal-800",
   capital_return: "bg-yellow-100 text-yellow-800",
   commission_payment: "bg-pink-100 text-pink-800",
+  provision_deposit: "bg-violet-100 text-violet-800",
+  provision_expense: "bg-amber-100 text-amber-800",
 };
 
 const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [
@@ -75,13 +79,11 @@ export default function TreasuryPage() {
 
   const kpis = useMemo(() => {
     const items = data?.items ?? [];
-    const totalAmount = items.reduce((sum, m) => sum + m.amount, 0);
+    const totalAmount = items.reduce((sum, m) => sum + Number(m.amount), 0);
     const count = data?.total ?? 0;
-    const avg = count > 0 ? totalAmount / items.length : 0;
     return {
       total: { current_value: totalAmount, previous_value: 0, change_percentage: null } as MetricCard,
       count: { current_value: count, previous_value: 0, change_percentage: null } as MetricCard,
-      avg: { current_value: avg, previous_value: 0, change_percentage: null } as MetricCard,
     };
   }, [data]);
 
@@ -94,13 +96,13 @@ export default function TreasuryPage() {
       </PageHeader>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Array.from({ length: 2 }).map((_, i) => (
             <Skeleton key={i} className="h-[120px] rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <KpiCard
             label="Total Movimientos"
             metric={kpis.total}
@@ -114,12 +116,6 @@ export default function TreasuryPage() {
             accentColor="violet"
             formatValue={(n) => String(n)}
           />
-          <KpiCard
-            label="Promedio"
-            metric={kpis.avg}
-            icon={<Calculator className="h-4 w-4" />}
-            accentColor="amber"
-          />
         </div>
       )}
 
@@ -130,6 +126,7 @@ export default function TreasuryPage() {
           <TabsTrigger value="collection_from_client">Cobros</TabsTrigger>
           <TabsTrigger value="expense">Gastos</TabsTrigger>
           <TabsTrigger value="transfer_out">Transf.</TabsTrigger>
+          <TabsTrigger value="provision_deposit">Provisiones</TabsTrigger>
         </TabsList>
       </Tabs>
 

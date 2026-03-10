@@ -6,6 +6,7 @@ Endpoints especializados por tipo de operacion con un endpoint
 generico de listado y filtros.
 """
 from datetime import date, datetime, time as dt_time, timedelta, timezone as tz
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -22,13 +23,30 @@ from app.schemas.money_movement import (
     CapitalInjectionCreate,
     CapitalReturnCreate,
     CommissionPaymentCreate,
+    ProvisionDepositCreate,
+    ProvisionExpenseCreate,
     AnnulMovementRequest,
+    AnnulMovementResponse,
     MoneyMovementResponse,
     MoneyMovementSummary,
 )
+from app.models.money_movement import MoneyMovement
 from app.services.money_movement import money_movement
 
 router = APIRouter()
+
+# Direccion del efecto en el balance del tercero por tipo de movimiento.
+# Positivo = tercero nos debe mas (o le debemos menos).
+# Negativo = tercero nos debe menos (o le debemos mas).
+THIRD_PARTY_BALANCE_DIRECTION = {
+    "payment_to_supplier": 1,       # Pagamos: su deuda baja (nuestro balance sube)
+    "collection_from_client": -1,   # Cobramos: nos deben menos
+    "capital_injection": -1,        # Inversor aporta: le debemos mas (balance baja)
+    "capital_return": 1,            # Devolvemos: le debemos menos (balance sube)
+    "commission_payment": 1,        # Pagamos comision: deuda de comision baja
+    "provision_deposit": -1,        # Depositamos a provision: fondos aumentan (balance baja)
+    "provision_expense": 1,         # Gastamos de provision: fondos disminuyen (balance sube)
+}
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +269,56 @@ def create_commission_payment(
     return _to_response(loaded)
 
 
+@router.post(
+    "/provision-deposit",
+    response_model=MoneyMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_provision_deposit(
+    data: ProvisionDepositCreate,
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Deposito a provision.
+
+    Efectos: account(-), provision.balance(-)
+    """
+    movement = money_movement.deposit_to_provision(
+        db=db,
+        data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded)
+
+
+@router.post(
+    "/provision-expense",
+    response_model=MoneyMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_provision_expense(
+    data: ProvisionExpenseCreate,
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Gasto desde provision — NO afecta cuentas de dinero.
+
+    Efectos: provision.balance(+)
+    """
+    movement = money_movement.create_provision_expense(
+        db=db,
+        data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints de lectura
 # ---------------------------------------------------------------------------
@@ -354,22 +422,74 @@ def get_by_third_party(
     third_party_id: UUID,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    date_from: Optional[date] = Query(None, description="Fecha desde"),
+    date_to: Optional[date] = Query(None, description="Fecha hasta"),
     org_context: dict = Depends(get_required_org_context),
     db: Session = Depends(get_db),
 ):
-    """Movimientos de un tercero especifico."""
-    movements, total = money_movement.get_by_third_party(
+    """
+    Estado de cuenta de un tercero con saldo corrido (balance_after).
+
+    Calcula balance iterativo sobre TODOS los movimientos confirmados
+    del tercero, luego mapea balance_after a la pagina solicitada.
+    Si date_from, calcula saldo de apertura con movimientos anteriores.
+    """
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.orm import joinedload as jl
+
+    org_id = org_context["organization_id"]
+    date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
+    date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
+
+    # 1. Query TODOS los movimientos confirmados del tercero (para balance corrido)
+    all_query = (
+        sa_select(MoneyMovement)
+        .where(
+            MoneyMovement.organization_id == org_id,
+            MoneyMovement.third_party_id == third_party_id,
+            MoneyMovement.status == "confirmed",
+        )
+        .order_by(MoneyMovement.date.asc(), MoneyMovement.movement_number.asc())
+    )
+    all_movs = list(db.scalars(all_query).all())
+
+    # 2. Calcular balance corrido iterativo
+    balance = Decimal("0")
+    balance_map = {}
+    opening_balance = Decimal("0")
+
+    for m in all_movs:
+        direction = THIRD_PARTY_BALANCE_DIRECTION.get(m.movement_type, 0)
+        balance += m.amount * direction
+        balance_map[m.id] = float(balance)
+        # Saldo de apertura: ultimo balance ANTES de date_from
+        if date_from_dt and m.date < date_from_dt:
+            opening_balance = balance
+
+    # 3. Query paginada con filtros de fecha
+    movements, total = money_movement.get_multi(
         db=db,
+        organization_id=org_id,
         third_party_id=third_party_id,
-        organization_id=org_context["organization_id"],
+        date_from=date_from_dt,
+        date_to=date_to_dt,
         skip=skip,
         limit=limit,
     )
+
+    # 4. Construir respuesta con balance_after
+    items = []
+    for m in movements:
+        data = _to_response(m)
+        data["balance_after"] = balance_map.get(m.id)
+        items.append(data)
+
     return {
-        "items": [_to_response(m) for m in movements],
+        "items": items,
         "total": total,
         "skip": skip,
         "limit": limit,
+        "opening_balance": float(opening_balance) if date_from_dt else None,
     }
 
 
@@ -388,7 +508,7 @@ def get_movement(
 # Anulacion
 # ---------------------------------------------------------------------------
 
-@router.post("/{movement_id}/annul", response_model=MoneyMovementResponse)
+@router.post("/{movement_id}/annul", response_model=AnnulMovementResponse)
 def annul_movement(
     movement_id: UUID,
     data: AnnulMovementRequest,
@@ -400,8 +520,9 @@ def annul_movement(
 
     Revierte todos los efectos en saldos.
     Si es transferencia, anula el par automaticamente.
+    Retorna warnings si la anulacion deja una provision en sobregiro.
     """
-    movement = money_movement.annul(
+    movement, warnings = money_movement.annul(
         db=db,
         movement_id=movement_id,
         reason=data.reason,
@@ -409,4 +530,5 @@ def annul_movement(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    response = _to_response(loaded)
+    return {**response, "warnings": warnings}

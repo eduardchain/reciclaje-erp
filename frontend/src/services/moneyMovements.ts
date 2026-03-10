@@ -1,6 +1,7 @@
 import apiClient from "./api";
 import type {
   MoneyMovementResponse,
+  MoneyMovementWithBalance,
   SupplierPaymentCreate,
   CustomerCollectionCreate,
   ExpenseMovementCreate,
@@ -9,6 +10,8 @@ import type {
   CapitalInjectionCreate,
   CapitalReturnCreate,
   CommissionPaymentCreate,
+  ProvisionDepositCreate,
+  ProvisionExpenseCreate,
   AnnulMovementRequest,
 } from "@/types/money-movement";
 import type { PaginatedResponse } from "@/types/common";
@@ -75,8 +78,23 @@ export const moneyMovementService = {
     return response.data;
   },
 
+  createProvisionDeposit: async (data: ProvisionDepositCreate): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/provision-deposit", data);
+    return response.data;
+  },
+
+  createProvisionExpense: async (data: ProvisionExpenseCreate): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/provision-expense", data);
+    return response.data;
+  },
+
   annul: async (id: string, data: AnnulMovementRequest): Promise<MoneyMovementResponse> => {
     const response = await apiClient.post<MoneyMovementResponse>(`/api/v1/money-movements/${id}/annul`, data);
+    return response.data;
+  },
+
+  getByThirdParty: async (thirdPartyId: string, filters: { date_from?: string; date_to?: string } = {}): Promise<{ items: MoneyMovementWithBalance[]; opening_balance: number }> => {
+    const response = await apiClient.get<{ items: MoneyMovementWithBalance[]; opening_balance: number }>(`/api/v1/money-movements/third-party/${thirdPartyId}`, { params: filters });
     return response.data;
   },
 };

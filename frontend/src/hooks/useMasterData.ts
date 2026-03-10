@@ -60,3 +60,10 @@ export function useExpenseCategories() {
     queryFn: () => expenseCategoryService.getAll(),
   });
 }
+
+export function useProvisions(search?: string) {
+  return useQuery({
+    queryKey: ["third-parties", "provisions", search],
+    queryFn: () => thirdPartyService.getProvisions({ search, limit: 100 }),
+  });
+}

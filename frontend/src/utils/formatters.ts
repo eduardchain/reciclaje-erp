@@ -104,6 +104,14 @@ export function utcToLocalDatetimeInput(isoStr: string): string {
   return toLocalDatetimeInput(new Date(isoStr));
 }
 
+/**
+ * Convierte un ISO string UTC del backend a formato "YYYY-MM-DD" en fecha LOCAL.
+ * Para pre-popular inputs type="date" en formularios de edicion.
+ */
+export function utcToLocalDateInput(isoStr: string): string {
+  return toLocalDateInput(new Date(isoStr));
+}
+
 type PydanticError = { msg: string; loc?: string[] };
 type ApiErrorResponse = { detail?: string | PydanticError[] };
 

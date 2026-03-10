@@ -237,6 +237,49 @@ export interface MarginAnalysisResponse {
   materials: MaterialMargin[];
 }
 
+// --- Treasury Dashboard ---
+
+export interface AccountSummary {
+  id: string;
+  name: string;
+  account_type: string;
+  current_balance: number;
+}
+
+export interface ProvisionSummary {
+  id: string;
+  name: string;
+  current_balance: number;
+  available_funds: number;
+}
+
+export interface RecentMovementItem {
+  id: string;
+  date: string;
+  movement_type: string;
+  amount: number;
+  description: string;
+  account_name: string | null;
+}
+
+export interface TreasuryDashboardResponse {
+  cash_accounts: AccountSummary[];
+  bank_accounts: AccountSummary[];
+  digital_accounts: AccountSummary[];
+  total_cash: number;
+  total_bank: number;
+  total_digital: number;
+  total_all_accounts: number;
+  total_receivable: number;
+  total_payable: number;
+  net_position: number;
+  provisions: ProvisionSummary[];
+  total_provision_available: number;
+  mtd_income: number;
+  mtd_expense: number;
+  recent_movements: RecentMovementItem[];
+}
+
 // --- Third Party Balances ---
 
 export interface SupplierBalance {

@@ -26,6 +26,7 @@ def list_third_parties(
     limit: int = Query(100, ge=1, le=500, description="Maximum records to return"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     search: Optional[str] = Query(None, description="Search in name, identification, and email"),
+    role: Optional[str] = Query(None, description="Filter by role: supplier, customer, investor, provision"),
     sort_by: str = Query("name", description="Field to sort by"),
     sort_order: str = Query("asc", regex="^(asc|desc)$", description="Sort order"),
     org_context: tuple = Depends(get_required_org_context),
@@ -33,21 +34,16 @@ def list_third_parties(
 ):
     """
     List all third parties for the organization with pagination and filters.
-    
+
     **Filters:**
     - `is_active`: Show only active/inactive third parties
     - `search`: Search by name, identification, or email
+    - `role`: Filter by role (supplier, customer, investor, provision)
     - `sort_by`: Field name to sort by (e.g., "name", "identification")
     - `sort_order`: Sort direction ("asc" or "desc")
-    
-    **Response:**
-    - `items`: List of third parties
-    - `total`: Total count matching filters
-    - `skip`: Current offset
-    - `limit`: Current page size
     """
     org_id = org_context["organization_id"]
-    
+
     return third_party.get_multi(
         db=db,
         organization_id=org_id,
@@ -55,6 +51,7 @@ def list_third_parties(
         limit=limit,
         is_active=is_active,
         search=search,
+        role=role,
         sort_by=sort_by,
         sort_order=sort_order
     )

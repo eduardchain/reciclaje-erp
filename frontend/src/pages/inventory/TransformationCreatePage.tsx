@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { useCreateTransformation } from "@/hooks/useInventory";
 import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
-import { toLocalDatetimeInput } from "@/utils/formatters";
+import { toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
 interface LineForm {
@@ -42,7 +42,7 @@ export default function TransformationCreatePage() {
   const [wasteQuantity, setWasteQuantity] = useState(0);
   const [costDistribution, setCostDistribution] = useState<"proportional_weight" | "manual">("proportional_weight");
   const [lines, setLines] = useState<LineForm[]>([createEmptyLine()]);
-  const [date, setDate] = useState(toLocalDatetimeInput());
+  const [date, setDate] = useState(toLocalDateInput());
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -105,7 +105,7 @@ export default function TransformationCreatePage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
-              <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} />
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
           </div>
         </CardContent>

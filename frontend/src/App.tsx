@@ -22,6 +22,9 @@ import DoubleEntryDetailPage from "@/pages/double-entries/DoubleEntryDetailPage"
 import TreasuryPage from "@/pages/treasury/TreasuryPage";
 import MovementCreatePage from "@/pages/treasury/MovementCreatePage";
 import MovementDetailPage from "@/pages/treasury/MovementDetailPage";
+import ProvisionsPage from "@/pages/treasury/ProvisionsPage";
+import AccountStatementPage from "@/pages/treasury/AccountStatementPage";
+import TreasuryDashboardPage from "@/pages/treasury/TreasuryDashboardPage";
 import StockPage from "@/pages/inventory/StockPage";
 import MovementHistoryPage from "@/pages/inventory/MovementHistoryPage";
 import AdjustmentsPage from "@/pages/inventory/AdjustmentsPage";
@@ -91,6 +94,9 @@ function App() {
               {/* Tesoreria */}
               <Route path={ROUTES.TREASURY} element={<TreasuryPage />} />
               <Route path={ROUTES.TREASURY_NEW} element={<MovementCreatePage />} />
+              <Route path={ROUTES.TREASURY_PROVISIONS} element={<ProvisionsPage />} />
+              <Route path={ROUTES.TREASURY_ACCOUNT_STATEMENT} element={<AccountStatementPage />} />
+              <Route path={ROUTES.TREASURY_DASHBOARD} element={<TreasuryDashboardPage />} />
               <Route path="/treasury/:id" element={<MovementDetailPage />} />
               {/* Inventario */}
               <Route path={ROUTES.INVENTORY} element={<StockPage />} />

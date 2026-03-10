@@ -45,6 +45,7 @@ export const invalidateAfterTreasury = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["money-accounts"] });
   qc.invalidateQueries({ queryKey: ["third-parties"] });
   qc.invalidateQueries({ queryKey: ["reports"] });
+  qc.invalidateQueries({ queryKey: ["treasury-dashboard"] });
 };
 
 export const invalidateAfterInventoryChange = (qc: QueryClient) => {

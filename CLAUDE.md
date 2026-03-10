@@ -92,7 +92,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - `components/shared/` — 12 reusable components (DataTable, PageHeader, StatusBadge, MoneyDisplay, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList, PriceSuggestion, KpiCard)
 - `components/auth/` — ProtectedRoute (token + org check), OrganizationSelector
 - `components/layout/` — Layout, Header (user dropdown), Sidebar (collapsible submenus)
-- `pages/` — 44 page components organized by module
+- `pages/` — 47 page components organized by module
 
 **Modules (all complete, 45+ routes):**
 - Auth: Login, org selection, protected routes
@@ -100,7 +100,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - Purchases: List (status tabs, search, date range, Items/DP/Actions columns) + Create (dynamic lines, auto-liquidate, price suggestions) + Edit (full revert-and-reapply) + Detail (liquidate/cancel/PDF)
 - Sales: Like purchases + commissions + profit display + stock warnings + Edit (lines + commissions)
 - Double Entries: Simultaneous buy+sell form with real-time profit calculation
-- Treasury: 8 movement types with dynamic form, annulment with reason
+- Treasury: 11 movement types with dynamic form, annulment with reason, provisions (deposit/expense), account statement with running balance, financial dashboard
 - Inventory: Stock view (expandable rows with warehouse breakdown, category/warehouse filters, transfer modal), movement history (material/warehouse filters, running balance/avg cost), adjustments (4 types), transformations (multi-line destinations, balance validation), warehouse transfers, valuation page, transit page (pending purchases/sales, bottleneck alerts)
 - Reports: P&L, Cash Flow, Balance Sheet, Purchase Report, Sales Report, Margin Analysis, Third Party Balances — all with date range pickers
 - Third Parties: CRUD with role badges (supplier/customer/investor/provision), balance display
@@ -126,7 +126,10 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - **Stock separation**: `current_stock_liquidated` (paid, available for sale) vs `current_stock_transit` (registered but unpaid). `current_stock` = total for backward compat.
 - **Audit fields**: Purchases and Sales track `created_by` and `liquidated_by` (user UUIDs).
 - **Price history & suggestions**: `PriceList` is append-only — each price update creates a new record. The "current" price is the most recent by `created_at`. Bulk endpoint `GET /price-lists/current` returns all current prices. Frontend `usePriceSuggestions()` hook auto-fills prices on material selection in purchase/sale/double-entry forms via `PriceSuggestion` component.
-- **Treasury movements**: `MoneyMovement` tracks all money flows with specific types (payment_to_supplier, collection_from_client, expense, etc.). Each movement affects exactly ONE account. Transfers create a linked pair (transfer_out + transfer_in). Status is `confirmed` or `annulled` (with reason/date/user audit). Independent of purchase/sale liquidation — liquidation handles balance changes directly, money_movements are for manual payments/collections/expenses.
+- **Treasury movements**: `MoneyMovement` tracks all money flows with 11 types (payment_to_supplier, collection_from_client, expense, service_income, transfer_out/in, capital_injection/return, commission_payment, provision_deposit, provision_expense). Each movement affects exactly ONE account (except provision_expense which has account_id=None). Transfers create a linked pair (transfer_out + transfer_in). Status is `confirmed` or `annulled` (with reason/date/user audit). Independent of purchase/sale liquidation.
+- **Provision system**: ThirdParty entities with `is_provision=True` act as fund pools. `provision_deposit` removes money from an account and adds to provision (both balances decrease — negative = funds available). `provision_expense` only affects provision (balance increases, no account touched, account_id=NULL). Fund validation: blocks if overspent (balance > 0) or insufficient funds. Annulation of deposits is allowed even if overspent (consistent with negative stock policy).
+- **Account statement (estado de cuenta)**: `GET /money-movements/third-party/{id}` returns movements with `balance_after` (running balance) and `opening_balance` when date_from is provided. Balance direction determined by THIRD_PARTY_BALANCE_DIRECTION map per movement type.
+- **Treasury Dashboard**: `GET /reports/treasury-dashboard` returns accounts by type (cash/bank/digital), CxC/CxP, provisions with available funds, MTD income/expense, last 10 movements.
 - **Negative stock allowed (RN-INV-03)**: Sales, adjustments, and transformations PERMIT negative stock. Instead of blocking, they return a `warnings[]` field in the response with descriptive messages. This is a global policy decision.
 - **Inventory adjustments**: 4 types (increase, decrease, recount, zero_out). All affect `current_stock_liquidated` only (not transit). Increase recalculates avg cost; decrease/recount/zero_out use current avg cost.
 - **Material transformation**: Disassembly of composite materials into components. Cost distribution: proportional by weight (default) or manual. Validation: `sum(destination_quantities) + waste == source_quantity`. Creates InventoryMovement for source and each destination.
@@ -180,11 +183,11 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Business Units | `/api/v1/business-units/` | P&L analysis segments (Fibras, Chatarra, etc.) |
 | Price Lists | `/api/v1/price-lists/` | Historical purchase/sale prices per material |
 | Expense Categories | `/api/v1/expense-categories/` | Direct/indirect expense classification for treasury |
-| Treasury | `/api/v1/money-movements/` | Supplier payments, customer collections, expenses, transfers, capital, commissions. 9 movement types, annulment with audit |
+| Treasury | `/api/v1/money-movements/` | 11 movement types (incl. provision_deposit, provision_expense), annulment with audit, account statement with running balance |
 | Inventory Adjustments | `/api/v1/inventory/adjustments/` | Manual stock corrections: increase, decrease, recount, zero-out. Warehouse transfers. Annulment with stock reversal |
 | Material Transformations | `/api/v1/inventory/transformations/` | Material disassembly (e.g., Motor → Copper + Iron + Aluminum + Waste). Proportional/manual cost distribution |
 | Inventory Views | `/api/v1/inventory/` | Consolidated stock (filterable by category/warehouse), per-material warehouse breakdown, transit stock (pending purchases/sales/bottleneck alerts), movement history (with running balance/avg cost per material), inventory valuation |
-| Reports & Dashboard | `/api/v1/reports/` | Dashboard with period comparison, P&L, Cash Flow, Balance Sheet, Purchase/Sales reports, Margin Analysis, Third Party Balances. All read-only |
+| Reports & Dashboard | `/api/v1/reports/` | Dashboard with period comparison, P&L, Cash Flow, Balance Sheet, Purchase/Sales reports, Margin Analysis, Third Party Balances, Treasury Dashboard. All read-only |
 
 ### Testing
 

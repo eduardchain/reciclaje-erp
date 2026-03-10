@@ -13,7 +13,7 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { usePurchase, useUpdatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
-import { formatCurrency, utcToLocalDatetimeInput } from "@/utils/formatters";
+import { formatCurrency, utcToLocalDateInput } from "@/utils/formatters";
 import type { PurchaseLineCreate } from "@/types/purchase";
 
 interface LineFormData extends PurchaseLineCreate {
@@ -59,7 +59,7 @@ export default function PurchaseEditPage() {
   useEffect(() => {
     if (purchase && !initialized) {
       setSupplierId(purchase.supplier_id);
-      setDate(utcToLocalDatetimeInput(purchase.date));
+      setDate(utcToLocalDateInput(purchase.date));
       setVehiclePlate(purchase.vehicle_plate ?? "");
       setInvoiceNumber(purchase.invoice_number ?? "");
       setNotes(purchase.notes ?? "");
@@ -181,7 +181,7 @@ export default function PurchaseEditPage() {
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
               <Input
-                type="datetime-local"
+                type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 className={isFutureDate ? "border-red-300" : ""}

@@ -15,7 +15,7 @@ import { useCreatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { purchaseService } from "@/services/purchases";
-import { formatCurrency, toLocalDatetimeInput } from "@/utils/formatters";
+import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { PurchaseLineCreate } from "@/types/purchase";
 
@@ -49,7 +49,7 @@ export default function PurchaseCreatePage() {
   const { getSuggestedPrice } = usePriceSuggestions();
 
   const [supplierId, setSupplierId] = useState("");
-  const [date, setDate] = useState(toLocalDatetimeInput());
+  const [date, setDate] = useState(toLocalDateInput());
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
@@ -159,7 +159,7 @@ export default function PurchaseCreatePage() {
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
               <Input
-                type="datetime-local"
+                type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 className={isFutureDate ? "border-red-300" : ""}

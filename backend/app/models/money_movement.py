@@ -10,8 +10,10 @@ Registra todos los movimientos financieros de la organizacion:
 - Aportes de capital (capital_injection)
 - Retiros de capital (capital_return)
 - Pagos de comisiones (commission_payment)
+- Depositos a provisiones (provision_deposit)
+- Gastos desde provisiones (provision_expense)
 
-Cada movimiento afecta exactamente UNA cuenta de dinero.
+Cada movimiento afecta exactamente UNA cuenta de dinero (excepto provision_expense).
 Las transferencias crean un par de movimientos vinculados por transfer_pair_id.
 
 Estado:
@@ -58,6 +60,8 @@ VALID_MOVEMENT_TYPES = [
     "capital_injection",        # Aporte de capital: account(+), investor.balance(-)
     "capital_return",           # Retiro de capital: account(-), investor.balance(+)
     "commission_payment",       # Pago de comision: account(-), third_party.balance(+)
+    "provision_deposit",        # Deposito a provision: account(-), provision.balance(-)
+    "provision_expense",        # Gasto desde provision: provision.balance(+), NO afecta cuenta
 ]
 
 
@@ -109,13 +113,13 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
         comment="Monto del movimiento (siempre positivo)",
     )
 
-    # Cuenta afectada (siempre exactamente una)
-    account_id: Mapped[UUID] = mapped_column(
+    # Cuenta afectada (None solo para provision_expense)
+    account_id: Mapped[Optional[UUID]] = mapped_column(
         GUID(),
         ForeignKey("money_accounts.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
         index=True,
-        comment="Cuenta de dinero afectada",
+        comment="Cuenta de dinero afectada (None para provision_expense)",
     )
 
     # Relaciones opcionales segun tipo
@@ -224,7 +228,7 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
     )
 
     # --- Relationships ---
-    account: Mapped["MoneyAccount"] = relationship(
+    account: Mapped[Optional["MoneyAccount"]] = relationship(
         "MoneyAccount",
         foreign_keys=[account_id],
     )

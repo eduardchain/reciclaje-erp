@@ -70,6 +70,12 @@ const navItems: NavItem[] = [
     name: "Tesoreria",
     path: ROUTES.TREASURY,
     icon: <Wallet className="w-5 h-5" />,
+    children: [
+      { name: "Dashboard", path: ROUTES.TREASURY_DASHBOARD, icon: <LayoutDashboard className="w-4 h-4" /> },
+      { name: "Movimientos", path: ROUTES.TREASURY, icon: <ArrowDownUp className="w-4 h-4" /> },
+      { name: "Provisiones", path: ROUTES.TREASURY_PROVISIONS, icon: <Tag className="w-4 h-4" /> },
+      { name: "Estado de Cuenta", path: ROUTES.TREASURY_ACCOUNT_STATEMENT, icon: <ListOrdered className="w-4 h-4" /> },
+    ],
   },
   {
     name: "Inventario",

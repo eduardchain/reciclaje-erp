@@ -37,6 +37,8 @@ from app.schemas.money_movement import (
     CapitalInjectionCreate,
     CapitalReturnCreate,
     CommissionPaymentCreate,
+    ProvisionDepositCreate,
+    ProvisionExpenseCreate,
     MoneyMovementResponse,
 )
 
@@ -422,6 +424,98 @@ class CRUDMoneyMovement:
         db.refresh(movement)
         return movement
 
+    def deposit_to_provision(
+        self,
+        db: Session,
+        data: ProvisionDepositCreate,
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """
+        Deposito a provision.
+
+        Efectos:
+        - account.current_balance -= amount
+        - provision.current_balance -= amount (negativo = fondos disponibles)
+        """
+        account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
+        provision = self._validate_third_party(db, data.provision_id, organization_id, require_type="is_provision")
+
+        movement = self._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="provision_deposit",
+            amount=data.amount,
+            account_id=data.account_id,
+            date=data.date,
+            description=data.description or f"Deposito a provision {provision.name}",
+            third_party_id=data.provision_id,
+            reference_number=data.reference_number,
+            notes=data.notes,
+            user_id=user_id,
+        )
+
+        account.current_balance -= data.amount
+        provision.current_balance -= data.amount
+
+        db.commit()
+        db.refresh(movement)
+        return movement
+
+    def create_provision_expense(
+        self,
+        db: Session,
+        data: ProvisionExpenseCreate,
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """
+        Gasto desde provision — NO afecta cuentas de dinero.
+
+        Efectos:
+        - provision.current_balance += amount (reduce fondos disponibles)
+
+        Validaciones:
+        - Provision no debe estar en sobregiro (balance > 0)
+        - Provision debe tener fondos suficientes (abs(balance) >= amount)
+        """
+        provision = self._validate_third_party(db, data.provision_id, organization_id, require_type="is_provision")
+        self._validate_expense_category(db, data.expense_category_id, organization_id)
+
+        # Validar fondos de provision
+        if provision.current_balance > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Provision '{provision.name}' esta en sobregiro (balance: ${provision.current_balance}). No se pueden registrar mas gastos.",
+            )
+        available = abs(provision.current_balance)
+        if available < data.amount:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Fondos insuficientes en provision '{provision.name}'. Disponible: ${available}, Requerido: ${data.amount}",
+            )
+
+        movement = self._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="provision_expense",
+            amount=data.amount,
+            account_id=None,
+            date=data.date,
+            description=data.description,
+            third_party_id=data.provision_id,
+            expense_category_id=data.expense_category_id,
+            reference_number=data.reference_number,
+            notes=data.notes,
+            user_id=user_id,
+        )
+
+        provision.current_balance += data.amount
+
+        db.commit()
+        db.refresh(movement)
+        return movement
+
     # ======================================================================
     # Anulacion
     # ======================================================================
@@ -433,13 +527,16 @@ class CRUDMoneyMovement:
         reason: str,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
-    ) -> MoneyMovement:
+    ) -> tuple[MoneyMovement, list[str]]:
         """
         Anular un movimiento confirmado, revirtiendo todos los efectos.
 
         Si el movimiento es parte de una transferencia, anula el par tambien.
         NO crea movimiento inverso — solo revierte saldos y cambia status.
+
+        Retorna: (movimiento, warnings)
         """
+        warnings: list[str] = []
         movement = self._get_or_404(db, movement_id, organization_id)
 
         if movement.status == "annulled":
@@ -469,9 +566,19 @@ class CRUDMoneyMovement:
                 pair.annulled_at = now
                 pair.annulled_by = user_id
 
+        # Warning si provision_deposit deja provision en sobregiro
+        if movement.movement_type == "provision_deposit" and movement.third_party_id:
+            provision = db.get(ThirdParty, movement.third_party_id)
+            if provision and provision.current_balance > 0:
+                warnings.append(
+                    f"La provision '{provision.name}' quedo en sobregiro "
+                    f"(balance: ${provision.current_balance}). "
+                    f"No se podran registrar gastos hasta depositar fondos."
+                )
+
         db.commit()
         db.refresh(movement)
-        return movement
+        return movement, warnings
 
     # ======================================================================
     # Queries
@@ -690,7 +797,7 @@ class CRUDMoneyMovement:
         organization_id: UUID,
         movement_type: str,
         amount: Decimal,
-        account_id: UUID,
+        account_id: Optional[UUID],
         date: datetime,
         description: str,
         user_id: Optional[UUID] = None,
@@ -773,6 +880,7 @@ class CRUDMoneyMovement:
                 "is_supplier": "proveedor",
                 "is_customer": "cliente",
                 "is_investor": "inversor",
+                "is_provision": "provision",
             }
             label = type_labels.get(require_type, require_type)
             raise HTTPException(
@@ -852,8 +960,10 @@ class CRUDMoneyMovement:
         - capital_injection: account(-), investor(+)
         - capital_return: account(+), investor(-)
         - commission_payment: account(+), third_party(-)
+        - provision_deposit: account(+), provision(+)
+        - provision_expense: provision(-) (sin cuenta)
         """
-        account = db.get(MoneyAccount, movement.account_id)
+        account = db.get(MoneyAccount, movement.account_id) if movement.account_id else None
         third_party = db.get(ThirdParty, movement.third_party_id) if movement.third_party_id else None
 
         mt = movement.movement_type
@@ -893,6 +1003,17 @@ class CRUDMoneyMovement:
 
         elif mt == "commission_payment":
             account.current_balance += amt
+            if third_party:
+                third_party.current_balance -= amt
+
+        elif mt == "provision_deposit":
+            if account:
+                account.current_balance += amt
+            if third_party:
+                third_party.current_balance += amt
+
+        elif mt == "provision_expense":
+            # provision_expense no tiene cuenta, solo reversa provision
             if third_party:
                 third_party.current_balance -= amt
 

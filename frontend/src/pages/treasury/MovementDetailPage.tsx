@@ -24,6 +24,8 @@ const typeLabels: Record<string, string> = {
   capital_injection: "Aporte de Capital",
   capital_return: "Devolucion de Capital",
   commission_payment: "Pago de Comision",
+  provision_deposit: "Deposito a Provision",
+  provision_expense: "Gasto desde Provision",
 };
 
 const statusBorderMap: Record<string, string> = {
@@ -82,7 +84,7 @@ export default function MovementDetailPage() {
         <Card className="shadow-sm">
           <CardContent className="pt-6">
             <dl className="space-y-3 text-sm">
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta</dt><dd>{movement.account_name}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta</dt><dd>{movement.account_name ?? "N/A (provision)"}</dd></div>
               {movement.third_party_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero</dt><dd>{movement.third_party_name}</dd></div>}
               {movement.expense_category_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria</dt><dd>{movement.expense_category_name}</dd></div>}
               {movement.reference_number && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Referencia</dt><dd>{movement.reference_number}</dd></div>}

@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { useCreateAdjustment } from "@/hooks/useInventory";
 import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
-import { toLocalDatetimeInput } from "@/utils/formatters";
+import { toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
 type AdjType = "increase" | "decrease" | "recount" | "zero_out";
@@ -45,7 +45,7 @@ export default function AdjustmentCreatePage() {
   const [quantity, setQuantity] = useState(0);
   const [unitCost, setUnitCost] = useState(0);
   const [countedQuantity, setCountedQuantity] = useState(0);
-  const [date, setDate] = useState(toLocalDatetimeInput());
+  const [date, setDate] = useState(toLocalDateInput());
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -118,7 +118,7 @@ export default function AdjustmentCreatePage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
-              <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} />
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
 
             {(adjType === "increase" || adjType === "decrease") && (

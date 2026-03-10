@@ -10,6 +10,8 @@ Schemas especializados por tipo de operacion:
 - CapitalInjectionCreate: Aporte de capital
 - CapitalReturnCreate: Retiro de capital
 - CommissionPaymentCreate: Pago de comision
+- ProvisionDepositCreate: Deposito a provision
+- ProvisionExpenseCreate: Gasto desde provision
 """
 from datetime import datetime
 from decimal import Decimal
@@ -118,6 +120,28 @@ class CommissionPaymentCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class ProvisionDepositCreate(BaseModel):
+    """Deposito a provision — account(-), provision.balance(-)."""
+    provision_id: UUID = Field(..., description="ID de la provision (is_provision=True)")
+    amount: Decimal = Field(..., gt=0, description="Monto a depositar")
+    account_id: UUID = Field(..., description="Cuenta de donde sale el dinero")
+    date: datetime = Field(..., description="Fecha del deposito")
+    description: Optional[str] = Field(None, max_length=500)
+    reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+
+class ProvisionExpenseCreate(BaseModel):
+    """Gasto desde provision — provision.balance(+), NO afecta cuentas de dinero."""
+    provision_id: UUID = Field(..., description="ID de la provision (is_provision=True)")
+    amount: Decimal = Field(..., gt=0, description="Monto del gasto")
+    expense_category_id: UUID = Field(..., description="Categoria del gasto")
+    date: datetime = Field(..., description="Fecha del gasto")
+    description: str = Field(..., min_length=1, max_length=500, description="Descripcion del gasto")
+    reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Schema de anulacion
 # ---------------------------------------------------------------------------
@@ -141,8 +165,8 @@ class MoneyMovementResponse(BaseModel):
     amount: float
     description: str
 
-    # Cuenta
-    account_id: UUID
+    # Cuenta (None para provision_expense)
+    account_id: Optional[UUID] = None
     account_name: Optional[str] = None
 
     # Relaciones opcionales
@@ -176,6 +200,16 @@ class MoneyMovementResponse(BaseModel):
     @field_serializer('amount')
     def serialize_amount(self, value: Decimal) -> float:
         return float(value)
+
+
+class AnnulMovementResponse(MoneyMovementResponse):
+    """Respuesta de anulacion con posibles warnings."""
+    warnings: list[str] = []
+
+
+class MoneyMovementWithBalance(MoneyMovementResponse):
+    """Movimiento con saldo acumulado para estado de cuenta."""
+    balance_after: Optional[float] = None
 
 
 class MoneyMovementSummary(BaseModel):

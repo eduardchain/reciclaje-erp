@@ -918,3 +918,412 @@ class TestSequentialNumbering:
             numbers.append(resp.json()["movement_number"])
 
         assert numbers == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Fixtures para provisiones
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def test_provision(db_session: Session, test_organization) -> ThirdParty:
+    """Provision con fondos disponibles ($500,000)."""
+    tp = ThirdParty(
+        name="Provision Mantenimiento",
+        is_provision=True,
+        provision_type="maintenance",
+        current_balance=Decimal("-500000.00"),  # negativo = fondos disponibles
+        organization_id=test_organization.id,
+    )
+    db_session.add(tp)
+    db_session.commit()
+    db_session.refresh(tp)
+    return tp
+
+
+@pytest.fixture
+def test_provision_empty(db_session: Session, test_organization) -> ThirdParty:
+    """Provision sin fondos (balance 0)."""
+    tp = ThirdParty(
+        name="Provision Vacia",
+        is_provision=True,
+        provision_type="other",
+        current_balance=Decimal("0.00"),
+        organization_id=test_organization.id,
+    )
+    db_session.add(tp)
+    db_session.commit()
+    db_session.refresh(tp)
+    return tp
+
+
+@pytest.fixture
+def test_provision_overspent(db_session: Session, test_organization) -> ThirdParty:
+    """Provision en sobregiro (balance > 0)."""
+    tp = ThirdParty(
+        name="Provision Sobregiro",
+        is_provision=True,
+        provision_type="other",
+        current_balance=Decimal("100000.00"),  # sobregiro
+        organization_id=test_organization.id,
+    )
+    db_session.add(tp)
+    db_session.commit()
+    db_session.refresh(tp)
+    return tp
+
+
+# ---------------------------------------------------------------------------
+# Tests: Provisiones
+# ---------------------------------------------------------------------------
+
+class TestProvisionDeposit:
+    """Tests para POST /api/v1/money-movements/provision-deposit."""
+
+    def test_provision_deposit(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_provision, db_session,
+    ):
+        """Deposito a provision — verifica saldos de cuenta y provision."""
+        payload = {
+            "provision_id": str(test_provision.id),
+            "amount": 200000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-01T10:00:00Z",
+            "description": "Aporte a provision mantenimiento",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/provision-deposit",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["movement_type"] == "provision_deposit"
+        assert data["amount"] == 200000.0
+        assert data["third_party_name"] == "Provision Mantenimiento"
+
+        # Verificar saldos
+        db_session.refresh(test_account)
+        db_session.refresh(test_provision)
+        assert test_account.current_balance == Decimal("9800000.00")  # 10M - 200K
+        assert test_provision.current_balance == Decimal("-700000.00")  # -500K - 200K
+
+    def test_provision_deposit_insufficient_funds(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_provision,
+    ):
+        """Deposito que excede saldo de cuenta — 400."""
+        payload = {
+            "provision_id": str(test_provision.id),
+            "amount": 99000000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-01T10:00:00Z",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/provision-deposit",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "Fondos insuficientes" in resp.json()["detail"]
+
+
+class TestProvisionExpense:
+    """Tests para POST /api/v1/money-movements/provision-expense."""
+
+    def test_provision_expense(
+        self, client: TestClient, org_headers: dict,
+        test_provision, test_expense_category, test_account, db_session,
+    ):
+        """Gasto desde provision — provision(+), cuenta sin cambio."""
+        initial_account_balance = test_account.current_balance
+        payload = {
+            "provision_id": str(test_provision.id),
+            "amount": 100000,
+            "expense_category_id": str(test_expense_category.id),
+            "date": "2026-03-02T10:00:00Z",
+            "description": "Reparacion equipo",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/provision-expense",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["movement_type"] == "provision_expense"
+        assert data["account_id"] is None
+        assert data["amount"] == 100000.0
+
+        # Verificar saldos
+        db_session.refresh(test_provision)
+        db_session.refresh(test_account)
+        assert test_provision.current_balance == Decimal("-400000.00")  # -500K + 100K
+        assert test_account.current_balance == initial_account_balance  # Sin cambio
+
+    def test_provision_expense_insufficient_funds(
+        self, client: TestClient, org_headers: dict,
+        test_provision, test_expense_category,
+    ):
+        """Gasto que excede fondos de provision — 400."""
+        payload = {
+            "provision_id": str(test_provision.id),
+            "amount": 600000,  # provision tiene 500K
+            "expense_category_id": str(test_expense_category.id),
+            "date": "2026-03-02T10:00:00Z",
+            "description": "Gasto excesivo",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/provision-expense",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "Fondos insuficientes" in resp.json()["detail"]
+
+    def test_provision_expense_when_overspent(
+        self, client: TestClient, org_headers: dict,
+        test_provision_overspent, test_expense_category,
+    ):
+        """Gasto desde provision en sobregiro — 400."""
+        payload = {
+            "provision_id": str(test_provision_overspent.id),
+            "amount": 10000,
+            "expense_category_id": str(test_expense_category.id),
+            "date": "2026-03-02T10:00:00Z",
+            "description": "Intento gasto sobregiro",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/provision-expense",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "sobregiro" in resp.json()["detail"]
+
+
+class TestProvisionAnnulment:
+    """Tests para anulacion de movimientos de provision."""
+
+    def test_annul_provision_deposit(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_provision, db_session,
+    ):
+        """Anular deposito a provision — reversa ambos saldos."""
+        # Crear deposito
+        resp = client.post(
+            "/api/v1/money-movements/provision-deposit",
+            json={
+                "provision_id": str(test_provision.id),
+                "amount": 200000,
+                "account_id": str(test_account.id),
+                "date": "2026-03-01T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+        movement_id = resp.json()["id"]
+
+        # Anular
+        resp = client.post(
+            f"/api/v1/money-movements/{movement_id}/annul",
+            json={"reason": "Error en monto"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "annulled"
+
+        # Saldos vuelven al original
+        db_session.refresh(test_account)
+        db_session.refresh(test_provision)
+        assert test_account.current_balance == Decimal("10000000.00")
+        assert test_provision.current_balance == Decimal("-500000.00")
+
+    def test_annul_provision_expense(
+        self, client: TestClient, org_headers: dict,
+        test_provision, test_expense_category, test_account, db_session,
+    ):
+        """Anular gasto de provision — reversa solo provision."""
+        initial_account = test_account.current_balance
+
+        # Crear gasto
+        resp = client.post(
+            "/api/v1/money-movements/provision-expense",
+            json={
+                "provision_id": str(test_provision.id),
+                "amount": 100000,
+                "expense_category_id": str(test_expense_category.id),
+                "date": "2026-03-02T10:00:00Z",
+                "description": "Gasto a anular",
+            },
+            headers=org_headers,
+        )
+        movement_id = resp.json()["id"]
+
+        # Anular
+        resp = client.post(
+            f"/api/v1/money-movements/{movement_id}/annul",
+            json={"reason": "Error"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+
+        db_session.refresh(test_provision)
+        db_session.refresh(test_account)
+        assert test_provision.current_balance == Decimal("-500000.00")  # Vuelve al original
+        assert test_account.current_balance == initial_account  # Sin cambio
+
+
+# ---------------------------------------------------------------------------
+# Tests: Estado de Cuenta con saldo corrido
+# ---------------------------------------------------------------------------
+
+class TestAccountStatement:
+    """Tests para GET /api/v1/money-movements/third-party/{id} con balance."""
+
+    def test_third_party_movements_with_balance(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier, db_session,
+    ):
+        """Movimientos de tercero incluyen balance_after correcto."""
+        # Crear 3 pagos al proveedor
+        for amt in [500000, 300000, 200000]:
+            client.post(
+                "/api/v1/money-movements/supplier-payment",
+                json={
+                    "supplier_id": str(test_supplier.id),
+                    "amount": amt,
+                    "account_id": str(test_account.id),
+                    "date": "2026-03-01T10:00:00Z",
+                },
+                headers=org_headers,
+            )
+
+        resp = client.get(
+            f"/api/v1/money-movements/third-party/{test_supplier.id}",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+
+        # Ordenado DESC por defecto, asi que items[0] es el ultimo
+        # Pero balance se calcula ASC. Verificar que balance_after existe
+        for item in data["items"]:
+            assert "balance_after" in item
+            assert item["balance_after"] is not None
+
+        # Balance final = sum de pagos con direccion +1
+        # Proveedor empieza en 0 (balance calculado), pagos: +500K, +800K, +1M
+        balances = sorted(
+            [(i["movement_number"], i["balance_after"]) for i in data["items"]],
+            key=lambda x: x[0],
+        )
+        assert balances[0][1] == 500000.0   # primer pago
+        assert balances[1][1] == 800000.0   # +300K
+        assert balances[2][1] == 1000000.0  # +200K
+
+    def test_balance_with_date_filter_opening_balance(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier, db_session,
+    ):
+        """Con date_from, opening_balance refleja movimientos anteriores."""
+        # Pago en febrero
+        client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json={
+                "supplier_id": str(test_supplier.id),
+                "amount": 500000,
+                "account_id": str(test_account.id),
+                "date": "2026-02-15T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+        # Pago en marzo
+        client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json={
+                "supplier_id": str(test_supplier.id),
+                "amount": 300000,
+                "account_id": str(test_account.id),
+                "date": "2026-03-05T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+
+        # Consultar solo marzo
+        resp = client.get(
+            f"/api/v1/money-movements/third-party/{test_supplier.id}",
+            params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1  # Solo el de marzo
+        assert data["opening_balance"] == 500000.0  # El de febrero como apertura
+        assert data["items"][0]["balance_after"] == 800000.0  # 500K + 300K
+
+
+# ---------------------------------------------------------------------------
+# Tests: Treasury Dashboard
+# ---------------------------------------------------------------------------
+
+class TestTreasuryDashboard:
+    """Tests para GET /api/v1/reports/treasury-dashboard."""
+
+    def test_treasury_dashboard_accounts_by_type(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_account2,
+    ):
+        """Dashboard muestra cuentas agrupadas por tipo."""
+        resp = client.get(
+            "/api/v1/reports/treasury-dashboard",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+
+        # test_account = cash, test_account2 = bank
+        assert len(data["cash_accounts"]) >= 1
+        assert len(data["bank_accounts"]) >= 1
+        assert data["total_cash"] >= 10000000.0
+        assert data["total_bank"] >= 5000000.0
+        assert data["total_all_accounts"] >= 15000000.0
+
+    def test_treasury_dashboard_provisions(
+        self, client: TestClient, org_headers: dict,
+        test_provision, test_account,
+    ):
+        """Dashboard incluye provisiones con fondos disponibles."""
+        resp = client.get(
+            "/api/v1/reports/treasury-dashboard",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert len(data["provisions"]) >= 1
+        prov = next(p for p in data["provisions"] if p["name"] == "Provision Mantenimiento")
+        assert prov["current_balance"] == -500000.0
+        assert prov["available_funds"] == 500000.0
+        assert data["total_provision_available"] >= 500000.0
+
+    def test_treasury_dashboard_recent_movements(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier,
+    ):
+        """Dashboard muestra ultimos movimientos."""
+        # Crear un movimiento
+        client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json={
+                "supplier_id": str(test_supplier.id),
+                "amount": 100000,
+                "account_id": str(test_account.id),
+                "date": "2026-03-09T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+
+        resp = client.get(
+            "/api/v1/reports/treasury-dashboard",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["recent_movements"]) >= 1
+        assert data["recent_movements"][0]["movement_type"] == "payment_to_supplier"

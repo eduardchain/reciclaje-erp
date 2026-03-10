@@ -42,6 +42,8 @@ export function useCreateMovement(type: string) {
     capital_injection: moneyMovementService.createCapitalInjection,
     capital_return: moneyMovementService.createCapitalReturn,
     commission_payment: moneyMovementService.createCommissionPayment,
+    provision_deposit: moneyMovementService.createProvisionDeposit,
+    provision_expense: moneyMovementService.createProvisionExpense,
   };
 
   return useMutation({
@@ -60,14 +62,26 @@ export function useCreateMovement(type: string) {
   });
 }
 
+export function useThirdPartyMovements(thirdPartyId: string, filters: { date_from?: string; date_to?: string } = {}) {
+  return useQuery({
+    queryKey: ["money-movements", "third-party", thirdPartyId, filters],
+    queryFn: () => moneyMovementService.getByThirdParty(thirdPartyId, filters),
+    enabled: !!thirdPartyId,
+  });
+}
+
 export function useAnnulMovement() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: AnnulMovementRequest }) =>
       moneyMovementService.annul(id, data),
-    onSuccess: () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onSuccess: (response: any) => {
       invalidateAfterTreasury(queryClient);
       toast.success("Movimiento anulado exitosamente");
+      if (response?.warnings?.length) {
+        response.warnings.forEach((w: string) => toast.warning(w));
+      }
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al anular el movimiento"));

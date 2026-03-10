@@ -28,6 +28,66 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             )
         )
     
+    # Mapeo de roles a columnas booleanas
+    ROLE_COLUMN_MAP = {
+        "supplier": "is_supplier",
+        "customer": "is_customer",
+        "investor": "is_investor",
+        "provision": "is_provision",
+    }
+
+    def get_multi(
+        self,
+        db: Session,
+        organization_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None,
+        role: Optional[str] = None,
+        sort_by: str = "name",
+        sort_order: str = "asc"
+    ) -> PaginatedResponse:
+        """Get third parties con filtro opcional por rol."""
+        from sqlalchemy import func
+
+        query = self._base_query(organization_id)
+
+        if role and role in self.ROLE_COLUMN_MAP:
+            col = getattr(self.model, self.ROLE_COLUMN_MAP[role])
+            query = query.where(col == True)
+
+        if is_active is not None:
+            query = query.where(self.model.is_active == is_active)
+
+        if search:
+            query = self._apply_search_filter(query, search)
+
+        count_query = select(func.count()).select_from(query.subquery())
+        total = db.execute(count_query).scalar_one()
+
+        sort_column = getattr(self.model, sort_by, self.model.name)
+        if sort_order.lower() == "desc":
+            query = query.order_by(sort_column.desc())
+        else:
+            query = query.order_by(sort_column.asc())
+
+        query = query.offset(skip).limit(limit)
+        result = db.execute(query)
+        items = result.scalars().all()
+
+        items_dict = [
+            {c.name: getattr(item, c.name) for c in item.__table__.columns}
+            for item in items
+        ]
+
+        return PaginatedResponse(
+            items=items_dict,
+            total=total,
+            skip=skip,
+            limit=limit
+        )
+
     def create(
         self,
         db: Session,

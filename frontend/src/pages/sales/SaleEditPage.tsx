@@ -16,7 +16,7 @@ import { useSale, useUpdateSale } from "@/hooks/useSales";
 import { inventoryService } from "@/services/inventory";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useCustomers, useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
-import { formatCurrency, formatWeight, utcToLocalDatetimeInput } from "@/utils/formatters";
+import { formatCurrency, formatWeight, utcToLocalDateInput, toLocalDateInput } from "@/utils/formatters";
 import type { SaleLineCreate, SaleCommissionCreate } from "@/types/sale";
 
 interface LineFormData extends SaleLineCreate {
@@ -96,7 +96,7 @@ export default function SaleEditPage() {
     if (sale && !initialized) {
       setCustomerId(sale.customer_id);
       setWarehouseId(sale.warehouse_id ?? "");
-      setDate(utcToLocalDatetimeInput(sale.date));
+      setDate(utcToLocalDateInput(sale.date));
       setVehiclePlate(sale.vehicle_plate ?? "");
       setInvoiceNumber(sale.invoice_number ?? "");
       setNotes(sale.notes ?? "");
@@ -147,7 +147,7 @@ export default function SaleEditPage() {
 
   const total = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
 
-  const isFutureDate = date ? new Date(date) > new Date() : false;
+  const isFutureDate = date ? date > toLocalDateInput() : false;
 
   const canSubmit =
     customerId &&
@@ -232,7 +232,7 @@ export default function SaleEditPage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
-              <Input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} className={isFutureDate ? "border-red-300" : ""} />
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={isFutureDate ? "border-red-300" : ""} />
               {isFutureDate && <p className="text-xs text-red-500 mt-0.5">La fecha no puede ser futura</p>}
             </div>
             <div>

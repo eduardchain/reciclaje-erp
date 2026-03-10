@@ -312,3 +312,56 @@ class ThirdPartyBalancesResponse(BaseModel):
     net_position: float
     suppliers: list[SupplierBalance]
     customers: list[CustomerBalance]
+
+
+# ---------------------------------------------------------------------------
+# Treasury Dashboard
+# ---------------------------------------------------------------------------
+
+class AccountSummary(BaseModel):
+    id: UUID
+    name: str
+    account_type: str
+    current_balance: float
+
+
+class ProvisionSummary(BaseModel):
+    id: UUID
+    name: str
+    provision_type: Optional[str] = None
+    current_balance: float
+    available_funds: float  # abs(balance) si negativo, 0 si positivo
+
+
+class RecentMovementItem(BaseModel):
+    id: UUID
+    movement_number: int
+    date: datetime
+    movement_type: str
+    amount: float
+    description: str
+    account_name: Optional[str] = None
+    third_party_name: Optional[str] = None
+
+
+class TreasuryDashboardResponse(BaseModel):
+    # Cuentas agrupadas por tipo
+    cash_accounts: list[AccountSummary]
+    bank_accounts: list[AccountSummary]
+    digital_accounts: list[AccountSummary]
+    total_cash: float
+    total_bank: float
+    total_digital: float
+    total_all_accounts: float
+    # CxC / CxP
+    total_receivable: float
+    total_payable: float
+    net_position: float
+    # Provisiones
+    provisions: list[ProvisionSummary]
+    total_provision_available: float
+    # Mes en curso (MTD)
+    mtd_income: float
+    mtd_expense: float
+    # Ultimos movimientos
+    recent_movements: list[RecentMovementItem]
