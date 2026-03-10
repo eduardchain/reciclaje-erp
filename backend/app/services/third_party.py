@@ -142,14 +142,14 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             HTTPException: 400 if has balance, 404 if not found
         """
         # Get third party
-        db_obj = self.get_or_404(db, id, organization_id, detail="Third party not found")
+        db_obj = self.get_or_404(db, id, organization_id, detail="Tercero no encontrado")
         
         # Validate zero balance
         if db_obj.current_balance != 0:
-            balance_type = "debt" if db_obj.current_balance < 0 else "credit"
+            balance_type = "deuda" if db_obj.current_balance < 0 else "credito"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot delete third party with outstanding {balance_type} balance ({db_obj.current_balance}). Settle balance first."
+                detail=f"No se puede eliminar el tercero con saldo pendiente de {balance_type} ({db_obj.current_balance}). Liquide el saldo primero."
             )
         
         # Soft delete
@@ -403,7 +403,7 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             db,
             third_party_id,
             organization_id,
-            detail="Third party not found"
+            detail="Tercero no encontrado"
         )
         
         # Update balance (negative balance = debt is allowed)

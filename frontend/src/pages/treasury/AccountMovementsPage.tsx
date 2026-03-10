@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, FileText } from "lucide-react";
+import { ArrowLeft, FileText, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,8 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { useAccountMovements } from "@/hooks/useMoneyMovements";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate } from "@/utils/formatters";
+import { exportAccountStatementPDF } from "@/utils/pdfExport";
+import { exportAccountStatementExcel } from "@/utils/excelExport";
 import { ROUTES } from "@/utils/constants";
 
 const MOVEMENT_TYPE_LABELS: Record<string, string> = {
@@ -77,12 +79,43 @@ export default function AccountMovementsPage() {
     return sum + (m.direction < 0 ? Number(m.amount) : 0);
   }, 0);
 
+  const canExport = !!accountId && movements.length > 0;
+
+  const buildExportData = () => ({
+    thirdPartyName: selectedAccount?.name ?? "",
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+    currentBalance: selectedAccount?.current_balance ?? 0,
+    totalDebit: totalInflow,
+    totalCredit: totalOutflow,
+    openingBalance: openingBalance ?? 0,
+    movements: movements.map((m) => ({
+      movement_number: m.movement_number,
+      date: m.date,
+      movement_type: m.movement_type,
+      typeLabel: MOVEMENT_TYPE_LABELS[m.movement_type] || m.movement_type,
+      description: m.description,
+      amount: Number(m.amount),
+      status: m.status,
+      balance_after: m.balance_after,
+      isDebit: m.direction > 0,
+    })),
+  });
+
   return (
     <div className="space-y-6">
       <PageHeader title="Movimientos de Cuenta" description="Historial de movimientos con saldo corrido por cuenta">
-        <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
-          <ArrowLeft className="h-4 w-4 mr-2" />Volver
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData())}>
+            <FileText className="h-4 w-4 mr-2" />PDF
+          </Button>
+          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())}>
+            <Download className="h-4 w-4 mr-2" />Excel
+          </Button>
+          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
+            <ArrowLeft className="h-4 w-4 mr-2" />Volver
+          </Button>
+        </div>
       </PageHeader>
 
       {/* Filtros */}

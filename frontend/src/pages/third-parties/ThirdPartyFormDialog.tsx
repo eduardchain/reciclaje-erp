@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useCreateThirdParty, useUpdateThirdParty } from "@/hooks/useCrudData";
 import type { ThirdPartyResponse } from "@/types/third-party";
 
@@ -91,7 +92,7 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
             <div className="flex items-center justify-between"><span className="text-sm">Provision</span><Switch checked={isProvision} onCheckedChange={setIsProvision} /></div>
           </div>
           {!editItem && (
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><Input type="number" value={initialBalance || ""} onChange={(e) => setInitialBalance(parseFloat(e.target.value) || 0)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><MoneyInput value={initialBalance} onChange={setInitialBalance} /></div>
           )}
         </div>
         <DialogFooter>

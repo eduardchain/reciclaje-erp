@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { useCreateAdjustment } from "@/hooks/useInventory";
 import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import { toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
@@ -124,21 +125,21 @@ export default function AdjustmentCreatePage() {
             {(adjType === "increase" || adjType === "decrease") && (
               <div>
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad *</Label>
-                <Input type="number" min={0} step="0.01" value={quantity || ""} onChange={(e) => setQuantity(parseFloat(e.target.value) || 0)} placeholder="0" />
+                <MoneyInput value={quantity} onChange={setQuantity} decimals={2} placeholder="0" />
               </div>
             )}
 
             {adjType === "increase" && (
               <div>
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Unitario *</Label>
-                <Input type="number" min={0} step="1" value={unitCost || ""} onChange={(e) => setUnitCost(parseFloat(e.target.value) || 0)} placeholder="0" />
+                <MoneyInput value={unitCost} onChange={setUnitCost} placeholder="0" />
               </div>
             )}
 
             {adjType === "recount" && (
               <div>
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad Contada *</Label>
-                <Input type="number" min={0} step="0.01" value={countedQuantity || ""} onChange={(e) => setCountedQuantity(parseFloat(e.target.value) || 0)} placeholder="0" />
+                <MoneyInput value={countedQuantity} onChange={setCountedQuantity} decimals={2} placeholder="0" />
               </div>
             )}
 

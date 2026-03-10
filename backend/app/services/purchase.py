@@ -117,12 +117,12 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if not supplier or supplier.organization_id != organization_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Supplier not found"
+                detail="Proveedor no encontrado"
             )
         if not supplier.is_supplier:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="ThirdParty is not a supplier"
+                detail="El tercero no es proveedor"
             )
 
         # Step 2b: Deteccion de duplicados (RN-COMP-02) - warning, no bloquea
@@ -168,7 +168,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             if not material or material.organization_id != organization_id:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Material {line_data.material_id} not found"
+                    detail=f"Material {line_data.material_id} no encontrado"
                 )
             
             # Validate warehouse (skip for double-entry)
@@ -176,13 +176,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 if not line_data.warehouse_id:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="warehouse_id is required for normal purchases"
+                        detail="warehouse_id es requerido para compras normales"
                     )
                 warehouse = db.get(Warehouse, line_data.warehouse_id)
                 if not warehouse or warehouse.organization_id != organization_id:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Warehouse {line_data.warehouse_id} not found"
+                        detail=f"Bodega {line_data.warehouse_id} no encontrada"
                     )
             
             # Calculate line total
@@ -286,19 +286,19 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if not purchase:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Purchase not found"
+                detail="Compra no encontrada"
             )
 
         if purchase.double_entry_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot liquidate purchase that belongs to a double-entry operation. Manage it through the double-entry instead."
+                detail="No se puede liquidar una compra de doble partida. Gestione desde la doble partida."
             )
 
         if purchase.status != "registered":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Purchase already {purchase.status}. Can only liquidate registered purchases."
+                detail=f"Compra ya esta {purchase.status}. Solo se pueden liquidar compras registradas."
             )
 
         # Step 2: Actualizar precios si se proporcionan line_updates
@@ -418,14 +418,14 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if not purchase:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Purchase not found"
+                detail="Compra no encontrada"
             )
         
         # Validate: Cannot cancel purchase that belongs to double-entry
         if purchase.double_entry_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot cancel purchase that belongs to a double-entry operation. Cancel the double-entry instead."
+                detail="No se puede cancelar una compra de doble partida. Cancele la doble partida."
             )
         
         if purchase.status == "cancelled":
@@ -460,7 +460,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 if material.current_stock < line.quantity:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Cannot cancel: insufficient stock for {material.code}. Current: {material.current_stock}, Required: {line.quantity}"
+                        detail=f"No se puede cancelar: stock insuficiente para {material.code}. Actual: {material.current_stock}, Requerido: {line.quantity}"
                     )
 
         # Step 3: Update status and audit
@@ -553,7 +553,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if not purchase:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Purchase not found"
+                detail="Compra no encontrada"
             )
 
         if purchase.status != "registered":
@@ -738,7 +738,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if not purchase:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Purchase not found"
+                detail="Compra no encontrada"
             )
         
         return purchase
@@ -918,14 +918,14 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if not purchase:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Purchase not found"
+                detail="Compra no encontrada"
             )
         
         # Validate: Cannot delete purchase that belongs to double-entry
         if purchase.double_entry_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot delete purchase that belongs to a double-entry operation. Cancel the double-entry instead."
+                detail="No se puede eliminar una compra de doble partida. Cancele la doble partida."
             )
         
         # Soft delete

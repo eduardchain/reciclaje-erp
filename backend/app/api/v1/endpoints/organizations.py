@@ -106,7 +106,7 @@ def get_organization_by_id(
     if not organization:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found or you are not a member",
+            detail="Organizacion no encontrada o no eres miembro",
         )
     
     # Get user's role
@@ -141,7 +141,7 @@ def update_organization_details(
     if not role:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found or you are not a member",
+            detail="Organizacion no encontrada o no eres miembro",
         )
     
     if role != "admin":
@@ -156,7 +156,7 @@ def update_organization_details(
         if not organization:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Organization not found",
+                detail="Organizacion no encontrada",
             )
         
         # Add member_role to response
@@ -193,7 +193,7 @@ def list_organization_members(
     if not role:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found or you are not a member",
+            detail="Organizacion no encontrada o no eres miembro",
         )
     
     members_list = get_organization_members(db, organization_id)
@@ -239,7 +239,7 @@ def add_organization_member(
     if not role:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found or you are not a member",
+            detail="Organizacion no encontrada o no eres miembro",
         )
     
     if role != "admin":
@@ -298,7 +298,7 @@ def update_organization_member_role(
     if not current_role:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found or you are not a member",
+            detail="Organizacion no encontrada o no eres miembro",
         )
     
     if current_role != "admin":
@@ -356,7 +356,7 @@ def remove_organization_member(
     if not current_role:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found or you are not a member",
+            detail="Organizacion no encontrada o no eres miembro",
         )
     
     if current_role != "admin":
@@ -397,7 +397,7 @@ def leave_organization(
     if not role:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found or you are not a member",
+            detail="Organizacion no encontrada o no eres miembro",
         )
     
     try:

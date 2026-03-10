@@ -98,7 +98,7 @@ def get_material_category(
         db=db,
         id=category_id,
         organization_id=org_id,
-        detail="Material category not found"
+        detail="Categoria de material no encontrada"
     )
 
 

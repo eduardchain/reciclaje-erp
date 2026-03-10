@@ -654,7 +654,7 @@ class TestDoubleEntryAPI:
 
         response = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
         assert response.status_code == 404
-        assert "supplier" in response.json()["detail"].lower()
+        assert "proveedor" in response.json()["detail"].lower()
 
     def test_create_double_entry_not_supplier_fails(
         self,
@@ -1103,7 +1103,7 @@ class TestDoubleEntryAPI:
             headers=org_headers,
         )
         assert response.status_code == 400
-        assert "already cancelled" in response.json()["detail"].lower()
+        assert "ya esta cancelada" in response.json()["detail"].lower()
 
     def test_cancel_with_commissions_reverts_balances(
         self,

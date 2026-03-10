@@ -407,7 +407,7 @@ async def get_sale(
     if not sale:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Sale not found",
+            detail="Venta no encontrada",
         )
     
     response_data = _enrich_sale_response(sale, db=db)

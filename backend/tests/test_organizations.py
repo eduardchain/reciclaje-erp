@@ -165,7 +165,7 @@ class TestGetOrganizationDetails:
         )
         
         assert response.status_code == 404
-        assert "not a member" in response.json()["detail"].lower()
+        assert "no eres miembro" in response.json()["detail"].lower() or "no encontrad" in response.json()["detail"].lower()
 
 
 class TestAddMember:

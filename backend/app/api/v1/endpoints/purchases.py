@@ -409,7 +409,7 @@ async def get_purchase(
     if not purchase:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Purchase not found",
+            detail="Compra no encontrada",
         )
     
     response_data = _enrich_purchase_response(purchase, db)

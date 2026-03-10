@@ -13,6 +13,7 @@ import { DataTable } from "@/components/shared/DataTable";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { useCreateMoneyAccount, useUpdateMoneyAccount } from "@/hooks/useCrudData";
 import { formatCurrency } from "@/utils/formatters";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import ConfigLayout from "./ConfigLayout";
 import { ROUTES } from "@/utils/constants";
 import type { MoneyAccountResponse, MoneyAccountType } from "@/types/money-account";
@@ -107,7 +108,7 @@ export default function MoneyAccountsPage() {
                 <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Numero de Cuenta</Label><Input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} /></div>
               </>
             )}
-            {!editItem && <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><Input type="number" value={initialBalance || ""} onChange={(e) => setInitialBalance(parseFloat(e.target.value) || 0)} /></div>}
+            {!editItem && <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><MoneyInput value={initialBalance} onChange={setInitialBalance} /></div>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>

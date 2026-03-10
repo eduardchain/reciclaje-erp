@@ -221,7 +221,7 @@ class TestGetThirdParty:
 
         # Assert
         assert response.status_code == 404
-        assert "not found" in response.json()["detail"].lower()
+        assert "no encontrad" in response.json()["detail"].lower()
 
     def test_get_third_party_different_org(self, client, auth_headers, test_supplier, test_organization2):
         """Test getting third party from different organization returns 404."""
@@ -498,7 +498,7 @@ class TestDeleteThirdParty:
 
         # Assert
         assert response.status_code == 400
-        assert "balance" in response.json()["detail"].lower()
+        assert "saldo pendiente" in response.json()["detail"].lower()
 
     def test_delete_third_party_with_zero_balance(self, client, org_headers, db_session, test_organization):
         """Test soft deleting third party with balance = 0."""

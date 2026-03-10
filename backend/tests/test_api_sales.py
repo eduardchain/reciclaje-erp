@@ -744,7 +744,7 @@ class TestCancelSale:
 
         # Assert
         assert response.status_code == 400
-        assert "cancelled" in response.json()["detail"].lower()
+        assert "cancelada" in response.json()["detail"].lower()
 
 
 class TestUpdateSale:

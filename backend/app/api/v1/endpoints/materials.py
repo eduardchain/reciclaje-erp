@@ -136,7 +136,7 @@ def get_material(
         db=db,
         id=material_id,
         organization_id=org_id,
-        detail="Material not found"
+        detail="Material no encontrado"
     )
 
 

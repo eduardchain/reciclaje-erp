@@ -9,6 +9,7 @@ import { DataTable } from "@/components/shared/DataTable";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { usePriceLists, useCreatePriceList } from "@/hooks/useCrudData";
 import { useMaterials } from "@/hooks/useMasterData";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import ConfigLayout from "./ConfigLayout";
 import type { PriceListResponse } from "@/types/config";
@@ -88,8 +89,8 @@ export default function PriceListsPage() {
           <DialogHeader><DialogTitle>Registrar Precio</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label><EntitySelect value={materialId} onChange={handleMaterialChange} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Seleccionar..." /></div>
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Compra</Label><Input type="number" min={0} step="1" value={purchasePrice || ""} onChange={(e) => setPurchasePrice(parseFloat(e.target.value) || 0)} /></div>
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Venta</Label><Input type="number" min={0} step="1" value={salePrice || ""} onChange={(e) => setSalePrice(parseFloat(e.target.value) || 0)} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Compra</Label><MoneyInput value={purchasePrice} onChange={setPurchasePrice} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Venta</Label><MoneyInput value={salePrice} onChange={setSalePrice} /></div>
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
           </div>
           <DialogFooter>

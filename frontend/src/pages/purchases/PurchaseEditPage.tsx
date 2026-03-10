@@ -13,6 +13,7 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { usePurchase, useUpdatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, utcToLocalDateInput } from "@/utils/formatters";
 import type { PurchaseLineCreate } from "@/types/purchase";
 
@@ -254,23 +255,18 @@ export default function PurchaseEditPage() {
               </div>
               <div className="col-span-2">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={line.quantity || ""}
-                  onChange={(e) => updateLine(line._key, "quantity", parseFloat(e.target.value) || 0)}
-                  placeholder="0.00"
+                <MoneyInput
+                  value={line.quantity}
+                  onChange={(v) => updateLine(line._key, "quantity", v)}
+                  decimals={2}
+                  placeholder="0,00"
                 />
               </div>
               <div className="col-span-2">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit. *</Label>}
-                <Input
-                  type="number"
-                  min={0}
-                  step="1"
-                  value={line.unit_price || ""}
-                  onChange={(e) => updateLine(line._key, "unit_price", parseFloat(e.target.value) || 0)}
+                <MoneyInput
+                  value={line.unit_price}
+                  onChange={(v) => updateLine(line._key, "unit_price", v)}
                   placeholder="0"
                 />
                 <PriceSuggestion

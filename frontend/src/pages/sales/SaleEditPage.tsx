@@ -16,6 +16,7 @@ import { useSale, useUpdateSale } from "@/hooks/useSales";
 import { inventoryService } from "@/services/inventory";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useCustomers, useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatWeight, utcToLocalDateInput, toLocalDateInput } from "@/utils/formatters";
 import type { SaleLineCreate, SaleCommissionCreate } from "@/types/sale";
 
@@ -281,13 +282,11 @@ export default function SaleEditPage() {
               </div>
               <div className="col-span-2">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={line.quantity || ""}
-                  onChange={(e) => updateLine(line._key, "quantity", parseFloat(e.target.value) || 0)}
-                  placeholder="0.00"
+                <MoneyInput
+                  value={line.quantity}
+                  onChange={(v) => updateLine(line._key, "quantity", v)}
+                  decimals={2}
+                  placeholder="0,00"
                 />
                 <WarehouseStockIndicator materialId={line.material_id} warehouseId={warehouseId} quantity={line.quantity} />
               </div>
@@ -297,12 +296,9 @@ export default function SaleEditPage() {
               </div>
               <div className="col-span-2">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio *</Label>}
-                <Input
-                  type="number"
-                  min={0}
-                  step="1"
-                  value={line.unit_price || ""}
-                  onChange={(e) => updateLine(line._key, "unit_price", parseFloat(e.target.value) || 0)}
+                <MoneyInput
+                  value={line.unit_price}
+                  onChange={(v) => updateLine(line._key, "unit_price", v)}
                   placeholder="0"
                 />
                 <PriceSuggestion

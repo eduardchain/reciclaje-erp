@@ -116,7 +116,7 @@ class TestGetMaterialCategory:
 
         # Assert
         assert response.status_code == 404
-        assert "not found" in response.json()["detail"].lower()
+        assert "no encontrad" in response.json()["detail"].lower()
 
     def test_get_category_different_org(self, client, auth_headers, test_category, test_organization2):
         """Test getting category from different organization returns 404."""

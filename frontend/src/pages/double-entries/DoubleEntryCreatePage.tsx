@@ -13,6 +13,7 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { useCreateDoubleEntry } from "@/hooks/useDoubleEntries";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, useCustomers, useMaterials } from "@/hooks/useMasterData";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { DoubleEntryLineCreate } from "@/types/double-entry";
@@ -188,14 +189,14 @@ export default function DoubleEntryCreatePage() {
                   />
                 </div>
                 <div className="col-span-2">
-                  <Input type="number" min={0} step="0.01" value={line.quantity || ""} onChange={(e) => updateLine(line._key, "quantity", parseFloat(e.target.value) || 0)} />
+                  <MoneyInput value={line.quantity} onChange={(v) => updateLine(line._key, "quantity", v)} decimals={2} />
                 </div>
                 <div className="col-span-2">
-                  <Input type="number" min={0} step="1" value={line.purchase_unit_price || ""} onChange={(e) => updateLine(line._key, "purchase_unit_price", parseFloat(e.target.value) || 0)} />
+                  <MoneyInput value={line.purchase_unit_price} onChange={(v) => updateLine(line._key, "purchase_unit_price", v)} />
                   <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "purchase")} onApply={(p) => updateLine(line._key, "purchase_unit_price", p)} />
                 </div>
                 <div className="col-span-2">
-                  <Input type="number" min={0} step="1" value={line.sale_unit_price || ""} onChange={(e) => updateLine(line._key, "sale_unit_price", parseFloat(e.target.value) || 0)} />
+                  <MoneyInput value={line.sale_unit_price} onChange={(v) => updateLine(line._key, "sale_unit_price", v)} />
                   <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "sale_unit_price", p)} />
                 </div>
                 <div className="col-span-2 text-right pt-2">

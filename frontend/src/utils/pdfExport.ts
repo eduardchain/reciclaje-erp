@@ -546,7 +546,7 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
   y += 10;
 
   // Tabla Header
-  const colX = { num: 14, date: 28, type: 58, desc: 118, debit: 152, credit: 174, balance: 196 };
+  const colX = { num: 14, date: 22, type: 44, desc: 84, debit: 148, credit: 172, balance: 196 };
   doc.setFillColor(245, 245, 245);
   doc.rect(14, y - 4, pageWidth - 28, 8, "F");
   doc.setFont("helvetica", "bold");
@@ -583,8 +583,8 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
 
     doc.text(String(m.movement_number), colX.num, y);
     doc.text(formatDate(m.date), colX.date, y);
-    doc.text(typeText.substring(0, 32), colX.type, y);
-    doc.text((m.description || "-").substring(0, 16), colX.desc, y);
+    doc.text(typeText.substring(0, 22), colX.type, y);
+    doc.text((m.description || "-").substring(0, 30), colX.desc, y);
 
     if (m.isDebit) {
       doc.text(formatCurrency(m.amount), colX.debit, y, { align: "right" });

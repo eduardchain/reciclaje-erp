@@ -18,6 +18,13 @@ import { useDateFilter } from "@/stores/dateFilterStore";
 import { formatCurrency, formatWeight, formatPercentage } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
+const ALERT_TYPE_LABELS: Record<string, string> = {
+  pending_purchases: "Compras Pendientes",
+  pending_sales: "Ventas Pendientes",
+  negative_stock: "Stock Negativo",
+  high_receivable: "Cuentas por Cobrar Altas",
+};
+
 export default function Dashboard() {
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
   const { data, isLoading } = useDashboard({ date_from: dateFrom, date_to: dateTo });
@@ -229,7 +236,7 @@ export default function Dashboard() {
                       <p className={`font-semibold ${
                         alert.severity === "warning" ? "text-amber-800" : "text-sky-800"
                       }`}>
-                        {alert.alert_type}
+                        {ALERT_TYPE_LABELS[alert.alert_type] || alert.alert_type}
                         {alert.count != null && ` (${alert.count})`}
                       </p>
                       <p className={`mt-0.5 ${

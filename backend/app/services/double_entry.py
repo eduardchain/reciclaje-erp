@@ -67,22 +67,22 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         if obj_in.supplier_id == obj_in.customer_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Supplier and customer cannot be the same third party"
+                detail="El proveedor y el cliente no pueden ser el mismo tercero"
             )
 
         # Step 3: Validar proveedor
         supplier = db.get(ThirdParty, obj_in.supplier_id)
         if not supplier or supplier.organization_id != organization_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supplier not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado")
         if not supplier.is_supplier:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ThirdParty is not marked as supplier")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no esta marcado como proveedor")
 
         # Step 4: Validar cliente
         customer = db.get(ThirdParty, obj_in.customer_id)
         if not customer or customer.organization_id != organization_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
         if not customer.is_customer:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ThirdParty is not marked as customer")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no esta marcado como cliente")
 
         # Step 5: Validar materiales y calcular totales
         materials = {}
@@ -94,7 +94,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             if not material or material.organization_id != organization_id:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Material {line_data.material_id} not found"
+                    detail=f"Material {line_data.material_id} no encontrado"
                 )
             materials[line_data.material_id] = material
 
@@ -184,7 +184,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                 if not recipient or recipient.organization_id != organization_id:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Commission recipient {comm_data.third_party_id} not found"
+                        detail=f"Receptor de comision {comm_data.third_party_id} no encontrado"
                     )
                 commission_amount = self._calculate_commission(
                     comm_data.commission_type, comm_data.commission_value, sale_total
@@ -265,13 +265,13 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         if not double_entry:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Double-entry operation not found"
+                detail="Doble partida no encontrada"
             )
 
         if double_entry.status == "cancelled":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Double-entry operation is already cancelled"
+                detail="La doble partida ya esta cancelada"
             )
 
         purchase = db.get(Purchase, double_entry.purchase_id)
@@ -280,7 +280,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         if not purchase or not sale:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Linked purchase or sale not found"
+                detail="Compra o venta vinculada no encontrada"
             )
 
         print(f"❌ Cancelling double-entry #{double_entry.double_entry_number}")
@@ -449,7 +449,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         if not double_entry or double_entry.organization_id != organization_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Double-entry operation not found"
+                detail="Doble partida no encontrada"
             )
 
         if obj_in.notes is not None:

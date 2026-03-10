@@ -77,7 +77,7 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Material with code '{obj_in.code}' already exists in this organization"
+                detail=f"Ya existe un material con codigo '{obj_in.code}' en esta organizacion"
             )
         
         # Validate business unit belongs to organization
@@ -89,7 +89,7 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
         if not business_unit:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Business unit does not belong to this organization"
+                detail="La unidad de negocio no pertenece a esta organizacion"
             )
         
         # Validate category belongs to organization
@@ -101,7 +101,7 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
         if not category:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Material category does not belong to this organization"
+                detail="La categoria de material no pertenece a esta organizacion"
             )
         
         # Create material with default values
@@ -145,7 +145,7 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
             HTTPException: 400 if validations fail, 404 if not found
         """
         # Get existing material
-        db_obj = self.get_or_404(db, id, organization_id, detail="Material not found")
+        db_obj = self.get_or_404(db, id, organization_id, detail="Material no encontrado")
         
         # Get update data
         update_data = obj_in.model_dump(exclude_unset=True)
@@ -156,7 +156,7 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
             if existing:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Material with code '{update_data['code']}' already exists in this organization"
+                    detail=f"Ya existe un material con codigo '{update_data['code']}' en esta organizacion"
                 )
         
         # Validate business unit if being updated
@@ -169,7 +169,7 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
             if not business_unit:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Business unit does not belong to this organization"
+                    detail="La unidad de negocio no pertenece a esta organizacion"
                 )
         
         # Validate category if being updated
@@ -182,7 +182,7 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
             if not category:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Material category does not belong to this organization"
+                    detail="La categoria de material no pertenece a esta organizacion"
                 )
         
         # Update attributes
@@ -218,13 +218,13 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
             HTTPException: 400 if has stock, 404 if not found
         """
         # Get material
-        db_obj = self.get_or_404(db, id, organization_id, detail="Material not found")
+        db_obj = self.get_or_404(db, id, organization_id, detail="Material no encontrado")
         
         # Validate no stock
         if db_obj.current_stock > 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot delete material with current stock ({db_obj.current_stock} {db_obj.default_unit}). Adjust stock to zero first."
+                detail=f"No se puede eliminar el material con stock actual ({db_obj.current_stock} {db_obj.default_unit}). Ajuste el stock a cero primero."
             )
         
         # Soft delete
@@ -312,7 +312,7 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
             db, 
             material_id, 
             organization_id,
-            detail="Material not found"
+            detail="Material no encontrado"
         )
         
         # Convert to Decimal for calculation
@@ -326,7 +326,7 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
         if new_stock < 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Insufficient stock. Current: {material.current_stock}, Requested: {abs(quantity_delta)}"
+                detail=f"Stock insuficiente. Actual: {material.current_stock}, Solicitado: {abs(quantity_delta)}"
             )
         
         # Update stock

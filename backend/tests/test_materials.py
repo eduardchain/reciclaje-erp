@@ -109,7 +109,7 @@ class TestCreateMaterial:
 
         # Assert
         assert response.status_code == 400
-        assert "already exists" in response.json()["detail"].lower()
+        assert "ya existe" in response.json()["detail"].lower()
 
     def test_create_material_invalid_business_unit(self, client, org_headers, test_category):
         """Test creating material with business unit from different org returns 400."""
@@ -128,7 +128,7 @@ class TestCreateMaterial:
 
         # Assert
         assert response.status_code == 400
-        assert "business unit" in response.json()["detail"].lower()
+        assert "unidad de negocio" in response.json()["detail"].lower()
 
     def test_create_material_invalid_category(self, client, org_headers, test_business_unit):
         """Test creating material with category from different org returns 400."""
@@ -147,7 +147,7 @@ class TestCreateMaterial:
 
         # Assert
         assert response.status_code == 400
-        assert "category" in response.json()["detail"].lower()
+        assert "categoria" in response.json()["detail"].lower()
 
     def test_create_material_without_auth(self, client, test_category, test_business_unit):
         """Test creating material without authentication returns 401."""
@@ -194,7 +194,7 @@ class TestGetMaterial:
 
         # Assert
         assert response.status_code == 404
-        assert "not found" in response.json()["detail"].lower()
+        assert "no encontrad" in response.json()["detail"].lower()
 
     def test_get_material_different_org(self, client, auth_headers, test_material, test_organization2):
         """Test getting material from different organization returns 404."""
@@ -462,7 +462,7 @@ class TestUpdateMaterial:
 
         # Assert
         assert response.status_code == 400
-        assert "already exists" in response.json()["detail"].lower()
+        assert "ya existe" in response.json()["detail"].lower()
 
     def test_update_material_not_found(self, client, org_headers):
         """Test updating non-existent material returns 404."""
@@ -588,7 +588,7 @@ class TestUpdateMaterialStock:
 
         # Assert
         assert response.status_code == 400
-        assert "insufficient stock" in response.json()["detail"].lower()
+        assert "stock insuficiente" in response.json()["detail"].lower()
 
     def test_update_stock_to_exactly_zero(self, client, org_headers, test_material, db_session):
         """Test updating stock to exactly zero."""

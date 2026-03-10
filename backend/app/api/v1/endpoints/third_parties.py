@@ -182,7 +182,7 @@ def get_third_party(
         db=db,
         id=third_party_id,
         organization_id=org_id,
-        detail="Third party not found"
+        detail="Tercero no encontrado"
     )
 
 

@@ -47,7 +47,7 @@ class TestRequiredOrgContext:
             )
         
         assert exc_info.value.status_code == 403
-        assert "not a member" in exc_info.value.detail.lower()
+        assert "no eres miembro" in exc_info.value.detail.lower()
     
     @pytest.mark.asyncio
     async def test_returns_correct_role(
@@ -137,7 +137,7 @@ class TestOptionalOrgContext:
             )
         
         assert exc_info.value.status_code == 403
-        assert "not a member" in exc_info.value.detail.lower()
+        assert "no eres miembro" in exc_info.value.detail.lower()
     
     @pytest.mark.asyncio
     async def test_returns_context_when_valid_header(

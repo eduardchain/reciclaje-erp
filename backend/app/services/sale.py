@@ -100,12 +100,12 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         if not customer or customer.organization_id != organization_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Customer not found"
+                detail="Cliente no encontrado"
             )
         if not customer.is_customer:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="ThirdParty is not marked as customer"
+                detail="El tercero no esta marcado como cliente"
             )
         
         # Step 3: Validate warehouse (skip for double-entry)
@@ -113,13 +113,13 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             if not obj_in.warehouse_id:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="warehouse_id is required for normal sales"
+                    detail="warehouse_id es requerido para ventas normales"
                 )
             warehouse = db.get(Warehouse, obj_in.warehouse_id)
             if not warehouse or warehouse.organization_id != organization_id:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Warehouse not found"
+                    detail="Bodega no encontrada"
                 )
         
         # Step 4: Validate stock availability for all materials BEFORE creating anything (skip for double-entry)
@@ -131,7 +131,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 if not material or material.organization_id != organization_id:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Material {line_data.material_id} not found"
+                        detail=f"Material {line_data.material_id} no encontrado"
                     )
 
                 # Validacion por bodega (stock especifico en la bodega de la venta)
@@ -184,7 +184,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             if not material or material.organization_id != organization_id:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Material {line_data.material_id} not found"
+                    detail=f"Material {line_data.material_id} no encontrado"
                 )
             
             # Calculate line total
@@ -283,21 +283,21 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         if not sale or sale.organization_id != organization_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Sale not found"
+                detail="Venta no encontrada"
             )
 
         # Validate: Cannot liquidate sale that belongs to double-entry
         if sale.double_entry_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot liquidate sale that belongs to a double-entry operation. Manage it through the double-entry instead."
+                detail="No se puede liquidar una venta de doble partida. Gestione desde la doble partida."
             )
 
         # Step 2: Validate status
         if sale.status != "registered":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot liquidate sale with status '{sale.status}'. Must be 'registered'"
+                detail=f"No se puede liquidar venta con estado '{sale.status}'. Debe estar 'registered'"
             )
 
         # Step 3: Si hay line_updates, actualizar precios de las lineas
@@ -388,21 +388,21 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         if not sale or sale.organization_id != organization_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Sale not found"
+                detail="Venta no encontrada"
             )
 
         # Validate: Cannot cancel sale that belongs to double-entry
         if sale.double_entry_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot cancel sale that belongs to a double-entry operation. Cancel the double-entry instead."
+                detail="No se puede cancelar una venta de doble partida. Cancele la doble partida."
             )
 
         # Step 2: Validate status
         if sale.status == "cancelled":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Sale is already cancelled"
+                detail="La venta ya esta cancelada"
             )
 
         was_liquidated = sale.status == "liquidated"
@@ -486,7 +486,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         if not sale:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Sale not found"
+                detail="Venta no encontrada"
             )
 
         if sale.status != "registered":
@@ -925,7 +925,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             if not recipient or recipient.organization_id != organization_id:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Commission recipient {comm_data.third_party_id} not found"
+                    detail=f"Receptor de comision {comm_data.third_party_id} no encontrado"
                 )
             
             # Calculate commission amount
@@ -998,14 +998,14 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         if not sale:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Sale not found"
+                detail="Venta no encontrada"
             )
         
         # Validate: Cannot delete sale that belongs to double-entry
         if sale.double_entry_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot delete sale that belongs to a double-entry operation. Cancel the double-entry instead."
+                detail="No se puede eliminar una venta de doble partida. Cancele la doble partida."
             )
         
         # Soft delete

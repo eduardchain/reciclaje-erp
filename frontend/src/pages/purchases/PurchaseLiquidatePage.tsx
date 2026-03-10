@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,6 +9,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { usePurchase, useLiquidatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 
 interface LiquidationLine {
@@ -180,12 +180,9 @@ export default function PurchaseLiquidatePage() {
               </div>
               <div className="col-span-3">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit. *</Label>}
-                <Input
-                  type="number"
-                  min={0}
-                  step="1"
-                  value={line.unit_price || ""}
-                  onChange={(e) => updatePrice(line.line_id, parseFloat(e.target.value) || 0)}
+                <MoneyInput
+                  value={line.unit_price}
+                  onChange={(v) => updatePrice(line.line_id, v)}
                   placeholder="0"
                   className={line.unit_price <= 0 ? "border-red-300" : ""}
                 />

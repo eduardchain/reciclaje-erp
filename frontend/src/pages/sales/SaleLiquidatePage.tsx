@@ -13,6 +13,7 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { useSale, useLiquidateSale } from "@/hooks/useSales";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useMaterials, useCustomers, useSuppliers } from "@/hooks/useMasterData";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import type { SaleCommissionCreate } from "@/types/sale";
 
@@ -242,12 +243,9 @@ export default function SaleLiquidatePage() {
                 </div>
                 <div className="col-span-2">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio/kg *</Label>}
-                  <Input
-                    type="number"
-                    min={0}
-                    step="1"
-                    value={line.unit_price || ""}
-                    onChange={(e) => updatePrice(line.line_id, parseFloat(e.target.value) || 0)}
+                  <MoneyInput
+                    value={line.unit_price}
+                    onChange={(v) => updatePrice(line.line_id, v)}
                     placeholder="0"
                     className={line.unit_price <= 0 ? "border-red-300" : ""}
                   />

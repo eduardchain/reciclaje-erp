@@ -154,7 +154,7 @@ async def get_required_org_context(
     except (ValueError, AttributeError):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid organization ID format. Must be a valid UUID.",
+            detail="Formato de ID de organizacion invalido. Debe ser un UUID valido.",
         )
     
     # Get user's role in organization
@@ -165,7 +165,7 @@ async def get_required_org_context(
     if not role:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not a member of this organization",
+            detail="No eres miembro de esta organizacion",
         )
     
     return {
@@ -215,7 +215,7 @@ async def get_optional_org_context(
     except (ValueError, AttributeError):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid organization ID format. Must be a valid UUID.",
+            detail="Formato de ID de organizacion invalido. Debe ser un UUID valido.",
         )
     
     # Get user's role in organization
@@ -224,7 +224,7 @@ async def get_optional_org_context(
     if not role:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not a member of this organization",
+            detail="No eres miembro de esta organizacion",
         )
     
     return {

@@ -246,7 +246,7 @@ async def get_double_entry(
     if not double_entry_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Double-entry operation not found",
+            detail="Doble partida no encontrada",
         )
     
     response_data = _enrich_double_entry_response(double_entry_obj)

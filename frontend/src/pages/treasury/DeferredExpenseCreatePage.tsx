@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { useCreateDeferredExpense } from "@/hooks/useDeferredExpenses";
 import { useMoneyAccounts, useExpenseCategories, useProvisions } from "@/hooks/useMasterData";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { DeferredExpenseType } from "@/types/deferred-expense";
@@ -91,14 +92,7 @@ export default function DeferredExpenseCreatePage() {
 
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Monto Total *</Label>
-              <Input
-                type="number"
-                min={0}
-                step="1"
-                value={totalAmount || ""}
-                onChange={(e) => setTotalAmount(parseFloat(e.target.value) || 0)}
-                placeholder="0"
-              />
+              <MoneyInput value={totalAmount} onChange={setTotalAmount} placeholder="0" />
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Meses (cuotas) *</Label>

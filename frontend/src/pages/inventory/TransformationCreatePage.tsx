@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
+import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useCreateTransformation } from "@/hooks/useInventory";
 import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { toLocalDateInput } from "@/utils/formatters";
@@ -101,7 +102,7 @@ export default function TransformationCreatePage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad *</Label>
-              <Input type="number" min={0} step="0.01" value={sourceQuantity || ""} onChange={(e) => setSourceQuantity(parseFloat(e.target.value) || 0)} />
+              <MoneyInput value={sourceQuantity} onChange={setSourceQuantity} decimals={2} />
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
@@ -141,12 +142,12 @@ export default function TransformationCreatePage() {
               </div>
               <div className="col-span-2">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad</Label>}
-                <Input type="number" min={0} step="0.01" value={line.quantity || ""} onChange={(e) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, quantity: parseFloat(e.target.value) || 0 } : l))} />
+                <MoneyInput value={line.quantity} onChange={(v) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, quantity: v } : l))} decimals={2} />
               </div>
               {costDistribution === "manual" && (
                 <div className="col-span-2">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Unit.</Label>}
-                  <Input type="number" min={0} step="1" value={line.unit_cost ?? ""} onChange={(e) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, unit_cost: parseFloat(e.target.value) || 0 } : l))} />
+                  <MoneyInput value={line.unit_cost ?? 0} onChange={(v) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, unit_cost: v } : l))} />
                 </div>
               )}
               <div className={costDistribution === "manual" ? "col-span-2" : "col-span-4"}>
@@ -166,7 +167,7 @@ export default function TransformationCreatePage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Merma/Desperdicio</Label>
-              <Input type="number" min={0} step="0.01" value={wasteQuantity || ""} onChange={(e) => setWasteQuantity(parseFloat(e.target.value) || 0)} />
+              <MoneyInput value={wasteQuantity} onChange={setWasteQuantity} decimals={2} />
             </div>
             <div className="text-sm">
               <p className="text-slate-500">Origen: <span className="font-medium">{sourceQuantity.toFixed(2)}</span></p>
