@@ -1625,3 +1625,136 @@ class TestEvidence:
             headers=org_headers,
         )
         assert resp.content == b"file2content"
+
+
+# ---------------------------------------------------------------------------
+# Tests de estado de cuenta de cuentas (GET /account/{id})
+# ---------------------------------------------------------------------------
+
+class TestAccountMovements:
+    """Tests para estado de cuenta de cuentas de dinero con balance corrido."""
+
+    def test_account_movements_with_balance(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier, test_customer,
+    ):
+        """Balance corrido: pago (-), cobro (+)."""
+        # Pago a proveedor: account -300K
+        client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json={
+                "supplier_id": str(test_supplier.id),
+                "amount": 300000,
+                "account_id": str(test_account.id),
+                "date": "2026-03-01T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+        # Cobro a cliente: account +500K
+        client.post(
+            "/api/v1/money-movements/customer-collection",
+            json={
+                "customer_id": str(test_customer.id),
+                "amount": 500000,
+                "account_id": str(test_account.id),
+                "date": "2026-03-02T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+
+        resp = client.get(
+            f"/api/v1/money-movements/account/{test_account.id}",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        items = data["items"]
+        assert len(items) >= 2
+
+        # El pago debe tener direction -1 y el cobro +1
+        payment = next(i for i in items if i["movement_type"] == "payment_to_supplier")
+        collection = next(i for i in items if i["movement_type"] == "collection_from_client")
+        assert payment["direction"] == -1
+        assert collection["direction"] == 1
+
+        # Balance corrido: cobro viene despues, balance sube respecto al pago
+        assert collection["balance_after"] > payment["balance_after"]
+        # Balance debe reflejar el saldo inicial de la cuenta (10M)
+        assert payment["balance_after"] == 10000000 - 300000  # 10M - pago 300k
+        assert collection["balance_after"] == 10000000 - 300000 + 500000  # + cobro 500k
+
+    def test_account_movements_date_filter(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier,
+    ):
+        """Filtro de fecha con opening_balance."""
+        # Pago viejo
+        client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json={
+                "supplier_id": str(test_supplier.id),
+                "amount": 100000,
+                "account_id": str(test_account.id),
+                "date": "2026-01-01T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+        # Pago reciente
+        client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json={
+                "supplier_id": str(test_supplier.id),
+                "amount": 200000,
+                "account_id": str(test_account.id),
+                "date": "2026-03-05T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+
+        resp = client.get(
+            f"/api/v1/money-movements/account/{test_account.id}",
+            params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # Solo el reciente debe estar en items
+        assert data["opening_balance"] is not None
+        # El pago viejo afecta opening_balance pero no aparece
+        assert any(float(i["amount"]) == 200000 for i in data["items"])
+
+    def test_account_movements_annulled_visible(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier, db_session,
+    ):
+        """Movimiento anulado aparece pero no afecta balance."""
+        # Crear pago
+        resp = client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json={
+                "supplier_id": str(test_supplier.id),
+                "amount": 400000,
+                "account_id": str(test_account.id),
+                "date": "2026-03-10T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+        mid = resp.json()["id"]
+
+        # Anular
+        client.post(
+            f"/api/v1/money-movements/{mid}/annul",
+            json={"reason": "Error"},
+            headers=org_headers,
+        )
+
+        resp = client.get(
+            f"/api/v1/money-movements/account/{test_account.id}",
+            headers=org_headers,
+        )
+        data = resp.json()
+        annulled = [i for i in data["items"] if i["id"] == mid]
+        assert len(annulled) == 1
+        assert annulled[0]["status"] == "annulled"
+        # Balance no cambia por movimiento anulado (sigue en saldo base = 10M)
+        assert annulled[0]["balance_after"] == 10000000.0

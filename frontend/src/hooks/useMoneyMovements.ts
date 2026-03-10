@@ -64,6 +64,15 @@ export function useCreateMovement(type: string) {
   });
 }
 
+export function useAccountMovements(accountId: string, filters: { date_from?: string; date_to?: string } = {}) {
+  return useQuery({
+    queryKey: ["money-movements", "account", accountId, filters],
+    queryFn: () => moneyMovementService.getByAccount(accountId, filters),
+    enabled: !!accountId,
+    staleTime: 0,
+  });
+}
+
 export function useThirdPartyMovements(thirdPartyId: string, filters: { date_from?: string; date_to?: string } = {}) {
   return useQuery({
     queryKey: ["money-movements", "third-party", thirdPartyId, filters],

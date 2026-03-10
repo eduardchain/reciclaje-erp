@@ -24,6 +24,7 @@ export const ROUTES = {
   TREASURY_PROVISIONS: "/treasury/provisions",
   TREASURY_ACCOUNT_STATEMENT: "/treasury/account-statement",
   TREASURY_DASHBOARD: "/treasury/dashboard",
+  TREASURY_ACCOUNT_MOVEMENTS: "/treasury/account-movements",
 
   // Inventario
   INVENTORY: "/inventory",

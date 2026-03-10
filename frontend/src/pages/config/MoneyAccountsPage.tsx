@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus } from "lucide-react";
+import { Plus, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,20 +14,28 @@ import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { useCreateMoneyAccount, useUpdateMoneyAccount } from "@/hooks/useCrudData";
 import { formatCurrency } from "@/utils/formatters";
 import ConfigLayout from "./ConfigLayout";
+import { ROUTES } from "@/utils/constants";
 import type { MoneyAccountResponse, MoneyAccountType } from "@/types/money-account";
 
 const typeLabels: Record<MoneyAccountType, string> = { cash: "Efectivo", bank: "Banco", digital: "Digital" };
 const typeColors: Record<MoneyAccountType, string> = { cash: "bg-emerald-100 text-emerald-800", bank: "bg-blue-100 text-blue-800", digital: "bg-purple-100 text-purple-800" };
 
-const columns: ColumnDef<MoneyAccountResponse, unknown>[] = [
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getColumns = (onViewMovements: (id: string) => void): ColumnDef<MoneyAccountResponse, unknown>[] => [
   { accessorKey: "name", header: "Nombre", cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
   { accessorKey: "account_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.account_type]}>{typeLabels[row.original.account_type]}</Badge> },
   { accessorKey: "bank_name", header: "Banco", cell: ({ row }) => row.original.bank_name ?? "-" },
   { accessorKey: "account_number", header: "Numero", cell: ({ row }) => row.original.account_number ?? "-" },
   { accessorKey: "current_balance", header: "Saldo", enableSorting: true, cell: ({ row }) => <span className="font-medium">{formatCurrency(row.original.current_balance)}</span> },
+  { id: "actions", header: "", cell: ({ row }) => (
+    <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); onViewMovements(row.original.id); }}>
+      <FileText className="h-3 w-3 mr-1" />Movimientos
+    </Button>
+  )},
 ];
 
 export default function MoneyAccountsPage() {
+  const navigate = useNavigate();
   const { data, isLoading } = useMoneyAccounts();
   const create = useCreateMoneyAccount();
   const update = useUpdateMoneyAccount();
@@ -73,7 +82,7 @@ export default function MoneyAccountsPage() {
         <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Cuenta</Button>
       </div>
 
-      <DataTable columns={columns} data={filteredItems} loading={isLoading} pageCount={1} pageIndex={0} pageSize={100} onPageChange={() => {}}
+      <DataTable columns={getColumns((id) => navigate(`${ROUTES.TREASURY_ACCOUNT_MOVEMENTS}?account_id=${id}`))} data={filteredItems} loading={isLoading} pageCount={1} pageIndex={0} pageSize={100} onPageChange={() => {}}
         onRowClick={(row) => openDialog(row)} emptyTitle="Sin cuentas" emptyDescription="No hay cuentas de dinero." exportFilename="ecobalance_cuentas-dinero" />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

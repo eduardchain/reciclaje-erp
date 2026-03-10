@@ -25,6 +25,7 @@ import MovementDetailPage from "@/pages/treasury/MovementDetailPage";
 import ProvisionsPage from "@/pages/treasury/ProvisionsPage";
 import AccountStatementPage from "@/pages/treasury/AccountStatementPage";
 import TreasuryDashboardPage from "@/pages/treasury/TreasuryDashboardPage";
+import AccountMovementsPage from "@/pages/treasury/AccountMovementsPage";
 import StockPage from "@/pages/inventory/StockPage";
 import MovementHistoryPage from "@/pages/inventory/MovementHistoryPage";
 import AdjustmentsPage from "@/pages/inventory/AdjustmentsPage";
@@ -97,6 +98,7 @@ function App() {
               <Route path={ROUTES.TREASURY_PROVISIONS} element={<ProvisionsPage />} />
               <Route path={ROUTES.TREASURY_ACCOUNT_STATEMENT} element={<AccountStatementPage />} />
               <Route path={ROUTES.TREASURY_DASHBOARD} element={<TreasuryDashboardPage />} />
+              <Route path={ROUTES.TREASURY_ACCOUNT_MOVEMENTS} element={<AccountMovementsPage />} />
               <Route path="/treasury/:id" element={<MovementDetailPage />} />
               {/* Inventario */}
               <Route path={ROUTES.INVENTORY} element={<StockPage />} />

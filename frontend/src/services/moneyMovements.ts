@@ -129,4 +129,10 @@ export const moneyMovementService = {
     const response = await apiClient.get(`/api/v1/money-movements/third-party/${thirdPartyId}`, { params: filters });
     return response.data;
   },
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getByAccount: async (accountId: string, filters: { date_from?: string; date_to?: string } = {}): Promise<{ items: any[]; total: number; opening_balance: number | null }> => {
+    const response = await apiClient.get(`/api/v1/money-movements/account/${accountId}`, { params: filters });
+    return response.data;
+  },
 };

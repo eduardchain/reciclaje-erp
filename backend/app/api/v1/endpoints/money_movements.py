@@ -34,6 +34,7 @@ from app.schemas.money_movement import (
     MoneyMovementSummary,
 )
 from app.models.money_movement import MoneyMovement
+from app.models.money_account import MoneyAccount
 from app.services.money_movement import money_movement
 
 router = APIRouter()
@@ -51,6 +52,23 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "provision_expense": 1,         # Gastamos de provision: fondos disminuyen (balance sube)
     "advance_payment": 1,           # Anticipo a proveedor: proveedor nos debe
     "advance_collection": -1,       # Anticipo de cliente: nosotros debemos al cliente
+}
+
+# Direccion del efecto en el balance de la cuenta por tipo de movimiento.
+# Positivo = entrada de dinero. Negativo = salida de dinero.
+ACCOUNT_BALANCE_DIRECTION = {
+    "collection_from_client": 1,
+    "service_income": 1,
+    "capital_injection": 1,
+    "transfer_in": 1,
+    "advance_collection": 1,
+    "payment_to_supplier": -1,
+    "expense": -1,
+    "commission_payment": -1,
+    "capital_return": -1,
+    "transfer_out": -1,
+    "provision_deposit": -1,
+    "advance_payment": -1,
 }
 
 
@@ -453,22 +471,80 @@ def get_by_account(
     account_id: UUID,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    date_from: Optional[date] = Query(None, description="Fecha desde"),
+    date_to: Optional[date] = Query(None, description="Fecha hasta"),
     org_context: dict = Depends(get_required_org_context),
     db: Session = Depends(get_db),
 ):
-    """Movimientos de una cuenta especifica."""
-    movements, total = money_movement.get_by_account(
-        db=db,
-        account_id=account_id,
-        organization_id=org_context["organization_id"],
-        skip=skip,
-        limit=limit,
+    """
+    Estado de cuenta de una cuenta de dinero con saldo corrido.
+
+    Incluye movimientos confirmados y anulados. Anulados aparecen
+    pero no afectan el balance. Default: ultimos 90 dias.
+    """
+    from sqlalchemy import select as sa_select
+
+    org_id = org_context["organization_id"]
+
+    # Default 90 dias
+    effective_date_from = date_from if date_from else (date.today() - timedelta(days=90))
+    effective_date_to = date_to if date_to else None
+
+    # Query todos los movimientos de esta cuenta (confirmed + annulled)
+    query = sa_select(MoneyMovement).where(
+        MoneyMovement.organization_id == org_id,
+        MoneyMovement.account_id == account_id,
+        MoneyMovement.status.in_(["confirmed", "annulled"]),
+    ).order_by(MoneyMovement.created_at)
+
+    movements = db.scalars(query).all()
+
+    # Calcular saldo base (initial_balance) = current_balance - efecto neto de todos los movimientos
+    account = db.get(MoneyAccount, account_id)
+    if not account:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Cuenta no encontrada")
+
+    net_effect = sum(
+        m.amount * ACCOUNT_BALANCE_DIRECTION.get(m.movement_type, 0)
+        for m in movements if m.status != "annulled"
     )
+    base_balance = account.current_balance - net_effect
+
+    # Calcular balance corrido
+    balance = base_balance
+    opening_balance = base_balance
+    all_items = []
+
+    for m in movements:
+        direction = ACCOUNT_BALANCE_DIRECTION.get(m.movement_type, 0)
+        if m.status != "annulled":
+            balance += m.amount * direction
+        balance_after = float(balance)
+
+        # Filtro de fechas (usar m.date para filtrar)
+        m_date = m.date.date() if isinstance(m.date, datetime) else m.date
+        if m_date < effective_date_from:
+            opening_balance = balance
+            continue
+        if effective_date_to and m_date > effective_date_to:
+            continue
+
+        item = _to_response(m)
+        item["direction"] = direction
+        item["balance_after"] = balance_after
+        all_items.append(item)
+
+    # Paginar
+    total = len(all_items)
+    page = all_items[skip:skip + limit]
+
     return {
-        "items": [_to_response(m) for m in movements],
+        "items": page,
         "total": total,
         "skip": skip,
         "limit": limit,
+        "opening_balance": float(opening_balance) if date_from else None,
     }
 
 
