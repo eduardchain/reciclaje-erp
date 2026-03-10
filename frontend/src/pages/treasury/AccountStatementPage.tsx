@@ -44,6 +44,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   double_entry_commission: "Comision Doble Partida",
   double_entry_cancellation: "Doble Partida Cancelada",
   double_entry_commission_cancellation: "Comision DP Cancelada",
+  initial_balance: "Saldo Inicial",
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

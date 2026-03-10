@@ -9,6 +9,7 @@ import type {
   MarginAnalysisResponse,
   ThirdPartyBalancesResponse,
   TreasuryDashboardResponse,
+  AuditBalancesResponse,
 } from "@/types/reports";
 
 interface DateRange {
@@ -48,4 +49,7 @@ export const reportsService = {
 
   getTreasuryDashboard: () =>
     get<TreasuryDashboardResponse>("/api/v1/reports/treasury-dashboard"),
+
+  getAuditBalances: () =>
+    get<AuditBalancesResponse>("/api/v1/reports/audit-balances"),
 };

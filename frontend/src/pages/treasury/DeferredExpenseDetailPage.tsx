@@ -34,7 +34,7 @@ export default function DeferredExpenseDetailPage() {
   const [showCancel, setShowCancel] = useState(false);
 
   if (isLoading) return <p className="text-center py-12 text-slate-400">Cargando...</p>;
-  if (!de) return <p className="text-center py-12 text-slate-400">Gasto diferido no encontrado</p>;
+  if (!de) return <p className="text-center py-12 text-slate-400">Gasto programado no encontrado</p>;
 
   const canApply = de.status === "active" && de.applied_months < de.total_months;
   const canCancel = de.status === "active";
@@ -42,7 +42,7 @@ export default function DeferredExpenseDetailPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title={de.name} description="Detalle de gasto diferido">
+      <PageHeader title={de.name} description="Detalle de gasto programado">
         <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY_DEFERRED)}>
           <ArrowLeft className="h-4 w-4 mr-2" />Volver
         </Button>
@@ -136,7 +136,7 @@ export default function DeferredExpenseDetailPage() {
           )}
           {canCancel && (
             <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 hover:text-red-700">
-              <XCircle className="h-4 w-4 mr-2" />Cancelar Gasto
+              <XCircle className="h-4 w-4 mr-2" />Cancelar Gasto Programado
             </Button>
           )}
         </div>
@@ -200,7 +200,7 @@ export default function DeferredExpenseDetailPage() {
       <ConfirmDialog
         open={showCancel}
         onOpenChange={setShowCancel}
-        title="Cancelar Gasto Diferido"
+        title="Cancelar Gasto Programado"
         description="Se cancelaran las cuotas pendientes. Las cuotas ya aplicadas (movimientos creados) permanecen activas y se pueden anular manualmente."
         confirmLabel="Cancelar Gasto"
         variant="destructive"

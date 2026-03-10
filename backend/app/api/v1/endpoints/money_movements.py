@@ -36,6 +36,7 @@ from app.schemas.money_movement import (
 )
 from app.models.money_movement import MoneyMovement
 from app.models.money_account import MoneyAccount
+from app.models.third_party import ThirdParty
 from app.services.money_movement import money_movement
 
 router = APIRouter()
@@ -817,10 +818,35 @@ def get_by_third_party(
     # --- Ordenar por fecha, sort_key ---
     events.sort(key=lambda e: (e[0], e[1]))
 
-    # --- Calcular balance corrido ---
-    balance = Decimal("0")
-    opening_balance = Decimal("0")
+    # --- Obtener initial_balance del tercero ---
+    tp = db.query(ThirdParty).filter(
+        ThirdParty.id == third_party_id,
+        ThirdParty.organization_id == org_id,
+    ).first()
+    initial = tp.initial_balance if tp and tp.initial_balance else Decimal("0")
+
+    # --- Calcular balance corrido (arranca desde initial_balance) ---
+    balance = initial
+    opening_balance = initial
     all_items = []
+
+    # Fila sintetica de saldo inicial (solo si != 0 y no hay date_from del usuario)
+    if initial != 0 and not date_from:
+        all_items.append({
+            "id": f"initial-{third_party_id}",
+            "date": tp.created_at.isoformat() if tp.created_at else None,
+            "event_type": "initial_balance",
+            "description": "Saldo Inicial",
+            "amount": float(abs(initial)),
+            "direction": 1 if initial > 0 else -1,
+            "balance_after": float(initial),
+            "status": "confirmed",
+            "reference_number": None,
+            "movement_number": None,
+            "source": "system",
+            "source_id": None,
+            "source_number": None,
+        })
 
     for _, _, filter_dt, evt in events:
         if evt["status"] not in ("annulled", "cancelled"):

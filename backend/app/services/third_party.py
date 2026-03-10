@@ -105,10 +105,11 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         Returns:
             Created ThirdParty
         """
-        # Create with default balance
-        obj_data = obj_in.model_dump()
+        # Create with initial_balance mapped to current_balance
+        obj_data = obj_in.model_dump(exclude={"initial_balance"})
         obj_data["organization_id"] = organization_id
-        obj_data["current_balance"] = 0.0
+        obj_data["initial_balance"] = obj_in.initial_balance
+        obj_data["current_balance"] = obj_in.initial_balance
         
         db_obj = self.model(**obj_data)
         db.add(db_obj)

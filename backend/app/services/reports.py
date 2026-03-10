@@ -21,8 +21,12 @@ from app.models.purchase import Purchase, PurchaseLine
 from app.models.sale import Sale, SaleLine
 from app.models.third_party import ThirdParty
 
+from app.models.sale import SaleCommission
 from app.schemas.reports import (
+    AccountAuditItem,
     AccountSummary,
+    AuditBalancesResponse,
+    AuditSummary,
     BalanceSheetAssets,
     BalanceSheetLiabilities,
     BalanceSheetResponse,
@@ -51,9 +55,42 @@ from app.schemas.reports import (
     SalesReportResponse,
     SupplierBalance,
     SupplierVolumeSummary,
+    ThirdPartyAuditItem,
     ThirdPartyBalancesResponse,
     TreasuryDashboardResponse,
 )
+
+# Direccion del efecto en el balance de la cuenta por tipo de movimiento.
+# Positivo = entrada. Negativo = salida.
+ACCOUNT_BALANCE_DIRECTION = {
+    "collection_from_client": 1,
+    "service_income": 1,
+    "capital_injection": 1,
+    "transfer_in": 1,
+    "advance_collection": 1,
+    "payment_to_supplier": -1,
+    "expense": -1,
+    "commission_payment": -1,
+    "capital_return": -1,
+    "transfer_out": -1,
+    "provision_deposit": -1,
+    "advance_payment": -1,
+    "asset_payment": -1,
+}
+
+# Direccion del efecto en el balance del tercero por tipo de movimiento.
+# Positivo = tercero nos debe mas. Negativo = tercero nos debe menos.
+THIRD_PARTY_BALANCE_DIRECTION = {
+    "payment_to_supplier": 1,
+    "collection_from_client": -1,
+    "capital_injection": -1,
+    "capital_return": 1,
+    "commission_payment": 1,
+    "provision_deposit": -1,
+    "provision_expense": 1,
+    "advance_payment": 1,
+    "advance_collection": -1,
+}
 
 # Tipos de money_movement que representan inflows a cuentas
 INFLOW_TYPES = frozenset([
@@ -1468,6 +1505,265 @@ class ReportService:
             mtd_income=float(mtd_income),
             mtd_expense=float(mtd_expense),
             recent_movements=recent_items,
+        )
+
+
+    # ------------------------------------------------------------------
+    # Audit Balances (Auditoria de saldos)
+    # ------------------------------------------------------------------
+
+    def audit_balances(
+        self,
+        db: Session,
+        organization_id: UUID,
+    ) -> AuditBalancesResponse:
+        """
+        Recalcula saldos desde cero y compara con current_balance almacenado.
+
+        Para cuentas: suma movimientos confirmados usando ACCOUNT_BALANCE_DIRECTION.
+        Para terceros: suma compras, ventas, comisiones, doble partida y money_movements.
+        """
+        # =====================================================================
+        # 1. Auditoria de cuentas de dinero
+        # =====================================================================
+        accounts = list(db.scalars(
+            select(MoneyAccount)
+            .where(
+                MoneyAccount.organization_id == organization_id,
+                MoneyAccount.is_active == True,
+            )
+            .order_by(MoneyAccount.name)
+        ).all())
+
+        # Sumar movimientos confirmados agrupados por (account_id, movement_type)
+        mm_account_rows = db.execute(
+            select(
+                MoneyMovement.account_id,
+                MoneyMovement.movement_type,
+                func.coalesce(func.sum(MoneyMovement.amount), 0),
+            )
+            .where(
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.status == "confirmed",
+                MoneyMovement.is_active == True,
+                MoneyMovement.account_id.isnot(None),
+            )
+            .group_by(MoneyMovement.account_id, MoneyMovement.movement_type)
+        ).all()
+
+        # Construir dict {account_id: calculated_balance}
+        account_calc: dict[UUID, Decimal] = {}
+        for acc_id, mv_type, total in mm_account_rows:
+            direction = ACCOUNT_BALANCE_DIRECTION.get(mv_type, 0)
+            account_calc[acc_id] = account_calc.get(acc_id, Decimal("0")) + Decimal(str(total)) * direction
+
+        account_items: list[AccountAuditItem] = []
+        accounts_ok = 0
+        accounts_mismatch = 0
+
+        for acc in accounts:
+            stored = Decimal(str(acc.current_balance))
+            initial = Decimal(str(acc.initial_balance))
+            calculated = initial + account_calc.get(acc.id, Decimal("0"))
+            diff = stored - calculated
+            ok = abs(diff) < Decimal("0.01")
+            if ok:
+                accounts_ok += 1
+            else:
+                accounts_mismatch += 1
+
+            account_items.append(AccountAuditItem(
+                id=acc.id,
+                name=acc.name,
+                account_type=acc.account_type,
+                stored_balance=float(stored),
+                calculated_balance=float(calculated),
+                difference=float(diff),
+                status="ok" if ok else "mismatch",
+            ))
+
+        # =====================================================================
+        # 2. Auditoria de terceros
+        # =====================================================================
+        third_parties = list(db.scalars(
+            select(ThirdParty)
+            .where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.is_active == True,
+            )
+            .order_by(ThirdParty.name)
+        ).all())
+
+        # Dict acumulador {third_party_id: calculated_balance}
+        tp_calc: dict[UUID, Decimal] = {}
+
+        def _add(tp_id: UUID, amount: Decimal) -> None:
+            tp_calc[tp_id] = tp_calc.get(tp_id, Decimal("0")) + amount
+
+        # 2a. Compras liquidadas: supplier.balance -= total_amount
+        purchase_rows = db.execute(
+            select(
+                Purchase.supplier_id,
+                func.coalesce(func.sum(Purchase.total_amount), 0),
+            )
+            .where(
+                Purchase.organization_id == organization_id,
+                Purchase.status == "liquidated",
+            )
+            .group_by(Purchase.supplier_id)
+        ).all()
+        for tp_id, total in purchase_rows:
+            _add(tp_id, -Decimal(str(total)))
+
+        # 2b. Compras canceladas post-liquidacion: reversal (+total_amount)
+        purchase_cancel_rows = db.execute(
+            select(
+                Purchase.supplier_id,
+                func.coalesce(func.sum(Purchase.total_amount), 0),
+            )
+            .where(
+                Purchase.organization_id == organization_id,
+                Purchase.status == "cancelled",
+                Purchase.liquidated_at.isnot(None),
+            )
+            .group_by(Purchase.supplier_id)
+        ).all()
+        for tp_id, total in purchase_cancel_rows:
+            _add(tp_id, Decimal(str(total)))
+
+        # 2c. Ventas liquidadas: customer.balance += total_amount
+        sale_rows = db.execute(
+            select(
+                Sale.customer_id,
+                func.coalesce(func.sum(Sale.total_amount), 0),
+            )
+            .where(
+                Sale.organization_id == organization_id,
+                Sale.status == "liquidated",
+            )
+            .group_by(Sale.customer_id)
+        ).all()
+        for tp_id, total in sale_rows:
+            _add(tp_id, Decimal(str(total)))
+
+        # 2d. Ventas canceladas post-liquidacion: reversal (-total_amount)
+        sale_cancel_rows = db.execute(
+            select(
+                Sale.customer_id,
+                func.coalesce(func.sum(Sale.total_amount), 0),
+            )
+            .where(
+                Sale.organization_id == organization_id,
+                Sale.status == "cancelled",
+                Sale.liquidated_at.isnot(None),
+            )
+            .group_by(Sale.customer_id)
+        ).all()
+        for tp_id, total in sale_cancel_rows:
+            _add(tp_id, -Decimal(str(total)))
+
+        # 2e. Comisiones de ventas liquidadas: recipient.balance += commission_amount
+        comm_rows = db.execute(
+            select(
+                SaleCommission.third_party_id,
+                func.coalesce(func.sum(SaleCommission.commission_amount), 0),
+            )
+            .select_from(SaleCommission)
+            .join(Sale, SaleCommission.sale_id == Sale.id)
+            .where(
+                Sale.organization_id == organization_id,
+                Sale.status == "liquidated",
+            )
+            .group_by(SaleCommission.third_party_id)
+        ).all()
+        for tp_id, total in comm_rows:
+            _add(tp_id, Decimal(str(total)))
+
+        # 2f. Comisiones de ventas canceladas post-liquidacion: reversal
+        comm_cancel_rows = db.execute(
+            select(
+                SaleCommission.third_party_id,
+                func.coalesce(func.sum(SaleCommission.commission_amount), 0),
+            )
+            .select_from(SaleCommission)
+            .join(Sale, SaleCommission.sale_id == Sale.id)
+            .where(
+                Sale.organization_id == organization_id,
+                Sale.status == "cancelled",
+                Sale.liquidated_at.isnot(None),
+            )
+            .group_by(SaleCommission.third_party_id)
+        ).all()
+        for tp_id, total in comm_cancel_rows:
+            _add(tp_id, -Decimal(str(total)))
+
+        # 2g. MoneyMovements confirmados con third_party_id
+        mm_tp_rows = db.execute(
+            select(
+                MoneyMovement.third_party_id,
+                MoneyMovement.movement_type,
+                func.coalesce(func.sum(MoneyMovement.amount), 0),
+            )
+            .where(
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.status == "confirmed",
+                MoneyMovement.is_active == True,
+                MoneyMovement.third_party_id.isnot(None),
+            )
+            .group_by(MoneyMovement.third_party_id, MoneyMovement.movement_type)
+        ).all()
+        for tp_id, mv_type, total in mm_tp_rows:
+            direction = THIRD_PARTY_BALANCE_DIRECTION.get(mv_type, 0)
+            if direction != 0:
+                _add(tp_id, Decimal(str(total)) * direction)
+
+        # Construir items de auditoria de terceros
+        tp_items: list[ThirdPartyAuditItem] = []
+        tp_ok = 0
+        tp_mismatch = 0
+
+        for tp in third_parties:
+            stored = Decimal(str(tp.current_balance))
+            initial = Decimal(str(tp.initial_balance))
+            calculated = initial + tp_calc.get(tp.id, Decimal("0"))
+            diff = stored - calculated
+            ok = abs(diff) < Decimal("0.01")
+            if ok:
+                tp_ok += 1
+            else:
+                tp_mismatch += 1
+
+            roles = []
+            if tp.is_supplier:
+                roles.append("supplier")
+            if tp.is_customer:
+                roles.append("customer")
+            if tp.is_investor:
+                roles.append("investor")
+            if tp.is_provision:
+                roles.append("provision")
+
+            tp_items.append(ThirdPartyAuditItem(
+                id=tp.id,
+                name=tp.name,
+                roles=roles,
+                stored_balance=float(stored),
+                calculated_balance=float(calculated),
+                difference=float(diff),
+                status="ok" if ok else "mismatch",
+            ))
+
+        return AuditBalancesResponse(
+            accounts=account_items,
+            third_parties=tp_items,
+            summary=AuditSummary(
+                total_accounts=len(account_items),
+                accounts_ok=accounts_ok,
+                accounts_mismatch=accounts_mismatch,
+                total_third_parties=len(tp_items),
+                third_parties_ok=tp_ok,
+                third_parties_mismatch=tp_mismatch,
+            ),
         )
 
 

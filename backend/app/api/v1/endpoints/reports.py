@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_required_org_context, get_db
 from app.schemas.reports import (
+    AuditBalancesResponse,
     BalanceSheetResponse,
     CashFlowResponse,
     DashboardResponse,
@@ -211,6 +212,24 @@ def get_treasury_dashboard(
     y ultimos 10 movimientos.
     """
     return report_service.get_treasury_dashboard(
+        db=db,
+        organization_id=org_context["organization_id"],
+    )
+
+
+@router.get("/audit-balances", response_model=AuditBalancesResponse)
+def audit_balances(
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Auditoria de saldos: recalcula balances desde movimientos y compara
+    con los valores almacenados en current_balance.
+
+    Detecta discrepancias causadas por bugs o errores de sincronizacion.
+    Solo lectura — no modifica ningun dato.
+    """
+    return report_service.audit_balances(
         db=db,
         organization_id=org_context["organization_id"],
     )

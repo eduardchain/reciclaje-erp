@@ -11,6 +11,7 @@ const tabs = [
   { value: ROUTES.REPORTS_SALES, label: "Ventas" },
   { value: ROUTES.REPORTS_MARGINS, label: "Margenes" },
   { value: ROUTES.REPORTS_BALANCES, label: "Saldos" },
+  { value: ROUTES.REPORTS_AUDIT, label: "Auditoría" },
 ];
 
 export default function ReportsLayout({ children }: { children: React.ReactNode }) {

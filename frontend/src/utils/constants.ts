@@ -47,6 +47,7 @@ export const ROUTES = {
   REPORTS_SALES: "/reports/sales",
   REPORTS_MARGINS: "/reports/margins",
   REPORTS_BALANCES: "/reports/balances",
+  REPORTS_AUDIT: "/reports/audit",
 
   // Maestros
   THIRD_PARTIES: "/third-parties",

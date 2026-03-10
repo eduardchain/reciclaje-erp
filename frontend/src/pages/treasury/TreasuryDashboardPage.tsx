@@ -208,12 +208,12 @@ export default function TreasuryDashboardPage() {
         </Card>
       )}
 
-      {/* Gastos Diferidos Pendientes */}
+      {/* Gastos Programados Pendientes */}
       <Card className="shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2">
             <CalendarClock className="h-4 w-4" />
-            Gastos Diferidos Pendientes
+            Gastos Programados Pendientes
           </CardTitle>
           <Button variant="outline" size="sm" onClick={() => navigate(ROUTES.TREASURY_DEFERRED)}>
             Ver todos

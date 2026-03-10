@@ -46,6 +46,7 @@ import PurchaseReportPage from "@/pages/reports/PurchaseReportPage";
 import SalesReportPage from "@/pages/reports/SalesReportPage";
 import MarginAnalysisPage from "@/pages/reports/MarginAnalysisPage";
 import ThirdPartyBalancesPage from "@/pages/reports/ThirdPartyBalancesPage";
+import AuditBalancesPage from "@/pages/reports/AuditBalancesPage";
 import ThirdPartiesPage from "@/pages/third-parties/ThirdPartiesPage";
 import MaterialsPage from "@/pages/materials/MaterialsPage";
 import CategoriesPage from "@/pages/materials/CategoriesPage";
@@ -126,6 +127,7 @@ function App() {
               <Route path={ROUTES.REPORTS_SALES} element={<SalesReportPage />} />
               <Route path={ROUTES.REPORTS_MARGINS} element={<MarginAnalysisPage />} />
               <Route path={ROUTES.REPORTS_BALANCES} element={<ThirdPartyBalancesPage />} />
+              <Route path={ROUTES.REPORTS_AUDIT} element={<AuditBalancesPage />} />
               {/* Maestros */}
               <Route path={ROUTES.THIRD_PARTIES} element={<ThirdPartiesPage />} />
               <Route path={ROUTES.MATERIALS} element={<MaterialsPage />} />

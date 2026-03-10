@@ -346,6 +346,49 @@ class RecentMovementItem(BaseModel):
     third_party_name: Optional[str] = None
 
 
+# ---------------------------------------------------------------------------
+# Audit Balances (Auditoria de saldos)
+# ---------------------------------------------------------------------------
+
+class AccountAuditItem(BaseModel):
+    """Resultado de auditoria para una cuenta de dinero."""
+    id: UUID
+    name: str
+    account_type: str
+    stored_balance: float
+    calculated_balance: float
+    difference: float
+    status: str  # "ok" | "mismatch"
+
+
+class ThirdPartyAuditItem(BaseModel):
+    """Resultado de auditoria para un tercero."""
+    id: UUID
+    name: str
+    roles: list[str]
+    stored_balance: float
+    calculated_balance: float
+    difference: float
+    status: str  # "ok" | "mismatch"
+
+
+class AuditSummary(BaseModel):
+    """Resumen de auditoria."""
+    total_accounts: int
+    accounts_ok: int
+    accounts_mismatch: int
+    total_third_parties: int
+    third_parties_ok: int
+    third_parties_mismatch: int
+
+
+class AuditBalancesResponse(BaseModel):
+    """Respuesta completa de auditoria de saldos."""
+    accounts: list[AccountAuditItem]
+    third_parties: list[ThirdPartyAuditItem]
+    summary: AuditSummary
+
+
 class TreasuryDashboardResponse(BaseModel):
     # Cuentas agrupadas por tipo
     cash_accounts: list[AccountSummary]

@@ -36,6 +36,7 @@ class MoneyAccountResponse(MoneyAccountBase):
     """Schema de respuesta para MoneyAccount."""
     id: UUID
     organization_id: UUID
+    initial_balance: float
     current_balance: float
     is_active: bool
     created_at: datetime
@@ -43,7 +44,7 @@ class MoneyAccountResponse(MoneyAccountBase):
 
     model_config = {"from_attributes": True}
 
-    @field_serializer('current_balance')
+    @field_serializer('initial_balance', 'current_balance')
     def serialize_decimal(self, value: Decimal) -> float:
         return float(value)
 

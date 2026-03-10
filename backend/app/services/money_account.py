@@ -52,9 +52,10 @@ class CRUDMoneyAccount(CRUDBase[MoneyAccount, MoneyAccountCreate, MoneyAccountUp
                 detail=f"Tipo de cuenta invalido: '{obj_in.account_type}'. Debe ser: {', '.join(sorted(VALID_ACCOUNT_TYPES))}",
             )
 
-        # Convertir schema a dict y mapear initial_balance -> current_balance
+        # Convertir schema a dict y mapear initial_balance -> current_balance + initial_balance
         obj_data = obj_in.model_dump(exclude={"initial_balance"})
         obj_data["organization_id"] = organization_id
+        obj_data["initial_balance"] = obj_in.initial_balance
         obj_data["current_balance"] = obj_in.initial_balance
 
         db_obj = self.model(**obj_data)

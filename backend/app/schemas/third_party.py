@@ -25,12 +25,12 @@ class ThirdPartyBase(BaseModel):
 class ThirdPartyCreate(ThirdPartyBase):
     """
     Schema for creating a ThirdParty.
-    
+
     Note:
     - organization_id comes from context automatically
     - current_balance defaults to 0
     """
-    pass
+    initial_balance: Decimal = Field(Decimal("0.00"), description="Saldo inicial")
 
 
 class ThirdPartyUpdate(BaseModel):
@@ -50,6 +50,7 @@ class ThirdPartyResponse(ThirdPartyBase):
     """Schema for ThirdParty responses."""
     id: UUID
     organization_id: UUID
+    initial_balance: float
     current_balance: float
     is_active: bool
     created_at: datetime
@@ -57,7 +58,7 @@ class ThirdPartyResponse(ThirdPartyBase):
 
     model_config = {"from_attributes": True}
 
-    @field_serializer('current_balance')
+    @field_serializer('initial_balance', 'current_balance')
     def serialize_decimal(self, value: Decimal) -> float:
         """Convert Decimal to float for JSON serialization."""
         return float(value)

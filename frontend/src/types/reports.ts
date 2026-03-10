@@ -237,6 +237,43 @@ export interface MarginAnalysisResponse {
   materials: MaterialMargin[];
 }
 
+// --- Audit Balances ---
+
+export interface AccountAuditItem {
+  id: string;
+  name: string;
+  account_type: string;
+  stored_balance: number;
+  calculated_balance: number;
+  difference: number;
+  status: string; // "ok" | "mismatch"
+}
+
+export interface ThirdPartyAuditItem {
+  id: string;
+  name: string;
+  roles: string[];
+  stored_balance: number;
+  calculated_balance: number;
+  difference: number;
+  status: string; // "ok" | "mismatch"
+}
+
+export interface AuditSummary {
+  total_accounts: number;
+  accounts_ok: number;
+  accounts_mismatch: number;
+  total_third_parties: number;
+  third_parties_ok: number;
+  third_parties_mismatch: number;
+}
+
+export interface AuditBalancesResponse {
+  accounts: AccountAuditItem[];
+  third_parties: ThirdPartyAuditItem[];
+  summary: AuditSummary;
+}
+
 // --- Treasury Dashboard ---
 
 export interface AccountSummary {

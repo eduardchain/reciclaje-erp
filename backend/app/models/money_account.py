@@ -40,12 +40,18 @@ class MoneyAccount(Base, TimestampMixin, OrganizationMixin):
     
     bank_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     
+    initial_balance: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=0,
+    )
+
     current_balance: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
         default=0,
     )
-    
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     
     # Relationships

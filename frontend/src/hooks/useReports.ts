@@ -67,3 +67,11 @@ export function useThirdPartyBalances() {
     queryFn: () => reportsService.getThirdPartyBalances(),
   });
 }
+
+export function useAuditBalances(enabled: boolean) {
+  return useQuery({
+    queryKey: ["reports", "audit-balances"],
+    queryFn: () => reportsService.getAuditBalances(),
+    enabled,
+  });
+}

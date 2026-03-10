@@ -35,13 +35,13 @@ export default function DeferredExpensesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Gastos Diferidos" description="Gastos grandes distribuidos en cuotas mensuales">
+      <PageHeader title="Gastos Programados" description="Gastos grandes distribuidos en cuotas mensuales">
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
             Volver a Tesoreria
           </Button>
           <Button onClick={() => navigate(ROUTES.TREASURY_DEFERRED_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="h-4 w-4 mr-2" />Nuevo Gasto Diferido
+            <Plus className="h-4 w-4 mr-2" />Nuevo Gasto Programado
           </Button>
         </div>
       </PageHeader>
@@ -68,8 +68,8 @@ export default function DeferredExpensesPage() {
           ) : items.length === 0 ? (
             <div className="p-6">
               <EmptyState
-                title="Sin gastos diferidos"
-                description="Crea un gasto diferido para distribuir gastos grandes en cuotas mensuales."
+                title="Sin gastos programados"
+                description="Crea un gasto programado para distribuir gastos grandes en cuotas mensuales."
               />
             </div>
           ) : (

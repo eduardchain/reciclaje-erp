@@ -11,6 +11,7 @@ export interface ThirdPartyResponse extends BaseEntity {
   is_customer: boolean;
   is_investor: boolean;
   is_provision: boolean;
+  initial_balance: number;
   current_balance: number;
   is_active: boolean;
 }
@@ -25,6 +26,7 @@ export interface ThirdPartyCreate {
   is_customer?: boolean;
   is_investor?: boolean;
   is_provision?: boolean;
+  initial_balance?: number;
 }
 
 export interface ThirdPartyUpdate {

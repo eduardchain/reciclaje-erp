@@ -964,6 +964,192 @@ class TestThirdPartyBalances:
 
 
 # ---------------------------------------------------------------------------
+# Audit Balances Tests
+# ---------------------------------------------------------------------------
+
+class TestAuditBalances:
+
+    @pytest.fixture
+    def audit_data(self, db_session: Session, test_organization: Organization, test_user: User):
+        """
+        Dataset con saldos consistentes: current_balance refleja exactamente
+        las operaciones creadas.
+        """
+        org_id = test_organization.id
+        now = datetime.now(tz=timezone.utc)
+
+        # Cuenta de dinero
+        cuenta = MoneyAccount(
+            name="Caja Audit", account_type="cash", organization_id=org_id,
+            current_balance=Decimal("0"), is_active=True,
+        )
+        db_session.add(cuenta)
+        db_session.flush()
+
+        # Terceros
+        proveedor = ThirdParty(
+            name="Proveedor Audit", organization_id=org_id,
+            is_supplier=True, is_customer=False,
+            current_balance=Decimal("0"), is_active=True,
+        )
+        cliente = ThirdParty(
+            name="Cliente Audit", organization_id=org_id,
+            is_supplier=False, is_customer=True,
+            current_balance=Decimal("0"), is_active=True,
+        )
+        comisionista = ThirdParty(
+            name="Comisionista Audit", organization_id=org_id,
+            is_supplier=False, is_customer=False,
+            current_balance=Decimal("0"), is_active=True,
+        )
+        db_session.add_all([proveedor, cliente, comisionista])
+        db_session.flush()
+
+        # Material y bodega
+        cat = MaterialCategory(
+            name="TestCat", organization_id=org_id, is_active=True,
+        )
+        db_session.add(cat)
+        db_session.flush()
+        mat = Material(
+            code="TEST", name="Material Test", organization_id=org_id,
+            category_id=cat.id, default_unit="kg",
+            current_stock=Decimal("0"), current_stock_liquidated=Decimal("0"),
+            current_stock_transit=Decimal("0"), current_average_cost=Decimal("0"),
+            is_active=True,
+        )
+        wh = Warehouse(name="Bodega Audit", organization_id=org_id, is_active=True)
+        db_session.add_all([mat, wh])
+        db_session.flush()
+
+        # Compra liquidada: $500,000 → proveedor.balance -= 500000
+        compra = Purchase(
+            purchase_number=100, organization_id=org_id,
+            supplier_id=proveedor.id, date=now - timedelta(days=5),
+            total_amount=Decimal("500000"), status="liquidated",
+            liquidated_at=now - timedelta(days=5),
+        )
+        db_session.add(compra)
+        db_session.flush()
+        db_session.add(PurchaseLine(
+            purchase_id=compra.id, material_id=mat.id, warehouse_id=wh.id,
+            quantity=Decimal("100"), unit_price=Decimal("5000"),
+            total_price=Decimal("500000"),
+        ))
+        proveedor.current_balance -= Decimal("500000")
+
+        # Venta liquidada: $800,000 → cliente.balance += 800000
+        venta = Sale(
+            sale_number=100, organization_id=org_id,
+            customer_id=cliente.id, warehouse_id=wh.id,
+            date=now - timedelta(days=3), total_amount=Decimal("800000"),
+            status="liquidated", liquidated_at=now - timedelta(days=3),
+        )
+        db_session.add(venta)
+        db_session.flush()
+        db_session.add(SaleLine(
+            sale_id=venta.id, material_id=mat.id,
+            quantity=Decimal("50"), unit_price=Decimal("16000"),
+            total_price=Decimal("800000"), unit_cost=Decimal("5000"),
+        ))
+        cliente.current_balance += Decimal("800000")
+
+        # Comision: $40,000 → comisionista.balance += 40000
+        comm = SaleCommission(
+            sale_id=venta.id, third_party_id=comisionista.id,
+            concept="Comision test", commission_type="fixed",
+            commission_value=Decimal("40000"), commission_amount=Decimal("40000"),
+        )
+        db_session.add(comm)
+        comisionista.current_balance += Decimal("40000")
+
+        # MoneyMovement: pago proveedor $300,000 → cuenta -= 300000, proveedor.balance += 300000
+        mm_pago = MoneyMovement(
+            movement_number=100, organization_id=org_id,
+            date=now - timedelta(days=2),
+            movement_type="payment_to_supplier", amount=Decimal("300000"),
+            account_id=cuenta.id, third_party_id=proveedor.id,
+            description="Pago proveedor", status="confirmed",
+        )
+        db_session.add(mm_pago)
+        cuenta.current_balance -= Decimal("300000")
+        proveedor.current_balance += Decimal("300000")
+
+        # MoneyMovement: cobro cliente $500,000 → cuenta += 500000, cliente.balance -= 500000
+        mm_cobro = MoneyMovement(
+            movement_number=101, organization_id=org_id,
+            date=now - timedelta(days=1),
+            movement_type="collection_from_client", amount=Decimal("500000"),
+            account_id=cuenta.id, third_party_id=cliente.id,
+            description="Cobro cliente", status="confirmed",
+        )
+        db_session.add(mm_cobro)
+        cuenta.current_balance += Decimal("500000")
+        cliente.current_balance -= Decimal("500000")
+
+        db_session.commit()
+
+        return {
+            "cuenta": cuenta,
+            "proveedor": proveedor,
+            "cliente": cliente,
+            "comisionista": comisionista,
+        }
+
+    def test_audit_balances_all_ok(
+        self, client: TestClient, org_headers: dict, audit_data: dict,
+    ):
+        """Saldos correctos: todos los items reportan status=ok."""
+        response = client.get("/api/v1/reports/audit-balances", headers=org_headers)
+        assert response.status_code == 200
+        data = response.json()
+
+        # Summary sin mismatches
+        assert data["summary"]["accounts_mismatch"] == 0
+        assert data["summary"]["third_parties_mismatch"] == 0
+
+        # Verificar que los items de audit existen con status ok
+        account_map = {a["name"]: a for a in data["accounts"]}
+        assert "Caja Audit" in account_map
+        assert account_map["Caja Audit"]["status"] == "ok"
+        # cuenta: -300000 + 500000 = 200000
+        assert account_map["Caja Audit"]["calculated_balance"] == pytest.approx(200000, abs=1)
+
+        tp_map = {t["name"]: t for t in data["third_parties"]}
+        assert tp_map["Proveedor Audit"]["status"] == "ok"
+        # proveedor: -500000 (compra) + 300000 (pago) = -200000
+        assert tp_map["Proveedor Audit"]["calculated_balance"] == pytest.approx(-200000, abs=1)
+
+        assert tp_map["Cliente Audit"]["status"] == "ok"
+        # cliente: +800000 (venta) - 500000 (cobro) = 300000
+        assert tp_map["Cliente Audit"]["calculated_balance"] == pytest.approx(300000, abs=1)
+
+        assert tp_map["Comisionista Audit"]["status"] == "ok"
+        assert tp_map["Comisionista Audit"]["calculated_balance"] == pytest.approx(40000, abs=1)
+
+    def test_audit_balances_detects_mismatch(
+        self, client: TestClient, org_headers: dict, audit_data: dict, db_session: Session,
+    ):
+        """Detecta discrepancia cuando current_balance fue modificado manualmente."""
+        # Forzar discrepancia en proveedor
+        proveedor = audit_data["proveedor"]
+        proveedor.current_balance += Decimal("999")
+        db_session.commit()
+
+        response = client.get("/api/v1/reports/audit-balances", headers=org_headers)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["summary"]["third_parties_mismatch"] >= 1
+
+        tp_map = {t["name"]: t for t in data["third_parties"]}
+        prov_audit = tp_map["Proveedor Audit"]
+        assert prov_audit["status"] == "mismatch"
+        assert prov_audit["difference"] == pytest.approx(999, abs=1)
+        assert prov_audit["roles"] == ["supplier"]
+
+
+# ---------------------------------------------------------------------------
 # Auth Test
 # ---------------------------------------------------------------------------
 

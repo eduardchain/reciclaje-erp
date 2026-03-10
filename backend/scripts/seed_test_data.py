@@ -54,8 +54,17 @@ def clear_data(db, org_slug: str) -> None:
     from app.models.sale import Sale, SaleLine, SaleCommission
     from app.models.purchase import Purchase, PurchaseLine
     from app.models.double_entry import DoubleEntry
+    from app.models.deferred_expense import DeferredExpense, DeferredApplication
 
     # Eliminar en orden de FK
+    # DeferredApplications tiene FK a money_movements → eliminar primero
+    db.query(DeferredApplication).filter(
+        DeferredApplication.deferred_expense_id.in_(
+            db.query(DeferredExpense.id).filter(DeferredExpense.organization_id == org_id)
+        )
+    ).delete(synchronize_session=False)
+    db.query(DeferredExpense).filter(DeferredExpense.organization_id == org_id).delete()
+
     db.query(SaleCommission).filter(
         SaleCommission.sale_id.in_(db.query(Sale.id).filter(Sale.organization_id == org_id))
     ).delete(synchronize_session=False)
@@ -339,6 +348,7 @@ def create_money_accounts(db, org: Organization) -> dict:
             account_type=tipo,
             bank_name=banco,
             account_number=numero,
+            initial_balance=saldo_inicial,
             current_balance=saldo_inicial,
             is_active=True,
         )

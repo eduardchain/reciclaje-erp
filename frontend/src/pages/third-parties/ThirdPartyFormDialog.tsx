@@ -26,6 +26,7 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
   const [isCustomer, setIsCustomer] = useState(false);
   const [isInvestor, setIsInvestor] = useState(false);
   const [isProvision, setIsProvision] = useState(false);
+  const [initialBalance, setInitialBalance] = useState(0);
 
   useEffect(() => {
     if (editItem) {
@@ -41,11 +42,12 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
     } else {
       setName(""); setIdentification(""); setEmail(""); setPhone(""); setAddress("");
       setIsSupplier(false); setIsCustomer(false); setIsInvestor(false); setIsProvision(false);
+      setInitialBalance(0);
     }
   }, [editItem, open]);
 
   const handleSubmit = () => {
-    const data = {
+    const base = {
       name,
       identification_number: identification || null,
       email: email || null,
@@ -59,9 +61,9 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
     const opts = { onSuccess: () => onOpenChange(false) };
 
     if (editItem) {
-      update.mutate({ id: editItem.id, data }, opts);
+      update.mutate({ id: editItem.id, data: base }, opts);
     } else {
-      create.mutate(data, opts);
+      create.mutate({ ...base, initial_balance: initialBalance }, opts);
     }
   };
 
@@ -88,6 +90,9 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
             <div className="flex items-center justify-between"><span className="text-sm">Inversionista</span><Switch checked={isInvestor} onCheckedChange={setIsInvestor} /></div>
             <div className="flex items-center justify-between"><span className="text-sm">Provision</span><Switch checked={isProvision} onCheckedChange={setIsProvision} /></div>
           </div>
+          {!editItem && (
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><Input type="number" value={initialBalance || ""} onChange={(e) => setInitialBalance(parseFloat(e.target.value) || 0)} /></div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>

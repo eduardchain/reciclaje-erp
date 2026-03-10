@@ -77,7 +77,7 @@ const navItems: NavItem[] = [
       { name: "Provisiones", path: ROUTES.TREASURY_PROVISIONS, icon: <Tag className="w-4 h-4" /> },
       { name: "Terceros", path: ROUTES.TREASURY_ACCOUNT_STATEMENT, icon: <ListOrdered className="w-4 h-4" /> },
       { name: "Cuentas", path: ROUTES.TREASURY_ACCOUNT_MOVEMENTS, icon: <CreditCard className="w-4 h-4" /> },
-      { name: "Gastos Diferidos", path: ROUTES.TREASURY_DEFERRED, icon: <CalendarClock className="w-4 h-4" /> },
+      { name: "Gastos Programados", path: ROUTES.TREASURY_DEFERRED, icon: <CalendarClock className="w-4 h-4" /> },
     ],
   },
   {

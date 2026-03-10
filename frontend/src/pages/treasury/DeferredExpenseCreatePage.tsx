@@ -72,7 +72,7 @@ export default function DeferredExpenseCreatePage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Nuevo Gasto Diferido" description="Distribuir un gasto grande en cuotas mensuales">
+      <PageHeader title="Nuevo Gasto Programado" description="Distribuir un gasto grande en cuotas mensuales">
         <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY_DEFERRED)}>
           <ArrowLeft className="h-4 w-4 mr-2" />Volver
         </Button>
@@ -207,7 +207,7 @@ export default function DeferredExpenseCreatePage() {
             disabled={!canSubmit}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
-            {create.isPending ? "Creando..." : "Crear Gasto Diferido"}
+            {create.isPending ? "Creando..." : "Crear Gasto Programado"}
           </Button>
         </div>
       </div>

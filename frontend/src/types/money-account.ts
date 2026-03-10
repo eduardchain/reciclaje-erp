@@ -8,6 +8,7 @@ export interface MoneyAccountResponse extends BaseEntity {
   account_type: MoneyAccountType;
   account_number: string | null;
   bank_name: string | null;
+  initial_balance: number;
   current_balance: number;
   is_active: boolean;
 }

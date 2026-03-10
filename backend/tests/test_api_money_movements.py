@@ -1257,6 +1257,64 @@ class TestAccountStatement:
         assert data["opening_balance"] == 500000.0  # El de febrero como apertura
         assert data["items"][0]["balance_after"] == 800000.0  # 500K + 300K
 
+    def test_third_party_statement_includes_initial_balance(
+        self, client: TestClient, org_headers: dict,
+        test_account, db_session, test_organization,
+    ):
+        """Tercero con initial_balance muestra fila sintetica y balance corrido correcto."""
+        # Crear tercero con initial_balance = 5000
+        tp = ThirdParty(
+            name="Tercero Con Saldo Inicial",
+            is_supplier=True,
+            initial_balance=Decimal("5000"),
+            current_balance=Decimal("5000"),
+            organization_id=test_organization.id,
+        )
+        db_session.add(tp)
+        db_session.commit()
+        db_session.refresh(tp)
+
+        # Crear pago al proveedor de $1000
+        resp = client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json={
+                "supplier_id": str(tp.id),
+                "amount": 1000,
+                "account_id": str(test_account.id),
+                "date": "2026-03-01T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+
+        # Consultar estado de cuenta (sin date_from → ve fila sintetica)
+        resp = client.get(
+            f"/api/v1/money-movements/third-party/{tp.id}",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+
+        # Con date_from explicito, no hay fila sintetica pero opening_balance = 5000
+        assert data["opening_balance"] == 5000.0
+        assert data["total"] == 1  # Solo el pago
+        assert data["items"][0]["balance_after"] == 6000.0  # 5000 + 1000
+
+        # Sin date_from: fila sintetica aparece
+        resp2 = client.get(
+            f"/api/v1/money-movements/third-party/{tp.id}",
+            headers=org_headers,
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        # Primer item es saldo inicial
+        assert data2["items"][0]["event_type"] == "initial_balance"
+        assert data2["items"][0]["amount"] == 5000.0
+        assert data2["items"][0]["balance_after"] == 5000.0
+        # Segundo item es el pago con balance corrido correcto
+        assert data2["items"][1]["balance_after"] == 6000.0  # 5000 + 1000
+
 
 # ---------------------------------------------------------------------------
 # Tests: Treasury Dashboard

@@ -38,10 +38,10 @@ export function useCreateDeferredExpense() {
     mutationFn: deferredExpenseService.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["deferred-expenses"] });
-      toast.success("Gasto diferido creado exitosamente");
+      toast.success("Gasto programado creado exitosamente");
     },
     onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, "Error al crear el gasto diferido"));
+      toast.error(getApiErrorMessage(error, "Error al crear el gasto programado"));
     },
   });
 }
@@ -67,10 +67,10 @@ export function useCancelDeferredExpense() {
     mutationFn: (id: string) => deferredExpenseService.cancel(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["deferred-expenses"] });
-      toast.success("Gasto diferido cancelado");
+      toast.success("Gasto programado cancelado");
     },
     onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, "Error al cancelar el gasto diferido"));
+      toast.error(getApiErrorMessage(error, "Error al cancelar el gasto programado"));
     },
   });
 }
