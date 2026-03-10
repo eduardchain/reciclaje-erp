@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "EcoBalance API"
     VERSION: str = "0.1.0"
 
+    # File uploads
+    UPLOAD_DIR: str = "./uploads"
+    MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024  # 5MB
+
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
     CORS_ALLOW_CREDENTIALS: bool = True

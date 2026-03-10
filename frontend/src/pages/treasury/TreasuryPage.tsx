@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, Wallet, Hash } from "lucide-react";
+import { Plus, Wallet, Hash, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -55,7 +55,12 @@ const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [
   { accessorKey: "movement_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.movement_number}</span> },
   { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
   { accessorKey: "movement_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.movement_type] ?? ""}>{typeLabels[row.original.movement_type] ?? row.original.movement_type}</Badge> },
-  { accessorKey: "description", header: "Descripcion" },
+  { accessorKey: "description", header: "Descripcion", cell: ({ row }) => (
+    <span className="flex items-center gap-1.5">
+      {row.original.description}
+      {row.original.evidence_url && <Paperclip className="h-3.5 w-3.5 text-slate-400 shrink-0" />}
+    </span>
+  ) },
   { accessorKey: "amount", header: "Monto", enableSorting: true, cell: ({ row }) => <span className="font-medium tabular-nums">{formatCurrency(row.original.amount)}</span> },
   { accessorKey: "account_name", header: "Cuenta" },
   { accessorKey: "third_party_name", header: "Tercero", cell: ({ row }) => row.original.third_party_name ?? "-" },

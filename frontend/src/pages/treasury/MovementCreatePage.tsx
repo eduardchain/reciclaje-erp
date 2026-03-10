@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, AlertCircle } from "lucide-react";
+import { ArrowLeft, AlertCircle, Paperclip, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
-import { useCreateMovement } from "@/hooks/useMoneyMovements";
+import { useCreateMovement, useUploadEvidence } from "@/hooks/useMoneyMovements";
 import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategories, useThirdParties, useProvisions } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
@@ -38,6 +38,7 @@ export default function MovementCreatePage() {
   const initialProvisionId = searchParams.get("provision_id") || "";
   const [type, setType] = useState<MovementType>(initialType);
   const create = useCreateMovement(type);
+  const uploadEvidence = useUploadEvidence();
 
   const { data: suppliersData } = useSuppliers();
   const { data: customersData } = useCustomers();
@@ -65,6 +66,7 @@ export default function MovementCreatePage() {
   const [date, setDate] = useState(toLocalDateInput());
   const [referenceNumber, setReferenceNumber] = useState("");
   const [notes, setNotes] = useState("");
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
 
   const resetFields = () => {
     setAmount(0);
@@ -76,6 +78,7 @@ export default function MovementCreatePage() {
     setDescription("");
     setReferenceNumber("");
     setNotes("");
+    setEvidenceFile(null);
   };
 
   const handleTypeChange = (v: string) => {
@@ -128,7 +131,17 @@ export default function MovementCreatePage() {
   const handleSubmit = () => {
     const payload = buildPayload();
     create.mutate(payload, {
-      onSuccess: () => navigate(ROUTES.TREASURY),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      onSuccess: (response: any) => {
+        if (evidenceFile && response?.id) {
+          uploadEvidence.mutate(
+            { id: response.id, file: evidenceFile },
+            { onSettled: () => navigate(ROUTES.TREASURY) },
+          );
+        } else {
+          navigate(ROUTES.TREASURY);
+        }
+      },
     });
   };
 
@@ -279,6 +292,25 @@ export default function MovementCreatePage() {
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Notas adicionales..." />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comprobante</Label>
+              {!evidenceFile ? (
+                <Input
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)}
+                  className="cursor-pointer"
+                />
+              ) : (
+                <div className="flex items-center gap-2 mt-1 p-2 bg-slate-50 rounded-md border">
+                  <Paperclip className="h-4 w-4 text-slate-400 shrink-0" />
+                  <span className="text-sm text-slate-700 truncate">{evidenceFile.name}</span>
+                  <button type="button" onClick={() => setEvidenceFile(null)} className="ml-auto text-slate-400 hover:text-red-500">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

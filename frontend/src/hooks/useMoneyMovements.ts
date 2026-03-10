@@ -73,6 +73,35 @@ export function useThirdPartyMovements(thirdPartyId: string, filters: { date_fro
   });
 }
 
+export function useUploadEvidence() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) =>
+      moneyMovementService.uploadEvidence(id, file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["money-movements"] });
+      toast.success("Comprobante subido exitosamente");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al subir el comprobante"));
+    },
+  });
+}
+
+export function useDeleteEvidence() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => moneyMovementService.deleteEvidence(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["money-movements"] });
+      toast.success("Comprobante eliminado");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al eliminar el comprobante"));
+    },
+  });
+}
+
 export function useAnnulMovement() {
   const queryClient = useQueryClient();
   return useMutation({

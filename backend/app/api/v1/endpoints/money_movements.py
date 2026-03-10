@@ -10,7 +10,8 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_required_org_context, get_db
@@ -741,6 +742,119 @@ def get_by_third_party(
         "limit": limit,
         "opening_balance": float(opening_balance) if date_from_dt else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Evidencia (upload / download / delete)
+# IMPORTANTE: Estos endpoints deben ir ANTES de GET /{movement_id}
+# para evitar que FastAPI capture "evidence" como UUID.
+# ---------------------------------------------------------------------------
+
+ALLOWED_EVIDENCE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "pdf"}
+
+
+@router.post("/{movement_id}/evidence", response_model=MoneyMovementResponse)
+def upload_evidence(
+    movement_id: UUID,
+    file: UploadFile = File(...),
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """Subir comprobante adjunto a un movimiento."""
+    import os
+    from app.core.config import settings
+
+    org_id = str(org_context["organization_id"])
+    mov = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+
+    # Validar extension
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower() if file.filename else ""
+    if ext not in ALLOWED_EVIDENCE_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tipo de archivo no permitido. Extensiones validas: {', '.join(ALLOWED_EVIDENCE_EXTENSIONS)}",
+        )
+
+    # Leer y validar tamano
+    content = file.file.read()
+    if len(content) > settings.MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Archivo excede el tamano maximo de {settings.MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
+        )
+
+    # Crear directorio
+    evidence_dir = os.path.join(settings.UPLOAD_DIR, "evidence", org_id)
+    os.makedirs(evidence_dir, exist_ok=True)
+
+    # Eliminar archivo previo si existe
+    if mov.evidence_url:
+        old_path = os.path.join(settings.UPLOAD_DIR, mov.evidence_url)
+        if os.path.exists(old_path):
+            os.remove(old_path)
+
+    # Guardar nuevo archivo
+    timestamp = int(datetime.now(tz=tz.utc).timestamp())
+    filename = f"{movement_id}_{timestamp}.{ext}"
+    filepath = os.path.join(evidence_dir, filename)
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    # Actualizar modelo
+    mov.evidence_url = f"evidence/{org_id}/{filename}"
+    db.commit()
+    db.refresh(mov)
+    return _to_response(mov)
+
+
+@router.get("/{movement_id}/evidence")
+def download_evidence(
+    movement_id: UUID,
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """Descargar comprobante adjunto de un movimiento."""
+    import os
+    import mimetypes
+    from app.core.config import settings
+
+    mov = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+
+    if not mov.evidence_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El movimiento no tiene comprobante adjunto")
+
+    filepath = os.path.join(settings.UPLOAD_DIR, mov.evidence_url)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archivo no encontrado en disco")
+
+    media_type = mimetypes.guess_type(filepath)[0] or "application/octet-stream"
+    filename = os.path.basename(filepath)
+    return FileResponse(filepath, media_type=media_type, filename=filename)
+
+
+@router.delete("/{movement_id}/evidence", response_model=MoneyMovementResponse)
+def delete_evidence(
+    movement_id: UUID,
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """Eliminar comprobante adjunto de un movimiento."""
+    import os
+    from app.core.config import settings
+
+    mov = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+
+    if not mov.evidence_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El movimiento no tiene comprobante adjunto")
+
+    filepath = os.path.join(settings.UPLOAD_DIR, mov.evidence_url)
+    if os.path.exists(filepath):
+        os.remove(filepath)
+
+    mov.evidence_url = None
+    db.commit()
+    db.refresh(mov)
+    return _to_response(mov)
 
 
 @router.get("/{movement_id}", response_model=MoneyMovementResponse)

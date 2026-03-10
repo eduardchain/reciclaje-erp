@@ -1471,3 +1471,157 @@ class TestAdvanceCollection:
         db_session.refresh(test_customer)
         assert test_account.current_balance == Decimal("10000000.00")
         assert test_customer.current_balance == Decimal("3000000.00")
+
+
+# ---------------------------------------------------------------------------
+# Tests de evidencia (upload / download / delete)
+# ---------------------------------------------------------------------------
+
+class TestEvidence:
+    """Tests para subir, descargar y eliminar comprobantes de movimientos."""
+
+    def _create_movement(self, client, org_headers, account_id, supplier_id):
+        """Helper: crea un pago a proveedor y retorna el ID."""
+        payload = {
+            "supplier_id": supplier_id,
+            "amount": 100000,
+            "account_id": account_id,
+            "date": "2026-03-01T10:00:00Z",
+            "description": "Pago test evidencia",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        return resp.json()["id"]
+
+    def test_upload_evidence(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier,
+    ):
+        """Subir comprobante a un movimiento."""
+        mid = self._create_movement(client, org_headers, str(test_account.id), str(test_supplier.id))
+
+        # Crear archivo de prueba (PNG falso de pocos bytes)
+        import io
+        fake_file = io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+        resp = client.post(
+            f"/api/v1/money-movements/{mid}/evidence",
+            headers=org_headers,
+            files={"file": ("comprobante.png", fake_file, "image/png")},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["evidence_url"] is not None
+        assert "evidence/" in data["evidence_url"]
+
+    def test_upload_evidence_invalid_extension(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier,
+    ):
+        """Archivo con extension no permitida — 400."""
+        mid = self._create_movement(client, org_headers, str(test_account.id), str(test_supplier.id))
+
+        import io
+        fake_file = io.BytesIO(b"not a real exe")
+        resp = client.post(
+            f"/api/v1/money-movements/{mid}/evidence",
+            headers=org_headers,
+            files={"file": ("virus.exe", fake_file, "application/octet-stream")},
+        )
+        assert resp.status_code == 400
+        assert "no permitido" in resp.json()["detail"]
+
+    def test_download_evidence(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier,
+    ):
+        """Subir y luego descargar comprobante."""
+        mid = self._create_movement(client, org_headers, str(test_account.id), str(test_supplier.id))
+
+        import io
+        content = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+        fake_file = io.BytesIO(content)
+        client.post(
+            f"/api/v1/money-movements/{mid}/evidence",
+            headers=org_headers,
+            files={"file": ("test.png", fake_file, "image/png")},
+        )
+
+        resp = client.get(
+            f"/api/v1/money-movements/{mid}/evidence",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.content == content
+
+    def test_download_evidence_not_found(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier,
+    ):
+        """Descargar sin comprobante — 404."""
+        mid = self._create_movement(client, org_headers, str(test_account.id), str(test_supplier.id))
+
+        resp = client.get(
+            f"/api/v1/money-movements/{mid}/evidence",
+            headers=org_headers,
+        )
+        assert resp.status_code == 404
+
+    def test_delete_evidence(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier,
+    ):
+        """Eliminar comprobante — evidence_url = None."""
+        mid = self._create_movement(client, org_headers, str(test_account.id), str(test_supplier.id))
+
+        import io
+        fake_file = io.BytesIO(b"\x89PNG" + b"\x00" * 50)
+        client.post(
+            f"/api/v1/money-movements/{mid}/evidence",
+            headers=org_headers,
+            files={"file": ("test.png", fake_file, "image/png")},
+        )
+
+        resp = client.delete(
+            f"/api/v1/money-movements/{mid}/evidence",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["evidence_url"] is None
+
+    def test_upload_replaces_existing(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier,
+    ):
+        """Subir segundo archivo reemplaza el primero."""
+        mid = self._create_movement(client, org_headers, str(test_account.id), str(test_supplier.id))
+
+        import io
+        # Primer upload
+        f1 = io.BytesIO(b"file1content")
+        resp1 = client.post(
+            f"/api/v1/money-movements/{mid}/evidence",
+            headers=org_headers,
+            files={"file": ("first.pdf", f1, "application/pdf")},
+        )
+        url1 = resp1.json()["evidence_url"]
+
+        # Segundo upload
+        f2 = io.BytesIO(b"file2content")
+        resp2 = client.post(
+            f"/api/v1/money-movements/{mid}/evidence",
+            headers=org_headers,
+            files={"file": ("second.jpg", f2, "image/jpeg")},
+        )
+        url2 = resp2.json()["evidence_url"]
+
+        assert url1 != url2
+
+        # Descargar retorna segundo archivo
+        resp = client.get(
+            f"/api/v1/money-movements/{mid}/evidence",
+            headers=org_headers,
+        )
+        assert resp.content == b"file2content"

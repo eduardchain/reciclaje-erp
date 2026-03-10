@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, XCircle } from "lucide-react";
+import { ArrowLeft, XCircle, Paperclip, Eye, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,9 +10,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { useMoneyMovement, useAnnulMovement } from "@/hooks/useMoneyMovements";
+import { useMoneyMovement, useAnnulMovement, useUploadEvidence, useDeleteEvidence } from "@/hooks/useMoneyMovements";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
+import apiClient from "@/services/api";
 
 const typeLabels: Record<string, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -26,6 +27,8 @@ const typeLabels: Record<string, string> = {
   commission_payment: "Pago de Comision",
   provision_deposit: "Deposito a Provision",
   provision_expense: "Gasto desde Provision",
+  advance_payment: "Anticipo a Proveedor",
+  advance_collection: "Anticipo de Cliente",
 };
 
 const statusBorderMap: Record<string, string> = {
@@ -38,9 +41,13 @@ export default function MovementDetailPage() {
   const navigate = useNavigate();
   const { data: movement, isLoading } = useMoneyMovement(id!);
   const annul = useAnnulMovement();
+  const uploadEvidence = useUploadEvidence();
+  const deleteEvidence = useDeleteEvidence();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [showAnnul, setShowAnnul] = useState(false);
   const [annulReason, setAnnulReason] = useState("");
+  const [showDeleteEvidence, setShowDeleteEvidence] = useState(false);
 
   if (isLoading) return <div className="space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>;
   if (!movement) return <div className="text-center py-12 text-slate-500">Movimiento no encontrado</div>;
@@ -51,6 +58,26 @@ export default function MovementDetailPage() {
       { id, data: { reason: annulReason } },
       { onSuccess: () => { setShowAnnul(false); setAnnulReason(""); } },
     );
+  };
+
+  const handleViewEvidence = async () => {
+    if (!id) return;
+    const response = await apiClient.get(`/api/v1/money-movements/${id}/evidence`, { responseType: "blob" });
+    const blob = new Blob([response.data], { type: response.headers["content-type"] });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !id) return;
+    uploadEvidence.mutate({ id, file });
+    e.target.value = "";
+  };
+
+  const handleDeleteEvidence = () => {
+    if (!id) return;
+    deleteEvidence.mutate(id, { onSuccess: () => setShowDeleteEvidence(false) });
   };
 
   return (
@@ -95,6 +122,46 @@ export default function MovementDetailPage() {
         </Card>
       </div>
 
+      {/* Comprobante */}
+      <Card className="shadow-sm">
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Paperclip className="h-4 w-4 text-slate-400" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comprobante</span>
+            </div>
+            {movement.evidence_url ? (
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handleViewEvidence}>
+                  <Eye className="h-4 w-4 mr-1" />Ver
+                </Button>
+                {movement.status === "confirmed" && (
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                      <Upload className="h-4 w-4 mr-1" />Reemplazar
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setShowDeleteEvidence(true)} className="text-red-600 border-red-200 hover:bg-red-50">
+                      <Trash2 className="h-4 w-4 mr-1" />Eliminar
+                    </Button>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div>
+                {movement.status === "confirmed" ? (
+                  <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadEvidence.isPending}>
+                    <Upload className="h-4 w-4 mr-1" />{uploadEvidence.isPending ? "Subiendo..." : "Agregar Comprobante"}
+                  </Button>
+                ) : (
+                  <span className="text-sm text-slate-400">Sin comprobante</span>
+                )}
+              </div>
+            )}
+          </div>
+          <input ref={fileInputRef} type="file" accept="image/*,.pdf" className="hidden" onChange={handleFileSelect} />
+        </CardContent>
+      </Card>
+
       {movement.status === "annulled" && (
         <Card className="shadow-sm border-red-200 bg-red-50">
           <CardContent className="pt-6">
@@ -122,6 +189,17 @@ export default function MovementDetailPage() {
           <Input value={annulReason} onChange={(e) => setAnnulReason(e.target.value)} placeholder="Ingrese la razon..." />
         </div>
       </ConfirmDialog>
+
+      <ConfirmDialog
+        open={showDeleteEvidence}
+        onOpenChange={setShowDeleteEvidence}
+        title="Eliminar Comprobante"
+        description="Se eliminara el comprobante adjunto de este movimiento. Esta accion no se puede deshacer."
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={handleDeleteEvidence}
+        loading={deleteEvidence.isPending}
+      />
     </div>
   );
 }

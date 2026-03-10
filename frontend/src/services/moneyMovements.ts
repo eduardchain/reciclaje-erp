@@ -104,6 +104,26 @@ export const moneyMovementService = {
     return response.data;
   },
 
+  uploadEvidence: async (id: string, file: File): Promise<MoneyMovementResponse> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await apiClient.post<MoneyMovementResponse>(
+      `/api/v1/money-movements/${id}/evidence`,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } },
+    );
+    return response.data;
+  },
+
+  deleteEvidence: async (id: string): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.delete<MoneyMovementResponse>(`/api/v1/money-movements/${id}/evidence`);
+    return response.data;
+  },
+
+  getEvidenceUrl: (id: string): string => {
+    return `${apiClient.defaults.baseURL}/api/v1/money-movements/${id}/evidence`;
+  },
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getByThirdParty: async (thirdPartyId: string, filters: { date_from?: string; date_to?: string } = {}): Promise<{ items: any[]; opening_balance: number }> => {
     const response = await apiClient.get(`/api/v1/money-movements/third-party/${thirdPartyId}`, { params: filters });
