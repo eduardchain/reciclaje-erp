@@ -12,6 +12,7 @@ Registra todos los movimientos financieros de la organizacion:
 - Pagos de comisiones (commission_payment)
 - Depositos a provisiones (provision_deposit)
 - Gastos desde provisiones (provision_expense)
+- Pagos de activos fijos (asset_payment)
 
 Cada movimiento afecta exactamente UNA cuenta de dinero (excepto provision_expense).
 Las transferencias crean un par de movimientos vinculados por transfer_pair_id.
@@ -64,6 +65,7 @@ VALID_MOVEMENT_TYPES = [
     "provision_expense",        # Gasto desde provision: provision.balance(+), NO afecta cuenta
     "advance_payment",          # Anticipo a proveedor: account(-), supplier.balance(+)
     "advance_collection",       # Anticipo de cliente: account(+), customer.balance(-)
+    "asset_payment",            # Pago de activo fijo: account(-), third_party.balance(+) opcional
 ]
 
 

@@ -73,6 +73,7 @@ OUTFLOW_TYPES = frozenset([
     "transfer_out",
     "provision_deposit",  # Sale dinero de cuenta hacia provision
     "advance_payment",    # Anticipo a proveedor: sale dinero de cuenta
+    "asset_payment",      # Pago de activo fijo: sale dinero de cuenta
 ])
 # Nota: provision_expense NO va aqui — no afecta cuentas de dinero
 

@@ -14,7 +14,7 @@ import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseC
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
-type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection";
+type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment";
 
 const typeLabels: Record<MovementType, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -29,6 +29,7 @@ const typeLabels: Record<MovementType, string> = {
   provision_expense: "Gasto desde Provision",
   advance_payment: "Anticipo a Proveedor",
   advance_collection: "Anticipo de Cliente",
+  asset_payment: "Pago Activo Fijo",
 };
 
 export default function MovementCreatePage() {
@@ -125,6 +126,8 @@ export default function MovementCreatePage() {
         return { ...base, supplier_id: thirdPartyId, account_id: accountId };
       case "advance_collection":
         return { ...base, customer_id: thirdPartyId, account_id: accountId };
+      case "asset_payment":
+        return { ...base, account_id: accountId, description, third_party_id: thirdPartyId || undefined };
     }
   };
 
@@ -172,11 +175,12 @@ export default function MovementCreatePage() {
   };
 
   const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment", "advance_payment", "advance_collection"].includes(type);
+  const optionalThirdParty = type === "asset_payment";
   const needsProvision = type === "provision_deposit" || type === "provision_expense";
   const needsExpenseCategory = type === "expense" || type === "provision_expense";
   const needsDestAccount = type === "transfer";
   const needsAccount = type !== "transfer" && type !== "provision_expense";
-  const needsDescription = ["expense", "service_income", "transfer", "provision_expense"].includes(type);
+  const needsDescription = ["expense", "service_income", "transfer", "provision_expense", "asset_payment"].includes(type);
 
   return (
     <div className="space-y-6">
@@ -221,6 +225,13 @@ export default function MovementCreatePage() {
               <div>
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">{getThirdPartyLabel()}</Label>
                 <EntitySelect value={thirdPartyId} onChange={setThirdPartyId} options={getThirdPartyOptions()} placeholder="Seleccionar..." />
+              </div>
+            )}
+
+            {optionalThirdParty && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero (opcional)</Label>
+                <EntitySelect value={thirdPartyId} onChange={setThirdPartyId} options={getThirdPartyOptions()} placeholder="Seleccionar tercero..." />
               </div>
             )}
 

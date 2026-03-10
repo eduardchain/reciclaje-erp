@@ -13,7 +13,8 @@ export type MoneyMovementType =
   | "provision_deposit"
   | "provision_expense"
   | "advance_payment"
-  | "advance_collection";
+  | "advance_collection"
+  | "asset_payment";
 
 export type MovementStatus = "confirmed" | "annulled";
 
@@ -166,6 +167,17 @@ export interface AdvanceCollectionCreate {
   account_id: string;
   date: string;
   description?: string | null;
+  reference_number?: string | null;
+  evidence_url?: string | null;
+  notes?: string | null;
+}
+
+export interface AssetPaymentCreate {
+  amount: number;
+  account_id: string;
+  description: string;
+  date: string;
+  third_party_id?: string | null;
   reference_number?: string | null;
   evidence_url?: string | null;
   notes?: string | null;

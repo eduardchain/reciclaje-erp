@@ -14,6 +14,7 @@ Schemas especializados por tipo de operacion:
 - ProvisionExpenseCreate: Gasto desde provision
 - AdvancePaymentCreate: Anticipo a proveedor
 - AdvanceCollectionCreate: Anticipo de cliente
+- AssetPaymentCreate: Pago de activo fijo
 """
 from datetime import datetime
 from decimal import Decimal
@@ -163,6 +164,18 @@ class AdvanceCollectionCreate(BaseModel):
     account_id: UUID = Field(..., description="Cuenta donde entra el dinero")
     date: datetime = Field(..., description="Fecha del anticipo")
     description: Optional[str] = Field(None, max_length=500)
+    reference_number: Optional[str] = Field(None, max_length=100)
+    evidence_url: Optional[str] = Field(None, max_length=500)
+    notes: Optional[str] = None
+
+
+class AssetPaymentCreate(BaseModel):
+    """Pago de activo fijo — account(-), third_party.balance(+) opcional."""
+    amount: Decimal = Field(..., gt=0, description="Monto del pago")
+    account_id: UUID = Field(..., description="Cuenta de donde sale el dinero")
+    description: str = Field(..., min_length=1, max_length=500, description="Descripcion del activo")
+    date: datetime = Field(..., description="Fecha del pago")
+    third_party_id: Optional[UUID] = Field(None, description="Tercero vendedor (opcional, cualquier tipo)")
     reference_number: Optional[str] = Field(None, max_length=100)
     evidence_url: Optional[str] = Field(None, max_length=500)
     notes: Optional[str] = None

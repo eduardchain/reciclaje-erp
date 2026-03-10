@@ -35,6 +35,7 @@ const typeLabels: Record<MoneyMovementType, string> = {
   provision_expense: "Gasto Provision",
   advance_payment: "Anticipo Proveedor",
   advance_collection: "Anticipo Cliente",
+  asset_payment: "Pago Activo Fijo",
 };
 
 const typeColors: Record<string, string> = {
@@ -49,6 +50,7 @@ const typeColors: Record<string, string> = {
   commission_payment: "bg-pink-100 text-pink-800",
   provision_deposit: "bg-violet-100 text-violet-800",
   provision_expense: "bg-amber-100 text-amber-800",
+  asset_payment: "bg-slate-100 text-slate-800",
 };
 
 const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [

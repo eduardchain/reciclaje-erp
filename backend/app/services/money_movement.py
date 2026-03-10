@@ -11,6 +11,7 @@ Cada metodo publico corresponde a un tipo de movimiento:
 - create_capital_injection: Aporte de capital
 - create_capital_return: Retiro de capital
 - pay_commission: Pago de comision
+- pay_asset: Pago de activo fijo
 - annul: Anular movimiento con reversion de saldos
 """
 from datetime import datetime
@@ -41,6 +42,7 @@ from app.schemas.money_movement import (
     ProvisionExpenseCreate,
     AdvancePaymentCreate,
     AdvanceCollectionCreate,
+    AssetPaymentCreate,
     MoneyMovementResponse,
 )
 
@@ -601,6 +603,50 @@ class CRUDMoneyMovement:
         return movement
 
     # ======================================================================
+    # Pago de activo fijo
+    # ======================================================================
+
+    def pay_asset(
+        self,
+        db: Session,
+        data: "AssetPaymentCreate",
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """
+        Pago de activo fijo.
+
+        Efectos:
+        - account.current_balance -= amount
+        (tercero es solo referencia informativa, NO afecta su balance)
+        """
+        account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
+
+        if data.third_party_id:
+            self._validate_third_party(db, data.third_party_id, organization_id)
+
+        movement = self._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="asset_payment",
+            amount=data.amount,
+            account_id=data.account_id,
+            date=data.date,
+            description=data.description,
+            third_party_id=data.third_party_id,
+            reference_number=data.reference_number,
+            evidence_url=data.evidence_url,
+            notes=data.notes,
+            user_id=user_id,
+        )
+
+        account.current_balance -= data.amount
+
+        db.commit()
+        db.refresh(movement)
+        return movement
+
+    # ======================================================================
     # Anulacion
     # ======================================================================
 
@@ -1048,6 +1094,7 @@ class CRUDMoneyMovement:
         - provision_expense: provision(-) (sin cuenta)
         - advance_payment: account(+), supplier(-)
         - advance_collection: account(-), customer(+)
+        - asset_payment: account(+) (tercero es solo referencia)
         """
         account = db.get(MoneyAccount, movement.account_id) if movement.account_id else None
         third_party = db.get(ThirdParty, movement.third_party_id) if movement.third_party_id else None
@@ -1112,6 +1159,10 @@ class CRUDMoneyMovement:
             account.current_balance -= amt
             if third_party:
                 third_party.current_balance += amt
+
+        elif mt == "asset_payment":
+            # Tercero es solo referencia, no se reversa balance
+            account.current_balance += amt
 
     def _get_or_404(
         self,

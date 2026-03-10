@@ -28,6 +28,7 @@ from app.schemas.money_movement import (
     ProvisionExpenseCreate,
     AdvancePaymentCreate,
     AdvanceCollectionCreate,
+    AssetPaymentCreate,
     AnnulMovementRequest,
     AnnulMovementResponse,
     MoneyMovementResponse,
@@ -52,6 +53,7 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "provision_expense": 1,         # Gastamos de provision: fondos disminuyen (balance sube)
     "advance_payment": 1,           # Anticipo a proveedor: proveedor nos debe
     "advance_collection": -1,       # Anticipo de cliente: nosotros debemos al cliente
+    # asset_payment: tercero es solo referencia, NO afecta balance
 }
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -69,6 +71,7 @@ ACCOUNT_BALANCE_DIRECTION = {
     "transfer_out": -1,
     "provision_deposit": -1,
     "advance_payment": -1,
+    "asset_payment": -1,
 }
 
 
@@ -383,6 +386,31 @@ def create_advance_collection(
     Efectos: account(+), customer.balance(-) — nosotros debemos al cliente.
     """
     movement = money_movement.collect_advance(
+        db=db,
+        data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded)
+
+
+@router.post(
+    "/asset-payment",
+    response_model=MoneyMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_asset_payment(
+    data: AssetPaymentCreate,
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Pago de activo fijo.
+
+    Efectos: account(-), third_party.balance(+) si se indica tercero.
+    """
+    movement = money_movement.pay_asset(
         db=db,
         data=data,
         organization_id=org_context["organization_id"],

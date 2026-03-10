@@ -13,6 +13,7 @@ import type {
   ProvisionExpenseCreate,
   AdvancePaymentCreate,
   AdvanceCollectionCreate,
+  AssetPaymentCreate,
   AnnulMovementRequest,
 } from "@/types/money-movement";
 import type { PaginatedResponse } from "@/types/common";
@@ -96,6 +97,11 @@ export const moneyMovementService = {
 
   createAdvanceCollection: async (data: AdvanceCollectionCreate): Promise<MoneyMovementResponse> => {
     const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/advance-collection", data);
+    return response.data;
+  },
+
+  createAssetPayment: async (data: AssetPaymentCreate): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/asset-payment", data);
     return response.data;
   },
 

@@ -32,6 +32,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   provision_expense: "Gasto desde Provision",
   advance_payment: "Anticipo a Proveedor",
   advance_collection: "Anticipo de Cliente",
+  asset_payment: "Pago Activo Fijo",
   purchase_liquidation: "Compra Liquidada",
   purchase_cancellation: "Compra Cancelada",
   sale_liquidation: "Venta Liquidada",

@@ -1758,3 +1758,101 @@ class TestAccountMovements:
         assert annulled[0]["status"] == "annulled"
         # Balance no cambia por movimiento anulado (sigue en saldo base = 10M)
         assert annulled[0]["balance_after"] == 10000000.0
+
+
+# ---------------------------------------------------------------------------
+# Tests: Pago de Activo Fijo (asset_payment)
+# ---------------------------------------------------------------------------
+
+class TestAssetPayment:
+    """Tests para asset_payment — pago de activo fijo."""
+
+    def test_asset_payment_basic(self, client: TestClient, org_headers, test_account, db_session):
+        """Pago de activo fijo sin tercero — solo afecta cuenta."""
+        resp = client.post(
+            "/api/v1/money-movements/asset-payment",
+            json={
+                "amount": 500000,
+                "account_id": str(test_account.id),
+                "description": "Compra de bascula industrial",
+                "date": "2025-03-10T10:00:00Z",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["movement_type"] == "asset_payment"
+        assert float(data["amount"]) == 500000
+        assert data["description"] == "Compra de bascula industrial"
+        assert data["third_party_id"] is None
+
+        # Verificar efecto en cuenta
+        db_session.refresh(test_account)
+        assert test_account.current_balance == Decimal("9500000.00")
+
+    def test_asset_payment_with_third_party(self, client: TestClient, org_headers, test_account, test_supplier, db_session):
+        """Pago de activo fijo con tercero — tercero es solo referencia, NO cambia su balance."""
+        initial_supplier_balance = test_supplier.current_balance
+
+        resp = client.post(
+            "/api/v1/money-movements/asset-payment",
+            json={
+                "amount": 1000000,
+                "account_id": str(test_account.id),
+                "description": "Compra camion de carga",
+                "date": "2025-03-10T10:00:00Z",
+                "third_party_id": str(test_supplier.id),
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["third_party_id"] == str(test_supplier.id)
+        assert data["third_party_name"] == test_supplier.name
+
+        # Verificar: cuenta baja, tercero NO cambia (es solo referencia)
+        db_session.refresh(test_account)
+        db_session.refresh(test_supplier)
+        assert test_account.current_balance == Decimal("9000000.00")
+        assert test_supplier.current_balance == initial_supplier_balance
+
+    def test_asset_payment_annul(self, client: TestClient, org_headers, test_account, test_supplier, db_session):
+        """Anulacion de pago de activo fijo revierte cuenta, tercero nunca cambio."""
+        initial_account_balance = test_account.current_balance
+        initial_supplier_balance = test_supplier.current_balance
+
+        # Crear
+        resp = client.post(
+            "/api/v1/money-movements/asset-payment",
+            json={
+                "amount": 800000,
+                "account_id": str(test_account.id),
+                "description": "Compra montacarga",
+                "date": "2025-03-10T10:00:00Z",
+                "third_party_id": str(test_supplier.id),
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        movement_id = resp.json()["id"]
+
+        # Verificar: cuenta baja, tercero NO cambio
+        db_session.refresh(test_account)
+        db_session.refresh(test_supplier)
+        assert test_account.current_balance == initial_account_balance - Decimal("800000")
+        assert test_supplier.current_balance == initial_supplier_balance
+
+        # Anular
+        resp = client.post(
+            f"/api/v1/money-movements/{movement_id}/annul",
+            json={"reason": "Error de digitacion"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "annulled"
+
+        # Verificar reversion: cuenta vuelve, tercero sigue igual
+        db_session.refresh(test_account)
+        db_session.refresh(test_supplier)
+        assert test_account.current_balance == initial_account_balance
+        assert test_supplier.current_balance == initial_supplier_balance
