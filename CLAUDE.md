@@ -171,6 +171,8 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 17. **Upload de evidencia (comprobantes)**: Cada MoneyMovement puede tener un archivo adjunto (imagen o PDF, max 5MB). Endpoints: `POST /{id}/evidence` (upload, multipart/form-data), `GET /{id}/evidence` (download, FileResponse), `DELETE /{id}/evidence`. Almacenamiento local en `{UPLOAD_DIR}/evidence/{org_id}/`. Config: `UPLOAD_DIR` (default `./uploads`), `MAX_UPLOAD_SIZE` (5MB). Un archivo por movimiento (reemplaza anterior). Frontend: file input en MovementCreatePage (upload post-create), sección comprobante en MovementDetailPage (ver/reemplazar/eliminar), icono Paperclip en TreasuryPage.
 
+18. **Gastos diferidos (Deferred Expenses)**: Gastos grandes distribuidos en cuotas mensuales. Tablas: `deferred_expenses` (monto total, cuota mensual, meses, tipo expense/provision_expense, estado active/completed/cancelled) + `deferred_applications` (cada cuota con FK a MoneyMovement). El usuario aplica cuotas manualmente via `POST /{id}/apply` — cada aplicacion crea un MoneyMovement (expense o provision_expense) y un DeferredApplication. La ultima cuota absorbe residuo de redondeo. Cancelacion solo marca status, no revierte cuotas ya aplicadas. Endpoint `GET /pending` para TreasuryDashboard. Migration: `22f663ae5d63`. 18 tests.
+
 16. **Estado de cuenta unificado (Unified Account Statement)**: El endpoint `GET /money-movements/third-party/{id}` es un "unified account statement" que fusiona TODAS las operaciones que afectan el balance de un tercero: MoneyMovements (confirmados + anulados), compras liquidadas/canceladas (standalone), ventas liquidadas/canceladas (standalone), comisiones de ventas, doble partida (como proveedor y/o cliente), y comisiones de doble partida. Cada item incluye `source`/`source_id`/`source_number` para trazar al registro original. Eventos ordenados por (datetime, sort_key: 0=comercial, 1=tesoreria, 2=cancelacion). Balance corrido calculado iterativamente. Default: ultimos 90 dias si no se provee `date_from`. Compras/ventas con `double_entry_id IS NOT NULL` se excluyen para evitar duplicados con la seccion de doble partida.
 
 ### Business Modules (Implemented)
@@ -193,11 +195,12 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Inventory Adjustments | `/api/v1/inventory/adjustments/` | Manual stock corrections: increase, decrease, recount, zero-out. Warehouse transfers. Annulment with stock reversal |
 | Material Transformations | `/api/v1/inventory/transformations/` | Material disassembly (e.g., Motor → Copper + Iron + Aluminum + Waste). Proportional/manual cost distribution |
 | Inventory Views | `/api/v1/inventory/` | Consolidated stock (filterable by category/warehouse), per-material warehouse breakdown, transit stock (pending purchases/sales/bottleneck alerts), movement history (with running balance/avg cost per material), inventory valuation |
+| Deferred Expenses | `/api/v1/deferred-expenses/` | Large expenses distributed in monthly installments. Create, apply installments (creates MoneyMovement), cancel. Pending endpoint for dashboard |
 | Reports & Dashboard | `/api/v1/reports/` | Dashboard with period comparison, P&L, Cash Flow, Balance Sheet, Purchase/Sales reports, Margin Analysis, Third Party Balances, Treasury Dashboard. All read-only |
 
 ### Testing
 
-Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 432 tests. Run with `./venv/bin/pytest` from backend dir.
+Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 450 tests. Run with `./venv/bin/pytest` from backend dir.
 
 Key fixtures: `test_user`, `auth_headers`, `org_headers` (auth + X-Organization-ID), `db_session`.
 

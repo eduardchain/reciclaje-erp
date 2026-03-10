@@ -9,12 +9,15 @@ import {
   ArrowDownCircle,
   TrendingUp,
   PiggyBank,
+  CalendarClock,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { reportsService } from "@/services/reports";
+import { usePendingDeferredExpenses } from "@/hooks/useDeferredExpenses";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
@@ -41,6 +44,7 @@ export default function TreasuryDashboardPage() {
     queryKey: ["treasury-dashboard"],
     queryFn: () => reportsService.getTreasuryDashboard(),
   });
+  const { data: pendingDeferred } = usePendingDeferredExpenses();
 
   if (isLoading || !data) {
     return (
@@ -203,6 +207,61 @@ export default function TreasuryDashboardPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Gastos Diferidos Pendientes */}
+      <Card className="shadow-sm">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+            <CalendarClock className="h-4 w-4" />
+            Gastos Diferidos Pendientes
+          </CardTitle>
+          <Button variant="outline" size="sm" onClick={() => navigate(ROUTES.TREASURY_DEFERRED)}>
+            Ver todos
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {!pendingDeferred || pendingDeferred.length === 0 ? (
+            <p className="text-sm text-slate-400 py-4 text-center">No hay cuotas pendientes</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nombre</TableHead>
+                  <TableHead>Categoria</TableHead>
+                  <TableHead className="text-center">Progreso</TableHead>
+                  <TableHead className="text-right">Siguiente Cuota</TableHead>
+                  <TableHead className="text-right">Restante</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pendingDeferred.map((de) => (
+                  <TableRow key={de.id} className="cursor-pointer hover:bg-slate-50" onClick={() => navigate(`${ROUTES.TREASURY_DEFERRED}/${de.id}`)}>
+                    <TableCell className="font-medium">
+                      {de.name}
+                    </TableCell>
+                    <TableCell className="text-sm text-slate-500">{de.expense_category_name}</TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="w-16 bg-slate-100 rounded-full h-2">
+                          <div
+                            className="bg-emerald-500 h-2 rounded-full"
+                            style={{ width: `${(de.applied_months / de.total_months) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-slate-500 tabular-nums">
+                          {de.applied_months}/{de.total_months}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-medium tabular-nums">{formatCurrency(de.next_amount)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-slate-500">{formatCurrency(de.remaining_amount)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Ultimos movimientos */}
       <Card className="shadow-sm">

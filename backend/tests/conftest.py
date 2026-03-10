@@ -34,6 +34,8 @@ from app.models import (
     MaterialTransformation,
     MaterialTransformationLine,
     MaterialCostHistory,
+    DeferredExpense,
+    DeferredApplication,
 )
 
 # Test database URL (PostgreSQL on port 5433)

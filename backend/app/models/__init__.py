@@ -20,6 +20,7 @@ from .money_movement import MoneyMovement
 from .inventory_adjustment import InventoryAdjustment
 from .material_transformation import MaterialTransformation, MaterialTransformationLine
 from .material_cost_history import MaterialCostHistory
+from .deferred_expense import DeferredExpense, DeferredApplication
 
 __all__ = [
     "Base",
@@ -49,4 +50,6 @@ __all__ = [
     "MaterialTransformation",
     "MaterialTransformationLine",
     "MaterialCostHistory",
+    "DeferredExpense",
+    "DeferredApplication",
 ]
