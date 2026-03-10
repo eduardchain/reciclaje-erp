@@ -310,6 +310,8 @@ class ThirdPartyBalancesResponse(BaseModel):
     total_payable: float
     total_receivable: float
     net_position: float
+    total_advances_paid: float  # Proveedores con balance > 0 (nos deben)
+    total_advances_received: float  # Clientes con balance < 0 (les debemos)
     suppliers: list[SupplierBalance]
     customers: list[CustomerBalance]
 

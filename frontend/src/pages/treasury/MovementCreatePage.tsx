@@ -14,7 +14,7 @@ import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseC
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
-type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense";
+type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection";
 
 const typeLabels: Record<MovementType, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -27,6 +27,8 @@ const typeLabels: Record<MovementType, string> = {
   commission_payment: "Pago de Comision",
   provision_deposit: "Deposito a Provision",
   provision_expense: "Gasto desde Provision",
+  advance_payment: "Anticipo a Proveedor",
+  advance_collection: "Anticipo de Cliente",
 };
 
 export default function MovementCreatePage() {
@@ -116,6 +118,10 @@ export default function MovementCreatePage() {
         return { ...base, provision_id: provisionId, account_id: accountId };
       case "provision_expense":
         return { ...base, provision_id: provisionId, expense_category_id: expCategoryId, description };
+      case "advance_payment":
+        return { ...base, supplier_id: thirdPartyId, account_id: accountId };
+      case "advance_collection":
+        return { ...base, customer_id: thirdPartyId, account_id: accountId };
     }
   };
 
@@ -128,8 +134,10 @@ export default function MovementCreatePage() {
 
   const getThirdPartyOptions = () => {
     switch (type) {
-      case "payment_to_supplier": return suppliers.map((s) => ({ id: s.id, label: s.name }));
-      case "collection_from_client": return customers.map((c) => ({ id: c.id, label: c.name }));
+      case "payment_to_supplier":
+      case "advance_payment": return suppliers.map((s) => ({ id: s.id, label: s.name }));
+      case "collection_from_client":
+      case "advance_collection": return customers.map((c) => ({ id: c.id, label: c.name }));
       case "capital_injection":
       case "capital_return": return investors.map((i) => ({ id: i.id, label: i.name }));
       case "commission_payment": return thirdParties.map((t) => ({ id: t.id, label: t.name }));
@@ -139,8 +147,10 @@ export default function MovementCreatePage() {
 
   const getThirdPartyLabel = () => {
     switch (type) {
-      case "payment_to_supplier": return "Proveedor *";
-      case "collection_from_client": return "Cliente *";
+      case "payment_to_supplier":
+      case "advance_payment": return "Proveedor *";
+      case "collection_from_client":
+      case "advance_collection": return "Cliente *";
       case "capital_injection":
       case "capital_return": return "Inversionista *";
       case "commission_payment": return "Comisionista *";
@@ -148,7 +158,7 @@ export default function MovementCreatePage() {
     }
   };
 
-  const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment"].includes(type);
+  const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment", "advance_payment", "advance_collection"].includes(type);
   const needsProvision = type === "provision_deposit" || type === "provision_expense";
   const needsExpenseCategory = type === "expense" || type === "provision_expense";
   const needsDestAccount = type === "transfer";

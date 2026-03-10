@@ -62,6 +62,8 @@ VALID_MOVEMENT_TYPES = [
     "commission_payment",       # Pago de comision: account(-), third_party.balance(+)
     "provision_deposit",        # Deposito a provision: account(-), provision.balance(-)
     "provision_expense",        # Gasto desde provision: provision.balance(+), NO afecta cuenta
+    "advance_payment",          # Anticipo a proveedor: account(-), supplier.balance(+)
+    "advance_collection",       # Anticipo de cliente: account(+), customer.balance(-)
 ]
 
 

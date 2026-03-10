@@ -30,6 +30,8 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   commission_payment: "Pago de Comision",
   provision_deposit: "Deposito a Provision",
   provision_expense: "Gasto desde Provision",
+  advance_payment: "Anticipo a Proveedor",
+  advance_collection: "Anticipo de Cliente",
 };
 
 export default function TreasuryDashboardPage() {

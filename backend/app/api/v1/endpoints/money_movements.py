@@ -25,6 +25,8 @@ from app.schemas.money_movement import (
     CommissionPaymentCreate,
     ProvisionDepositCreate,
     ProvisionExpenseCreate,
+    AdvancePaymentCreate,
+    AdvanceCollectionCreate,
     AnnulMovementRequest,
     AnnulMovementResponse,
     MoneyMovementResponse,
@@ -46,6 +48,8 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "commission_payment": 1,        # Pagamos comision: deuda de comision baja
     "provision_deposit": -1,        # Depositamos a provision: fondos aumentan (balance baja)
     "provision_expense": 1,         # Gastamos de provision: fondos disminuyen (balance sube)
+    "advance_payment": 1,           # Anticipo a proveedor: proveedor nos debe
+    "advance_collection": -1,       # Anticipo de cliente: nosotros debemos al cliente
 }
 
 
@@ -319,6 +323,56 @@ def create_provision_expense(
     return _to_response(loaded)
 
 
+@router.post(
+    "/advance-payment",
+    response_model=MoneyMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_advance_payment(
+    data: AdvancePaymentCreate,
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Anticipo a proveedor.
+
+    Efectos: account(-), supplier.balance(+) — proveedor nos debe.
+    """
+    movement = money_movement.pay_advance(
+        db=db,
+        data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded)
+
+
+@router.post(
+    "/advance-collection",
+    response_model=MoneyMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_advance_collection(
+    data: AdvanceCollectionCreate,
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Anticipo de cliente.
+
+    Efectos: account(+), customer.balance(-) — nosotros debemos al cliente.
+    """
+    movement = money_movement.collect_advance(
+        db=db,
+        data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints de lectura
 # ---------------------------------------------------------------------------
@@ -428,64 +482,260 @@ def get_by_third_party(
     db: Session = Depends(get_db),
 ):
     """
-    Estado de cuenta de un tercero con saldo corrido (balance_after).
+    Estado de cuenta COMPLETO (unified account statement) de un tercero con saldo corrido.
 
-    Calcula balance iterativo sobre TODOS los movimientos confirmados
-    del tercero, luego mapea balance_after a la pagina solicitada.
-    Si date_from, calcula saldo de apertura con movimientos anteriores.
+    Incluye TODAS las operaciones que afectan el balance:
+    - MoneyMovements confirmados y anulados (pagos, cobros, anticipos, etc.)
+    - Compras liquidadas/canceladas (solo standalone, no doble partida)
+    - Ventas liquidadas/canceladas (solo standalone, no doble partida)
+    - Comisiones de ventas standalone
+    - Doble partida (compra+venta simultanea) y sus comisiones
+
+    Cada item incluye source/source_id/source_number para trazar al registro original.
+    Si no se provee date_from, default a 90 dias atras.
     """
     from sqlalchemy import select as sa_select
-    from sqlalchemy.orm import joinedload as jl
+    from sqlalchemy.orm import joinedload
+
+    from app.models.purchase import Purchase
+    from app.models.sale import Sale, SaleCommission
+    from app.models.double_entry import DoubleEntry
 
     org_id = org_context["organization_id"]
-    date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
+
+    # Default: ultimos 90 dias si no se provee date_from
+    effective_date_from = date_from if date_from else (date.today() - timedelta(days=90))
+    date_from_dt = datetime.combine(effective_date_from, dt_time.min, tzinfo=tz.utc)
     date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
 
-    # 1. Query TODOS los movimientos confirmados del tercero (para balance corrido)
-    all_query = (
-        sa_select(MoneyMovement)
-        .where(
-            MoneyMovement.organization_id == org_id,
-            MoneyMovement.third_party_id == third_party_id,
-            MoneyMovement.status == "confirmed",
-        )
-        .order_by(MoneyMovement.date.asc(), MoneyMovement.movement_number.asc())
+    # --- Recopilar TODOS los eventos que afectan el balance del tercero ---
+    # Cada evento: (sort_datetime, sort_key, filter_datetime, event_dict)
+    # sort_datetime: timestamps del servidor (created_at, liquidated_at) para orden cronologico real
+    # filter_datetime: timestamp para aplicar filtros de fecha (= sort_datetime por defecto)
+    # sort_key: 0=operacion comercial, 1=movimiento tesoreria, 2=cancelacion/anulacion
+    events: list[tuple] = []
+
+    def _evt(sort_dt, sort_key, filter_dt=None, **kwargs):
+        events.append((sort_dt, sort_key, filter_dt or sort_dt, kwargs))
+
+    # 1. MoneyMovements confirmados y anulados
+    mm_query = sa_select(MoneyMovement).where(
+        MoneyMovement.organization_id == org_id,
+        MoneyMovement.third_party_id == third_party_id,
+        MoneyMovement.status.in_(["confirmed", "annulled"]),
     )
-    all_movs = list(db.scalars(all_query).all())
-
-    # 2. Calcular balance corrido iterativo
-    balance = Decimal("0")
-    balance_map = {}
-    opening_balance = Decimal("0")
-
-    for m in all_movs:
+    for m in db.scalars(mm_query).all():
         direction = THIRD_PARTY_BALANCE_DIRECTION.get(m.movement_type, 0)
-        balance += m.amount * direction
-        balance_map[m.id] = float(balance)
-        # Saldo de apertura: ultimo balance ANTES de date_from
-        if date_from_dt and m.date < date_from_dt:
-            opening_balance = balance
+        _evt(m.created_at, 1, filter_dt=m.date,
+             id=str(m.id), date=m.date.isoformat(),
+             event_type=m.movement_type, description=m.description or "",
+             amount=float(m.amount), direction=direction,
+             status=m.status, reference_number=m.reference_number,
+             movement_number=m.movement_number,
+             source="money_movement", source_id=str(m.id), source_number=m.movement_number)
 
-    # 3. Query paginada con filtros de fecha
-    movements, total = money_movement.get_multi(
-        db=db,
-        organization_id=org_id,
-        third_party_id=third_party_id,
-        date_from=date_from_dt,
-        date_to=date_to_dt,
-        skip=skip,
-        limit=limit,
+    # 2. Compras liquidadas (standalone, no doble partida)
+    # Proveedor: balance -= total_amount al liquidar
+    purch_query = sa_select(Purchase).where(
+        Purchase.organization_id == org_id,
+        Purchase.supplier_id == third_party_id,
+        Purchase.status.in_(["liquidated", "cancelled"]),
+        Purchase.liquidated_at.isnot(None),
+        Purchase.double_entry_id.is_(None),  # Excluir doble partida
     )
+    for p in db.scalars(purch_query).all():
+        _evt(p.liquidated_at, 0,
+             id=f"purchase-{p.id}", date=p.liquidated_at.isoformat(),
+             event_type="purchase_liquidation",
+             description=f"Compra #{p.purchase_number} liquidada",
+             amount=float(p.total_amount), direction=-1,
+             status="confirmed" if p.status == "liquidated" else "cancelled",
+             reference_number=None, movement_number=None,
+             source="purchase", source_id=str(p.id), source_number=p.purchase_number)
+        if p.status == "cancelled" and p.cancelled_at:
+            _evt(p.cancelled_at, 2,
+                 id=f"purchase-cancel-{p.id}", date=p.cancelled_at.isoformat(),
+                 event_type="purchase_cancellation",
+                 description=f"Compra #{p.purchase_number} cancelada (reversa)",
+                 amount=float(p.total_amount), direction=1,
+                 status="annulled", reference_number=None, movement_number=None,
+                 source="purchase", source_id=str(p.id), source_number=p.purchase_number)
 
-    # 4. Construir respuesta con balance_after
-    items = []
-    for m in movements:
-        data = _to_response(m)
-        data["balance_after"] = balance_map.get(m.id)
-        items.append(data)
+    # 3. Ventas liquidadas (standalone, no doble partida)
+    # Cliente: balance += total_amount al liquidar
+    sale_query = sa_select(Sale).where(
+        Sale.organization_id == org_id,
+        Sale.customer_id == third_party_id,
+        Sale.status.in_(["liquidated", "cancelled"]),
+        Sale.liquidated_at.isnot(None),
+        Sale.double_entry_id.is_(None),  # Excluir doble partida
+    )
+    for s in db.scalars(sale_query).all():
+        _evt(s.liquidated_at, 0,
+             id=f"sale-{s.id}", date=s.liquidated_at.isoformat(),
+             event_type="sale_liquidation",
+             description=f"Venta #{s.sale_number} liquidada",
+             amount=float(s.total_amount), direction=1,
+             status="confirmed" if s.status == "liquidated" else "cancelled",
+             reference_number=None, movement_number=None,
+             source="sale", source_id=str(s.id), source_number=s.sale_number)
+        if s.status == "cancelled" and s.cancelled_at:
+            _evt(s.cancelled_at, 2,
+                 id=f"sale-cancel-{s.id}", date=s.cancelled_at.isoformat(),
+                 event_type="sale_cancellation",
+                 description=f"Venta #{s.sale_number} cancelada (reversa)",
+                 amount=float(s.total_amount), direction=-1,
+                 status="annulled", reference_number=None, movement_number=None,
+                 source="sale", source_id=str(s.id), source_number=s.sale_number)
+
+    # 4. Comisiones de ventas standalone (receptor: balance += commission_amount)
+    comm_query = (
+        sa_select(SaleCommission, Sale)
+        .join(Sale, SaleCommission.sale_id == Sale.id)
+        .where(
+            Sale.organization_id == org_id,
+            SaleCommission.third_party_id == third_party_id,
+            Sale.status.in_(["liquidated", "cancelled"]),
+            Sale.liquidated_at.isnot(None),
+            Sale.double_entry_id.is_(None),  # Excluir doble partida
+        )
+    )
+    for comm, sale in db.execute(comm_query).all():
+        _evt(sale.liquidated_at, 0,
+             id=f"commission-{comm.id}", date=sale.liquidated_at.isoformat(),
+             event_type="sale_commission",
+             description=f"Comision Venta #{sale.sale_number}: {comm.concept}",
+             amount=float(comm.commission_amount), direction=1,
+             status="confirmed" if sale.status == "liquidated" else "cancelled",
+             reference_number=None, movement_number=None,
+             source="commission", source_id=str(comm.id), source_number=sale.sale_number)
+        if sale.status == "cancelled" and sale.cancelled_at:
+            _evt(sale.cancelled_at, 2,
+                 id=f"commission-cancel-{comm.id}", date=sale.cancelled_at.isoformat(),
+                 event_type="commission_cancellation",
+                 description=f"Comision Venta #{sale.sale_number} cancelada (reversa)",
+                 amount=float(comm.commission_amount), direction=-1,
+                 status="annulled", reference_number=None, movement_number=None,
+                 source="commission", source_id=str(comm.id), source_number=sale.sale_number)
+
+    # 5. Doble partida — usa created_at como timestamp, Purchase/Sale para montos
+    de_query = (
+        sa_select(DoubleEntry)
+        .options(joinedload(DoubleEntry.purchase), joinedload(DoubleEntry.sale))
+        .where(
+            DoubleEntry.organization_id == org_id,
+            DoubleEntry.status.in_(["completed", "cancelled"]),
+        )
+        .where(
+            (DoubleEntry.supplier_id == third_party_id)
+            | (DoubleEntry.customer_id == third_party_id)
+        )
+    )
+    for de in db.scalars(de_query).unique().all():
+        de_dt = de.created_at  # datetime del registro
+        purchase_amount = float(de.purchase.total_amount) if de.purchase else 0
+        sale_amount = float(de.sale.total_amount) if de.sale else 0
+        is_active = de.status == "completed"
+        evt_status = "confirmed" if is_active else "cancelled"
+
+        # Como proveedor
+        if de.supplier_id == third_party_id:
+            _evt(de_dt, 0,
+                 id=f"de-supplier-{de.id}", date=de_dt.isoformat(),
+                 event_type="double_entry_purchase",
+                 description=f"Doble Partida #{de.double_entry_number} (como proveedor)",
+                 amount=purchase_amount, direction=-1,
+                 status=evt_status, reference_number=None, movement_number=None,
+                 source="double_entry", source_id=str(de.id), source_number=de.double_entry_number)
+        # Como cliente
+        if de.customer_id == third_party_id:
+            _evt(de_dt, 0,
+                 id=f"de-customer-{de.id}", date=de_dt.isoformat(),
+                 event_type="double_entry_sale",
+                 description=f"Doble Partida #{de.double_entry_number} (como cliente)",
+                 amount=sale_amount, direction=1,
+                 status=evt_status, reference_number=None, movement_number=None,
+                 source="double_entry", source_id=str(de.id), source_number=de.double_entry_number)
+
+        # Cancelacion reversa (usar updated_at como proxy de cancelled_at)
+        if de.status == "cancelled":
+            cancel_dt = de.updated_at or de_dt
+            if de.supplier_id == third_party_id:
+                _evt(cancel_dt, 2,
+                     id=f"de-cancel-supplier-{de.id}", date=cancel_dt.isoformat(),
+                     event_type="double_entry_cancellation",
+                     description=f"Doble Partida #{de.double_entry_number} cancelada (reversa proveedor)",
+                     amount=purchase_amount, direction=1,
+                     status="annulled", reference_number=None, movement_number=None,
+                     source="double_entry", source_id=str(de.id), source_number=de.double_entry_number)
+            if de.customer_id == third_party_id:
+                _evt(cancel_dt, 2,
+                     id=f"de-cancel-customer-{de.id}", date=cancel_dt.isoformat(),
+                     event_type="double_entry_cancellation",
+                     description=f"Doble Partida #{de.double_entry_number} cancelada (reversa cliente)",
+                     amount=sale_amount, direction=-1,
+                     status="annulled", reference_number=None, movement_number=None,
+                     source="double_entry", source_id=str(de.id), source_number=de.double_entry_number)
+
+    # 6. Comisiones de doble partida
+    de_comm_query = (
+        sa_select(SaleCommission, Sale, DoubleEntry)
+        .join(Sale, SaleCommission.sale_id == Sale.id)
+        .join(DoubleEntry, DoubleEntry.sale_id == Sale.id)
+        .where(
+            DoubleEntry.organization_id == org_id,
+            SaleCommission.third_party_id == third_party_id,
+            DoubleEntry.status.in_(["completed", "cancelled"]),
+        )
+    )
+    for comm, sale, de in db.execute(de_comm_query).all():
+        de_dt = de.created_at
+        is_active = de.status == "completed"
+        _evt(de_dt, 0,
+             id=f"de-commission-{comm.id}", date=de_dt.isoformat(),
+             event_type="double_entry_commission",
+             description=f"Comision DP #{de.double_entry_number}: {comm.concept}",
+             amount=float(comm.commission_amount), direction=1,
+             status="confirmed" if is_active else "cancelled",
+             reference_number=None, movement_number=None,
+             source="commission", source_id=str(comm.id), source_number=de.double_entry_number)
+        if de.status == "cancelled":
+            cancel_dt = de.updated_at or de_dt
+            _evt(cancel_dt, 2,
+                 id=f"de-comm-cancel-{comm.id}", date=cancel_dt.isoformat(),
+                 event_type="double_entry_commission_cancellation",
+                 description=f"Comision DP #{de.double_entry_number} cancelada (reversa)",
+                 amount=float(comm.commission_amount), direction=-1,
+                 status="annulled", reference_number=None, movement_number=None,
+                 source="commission", source_id=str(comm.id), source_number=de.double_entry_number)
+
+    # --- Ordenar por fecha, sort_key ---
+    events.sort(key=lambda e: (e[0], e[1]))
+
+    # --- Calcular balance corrido ---
+    balance = Decimal("0")
+    opening_balance = Decimal("0")
+    all_items = []
+
+    for _, _, filter_dt, evt in events:
+        if evt["status"] not in ("annulled", "cancelled"):
+            balance += Decimal(str(evt["amount"])) * evt["direction"]
+        evt["balance_after"] = float(balance)
+
+        if date_from_dt and filter_dt < date_from_dt:
+            opening_balance = balance
+            continue
+        if date_to_dt and filter_dt >= date_to_dt:
+            continue
+
+        all_items.append(evt)
+
+    # --- Paginar ---
+    total = len(all_items)
+    page = all_items[skip:skip + limit]
 
     return {
-        "items": items,
+        "items": page,
         "total": total,
         "skip": skip,
         "limit": limit,

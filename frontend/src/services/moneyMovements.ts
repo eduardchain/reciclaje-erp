@@ -1,7 +1,6 @@
 import apiClient from "./api";
 import type {
   MoneyMovementResponse,
-  MoneyMovementWithBalance,
   SupplierPaymentCreate,
   CustomerCollectionCreate,
   ExpenseMovementCreate,
@@ -12,6 +11,8 @@ import type {
   CommissionPaymentCreate,
   ProvisionDepositCreate,
   ProvisionExpenseCreate,
+  AdvancePaymentCreate,
+  AdvanceCollectionCreate,
   AnnulMovementRequest,
 } from "@/types/money-movement";
 import type { PaginatedResponse } from "@/types/common";
@@ -88,13 +89,24 @@ export const moneyMovementService = {
     return response.data;
   },
 
+  createAdvancePayment: async (data: AdvancePaymentCreate): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/advance-payment", data);
+    return response.data;
+  },
+
+  createAdvanceCollection: async (data: AdvanceCollectionCreate): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/advance-collection", data);
+    return response.data;
+  },
+
   annul: async (id: string, data: AnnulMovementRequest): Promise<MoneyMovementResponse> => {
     const response = await apiClient.post<MoneyMovementResponse>(`/api/v1/money-movements/${id}/annul`, data);
     return response.data;
   },
 
-  getByThirdParty: async (thirdPartyId: string, filters: { date_from?: string; date_to?: string } = {}): Promise<{ items: MoneyMovementWithBalance[]; opening_balance: number }> => {
-    const response = await apiClient.get<{ items: MoneyMovementWithBalance[]; opening_balance: number }>(`/api/v1/money-movements/third-party/${thirdPartyId}`, { params: filters });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getByThirdParty: async (thirdPartyId: string, filters: { date_from?: string; date_to?: string } = {}): Promise<{ items: any[]; opening_balance: number }> => {
+    const response = await apiClient.get(`/api/v1/money-movements/third-party/${thirdPartyId}`, { params: filters });
     return response.data;
   },
 };

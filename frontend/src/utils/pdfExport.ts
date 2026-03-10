@@ -4,6 +4,27 @@ import type { SaleResponse } from "@/types/sale";
 import type { DoubleEntryResponse } from "@/types/double-entry";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 
+export interface AccountStatementExportData {
+  thirdPartyName: string;
+  dateFrom?: string;
+  dateTo?: string;
+  currentBalance: number;
+  totalDebit: number;
+  totalCredit: number;
+  openingBalance: number;
+  movements: Array<{
+    movement_number: string | number;
+    date: string;
+    movement_type: string;
+    typeLabel: string;
+    description: string;
+    amount: number;
+    status: string;
+    balance_after: number | null;
+    isDebit: boolean;
+  }>;
+}
+
 const STATUS_LABELS: Record<string, string> = {
   registered: "Registrada",
   liquidated: "Liquidada",
@@ -465,4 +486,125 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string) 
   doc.setTextColor(0);
 
   doc.save(`doble_partida_${de.double_entry_number}.pdf`);
+}
+
+export function exportAccountStatementPDF(data: AccountStatementExportData, orgName?: string) {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let y = 20;
+
+  // Header
+  doc.setFontSize(18);
+  doc.setFont("helvetica", "bold");
+  doc.text(orgName || "EcoBalance ERP", 14, y);
+  y += 8;
+
+  doc.setFontSize(14);
+  doc.text("Estado de Cuenta", 14, y);
+  y += 8;
+
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "normal");
+  doc.text(data.thirdPartyName, 14, y);
+  y += 8;
+
+  // Periodo
+  doc.setFontSize(10);
+  if (data.dateFrom || data.dateTo) {
+    const from = data.dateFrom || "...";
+    const to = data.dateTo || "...";
+    doc.text(`Periodo: ${from} - ${to}`, 14, y);
+  } else if (data.movements.length > 0) {
+    const firstDate = formatDate(data.movements[0].date);
+    const lastDate = formatDate(data.movements[data.movements.length - 1].date);
+    doc.text(`Periodo: ${firstDate} - ${lastDate}`, 14, y);
+  }
+  y += 6;
+
+  // Linea separadora
+  doc.setDrawColor(200);
+  doc.line(14, y, pageWidth - 14, y);
+  y += 8;
+
+  // Resumen
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("Saldo Actual:", 14, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(formatCurrency(data.currentBalance), 60, y);
+
+  doc.setFont("helvetica", "bold");
+  doc.text("Total Debe:", pageWidth / 2, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(formatCurrency(data.totalDebit), pageWidth / 2 + 40, y);
+  y += 6;
+
+  doc.setFont("helvetica", "bold");
+  doc.text("Total Haber:", 14, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(formatCurrency(data.totalCredit), 60, y);
+  y += 10;
+
+  // Tabla Header
+  const colX = { num: 14, date: 28, type: 58, desc: 118, debit: 152, credit: 174, balance: 196 };
+  doc.setFillColor(245, 245, 245);
+  doc.rect(14, y - 4, pageWidth - 28, 8, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.text("#", colX.num, y);
+  doc.text("Fecha", colX.date, y);
+  doc.text("Tipo", colX.type, y);
+  doc.text("Descripcion", colX.desc, y);
+  doc.text("Debe", colX.debit, y, { align: "right" });
+  doc.text("Haber", colX.credit, y, { align: "right" });
+  doc.text("Saldo", pageWidth - 14, y, { align: "right" });
+  y += 7;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+
+  // Saldo de apertura
+  if (data.dateFrom) {
+    doc.setFont("helvetica", "italic");
+    doc.text("Saldo de apertura", colX.date, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(formatCurrency(data.openingBalance), pageWidth - 14, y, { align: "right" });
+    y += 6;
+  }
+
+  // Movimientos
+  for (const m of data.movements) {
+    if (y > 270) {
+      doc.addPage();
+      y = 20;
+    }
+    const isAnnulled = m.status === "annulled";
+    const typeText = isAnnulled ? `${m.typeLabel} (Anulado)` : m.typeLabel;
+
+    doc.text(String(m.movement_number), colX.num, y);
+    doc.text(formatDate(m.date), colX.date, y);
+    doc.text(typeText.substring(0, 32), colX.type, y);
+    doc.text((m.description || "-").substring(0, 16), colX.desc, y);
+
+    if (m.isDebit) {
+      doc.text(formatCurrency(m.amount), colX.debit, y, { align: "right" });
+    } else {
+      doc.text(formatCurrency(m.amount), colX.credit, y, { align: "right" });
+    }
+
+    if (m.balance_after != null) {
+      doc.text(formatCurrency(m.balance_after), pageWidth - 14, y, { align: "right" });
+    }
+    y += 5.5;
+  }
+
+  // Footer
+  y += 8;
+  doc.setFontSize(8);
+  doc.setTextColor(150);
+  doc.text(`Generado: ${new Date().toLocaleString("es-CO")}`, 14, y);
+  doc.setTextColor(0);
+
+  const safeName = data.thirdPartyName.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 30);
+  doc.save(`estado_cuenta_${safeName}.pdf`);
 }

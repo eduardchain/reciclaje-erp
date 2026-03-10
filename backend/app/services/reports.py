@@ -61,6 +61,7 @@ INFLOW_TYPES = frozenset([
     "service_income",
     "capital_injection",
     "transfer_in",
+    "advance_collection",
 ])
 
 # Tipos de money_movement que representan outflows de cuentas
@@ -71,6 +72,7 @@ OUTFLOW_TYPES = frozenset([
     "capital_return",
     "transfer_out",
     "provision_deposit",  # Sale dinero de cuenta hacia provision
+    "advance_payment",    # Anticipo a proveedor: sale dinero de cuenta
 ])
 # Nota: provision_expense NO va aqui — no afecta cuentas de dinero
 
@@ -944,6 +946,8 @@ class ReportService:
         customers = []
         total_payable = Decimal("0")
         total_receivable = Decimal("0")
+        total_advances_paid = Decimal("0")
+        total_advances_received = Decimal("0")
 
         if type_filter != "customers":
             rows = db.execute(
@@ -959,6 +963,9 @@ class ReportService:
                 suppliers.append(SupplierBalance(id=r[0], name=r[1], balance=float(r[2])))
                 if r[2] < 0:
                     total_payable += abs(Decimal(str(r[2])))
+                elif r[2] > 0:
+                    # Proveedor con balance positivo = nos debe (anticipo)
+                    total_advances_paid += Decimal(str(r[2]))
 
         if type_filter != "suppliers":
             rows = db.execute(
@@ -974,11 +981,16 @@ class ReportService:
                 customers.append(CustomerBalance(id=r[0], name=r[1], balance=float(r[2])))
                 if r[2] > 0:
                     total_receivable += Decimal(str(r[2]))
+                elif r[2] < 0:
+                    # Cliente con balance negativo = le debemos (anticipo recibido)
+                    total_advances_received += abs(Decimal(str(r[2])))
 
         return ThirdPartyBalancesResponse(
             total_payable=float(total_payable),
             total_receivable=float(total_receivable),
             net_position=float(total_receivable - total_payable),
+            total_advances_paid=float(total_advances_paid),
+            total_advances_received=float(total_advances_received),
             suppliers=suppliers,
             customers=customers,
         )

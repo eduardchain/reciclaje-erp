@@ -19,10 +19,11 @@ export function useCustomers(search?: string) {
   });
 }
 
-export function useThirdParties(filters?: { search?: string; role?: string }) {
+export function useThirdParties(filters?: { search?: string; role?: string }, options?: { staleTime?: number }) {
   return useQuery({
     queryKey: ["third-parties", "list", filters],
     queryFn: () => thirdPartyService.getAll({ ...filters, limit: 100 }),
+    ...options,
   });
 }
 

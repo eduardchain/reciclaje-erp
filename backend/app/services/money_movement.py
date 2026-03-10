@@ -39,6 +39,8 @@ from app.schemas.money_movement import (
     CommissionPaymentCreate,
     ProvisionDepositCreate,
     ProvisionExpenseCreate,
+    AdvancePaymentCreate,
+    AdvanceCollectionCreate,
     MoneyMovementResponse,
 )
 
@@ -517,6 +519,88 @@ class CRUDMoneyMovement:
         return movement
 
     # ======================================================================
+    # Anticipos
+    # ======================================================================
+
+    def pay_advance(
+        self,
+        db: Session,
+        data: "AdvancePaymentCreate",
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """
+        Anticipo a proveedor.
+
+        Efectos:
+        - account.current_balance -= amount
+        - supplier.current_balance += amount (proveedor nos debe)
+        """
+        account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
+        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_type="is_supplier")
+
+        movement = self._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="advance_payment",
+            amount=data.amount,
+            account_id=data.account_id,
+            date=data.date,
+            description=data.description or f"Anticipo a {supplier.name}",
+            third_party_id=data.supplier_id,
+            reference_number=data.reference_number,
+            evidence_url=data.evidence_url,
+            notes=data.notes,
+            user_id=user_id,
+        )
+
+        account.current_balance -= data.amount
+        supplier.current_balance += data.amount
+
+        db.commit()
+        db.refresh(movement)
+        return movement
+
+    def collect_advance(
+        self,
+        db: Session,
+        data: "AdvanceCollectionCreate",
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """
+        Anticipo de cliente.
+
+        Efectos:
+        - account.current_balance += amount
+        - customer.current_balance -= amount (nosotros debemos al cliente)
+        """
+        account = self._validate_account(db, data.account_id, organization_id)
+        customer = self._validate_third_party(db, data.customer_id, organization_id, require_type="is_customer")
+
+        movement = self._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="advance_collection",
+            amount=data.amount,
+            account_id=data.account_id,
+            date=data.date,
+            description=data.description or f"Anticipo de {customer.name}",
+            third_party_id=data.customer_id,
+            reference_number=data.reference_number,
+            evidence_url=data.evidence_url,
+            notes=data.notes,
+            user_id=user_id,
+        )
+
+        account.current_balance += data.amount
+        customer.current_balance -= data.amount
+
+        db.commit()
+        db.refresh(movement)
+        return movement
+
+    # ======================================================================
     # Anulacion
     # ======================================================================
 
@@ -962,6 +1046,8 @@ class CRUDMoneyMovement:
         - commission_payment: account(+), third_party(-)
         - provision_deposit: account(+), provision(+)
         - provision_expense: provision(-) (sin cuenta)
+        - advance_payment: account(+), supplier(-)
+        - advance_collection: account(-), customer(+)
         """
         account = db.get(MoneyAccount, movement.account_id) if movement.account_id else None
         third_party = db.get(ThirdParty, movement.third_party_id) if movement.third_party_id else None
@@ -1016,6 +1102,16 @@ class CRUDMoneyMovement:
             # provision_expense no tiene cuenta, solo reversa provision
             if third_party:
                 third_party.current_balance -= amt
+
+        elif mt == "advance_payment":
+            account.current_balance += amt
+            if third_party:
+                third_party.current_balance -= amt
+
+        elif mt == "advance_collection":
+            account.current_balance -= amt
+            if third_party:
+                third_party.current_balance += amt
 
     def _get_or_404(
         self,

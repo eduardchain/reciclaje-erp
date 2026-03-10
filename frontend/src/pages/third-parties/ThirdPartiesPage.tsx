@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus } from "lucide-react";
+import { Plus, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,6 +12,7 @@ import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { useThirdParties } from "@/hooks/useMasterData";
 import ThirdPartyFormDialog from "./ThirdPartyFormDialog";
 import type { ThirdPartyResponse } from "@/types/third-party";
+import { ROUTES } from "@/utils/constants";
 
 const PAGE_SIZE = 20;
 
@@ -25,20 +27,33 @@ function RoleBadges({ tp }: { tp: ThirdPartyResponse }) {
   );
 }
 
-const columns: ColumnDef<ThirdPartyResponse, unknown>[] = [
-  { accessorKey: "name", header: "Nombre", enableSorting: true, cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
-  { accessorKey: "identification_number", header: "Identificacion", cell: ({ row }) => row.original.identification_number ?? "-" },
-  { accessorKey: "roles", header: "Roles", cell: ({ row }) => <RoleBadges tp={row.original} /> },
-  { accessorKey: "phone", header: "Telefono", cell: ({ row }) => row.original.phone ?? "-" },
-  { accessorKey: "current_balance", header: "Saldo", enableSorting: true, cell: ({ row }) => <MoneyDisplay amount={row.original.current_balance} /> },
-];
+function getColumns(navigate: ReturnType<typeof useNavigate>): ColumnDef<ThirdPartyResponse, unknown>[] {
+  return [
+    { accessorKey: "name", header: "Nombre", enableSorting: true, cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
+    { accessorKey: "identification_number", header: "Identificacion", cell: ({ row }) => row.original.identification_number ?? "-" },
+    { accessorKey: "roles", header: "Roles", cell: ({ row }) => <RoleBadges tp={row.original} /> },
+    { accessorKey: "phone", header: "Telefono", cell: ({ row }) => row.original.phone ?? "-" },
+    { accessorKey: "current_balance", header: "Saldo", enableSorting: true, cell: ({ row }) => <MoneyDisplay amount={row.original.current_balance} /> },
+    { id: "actions", header: "", cell: ({ row }) => (
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={(e) => { e.stopPropagation(); navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${row.original.id}`); }}
+      >
+        <FileText className="h-3 w-3 mr-1" />Estado de Cuenta
+      </Button>
+    )},
+  ];
+}
 
 export default function ThirdPartiesPage() {
+  const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [roleFilter, setRoleFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<ThirdPartyResponse | null>(null);
+  const columns = getColumns(navigate);
 
   const { data, isLoading } = useThirdParties({
     search: search || undefined,

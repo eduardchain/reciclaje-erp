@@ -925,6 +925,43 @@ class TestThirdPartyBalances:
         assert len(data["suppliers"]) == 0
         assert len(data["customers"]) == 2
 
+    def test_tp_balances_advances(self, client: TestClient, org_headers: dict, report_data: dict, db_session):
+        """Anticipos: proveedor con balance > 0 y cliente con balance < 0."""
+        org_id = report_data["org_id"]
+
+        # Proveedor con balance positivo (anticipo pagado, nos debe)
+        prov_advance = ThirdParty(
+            name="Proveedor Anticipo", organization_id=org_id,
+            is_supplier=True, is_customer=False,
+            current_balance=Decimal("300000"),  # nos debe 300K
+            is_active=True,
+        )
+        # Cliente con balance negativo (anticipo recibido, le debemos)
+        cli_advance = ThirdParty(
+            name="Cliente Anticipo", organization_id=org_id,
+            is_supplier=False, is_customer=True,
+            current_balance=Decimal("-200000"),  # le debemos 200K
+            is_active=True,
+        )
+        db_session.add_all([prov_advance, cli_advance])
+        db_session.commit()
+
+        response = client.get("/api/v1/reports/third-party-balances", headers=org_headers)
+        assert response.status_code == 200
+        data = response.json()
+
+        # Anticipos pagados = proveedores con balance > 0
+        assert data["total_advances_paid"] == pytest.approx(300000, abs=1)
+        # Anticipos recibidos = clientes con balance < 0
+        assert data["total_advances_received"] == pytest.approx(200000, abs=1)
+
+        # Payable ahora NO incluye al proveedor con balance > 0
+        # Original: 2M + 500K = 2.5M (sin cambio, el nuevo proveedor tiene balance > 0)
+        assert data["total_payable"] == pytest.approx(2500000, abs=1)
+        # Receivable ahora NO incluye al cliente con balance < 0
+        # Original: 3M + 1M = 4M (sin cambio, el nuevo cliente tiene balance < 0)
+        assert data["total_receivable"] == pytest.approx(4000000, abs=1)
+
 
 # ---------------------------------------------------------------------------
 # Auth Test

@@ -100,7 +100,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - Purchases: List (status tabs, search, date range, Items/DP/Actions columns) + Create (dynamic lines, auto-liquidate, price suggestions) + Edit (full revert-and-reapply) + Detail (liquidate/cancel/PDF)
 - Sales: Like purchases + commissions + profit display + stock warnings + Edit (lines + commissions)
 - Double Entries: Simultaneous buy+sell form with real-time profit calculation
-- Treasury: 11 movement types with dynamic form, annulment with reason, provisions (deposit/expense), account statement with running balance, financial dashboard
+- Treasury: 13 movement types with dynamic form, annulment with reason, provisions (deposit/expense), advances (supplier/customer), account statement with running balance + PDF/Excel export, financial dashboard
 - Inventory: Stock view (expandable rows with warehouse breakdown, category/warehouse filters, transfer modal), movement history (material/warehouse filters, running balance/avg cost), adjustments (4 types), transformations (multi-line destinations, balance validation), warehouse transfers, valuation page, transit page (pending purchases/sales, bottleneck alerts)
 - Reports: P&L, Cash Flow, Balance Sheet, Purchase Report, Sales Report, Margin Analysis, Third Party Balances — all with date range pickers
 - Third Parties: CRUD with role badges (supplier/customer/investor/provision), balance display
@@ -167,6 +167,10 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 14. **Precio sugerido desde lista de precios**: Al seleccionar un material en formularios de compra/venta/doble partida, el precio se auto-llena desde la lista de precios vigente (solo si el campo esta vacio). Un hint clickable `"Lista: $ X"` permite restaurar el precio sugerido. Materiales sin precio en la lista no muestran sugerencia.
 
+15. **Anticipos a proveedor/cliente**: `advance_payment` (account-, supplier+) y `advance_collection` (account+, customer-). Un proveedor con balance > 0 significa "nos debe" (anticipo pagado). Un cliente con balance < 0 significa "le debemos" (anticipo recibido). No se vinculan a compras/ventas — el anticipo se consume automaticamente al liquidar operaciones futuras. El reporte de terceros muestra "Saldo a Favor" usando aproximacion por signo de balance.
+
+16. **Estado de cuenta unificado (Unified Account Statement)**: El endpoint `GET /money-movements/third-party/{id}` es un "unified account statement" que fusiona TODAS las operaciones que afectan el balance de un tercero: MoneyMovements (confirmados + anulados), compras liquidadas/canceladas (standalone), ventas liquidadas/canceladas (standalone), comisiones de ventas, doble partida (como proveedor y/o cliente), y comisiones de doble partida. Cada item incluye `source`/`source_id`/`source_number` para trazar al registro original. Eventos ordenados por (datetime, sort_key: 0=comercial, 1=tesoreria, 2=cancelacion). Balance corrido calculado iterativamente. Default: ultimos 90 dias si no se provee `date_from`. Compras/ventas con `double_entry_id IS NOT NULL` se excluyen para evitar duplicados con la seccion de doble partida.
+
 ### Business Modules (Implemented)
 
 | Module | Endpoints | Description |
@@ -183,7 +187,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Business Units | `/api/v1/business-units/` | P&L analysis segments (Fibras, Chatarra, etc.) |
 | Price Lists | `/api/v1/price-lists/` | Historical purchase/sale prices per material |
 | Expense Categories | `/api/v1/expense-categories/` | Direct/indirect expense classification for treasury |
-| Treasury | `/api/v1/money-movements/` | 11 movement types (incl. provision_deposit, provision_expense), annulment with audit, account statement with running balance |
+| Treasury | `/api/v1/money-movements/` | 13 movement types (incl. provisions, advances), annulment with audit, account statement with running balance + PDF/Excel export |
 | Inventory Adjustments | `/api/v1/inventory/adjustments/` | Manual stock corrections: increase, decrease, recount, zero-out. Warehouse transfers. Annulment with stock reversal |
 | Material Transformations | `/api/v1/inventory/transformations/` | Material disassembly (e.g., Motor → Copper + Iron + Aluminum + Waste). Proportional/manual cost distribution |
 | Inventory Views | `/api/v1/inventory/` | Consolidated stock (filterable by category/warehouse), per-material warehouse breakdown, transit stock (pending purchases/sales/bottleneck alerts), movement history (with running balance/avg cost per material), inventory valuation |
@@ -191,7 +195,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 ### Testing
 
-Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 413 tests. Run with `./venv/bin/pytest` from backend dir.
+Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 432 tests. Run with `./venv/bin/pytest` from backend dir.
 
 Key fixtures: `test_user`, `auth_headers`, `org_headers` (auth + X-Organization-ID), `db_session`.
 

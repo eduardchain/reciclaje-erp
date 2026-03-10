@@ -12,6 +12,8 @@ Schemas especializados por tipo de operacion:
 - CommissionPaymentCreate: Pago de comision
 - ProvisionDepositCreate: Deposito a provision
 - ProvisionExpenseCreate: Gasto desde provision
+- AdvancePaymentCreate: Anticipo a proveedor
+- AdvanceCollectionCreate: Anticipo de cliente
 """
 from datetime import datetime
 from decimal import Decimal
@@ -139,6 +141,30 @@ class ProvisionExpenseCreate(BaseModel):
     date: datetime = Field(..., description="Fecha del gasto")
     description: str = Field(..., min_length=1, max_length=500, description="Descripcion del gasto")
     reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+
+class AdvancePaymentCreate(BaseModel):
+    """Anticipo a proveedor — account(-), supplier.balance(+)."""
+    supplier_id: UUID = Field(..., description="ID del proveedor (is_supplier=True)")
+    amount: Decimal = Field(..., gt=0, description="Monto del anticipo")
+    account_id: UUID = Field(..., description="Cuenta de donde sale el dinero")
+    date: datetime = Field(..., description="Fecha del anticipo")
+    description: Optional[str] = Field(None, max_length=500)
+    reference_number: Optional[str] = Field(None, max_length=100)
+    evidence_url: Optional[str] = Field(None, max_length=500)
+    notes: Optional[str] = None
+
+
+class AdvanceCollectionCreate(BaseModel):
+    """Anticipo de cliente — account(+), customer.balance(-)."""
+    customer_id: UUID = Field(..., description="ID del cliente (is_customer=True)")
+    amount: Decimal = Field(..., gt=0, description="Monto del anticipo")
+    account_id: UUID = Field(..., description="Cuenta donde entra el dinero")
+    date: datetime = Field(..., description="Fecha del anticipo")
+    description: Optional[str] = Field(None, max_length=500)
+    reference_number: Optional[str] = Field(None, max_length=100)
+    evidence_url: Optional[str] = Field(None, max_length=500)
     notes: Optional[str] = None
 
 

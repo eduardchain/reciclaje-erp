@@ -1327,3 +1327,147 @@ class TestTreasuryDashboard:
         data = resp.json()
         assert len(data["recent_movements"]) >= 1
         assert data["recent_movements"][0]["movement_type"] == "payment_to_supplier"
+
+
+class TestAdvancePayment:
+    """Tests para POST /api/v1/money-movements/advance-payment."""
+
+    def test_advance_payment(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier, db_session,
+    ):
+        """Anticipo a proveedor — account(-), supplier(+)."""
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "amount": 500000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-01T10:00:00Z",
+            "description": "Anticipo compra futura",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/advance-payment",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["movement_type"] == "advance_payment"
+        assert data["amount"] == 500000.0
+        assert data["third_party_name"] == "Metales XYZ"
+
+        db_session.refresh(test_account)
+        db_session.refresh(test_supplier)
+        assert test_account.current_balance == Decimal("9500000.00")  # 10M - 500K
+        assert test_supplier.current_balance == Decimal("-1500000.00")  # -2M + 500K
+
+    def test_advance_payment_insufficient_funds(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier,
+    ):
+        """Anticipo que excede saldo de cuenta — 400."""
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "amount": 99000000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-01T10:00:00Z",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/advance-payment",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "Fondos insuficientes" in resp.json()["detail"]
+
+
+class TestAdvanceCollection:
+    """Tests para POST /api/v1/money-movements/advance-collection."""
+
+    def test_advance_collection(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_customer, db_session,
+    ):
+        """Anticipo de cliente — account(+), customer(-)."""
+        payload = {
+            "customer_id": str(test_customer.id),
+            "amount": 1000000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-01T10:00:00Z",
+            "description": "Anticipo pedido grande",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/advance-collection",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["movement_type"] == "advance_collection"
+        assert data["amount"] == 1000000.0
+        assert data["third_party_name"] == "Industrial ABC"
+
+        db_session.refresh(test_account)
+        db_session.refresh(test_customer)
+        assert test_account.current_balance == Decimal("11000000.00")  # 10M + 1M
+        assert test_customer.current_balance == Decimal("2000000.00")  # 3M - 1M
+
+    def test_annul_advance_payment(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier, db_session,
+    ):
+        """Anular anticipo a proveedor — reversa correcta."""
+        # Crear anticipo
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "amount": 300000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-01T10:00:00Z",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/advance-payment",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        movement_id = resp.json()["id"]
+
+        # Anular
+        resp = client.post(
+            f"/api/v1/money-movements/{movement_id}/annul",
+            json={"reason": "Error en monto"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "annulled"
+
+        db_session.refresh(test_account)
+        db_session.refresh(test_supplier)
+        assert test_account.current_balance == Decimal("10000000.00")  # Restaurado
+        assert test_supplier.current_balance == Decimal("-2000000.00")  # Restaurado
+
+    def test_annul_advance_collection(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_customer, db_session,
+    ):
+        """Anular anticipo de cliente — reversa correcta."""
+        payload = {
+            "customer_id": str(test_customer.id),
+            "amount": 500000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-01T10:00:00Z",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/advance-collection",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        movement_id = resp.json()["id"]
+
+        resp = client.post(
+            f"/api/v1/money-movements/{movement_id}/annul",
+            json={"reason": "Cliente cancelo"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "annulled"
+
+        db_session.refresh(test_account)
+        db_session.refresh(test_customer)
+        assert test_account.current_balance == Decimal("10000000.00")
+        assert test_customer.current_balance == Decimal("3000000.00")

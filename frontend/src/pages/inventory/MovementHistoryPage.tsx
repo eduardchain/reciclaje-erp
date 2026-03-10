@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { EntitySelect } from "@/components/shared/EntitySelect";
 import { DataTable } from "@/components/shared/DataTable";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { KpiCard } from "@/components/shared/KpiCard";
@@ -189,17 +190,14 @@ export default function MovementHistoryPage() {
         totalItems={data?.total}
         toolbar={
           <div className="flex flex-wrap items-center gap-3">
-            <Select value={materialFilter} onValueChange={(v) => { setMaterialFilter(v === "all" ? "" : v); setPage(0); }}>
-              <SelectTrigger className="w-52">
-                <SelectValue placeholder="Todos los materiales" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los materiales</SelectItem>
-                {materials.map((m: { id: string; code: string; name: string }) => (
-                  <SelectItem key={m.id} value={m.id}>{m.code} - {m.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="w-52">
+              <EntitySelect
+                value={materialFilter}
+                onChange={(v) => { setMaterialFilter(v); setPage(0); }}
+                options={materials.map((m: { id: string; code: string; name: string }) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
+                placeholder="Todos los materiales"
+              />
+            </div>
             <Select value={warehouseFilter} onValueChange={(v) => { setWarehouseFilter(v === "all" ? "" : v); setPage(0); }}>
               <SelectTrigger className="w-48">
                 <SelectValue placeholder="Todas las bodegas" />

@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import ReportsLayout from "./ReportsLayout";
 import { useThirdPartyBalances } from "@/hooks/useReports";
 import { formatCurrency } from "@/utils/formatters";
@@ -35,6 +36,29 @@ export default function ThirdPartyBalancesPage() {
             </Card>
           </div>
 
+          {(data.total_advances_paid > 0 || data.total_advances_received > 0) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {data.total_advances_paid > 0 && (
+                <Card className="shadow-sm border-l-[3px] border-l-amber-500">
+                  <CardContent className="pt-6">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo a Favor (Proveedores)</p>
+                    <p className="text-xl font-bold text-amber-700">{formatCurrency(data.total_advances_paid)}</p>
+                    <p className="text-xs text-slate-400 mt-1">Proveedores que nos deben por anticipos</p>
+                  </CardContent>
+                </Card>
+              )}
+              {data.total_advances_received > 0 && (
+                <Card className="shadow-sm border-l-[3px] border-l-purple-500">
+                  <CardContent className="pt-6">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo a Favor (Clientes)</p>
+                    <p className="text-xl font-bold text-purple-700">{formatCurrency(data.total_advances_received)}</p>
+                    <p className="text-xs text-slate-400 mt-1">Anticipos recibidos de clientes</p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
           <Tabs defaultValue="suppliers">
             <TabsList>
               <TabsTrigger value="suppliers">Proveedores ({data.suppliers.length})</TabsTrigger>
@@ -59,8 +83,11 @@ export default function ThirdPartyBalancesPage() {
                       <TableBody>
                         {data.suppliers.map((s) => (
                           <TableRow key={s.id}>
-                            <TableCell>{s.name}</TableCell>
-                            <TableCell className="text-right font-medium text-red-700">{formatCurrency(s.balance)}</TableCell>
+                            <TableCell>
+                              {s.name}
+                              {s.balance > 0 && <Badge variant="outline" className="ml-2 bg-amber-50 text-amber-700 text-[10px] py-0">Nos debe</Badge>}
+                            </TableCell>
+                            <TableCell className={`text-right font-medium ${s.balance > 0 ? "text-amber-700" : "text-red-700"}`}>{formatCurrency(s.balance)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -89,8 +116,11 @@ export default function ThirdPartyBalancesPage() {
                       <TableBody>
                         {data.customers.map((c) => (
                           <TableRow key={c.id}>
-                            <TableCell>{c.name}</TableCell>
-                            <TableCell className="text-right font-medium text-emerald-700">{formatCurrency(c.balance)}</TableCell>
+                            <TableCell>
+                              {c.name}
+                              {c.balance < 0 && <Badge variant="outline" className="ml-2 bg-purple-50 text-purple-700 text-[10px] py-0">Le debemos</Badge>}
+                            </TableCell>
+                            <TableCell className={`text-right font-medium ${c.balance < 0 ? "text-purple-700" : "text-emerald-700"}`}>{formatCurrency(c.balance)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

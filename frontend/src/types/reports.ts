@@ -298,6 +298,8 @@ export interface ThirdPartyBalancesResponse {
   total_payable: number;
   total_receivable: number;
   net_position: number;
+  total_advances_paid: number;
+  total_advances_received: number;
   suppliers: SupplierBalance[];
   customers: CustomerBalance[];
 }

@@ -44,6 +44,8 @@ export function useCreateMovement(type: string) {
     commission_payment: moneyMovementService.createCommissionPayment,
     provision_deposit: moneyMovementService.createProvisionDeposit,
     provision_expense: moneyMovementService.createProvisionExpense,
+    advance_payment: moneyMovementService.createAdvancePayment,
+    advance_collection: moneyMovementService.createAdvanceCollection,
   };
 
   return useMutation({
@@ -67,6 +69,7 @@ export function useThirdPartyMovements(thirdPartyId: string, filters: { date_fro
     queryKey: ["money-movements", "third-party", thirdPartyId, filters],
     queryFn: () => moneyMovementService.getByThirdParty(thirdPartyId, filters),
     enabled: !!thirdPartyId,
+    staleTime: 0,
   });
 }
 

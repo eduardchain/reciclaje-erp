@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, FileText } from "lucide-react";
+import { ArrowLeft, FileText, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,9 +14,11 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { useThirdPartyMovements } from "@/hooks/useMoneyMovements";
 import { useThirdParties } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate } from "@/utils/formatters";
+import { exportAccountStatementPDF } from "@/utils/pdfExport";
+import { exportAccountStatementExcel } from "@/utils/excelExport";
 import { ROUTES } from "@/utils/constants";
 
-const MOVEMENT_TYPE_LABELS: Record<string, string> = {
+const EVENT_TYPE_LABELS: Record<string, string> = {
   payment_to_supplier: "Pago a Proveedor",
   collection_from_client: "Cobro a Cliente",
   expense: "Gasto",
@@ -28,15 +30,37 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   commission_payment: "Pago de Comision",
   provision_deposit: "Deposito a Provision",
   provision_expense: "Gasto desde Provision",
+  advance_payment: "Anticipo a Proveedor",
+  advance_collection: "Anticipo de Cliente",
+  purchase_liquidation: "Compra Liquidada",
+  purchase_cancellation: "Compra Cancelada",
+  sale_liquidation: "Venta Liquidada",
+  sale_cancellation: "Venta Cancelada",
+  sale_commission: "Comision de Venta",
+  commission_cancellation: "Comision Cancelada",
+  double_entry_purchase: "Doble Partida (Compra)",
+  double_entry_sale: "Doble Partida (Venta)",
+  double_entry_commission: "Comision Doble Partida",
+  double_entry_cancellation: "Doble Partida Cancelada",
+  double_entry_commission_cancellation: "Comision DP Cancelada",
 };
 
-// Tipos que representan DEBE (incrementan deuda del tercero)
-const DEBIT_TYPES = new Set([
-  "payment_to_supplier",
-  "capital_return",
-  "commission_payment",
-  "provision_expense",
-]);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+interface StatementItem {
+  id: string;
+  date: string;
+  event_type: string;
+  description: string;
+  amount: number;
+  direction: number;
+  status: string;
+  reference_number: string | null;
+  movement_number: number | null;
+  balance_after: number | null;
+  source: string;
+  source_id: string;
+  source_number: number | string | null;
+}
 
 export default function AccountStatementPage() {
   const navigate = useNavigate();
@@ -47,7 +71,7 @@ export default function AccountStatementPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  const { data: thirdPartiesData } = useThirdParties();
+  const { data: thirdPartiesData } = useThirdParties(undefined, { staleTime: 0 });
   const thirdParties = thirdPartiesData?.items ?? [];
 
   const filters = {
@@ -56,25 +80,57 @@ export default function AccountStatementPage() {
   };
 
   const { data, isLoading } = useThirdPartyMovements(thirdPartyId, filters);
-  const movements = data?.items ?? [];
+  const movements: StatementItem[] = data?.items ?? [];
   const openingBalance = data?.opening_balance ?? 0;
 
-  // Calcular totales
-  const totalDebit = movements.reduce((sum, m) => {
-    return sum + (DEBIT_TYPES.has(m.movement_type) ? m.amount : 0);
+  // Calcular totales (excluir anulados/cancelados)
+  const activeMovements = movements.filter((m) => m.status !== "annulled" && m.status !== "cancelled");
+  const totalDebit = activeMovements.reduce((sum, m) => {
+    return sum + (m.direction > 0 ? Number(m.amount) : 0);
   }, 0);
-  const totalCredit = movements.reduce((sum, m) => {
-    return sum + (!DEBIT_TYPES.has(m.movement_type) ? m.amount : 0);
+  const totalCredit = activeMovements.reduce((sum, m) => {
+    return sum + (m.direction < 0 ? Number(m.amount) : 0);
   }, 0);
 
   const selectedThirdParty = thirdParties.find((t) => t.id === thirdPartyId);
 
+  const canExport = !!thirdPartyId && movements.length > 0;
+
+  const buildExportData = () => ({
+    thirdPartyName: selectedThirdParty?.name ?? "",
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+    currentBalance: selectedThirdParty?.current_balance ?? 0,
+    totalDebit,
+    totalCredit,
+    openingBalance,
+    movements: movements.map((m) => ({
+      movement_number: m.movement_number ?? "",
+      date: m.date,
+      movement_type: m.event_type,
+      typeLabel: EVENT_TYPE_LABELS[m.event_type] || m.event_type,
+      description: m.description,
+      amount: m.amount,
+      status: m.status,
+      balance_after: m.balance_after ?? null,
+      isDebit: m.direction > 0,
+    })),
+  });
+
   return (
     <div className="space-y-6">
       <PageHeader title="Estado de Cuenta" description="Movimientos y saldo corrido por tercero">
-        <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
-          <ArrowLeft className="h-4 w-4 mr-2" />Volver
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData())}>
+            <FileText className="h-4 w-4 mr-2" />PDF
+          </Button>
+          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())}>
+            <Download className="h-4 w-4 mr-2" />Excel
+          </Button>
+          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
+            <ArrowLeft className="h-4 w-4 mr-2" />Volver
+          </Button>
+        </div>
       </PageHeader>
 
       {/* Filtros */}
@@ -171,14 +227,14 @@ export default function AccountStatementPage() {
                       </TableRow>
                     )}
                     {movements.map((m) => {
-                      const isDebit = DEBIT_TYPES.has(m.movement_type);
-                      const isAnnulled = m.status === "annulled";
+                      const isDebit = m.direction > 0;
+                      const isAnnulled = m.status === "annulled" || m.status === "cancelled";
                       return (
                         <TableRow key={m.id} className={isAnnulled ? "opacity-50 bg-rose-50/50" : ""}>
-                          <TableCell className="text-xs text-slate-400">{m.movement_number}</TableCell>
+                          <TableCell className="text-xs text-slate-400">{m.movement_number ?? ""}</TableCell>
                           <TableCell className="text-sm">{formatDate(m.date)}</TableCell>
                           <TableCell className="text-sm">
-                            <span className={isAnnulled ? "line-through" : ""}>{MOVEMENT_TYPE_LABELS[m.movement_type] || m.movement_type}</span>
+                            <span className={isAnnulled ? "line-through" : ""}>{EVENT_TYPE_LABELS[m.event_type] || m.event_type}</span>
                             {isAnnulled && <Badge variant="outline" className="ml-2 bg-rose-50 text-rose-600 text-[10px] py-0">Anulado</Badge>}
                           </TableCell>
                           <TableCell className={`text-sm max-w-[200px] truncate ${isAnnulled ? "line-through" : ""}`}>{m.description}</TableCell>
