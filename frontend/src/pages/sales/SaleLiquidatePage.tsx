@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, CreditCard, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,9 +23,9 @@ interface LiquidationLine {
   material_name: string;
   material_code: string;
   quantity: number;
+  received_quantity: number;
   unit_price: number;
   unit_cost: number;
-  current_avg_cost: number;
 }
 
 interface CommissionFormData extends SaleCommissionCreate {
@@ -64,16 +64,15 @@ export default function SaleLiquidatePage() {
             const suggested = getSuggestedPrice(line.material_id, "sale");
             if (suggested) price = suggested;
           }
-          const mat = materials.find((m) => m.id === line.material_id);
           return {
             line_id: line.id,
             material_id: line.material_id,
             material_name: line.material_name,
             material_code: line.material_code,
             quantity: line.quantity,
+            received_quantity: line.quantity,
             unit_price: price,
             unit_cost: line.unit_cost,
-            current_avg_cost: mat?.current_average_cost ?? line.unit_cost,
           };
         }),
       );
@@ -105,6 +104,12 @@ export default function SaleLiquidatePage() {
     );
   };
 
+  const updateReceivedQuantity = (lineId: string, qty: number) => {
+    setLines((prev) =>
+      prev.map((l) => (l.line_id === lineId ? { ...l, received_quantity: qty } : l)),
+    );
+  };
+
   // Comisiones helpers
   const addCommission = () => setCommissions((prev) => [...prev, createEmptyCommission()]);
   const removeCommission = (key: number) => setCommissions((prev) => prev.filter((c) => c._key !== key));
@@ -114,20 +119,32 @@ export default function SaleLiquidatePage() {
     );
   };
 
-  // Cálculos
-  const subtotal = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
-  const totalProfit = lines.reduce((sum, l) => sum + (l.unit_price - l.unit_cost) * l.quantity, 0);
+  // Cálculos — subtotal usa received_quantity para facturación
+  const subtotal = lines.reduce((sum, l) => sum + l.received_quantity * l.unit_price, 0);
+  const totalCost = lines.reduce((sum, l) => sum + l.unit_cost * l.quantity, 0);
+  const totalProfit = subtotal - totalCost;
   const marginPct = subtotal > 0 ? (totalProfit / subtotal) * 100 : 0;
+
+  // Diferencia de báscula
+  const totalQtyDifference = useMemo(() =>
+    lines.reduce((sum, l) => sum + (l.received_quantity - l.quantity), 0),
+  [lines]);
+  const totalAmountDifference = useMemo(() =>
+    lines.reduce((sum, l) => sum + (l.received_quantity - l.quantity) * l.unit_price, 0),
+  [lines]);
+  const hasDifference = Math.abs(totalQtyDifference) > 0.001;
 
   const commissionAmounts = commissions.map((c) => {
     if (c.commission_type === "percentage") return (subtotal * c.commission_value) / 100;
     return c.commission_value;
   });
   const totalCommissions = commissionAmounts.reduce((sum, a) => sum + a, 0);
-  const netTotal = subtotal - totalCommissions;
+  const netProfit = totalProfit - totalCommissions;
+  const netMarginPct = subtotal > 0 ? (netProfit / subtotal) * 100 : 0;
 
   const allPricesValid = lines.every((l) => l.unit_price > 0);
-  const canSubmit = allPricesValid && lines.length > 0;
+  const allReceivedValid = lines.every((l) => l.received_quantity > 0);
+  const canSubmit = allPricesValid && allReceivedValid && lines.length > 0;
 
   const handleSubmit = () => {
     if (!canSubmit || !id) return;
@@ -138,6 +155,9 @@ export default function SaleLiquidatePage() {
           lines: lines.map((l) => ({
             line_id: l.line_id,
             unit_price: l.unit_price,
+            ...(Math.abs(l.received_quantity - l.quantity) > 0.001 && {
+              received_quantity: l.received_quantity,
+            }),
           })),
           commissions: commissions
             .filter((c) => c.third_party_id && c.commission_value > 0)
@@ -207,7 +227,7 @@ export default function SaleLiquidatePage() {
         </CardContent>
       </Card>
 
-      {/* Líneas con precios editables */}
+      {/* Líneas con precios y cantidad recibida editables */}
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
@@ -216,32 +236,52 @@ export default function SaleLiquidatePage() {
         </CardHeader>
         <CardContent className="space-y-0">
           {lines.map((line, idx) => {
-            const lineProfit = (line.unit_price - line.unit_cost) * line.quantity;
+            const lineDiff = line.received_quantity - line.quantity;
+            const lineTotal = line.received_quantity * line.unit_price;
+            const lineProfit = lineTotal - line.unit_cost * line.quantity;
             return (
               <div
                 key={line.line_id}
-                className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
+                className={`grid grid-cols-12 gap-2 items-end pb-8 mb-3 relative ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
               >
-                <div className="col-span-3">
+                <div className="col-span-2">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</Label>}
                   <p className="h-10 flex items-center text-sm">
                     <span className="font-medium">{line.material_name}</span>
-                    <span className="text-slate-400 ml-2 text-xs">{line.material_code}</span>
+                    <span className="text-slate-400 ml-1 text-xs">{line.material_code}</span>
                   </p>
                 </div>
                 <div className="col-span-1">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cant. (kg)</Label>}
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Despachado</Label>}
                   <p className="h-10 flex items-center text-sm tabular-nums">
                     {formatWeight(line.quantity)}
                   </p>
                 </div>
                 <div className="col-span-2">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Prom.</Label>}
-                  <p className="h-10 flex items-center text-sm tabular-nums text-slate-400">
-                    {formatCurrency(line.current_avg_cost)}
-                  </p>
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Recibido (kg)</Label>}
+                  <MoneyInput
+                    value={line.received_quantity}
+                    onChange={(v) => updateReceivedQuantity(line.line_id, v)}
+                    decimals={2}
+                    placeholder="0"
+                  />
                 </div>
-                <div className="col-span-2">
+                <div className="col-span-1">
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Dif.</Label>}
+                  <div className="h-10 flex items-center text-sm tabular-nums">
+                    {Math.abs(lineDiff) < 0.001 ? (
+                      <span className="text-slate-400">&mdash;</span>
+                    ) : (
+                      <div className={lineDiff > 0 ? "text-emerald-600" : "text-red-600"}>
+                        <div>{lineDiff > 0 ? "+" : ""}{lineDiff.toFixed(2)} kg</div>
+                        <div className="text-xs">
+                          ({lineDiff > 0 ? "+" : ""}{formatCurrency(lineDiff * line.unit_price)})
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="col-span-2 relative">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio/kg *</Label>}
                   <MoneyInput
                     value={line.unit_price}
@@ -249,22 +289,24 @@ export default function SaleLiquidatePage() {
                     placeholder="0"
                     className={line.unit_price <= 0 ? "border-red-300" : ""}
                   />
-                  <PriceSuggestion
-                    suggestedPrice={getSuggestedPrice(line.material_id, "sale")}
-                    onApply={(p) => updatePrice(line.line_id, p)}
-                  />
-                  {line.unit_price <= 0 && (
-                    <p className="text-xs text-red-500 mt-0.5">El precio debe ser mayor a 0</p>
-                  )}
+                  <div className="absolute left-0 w-max" style={{ top: "100%" }}>
+                    <PriceSuggestion
+                      suggestedPrice={getSuggestedPrice(line.material_id, "sale")}
+                      onApply={(p) => updatePrice(line.line_id, p)}
+                    />
+                    {line.unit_price <= 0 && (
+                      <p className="text-xs text-red-500 mt-0.5">El precio debe ser mayor a 0</p>
+                    )}
+                  </div>
                 </div>
                 <div className="col-span-2 text-right">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}
                   <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">
-                    {formatCurrency(line.quantity * line.unit_price)}
+                    {formatCurrency(lineTotal)}
                   </p>
                 </div>
                 <div className="col-span-2 text-right">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Utilidad</Label>}
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Util. Bruta</Label>}
                   <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                     {formatCurrency(lineProfit)}
                   </p>
@@ -273,14 +315,25 @@ export default function SaleLiquidatePage() {
             );
           })}
 
-          <div className="bg-slate-50 rounded-lg p-3 mt-2">
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-slate-600">Subtotal</span>
-              <span className="text-lg font-bold">{formatCurrency(subtotal)}</span>
-            </div>
-          </div>
         </CardContent>
       </Card>
+
+      {/* Alerta de diferencia de báscula */}
+      {hasDifference && (
+        <div className={`p-4 rounded-lg border ${totalAmountDifference > 0 ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"}`}>
+          <div className="flex justify-between items-center">
+            <span className="font-medium text-sm">
+              {totalAmountDifference > 0 ? "Ganancia" : "Perdida"} por diferencia de bascula:
+            </span>
+            <span className={`text-lg font-bold ${totalAmountDifference > 0 ? "text-emerald-600" : "text-red-600"}`}>
+              {totalAmountDifference > 0 ? "+" : ""}{formatCurrency(totalAmountDifference)}
+            </span>
+          </div>
+          <p className="text-sm text-slate-600 mt-1">
+            Diferencia total: {totalQtyDifference > 0 ? "+" : ""}{totalQtyDifference.toFixed(2)} kg
+          </p>
+        </div>
+      )}
 
       {/* Comisiones */}
       <Card className="shadow-sm">
@@ -355,41 +408,65 @@ export default function SaleLiquidatePage() {
         </CardContent>
       </Card>
 
-      {/* Resumen y acciones */}
+      {/* Resumen Financiero */}
+      <Card className="shadow-sm bg-slate-50/50">
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Resumen Financiero</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="max-w-sm ml-auto space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">Total Venta</span>
+              <span className="font-bold tabular-nums text-base">{formatCurrency(subtotal)}</span>
+            </div>
+            <div className="border-t border-slate-200 pt-2" />
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">Costo de Venta</span>
+              <span className="tabular-nums text-slate-500">{formatCurrency(totalCost)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">
+                Utilidad Bruta <span className="text-xs text-slate-400">({marginPct.toFixed(1)}%)</span>
+              </span>
+              <span className={`font-semibold tabular-nums ${totalProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                {formatCurrency(totalProfit)}
+              </span>
+            </div>
+            {totalCommissions > 0 && (
+              <>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">(-) Comisiones</span>
+                  <span className="tabular-nums text-amber-600">-{formatCurrency(totalCommissions)}</span>
+                </div>
+                <div className="border-t border-dashed border-slate-200" />
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium text-slate-700">
+                    Utilidad Neta <span className="text-xs text-slate-400">({netMarginPct.toFixed(1)}%)</span>
+                  </span>
+                  <span className={`font-bold tabular-nums ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    {formatCurrency(netProfit)}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Acciones */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1 text-sm">
-            <div className="flex gap-6">
-              <span>Subtotal: <strong>{formatCurrency(subtotal)}</strong></span>
-              {totalCommissions > 0 && (
-                <span>Comisiones: <strong className="text-amber-600">-{formatCurrency(totalCommissions)}</strong></span>
-              )}
-              {totalCommissions > 0 && (
-                <span>Neto: <strong>{formatCurrency(netTotal)}</strong></span>
-              )}
-            </div>
-            <div className="flex gap-6">
-              <span className={totalProfit >= 0 ? "text-emerald-600" : "text-red-600"}>
-                Utilidad Bruta: <strong>{formatCurrency(totalProfit)}</strong>
-              </span>
-              <span className="text-slate-500">
-                Margen: <strong>{marginPct.toFixed(1)}%</strong>
-              </span>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => navigate(`/sales/${id}`)}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={!canSubmit || liquidate.isPending}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              <CreditCard className="h-4 w-4 mr-2" />
-              {liquidate.isPending ? "Liquidando..." : "Confirmar Liquidacion"}
-            </Button>
-          </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(`/sales/${id}`)}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={!canSubmit || liquidate.isPending}
+            className="bg-emerald-600 hover:bg-emerald-700"
+          >
+            <CreditCard className="h-4 w-4 mr-2" />
+            {liquidate.isPending ? "Liquidando..." : "Confirmar Liquidacion"}
+          </Button>
         </div>
       </div>
     </div>

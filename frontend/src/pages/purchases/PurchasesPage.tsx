@@ -116,17 +116,17 @@ const columns: ColumnDef<PurchaseResponse, unknown>[] = [
   },
   {
     accessorKey: "date",
-    header: "Fecha",
+    header: "FECHA",
     enableSorting: true,
     cell: ({ row }) => formatDate(row.original.date),
   },
   {
     accessorKey: "supplier_name",
-    header: "Proveedor",
+    header: "PROVEEDOR",
   },
   {
     id: "items",
-    header: "Items",
+    header: "DETALLE",
     cell: ({ row }) => (
       <div className="space-y-0.5">
         {row.original.lines.map((line) => (
@@ -139,7 +139,7 @@ const columns: ColumnDef<PurchaseResponse, unknown>[] = [
   },
   {
     accessorKey: "total_amount",
-    header: "Total",
+    header: "TOTAL",
     enableSorting: true,
     cell: ({ row }) => (
       <span className="font-medium tabular-nums">{formatCurrency(row.original.total_amount)}</span>
@@ -148,6 +148,7 @@ const columns: ColumnDef<PurchaseResponse, unknown>[] = [
   {
     id: "double_entry",
     header: "D.P.",
+
     cell: ({ row }) =>
       row.original.double_entry_id ? (
         <span className="bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded font-medium">
@@ -159,7 +160,7 @@ const columns: ColumnDef<PurchaseResponse, unknown>[] = [
   },
   {
     accessorKey: "status",
-    header: "Estado",
+    header: "ESTADO",
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
   },
   {

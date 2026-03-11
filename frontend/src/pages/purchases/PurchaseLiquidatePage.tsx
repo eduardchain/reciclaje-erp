@@ -157,7 +157,7 @@ export default function PurchaseLiquidatePage() {
           {lines.map((line, idx) => (
             <div
               key={line.line_id}
-              className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
+              className={`grid grid-cols-12 gap-2 items-end pb-8 mb-3 relative ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
             >
               <div className="col-span-3">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</Label>}
@@ -178,7 +178,7 @@ export default function PurchaseLiquidatePage() {
                   {formatWeight(line.quantity)}
                 </p>
               </div>
-              <div className="col-span-3">
+              <div className="col-span-3 relative">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit. *</Label>}
                 <MoneyInput
                   value={line.unit_price}
@@ -186,13 +186,15 @@ export default function PurchaseLiquidatePage() {
                   placeholder="0"
                   className={line.unit_price <= 0 ? "border-red-300" : ""}
                 />
-                <PriceSuggestion
-                  suggestedPrice={getSuggestedPrice(line.material_id, "purchase")}
-                  onApply={(p) => updatePrice(line.line_id, p)}
-                />
-                {line.unit_price <= 0 && (
-                  <p className="text-xs text-red-500 mt-0.5">El precio debe ser mayor a 0</p>
-                )}
+                <div className="absolute left-0 w-max" style={{ top: "100%" }}>
+                  <PriceSuggestion
+                    suggestedPrice={getSuggestedPrice(line.material_id, "purchase")}
+                    onApply={(p) => updatePrice(line.line_id, p)}
+                  />
+                  {line.unit_price <= 0 && (
+                    <p className="text-xs text-red-500 mt-0.5">El precio debe ser mayor a 0</p>
+                  )}
+                </div>
               </div>
               <div className="col-span-2 text-right">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}

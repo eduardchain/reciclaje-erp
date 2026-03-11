@@ -179,7 +179,7 @@ export default function DoubleEntryCreatePage() {
             const availableMaterials = materials.filter((m) => !used.includes(m.id));
 
             return (
-              <div key={line._key} className="grid grid-cols-12 gap-2 items-start py-2 border-b border-slate-100 last:border-0">
+              <div key={line._key} className="grid grid-cols-12 gap-2 items-start py-2 pb-8 relative border-b border-slate-100 last:border-0">
                 <div className="col-span-3">
                   <EntitySelect
                     value={line.material_id}
@@ -191,13 +191,17 @@ export default function DoubleEntryCreatePage() {
                 <div className="col-span-2">
                   <MoneyInput value={line.quantity} onChange={(v) => updateLine(line._key, "quantity", v)} decimals={2} />
                 </div>
-                <div className="col-span-2">
+                <div className="col-span-2 relative">
                   <MoneyInput value={line.purchase_unit_price} onChange={(v) => updateLine(line._key, "purchase_unit_price", v)} />
-                  <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "purchase")} onApply={(p) => updateLine(line._key, "purchase_unit_price", p)} />
+                  <div className="absolute left-0 w-max" style={{ top: "100%" }}>
+                    <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "purchase")} onApply={(p) => updateLine(line._key, "purchase_unit_price", p)} />
+                  </div>
                 </div>
-                <div className="col-span-2">
+                <div className="col-span-2 relative">
                   <MoneyInput value={line.sale_unit_price} onChange={(v) => updateLine(line._key, "sale_unit_price", v)} />
-                  <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "sale_unit_price", p)} />
+                  <div className="absolute left-0 w-max" style={{ top: "100%" }}>
+                    <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "sale_unit_price", p)} />
+                  </div>
                 </div>
                 <div className="col-span-2 text-right pt-2">
                   <span className={`font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-700" : "text-red-700"}`}>

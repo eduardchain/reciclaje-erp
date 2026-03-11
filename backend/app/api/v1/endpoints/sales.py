@@ -62,6 +62,9 @@ def _enrich_sale_response(sale: Sale, db: Session = None, warnings: list[str] | 
                 "material_code": line.material.code if line.material else None,
                 "material_name": line.material.name if line.material else None,
                 "profit": float(line.calculate_profit()),
+                "received_quantity": float(line.received_quantity) if line.received_quantity is not None else None,
+                "quantity_difference": float(line.received_quantity - line.quantity) if line.received_quantity is not None else None,
+                "amount_difference": float((line.received_quantity - line.quantity) * line.unit_price) if line.received_quantity is not None else None,
             }
             for line in sale.lines
         ],
@@ -73,6 +76,19 @@ def _enrich_sale_response(sale: Sale, db: Session = None, warnings: list[str] | 
             for comm in sale.commissions
         ],
     }
+
+    # Calcular totales de diferencia de bascula
+    lines_with_received = [l for l in sale.lines if l.received_quantity is not None]
+    if lines_with_received:
+        data["total_quantity_difference"] = float(sum(
+            l.received_quantity - l.quantity for l in lines_with_received
+        ))
+        data["total_amount_difference"] = float(sum(
+            (l.received_quantity - l.quantity) * l.unit_price for l in lines_with_received
+        ))
+    else:
+        data["total_quantity_difference"] = None
+        data["total_amount_difference"] = None
 
     # Resolver nombres de usuarios de auditoria
     if db:

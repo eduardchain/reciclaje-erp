@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, DollarSign, TrendingUp, Hash, MoreHorizontal, Eye, Pencil, XCircle, FileText } from "lucide-react";
+import { Plus, DollarSign, TrendingUp, Hash, MoreHorizontal, Eye, Pencil, XCircle, FileText, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -112,17 +112,17 @@ const columns: ColumnDef<SaleResponse, unknown>[] = [
   },
   {
     accessorKey: "date",
-    header: "Fecha",
+    header: "FECHA",
     enableSorting: true,
     cell: ({ row }) => formatDate(row.original.date),
   },
   {
     accessorKey: "customer_name",
-    header: "Cliente",
+    header: "CLIENTE",
   },
   {
     id: "items",
-    header: "Items",
+    header: "DETALLE",
     cell: ({ row }) => (
       <div className="space-y-0.5">
         {row.original.lines.map((line) => (
@@ -135,15 +135,20 @@ const columns: ColumnDef<SaleResponse, unknown>[] = [
   },
   {
     accessorKey: "total_amount",
-    header: "Total",
+    header: "TOTAL",
     enableSorting: true,
     cell: ({ row }) => (
-      <span className="font-medium tabular-nums">{formatCurrency(row.original.total_amount)}</span>
+      <span className="font-medium tabular-nums">
+        {formatCurrency(row.original.total_amount)}
+        {row.original.total_amount_difference != null && Math.abs(row.original.total_amount_difference) > 0.01 && (
+          <Scale className={`inline-block ml-1 h-3.5 w-3.5 ${row.original.total_amount_difference > 0 ? "text-emerald-500" : "text-red-500"}`} />
+        )}
+      </span>
     ),
   },
   {
     accessorKey: "total_profit",
-    header: "Utilidad",
+    header: "UTILIDAD BRUTA",
     enableSorting: true,
     cell: ({ row }) => (
       <span className={`font-medium tabular-nums ${row.original.total_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
@@ -153,7 +158,7 @@ const columns: ColumnDef<SaleResponse, unknown>[] = [
   },
   {
     id: "commissions",
-    header: "Comisiones",
+    header: "COMISIONES",
     cell: ({ row }) => {
       const total = row.original.commissions.reduce((sum, c) => sum + c.commission_amount, 0);
       return total > 0 ? (
@@ -177,7 +182,7 @@ const columns: ColumnDef<SaleResponse, unknown>[] = [
   },
   {
     accessorKey: "status",
-    header: "Estado",
+    header: "ESTADO",
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
   },
   {
@@ -209,13 +214,18 @@ export default function SalesPage() {
     const items = data?.items ?? [];
     const totalAmount = items.reduce((sum, s) => sum + s.total_amount, 0);
     const totalProfit = items.reduce((sum, s) => sum + s.total_profit, 0);
+    const totalCommissions = items.reduce((sum, s) => sum + s.commissions.reduce((cs, c) => cs + c.commission_amount, 0), 0);
+    const netProfit = totalProfit - totalCommissions;
     const count = data?.total ?? 0;
     const margin = totalAmount > 0 ? (totalProfit / totalAmount) * 100 : 0;
+    const netMargin = totalAmount > 0 ? (netProfit / totalAmount) * 100 : 0;
     return {
       total: { current_value: totalAmount, previous_value: 0, change_percentage: null } as MetricCard,
       profit: { current_value: totalProfit, previous_value: 0, change_percentage: null } as MetricCard,
+      netProfit: { current_value: netProfit, previous_value: 0, change_percentage: null } as MetricCard,
       count: { current_value: count, previous_value: 0, change_percentage: null } as MetricCard,
       margin,
+      netMargin,
     };
   }, [data]);
 
@@ -230,13 +240,13 @@ export default function SalesPage() {
 
       {/* KPI Cards */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <KpiCard
             label="Total Ventas"
             metric={kpis.total}
@@ -244,12 +254,20 @@ export default function SalesPage() {
             accentColor="emerald"
           />
           <KpiCard
-            label="Utilidad Total"
+            label="Utilidad Bruta"
             metric={kpis.profit}
             icon={<TrendingUp className="h-4 w-4" />}
             accentColor="violet"
             secondaryLabel="Margen"
             secondaryValue={formatPercentage(kpis.margin)}
+          />
+          <KpiCard
+            label="Utilidad Neta"
+            metric={kpis.netProfit}
+            icon={<TrendingUp className="h-4 w-4" />}
+            accentColor="amber"
+            secondaryLabel="Margen Neto"
+            secondaryValue={formatPercentage(kpis.netMargin)}
           />
           <KpiCard
             label="Operaciones"

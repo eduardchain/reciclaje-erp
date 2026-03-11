@@ -76,15 +76,20 @@ class SaleLineResponse(SaleLineBase):
     sale_id: UUID
     total_price: float
     unit_cost: float
-    profit: float = Field(..., description="(unit_price - unit_cost) × quantity")
+    profit: float = Field(..., description="total_price - (unit_cost × quantity)")
     created_at: datetime
-    
+
+    # Cantidad recibida por cliente (diferencia de bascula)
+    received_quantity: Optional[float] = Field(None, description="Cantidad recibida por cliente")
+    quantity_difference: Optional[float] = Field(None, description="Diferencia: received - quantity")
+    amount_difference: Optional[float] = Field(None, description="Impacto en monto: diferencia × unit_price")
+
     # Joined data from related models
     material_code: str = Field(..., description="Material code (e.g., MAT-001)")
     material_name: str = Field(..., description="Material name")
-    
+
     model_config = {"from_attributes": True}
-    
+
     @field_serializer('quantity', 'unit_price', 'total_price', 'unit_cost', 'profit')
     def serialize_decimals(self, value: Decimal) -> float:
         """Convert Decimal to float for JSON serialization."""
@@ -189,6 +194,10 @@ class SaleResponse(SaleBase):
     # Double-entry link
     double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
 
+    # Diferencia de bascula (cantidad recibida por cliente)
+    total_quantity_difference: Optional[float] = Field(None, description="Suma de diferencias de cantidad")
+    total_amount_difference: Optional[float] = Field(None, description="Impacto total en monto por diferencias")
+
     # Warnings (stock negativo, etc.) — RN-INV-03
     warnings: List[str] = Field(default_factory=list, description="Warnings (e.g., negative stock)")
 
@@ -201,9 +210,10 @@ class SaleResponse(SaleBase):
 
 
 class SaleLiquidateLineUpdate(BaseModel):
-    """Precio actualizado para una línea durante liquidación."""
+    """Precio y cantidad recibida actualizada para una línea durante liquidación."""
     line_id: UUID = Field(..., description="ID de la línea de venta")
     unit_price: Decimal = Field(..., gt=0, description="Nuevo precio unitario (debe ser > 0)")
+    received_quantity: Optional[Decimal] = Field(None, gt=0, description="Cantidad recibida por cliente (opcional)")
 
 
 class SaleLiquidateRequest(BaseModel):

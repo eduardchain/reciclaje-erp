@@ -312,7 +312,14 @@ class SaleLine(Base, TimestampMixin):
         nullable=False,
         comment="Quantity sold (must be positive)"
     )
-    
+
+    received_quantity: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 3),
+        nullable=True,
+        default=None,
+        comment="Cantidad recibida por el cliente (si difiere de quantity)",
+    )
+
     unit_price: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
@@ -358,11 +365,12 @@ class SaleLine(Base, TimestampMixin):
     def calculate_profit(self) -> Decimal:
         """
         Calculate profit for this line.
-        
+
         Returns:
-            (unit_price - unit_cost) × quantity
+            total_price - (unit_cost × quantity)
+            Usa total_price que ya refleja received_quantity si aplica.
         """
-        return (self.unit_price - self.unit_cost) * self.quantity
+        return self.total_price - (self.unit_cost * self.quantity)
     
     def calculate_profit_margin(self) -> Decimal:
         """

@@ -40,14 +40,14 @@ function WarehouseStockIndicator({ materialId, warehouseId, quantity }: { materi
   const stock = wh?.stock ?? 0;
   const insufficient = quantity > 0 && stock < quantity;
   return (
-    <div className="text-xs mt-1">
-      <span className="text-slate-500">Stock en bodega: </span>
+    <div className="text-xs mt-1 whitespace-nowrap">
+      <span className="text-slate-500">Stock: </span>
       <span className={insufficient ? "text-amber-600 font-medium" : "text-emerald-600"}>
         {formatWeight(stock)}
       </span>
       {insufficient && (
-        <span className="text-amber-600 ml-2">
-          — Insuficiente (faltan {formatWeight(quantity - stock)})
+        <span className="text-amber-600 ml-1">
+          (faltan {formatWeight(quantity - stock)})
         </span>
       )}
     </div>
@@ -269,7 +269,7 @@ export default function SaleEditPage() {
             return (
             <div
               key={line._key}
-              className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
+              className={`grid grid-cols-12 gap-2 items-end pb-8 mb-3 relative ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
             >
               <div className="col-span-3">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
@@ -280,7 +280,7 @@ export default function SaleEditPage() {
                   placeholder="Material..."
                 />
               </div>
-              <div className="col-span-2">
+              <div className="col-span-2 relative">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
                 <MoneyInput
                   value={line.quantity}
@@ -288,23 +288,27 @@ export default function SaleEditPage() {
                   decimals={2}
                   placeholder="0,00"
                 />
-                <WarehouseStockIndicator materialId={line.material_id} warehouseId={warehouseId} quantity={line.quantity} />
+                <div className="absolute left-0 w-max" style={{ top: "100%" }}>
+                  <WarehouseStockIndicator materialId={line.material_id} warehouseId={warehouseId} quantity={line.quantity} />
+                </div>
               </div>
               <div className="col-span-1">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo</Label>}
                 <p className="h-10 flex items-center text-sm tabular-nums text-slate-400">{avgCost > 0 ? formatCurrency(avgCost) : "-"}</p>
               </div>
-              <div className="col-span-2">
+              <div className="col-span-2 relative">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio *</Label>}
                 <MoneyInput
                   value={line.unit_price}
                   onChange={(v) => updateLine(line._key, "unit_price", v)}
                   placeholder="0"
                 />
-                <PriceSuggestion
-                  suggestedPrice={getSuggestedPrice(line.material_id, "sale")}
-                  onApply={(p) => updateLine(line._key, "unit_price", p)}
-                />
+                <div className="absolute left-0 w-max" style={{ top: "100%" }}>
+                  <PriceSuggestion
+                    suggestedPrice={getSuggestedPrice(line.material_id, "sale")}
+                    onApply={(p) => updateLine(line._key, "unit_price", p)}
+                  />
+                </div>
               </div>
               <div className="col-span-2 text-right">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}

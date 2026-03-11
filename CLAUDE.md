@@ -177,6 +177,8 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 19. **Transformacion con costo promedio movil**: Tercer metodo de distribucion `average_cost` (default) que usa el costo promedio del material DESTINO. Genera `value_difference = total_dest_value - distributable_value` (excluye merma de la comparacion). Positivo = ganancia, negativo = perdida. Se muestra en P&L como linea separada "Ganancia/Perdida por Transformaciones" sumada a `total_gross_profit`. Migration: `84cf14a916ca` (columna `value_difference` Numeric 15,2 nullable).
 
+20. **Cantidad recibida por cliente (diferencia de bascula)**: En ventas, el cliente puede reportar una cantidad diferente a la despachada. `SaleLine.received_quantity` (Numeric 10,3 nullable) registra lo que el cliente peso. Al liquidar, si se envia `received_quantity`, el `total_price` se calcula como `received_quantity × unit_price` (facturar lo recibido). El COGS no cambia (`unit_cost × quantity` original — lo que salio de bodega). Profit = `total_price - (unit_cost × quantity)`. El inventario NO se ajusta — la diferencia es solo financiera. `SaleResponse` incluye `total_quantity_difference` y `total_amount_difference`. Migration: `bf0ec8815fdc`.
+
 ### Business Modules (Implemented)
 
 | Module | Endpoints | Description |

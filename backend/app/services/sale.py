@@ -300,17 +300,23 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 detail=f"No se puede liquidar venta con estado '{sale.status}'. Debe estar 'registered'"
             )
 
-        # Step 3: Si hay line_updates, actualizar precios de las lineas
+        # Step 3: Si hay line_updates, actualizar precios y cantidad recibida
         if line_updates:
-            price_map = {str(lu.line_id): lu.unit_price for lu in line_updates}
+            update_map = {str(lu.line_id): lu for lu in line_updates}
             stmt = select(SaleLine).where(SaleLine.sale_id == sale.id)
             lines = db.scalars(stmt).all()
 
             new_total = Decimal("0.00")
             for line in lines:
-                if str(line.id) in price_map:
-                    line.unit_price = price_map[str(line.id)]
-                    line.total_price = line.quantity * line.unit_price
+                lu = update_map.get(str(line.id))
+                if lu:
+                    line.unit_price = lu.unit_price
+                    # Si viene received_quantity, usar para facturacion
+                    if lu.received_quantity is not None:
+                        line.received_quantity = lu.received_quantity
+                        line.total_price = lu.received_quantity * line.unit_price
+                    else:
+                        line.total_price = line.quantity * line.unit_price
                 new_total += line.total_price
 
             sale.total_amount = new_total

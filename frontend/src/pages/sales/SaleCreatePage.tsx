@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
@@ -43,14 +43,14 @@ function WarehouseStockIndicator({ materialId, warehouseId, quantity }: { materi
   const stock = wh?.stock ?? 0;
   const insufficient = quantity > 0 && stock < quantity;
   return (
-    <div className="text-xs mt-1">
-      <span className="text-slate-500">Stock en bodega: </span>
+    <div className="text-xs mt-1 whitespace-nowrap">
+      <span className="text-slate-500">Stock: </span>
       <span className={insufficient ? "text-amber-600 font-medium" : "text-emerald-600"}>
         {formatWeight(stock)}
       </span>
       {insufficient && (
-        <span className="text-amber-600 ml-2">
-          — Insuficiente (faltan {formatWeight(quantity - stock)})
+        <span className="text-amber-600 ml-1">
+          (faltan {formatWeight(quantity - stock)})
         </span>
       )}
     </div>
@@ -111,6 +111,25 @@ export default function SaleCreatePage() {
   };
 
   const total = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
+
+  const estCost = useMemo(() => lines.reduce((sum, l) => {
+    const mat = materials.find((m) => m.id === l.material_id);
+    return sum + (mat?.current_average_cost ?? 0) * l.quantity;
+  }, 0), [lines, materials]);
+
+  const estProfit = useMemo(() => lines.reduce((sum, l) => {
+    const mat = materials.find((m) => m.id === l.material_id);
+    const avgCost = mat?.current_average_cost ?? 0;
+    return sum + (l.unit_price > 0 && avgCost > 0 ? (l.unit_price - avgCost) * l.quantity : 0);
+  }, 0), [lines, materials]);
+
+  const totalComm = useMemo(() => commissions.reduce((sum, c) => {
+    return sum + (c.commission_type === "percentage" ? (total * c.commission_value) / 100 : c.commission_value);
+  }, 0), [commissions, total]);
+
+  const netProfit = estProfit - totalComm;
+  const margin = total > 0 ? (estProfit / total) * 100 : 0;
+  const netMargin = total > 0 ? (netProfit / total) * 100 : 0;
 
   const isFutureDate = date ? date > toLocalDateInput() : false;
 
@@ -217,31 +236,35 @@ export default function SaleCreatePage() {
             const avgCost = mat?.current_average_cost ?? 0;
             const lineProfit = line.unit_price > 0 && avgCost > 0 ? (line.unit_price - avgCost) * line.quantity : 0;
             return (
-            <div key={line._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}>
+            <div key={line._key} className={`grid grid-cols-12 gap-2 items-end pb-8 mb-3 relative ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}>
               <div className="col-span-3">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
                 <EntitySelect value={line.material_id} onChange={(v) => handleMaterialChange(line._key, v)} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Material..." />
               </div>
-              <div className="col-span-2">
+              <div className="col-span-2 relative">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
                 <MoneyInput value={line.quantity} onChange={(v) => updateLine(line._key, "quantity", v)} decimals={2} placeholder="0,00" />
-                <WarehouseStockIndicator materialId={line.material_id} warehouseId={warehouseId} quantity={line.quantity} />
+                <div className="absolute left-0 w-max" style={{ top: "100%" }}>
+                  <WarehouseStockIndicator materialId={line.material_id} warehouseId={warehouseId} quantity={line.quantity} />
+                </div>
               </div>
               <div className="col-span-1">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo</Label>}
                 <p className="h-10 flex items-center text-sm tabular-nums text-slate-400">{avgCost > 0 ? formatCurrency(avgCost) : "-"}</p>
               </div>
-              <div className="col-span-2">
+              <div className="col-span-2 relative">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio *</Label>}
                 <MoneyInput value={line.unit_price} onChange={(v) => updateLine(line._key, "unit_price", v)} placeholder="0" />
-                <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "unit_price", p)} />
+                <div className="absolute left-0 w-max" style={{ top: "100%" }}>
+                  <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "unit_price", p)} />
+                </div>
               </div>
               <div className="col-span-2 text-right">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}
                 <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">{formatCurrency(line.quantity * line.unit_price)}</p>
               </div>
               <div className="col-span-1 text-right">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Utilidad</Label>}
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Util. Bruta</Label>}
                 <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                   {line.unit_price > 0 && avgCost > 0 ? formatCurrency(lineProfit) : "-"}
                 </p>
@@ -253,38 +276,6 @@ export default function SaleCreatePage() {
             </div>
             );
           })}
-          {(() => {
-            const estProfit = lines.reduce((sum, l) => {
-              const mat = materials.find((m) => m.id === l.material_id);
-              const avgCost = mat?.current_average_cost ?? 0;
-              return sum + (l.unit_price > 0 && avgCost > 0 ? (l.unit_price - avgCost) * l.quantity : 0);
-            }, 0);
-            const totalComm = commissions.reduce((sum, c) => {
-              return sum + (c.commission_type === "percentage" ? (total * c.commission_value) / 100 : c.commission_value);
-            }, 0);
-            const netProfit = estProfit - totalComm;
-            const margin = total > 0 ? (estProfit / total) * 100 : 0;
-            return (
-              <div className="bg-slate-50 rounded-lg p-3 mt-2 space-y-1">
-                <div className="flex justify-end gap-6">
-                  <span className="text-lg font-bold">Total: {formatCurrency(total)}</span>
-                  {estProfit !== 0 && (
-                    <span className={`text-lg font-bold ${estProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                      Util. Bruta: {formatCurrency(estProfit)} ({margin.toFixed(1)}%)
-                    </span>
-                  )}
-                </div>
-                {totalComm > 0 && (
-                  <div className="flex justify-end gap-6 text-sm">
-                    <span className="text-amber-600">Comisiones: -{formatCurrency(totalComm)}</span>
-                    <span className={`font-semibold ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                      Util. Neta: {formatCurrency(netProfit)}
-                    </span>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
         </CardContent>
       </Card>
 
@@ -338,6 +329,59 @@ export default function SaleCreatePage() {
             ))}
           </CardContent>
         )}
+      </Card>
+
+      {/* Resumen Financiero */}
+      <Card className="shadow-sm bg-slate-50/50">
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Resumen Financiero</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="max-w-sm ml-auto space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">Total Venta</span>
+              <span className="font-bold tabular-nums text-base">{formatCurrency(total)}</span>
+            </div>
+            {estCost > 0 && (
+              <>
+                <div className="border-t border-slate-200 pt-2" />
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">Costo Est.</span>
+                  <span className="tabular-nums text-slate-500">{formatCurrency(estCost)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">
+                    Utilidad Bruta Est. <span className="text-xs text-slate-400">({margin.toFixed(1)}%)</span>
+                  </span>
+                  <span className={`font-semibold tabular-nums ${estProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    {formatCurrency(estProfit)}
+                  </span>
+                </div>
+              </>
+            )}
+            {totalComm > 0 && (
+              <>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">(-) Comisiones</span>
+                  <span className="font-semibold tabular-nums text-amber-600">-{formatCurrency(totalComm)}</span>
+                </div>
+                {estCost > 0 && (
+                  <>
+                    <div className="border-t border-dashed border-slate-200" />
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium text-slate-700">
+                        Utilidad Neta Est. <span className="text-xs text-slate-400">({netMargin.toFixed(1)}%)</span>
+                      </span>
+                      <span className={`font-bold tabular-nums ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                        {formatCurrency(netProfit)}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </CardContent>
       </Card>
 
       {/* Liquidacion */}

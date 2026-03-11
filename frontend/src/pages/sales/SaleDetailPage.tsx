@@ -46,6 +46,12 @@ export default function SaleDetailPage() {
     return <div className="text-center py-12 text-slate-500">Venta no encontrada</div>;
   }
 
+  const totalCommissions = sale.commissions.reduce((sum, c) => sum + c.commission_amount, 0);
+  const totalCost = sale.total_amount - sale.total_profit;
+  const marginPct = sale.total_amount > 0 ? (sale.total_profit / sale.total_amount) * 100 : 0;
+  const netProfit = sale.total_profit - totalCommissions;
+  const netMarginPct = sale.total_amount > 0 ? (netProfit / sale.total_amount) * 100 : 0;
+
   return (
     <div className="space-y-6">
       <PageHeader title={`Venta #${sale.sale_number}`} description={`Cliente: ${sale.customer_name}`}>
@@ -84,7 +90,7 @@ export default function SaleDetailPage() {
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Estado</dt><dd><StatusBadge status={sale.status} /></dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</dt><dd>{formatDate(sale.date)}</dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold text-lg">{formatCurrency(sale.total_amount)}</dd></div>
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Utilidad</dt><dd className={`font-bold ${sale.total_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(sale.total_profit)}</dd></div>
+              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">{totalCommissions > 0 ? "Utilidad Neta" : "Utilidad Bruta"}</dt><dd className={`font-bold ${(totalCommissions > 0 ? netProfit : sale.total_profit) >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(totalCommissions > 0 ? netProfit : sale.total_profit)}</dd></div>
             </dl>
           </CardContent>
         </Card>
@@ -119,11 +125,17 @@ export default function SaleDetailPage() {
               <TableHeader>
                 <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Material</TableHead>
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Cantidad</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Despachado</TableHead>
+                  {sale.lines.some((l) => l.received_quantity !== null) && (
+                    <>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Recibido</TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Dif.</TableHead>
+                    </>
+                  )}
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Precio Unit.</TableHead>
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Costo Unit.</TableHead>
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total</TableHead>
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Utilidad</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Util. Bruta</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -134,6 +146,27 @@ export default function SaleDetailPage() {
                       <span className="text-slate-400 ml-2 text-xs">{line.material_code}</span>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatWeight(line.quantity)}</TableCell>
+                    {sale.lines.some((l) => l.received_quantity !== null) && (
+                      <>
+                        <TableCell className="text-right tabular-nums">
+                          {line.received_quantity != null ? formatWeight(line.received_quantity) : <span className="text-slate-400">&mdash;</span>}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {line.quantity_difference != null && Math.abs(line.quantity_difference) > 0.001 ? (
+                            <div className={line.quantity_difference > 0 ? "text-emerald-600" : "text-red-600"}>
+                              <div>{line.quantity_difference > 0 ? "+" : ""}{line.quantity_difference.toFixed(2)} kg</div>
+                              {line.amount_difference != null && (
+                                <div className="text-xs">
+                                  ({line.amount_difference > 0 ? "+" : ""}{formatCurrency(line.amount_difference)})
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">&mdash;</span>
+                          )}
+                        </TableCell>
+                      </>
+                    )}
                     <TableCell className="text-right tabular-nums">{formatCurrency(line.unit_price)}</TableCell>
                     <TableCell className="text-right tabular-nums text-slate-500">{formatCurrency(line.unit_cost)}</TableCell>
                     <TableCell className="text-right tabular-nums font-medium">{formatCurrency(line.total_price)}</TableCell>
@@ -143,12 +176,25 @@ export default function SaleDetailPage() {
               </TableBody>
             </Table>
           </div>
-          <div className="bg-slate-50 rounded-lg p-3 mt-3">
-            <div className="flex justify-end gap-8">
-              <span className="text-lg font-bold">Total: {formatCurrency(sale.total_amount)}</span>
-              <span className={`text-lg font-bold ${sale.total_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>Utilidad: {formatCurrency(sale.total_profit)}</span>
+          {sale.total_amount_difference != null && Math.abs(sale.total_amount_difference) > 0.01 && (
+            <div className={`p-3 rounded-lg mt-3 ${sale.total_amount_difference > 0 ? "bg-emerald-50" : "bg-red-50"}`}>
+              <div className="flex justify-between items-center text-sm">
+                <span className="font-medium">
+                  {sale.total_amount_difference > 0 ? "Ganancia" : "Perdida"} por diferencia de bascula:
+                </span>
+                <div className="text-right">
+                  <span className={`font-bold ${sale.total_amount_difference > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    {sale.total_amount_difference > 0 ? "+" : ""}{formatCurrency(sale.total_amount_difference)}
+                  </span>
+                  {sale.total_quantity_difference != null && (
+                    <span className="text-slate-500 ml-2 text-xs">
+                      ({sale.total_quantity_difference > 0 ? "+" : ""}{sale.total_quantity_difference.toFixed(2)} kg)
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 
@@ -186,6 +232,51 @@ export default function SaleDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Resumen Financiero */}
+      <Card className="shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Resumen Financiero</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="max-w-sm ml-auto space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">Total Venta</span>
+              <span className="font-bold tabular-nums text-base">{formatCurrency(sale.total_amount)}</span>
+            </div>
+            <div className="border-t border-slate-200 pt-2" />
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">Costo de Venta</span>
+              <span className="tabular-nums text-slate-500">{formatCurrency(totalCost)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">
+                Utilidad Bruta <span className="text-xs text-slate-400">({marginPct.toFixed(1)}%)</span>
+              </span>
+              <span className={`font-semibold tabular-nums ${sale.total_profit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                {formatCurrency(sale.total_profit)}
+              </span>
+            </div>
+            {totalCommissions > 0 && (
+              <>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">(-) Comisiones</span>
+                  <span className="tabular-nums text-amber-600">-{formatCurrency(totalCommissions)}</span>
+                </div>
+                <div className="border-t border-dashed border-slate-200" />
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium text-slate-700">
+                    Utilidad Neta <span className="text-xs text-slate-400">({netMarginPct.toFixed(1)}%)</span>
+                  </span>
+                  <span className={`font-bold tabular-nums ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    {formatCurrency(netProfit)}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Auditoria */}
       <Card className="shadow-sm">

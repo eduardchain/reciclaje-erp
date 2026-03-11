@@ -39,6 +39,9 @@ export interface SaleLineResponse {
   created_at: string;
   material_code: string;
   material_name: string;
+  received_quantity: number | null;
+  quantity_difference: number | null;
+  amount_difference: number | null;
 }
 
 export interface SaleCreate {
@@ -98,12 +101,15 @@ export interface SaleResponse extends BaseEntity {
   payment_account_name: string | null;
   lines: SaleLineResponse[];
   commissions: SaleCommissionResponse[];
+  total_quantity_difference: number | null;
+  total_amount_difference: number | null;
   warnings: string[];
 }
 
 export interface SaleLiquidateLineUpdate {
   line_id: string;
   unit_price: number;
+  received_quantity?: number;
 }
 
 export interface SaleLiquidateRequest {
