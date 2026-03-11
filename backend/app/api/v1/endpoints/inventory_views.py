@@ -640,7 +640,7 @@ def get_valuation(
     query = select(Material).where(
         Material.organization_id == org_context["organization_id"],
         Material.is_active == True,
-        Material.current_stock_liquidated > 0,
+        Material.current_stock_liquidated != 0,
     )
 
     if category_id:
