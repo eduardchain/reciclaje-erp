@@ -43,6 +43,7 @@ from app.schemas.money_movement import (
     AdvancePaymentCreate,
     AdvanceCollectionCreate,
     AssetPaymentCreate,
+    ExpenseAccrualCreate,
     MoneyMovementResponse,
 )
 
@@ -647,6 +648,53 @@ class CRUDMoneyMovement:
         return movement
 
     # ======================================================================
+    # Gasto causado (pasivo)
+    # ======================================================================
+
+    def create_expense_accrual(
+        self,
+        db: Session,
+        data: "ExpenseAccrualCreate",
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """
+        Gasto causado (pasivo) — NO mueve dinero de ninguna cuenta.
+
+        Efectos:
+        - third_party.current_balance -= amount (le debemos mas)
+        - Aparece en P&L como gasto operativo
+
+        Validaciones:
+        - Tercero debe existir y estar activo (cualquier tipo)
+        - Categoria de gasto debe existir
+        """
+        third_party = self._validate_third_party(db, data.third_party_id, organization_id)
+        self._validate_expense_category(db, data.expense_category_id, organization_id)
+
+        movement = self._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="expense_accrual",
+            amount=data.amount,
+            account_id=None,
+            date=data.date,
+            description=data.description,
+            third_party_id=data.third_party_id,
+            expense_category_id=data.expense_category_id,
+            reference_number=data.reference_number,
+            notes=data.notes,
+            user_id=user_id,
+        )
+
+        # Efecto: tercero nos debe mas (balance negativo = le debemos)
+        third_party.current_balance -= data.amount
+
+        db.commit()
+        db.refresh(movement)
+        return movement
+
+    # ======================================================================
     # Anulacion
     # ======================================================================
 
@@ -1163,6 +1211,23 @@ class CRUDMoneyMovement:
         elif mt == "asset_payment":
             # Tercero es solo referencia, no se reversa balance
             account.current_balance += amt
+
+        elif mt == "expense_accrual":
+            # Sin cuenta, solo reversa tercero
+            if third_party:
+                third_party.current_balance += amt
+
+        elif mt == "deferred_funding":
+            # Reversa: account(+), third_party(-)
+            if account:
+                account.current_balance += amt
+            if third_party:
+                third_party.current_balance -= amt
+
+        elif mt == "deferred_expense":
+            # Sin cuenta, solo reversa tercero
+            if third_party:
+                third_party.current_balance += amt
 
     def _get_or_404(
         self,

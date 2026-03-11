@@ -68,3 +68,10 @@ export function useProvisions(search?: string) {
     queryFn: () => thirdPartyService.getProvisions({ search, limit: 100 }),
   });
 }
+
+export function useLiabilities(search?: string) {
+  return useQuery({
+    queryKey: ["third-parties", "liabilities", search],
+    queryFn: () => thirdPartyService.getLiabilities({ search, limit: 100 }),
+  });
+}

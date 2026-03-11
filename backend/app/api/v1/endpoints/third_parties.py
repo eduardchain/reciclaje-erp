@@ -141,6 +141,35 @@ def list_provisions(
     )
 
 
+@router.get("/liabilities", response_model=PaginatedResponse)
+def list_liabilities(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    is_active: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None),
+    sort_by: str = Query("name"),
+    sort_order: str = Query("asc", regex="^(asc|desc)$"),
+    org_context: tuple = Depends(get_required_org_context),
+    db: Session = Depends(get_db)
+):
+    """
+    List only third parties marked as liabilities (is_liability = True).
+    Excluye system entities.
+    """
+    org_id = org_context["organization_id"]
+
+    return third_party.get_liabilities(
+        db=db,
+        organization_id=org_id,
+        skip=skip,
+        limit=limit,
+        is_active=is_active,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order
+    )
+
+
 @router.post("", response_model=ThirdPartyResponse, status_code=status.HTTP_201_CREATED)
 def create_third_party(
     third_party_in: ThirdPartyCreate,

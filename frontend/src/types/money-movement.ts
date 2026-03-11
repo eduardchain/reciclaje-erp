@@ -14,7 +14,10 @@ export type MoneyMovementType =
   | "provision_expense"
   | "advance_payment"
   | "advance_collection"
-  | "asset_payment";
+  | "asset_payment"
+  | "expense_accrual"
+  | "deferred_funding"
+  | "deferred_expense";
 
 export type MovementStatus = "confirmed" | "annulled";
 
@@ -180,6 +183,16 @@ export interface AssetPaymentCreate {
   third_party_id?: string | null;
   reference_number?: string | null;
   evidence_url?: string | null;
+  notes?: string | null;
+}
+
+export interface ExpenseAccrualCreate {
+  third_party_id: string;
+  amount: number;
+  expense_category_id: string;
+  date: string;
+  description: string;
+  reference_number?: string | null;
   notes?: string | null;
 }
 

@@ -26,9 +26,10 @@ import ProvisionsPage from "@/pages/treasury/ProvisionsPage";
 import AccountStatementPage from "@/pages/treasury/AccountStatementPage";
 import TreasuryDashboardPage from "@/pages/treasury/TreasuryDashboardPage";
 import AccountMovementsPage from "@/pages/treasury/AccountMovementsPage";
-import DeferredExpensesPage from "@/pages/treasury/DeferredExpensesPage";
-import DeferredExpenseCreatePage from "@/pages/treasury/DeferredExpenseCreatePage";
-import DeferredExpenseDetailPage from "@/pages/treasury/DeferredExpenseDetailPage";
+import LiabilitiesPage from "@/pages/treasury/LiabilitiesPage";
+import ScheduledExpensesPage from "@/pages/treasury/ScheduledExpensesPage";
+import ScheduledExpenseCreatePage from "@/pages/treasury/ScheduledExpenseCreatePage";
+import ScheduledExpenseDetailPage from "@/pages/treasury/ScheduledExpenseDetailPage";
 import StockPage from "@/pages/inventory/StockPage";
 import MovementHistoryPage from "@/pages/inventory/MovementHistoryPage";
 import AdjustmentsPage from "@/pages/inventory/AdjustmentsPage";
@@ -103,9 +104,10 @@ function App() {
               <Route path={ROUTES.TREASURY_ACCOUNT_STATEMENT} element={<AccountStatementPage />} />
               <Route path={ROUTES.TREASURY_DASHBOARD} element={<TreasuryDashboardPage />} />
               <Route path={ROUTES.TREASURY_ACCOUNT_MOVEMENTS} element={<AccountMovementsPage />} />
-              <Route path={ROUTES.TREASURY_DEFERRED} element={<DeferredExpensesPage />} />
-              <Route path={ROUTES.TREASURY_DEFERRED_NEW} element={<DeferredExpenseCreatePage />} />
-              <Route path="/treasury/deferred-expenses/:id" element={<DeferredExpenseDetailPage />} />
+              <Route path={ROUTES.TREASURY_LIABILITIES} element={<LiabilitiesPage />} />
+              <Route path={ROUTES.TREASURY_SCHEDULED} element={<ScheduledExpensesPage />} />
+              <Route path={ROUTES.TREASURY_SCHEDULED_NEW} element={<ScheduledExpenseCreatePage />} />
+              <Route path="/treasury/scheduled-expenses/:id" element={<ScheduledExpenseDetailPage />} />
               <Route path="/treasury/:id" element={<MovementDetailPage />} />
               {/* Inventario */}
               <Route path={ROUTES.INVENTORY} element={<StockPage />} />

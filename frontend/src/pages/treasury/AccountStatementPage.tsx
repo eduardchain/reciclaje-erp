@@ -45,6 +45,9 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   double_entry_cancellation: "Doble Partida Cancelada",
   double_entry_commission_cancellation: "Comision DP Cancelada",
   initial_balance: "Saldo Inicial",
+  expense_accrual: "Gasto Causado (Pasivo)",
+  deferred_funding: "Pago Gasto Diferido",
+  deferred_expense: "Cuota Gasto Diferido",
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

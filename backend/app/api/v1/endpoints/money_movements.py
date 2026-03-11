@@ -29,6 +29,7 @@ from app.schemas.money_movement import (
     AdvancePaymentCreate,
     AdvanceCollectionCreate,
     AssetPaymentCreate,
+    ExpenseAccrualCreate,
     AnnulMovementRequest,
     AnnulMovementResponse,
     MoneyMovementResponse,
@@ -55,6 +56,9 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "advance_payment": 1,           # Anticipo a proveedor: proveedor nos debe
     "advance_collection": -1,       # Anticipo de cliente: nosotros debemos al cliente
     # asset_payment: tercero es solo referencia, NO afecta balance
+    "expense_accrual": -1,          # Gasto causado: le debemos mas (balance baja)
+    "deferred_funding": 1,          # Pago gasto diferido: prepago nos debe (balance sube)
+    "deferred_expense": -1,         # Cuota gasto diferido: reduce prepago (balance baja)
 }
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -73,6 +77,9 @@ ACCOUNT_BALANCE_DIRECTION = {
     "provision_deposit": -1,
     "advance_payment": -1,
     "asset_payment": -1,
+    "deferred_funding": -1,         # Pago inicial gasto diferido: sale dinero de cuenta
+    # expense_accrual: NO toca cuenta (account_id=None)
+    # deferred_expense: NO toca cuenta (account_id=None)
 }
 
 
@@ -412,6 +419,31 @@ def create_asset_payment(
     Efectos: account(-), third_party.balance(+) si se indica tercero.
     """
     movement = money_movement.pay_asset(
+        db=db,
+        data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded)
+
+
+@router.post(
+    "/expense-accrual",
+    response_model=MoneyMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_expense_accrual(
+    data: ExpenseAccrualCreate,
+    org_context: dict = Depends(get_required_org_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Gasto causado (pasivo) — NO mueve dinero de cuentas.
+
+    Efectos: third_party.balance(-), aparece en P&L.
+    """
+    movement = money_movement.create_expense_accrual(
         db=db,
         data=data,
         organization_id=org_context["organization_id"],

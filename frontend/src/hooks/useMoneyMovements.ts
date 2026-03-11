@@ -47,6 +47,7 @@ export function useCreateMovement(type: string) {
     advance_payment: moneyMovementService.createAdvancePayment,
     advance_collection: moneyMovementService.createAdvanceCollection,
     asset_payment: moneyMovementService.createAssetPayment,
+    expense_accrual: moneyMovementService.createExpenseAccrual,
   };
 
   return useMutation({

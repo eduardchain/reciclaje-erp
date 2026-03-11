@@ -17,7 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PageHeader } from "@/components/shared/PageHeader";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { reportsService } from "@/services/reports";
-import { usePendingDeferredExpenses } from "@/hooks/useDeferredExpenses";
+import { usePendingScheduledExpenses } from "@/hooks/useScheduledExpenses";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
@@ -36,6 +36,9 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   advance_payment: "Anticipo a Proveedor",
   advance_collection: "Anticipo de Cliente",
   asset_payment: "Pago Activo Fijo",
+  expense_accrual: "Gasto Causado (Pasivo)",
+  deferred_funding: "Pago Gasto Diferido",
+  deferred_expense: "Cuota Gasto Diferido",
 };
 
 export default function TreasuryDashboardPage() {
@@ -44,7 +47,7 @@ export default function TreasuryDashboardPage() {
     queryKey: ["treasury-dashboard"],
     queryFn: () => reportsService.getTreasuryDashboard(),
   });
-  const { data: pendingDeferred } = usePendingDeferredExpenses();
+  const { data: pendingDeferred } = usePendingScheduledExpenses();
 
   if (isLoading || !data) {
     return (
@@ -213,9 +216,9 @@ export default function TreasuryDashboardPage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2">
             <CalendarClock className="h-4 w-4" />
-            Gastos Programados Pendientes
+            Gastos Diferidos Pendientes
           </CardTitle>
-          <Button variant="outline" size="sm" onClick={() => navigate(ROUTES.TREASURY_DEFERRED)}>
+          <Button variant="outline" size="sm" onClick={() => navigate(ROUTES.TREASURY_SCHEDULED)}>
             Ver todos
           </Button>
         </CardHeader>
@@ -234,27 +237,27 @@ export default function TreasuryDashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pendingDeferred.map((de) => (
-                  <TableRow key={de.id} className="cursor-pointer hover:bg-slate-50" onClick={() => navigate(`${ROUTES.TREASURY_DEFERRED}/${de.id}`)}>
+                {pendingDeferred.map((se) => (
+                  <TableRow key={se.id} className="cursor-pointer hover:bg-slate-50" onClick={() => navigate(`${ROUTES.TREASURY_SCHEDULED}/${se.id}`)}>
                     <TableCell className="font-medium">
-                      {de.name}
+                      {se.name}
                     </TableCell>
-                    <TableCell className="text-sm text-slate-500">{de.expense_category_name}</TableCell>
+                    <TableCell className="text-sm text-slate-500">{se.expense_category_name}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-2">
                         <div className="w-16 bg-slate-100 rounded-full h-2">
                           <div
                             className="bg-emerald-500 h-2 rounded-full"
-                            style={{ width: `${(de.applied_months / de.total_months) * 100}%` }}
+                            style={{ width: `${(se.applied_months / se.total_months) * 100}%` }}
                           />
                         </div>
                         <span className="text-xs text-slate-500 tabular-nums">
-                          {de.applied_months}/{de.total_months}
+                          {se.applied_months}/{se.total_months}
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">{formatCurrency(de.next_amount)}</TableCell>
-                    <TableCell className="text-right tabular-nums text-slate-500">{formatCurrency(de.remaining_amount)}</TableCell>
+                    <TableCell className="text-right font-medium tabular-nums">{formatCurrency(se.next_amount)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-slate-500">{formatCurrency(se.remaining_amount)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

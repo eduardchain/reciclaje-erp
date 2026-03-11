@@ -50,6 +50,10 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
     is_investor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     
     is_provision: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    is_liability: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    is_system_entity: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     
     provision_type: Mapped[str | None] = mapped_column(
         String(50),

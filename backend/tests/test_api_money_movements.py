@@ -1914,3 +1914,161 @@ class TestAssetPayment:
         db_session.refresh(test_supplier)
         assert test_account.current_balance == initial_account_balance
         assert test_supplier.current_balance == initial_supplier_balance
+
+
+# ---------------------------------------------------------------------------
+# Tests: Gasto Causado (expense_accrual)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def test_liability(db_session: Session, test_organization) -> ThirdParty:
+    """Tercero pasivo (is_liability=True) con balance 0."""
+    tp = ThirdParty(
+        name="Pasivo Laboral Q1",
+        is_liability=True,
+        current_balance=Decimal("0.00"),
+        organization_id=test_organization.id,
+    )
+    db_session.add(tp)
+    db_session.commit()
+    db_session.refresh(tp)
+    return tp
+
+
+class TestExpenseAccrual:
+    """Tests para POST /api/v1/money-movements/expense-accrual."""
+
+    def test_expense_accrual_basic(
+        self, client: TestClient, org_headers: dict,
+        test_liability, test_expense_category, test_account, db_session,
+    ):
+        """Gasto causado — NO mueve dinero, tercero.balance(-), aparece en response."""
+        initial_account_balance = test_account.current_balance
+        payload = {
+            "third_party_id": str(test_liability.id),
+            "amount": 2000000,
+            "expense_category_id": str(test_expense_category.id),
+            "date": "2026-03-01T10:00:00Z",
+            "description": "Provision laboral marzo 2026",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/expense-accrual",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["movement_type"] == "expense_accrual"
+        assert data["amount"] == 2000000.0
+        assert data["account_id"] is None  # No toca cuenta
+        assert data["third_party_name"] == "Pasivo Laboral Q1"
+        assert data["expense_category_name"] == "Combustible"
+
+        # Verificar saldos
+        db_session.refresh(test_liability)
+        db_session.refresh(test_account)
+        assert test_liability.current_balance == Decimal("-2000000.00")  # Le debemos
+        assert test_account.current_balance == initial_account_balance  # Sin cambio
+
+    def test_expense_accrual_any_third_party(
+        self, client: TestClient, org_headers: dict,
+        test_supplier, test_expense_category,
+    ):
+        """Gasto causado acepta cualquier tercero activo, no solo is_liability."""
+        payload = {
+            "third_party_id": str(test_supplier.id),
+            "amount": 500000,
+            "expense_category_id": str(test_expense_category.id),
+            "date": "2026-03-01T10:00:00Z",
+            "description": "Gasto causado a proveedor",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/expense-accrual",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["movement_type"] == "expense_accrual"
+
+    def test_expense_accrual_invalid_category(
+        self, client: TestClient, org_headers: dict,
+        test_liability,
+    ):
+        """Categoria inexistente — 404."""
+        payload = {
+            "third_party_id": str(test_liability.id),
+            "amount": 100000,
+            "expense_category_id": str(uuid4()),
+            "date": "2026-03-01T10:00:00Z",
+            "description": "Gasto con cat invalida",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/expense-accrual",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 404
+        assert "Categoria" in resp.json()["detail"]
+
+    def test_expense_accrual_annul(
+        self, client: TestClient, org_headers: dict,
+        test_liability, test_expense_category, db_session,
+    ):
+        """Anulacion de gasto causado — reversa balance tercero."""
+        # Crear
+        resp = client.post(
+            "/api/v1/money-movements/expense-accrual",
+            json={
+                "third_party_id": str(test_liability.id),
+                "amount": 1000000,
+                "expense_category_id": str(test_expense_category.id),
+                "date": "2026-03-01T10:00:00Z",
+                "description": "Gasto a anular",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        movement_id = resp.json()["id"]
+
+        db_session.refresh(test_liability)
+        assert test_liability.current_balance == Decimal("-1000000.00")
+
+        # Anular
+        resp = client.post(
+            f"/api/v1/money-movements/{movement_id}/annul",
+            json={"reason": "Error de digitacion"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "annulled"
+
+        db_session.refresh(test_liability)
+        assert test_liability.current_balance == Decimal("0.00")  # Restaurado
+
+    def test_expense_accrual_appears_in_pnl(
+        self, client: TestClient, org_headers: dict,
+        test_liability, test_expense_category,
+    ):
+        """Gasto causado aparece en P&L como gasto operativo."""
+        # Crear gasto causado
+        client.post(
+            "/api/v1/money-movements/expense-accrual",
+            json={
+                "third_party_id": str(test_liability.id),
+                "amount": 3000000,
+                "expense_category_id": str(test_expense_category.id),
+                "date": "2026-03-05T10:00:00Z",
+                "description": "Pasivo laboral Q1",
+            },
+            headers=org_headers,
+        )
+
+        # Consultar P&L
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["operating_expenses"] >= 3000000.0
+        # Debe estar en expenses_by_category
+        cat_names = [c["category_name"] for c in data["expenses_by_category"]]
+        assert "Combustible" in cat_names

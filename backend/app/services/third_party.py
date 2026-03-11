@@ -34,6 +34,7 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         "customer": "is_customer",
         "investor": "is_investor",
         "provision": "is_provision",
+        "liability": "is_liability",
     }
 
     def get_multi(
@@ -51,7 +52,9 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         """Get third parties con filtro opcional por rol."""
         from sqlalchemy import func
 
-        query = self._base_query(organization_id)
+        query = self._base_query(organization_id).where(
+            self.model.is_system_entity == False
+        )
 
         if role and role in self.ROLE_COLUMN_MAP:
             col = getattr(self.model, self.ROLE_COLUMN_MAP[role])
@@ -186,9 +189,10 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         Returns:
             PaginatedResponse with suppliers
         """
-        # Base query with supplier filter
+        # Base query with supplier filter (excluir system entities)
         query = self._base_query(organization_id).where(
-            self.model.is_supplier == True
+            self.model.is_supplier == True,
+            self.model.is_system_entity == False,
         )
         
         # Apply filters
@@ -257,9 +261,10 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         Returns:
             PaginatedResponse with customers
         """
-        # Base query with customer filter
+        # Base query with customer filter (excluir system entities)
         query = self._base_query(organization_id).where(
-            self.model.is_customer == True
+            self.model.is_customer == True,
+            self.model.is_system_entity == False,
         )
         
         # Apply filters
@@ -328,9 +333,10 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         Returns:
             PaginatedResponse with provisions
         """
-        # Base query with provision filter
+        # Base query with provision filter (excluir system entities)
         query = self._base_query(organization_id).where(
-            self.model.is_provision == True
+            self.model.is_provision == True,
+            self.model.is_system_entity == False,
         )
         
         # Apply filters
@@ -372,6 +378,55 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             limit=limit
         )
     
+    def get_liabilities(
+        self,
+        db: Session,
+        organization_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None,
+        sort_by: str = "name",
+        sort_order: str = "asc"
+    ) -> PaginatedResponse:
+        """Get all liabilities (is_liability=True) for organization."""
+        query = self._base_query(organization_id).where(
+            self.model.is_liability == True,
+            self.model.is_system_entity == False,
+        )
+
+        if is_active is not None:
+            query = query.where(self.model.is_active == is_active)
+
+        if search:
+            query = self._apply_search_filter(query, search)
+
+        from sqlalchemy import func
+        count_query = select(func.count()).select_from(query.subquery())
+        total = db.execute(count_query).scalar_one()
+
+        sort_column = getattr(self.model, sort_by, self.model.name)
+        if sort_order.lower() == "desc":
+            query = query.order_by(sort_column.desc())
+        else:
+            query = query.order_by(sort_column.asc())
+
+        query = query.offset(skip).limit(limit)
+        result = db.execute(query)
+        items = result.scalars().all()
+
+        items_dict = [
+            {c.name: getattr(item, c.name) for c in item.__table__.columns}
+            for item in items
+        ]
+
+        return PaginatedResponse(
+            items=items_dict,
+            total=total,
+            skip=skip,
+            limit=limit
+        )
+
     def update_balance(
         self,
         db: Session,

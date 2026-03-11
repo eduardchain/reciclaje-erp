@@ -32,6 +32,9 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   advance_payment: "Anticipo a Proveedor",
   advance_collection: "Anticipo de Cliente",
   asset_payment: "Pago Activo Fijo",
+  expense_accrual: "Gasto Causado (Pasivo)",
+  deferred_funding: "Pago Gasto Diferido",
+  deferred_expense: "Cuota Gasto Diferido",
 };
 
 interface AccountMovementItem {

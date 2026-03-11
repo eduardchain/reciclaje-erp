@@ -54,16 +54,16 @@ def clear_data(db, org_slug: str) -> None:
     from app.models.sale import Sale, SaleLine, SaleCommission
     from app.models.purchase import Purchase, PurchaseLine
     from app.models.double_entry import DoubleEntry
-    from app.models.deferred_expense import DeferredExpense, DeferredApplication
+    from app.models.scheduled_expense import ScheduledExpense, ScheduledExpenseApplication
 
     # Eliminar en orden de FK
-    # DeferredApplications tiene FK a money_movements → eliminar primero
-    db.query(DeferredApplication).filter(
-        DeferredApplication.deferred_expense_id.in_(
-            db.query(DeferredExpense.id).filter(DeferredExpense.organization_id == org_id)
+    # ScheduledExpenseApplications tiene FK a money_movements → eliminar primero
+    db.query(ScheduledExpenseApplication).filter(
+        ScheduledExpenseApplication.scheduled_expense_id.in_(
+            db.query(ScheduledExpense.id).filter(ScheduledExpense.organization_id == org_id)
         )
     ).delete(synchronize_session=False)
-    db.query(DeferredExpense).filter(DeferredExpense.organization_id == org_id).delete()
+    db.query(ScheduledExpense).filter(ScheduledExpense.organization_id == org_id).delete()
 
     db.query(SaleCommission).filter(
         SaleCommission.sale_id.in_(db.query(Sale.id).filter(Sale.organization_id == org_id))

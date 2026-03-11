@@ -90,6 +90,9 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "provision_expense": 1,
     "advance_payment": 1,
     "advance_collection": -1,
+    "expense_accrual": -1,          # Gasto causado: le debemos mas
+    "deferred_funding": 1,          # Pago gasto diferido: prepago nos debe
+    "deferred_expense": -1,         # Cuota gasto diferido: reduce prepago
 }
 
 # Tipos de money_movement que representan inflows a cuentas
@@ -111,6 +114,7 @@ OUTFLOW_TYPES = frozenset([
     "provision_deposit",  # Sale dinero de cuenta hacia provision
     "advance_payment",    # Anticipo a proveedor: sale dinero de cuenta
     "asset_payment",      # Pago de activo fijo: sale dinero de cuenta
+    "deferred_funding",   # Pago inicial gasto diferido: sale dinero de cuenta
 ])
 # Nota: provision_expense NO va aqui — no afecta cuentas de dinero
 
@@ -252,7 +256,7 @@ class ReportService:
             .where(
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.status == "confirmed",
-                MoneyMovement.movement_type.in_(["expense", "commission_payment", "service_income"]),
+                MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "commission_payment", "service_income"]),
                 MoneyMovement.date >= dt_from,
                 MoneyMovement.date < dt_to,
             )
@@ -273,7 +277,7 @@ class ReportService:
             total_dec = Decimal(str(total))
             if mt == "service_income":
                 service_income += total_dec
-            elif mt == "expense":
+            elif mt in ("expense", "provision_expense", "expense_accrual", "deferred_expense"):
                 operating_expenses += total_dec
                 expenses_by_cat.append(ExpenseCategoryBreakdown(
                     category_id=cat_id,

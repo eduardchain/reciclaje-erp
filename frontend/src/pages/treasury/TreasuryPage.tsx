@@ -36,6 +36,9 @@ const typeLabels: Record<MoneyMovementType, string> = {
   advance_payment: "Anticipo Proveedor",
   advance_collection: "Anticipo Cliente",
   asset_payment: "Pago Activo Fijo",
+  expense_accrual: "Gasto Causado (Pasivo)",
+  deferred_funding: "Pago Gasto Diferido",
+  deferred_expense: "Cuota Gasto Diferido",
 };
 
 const typeColors: Record<string, string> = {
@@ -51,6 +54,9 @@ const typeColors: Record<string, string> = {
   provision_deposit: "bg-violet-100 text-violet-800",
   provision_expense: "bg-amber-100 text-amber-800",
   asset_payment: "bg-slate-100 text-slate-800",
+  expense_accrual: "bg-rose-100 text-rose-800",
+  deferred_funding: "bg-indigo-100 text-indigo-800",
+  deferred_expense: "bg-cyan-100 text-cyan-800",
 };
 
 const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [

@@ -181,6 +181,17 @@ class AssetPaymentCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class ExpenseAccrualCreate(BaseModel):
+    """Gasto causado (pasivo) — NO cuenta, third_party.balance(-), aparece en P&L."""
+    third_party_id: UUID = Field(..., description="Tercero (cualquier tercero activo)")
+    amount: Decimal = Field(..., gt=0, description="Monto del gasto causado")
+    expense_category_id: UUID = Field(..., description="Categoria del gasto")
+    date: datetime = Field(..., description="Fecha del gasto")
+    description: str = Field(..., min_length=1, max_length=500, description="Descripcion del gasto")
+    reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Schema de anulacion
 # ---------------------------------------------------------------------------

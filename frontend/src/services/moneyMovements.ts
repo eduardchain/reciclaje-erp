@@ -14,6 +14,7 @@ import type {
   AdvancePaymentCreate,
   AdvanceCollectionCreate,
   AssetPaymentCreate,
+  ExpenseAccrualCreate,
   AnnulMovementRequest,
 } from "@/types/money-movement";
 import type { PaginatedResponse } from "@/types/common";
@@ -102,6 +103,11 @@ export const moneyMovementService = {
 
   createAssetPayment: async (data: AssetPaymentCreate): Promise<MoneyMovementResponse> => {
     const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/asset-payment", data);
+    return response.data;
+  },
+
+  createExpenseAccrual: async (data: ExpenseAccrualCreate): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/expense-accrual", data);
     return response.data;
   },
 

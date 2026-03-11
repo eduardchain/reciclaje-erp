@@ -5,51 +5,48 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
-import { useCreateDeferredExpense } from "@/hooks/useDeferredExpenses";
-import { useMoneyAccounts, useExpenseCategories, useProvisions } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
+import { useCreateScheduledExpense } from "@/hooks/useScheduledExpenses";
+import { useMoneyAccounts, useExpenseCategories } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
-import type { DeferredExpenseType } from "@/types/deferred-expense";
 
-export default function DeferredExpenseCreatePage() {
+export default function ScheduledExpenseCreatePage() {
   const navigate = useNavigate();
-  const create = useCreateDeferredExpense();
+  const create = useCreateScheduledExpense();
 
   const { data: accountsData } = useMoneyAccounts();
   const { data: categoriesData } = useExpenseCategories();
-  const { data: provisionsData } = useProvisions();
 
   const accounts = accountsData?.items ?? [];
   const categories = categoriesData?.items ?? [];
-  const provisions = provisionsData?.items ?? [];
 
   const [name, setName] = useState("");
   const [totalAmount, setTotalAmount] = useState(0);
   const [totalMonths, setTotalMonths] = useState(12);
-  const [expenseType, setExpenseType] = useState<DeferredExpenseType>("expense");
-  const [categoryId, setCategoryId] = useState("");
   const [accountId, setAccountId] = useState("");
-  const [provisionId, setProvisionId] = useState("");
-  const [description, setDescription] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [startDate, setStartDate] = useState(toLocalDateInput());
+  const [applyDay, setApplyDay] = useState(1);
+  const [description, setDescription] = useState("");
 
   const monthlyAmount = totalAmount > 0 && totalMonths >= 2
     ? Math.floor((totalAmount / totalMonths) * 100) / 100
     : 0;
   const lastMonthAmount = totalAmount > 0 && totalMonths >= 2
-    ? totalAmount - monthlyAmount * (totalMonths - 1)
+    ? +(totalAmount - monthlyAmount * (totalMonths - 1)).toFixed(2)
     : 0;
+
+  const selectedAccount = accounts.find((a) => a.id === accountId);
 
   const canSubmit =
     name.trim() !== "" &&
     totalAmount > 0 &&
     totalMonths >= 2 &&
+    accountId !== "" &&
     categoryId !== "" &&
-    (expenseType === "expense" ? accountId !== "" : provisionId !== "") &&
     !create.isPending;
 
   const handleSubmit = () => {
@@ -58,23 +55,22 @@ export default function DeferredExpenseCreatePage() {
         name,
         total_amount: totalAmount,
         total_months: totalMonths,
+        source_account_id: accountId,
         expense_category_id: categoryId,
-        expense_type: expenseType,
-        account_id: expenseType === "expense" ? accountId : null,
-        provision_id: expenseType === "provision_expense" ? provisionId : null,
-        description: description || null,
         start_date: startDate,
+        apply_day: applyDay,
+        description: description || null,
       },
       {
-        onSuccess: () => navigate(ROUTES.TREASURY_DEFERRED),
+        onSuccess: () => navigate(ROUTES.TREASURY_SCHEDULED),
       },
     );
   };
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Nuevo Gasto Programado" description="Distribuir un gasto grande en cuotas mensuales">
-        <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY_DEFERRED)}>
+      <PageHeader title="Nuevo Gasto Diferido" description="Pago upfront con distribucion mensual en P&L">
+        <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY_SCHEDULED)}>
           <ArrowLeft className="h-4 w-4 mr-2" />Volver
         </Button>
       </PageHeader>
@@ -106,16 +102,18 @@ export default function DeferredExpenseCreatePage() {
             </div>
 
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo de Gasto *</Label>
-              <Select value={expenseType} onValueChange={(v) => setExpenseType(v as DeferredExpenseType)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="expense">Desde Cuenta de Dinero</SelectItem>
-                  <SelectItem value="provision_expense">Desde Provision</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta Origen *</Label>
+              <EntitySelect
+                value={accountId}
+                onChange={setAccountId}
+                options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
+                placeholder="Seleccionar cuenta..."
+              />
+              {selectedAccount && (
+                <p className="text-xs mt-1 text-slate-500">
+                  Saldo disponible: <span className="font-medium">{formatCurrency(selectedAccount.current_balance)}</span>
+                </p>
+              )}
             </div>
 
             <div>
@@ -128,36 +126,21 @@ export default function DeferredExpenseCreatePage() {
               />
             </div>
 
-            {expenseType === "expense" && (
-              <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta *</Label>
-                <EntitySelect
-                  value={accountId}
-                  onChange={setAccountId}
-                  options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
-                  placeholder="Seleccionar cuenta..."
-                />
-              </div>
-            )}
-
-            {expenseType === "provision_expense" && (
-              <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Provision *</Label>
-                <EntitySelect
-                  value={provisionId}
-                  onChange={setProvisionId}
-                  options={provisions.map((p) => ({
-                    id: p.id,
-                    label: `${p.name} (Fondos: ${formatCurrency(p.current_balance < 0 ? Math.abs(p.current_balance) : 0)})`,
-                  }))}
-                  placeholder="Seleccionar provision..."
-                />
-              </div>
-            )}
-
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha Inicio *</Label>
               <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Dia del Mes para Cuotas</Label>
+              <Input
+                type="number"
+                min={1}
+                max={28}
+                value={applyDay}
+                onChange={(e) => setApplyDay(parseInt(e.target.value) || 1)}
+              />
+              <p className="text-xs mt-1 text-slate-400">Dia del mes en que se aplica cada cuota (1-28)</p>
             </div>
 
             <div className="md:col-span-2">
@@ -168,14 +151,18 @@ export default function DeferredExpenseCreatePage() {
         </CardContent>
       </Card>
 
-      {/* Preview de cuotas */}
+      {/* Preview */}
       {totalAmount > 0 && totalMonths >= 2 && (
         <Card className="shadow-sm border-t-[3px] border-t-emerald-500">
           <CardContent className="p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Vista Previa</p>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <p className="text-xs text-slate-400">Cuota mensual</p>
+                <p className="text-xs text-slate-400">Pago upfront (sale de cuenta)</p>
+                <p className="text-lg font-bold text-rose-600 tabular-nums">{formatCurrency(totalAmount)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400">Cuota mensual en P&L</p>
                 <p className="text-lg font-bold text-slate-900 tabular-nums">{formatCurrency(monthlyAmount)}</p>
               </div>
               <div>
@@ -195,13 +182,13 @@ export default function DeferredExpenseCreatePage() {
 
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY_DEFERRED)}>Cancelar</Button>
+          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY_SCHEDULED)}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
             disabled={!canSubmit}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
-            {create.isPending ? "Creando..." : "Crear Gasto Programado"}
+            {create.isPending ? "Creando..." : "Crear Gasto Diferido"}
           </Button>
         </div>
       </div>

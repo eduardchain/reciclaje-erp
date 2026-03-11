@@ -11,11 +11,11 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useCreateMovement, useUploadEvidence } from "@/hooks/useMoneyMovements";
-import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategories, useThirdParties, useProvisions } from "@/hooks/useMasterData";
+import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategories, useThirdParties, useProvisions, useLiabilities } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
-type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment";
+type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment" | "expense_accrual";
 
 const typeLabels: Record<MovementType, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -31,6 +31,7 @@ const typeLabels: Record<MovementType, string> = {
   advance_payment: "Anticipo a Proveedor",
   advance_collection: "Anticipo de Cliente",
   asset_payment: "Pago Activo Fijo",
+  expense_accrual: "Causar Gasto (Pasivo)",
 };
 
 export default function MovementCreatePage() {
@@ -38,6 +39,7 @@ export default function MovementCreatePage() {
   const [searchParams] = useSearchParams();
   const initialType = (searchParams.get("type") as MovementType) || "payment_to_supplier";
   const initialProvisionId = searchParams.get("provision_id") || "";
+  const initialThirdPartyId = searchParams.get("third_party_id") || "";
   const [type, setType] = useState<MovementType>(initialType);
   const create = useCreateMovement(type);
   const uploadEvidence = useUploadEvidence();
@@ -49,6 +51,7 @@ export default function MovementCreatePage() {
   const { data: accountsData } = useMoneyAccounts();
   const { data: expCategoriesData } = useExpenseCategories();
   const { data: provisionsData } = useProvisions();
+  const { data: liabilitiesData } = useLiabilities();
 
   const suppliers = suppliersData?.items ?? [];
   const customers = customersData?.items ?? [];
@@ -57,10 +60,11 @@ export default function MovementCreatePage() {
   const accounts = accountsData?.items ?? [];
   const expenseCategories = expCategoriesData?.items ?? [];
   const provisions = provisionsData?.items ?? [];
+  const liabilities = liabilitiesData?.items ?? [];
 
   const [amount, setAmount] = useState(0);
   const [accountId, setAccountId] = useState("");
-  const [thirdPartyId, setThirdPartyId] = useState("");
+  const [thirdPartyId, setThirdPartyId] = useState(initialThirdPartyId);
   const [provisionId, setProvisionId] = useState(initialProvisionId);
   const [expCategoryId, setExpCategoryId] = useState("");
   const [destAccountId, setDestAccountId] = useState("");
@@ -129,6 +133,8 @@ export default function MovementCreatePage() {
         return { ...base, customer_id: thirdPartyId, account_id: accountId };
       case "asset_payment":
         return { ...base, account_id: accountId, description, third_party_id: thirdPartyId || undefined };
+      case "expense_accrual":
+        return { ...base, third_party_id: thirdPartyId, expense_category_id: expCategoryId, description };
     }
   };
 
@@ -152,12 +158,17 @@ export default function MovementCreatePage() {
   const getThirdPartyOptions = () => {
     switch (type) {
       case "payment_to_supplier":
-      case "advance_payment": return suppliers.map((s) => ({ id: s.id, label: s.name }));
+      case "advance_payment": {
+        // Incluir proveedores + pasivos para permitir pagar ambos
+        const combined = [...suppliers, ...liabilities.filter((l) => !suppliers.some((s) => s.id === l.id))];
+        return combined.map((s) => ({ id: s.id, label: s.name }));
+      }
       case "collection_from_client":
       case "advance_collection": return customers.map((c) => ({ id: c.id, label: c.name }));
       case "capital_injection":
       case "capital_return": return investors.map((i) => ({ id: i.id, label: i.name }));
       case "commission_payment": return thirdParties.map((t) => ({ id: t.id, label: t.name }));
+      case "expense_accrual": return liabilities.map((l) => ({ id: l.id, label: l.name }));
       default: return thirdParties.map((t) => ({ id: t.id, label: t.name }));
     }
   };
@@ -171,17 +182,18 @@ export default function MovementCreatePage() {
       case "capital_injection":
       case "capital_return": return "Inversionista *";
       case "commission_payment": return "Comisionista *";
+      case "expense_accrual": return "Tercero (Pasivo) *";
       default: return "Tercero";
     }
   };
 
-  const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment", "advance_payment", "advance_collection"].includes(type);
+  const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment", "advance_payment", "advance_collection", "expense_accrual"].includes(type);
   const optionalThirdParty = type === "asset_payment";
   const needsProvision = type === "provision_deposit" || type === "provision_expense";
-  const needsExpenseCategory = type === "expense" || type === "provision_expense";
+  const needsExpenseCategory = type === "expense" || type === "provision_expense" || type === "expense_accrual";
   const needsDestAccount = type === "transfer";
-  const needsAccount = type !== "transfer" && type !== "provision_expense";
-  const needsDescription = ["expense", "service_income", "transfer", "provision_expense", "asset_payment"].includes(type);
+  const needsAccount = type !== "transfer" && type !== "provision_expense" && type !== "expense_accrual";
+  const needsDescription = ["expense", "service_income", "transfer", "provision_expense", "asset_payment", "expense_accrual"].includes(type);
 
   return (
     <div className="space-y-6">

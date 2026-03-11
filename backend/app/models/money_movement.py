@@ -66,6 +66,9 @@ VALID_MOVEMENT_TYPES = [
     "advance_payment",          # Anticipo a proveedor: account(-), supplier.balance(+)
     "advance_collection",       # Anticipo de cliente: account(+), customer.balance(-)
     "asset_payment",            # Pago de activo fijo: account(-), third_party.balance(+) opcional
+    "expense_accrual",          # Gasto causado (pasivo): NO cuenta, third_party.balance(-), P&L
+    "deferred_funding",         # Pago inicial gasto diferido: account(-), third_party.balance(+), NO P&L
+    "deferred_expense",         # Cuota gasto diferido: NO cuenta, third_party.balance(-), P&L
 ]
 
 

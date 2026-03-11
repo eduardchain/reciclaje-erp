@@ -26,6 +26,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   CalendarClock,
+  Scale,
 } from "lucide-react";
 import { cn } from "@/utils";
 import { ROUTES } from "@/utils/constants";
@@ -77,7 +78,8 @@ const navItems: NavItem[] = [
       { name: "Provisiones", path: ROUTES.TREASURY_PROVISIONS, icon: <Tag className="w-4 h-4" /> },
       { name: "Terceros", path: ROUTES.TREASURY_ACCOUNT_STATEMENT, icon: <ListOrdered className="w-4 h-4" /> },
       { name: "Cuentas", path: ROUTES.TREASURY_ACCOUNT_MOVEMENTS, icon: <CreditCard className="w-4 h-4" /> },
-      { name: "Gastos Programados", path: ROUTES.TREASURY_DEFERRED, icon: <CalendarClock className="w-4 h-4" /> },
+      { name: "Pasivos", path: ROUTES.TREASURY_LIABILITIES, icon: <Scale className="w-4 h-4" /> },
+      { name: "Gastos Diferidos", path: ROUTES.TREASURY_SCHEDULED, icon: <CalendarClock className="w-4 h-4" /> },
     ],
   },
   {
