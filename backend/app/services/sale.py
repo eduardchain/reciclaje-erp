@@ -429,7 +429,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 unit_cost=line.unit_cost,
                 reference_type="sale",
                 reference_id=sale.id,
-                date=datetime.now(timezone.utc),
+                date=sale.date,
                 notes=f"Reversal of sale #{sale.sale_number}",
             )
             db.add(reversal_movement)

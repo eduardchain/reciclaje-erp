@@ -62,7 +62,7 @@ export default function TransformationDetailPage() {
           <CardContent className="space-y-2 text-sm">
             <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Merma</span><span className="tabular-nums text-orange-600">{t.waste_quantity.toFixed(2)}</span></div>
             <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor Merma</span><span>{formatCurrency(t.waste_value)}</span></div>
-            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Distribucion</span><span>{t.cost_distribution === "proportional_weight" ? "Proporcional" : "Manual"}</span></div>
+            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Distribucion</span><span>{t.cost_distribution === "average_cost" ? "Costo Promedio" : t.cost_distribution === "proportional_weight" ? "Proporcional" : "Manual"}</span></div>
           </CardContent>
         </Card>
 
@@ -105,7 +105,12 @@ export default function TransformationDetailPage() {
             </Table>
           </div>
           <div className="bg-slate-50 rounded-lg p-3 mt-3">
-            <div className="flex justify-end">
+            <div className="flex justify-between items-center">
+              {t.value_difference != null && t.value_difference !== 0 ? (
+                <div className={`px-3 py-1 rounded-md text-sm font-medium ${t.value_difference > 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                  {t.value_difference > 0 ? "Ganancia" : "Perdida"} por Valorizacion: {formatCurrency(Math.abs(t.value_difference))}
+                </div>
+              ) : <div />}
               <span className="text-lg font-bold">{formatCurrency(t.source_total_value)}</span>
             </div>
           </div>

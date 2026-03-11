@@ -41,7 +41,7 @@ export default function TransformationCreatePage() {
   const [sourceWarehouseId, setSourceWarehouseId] = useState("");
   const [sourceQuantity, setSourceQuantity] = useState(0);
   const [wasteQuantity, setWasteQuantity] = useState(0);
-  const [costDistribution, setCostDistribution] = useState<"proportional_weight" | "manual">("proportional_weight");
+  const [costDistribution, setCostDistribution] = useState<"average_cost" | "proportional_weight" | "manual">("average_cost");
   const [lines, setLines] = useState<LineForm[]>([createEmptyLine()]);
   const [date, setDate] = useState(toLocalDateInput());
   const [reason, setReason] = useState("");
@@ -117,9 +117,10 @@ export default function TransformationCreatePage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Materiales Destino</CardTitle>
           <div className="flex items-center gap-4">
-            <Select value={costDistribution} onValueChange={(v) => setCostDistribution(v as "proportional_weight" | "manual")}>
-              <SelectTrigger className="w-[200px]"><SelectValue /></SelectTrigger>
+            <Select value={costDistribution} onValueChange={(v) => setCostDistribution(v as "average_cost" | "proportional_weight" | "manual")}>
+              <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="average_cost">Costo Promedio Movil</SelectItem>
                 <SelectItem value="proportional_weight">Proporcional (peso)</SelectItem>
                 <SelectItem value="manual">Manual</SelectItem>
               </SelectContent>

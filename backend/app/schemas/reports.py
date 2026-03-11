@@ -112,6 +112,10 @@ class ProfitAndLossResponse(BaseModel):
     double_entry_profit: float
     double_entry_count: int
 
+    # Ganancia/Perdida por transformaciones
+    transformation_profit: float = 0.0
+    transformation_count: int = 0
+
     # Utilidad bruta total
     total_gross_profit: float
 

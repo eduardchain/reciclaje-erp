@@ -11,7 +11,7 @@ Metodos publicos:
 
 Cada transformacion crea InventoryMovement como audit trail.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
@@ -103,7 +103,23 @@ class CRUDMaterialTransformation:
         total_dest_qty = sum(line.quantity for line in data.lines)
 
         line_costs = []
-        if data.cost_distribution == "proportional_weight":
+        value_difference = None  # Solo se calcula para average_cost
+
+        if data.cost_distribution == "average_cost":
+            # Usar costo promedio del material DESTINO
+            total_dest_value = Decimal("0")
+            for line_data in data.lines:
+                dest_material = self._validate_material(db, line_data.destination_material_id, organization_id)
+                unit_cost = dest_material.current_average_cost or Decimal("0")
+                line_total = line_data.quantity * unit_cost
+                total_dest_value += line_total
+                line_costs.append((unit_cost, line_total))
+
+            # Diferencia vs distributable_value (NO vs source_total_value)
+            # La merma ya es perdida fisica conocida, no es diferencia de valorizacion
+            value_difference = total_dest_value - distributable_value
+
+        elif data.cost_distribution == "proportional_weight":
             for line_data in data.lines:
                 if total_dest_qty > 0:
                     line_total = (line_data.quantity / total_dest_qty) * distributable_value
@@ -149,6 +165,7 @@ class CRUDMaterialTransformation:
             waste_quantity=data.waste_quantity,
             waste_value=waste_value,
             cost_distribution=data.cost_distribution,
+            value_difference=value_difference,
             reason=data.reason,
             notes=data.notes,
             status="confirmed",
@@ -299,7 +316,7 @@ class CRUDMaterialTransformation:
             movement_type="transformation",
             quantity=transformation.source_quantity,
             unit_cost=transformation.source_unit_cost,
-            date=datetime.utcnow(),
+            date=transformation.date,
             reference_id=transformation.id,
             notes=f"Anulacion transformacion #{transformation.transformation_number}: restaurar {source_material.name}",
         )
@@ -326,7 +343,7 @@ class CRUDMaterialTransformation:
                 movement_type="transformation",
                 quantity=-line.quantity,
                 unit_cost=line.unit_cost,
-                date=datetime.utcnow(),
+                date=transformation.date,
                 reference_id=transformation.id,
                 notes=f"Anulacion transformacion #{transformation.transformation_number}: revertir {dest_material.name}",
             )
@@ -334,7 +351,7 @@ class CRUDMaterialTransformation:
         # Marcar como anulada
         transformation.status = "annulled"
         transformation.annulled_reason = reason
-        transformation.annulled_at = datetime.utcnow()
+        transformation.annulled_at = datetime.now(timezone.utc)
         transformation.annulled_by = user_id
 
         db.commit()

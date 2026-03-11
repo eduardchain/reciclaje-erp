@@ -127,7 +127,7 @@ export interface WarehouseTransferResponse {
 
 // --- Material Transformations ---
 
-export type CostDistribution = "proportional_weight" | "manual";
+export type CostDistribution = "average_cost" | "proportional_weight" | "manual";
 export type TransformationStatus = "confirmed" | "annulled";
 
 export interface TransformationLineCreate {
@@ -176,6 +176,7 @@ export interface MaterialTransformationResponse extends BaseEntity {
   waste_quantity: number;
   waste_value: number;
   cost_distribution: CostDistribution;
+  value_difference: number | null;
   lines: TransformationLineResponse[];
   reason: string;
   notes: string | null;

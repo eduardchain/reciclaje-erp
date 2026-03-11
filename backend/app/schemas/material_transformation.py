@@ -36,8 +36,8 @@ class MaterialTransformationCreate(BaseModel):
     source_quantity: Decimal = Field(..., gt=0, description="Cantidad de material de origen")
     waste_quantity: Decimal = Field(default=Decimal("0"), ge=0, description="Cantidad de merma/desperdicio")
     cost_distribution: str = Field(
-        default="proportional_weight",
-        description="Metodo: 'proportional_weight' o 'manual'"
+        default="average_cost",
+        description="Metodo: 'average_cost', 'proportional_weight' o 'manual'"
     )
     lines: list[TransformationLineCreate] = Field(..., min_length=1, description="Lineas de destino (minimo 1)")
     date: datetime = Field(..., description="Fecha de la transformacion")
@@ -60,7 +60,7 @@ class MaterialTransformationCreate(BaseModel):
     @model_validator(mode='after')
     def validate_cost_distribution(self):
         """Validar metodo de distribucion."""
-        if self.cost_distribution not in ("proportional_weight", "manual"):
+        if self.cost_distribution not in ("average_cost", "proportional_weight", "manual"):
             raise ValueError(f"Metodo de distribucion invalido: {self.cost_distribution}")
         if self.cost_distribution == "manual":
             for i, line in enumerate(self.lines):
@@ -126,6 +126,7 @@ class MaterialTransformationResponse(BaseModel):
 
     # Distribucion
     cost_distribution: str
+    value_difference: Optional[float] = None
 
     # Lineas
     lines: list[TransformationLineResponse] = []
@@ -156,6 +157,10 @@ class MaterialTransformationResponse(BaseModel):
     )
     def serialize_decimal(self, value: Decimal) -> float:
         return float(value)
+
+    @field_serializer('value_difference')
+    def serialize_value_difference(self, value) -> Optional[float]:
+        return float(value) if value is not None else None
 
 
 class PaginatedMaterialTransformationResponse(BaseModel):

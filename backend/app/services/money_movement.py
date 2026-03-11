@@ -14,7 +14,7 @@ Cada metodo publico corresponde a un tipo de movimiento:
 - pay_asset: Pago de activo fijo
 - annul: Anular movimiento con reversion de saldos
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List, Any
 from uuid import UUID
@@ -675,7 +675,7 @@ class CRUDMoneyMovement:
                 detail="El movimiento ya esta anulado",
             )
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Revertir efectos del movimiento
         self._reverse_effects(db, movement)

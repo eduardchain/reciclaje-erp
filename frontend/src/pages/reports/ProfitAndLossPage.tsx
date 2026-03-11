@@ -33,6 +33,9 @@ export default function ProfitAndLossPage() {
 
             <div className="space-y-2">
               <div className="flex justify-between text-sm"><span>Utilidad Pasa Mano ({data.double_entry_count} operaciones)</span><span className="font-medium text-emerald-700">{formatCurrency(data.double_entry_profit)}</span></div>
+              {data.transformation_count > 0 && (
+                <div className="flex justify-between text-sm"><span>Ganancia/Perdida Transformaciones ({data.transformation_count})</span><span className={`font-medium ${data.transformation_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(data.transformation_profit)}</span></div>
+              )}
               <Separator />
               <div className="flex justify-between font-medium"><span>Utilidad Bruta Total</span><span className={data.total_gross_profit >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.total_gross_profit)}</span></div>
             </div>

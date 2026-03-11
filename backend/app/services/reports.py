@@ -221,6 +221,24 @@ class ReportService:
         de_profit = Decimal(str(de_row[0]))
         de_count = de_row[1]
 
+        # 3.5 Transformation profit (ganancia/perdida por valorizacion)
+        from app.models.material_transformation import MaterialTransformation
+
+        trans_row = db.execute(
+            select(
+                func.coalesce(func.sum(MaterialTransformation.value_difference), 0),
+                func.count(),
+            ).where(
+                MaterialTransformation.organization_id == organization_id,
+                MaterialTransformation.status == "confirmed",
+                MaterialTransformation.value_difference.isnot(None),
+                MaterialTransformation.date >= dt_from,
+                MaterialTransformation.date < dt_to,
+            )
+        ).one()
+        transformation_profit = Decimal(str(trans_row[0]))
+        transformation_count = trans_row[1]
+
         # 4. Service income + expenses by category + commissions
         mm_rows = db.execute(
             select(
@@ -268,7 +286,7 @@ class ReportService:
 
         # Calculos
         gross_profit_sales = sales_revenue - cogs
-        total_gross_profit = gross_profit_sales + de_profit + service_income
+        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
         total_revenue_base = sales_revenue + service_income + (
@@ -293,6 +311,8 @@ class ReportService:
             gross_margin_sales=self._safe_pct(gross_profit_sales, sales_revenue),
             double_entry_profit=float(de_profit),
             double_entry_count=de_count,
+            transformation_profit=float(transformation_profit),
+            transformation_count=transformation_count,
             total_gross_profit=float(total_gross_profit),
             operating_expenses=float(operating_expenses),
             commissions_paid=float(commissions_paid),

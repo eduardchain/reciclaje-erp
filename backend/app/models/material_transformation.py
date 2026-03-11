@@ -122,12 +122,20 @@ class MaterialTransformation(Base, OrganizationMixin, TimestampMixin):
         comment="Valor monetario perdido por la merma",
     )
 
+    # Diferencia de valorización (solo para metodo average_cost)
+    value_difference: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2),
+        nullable=True,
+        default=None,
+        comment="Diferencia de valorizacion: sum(destinos) - distributable_value. Positivo=ganancia, Negativo=perdida",
+    )
+
     # Metodo de distribucion de costos
     cost_distribution: Mapped[str] = mapped_column(
         String(30),
         nullable=False,
-        default="proportional_weight",
-        comment="Metodo: proportional_weight (por peso) o manual",
+        default="average_cost",
+        comment="Metodo: average_cost, proportional_weight o manual",
     )
 
     # Razon y notas

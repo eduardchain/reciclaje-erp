@@ -13,7 +13,7 @@ Tambien incluye transfer_between_warehouses para traslados entre bodegas.
 Todos los ajustes afectan current_stock_liquidated (no transito).
 Stock negativo PERMITIDO con warning (RN-INV-03).
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID, uuid4
@@ -407,7 +407,7 @@ class CRUDInventoryAdjustment:
             movement_type="adjustment_reversal",
             quantity=-adjustment.quantity,
             unit_cost=adjustment.unit_cost,
-            date=datetime.utcnow(),
+            date=adjustment.date,
             reference_id=adjustment.id,
             notes=f"Anulacion de ajuste #{adjustment.adjustment_number}: {reason}",
         )
@@ -415,7 +415,7 @@ class CRUDInventoryAdjustment:
         # Marcar como anulado
         adjustment.status = "annulled"
         adjustment.annulled_reason = reason
-        adjustment.annulled_at = datetime.utcnow()
+        adjustment.annulled_at = datetime.now(timezone.utc)
         adjustment.annulled_by = user_id
 
         db.commit()
