@@ -524,7 +524,7 @@ def get_by_account(
         MoneyMovement.organization_id == org_id,
         MoneyMovement.account_id == account_id,
         MoneyMovement.status.in_(["confirmed", "annulled"]),
-    ).order_by(MoneyMovement.created_at)
+    ).order_by(MoneyMovement.date, MoneyMovement.created_at)
 
     movements = db.scalars(query).all()
 
@@ -615,14 +615,18 @@ def get_by_third_party(
     date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
 
     # --- Recopilar TODOS los eventos que afectan el balance del tercero ---
-    # Cada evento: (sort_datetime, sort_key, filter_datetime, event_dict)
-    # sort_datetime: timestamps del servidor (created_at, liquidated_at) para orden cronologico real
+    # Cada evento: (transaction_date, sort_datetime, sort_key, filter_datetime, event_dict)
+    # transaction_date: fecha de la transaccion (date del registro) para orden cronologico por fecha de negocio
+    # sort_datetime: timestamps del servidor (created_at, liquidated_at) para desempate dentro del mismo dia
     # filter_datetime: timestamp para aplicar filtros de fecha (= sort_datetime por defecto)
     # sort_key: 0=operacion comercial, 1=movimiento tesoreria, 2=cancelacion/anulacion
     events: list[tuple] = []
 
-    def _evt(sort_dt, sort_key, filter_dt=None, **kwargs):
-        events.append((sort_dt, sort_key, filter_dt or sort_dt, kwargs))
+    def _evt(txn_date, sort_dt, sort_key, filter_dt=None, **kwargs):
+        # Normalizar transaction_date a date (DoubleEntry.date es Date, otros son DateTime)
+        if isinstance(txn_date, datetime):
+            txn_date = txn_date.date()
+        events.append((txn_date, sort_dt, sort_key, filter_dt or sort_dt, kwargs))
 
     # 1. MoneyMovements confirmados y anulados
     mm_query = sa_select(MoneyMovement).where(
@@ -632,7 +636,7 @@ def get_by_third_party(
     )
     for m in db.scalars(mm_query).all():
         direction = THIRD_PARTY_BALANCE_DIRECTION.get(m.movement_type, 0)
-        _evt(m.created_at, 1, filter_dt=m.date,
+        _evt(m.date, m.created_at, 1, filter_dt=m.date,
              id=str(m.id), date=m.date.isoformat(),
              event_type=m.movement_type, description=m.description or "",
              amount=float(m.amount), direction=direction,
@@ -650,8 +654,8 @@ def get_by_third_party(
         Purchase.double_entry_id.is_(None),  # Excluir doble partida
     )
     for p in db.scalars(purch_query).all():
-        _evt(p.liquidated_at, 0,
-             id=f"purchase-{p.id}", date=p.liquidated_at.isoformat(),
+        _evt(p.date, p.liquidated_at, 0,
+             id=f"purchase-{p.id}", date=p.date.isoformat(),
              event_type="purchase_liquidation",
              description=f"Compra #{p.purchase_number} liquidada",
              amount=float(p.total_amount), direction=-1,
@@ -659,8 +663,8 @@ def get_by_third_party(
              reference_number=None, movement_number=None,
              source="purchase", source_id=str(p.id), source_number=p.purchase_number)
         if p.status == "cancelled" and p.cancelled_at:
-            _evt(p.cancelled_at, 2,
-                 id=f"purchase-cancel-{p.id}", date=p.cancelled_at.isoformat(),
+            _evt(p.date, p.cancelled_at, 2,
+                 id=f"purchase-cancel-{p.id}", date=p.date.isoformat(),
                  event_type="purchase_cancellation",
                  description=f"Compra #{p.purchase_number} cancelada (reversa)",
                  amount=float(p.total_amount), direction=1,
@@ -677,8 +681,8 @@ def get_by_third_party(
         Sale.double_entry_id.is_(None),  # Excluir doble partida
     )
     for s in db.scalars(sale_query).all():
-        _evt(s.liquidated_at, 0,
-             id=f"sale-{s.id}", date=s.liquidated_at.isoformat(),
+        _evt(s.date, s.liquidated_at, 0,
+             id=f"sale-{s.id}", date=s.date.isoformat(),
              event_type="sale_liquidation",
              description=f"Venta #{s.sale_number} liquidada",
              amount=float(s.total_amount), direction=1,
@@ -686,8 +690,8 @@ def get_by_third_party(
              reference_number=None, movement_number=None,
              source="sale", source_id=str(s.id), source_number=s.sale_number)
         if s.status == "cancelled" and s.cancelled_at:
-            _evt(s.cancelled_at, 2,
-                 id=f"sale-cancel-{s.id}", date=s.cancelled_at.isoformat(),
+            _evt(s.date, s.cancelled_at, 2,
+                 id=f"sale-cancel-{s.id}", date=s.date.isoformat(),
                  event_type="sale_cancellation",
                  description=f"Venta #{s.sale_number} cancelada (reversa)",
                  amount=float(s.total_amount), direction=-1,
@@ -707,8 +711,8 @@ def get_by_third_party(
         )
     )
     for comm, sale in db.execute(comm_query).all():
-        _evt(sale.liquidated_at, 0,
-             id=f"commission-{comm.id}", date=sale.liquidated_at.isoformat(),
+        _evt(sale.date, sale.liquidated_at, 0,
+             id=f"commission-{comm.id}", date=sale.date.isoformat(),
              event_type="sale_commission",
              description=f"Comision Venta #{sale.sale_number}: {comm.concept}",
              amount=float(comm.commission_amount), direction=1,
@@ -716,8 +720,8 @@ def get_by_third_party(
              reference_number=None, movement_number=None,
              source="commission", source_id=str(comm.id), source_number=sale.sale_number)
         if sale.status == "cancelled" and sale.cancelled_at:
-            _evt(sale.cancelled_at, 2,
-                 id=f"commission-cancel-{comm.id}", date=sale.cancelled_at.isoformat(),
+            _evt(sale.date, sale.cancelled_at, 2,
+                 id=f"commission-cancel-{comm.id}", date=sale.date.isoformat(),
                  event_type="commission_cancellation",
                  description=f"Comision Venta #{sale.sale_number} cancelada (reversa)",
                  amount=float(comm.commission_amount), direction=-1,
@@ -746,8 +750,8 @@ def get_by_third_party(
 
         # Como proveedor
         if de.supplier_id == third_party_id:
-            _evt(de_dt, 0,
-                 id=f"de-supplier-{de.id}", date=de_dt.isoformat(),
+            _evt(de.date, de_dt, 0,
+                 id=f"de-supplier-{de.id}", date=de.date.isoformat(),
                  event_type="double_entry_purchase",
                  description=f"Doble Partida #{de.double_entry_number} (como proveedor)",
                  amount=purchase_amount, direction=-1,
@@ -755,8 +759,8 @@ def get_by_third_party(
                  source="double_entry", source_id=str(de.id), source_number=de.double_entry_number)
         # Como cliente
         if de.customer_id == third_party_id:
-            _evt(de_dt, 0,
-                 id=f"de-customer-{de.id}", date=de_dt.isoformat(),
+            _evt(de.date, de_dt, 0,
+                 id=f"de-customer-{de.id}", date=de.date.isoformat(),
                  event_type="double_entry_sale",
                  description=f"Doble Partida #{de.double_entry_number} (como cliente)",
                  amount=sale_amount, direction=1,
@@ -767,16 +771,16 @@ def get_by_third_party(
         if de.status == "cancelled":
             cancel_dt = de.updated_at or de_dt
             if de.supplier_id == third_party_id:
-                _evt(cancel_dt, 2,
-                     id=f"de-cancel-supplier-{de.id}", date=cancel_dt.isoformat(),
+                _evt(de.date, cancel_dt, 2,
+                     id=f"de-cancel-supplier-{de.id}", date=de.date.isoformat(),
                      event_type="double_entry_cancellation",
                      description=f"Doble Partida #{de.double_entry_number} cancelada (reversa proveedor)",
                      amount=purchase_amount, direction=1,
                      status="annulled", reference_number=None, movement_number=None,
                      source="double_entry", source_id=str(de.id), source_number=de.double_entry_number)
             if de.customer_id == third_party_id:
-                _evt(cancel_dt, 2,
-                     id=f"de-cancel-customer-{de.id}", date=cancel_dt.isoformat(),
+                _evt(de.date, cancel_dt, 2,
+                     id=f"de-cancel-customer-{de.id}", date=de.date.isoformat(),
                      event_type="double_entry_cancellation",
                      description=f"Doble Partida #{de.double_entry_number} cancelada (reversa cliente)",
                      amount=sale_amount, direction=-1,
@@ -797,8 +801,8 @@ def get_by_third_party(
     for comm, sale, de in db.execute(de_comm_query).all():
         de_dt = de.created_at
         is_active = de.status == "completed"
-        _evt(de_dt, 0,
-             id=f"de-commission-{comm.id}", date=de_dt.isoformat(),
+        _evt(de.date, de_dt, 0,
+             id=f"de-commission-{comm.id}", date=de.date.isoformat(),
              event_type="double_entry_commission",
              description=f"Comision DP #{de.double_entry_number}: {comm.concept}",
              amount=float(comm.commission_amount), direction=1,
@@ -807,16 +811,16 @@ def get_by_third_party(
              source="commission", source_id=str(comm.id), source_number=de.double_entry_number)
         if de.status == "cancelled":
             cancel_dt = de.updated_at or de_dt
-            _evt(cancel_dt, 2,
-                 id=f"de-comm-cancel-{comm.id}", date=cancel_dt.isoformat(),
+            _evt(de.date, cancel_dt, 2,
+                 id=f"de-comm-cancel-{comm.id}", date=de.date.isoformat(),
                  event_type="double_entry_commission_cancellation",
                  description=f"Comision DP #{de.double_entry_number} cancelada (reversa)",
                  amount=float(comm.commission_amount), direction=-1,
                  status="annulled", reference_number=None, movement_number=None,
                  source="commission", source_id=str(comm.id), source_number=de.double_entry_number)
 
-    # --- Ordenar por fecha, sort_key ---
-    events.sort(key=lambda e: (e[0], e[1]))
+    # --- Ordenar por fecha de transaccion, timestamp servidor, sort_key ---
+    events.sort(key=lambda e: (e[0], e[1], e[2]))
 
     # --- Obtener initial_balance del tercero ---
     tp = db.query(ThirdParty).filter(
@@ -848,7 +852,7 @@ def get_by_third_party(
             "source_number": None,
         })
 
-    for _, _, filter_dt, evt in events:
+    for _, _, _, filter_dt, evt in events:
         if evt["status"] not in ("annulled", "cancelled"):
             balance += Decimal(str(evt["amount"])) * evt["direction"]
         evt["balance_after"] = float(balance)

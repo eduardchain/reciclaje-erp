@@ -334,11 +334,11 @@ def create_third_parties(db, org: Organization) -> dict:
 
 def create_money_accounts(db, org: Organization) -> dict:
     cuentas = [
-        ("Caja Principal",      "cash",    None,         None,             Decimal("30000000")),
-        ("Bancolombia Ahorros", "bank",    "Bancolombia", "040-1234567-89", Decimal("100000000")),
-        ("Davivienda Corriente","bank",    "Davivienda",  "001-9876543-21", Decimal("50000000")),
-        ("Nequi Operaciones",   "digital", None,         "3001234567",     Decimal("5000000")),
-        ("Caja Chica",          "cash",    None,         None,             Decimal("3000000")),
+        ("Caja Principal",      "cash",    None,         None,             Decimal("0")),
+        ("Bancolombia Ahorros", "bank",    "Bancolombia", "040-1234567-89", Decimal("0")),
+        ("Davivienda Corriente","bank",    "Davivienda",  "001-9876543-21", Decimal("0")),
+        ("Nequi Operaciones",   "digital", None,         "3001234567",     Decimal("0")),
+        ("Caja Chica",          "cash",    None,         None,             Decimal("0")),
     ]
     result = {}
     for nombre, tipo, banco, numero, saldo_inicial in cuentas:
