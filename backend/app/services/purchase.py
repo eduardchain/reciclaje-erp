@@ -397,7 +397,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 )
 
             col_today = datetime.now(ZoneInfo("America/Bogota")).date()
-            today_dt = datetime.combine(col_today, time.min, tzinfo=timezone.utc)
+            today_dt = datetime.combine(col_today, time(12, 0), tzinfo=timezone.utc)
 
             mm_service._create_movement(
                 db=db,

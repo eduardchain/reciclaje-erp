@@ -105,7 +105,7 @@ class CRUDScheduledExpense:
             movement_type="deferred_funding",
             amount=data.total_amount,
             account_id=data.source_account_id,
-            date=datetime.combine(data.start_date, datetime.min.time(), tzinfo=timezone.utc),
+            date=datetime.combine(data.start_date, time(12, 0), tzinfo=timezone.utc),
             description=f"Pago gasto diferido: {data.name}",
             third_party_id=prepaid_tp.id,
             user_id=user_id,
@@ -181,7 +181,7 @@ class CRUDScheduledExpense:
 
         # Fecha de negocio: dia actual en Colombia (no UTC, para evitar desfase nocturno)
         col_today = datetime.now(ZoneInfo("America/Bogota")).date()
-        today_dt = datetime.combine(col_today, time.min, tzinfo=timezone.utc)
+        today_dt = datetime.combine(col_today, time(12, 0), tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         desc = f"Cuota gasto diferido: {scheduled.name} ({next_number}/{scheduled.total_months})"
 
