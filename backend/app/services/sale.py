@@ -27,6 +27,7 @@ from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
 from app.models.third_party import ThirdParty
 from app.models.money_account import MoneyAccount
+from app.models.money_movement import MoneyMovement
 from app.models.warehouse import Warehouse
 from app.schemas.sale import SaleCreate, SaleUpdate, SaleFullUpdate
 from app.services.money_movement import money_movement as mm_service
@@ -487,6 +488,21 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             customer = db.get(ThirdParty, sale.customer_id)
             customer.current_balance -= sale.total_amount
             print(f"👤 Customer '{customer.name}' balance reverted: ${customer.current_balance + sale.total_amount} → ${customer.current_balance}")
+
+            # Anular movimientos commission_accrual
+            comm_movements = db.scalars(
+                select(MoneyMovement).where(
+                    MoneyMovement.sale_id == sale_id,
+                    MoneyMovement.movement_type == "commission_accrual",
+                    MoneyMovement.status == "confirmed",
+                )
+            ).all()
+            for mov in comm_movements:
+                mov.status = "annulled"
+                mov.annulled_at = datetime.now(timezone.utc)
+                mov.annulled_by = user_id
+                mov.annulled_reason = f"Cancelación venta #{sale.sale_number}"
+                print(f"  📝 Commission accrual #{mov.movement_number} anulado")
 
             # Revertir comisiones pagadas
             stmt_comm = select(SaleCommission).where(SaleCommission.sale_id == sale_id)
@@ -1063,24 +1079,33 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
     
     def _pay_commissions(self, db: Session, sale: Sale) -> None:
         """
-        Pay commissions by increasing recipient balances.
-        
+        Pay commissions by increasing recipient balances and creating commission_accrual movements.
+
         Called during liquidate() to process commission payments.
-        
-        Args:
-            db: Database session
-            sale: Sale instance with loaded commissions
+        Creates MoneyMovement (commission_accrual) for P&L tracking.
         """
-        # Load commissions if not already loaded
         stmt = select(SaleCommission).where(SaleCommission.sale_id == sale.id)
         commissions = db.scalars(stmt).all()
-        
+
         for commission in commissions:
             recipient = db.get(ThirdParty, commission.third_party_id)
-            
+
+            # Crear movimiento commission_accrual para P&L
+            mm_service._create_movement(
+                db=db,
+                organization_id=sale.organization_id,
+                movement_type="commission_accrual",
+                amount=commission.commission_amount,
+                account_id=None,
+                date=sale.date,
+                description=f"Comisión venta #{sale.sale_number} - {commission.concept}",
+                third_party_id=commission.third_party_id,
+                sale_id=sale.id,
+            )
+
             # Increase recipient balance (we owe them the commission)
             recipient.current_balance += commission.commission_amount
-            
+
             print(f"  💼 Paid commission to '{recipient.name}': ${commission.commission_amount} ({commission.concept})")
             print(f"     Balance: ${recipient.current_balance - commission.commission_amount} → ${recipient.current_balance}")
 

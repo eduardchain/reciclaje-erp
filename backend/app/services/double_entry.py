@@ -22,8 +22,10 @@ from app.models.purchase import Purchase, PurchaseLine
 from app.models.sale import Sale, SaleLine, SaleCommission
 from app.models.material import Material
 from app.models.third_party import ThirdParty
+from app.models.money_movement import MoneyMovement
 from app.schemas.double_entry import DoubleEntryCreate, DoubleEntryUpdate
 from app.services.base import CRUDBase
+from app.services.money_movement import money_movement as mm_service
 
 
 class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate]):
@@ -198,6 +200,19 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                     commission_amount=commission_amount,
                 )
                 db.add(commission)
+                # Crear movimiento commission_accrual para P&L
+                mm_service._create_movement(
+                    db=db,
+                    organization_id=organization_id,
+                    movement_type="commission_accrual",
+                    amount=commission_amount,
+                    account_id=None,
+                    date=sale.date,
+                    description=f"Comisión DE #{double_entry_number} - {comm_data.concept}",
+                    third_party_id=comm_data.third_party_id,
+                    sale_id=sale.id,
+                    user_id=user_id,
+                )
                 # Pagar comision (la venta esta liquidada desde la creacion)
                 recipient.current_balance += commission_amount
                 print(f"   💼 Commission: {comm_data.concept} - ${commission_amount} (paid)")
@@ -296,6 +311,20 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         customer = db.get(ThirdParty, double_entry.customer_id)
         customer.current_balance -= double_entry.total_sale_amount
         print(f"   💰 Customer balance reverted: -${double_entry.total_sale_amount}")
+
+        # Anular movimientos commission_accrual
+        comm_movements = db.scalars(
+            select(MoneyMovement).where(
+                MoneyMovement.sale_id == sale.id,
+                MoneyMovement.movement_type == "commission_accrual",
+                MoneyMovement.status == "confirmed",
+            )
+        ).all()
+        for mov in comm_movements:
+            mov.status = "annulled"
+            mov.annulled_at = datetime.now(timezone.utc)
+            mov.annulled_reason = f"Cancelación DE #{double_entry.double_entry_number}"
+            print(f"   📝 Commission accrual #{mov.movement_number} anulado")
 
         # Revertir comisiones pagadas
         for comm in sale.commissions:

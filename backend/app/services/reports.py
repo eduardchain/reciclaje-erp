@@ -93,6 +93,7 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "expense_accrual": -1,          # Gasto causado: le debemos mas
     "deferred_funding": 1,          # Pago gasto diferido: prepago nos debe
     "deferred_expense": -1,         # Cuota gasto diferido: reduce prepago
+    "commission_accrual": 1,         # Comision causada: les debemos comision
 }
 
 # Tipos de money_movement que representan inflows a cuentas
@@ -256,7 +257,7 @@ class ReportService:
             .where(
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.status == "confirmed",
-                MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "commission_payment", "service_income"]),
+                MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "commission_payment", "commission_accrual", "service_income"]),
                 MoneyMovement.date >= dt_from,
                 MoneyMovement.date < dt_to,
             )
@@ -286,7 +287,7 @@ class ReportService:
                     total_amount=float(total_dec),
                     source_type=mt,
                 ))
-            elif mt == "commission_payment":
+            elif mt in ("commission_payment", "commission_accrual"):
                 commissions_paid += total_dec
 
         # Calculos

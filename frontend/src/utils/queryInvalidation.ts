@@ -43,6 +43,8 @@ export const invalidateAfterDoubleEntry = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["double-entries"] });
   qc.invalidateQueries({ queryKey: ["purchases"] });
   qc.invalidateQueries({ queryKey: ["sales"] });
+  qc.invalidateQueries({ queryKey: ["money-movements"] });
+  qc.invalidateQueries({ queryKey: ["treasury-dashboard"] });
   invalidateFinancial(qc);
 };
 

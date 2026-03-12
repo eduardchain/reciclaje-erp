@@ -191,6 +191,18 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 24. **P&L desagregado por fuente**: `ExpenseCategoryBreakdown` incluye `source_type` (expense, provision_expense, expense_accrual, deferred_expense). Frontend agrupa gastos operativos por fuente con subtotales cuando hay mas de un tipo. Tabla detallada con secciones colapsables por fuente.
 
+26. **Invalidacion de cache React Query (queryInvalidation.ts)**: Sistema centralizado en `frontend/src/utils/queryInvalidation.ts`. Cada operacion que crea registros en OTROS modulos debe invalidar esos modulos. Regla clave: **si una operacion crea side-effects cross-module, invalidar TODOS los query keys afectados**. Mapa actual:
+    - `invalidateAfterPurchase` (crear/editar): `purchases` + `inventory` + `materials`
+    - `invalidateAfterPurchaseLiquidateOrCancel`: + `money-movements` + `treasury-dashboard` + `third-parties` + `reports` + `money-accounts` (incluye pago inmediato)
+    - `invalidateAfterSale` (crear/editar): `sales` + `inventory` + `materials`
+    - `invalidateAfterSaleLiquidateOrCancel`: + `money-movements` + `treasury-dashboard` + `third-parties` + `reports` + `money-accounts` (incluye cobro inmediato)
+    - `invalidateAfterDoubleEntry` (crear/cancelar): `double-entries` + `purchases` + `sales` + `third-parties` + `reports` + `money-accounts`
+    - `invalidateAfterTreasury` (movimientos tesoreria): `money-movements` + `money-accounts` + `third-parties` + `reports` + `treasury-dashboard` + `scheduled-expenses`
+    - `invalidateAfterInventoryChange` (ajustes/transformaciones): `inventory` + `materials`
+    - Al agregar nuevas operaciones con side-effects, SIEMPRE agregar invalidacion de query keys afectados.
+
+27. **Serializacion de fechas en Response schemas**: `DoubleEntryResponse.date` (python `date`, no `datetime`) necesita `field_serializer` que convierte a datetime mediodia UTC ISO string (`"2026-03-12T12:00:00+00:00"`). Sin esto, JS parsea `"2026-03-12"` como midnight UTC → dia anterior en Colombia. Otros Response schemas con campo `datetime` no necesitan esto (ya incluyen hora).
+
 ### Business Modules (Implemented)
 
 | Module | Endpoints | Description |
@@ -216,7 +228,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 ### Testing
 
-Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 450 tests. Run with `./venv/bin/pytest` from backend dir.
+Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 466 tests. Run with `./venv/bin/pytest` from backend dir.
 
 Key fixtures: `test_user`, `auth_headers`, `org_headers` (auth + X-Organization-ID), `db_session`.
 
