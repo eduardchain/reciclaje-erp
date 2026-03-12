@@ -730,7 +730,18 @@ def get_by_third_party(
                  status="annulled", reference_number=None, movement_number=None,
                  source="sale", source_id=str(s.id), source_number=s.sale_number)
 
-    # 4. Comisiones de ventas standalone (receptor: balance += commission_amount)
+    # Sale IDs que ya tienen commission_accrual (evitar duplicacion con seccion 4/6)
+    sales_with_accrual = set(
+        db.scalars(
+            sa_select(MoneyMovement.sale_id).where(
+                MoneyMovement.organization_id == org_id,
+                MoneyMovement.movement_type == "commission_accrual",
+                MoneyMovement.sale_id.isnot(None),
+            )
+        ).all()
+    )
+
+    # 4. Comisiones de ventas standalone SIN commission_accrual (compatibilidad ventas antiguas)
     comm_query = (
         sa_select(SaleCommission, Sale)
         .join(Sale, SaleCommission.sale_id == Sale.id)
@@ -743,6 +754,8 @@ def get_by_third_party(
         )
     )
     for comm, sale in db.execute(comm_query).all():
+        if sale.id in sales_with_accrual:
+            continue
         _evt(sale.date, sale.liquidated_at, 0,
              id=f"commission-{comm.id}", date=sale.date.isoformat(),
              event_type="sale_commission",
@@ -831,6 +844,8 @@ def get_by_third_party(
         )
     )
     for comm, sale, de in db.execute(de_comm_query).all():
+        if sale.id in sales_with_accrual:
+            continue
         de_dt = de.created_at
         is_active = de.status == "completed"
         _evt(de.date, de_dt, 0,

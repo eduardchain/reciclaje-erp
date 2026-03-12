@@ -13,7 +13,7 @@ Uso:
 import sys
 import os
 import argparse
-from datetime import date
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 
 # Agregar backend al path
@@ -30,6 +30,7 @@ from app.models.money_account import MoneyAccount
 from app.models.business_unit import BusinessUnit
 from app.models.expense_category import ExpenseCategory
 from app.models.price_list import PriceList
+from app.models.money_movement import MoneyMovement
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +397,36 @@ def create_price_lists(db, org: Organization, materiales: dict) -> None:
     print(f"  Lista de precios: {len(precios)} materiales")
 
 
+def create_initial_capital(db, org: Organization, accounts: dict, tps: dict, users: dict) -> None:
+    """Crea aporte de capital de 100M COP a Bancolombia Ahorros."""
+    amount = Decimal("100000000")
+    account = accounts["Bancolombia Ahorros"]
+    investor = tps["Carlos Perez Inversores"]
+    admin = users["admin@reciclajes.com"]
+    today_noon = datetime.combine(date.today(), time(12, 0), tzinfo=timezone.utc)
+
+    mov = MoneyMovement(
+        organization_id=org.id,
+        movement_number=1,
+        date=today_noon,
+        movement_type="capital_injection",
+        amount=amount,
+        description="Aporte de capital inicial",
+        account_id=account.id,
+        third_party_id=investor.id,
+        status="confirmed",
+        created_by=str(admin.id),
+    )
+    db.add(mov)
+
+    # Efectos: cuenta(+), inversor.balance(-)
+    account.current_balance += amount
+    investor.current_balance -= amount
+
+    db.flush()
+    print(f"  Aporte de capital: ${amount:,.0f} → {account.name} (desde {investor.name})")
+
+
 # ---------------------------------------------------------------------------
 # Punto de entrada principal
 # ---------------------------------------------------------------------------
@@ -421,37 +452,41 @@ def main():
             print(f"\nOrganizacion '{existing.name}' ya existe. Use --clear para recrear.")
             return
 
-        print("\n[1/6] Organizacion y usuarios...")
+        print("\n[1/7] Organizacion y usuarios...")
         org = create_organization(db)
         users = create_users(db, org)
         db.commit()
 
-        print("\n[2/6] Unidades de negocio y categorias...")
+        print("\n[2/7] Unidades de negocio y categorias...")
         bus = create_business_units(db, org)
         cats = create_material_categories(db, org)
         expense_cats = create_expense_categories(db, org)
         db.commit()
 
-        print("\n[3/6] Materiales...")
+        print("\n[3/7] Materiales...")
         mats = create_materials(db, org, cats, bus)
         db.commit()
 
-        print("\n[4/6] Bodegas y cuentas...")
+        print("\n[4/7] Bodegas y cuentas...")
         warehouses = create_warehouses(db, org)
         accounts = create_money_accounts(db, org)
         db.commit()
 
-        print("\n[5/6] Terceros...")
+        print("\n[5/7] Terceros...")
         tps = create_third_parties(db, org)
         db.commit()
 
-        print("\n[6/6] Lista de precios...")
+        print("\n[6/7] Lista de precios...")
         create_price_lists(db, org, mats)
+        db.commit()
+
+        print("\n[7/7] Capital inicial...")
+        create_initial_capital(db, org, accounts, tps, users)
         db.commit()
 
         print("\n" + "="*60)
         print("  Datos maestros creados exitosamente!")
-        print("  (Sin compras, ventas ni movimientos)")
+        print("  (Con aporte de capital inicial de $100M)")
         print("="*60)
         print(f"\nOrganizacion: Reciclajes El Progreso")
         print(f"Slug:          reciclajes-el-progreso")
@@ -465,9 +500,10 @@ def main():
         print(f"  20 materiales con lista de precios")
         print(f"  15 terceros (proveedores, clientes, inversores)")
         print(f"  3 bodegas")
-        print(f"  5 cuentas de dinero")
+        print(f"  5 cuentas de dinero (Bancolombia: $100M)")
         print(f"  4 unidades de negocio")
         print(f"  7 categorias de gasto")
+        print(f"  1 aporte de capital inicial")
         print()
 
     except Exception as e:

@@ -33,6 +33,7 @@ const typeLabels: Record<string, string> = {
   expense_accrual: "Gasto Causado (Pasivo)",
   deferred_funding: "Pago Gasto Diferido",
   deferred_expense: "Cuota Gasto Diferido",
+  commission_accrual: "Comisión Causada",
 };
 
 const statusBorderMap: Record<string, string> = {

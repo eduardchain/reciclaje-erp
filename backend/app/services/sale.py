@@ -504,13 +504,13 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 mov.annulled_reason = f"Cancelación venta #{sale.sale_number}"
                 print(f"  📝 Commission accrual #{mov.movement_number} anulado")
 
-            # Revertir comisiones pagadas
+            # Revertir comisiones causadas (balance was decreased, now increase back)
             stmt_comm = select(SaleCommission).where(SaleCommission.sale_id == sale_id)
             commissions = db.scalars(stmt_comm).all()
             for comm in commissions:
                 recipient = db.get(ThirdParty, comm.third_party_id)
-                recipient.current_balance -= comm.commission_amount
-                print(f"  💰 Commission reverted for '{recipient.name}': -${comm.commission_amount}")
+                recipient.current_balance += comm.commission_amount
+                print(f"  💰 Commission reverted for '{recipient.name}': +${comm.commission_amount}")
 
         db.flush()
 
@@ -1103,11 +1103,11 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 sale_id=sale.id,
             )
 
-            # Increase recipient balance (we owe them the commission)
-            recipient.current_balance += commission.commission_amount
+            # Decrease recipient balance (we owe them the commission → negative = debt)
+            recipient.current_balance -= commission.commission_amount
 
-            print(f"  💼 Paid commission to '{recipient.name}': ${commission.commission_amount} ({commission.concept})")
-            print(f"     Balance: ${recipient.current_balance - commission.commission_amount} → ${recipient.current_balance}")
+            print(f"  💼 Commission accrued to '{recipient.name}': ${commission.commission_amount} ({commission.concept})")
+            print(f"     Balance: ${recipient.current_balance + commission.commission_amount} → ${recipient.current_balance}")
 
 
 # Create singleton instance

@@ -1238,9 +1238,9 @@ class CRUDMoneyMovement:
                 third_party.current_balance += amt
 
         elif mt == "commission_accrual":
-            # Sin cuenta, solo reversa tercero (inverso: les debiamos comision)
+            # Sin cuenta, solo reversa tercero (causacion hizo -=, reversa +=)
             if third_party:
-                third_party.current_balance -= amt
+                third_party.current_balance += amt
 
     def _get_or_404(
         self,

@@ -17,7 +17,8 @@ export type MoneyMovementType =
   | "asset_payment"
   | "expense_accrual"
   | "deferred_funding"
-  | "deferred_expense";
+  | "deferred_expense"
+  | "commission_accrual";
 
 export type MovementStatus = "confirmed" | "annulled";
 

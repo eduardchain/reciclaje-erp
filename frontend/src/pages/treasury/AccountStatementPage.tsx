@@ -48,6 +48,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   expense_accrual: "Gasto Causado (Pasivo)",
   deferred_funding: "Pago Gasto Diferido",
   deferred_expense: "Cuota Gasto Diferido",
+  commission_accrual: "Comisión Causada",
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

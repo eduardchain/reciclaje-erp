@@ -493,9 +493,9 @@ class TestDoubleEntryAPI:
         assert float(commission["commission_amount"]) == expected_commission
         assert commission["third_party_name"] == "Commission Agent"
 
-        # Verify recipient balance IS updated (commissions paid immediately for DPs)
+        # Verify recipient balance IS updated (negative = we owe them the commission)
         db_session.refresh(test_commission_recipient)
-        assert test_commission_recipient.current_balance == Decimal(str(expected_commission))
+        assert test_commission_recipient.current_balance == -Decimal(str(expected_commission))
 
     def test_create_double_entry_same_supplier_customer_fails(
         self,
@@ -1143,11 +1143,11 @@ class TestDoubleEntryAPI:
         assert create_resp.status_code == 201
         de_id = create_resp.json()["id"]
 
-        # Verificar que la comision fue pagada
+        # Verificar que la comision fue causada (negative = we owe them)
         db_session.refresh(test_commission_recipient)
         sale_total = Decimal("1000") * Decimal("10000")
         expected_commission = sale_total * Decimal("0.025")
-        assert test_commission_recipient.current_balance == expected_commission
+        assert test_commission_recipient.current_balance == -expected_commission
 
         # Cancelar
         cancel_resp = client.patch(

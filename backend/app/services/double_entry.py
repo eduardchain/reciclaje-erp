@@ -208,13 +208,13 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                     amount=commission_amount,
                     account_id=None,
                     date=sale.date,
-                    description=f"Comisión DE #{double_entry_number} - {comm_data.concept}",
+                    description=f"Comisión DP #{double_entry_number} - {comm_data.concept}",
                     third_party_id=comm_data.third_party_id,
                     sale_id=sale.id,
                     user_id=user_id,
                 )
-                # Pagar comision (la venta esta liquidada desde la creacion)
-                recipient.current_balance += commission_amount
+                # Causar comision (les debemos → balance decreases)
+                recipient.current_balance -= commission_amount
                 print(f"   💼 Commission: {comm_data.concept} - ${commission_amount} (paid)")
 
         # Step 9: Actualizar saldos
@@ -323,14 +323,14 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         for mov in comm_movements:
             mov.status = "annulled"
             mov.annulled_at = datetime.now(timezone.utc)
-            mov.annulled_reason = f"Cancelación DE #{double_entry.double_entry_number}"
+            mov.annulled_reason = f"Cancelación DP #{double_entry.double_entry_number}"
             print(f"   📝 Commission accrual #{mov.movement_number} anulado")
 
-        # Revertir comisiones pagadas
+        # Revertir comisiones causadas (balance was decreased, now increase back)
         for comm in sale.commissions:
             recipient = db.get(ThirdParty, comm.third_party_id)
-            recipient.current_balance -= comm.commission_amount
-            print(f"   💼 Commission reverted for '{recipient.name}': -${comm.commission_amount}")
+            recipient.current_balance += comm.commission_amount
+            print(f"   💼 Commission reverted for '{recipient.name}': +${comm.commission_amount}")
 
         double_entry.status = "cancelled"
 
