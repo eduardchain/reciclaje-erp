@@ -21,6 +21,7 @@ from .inventory_adjustment import InventoryAdjustment
 from .material_transformation import MaterialTransformation, MaterialTransformationLine
 from .material_cost_history import MaterialCostHistory
 from .scheduled_expense import ScheduledExpense, ScheduledExpenseApplication
+from .fixed_asset import FixedAsset, AssetDepreciation
 
 __all__ = [
     "Base",
@@ -52,4 +53,6 @@ __all__ = [
     "MaterialCostHistory",
     "ScheduledExpense",
     "ScheduledExpenseApplication",
+    "FixedAsset",
+    "AssetDepreciation",
 ]

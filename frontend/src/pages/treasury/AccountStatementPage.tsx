@@ -49,6 +49,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   deferred_funding: "Pago Gasto Diferido",
   deferred_expense: "Cuota Gasto Diferido",
   commission_accrual: "Comisión Causada",
+  depreciation_expense: "Depreciación Activo",
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -69,7 +69,8 @@ VALID_MOVEMENT_TYPES = [
     "expense_accrual",          # Gasto causado (pasivo): NO cuenta, third_party.balance(-), P&L
     "deferred_funding",         # Pago inicial gasto diferido: account(-), third_party.balance(+), NO P&L
     "deferred_expense",         # Cuota gasto diferido: NO cuenta, third_party.balance(-), P&L
-    "commission_accrual",       # Comision causada: NO cuenta, third_party.balance(+), P&L
+    "commission_accrual",       # Comision causada: NO cuenta, third_party.balance(-), P&L
+    "depreciation_expense",     # Depreciacion activo: NO cuenta, NO tercero, expense_category, P&L
 ]
 
 

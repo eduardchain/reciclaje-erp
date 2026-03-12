@@ -30,6 +30,9 @@ import LiabilitiesPage from "@/pages/treasury/LiabilitiesPage";
 import ScheduledExpensesPage from "@/pages/treasury/ScheduledExpensesPage";
 import ScheduledExpenseCreatePage from "@/pages/treasury/ScheduledExpenseCreatePage";
 import ScheduledExpenseDetailPage from "@/pages/treasury/ScheduledExpenseDetailPage";
+import FixedAssetsPage from "@/pages/treasury/FixedAssetsPage";
+import FixedAssetCreatePage from "@/pages/treasury/FixedAssetCreatePage";
+import FixedAssetDetailPage from "@/pages/treasury/FixedAssetDetailPage";
 import StockPage from "@/pages/inventory/StockPage";
 import MovementHistoryPage from "@/pages/inventory/MovementHistoryPage";
 import AdjustmentsPage from "@/pages/inventory/AdjustmentsPage";
@@ -108,6 +111,9 @@ function App() {
               <Route path={ROUTES.TREASURY_SCHEDULED} element={<ScheduledExpensesPage />} />
               <Route path={ROUTES.TREASURY_SCHEDULED_NEW} element={<ScheduledExpenseCreatePage />} />
               <Route path="/treasury/scheduled-expenses/:id" element={<ScheduledExpenseDetailPage />} />
+              <Route path={ROUTES.TREASURY_FIXED_ASSETS} element={<FixedAssetsPage />} />
+              <Route path={ROUTES.TREASURY_FIXED_ASSETS_NEW} element={<FixedAssetCreatePage />} />
+              <Route path="/treasury/fixed-assets/:id" element={<FixedAssetDetailPage />} />
               <Route path="/treasury/:id" element={<MovementDetailPage />} />
               {/* Inventario */}
               <Route path={ROUTES.INVENTORY} element={<StockPage />} />

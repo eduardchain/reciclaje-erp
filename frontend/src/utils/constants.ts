@@ -28,6 +28,8 @@ export const ROUTES = {
   TREASURY_LIABILITIES: "/treasury/liabilities",
   TREASURY_SCHEDULED: "/treasury/scheduled-expenses",
   TREASURY_SCHEDULED_NEW: "/treasury/scheduled-expenses/new",
+  TREASURY_FIXED_ASSETS: "/treasury/fixed-assets",
+  TREASURY_FIXED_ASSETS_NEW: "/treasury/fixed-assets/new",
 
   // Inventario
   INVENTORY: "/inventory",

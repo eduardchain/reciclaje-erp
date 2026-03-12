@@ -180,6 +180,7 @@ class BalanceSheetAssets(BaseModel):
     inventory: float
     prepaid_expenses: float = 0.0
     provision_funds: float = 0.0
+    fixed_assets: float = 0.0
     total: float
 
 

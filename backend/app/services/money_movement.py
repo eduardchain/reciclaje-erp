@@ -1242,6 +1242,10 @@ class CRUDMoneyMovement:
             if third_party:
                 third_party.current_balance += amt
 
+        elif mt == "depreciation_expense":
+            # Sin cuenta ni tercero, solo anula el status del movimiento
+            pass
+
     def _get_or_404(
         self,
         db: Session,

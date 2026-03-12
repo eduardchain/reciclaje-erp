@@ -20,6 +20,7 @@ from app.models.money_movement import MoneyMovement
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.sale import Sale, SaleLine
 from app.models.third_party import ThirdParty
+from app.models.fixed_asset import FixedAsset
 
 from app.models.sale import SaleCommission
 from app.schemas.reports import (
@@ -257,7 +258,7 @@ class ReportService:
             .where(
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.status == "confirmed",
-                MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "commission_payment", "commission_accrual", "service_income"]),
+                MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "commission_payment", "commission_accrual", "service_income"]),
                 MoneyMovement.date >= dt_from,
                 MoneyMovement.date < dt_to,
             )
@@ -278,7 +279,7 @@ class ReportService:
             total_dec = Decimal(str(total))
             if mt == "service_income":
                 service_income += total_dec
-            elif mt in ("expense", "provision_expense", "expense_accrual", "deferred_expense"):
+            elif mt in ("expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense"):
                 operating_expenses += total_dec
                 expenses_by_cat.append(ExpenseCategoryBreakdown(
                     category_id=cat_id,
@@ -569,7 +570,18 @@ class ReportService:
             )
         ))
 
-        total_assets = cash_and_bank + accounts_receivable + inventory + prepaid_expenses + provision_funds
+        # Activos fijos (valor actual de activos no dados de baja)
+        fixed_assets_value = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(FixedAsset.current_value), 0))
+                .where(
+                    FixedAsset.organization_id == organization_id,
+                    FixedAsset.status != "disposed",
+                )
+            )
+        ))
+
+        total_assets = cash_and_bank + accounts_receivable + inventory + prepaid_expenses + provision_funds + fixed_assets_value
 
         # Pasivos
         accounts_payable = Decimal(str(
@@ -617,6 +629,7 @@ class ReportService:
                 inventory=float(inventory),
                 prepaid_expenses=float(prepaid_expenses),
                 provision_funds=float(provision_funds),
+                fixed_assets=float(fixed_assets_value),
                 total=float(total_assets),
             ),
             total_assets=float(total_assets),

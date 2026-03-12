@@ -6,7 +6,7 @@ from .endpoints import (
     purchases, sales, double_entries,
     money_accounts, warehouses, business_units,
     price_lists, expense_categories,
-    money_movements, scheduled_expenses,
+    money_movements, scheduled_expenses, fixed_assets,
     inventory_adjustments, material_transformations, inventory_views,
     reports,
 )
@@ -28,6 +28,7 @@ api_router.include_router(price_lists.router, prefix="/price-lists", tags=["pric
 api_router.include_router(expense_categories.router, prefix="/expense-categories", tags=["expense-categories"])
 api_router.include_router(money_movements.router, prefix="/money-movements", tags=["treasury"])
 api_router.include_router(scheduled_expenses.router, prefix="/scheduled-expenses", tags=["treasury"])
+api_router.include_router(fixed_assets.router, prefix="/fixed-assets", tags=["treasury"])
 api_router.include_router(inventory_adjustments.router, prefix="/inventory/adjustments", tags=["inventory"])
 api_router.include_router(material_transformations.router, prefix="/inventory/transformations", tags=["inventory"])
 api_router.include_router(inventory_views.router, prefix="/inventory", tags=["inventory"])

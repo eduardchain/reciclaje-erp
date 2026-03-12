@@ -207,6 +207,8 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 29. **Seed script con capital inicial**: `scripts/seed_test_data.py --clear` crea automaticamente un aporte de capital de $100M COP a "Bancolombia Ahorros" desde "Carlos Perez Inversores" con fecha de hoy.
 
+30. **Activos fijos con depreciacion mensual (F5)**: Modulo completo para equipos costosos con depreciacion lineal mensual. Dos tablas: `fixed_assets` + `asset_depreciations`. Tipo de movimiento `depreciation_expense`: NO cuenta, NO tercero, solo `expense_category_id` para P&L. Cuota = `purchase_value × (rate/100)`, vida util hasta `salvage_value`. Ultima cuota ajustada exactamente al residual. Dispose con depreciacion acelerada (periodo `YYYY-MMB`). `apply_pending` deprecia batch todos los activos activos del mes. Balance Sheet incluye `fixed_assets = SUM(current_value) WHERE status != 'disposed'`. Migration: `d3e73695da43`. 20 tests. Frontend: FixedAssetsPage (list + apply batch), FixedAssetCreatePage (form + preview calculo), FixedAssetDetailPage (KPIs + progress bar + depreciaciones + dispose). Sidebar: "Activos Fijos" (Building2 icon) en Tesoreria. Labels `depreciation_expense` en 5 paginas de tesoreria.
+
 ### Business Modules (Implemented)
 
 | Module | Endpoints | Description |
@@ -223,7 +225,8 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Business Units | `/api/v1/business-units/` | P&L analysis segments (Fibras, Chatarra, etc.) |
 | Price Lists | `/api/v1/price-lists/` | Historical purchase/sale prices per material |
 | Expense Categories | `/api/v1/expense-categories/` | Direct/indirect expense classification for treasury |
-| Treasury | `/api/v1/money-movements/` | 14 movement types (incl. provisions, advances), annulment with audit, account statement with running balance + PDF/Excel export |
+| Treasury | `/api/v1/money-movements/` | 15 movement types (incl. provisions, advances, depreciation), annulment with audit, account statement with running balance + PDF/Excel export |
+| Fixed Assets | `/api/v1/fixed-assets/` | Equipment depreciation: create, depreciate monthly, apply-pending batch, dispose with accelerated depreciation |
 | Inventory Adjustments | `/api/v1/inventory/adjustments/` | Manual stock corrections: increase, decrease, recount, zero-out. Warehouse transfers. Annulment with stock reversal |
 | Material Transformations | `/api/v1/inventory/transformations/` | Material disassembly (e.g., Motor → Copper + Iron + Aluminum + Waste). Proportional/manual cost distribution |
 | Inventory Views | `/api/v1/inventory/` | Consolidated stock (filterable by category/warehouse), per-material warehouse breakdown, transit stock (pending purchases/sales/bottleneck alerts), movement history (with running balance/avg cost per material), inventory valuation |
@@ -232,7 +235,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 ### Testing
 
-Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 466 tests. Run with `./venv/bin/pytest` from backend dir.
+Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 486 tests. Run with `./venv/bin/pytest` from backend dir.
 
 Key fixtures: `test_user`, `auth_headers`, `org_headers` (auth + X-Organization-ID), `db_session`.
 
