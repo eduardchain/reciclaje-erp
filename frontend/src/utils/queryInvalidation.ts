@@ -20,6 +20,8 @@ export const invalidateAfterPurchase = (qc: QueryClient) => {
 
 export const invalidateAfterPurchaseLiquidateOrCancel = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["purchases"] });
+  qc.invalidateQueries({ queryKey: ["money-movements"] });
+  qc.invalidateQueries({ queryKey: ["treasury-dashboard"] });
   invalidateInventory(qc);
   invalidateFinancial(qc);
 };
@@ -31,12 +33,16 @@ export const invalidateAfterSale = (qc: QueryClient) => {
 
 export const invalidateAfterSaleLiquidateOrCancel = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["sales"] });
+  qc.invalidateQueries({ queryKey: ["money-movements"] });
+  qc.invalidateQueries({ queryKey: ["treasury-dashboard"] });
   invalidateInventory(qc);
   invalidateFinancial(qc);
 };
 
 export const invalidateAfterDoubleEntry = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["double-entries"] });
+  qc.invalidateQueries({ queryKey: ["purchases"] });
+  qc.invalidateQueries({ queryKey: ["sales"] });
   invalidateFinancial(qc);
 };
 

@@ -3,7 +3,7 @@ Pydantic schemas for DoubleEntry (Pasa Mano) model.
 
 Soporta multiples materiales por operacion via DoubleEntryLine.
 """
-from datetime import date as date_type, datetime
+from datetime import date as date_type, datetime, time, timezone
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
@@ -128,6 +128,12 @@ class DoubleEntryResponse(BaseModel):
     commissions: List[SaleCommissionResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
+
+    @field_serializer('date')
+    def serialize_date_as_noon_utc(self, value: date_type) -> str:
+        """Serializar date como datetime mediodia UTC para display correcto en cualquier timezone."""
+        dt = datetime.combine(value, time(12, 0), tzinfo=timezone.utc)
+        return dt.isoformat()
 
     @field_serializer('total_purchase_cost', 'total_sale_amount', 'profit', 'profit_margin')
     def serialize_decimals(self, value: Decimal) -> float:
