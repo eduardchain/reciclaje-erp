@@ -284,6 +284,7 @@ class ReportService:
                     category_name=cat_name or "Sin categoria",
                     is_direct_expense=bool(is_direct),
                     total_amount=float(total_dec),
+                    source_type=mt,
                 ))
             elif mt == "commission_payment":
                 commissions_paid += total_dec

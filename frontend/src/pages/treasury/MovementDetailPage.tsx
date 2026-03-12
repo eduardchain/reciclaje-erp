@@ -141,11 +141,11 @@ export default function MovementDetailPage() {
                 </Button>
                 {movement.status === "confirmed" && (
                   <>
-                    <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-                      <Upload className="h-4 w-4 mr-1" />Reemplazar
+                    <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadEvidence.isPending}>
+                      <Upload className="h-4 w-4 mr-1" />{uploadEvidence.isPending ? "Subiendo..." : "Reemplazar"}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => setShowDeleteEvidence(true)} className="text-red-600 border-red-200 hover:bg-red-50">
-                      <Trash2 className="h-4 w-4 mr-1" />Eliminar
+                    <Button variant="outline" size="sm" onClick={() => setShowDeleteEvidence(true)} className="text-red-600 border-red-200 hover:bg-red-50" disabled={deleteEvidence.isPending}>
+                      <Trash2 className="h-4 w-4 mr-1" />{deleteEvidence.isPending ? "Eliminando..." : "Eliminar"}
                     </Button>
                   </>
                 )}

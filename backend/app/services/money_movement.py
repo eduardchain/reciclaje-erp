@@ -76,13 +76,13 @@ class CRUDMoneyMovement:
         - supplier.current_balance += amount (hacia 0, reduce deuda)
 
         Validaciones:
-        - Tercero debe existir y ser is_supplier=True
+        - Tercero debe existir y ser is_supplier=True o is_liability=True
         - Cuenta debe tener fondos suficientes
         - Si purchase_id, compra debe pertenecer al proveedor
         """
         # Validaciones
         account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
-        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_type="is_supplier")
+        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_type=["is_supplier", "is_liability"])
 
         if data.purchase_id:
             self._validate_purchase(db, data.purchase_id, organization_id, supplier_id=data.supplier_id)
@@ -1044,27 +1044,35 @@ class CRUDMoneyMovement:
         db: Session,
         third_party_id: UUID,
         organization_id: UUID,
-        require_type: Optional[str] = None,
+        require_type: Optional[str | list[str]] = None,
     ) -> ThirdParty:
-        """Validar que el tercero existe, pertenece a la org, y tiene el tipo requerido."""
+        """Validar que el tercero existe, pertenece a la org, y tiene el tipo requerido.
+
+        require_type puede ser un string ("is_supplier") o una lista
+        ["is_supplier", "is_liability"] para validar que tenga AL MENOS uno (OR).
+        """
         tp = db.get(ThirdParty, third_party_id)
         if not tp or tp.organization_id != organization_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Tercero no encontrado",
             )
-        if require_type and not getattr(tp, require_type, False):
-            type_labels = {
-                "is_supplier": "proveedor",
-                "is_customer": "cliente",
-                "is_investor": "inversor",
-                "is_provision": "provision",
-            }
-            label = type_labels.get(require_type, require_type)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"El tercero '{tp.name}' no es {label}",
-            )
+        type_labels = {
+            "is_supplier": "proveedor",
+            "is_customer": "cliente",
+            "is_investor": "inversor",
+            "is_provision": "provision",
+            "is_liability": "pasivo",
+        }
+        if require_type:
+            types = [require_type] if isinstance(require_type, str) else require_type
+            if not any(getattr(tp, t, False) for t in types):
+                labels = [type_labels.get(t, t) for t in types]
+                label = " o ".join(labels)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"El tercero '{tp.name}' no es {label}",
+                )
         return tp
 
     def _validate_expense_category(

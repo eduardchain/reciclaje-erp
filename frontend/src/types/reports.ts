@@ -61,6 +61,7 @@ export interface ExpenseCategoryBreakdown {
   category_name: string;
   is_direct_expense: boolean;
   total_amount: number;
+  source_type: string; // expense, provision_expense, expense_accrual, deferred_expense
 }
 
 export interface ProfitAndLossResponse {

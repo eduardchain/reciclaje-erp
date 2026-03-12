@@ -179,6 +179,14 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 20. **Cantidad recibida por cliente (diferencia de bascula)**: En ventas, el cliente puede reportar una cantidad diferente a la despachada. `SaleLine.received_quantity` (Numeric 10,3 nullable) registra lo que el cliente peso. Al liquidar, si se envia `received_quantity`, el `total_price` se calcula como `received_quantity × unit_price` (facturar lo recibido). El COGS no cambia (`unit_cost × quantity` original — lo que salio de bodega). Profit = `total_price - (unit_cost × quantity)`. El inventario NO se ajusta — la diferencia es solo financiera. `SaleResponse` incluye `total_quantity_difference` y `total_amount_difference`. Migration: `bf0ec8815fdc`.
 
+21. **Pago de pasivo (liability_payment)**: Tipo frontend-only que mapea a `payment_to_supplier` en backend (misma logica contable: account(-), third_party(+)). Frontend: `backendTypeMap` convierte `liability_payment` → `payment_to_supplier` antes de enviar. `getThirdPartyOptions` filtra: `payment_to_supplier` solo proveedores, `liability_payment` solo pasivos (`is_liability`). `isTypeLocked`: cuando URL tiene `?type=...`, el selector de tipo se reemplaza con texto estatico. Backend `_validate_third_party` acepta `str | list[str]` con logica OR para `require_type=["is_supplier", "is_liability"]`.
+
+22. **Balance Sheet con provisiones y prepagos**: Activos incluyen `provision_funds` (provisiones con balance < 0, abs()) y `prepaid_expenses` (ThirdParty con `is_system_entity=True` y balance > 0). Pasivos incluyen `liability_debt` (ThirdParty con `is_liability=True` y balance < 0, abs()). Convencion de signo: `current_balance` raw se muestra como "Saldo Contable"; `abs()` como "Fondos Disponibles" solo en vistas operativas.
+
+23. **Cash Flow desglosado**: Ingresos incluyen `advance_collections`. Egresos incluyen `provision_deposits`, `deferred_fundings`, `advance_payments`, `asset_payments`. Todos se suman a `total_outflows`/`total_inflows` para que `closing_balance = opening_balance + total_inflows - total_outflows` cuadre.
+
+24. **P&L desagregado por fuente**: `ExpenseCategoryBreakdown` incluye `source_type` (expense, provision_expense, expense_accrual, deferred_expense). Frontend agrupa gastos operativos por fuente con subtotales cuando hay mas de un tipo. Tabla detallada con secciones colapsables por fuente.
+
 ### Business Modules (Implemented)
 
 | Module | Endpoints | Description |

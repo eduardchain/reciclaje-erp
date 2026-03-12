@@ -165,10 +165,12 @@ export default function ScheduledExpenseCreatePage() {
                 <p className="text-xs text-slate-400">Cuota mensual en P&L</p>
                 <p className="text-lg font-bold text-slate-900 tabular-nums">{formatCurrency(monthlyAmount)}</p>
               </div>
-              <div>
-                <p className="text-xs text-slate-400">Ultima cuota (ajuste)</p>
-                <p className="text-lg font-bold text-slate-900 tabular-nums">{formatCurrency(lastMonthAmount)}</p>
-              </div>
+              {lastMonthAmount !== monthlyAmount && (
+                <div>
+                  <p className="text-xs text-slate-400">Ultima cuota (ajuste)</p>
+                  <p className="text-lg font-bold text-slate-900 tabular-nums">{formatCurrency(lastMonthAmount)}</p>
+                </div>
+              )}
               <div>
                 <p className="text-xs text-slate-400">Total verificado</p>
                 <p className="text-lg font-bold text-slate-900 tabular-nums">

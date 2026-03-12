@@ -142,6 +142,7 @@ export default function TransformationDetailPage() {
         description="Se revertiran todos los movimientos de stock."
         onConfirm={() => annul.mutate({ id: t.id, data: { reason: annulReason } }, { onSuccess: () => navigate(ROUTES.INVENTORY_TRANSFORMATIONS) })}
         variant="destructive"
+        loading={annul.isPending}
         disabled={annulReason.length < 1}
       >
         <div className="space-y-2 mt-2">

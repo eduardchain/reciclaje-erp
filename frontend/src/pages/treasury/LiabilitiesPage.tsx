@@ -32,6 +32,8 @@ export default function LiabilitiesPage() {
   // Modal crear pasivo
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newIdNumber, setNewIdNumber] = useState("");
+  const [newPhone, setNewPhone] = useState("");
   const createTP = useMutation({
     mutationFn: (data: ThirdPartyCreate) => thirdPartyService.create(data),
     onSuccess: () => {
@@ -39,6 +41,8 @@ export default function LiabilitiesPage() {
       toast.success("Pasivo creado exitosamente");
       setShowCreate(false);
       setNewName("");
+      setNewIdNumber("");
+      setNewPhone("");
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al crear el pasivo"));
@@ -113,8 +117,7 @@ export default function LiabilitiesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Nombre</TableHead>
-                  <TableHead>Identificacion</TableHead>
-                  <TableHead className="text-right">Balance</TableHead>
+                  <TableHead className="text-right">Saldo Contable</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
@@ -122,7 +125,6 @@ export default function LiabilitiesPage() {
                 {items.map((tp) => (
                   <TableRow key={tp.id}>
                     <TableCell className="font-medium">{tp.name}</TableCell>
-                    <TableCell className="text-sm text-slate-500">{tp.identification_number || "—"}</TableCell>
                     <TableCell className="text-right">
                       <MoneyDisplay amount={tp.current_balance} />
                     </TableCell>
@@ -138,7 +140,7 @@ export default function LiabilitiesPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => navigate(`${ROUTES.TREASURY_NEW}?type=payment_to_supplier&third_party_id=${tp.id}`)}
+                          onClick={() => navigate(`${ROUTES.TREASURY_NEW}?type=liability_payment&third_party_id=${tp.id}`)}
                         >
                           Pagar
                         </Button>
@@ -170,11 +172,24 @@ export default function LiabilitiesPage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label>
               <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Ej: Prestaciones Juan Perez" />
             </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Identificacion</Label>
+              <Input value={newIdNumber} onChange={(e) => setNewIdNumber(e.target.value)} placeholder="Cedula o NIT (opcional)" />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Telefono</Label>
+              <Input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Telefono (opcional)" />
+            </div>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
             <Button
-              onClick={() => createTP.mutate({ name: newName, is_liability: true })}
+              onClick={() => createTP.mutate({
+                name: newName,
+                is_liability: true,
+                identification_number: newIdNumber || undefined,
+                phone: newPhone || undefined,
+              })}
               disabled={!newName.trim() || createTP.isPending}
               className="bg-emerald-600 hover:bg-emerald-700"
             >

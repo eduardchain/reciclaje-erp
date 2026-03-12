@@ -301,9 +301,9 @@ def create_third_parties(db, org: Organization) -> dict:
         ("Plasticos y Fibras SA",   "150012345-6", "compras@plasticos.co", "3020123456", False, True,  False, False),
         ("Carlos Perez Inversores", "250123456-7", "cperez@inversiones.co","3151234567", False, False, True,  False),
         ("Diana Hernandez Capital", "350234567-8", "diana@capital.co",     "3162345678", False, False, True,  False),
-        ("Logistica Express SAS",   "450345678-9", "logistica@express.co", "3173456789", True,  False, False, True),
-        ("Agente Lopez Comercial",  "550456789-0", "lopez@agente.co",      "3184567890", False, False, False, True),
-        ("Valeria Torres Agente",   "650567890-1", "vtorres@agente.co",    "3195678901", False, False, False, True),
+        ("Logistica Express SAS",   "450345678-9", "logistica@express.co", "3173456789", True,  False, False, False),
+        ("Reciclajes del Sur SAS",  "550456789-0", "info@rsur.co",         "3184567890", True,  True,  False, False),
+        ("Valeria Torres Comercial","650567890-1", "vtorres@comercial.co", "3195678901", False, True,  False, False),
     ]
     result = {}
     for nombre, nit, email, tel, is_sup, is_cust, is_inv, is_prov in terceros:
@@ -463,7 +463,7 @@ def main():
         print(f"  ingrid@reciclajes.com   - comercial")
         print(f"\nDatos maestros:")
         print(f"  20 materiales con lista de precios")
-        print(f"  15 terceros (proveedores, clientes, inversores, agentes)")
+        print(f"  15 terceros (proveedores, clientes, inversores)")
         print(f"  3 bodegas")
         print(f"  5 cuentas de dinero")
         print(f"  4 unidades de negocio")

@@ -90,6 +90,7 @@ class ExpenseCategoryBreakdown(BaseModel):
     category_name: str
     is_direct_expense: bool
     total_amount: float
+    source_type: str = "expense"  # expense, provision_expense, expense_accrual, deferred_expense
 
 
 class ProfitAndLossResponse(BaseModel):

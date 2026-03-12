@@ -11,7 +11,8 @@ Reemplaza DeferredExpense con modelo mas claro:
 - Cuotas son deferred_expense (NO tocan cuenta, SI aparecen en P&L)
 - ThirdParty auto-creado con is_system_entity=True como prepago
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal, ROUND_DOWN
 from typing import Optional, List
 from uuid import UUID
@@ -178,6 +179,9 @@ class CRUDScheduledExpense:
         else:
             amount = scheduled.monthly_amount
 
+        # Fecha de negocio: dia actual en Colombia (no UTC, para evitar desfase nocturno)
+        col_today = datetime.now(ZoneInfo("America/Bogota")).date()
+        today_dt = datetime.combine(col_today, time.min, tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         desc = f"Cuota gasto diferido: {scheduled.name} ({next_number}/{scheduled.total_months})"
 
@@ -191,7 +195,7 @@ class CRUDScheduledExpense:
             movement_type="deferred_expense",
             amount=amount,
             account_id=None,
-            date=now,
+            date=today_dt,
             description=desc,
             third_party_id=scheduled.prepaid_third_party_id,
             expense_category_id=scheduled.expense_category_id,

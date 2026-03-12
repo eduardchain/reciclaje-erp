@@ -109,6 +109,7 @@ export default function AdjustmentDetailPage() {
         description="Esta accion revertira los cambios de stock."
         onConfirm={() => annul.mutate({ id: adj.id, data: { reason: annulReason } }, { onSuccess: () => navigate(ROUTES.INVENTORY_ADJUSTMENTS) })}
         variant="destructive"
+        loading={annul.isPending}
         disabled={annulReason.length < 1}
       >
         <div className="space-y-2 mt-2">

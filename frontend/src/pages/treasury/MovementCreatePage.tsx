@@ -15,7 +15,7 @@ import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseC
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
-type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment" | "expense_accrual";
+type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment" | "expense_accrual" | "liability_payment";
 
 const typeLabels: Record<MovementType, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -32,6 +32,12 @@ const typeLabels: Record<MovementType, string> = {
   advance_collection: "Anticipo de Cliente",
   asset_payment: "Pago Activo Fijo",
   expense_accrual: "Causar Gasto (Pasivo)",
+  liability_payment: "Pago de Pasivo",
+};
+
+// Tipos frontend-only que mapean a un tipo backend diferente
+const backendTypeMap: Partial<Record<MovementType, string>> = {
+  liability_payment: "payment_to_supplier",
 };
 
 export default function MovementCreatePage() {
@@ -41,7 +47,9 @@ export default function MovementCreatePage() {
   const initialProvisionId = searchParams.get("provision_id") || "";
   const initialThirdPartyId = searchParams.get("third_party_id") || "";
   const [type, setType] = useState<MovementType>(initialType);
-  const create = useCreateMovement(type);
+  const isTypeLocked = !!searchParams.get("type");
+  const backendType = backendTypeMap[type] ?? type;
+  const create = useCreateMovement(backendType);
   const uploadEvidence = useUploadEvidence();
 
   const { data: suppliersData } = useSuppliers();
@@ -108,6 +116,7 @@ export default function MovementCreatePage() {
 
     switch (type) {
       case "payment_to_supplier":
+      case "liability_payment":
         return { ...base, supplier_id: thirdPartyId, account_id: accountId };
       case "collection_from_client":
         return { ...base, customer_id: thirdPartyId, account_id: accountId };
@@ -158,11 +167,8 @@ export default function MovementCreatePage() {
   const getThirdPartyOptions = () => {
     switch (type) {
       case "payment_to_supplier":
-      case "advance_payment": {
-        // Incluir proveedores + pasivos para permitir pagar ambos
-        const combined = [...suppliers, ...liabilities.filter((l) => !suppliers.some((s) => s.id === l.id))];
-        return combined.map((s) => ({ id: s.id, label: s.name }));
-      }
+      case "advance_payment": return suppliers.map((s) => ({ id: s.id, label: s.name }));
+      case "liability_payment": return liabilities.map((l) => ({ id: l.id, label: l.name }));
       case "collection_from_client":
       case "advance_collection": return customers.map((c) => ({ id: c.id, label: c.name }));
       case "capital_injection":
@@ -177,6 +183,7 @@ export default function MovementCreatePage() {
     switch (type) {
       case "payment_to_supplier":
       case "advance_payment": return "Proveedor *";
+      case "liability_payment": return "Pasivo *";
       case "collection_from_client":
       case "advance_collection": return "Cliente *";
       case "capital_injection":
@@ -187,7 +194,7 @@ export default function MovementCreatePage() {
     }
   };
 
-  const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment", "advance_payment", "advance_collection", "expense_accrual"].includes(type);
+  const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment", "advance_payment", "advance_collection", "expense_accrual", "liability_payment"].includes(type);
   const optionalThirdParty = type === "asset_payment";
   const needsProvision = type === "provision_deposit" || type === "provision_expense";
   const needsExpenseCategory = type === "expense" || type === "provision_expense" || type === "expense_accrual";
@@ -207,16 +214,20 @@ export default function MovementCreatePage() {
       <Card className="shadow-sm">
         <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Tipo de Movimiento</CardTitle></CardHeader>
         <CardContent>
-          <Select value={type} onValueChange={handleTypeChange}>
-            <SelectTrigger className="w-full max-w-md">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(typeLabels).map(([key, label]) => (
-                <SelectItem key={key} value={key}>{label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {isTypeLocked ? (
+            <p className="text-sm font-medium text-slate-900 py-2">{typeLabels[type]}</p>
+          ) : (
+            <Select value={type} onValueChange={handleTypeChange}>
+              <SelectTrigger className="w-full max-w-md">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(typeLabels).map(([key, label]) => (
+                  <SelectItem key={key} value={key}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </CardContent>
       </Card>
 

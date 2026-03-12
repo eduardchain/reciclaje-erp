@@ -210,6 +210,7 @@ export default function ScheduledExpenseDetailPage() {
         title="Aplicar Cuota"
         description={`Se creara un movimiento de ${formatCurrency(se.next_amount)} (cuota ${se.applied_months + 1} de ${se.total_months}). Esta accion no se puede deshacer.`}
         confirmLabel="Aplicar Cuota"
+        loading={apply.isPending}
         onConfirm={() => {
           apply.mutate(se.id, { onSuccess: () => setShowApply(false) });
         }}
@@ -221,6 +222,7 @@ export default function ScheduledExpenseDetailPage() {
         description="Se cancelaran las cuotas pendientes. Las cuotas ya aplicadas (movimientos creados) permanecen activas y se pueden anular manualmente."
         confirmLabel="Cancelar Gasto"
         variant="destructive"
+        loading={cancel.isPending}
         onConfirm={() => {
           cancel.mutate(se.id, { onSuccess: () => setShowCancel(false) });
         }}

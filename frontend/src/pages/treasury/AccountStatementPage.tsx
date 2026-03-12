@@ -168,7 +168,7 @@ export default function AccountStatementPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card className="border-t-[3px] border-t-sky-500 shadow-sm">
             <CardContent className="p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Saldo Actual</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Saldo Contable</p>
               <MoneyDisplay amount={selectedThirdParty?.current_balance ?? 0} className="text-xl font-bold" />
             </CardContent>
           </Card>
