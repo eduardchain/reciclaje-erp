@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, model_validator
 
+from app.utils.dates import BusinessDate
+
 
 # ============================================================================
 # SaleCommission Schemas
@@ -104,7 +106,7 @@ class SaleBase(BaseModel):
     """Base schema for Sale."""
     customer_id: UUID = Field(..., description="Customer UUID (must have is_customer=True)")
     warehouse_id: Optional[UUID] = Field(None, description="Source warehouse UUID (nullable for double-entry)")
-    date: datetime = Field(..., description="Sale date")
+    date: BusinessDate = Field(..., description="Sale date")
     vehicle_plate: Optional[str] = Field(None, max_length=20, description="Vehicle plate number for delivery/pickup")
     invoice_number: Optional[str] = Field(None, max_length=50, description="Invoice or bill number")
     notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
@@ -149,7 +151,7 @@ class SaleFullUpdate(BaseModel):
     """
     customer_id: Optional[UUID] = Field(None, description="Nuevo cliente")
     warehouse_id: Optional[UUID] = Field(None, description="Nueva bodega")
-    date: Optional[datetime] = Field(None, description="Nueva fecha")
+    date: Optional[BusinessDate] = Field(None, description="Nueva fecha")
     notes: Optional[str] = Field(None, max_length=1000)
     vehicle_plate: Optional[str] = Field(None, max_length=20)
     invoice_number: Optional[str] = Field(None, max_length=50)

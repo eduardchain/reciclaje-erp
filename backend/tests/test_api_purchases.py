@@ -12,7 +12,7 @@ Tests all 8 endpoints:
 8. PATCH /api/v1/purchases/{id}/cancel - Cancel
 """
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -1413,7 +1413,7 @@ class TestPurchaseValidations:
     ):
         """Test that creating a purchase with future date fails (V-COMP-04)."""
         from datetime import timedelta
-        future_date = (datetime.now() + timedelta(days=1)).isoformat()
+        future_date = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
 
         purchase_data = {
             "supplier_id": str(test_supplier.id),

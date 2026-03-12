@@ -83,9 +83,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             HTTPException: 403 if resources don't belong to organization
             HTTPException: 400 if insufficient stock or invalid data
         """
-        # Validar fecha no futura
-        sale_date = obj_in.date.replace(tzinfo=None) if obj_in.date.tzinfo else obj_in.date
-        if sale_date > datetime.now(timezone.utc).replace(tzinfo=None):
+        # Validar fecha no futura — comparar solo fechas (BusinessDate normaliza a mediodia)
+        if obj_in.date.date() > datetime.now(timezone.utc).date():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="La fecha de venta no puede ser futura"

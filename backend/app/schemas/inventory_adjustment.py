@@ -14,6 +14,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer
 
+from app.utils.dates import BusinessDate
+
 
 # ---------------------------------------------------------------------------
 # Schemas de creacion — uno por tipo de ajuste
@@ -25,7 +27,7 @@ class IncreaseCreate(BaseModel):
     warehouse_id: UUID = Field(..., description="Bodega donde se realiza el ajuste")
     quantity: Decimal = Field(..., gt=0, description="Cantidad a agregar")
     unit_cost: Decimal = Field(..., gt=0, description="Costo unitario del material encontrado")
-    date: datetime = Field(..., description="Fecha del ajuste")
+    date: BusinessDate = Field(..., description="Fecha del ajuste")
     reason: str = Field(..., min_length=3, description="Razon del ajuste")
     notes: Optional[str] = None
 
@@ -35,7 +37,7 @@ class DecreaseCreate(BaseModel):
     material_id: UUID = Field(..., description="Material a ajustar")
     warehouse_id: UUID = Field(..., description="Bodega donde se realiza el ajuste")
     quantity: Decimal = Field(..., gt=0, description="Cantidad a disminuir")
-    date: datetime = Field(..., description="Fecha del ajuste")
+    date: BusinessDate = Field(..., description="Fecha del ajuste")
     reason: str = Field(..., min_length=3, description="Razon del ajuste")
     notes: Optional[str] = None
 
@@ -45,7 +47,7 @@ class RecountCreate(BaseModel):
     material_id: UUID = Field(..., description="Material a ajustar")
     warehouse_id: UUID = Field(..., description="Bodega donde se realiza el conteo")
     counted_quantity: Decimal = Field(..., ge=0, description="Cantidad contada fisicamente")
-    date: datetime = Field(..., description="Fecha del conteo")
+    date: BusinessDate = Field(..., description="Fecha del conteo")
     reason: str = Field(..., min_length=3, description="Razon del conteo")
     notes: Optional[str] = None
 
@@ -54,7 +56,7 @@ class ZeroOutCreate(BaseModel):
     """Llevar stock a cero — elimina todo el stock liquidado."""
     material_id: UUID = Field(..., description="Material a llevar a cero")
     warehouse_id: UUID = Field(..., description="Bodega del ajuste")
-    date: datetime = Field(..., description="Fecha del ajuste")
+    date: BusinessDate = Field(..., description="Fecha del ajuste")
     reason: str = Field(..., min_length=3, description="Razon para llevar a cero")
     notes: Optional[str] = None
 
@@ -78,7 +80,7 @@ class WarehouseTransferCreate(BaseModel):
     source_warehouse_id: UUID = Field(..., description="Bodega de origen")
     destination_warehouse_id: UUID = Field(..., description="Bodega de destino")
     quantity: Decimal = Field(..., gt=0, description="Cantidad a trasladar")
-    date: datetime = Field(..., description="Fecha del traslado")
+    date: BusinessDate = Field(..., description="Fecha del traslado")
     reason: str = Field(..., min_length=3, description="Razon del traslado")
     notes: Optional[str] = None
 

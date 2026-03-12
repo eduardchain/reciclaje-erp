@@ -183,7 +183,11 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 22. **Balance Sheet con provisiones y prepagos**: Activos incluyen `provision_funds` (provisiones con balance < 0, abs()) y `prepaid_expenses` (ThirdParty con `is_system_entity=True` y balance > 0). Pasivos incluyen `liability_debt` (ThirdParty con `is_liability=True` y balance < 0, abs()). Convencion de signo: `current_balance` raw se muestra como "Saldo Contable"; `abs()` como "Fondos Disponibles" solo en vistas operativas.
 
-23. **Cash Flow desglosado**: Ingresos incluyen `advance_collections`. Egresos incluyen `provision_deposits`, `deferred_fundings`, `advance_payments`, `asset_payments`. Todos se suman a `total_outflows`/`total_inflows` para que `closing_balance = opening_balance + total_inflows - total_outflows` cuadre.
+23. **Normalizacion de fechas de negocio (BusinessDate)**: Todas las fechas de negocio (compras, ventas, movimientos, ajustes, transformaciones, doble partida) se normalizan a mediodia UTC (12:00) via `BusinessDate` (Pydantic `Annotated[datetime, BeforeValidator]` en `app/utils/dates.py`). Esto garantiza que la fecha se muestre correctamente en cualquier timezone UTC-12 a UTC+12. El frontend envia fecha local, el schema la normaliza automaticamente. Para double_entry (que usa python `date`, no `datetime`), la normalizacion es en el service. Validaciones de "fecha futura" comparan `.date()` (no datetime completo). NO se aplica a Response schemas (solo lectura) ni a `reports.py._date_range` (query bounds, no almacenamiento).
+
+24. **Pago/Cobro inmediato al liquidar**: Al liquidar compras/ventas, opcionalmente se puede marcar "pago/cobro inmediato" con cuenta seleccionada. Crea un `MoneyMovement` atomicamente dentro de la misma transaccion usando `_create_movement()` (composable, usa flush). Validacion de saldo de cuenta. Frontend: Switch + EntitySelect en PurchaseLiquidatePage/SaleLiquidatePage.
+
+25. **Cash Flow desglosado**: Ingresos incluyen `advance_collections`. Egresos incluyen `provision_deposits`, `deferred_fundings`, `advance_payments`, `asset_payments`. Todos se suman a `total_outflows`/`total_inflows` para que `closing_balance = opening_balance + total_inflows - total_outflows` cuadre.
 
 24. **P&L desagregado por fuente**: `ExpenseCategoryBreakdown` incluye `source_type` (expense, provision_expense, expense_accrual, deferred_expense). Frontend agrupa gastos operativos por fuente con subtotales cuando hay mas de un tipo. Tabla detallada con secciones colapsables por fuente.
 

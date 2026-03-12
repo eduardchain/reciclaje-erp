@@ -105,8 +105,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             HTTPException: 404 if supplier/material/warehouse not found
             HTTPException: 403 if resources don't belong to organization
         """
-        # Step 0: Validar fecha no futura (V-COMP-04)
-        if obj_in.date.replace(tzinfo=None) > datetime.now(timezone.utc).replace(tzinfo=None):
+        # Step 0: Validar fecha no futura (V-COMP-04) — comparar solo fechas (BusinessDate normaliza a mediodia)
+        if obj_in.date.date() > datetime.now(timezone.utc).date():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="La fecha de la compra no puede ser futura"

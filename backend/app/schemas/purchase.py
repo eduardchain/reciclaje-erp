@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, model_validator
 
+from app.utils.dates import BusinessDate
+
 
 # ============================================================================
 # PurchaseLine Schemas
@@ -57,7 +59,7 @@ class PurchaseLineResponse(PurchaseLineBase):
 class PurchaseBase(BaseModel):
     """Base schema for Purchase."""
     supplier_id: UUID = Field(..., description="Supplier UUID (must have is_supplier=True)")
-    date: datetime = Field(..., description="Purchase date (weighing date)")
+    date: BusinessDate = Field(..., description="Purchase date (weighing date)")
     notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
     vehicle_plate: Optional[str] = Field(None, max_length=20, description="Vehicle plate number")
     invoice_number: Optional[str] = Field(None, max_length=50, description="Invoice or bill number")
@@ -94,7 +96,7 @@ class PurchaseUpdate(BaseModel):
     Note: Only metadata can be updated, not lines or amounts.
     """
     notes: Optional[str] = Field(None, max_length=1000)
-    date: Optional[datetime] = None
+    date: Optional[BusinessDate] = None
     vehicle_plate: Optional[str] = Field(None, max_length=20)
     invoice_number: Optional[str] = Field(None, max_length=50)
 
@@ -107,7 +109,7 @@ class PurchaseFullUpdate(BaseModel):
     Si lines se proporciona, reemplaza TODAS las lineas existentes (estrategia revert+reapply).
     """
     supplier_id: Optional[UUID] = Field(None, description="Nuevo proveedor (debe tener is_supplier=True)")
-    date: Optional[datetime] = Field(None, description="Nueva fecha")
+    date: Optional[BusinessDate] = Field(None, description="Nueva fecha")
     notes: Optional[str] = Field(None, max_length=1000)
     vehicle_plate: Optional[str] = Field(None, max_length=20)
     invoice_number: Optional[str] = Field(None, max_length=50)

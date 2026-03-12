@@ -16,6 +16,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, model_validator
 
+from app.utils.dates import BusinessDate
+
 
 # ---------------------------------------------------------------------------
 # Schemas de creacion
@@ -40,7 +42,7 @@ class MaterialTransformationCreate(BaseModel):
         description="Metodo: 'average_cost', 'proportional_weight' o 'manual'"
     )
     lines: list[TransformationLineCreate] = Field(..., min_length=1, description="Lineas de destino (minimo 1)")
-    date: datetime = Field(..., description="Fecha de la transformacion")
+    date: BusinessDate = Field(..., description="Fecha de la transformacion")
     reason: str = Field(..., min_length=3, description="Razon de la transformacion")
     notes: Optional[str] = None
 

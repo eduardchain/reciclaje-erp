@@ -8,7 +8,7 @@ Business Rules:
 - Updates customer balance (receivable increases)
 - Commissions paid immediately (sale is liquidated at creation)
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
@@ -117,7 +117,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             organization_id=organization_id,
             purchase_number=purchase_number,
             supplier_id=obj_in.supplier_id,
-            date=datetime.combine(obj_in.date, datetime.min.time()),
+            date=datetime.combine(obj_in.date, time(12, 0), tzinfo=timezone.utc),
             total_amount=purchase_total,
             status="liquidated",
             liquidated_at=now_utc,
@@ -149,7 +149,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             sale_number=sale_number,
             customer_id=obj_in.customer_id,
             warehouse_id=None,
-            date=datetime.combine(obj_in.date, datetime.min.time()),
+            date=datetime.combine(obj_in.date, time(12, 0), tzinfo=timezone.utc),
             vehicle_plate=obj_in.vehicle_plate,
             invoice_number=obj_in.invoice_number,
             total_amount=sale_total,

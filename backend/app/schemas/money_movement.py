@@ -23,6 +23,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer
 
+from app.utils.dates import BusinessDate
+
 
 # ---------------------------------------------------------------------------
 # Schemas de creacion — uno por tipo de operacion
@@ -34,7 +36,7 @@ class SupplierPaymentCreate(BaseModel):
     amount: Decimal = Field(..., gt=0, description="Monto a pagar")
     account_id: UUID = Field(..., description="Cuenta de donde sale el dinero")
     purchase_id: Optional[UUID] = Field(None, description="Compra vinculada (opcional)")
-    date: datetime = Field(..., description="Fecha del pago")
+    date: BusinessDate = Field(..., description="Fecha del pago")
     description: Optional[str] = Field(None, max_length=500)
     reference_number: Optional[str] = Field(None, max_length=100)
     evidence_url: Optional[str] = Field(None, max_length=500)
@@ -47,7 +49,7 @@ class CustomerCollectionCreate(BaseModel):
     amount: Decimal = Field(..., gt=0, description="Monto cobrado")
     account_id: UUID = Field(..., description="Cuenta donde entra el dinero")
     sale_id: Optional[UUID] = Field(None, description="Venta vinculada (opcional)")
-    date: datetime = Field(..., description="Fecha del cobro")
+    date: BusinessDate = Field(..., description="Fecha del cobro")
     description: Optional[str] = Field(None, max_length=500)
     reference_number: Optional[str] = Field(None, max_length=100)
     evidence_url: Optional[str] = Field(None, max_length=500)
@@ -60,7 +62,7 @@ class ExpenseCreate(BaseModel):
     expense_category_id: UUID = Field(..., description="Categoria del gasto")
     account_id: UUID = Field(..., description="Cuenta de donde sale el dinero")
     description: str = Field(..., min_length=1, max_length=500, description="Descripcion del gasto")
-    date: datetime = Field(..., description="Fecha del gasto")
+    date: BusinessDate = Field(..., description="Fecha del gasto")
     third_party_id: Optional[UUID] = Field(None, description="Tercero receptor (opcional)")
     reference_number: Optional[str] = Field(None, max_length=100)
     evidence_url: Optional[str] = Field(None, max_length=500)
@@ -72,7 +74,7 @@ class ServiceIncomeCreate(BaseModel):
     amount: Decimal = Field(..., gt=0, description="Monto del ingreso")
     account_id: UUID = Field(..., description="Cuenta donde entra el dinero")
     description: str = Field(..., min_length=1, max_length=500, description="Descripcion del ingreso")
-    date: datetime = Field(..., description="Fecha del ingreso")
+    date: BusinessDate = Field(..., description="Fecha del ingreso")
     third_party_id: Optional[UUID] = Field(None, description="Tercero (opcional)")
     reference_number: Optional[str] = Field(None, max_length=100)
     evidence_url: Optional[str] = Field(None, max_length=500)
@@ -84,7 +86,7 @@ class TransferCreate(BaseModel):
     amount: Decimal = Field(..., gt=0, description="Monto a transferir")
     source_account_id: UUID = Field(..., description="Cuenta origen")
     destination_account_id: UUID = Field(..., description="Cuenta destino")
-    date: datetime = Field(..., description="Fecha de la transferencia")
+    date: BusinessDate = Field(..., description="Fecha de la transferencia")
     description: str = Field(..., min_length=1, max_length=500, description="Descripcion")
     reference_number: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
@@ -95,7 +97,7 @@ class CapitalInjectionCreate(BaseModel):
     investor_id: UUID = Field(..., description="ID del inversor (is_investor=True)")
     amount: Decimal = Field(..., gt=0, description="Monto aportado")
     account_id: UUID = Field(..., description="Cuenta donde entra el capital")
-    date: datetime = Field(..., description="Fecha del aporte")
+    date: BusinessDate = Field(..., description="Fecha del aporte")
     description: Optional[str] = Field(None, max_length=500)
     reference_number: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
@@ -106,7 +108,7 @@ class CapitalReturnCreate(BaseModel):
     investor_id: UUID = Field(..., description="ID del inversor (is_investor=True)")
     amount: Decimal = Field(..., gt=0, description="Monto a retirar")
     account_id: UUID = Field(..., description="Cuenta de donde sale el capital")
-    date: datetime = Field(..., description="Fecha del retiro")
+    date: BusinessDate = Field(..., description="Fecha del retiro")
     description: Optional[str] = Field(None, max_length=500)
     reference_number: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
@@ -117,7 +119,7 @@ class CommissionPaymentCreate(BaseModel):
     third_party_id: UUID = Field(..., description="Tercero receptor de la comision")
     amount: Decimal = Field(..., gt=0, description="Monto a pagar")
     account_id: UUID = Field(..., description="Cuenta de donde sale el dinero")
-    date: datetime = Field(..., description="Fecha del pago")
+    date: BusinessDate = Field(..., description="Fecha del pago")
     description: Optional[str] = Field(None, max_length=500)
     reference_number: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
@@ -128,7 +130,7 @@ class ProvisionDepositCreate(BaseModel):
     provision_id: UUID = Field(..., description="ID de la provision (is_provision=True)")
     amount: Decimal = Field(..., gt=0, description="Monto a depositar")
     account_id: UUID = Field(..., description="Cuenta de donde sale el dinero")
-    date: datetime = Field(..., description="Fecha del deposito")
+    date: BusinessDate = Field(..., description="Fecha del deposito")
     description: Optional[str] = Field(None, max_length=500)
     reference_number: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
@@ -139,7 +141,7 @@ class ProvisionExpenseCreate(BaseModel):
     provision_id: UUID = Field(..., description="ID de la provision (is_provision=True)")
     amount: Decimal = Field(..., gt=0, description="Monto del gasto")
     expense_category_id: UUID = Field(..., description="Categoria del gasto")
-    date: datetime = Field(..., description="Fecha del gasto")
+    date: BusinessDate = Field(..., description="Fecha del gasto")
     description: str = Field(..., min_length=1, max_length=500, description="Descripcion del gasto")
     reference_number: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
@@ -150,7 +152,7 @@ class AdvancePaymentCreate(BaseModel):
     supplier_id: UUID = Field(..., description="ID del proveedor (is_supplier=True)")
     amount: Decimal = Field(..., gt=0, description="Monto del anticipo")
     account_id: UUID = Field(..., description="Cuenta de donde sale el dinero")
-    date: datetime = Field(..., description="Fecha del anticipo")
+    date: BusinessDate = Field(..., description="Fecha del anticipo")
     description: Optional[str] = Field(None, max_length=500)
     reference_number: Optional[str] = Field(None, max_length=100)
     evidence_url: Optional[str] = Field(None, max_length=500)
@@ -162,7 +164,7 @@ class AdvanceCollectionCreate(BaseModel):
     customer_id: UUID = Field(..., description="ID del cliente (is_customer=True)")
     amount: Decimal = Field(..., gt=0, description="Monto del anticipo")
     account_id: UUID = Field(..., description="Cuenta donde entra el dinero")
-    date: datetime = Field(..., description="Fecha del anticipo")
+    date: BusinessDate = Field(..., description="Fecha del anticipo")
     description: Optional[str] = Field(None, max_length=500)
     reference_number: Optional[str] = Field(None, max_length=100)
     evidence_url: Optional[str] = Field(None, max_length=500)
@@ -174,7 +176,7 @@ class AssetPaymentCreate(BaseModel):
     amount: Decimal = Field(..., gt=0, description="Monto del pago")
     account_id: UUID = Field(..., description="Cuenta de donde sale el dinero")
     description: str = Field(..., min_length=1, max_length=500, description="Descripcion del activo")
-    date: datetime = Field(..., description="Fecha del pago")
+    date: BusinessDate = Field(..., description="Fecha del pago")
     third_party_id: Optional[UUID] = Field(None, description="Tercero vendedor (opcional, cualquier tipo)")
     reference_number: Optional[str] = Field(None, max_length=100)
     evidence_url: Optional[str] = Field(None, max_length=500)
@@ -186,7 +188,7 @@ class ExpenseAccrualCreate(BaseModel):
     third_party_id: UUID = Field(..., description="Tercero (cualquier tercero activo)")
     amount: Decimal = Field(..., gt=0, description="Monto del gasto causado")
     expense_category_id: UUID = Field(..., description="Categoria del gasto")
-    date: datetime = Field(..., description="Fecha del gasto")
+    date: BusinessDate = Field(..., description="Fecha del gasto")
     description: str = Field(..., min_length=1, max_length=500, description="Descripcion del gasto")
     reference_number: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None

@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer
 
+from app.utils.dates import BusinessDate
+
 
 class InventoryMovementBase(BaseModel):
     """Base schema for InventoryMovement."""
@@ -24,7 +26,7 @@ class InventoryMovementBase(BaseModel):
         description="Reference type: purchase | sale | adjustment | transfer | transformation"
     )
     reference_id: Optional[UUID] = Field(None, description="Referenced transaction ID (NULL for manual adjustments)")
-    date: datetime = Field(..., description="Movement date")
+    date: BusinessDate = Field(..., description="Movement date")
     notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
 
 
