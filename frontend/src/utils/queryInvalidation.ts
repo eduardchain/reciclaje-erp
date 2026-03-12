@@ -64,5 +64,6 @@ export const invalidateAfterInventoryChange = (qc: QueryClient) => {
 export const invalidateAfterFixedAsset = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["fixed-assets"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });
+  qc.invalidateQueries({ queryKey: ["money-accounts"] });
   qc.invalidateQueries({ queryKey: ["reports"] });
 };

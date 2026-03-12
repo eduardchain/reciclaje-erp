@@ -50,8 +50,9 @@ export default function ProfitAndLossPage() {
                   provision_expense: "Gastos desde Provisiones",
                   expense_accrual: "Gastos Causados (Pasivos)",
                   deferred_expense: "Gastos Diferidos",
+                  depreciation_expense: "Depreciación de Activos",
                 };
-                const order = ["expense", "provision_expense", "expense_accrual", "deferred_expense"];
+                const order = ["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense"];
                 const sources = order.filter((s) => bySource[s] > 0);
                 if (sources.length > 1) {
                   return sources.map((s) => (

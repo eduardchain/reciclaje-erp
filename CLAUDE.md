@@ -92,7 +92,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - `components/shared/` — 12 reusable components (DataTable, PageHeader, StatusBadge, MoneyDisplay, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList, PriceSuggestion, KpiCard)
 - `components/auth/` — ProtectedRoute (token + org check), OrganizationSelector
 - `components/layout/` — Layout, Header (user dropdown), Sidebar (collapsible submenus)
-- `pages/` — 47 page components organized by module
+- `pages/` — 51 page components organized by module
 
 **Modules (all complete, 45+ routes):**
 - Auth: Login, org selection, protected routes
@@ -100,7 +100,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - Purchases: List (status tabs, search, date range, Items/DP/Actions columns) + Create (dynamic lines, auto-liquidate, price suggestions) + Edit (full revert-and-reapply) + Detail (liquidate/cancel/PDF)
 - Sales: Like purchases + commissions + profit display + stock warnings + Edit (lines + commissions)
 - Double Entries: Simultaneous buy+sell form with real-time profit calculation
-- Treasury: 14 movement types with dynamic form, annulment with reason, provisions (deposit/expense), advances (supplier/customer), account statement with running balance + PDF/Excel export, financial dashboard
+- Treasury: 14 movement types with dynamic form, annulment with reason, provisions (deposit/expense), advances (supplier/customer), account statement with running balance + PDF/Excel export, financial dashboard, fixed assets with monthly depreciation
 - Inventory: Stock view (expandable rows with warehouse breakdown, category/warehouse filters, transfer modal), movement history (material/warehouse filters, running balance/avg cost), adjustments (4 types), transformations (multi-line destinations, balance validation), warehouse transfers, valuation page, transit page (pending purchases/sales, bottleneck alerts)
 - Reports: P&L, Cash Flow, Balance Sheet, Purchase Report, Sales Report, Margin Analysis, Third Party Balances — all with date range pickers
 - Third Parties: CRUD with role badges (supplier/customer/investor/provision), balance display
@@ -188,6 +188,8 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 24. **Pago/Cobro inmediato al liquidar**: Al liquidar compras/ventas, opcionalmente se puede marcar "pago/cobro inmediato" con cuenta seleccionada. Crea un `MoneyMovement` atomicamente dentro de la misma transaccion usando `_create_movement()` (composable, usa flush). Validacion de saldo de cuenta. Frontend: Switch + EntitySelect en PurchaseLiquidatePage/SaleLiquidatePage.
 
 25. **Cash Flow desglosado**: Ingresos incluyen `advance_collections`. Egresos incluyen `provision_deposits`, `deferred_fundings`, `advance_payments`, `asset_payments`. Todos se suman a `total_outflows`/`total_inflows` para que `closing_balance = opening_balance + total_inflows - total_outflows` cuadre.
+
+26. **Activos Fijos (Fixed Assets)**: Modulo completo de depreciacion mensual en linea recta. `FixedAsset` con status `active | fully_depreciated | disposed`. Crear activo es OBLIGATORIO con `source_account_id` — se crea `asset_payment` (MoneyMovement) y se descuenta balance de cuenta atomicamente. `depreciation_expense` (MoneyMovement sin cuenta ni tercero, solo expense_category) se crea al depreciar. Ultima cuota se ajusta para llegar exacto a `salvage_value`. Dispose crea depreciacion acelerada por valor pendiente. `apply-pending` batch deprecia todos los activos con periodos pendientes. Balance Sheet incluye `fixed_assets` (SUM current_value WHERE status != disposed). P&L incluye `depreciation_expense` como source_type en expenses_by_category. Update restricciones: si tiene depreciaciones, solo nombre/codigo/notas/categoria editables. Frontend: 4 paginas (List, Create, Detail, Edit). 23 tests.
 
 24. **P&L desagregado por fuente**: `ExpenseCategoryBreakdown` incluye `source_type` (expense, provision_expense, expense_accrual, deferred_expense). Frontend agrupa gastos operativos por fuente con subtotales cuando hay mas de un tipo. Tabla detallada con secciones colapsables por fuente.
 

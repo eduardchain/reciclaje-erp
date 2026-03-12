@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,36 +8,44 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
-import { useCreateFixedAsset } from "@/hooks/useFixedAssets";
-import { useExpenseCategories, useThirdParties, useMoneyAccounts } from "@/hooks/useMasterData";
-import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
-import { ROUTES } from "@/utils/constants";
+import { useFixedAsset, useUpdateFixedAsset } from "@/hooks/useFixedAssets";
+import { useExpenseCategories } from "@/hooks/useMasterData";
+import { formatCurrency } from "@/utils/formatters";
 
-export default function FixedAssetCreatePage() {
+export default function FixedAssetEditPage() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const create = useCreateFixedAsset();
-
+  const { data: asset, isLoading } = useFixedAsset(id || "");
+  const update = useUpdateFixedAsset();
   const { data: categoriesData } = useExpenseCategories();
-  const { data: suppliersData } = useThirdParties({ role: "is_supplier" });
-  const { data: accountsData } = useMoneyAccounts();
-
   const categories = categoriesData?.items ?? [];
-  const suppliers = suppliersData?.items ?? [];
-  const accounts = accountsData?.items ?? [];
 
   const [name, setName] = useState("");
   const [assetCode, setAssetCode] = useState("");
-  const [purchaseDate, setPurchaseDate] = useState(toLocalDateInput());
   const [purchaseValue, setPurchaseValue] = useState(0);
   const [salvageValue, setSalvageValue] = useState(0);
   const [depreciationRate, setDepreciationRate] = useState(0);
-  const [depreciationStartDate, setDepreciationStartDate] = useState(toLocalDateInput());
-  const [accountId, setAccountId] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const [thirdPartyId, setThirdPartyId] = useState("");
   const [notes, setNotes] = useState("");
 
-  // Calculos en vivo
+  const hasDepreciations = (asset?.depreciations?.length ?? 0) > 0;
+
+  useEffect(() => {
+    if (asset) {
+      setName(asset.name);
+      setAssetCode(asset.asset_code || "");
+      setPurchaseValue(asset.purchase_value);
+      setSalvageValue(asset.salvage_value);
+      setDepreciationRate(asset.depreciation_rate);
+      setCategoryId(asset.expense_category_id);
+      setNotes(asset.notes || "");
+    }
+  }, [asset]);
+
+  if (isLoading) return <p className="text-center py-12 text-slate-400">Cargando...</p>;
+  if (!asset) return <p className="text-center py-12 text-slate-400">Activo fijo no encontrado</p>;
+
+  // Calculos en vivo (solo si campos financieros editables)
   const monthlyDepreciation = purchaseValue > 0 && depreciationRate > 0
     ? Math.round(purchaseValue * (depreciationRate / 100) * 100) / 100
     : 0;
@@ -48,42 +56,47 @@ export default function FixedAssetCreatePage() {
 
   const canSubmit =
     name.trim() !== "" &&
-    purchaseValue > 0 &&
-    depreciationRate > 0 &&
-    depreciationRate <= 100 &&
-    purchaseValue > salvageValue &&
     categoryId !== "" &&
-    accountId !== "" &&
-    !create.isPending;
+    (!hasDepreciations || true) &&
+    (hasDepreciations || (purchaseValue > 0 && depreciationRate > 0 && purchaseValue > salvageValue)) &&
+    !update.isPending;
 
   const handleSubmit = () => {
-    create.mutate(
-      {
-        name,
-        asset_code: assetCode || null,
-        purchase_date: purchaseDate,
-        purchase_value: purchaseValue,
-        salvage_value: salvageValue,
-        depreciation_rate: depreciationRate,
-        depreciation_start_date: depreciationStartDate,
-        expense_category_id: categoryId,
-        source_account_id: accountId,
-        third_party_id: thirdPartyId || null,
-        notes: notes || null,
-      },
-      {
-        onSuccess: () => navigate(ROUTES.TREASURY_FIXED_ASSETS),
-      },
+    const payload: Record<string, unknown> = {
+      name,
+      asset_code: assetCode || null,
+      notes: notes || null,
+      expense_category_id: categoryId,
+    };
+    if (!hasDepreciations) {
+      payload.purchase_value = purchaseValue;
+      payload.salvage_value = salvageValue;
+      payload.depreciation_rate = depreciationRate;
+    }
+    update.mutate(
+      { id: asset.id, data: payload },
+      { onSuccess: () => navigate(`/treasury/fixed-assets/${asset.id}`) },
     );
   };
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Nuevo Activo Fijo" description="Registrar equipo o bien con depreciacion mensual">
-        <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY_FIXED_ASSETS)}>
+      <PageHeader title="Editar Activo Fijo" description={asset.name}>
+        <Button variant="outline" onClick={() => navigate(`/treasury/fixed-assets/${asset.id}`)}>
           <ArrowLeft className="h-4 w-4 mr-2" />Volver
         </Button>
       </PageHeader>
+
+      {hasDepreciations && (
+        <Card className="border-amber-200 bg-amber-50 shadow-sm">
+          <CardContent className="p-4">
+            <p className="text-sm text-amber-800">
+              Este activo ya tiene depreciaciones aplicadas. Solo se pueden editar nombre, codigo, categoria y notas.
+              Los campos financieros (valor, tasa, valor residual) estan bloqueados.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="shadow-sm">
         <CardHeader>
@@ -93,59 +106,12 @@ export default function FixedAssetCreatePage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Retroexcavadora CAT 320" />
+              <Input value={name} onChange={(e) => setName(e.target.value)} />
             </div>
 
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Codigo de Activo</Label>
-              <Input value={assetCode} onChange={(e) => setAssetCode(e.target.value)} placeholder="Ej: AF-001" />
-            </div>
-
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Compra *</Label>
-              <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
-            </div>
-
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta de Pago *</Label>
-              <EntitySelect
-                value={accountId}
-                onChange={setAccountId}
-                options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
-                placeholder="Seleccionar cuenta..."
-              />
-              <p className="text-xs mt-1 text-slate-400">Se descontara el valor de compra de esta cuenta</p>
-            </div>
-
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor de Compra *</Label>
-              <MoneyInput value={purchaseValue} onChange={setPurchaseValue} placeholder="0" />
-            </div>
-
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor Residual</Label>
-              <MoneyInput value={salvageValue} onChange={setSalvageValue} placeholder="0" />
-              <p className="text-xs mt-1 text-slate-400">Valor al final de la vida util (default 0)</p>
-            </div>
-
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tasa Depreciacion Mensual (%) *</Label>
-              <Input
-                type="number"
-                min={0.01}
-                max={100}
-                step={0.01}
-                value={depreciationRate || ""}
-                onChange={(e) => setDepreciationRate(parseFloat(e.target.value) || 0)}
-                placeholder="Ej: 1"
-              />
-              <p className="text-xs mt-1 text-slate-400">Porcentaje mensual sobre valor de compra</p>
-            </div>
-
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha Inicio Depreciacion *</Label>
-              <Input type="date" value={depreciationStartDate} onChange={(e) => setDepreciationStartDate(e.target.value)} />
-              <p className="text-xs mt-1 text-slate-400">Debe ser igual o posterior a la fecha de compra</p>
+              <Input value={assetCode} onChange={(e) => setAssetCode(e.target.value)} />
             </div>
 
             <div>
@@ -159,12 +125,25 @@ export default function FixedAssetCreatePage() {
             </div>
 
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</Label>
-              <EntitySelect
-                value={thirdPartyId}
-                onChange={setThirdPartyId}
-                options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
-                placeholder="Seleccionar proveedor (opcional)..."
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor de Compra *</Label>
+              <MoneyInput value={purchaseValue} onChange={setPurchaseValue} disabled={hasDepreciations} />
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor Residual</Label>
+              <MoneyInput value={salvageValue} onChange={setSalvageValue} disabled={hasDepreciations} />
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tasa Depreciacion Mensual (%)</Label>
+              <Input
+                type="number"
+                min={0.01}
+                max={100}
+                step={0.01}
+                value={depreciationRate || ""}
+                onChange={(e) => setDepreciationRate(parseFloat(e.target.value) || 0)}
+                disabled={hasDepreciations}
               />
             </div>
 
@@ -176,8 +155,8 @@ export default function FixedAssetCreatePage() {
         </CardContent>
       </Card>
 
-      {/* Preview */}
-      {purchaseValue > 0 && depreciationRate > 0 && (
+      {/* Preview (solo si campos financieros editables) */}
+      {!hasDepreciations && purchaseValue > 0 && depreciationRate > 0 && (
         <Card className="shadow-sm border-t-[3px] border-t-emerald-500">
           <CardContent className="p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Vista Previa Depreciacion</p>
@@ -205,13 +184,13 @@ export default function FixedAssetCreatePage() {
 
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY_FIXED_ASSETS)}>Cancelar</Button>
+          <Button variant="outline" onClick={() => navigate(`/treasury/fixed-assets/${asset.id}`)}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
             disabled={!canSubmit}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
-            {create.isPending ? "Creando..." : "Crear Activo Fijo"}
+            {update.isPending ? "Guardando..." : "Guardar Cambios"}
           </Button>
         </div>
       </div>

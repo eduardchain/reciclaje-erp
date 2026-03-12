@@ -21,8 +21,8 @@ class FixedAssetCreate(BaseModel):
     depreciation_rate: Decimal = Field(..., ge=Decimal("0.01"), le=Decimal("100"))
     depreciation_start_date: date
     expense_category_id: UUID
+    source_account_id: UUID
     third_party_id: Optional[UUID] = None
-    purchase_movement_id: Optional[UUID] = None
     notes: Optional[str] = Field(None, max_length=500)
 
     @model_validator(mode="after")

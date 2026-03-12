@@ -28,6 +28,9 @@ export default function BalanceSheetPage() {
                 {data.assets.prepaid_expenses > 0 && (
                   <div className="flex justify-between"><span>Gastos Prepagados</span><span>{formatCurrency(data.assets.prepaid_expenses)}</span></div>
                 )}
+                {data.assets.fixed_assets > 0 && (
+                  <div className="flex justify-between"><span>Activos Fijos (Neto)</span><span>{formatCurrency(data.assets.fixed_assets)}</span></div>
+                )}
                 <Separator />
                 <div className="flex justify-between font-bold"><span>Total Activos</span><span>{formatCurrency(data.total_assets)}</span></div>
               </CardContent>

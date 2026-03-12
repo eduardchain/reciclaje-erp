@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Play, XCircle, ExternalLink } from "lucide-react";
+import { ArrowLeft, Play, XCircle, ExternalLink, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -165,8 +165,12 @@ export default function FixedAssetDetailPage() {
       </Card>
 
       {/* Acciones */}
-      {(canDepreciate || canDispose) && (
-        <div className="flex gap-2">
+      <div className="flex gap-2">
+          {asset.status !== "disposed" && (
+            <Button variant="outline" onClick={() => navigate(`/treasury/fixed-assets/${asset.id}/edit`)}>
+              <Pencil className="h-4 w-4 mr-2" />Editar
+            </Button>
+          )}
           {canDepreciate && (
             <Button onClick={() => setShowDepreciate(true)} className="bg-emerald-600 hover:bg-emerald-700">
               <Play className="h-4 w-4 mr-2" />Aplicar Depreciacion
@@ -177,8 +181,7 @@ export default function FixedAssetDetailPage() {
               <XCircle className="h-4 w-4 mr-2" />Dar de Baja
             </Button>
           )}
-        </div>
-      )}
+      </div>
 
       {/* Tabla de depreciaciones */}
       <Card className="shadow-sm">

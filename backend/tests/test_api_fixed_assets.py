@@ -4,7 +4,7 @@ Tests para endpoints de FixedAsset (Activos Fijos).
 Cubre: CRUD, depreciacion manual, ultima cuota ajustada, duplicado periodo,
 apply-pending batch, dispose con depreciacion acelerada, update restricciones,
 P&L incluye depreciation_expense, Balance Sheet incluye fixed_assets,
-depreciation_start_date futuro.
+depreciation_start_date futuro, pago obligatorio desde cuenta.
 """
 from datetime import date, timedelta
 from decimal import Decimal
@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.expense_category import ExpenseCategory
+from app.models.money_account import MoneyAccount
 from app.models.third_party import ThirdParty
 
 
@@ -51,10 +52,25 @@ def fa_supplier(db_session: Session, test_organization) -> ThirdParty:
     return tp
 
 
+@pytest.fixture
+def fa_account(db_session: Session, test_organization) -> MoneyAccount:
+    """Cuenta de dinero con saldo suficiente para comprar activos."""
+    acc = MoneyAccount(
+        name="Cuenta Principal",
+        account_type="bank",
+        current_balance=Decimal("5000000000"),
+        organization_id=test_organization.id,
+    )
+    db_session.add(acc)
+    db_session.commit()
+    db_session.refresh(acc)
+    return acc
+
+
 BASE_URL = "/api/v1/fixed-assets"
 
 
-def _create_asset(client, org_headers, fa_category, **overrides):
+def _create_asset(client, org_headers, fa_category, fa_account, **overrides):
     """Helper para crear un activo fijo con datos default."""
     payload = {
         "name": "Retroexcavadora CAT 320",
@@ -65,6 +81,7 @@ def _create_asset(client, org_headers, fa_category, **overrides):
         "depreciation_rate": 1.0,
         "depreciation_start_date": "2026-01-01",
         "expense_category_id": str(fa_category.id),
+        "source_account_id": str(fa_account.id),
     }
     payload.update(overrides)
     return client.post(BASE_URL + "/", json=payload, headers=org_headers)
@@ -75,9 +92,9 @@ def _create_asset(client, org_headers, fa_category, **overrides):
 # ---------------------------------------------------------------------------
 
 class TestFixedAssetCreate:
-    def test_create_basic(self, client: TestClient, org_headers, fa_category):
+    def test_create_basic(self, client: TestClient, org_headers, fa_category, fa_account):
         """Crear activo fijo basico."""
-        resp = _create_asset(client, org_headers, fa_category)
+        resp = _create_asset(client, org_headers, fa_category, fa_account)
         assert resp.status_code == 201
         data = resp.json()
         assert data["name"] == "Retroexcavadora CAT 320"
@@ -94,10 +111,10 @@ class TestFixedAssetCreate:
         assert data["status"] == "active"
         assert data["depreciation_progress"] == 0.0
 
-    def test_create_with_salvage(self, client: TestClient, org_headers, fa_category):
+    def test_create_with_salvage(self, client: TestClient, org_headers, fa_category, fa_account):
         """Crear activo con valor residual."""
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=100000000,
             salvage_value=10000000,
             depreciation_rate=5.0,
@@ -109,10 +126,10 @@ class TestFixedAssetCreate:
         # depreciable = 100M - 10M = 90M, useful_life = 90M / 5M = 18
         assert data["useful_life_months"] == 18
 
-    def test_create_with_supplier(self, client: TestClient, org_headers, fa_category, fa_supplier):
+    def test_create_with_supplier(self, client: TestClient, org_headers, fa_category, fa_account, fa_supplier):
         """Crear activo con proveedor."""
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             third_party_id=str(fa_supplier.id),
         )
         assert resp.status_code == 201
@@ -120,23 +137,85 @@ class TestFixedAssetCreate:
         assert data["third_party_id"] == str(fa_supplier.id)
         assert data["third_party_name"] == "Equipos Industriales S.A."
 
-    def test_create_invalid_salvage(self, client: TestClient, org_headers, fa_category):
+    def test_create_invalid_salvage(self, client: TestClient, org_headers, fa_category, fa_account):
         """Valor residual >= valor compra debe fallar."""
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=100000,
             salvage_value=100000,
         )
         assert resp.status_code == 422
 
-    def test_create_invalid_dates(self, client: TestClient, org_headers, fa_category):
+    def test_create_invalid_dates(self, client: TestClient, org_headers, fa_category, fa_account):
         """depreciation_start_date < purchase_date debe fallar."""
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_date="2026-03-01",
             depreciation_start_date="2026-02-01",
         )
         assert resp.status_code == 422
+
+    def test_create_requires_account(self, client: TestClient, org_headers, fa_category):
+        """Sin source_account_id debe fallar 422."""
+        payload = {
+            "name": "Sin Cuenta",
+            "purchase_date": "2026-01-01",
+            "purchase_value": 1000000,
+            "depreciation_rate": 5.0,
+            "depreciation_start_date": "2026-01-01",
+            "expense_category_id": str(fa_category.id),
+        }
+        resp = client.post(BASE_URL + "/", json=payload, headers=org_headers)
+        assert resp.status_code == 422
+
+    def test_create_insufficient_balance(self, client: TestClient, org_headers, fa_category, db_session, test_organization):
+        """Saldo insuficiente en cuenta debe fallar 400."""
+        # Cuenta con saldo bajo
+        low_acc = MoneyAccount(
+            name="Cuenta Pobre",
+            account_type="cash",
+            current_balance=Decimal("100"),
+            organization_id=test_organization.id,
+        )
+        db_session.add(low_acc)
+        db_session.commit()
+        db_session.refresh(low_acc)
+
+        resp = _create_asset(
+            client, org_headers, fa_category, low_acc,
+            purchase_value=1000000,
+        )
+        assert resp.status_code == 400
+
+    def test_create_creates_asset_payment(self, client: TestClient, org_headers, fa_category, fa_account, db_session):
+        """Crear activo genera MoneyMovement asset_payment y descuenta balance."""
+        initial_balance = float(fa_account.current_balance)
+        purchase_value = 10000000
+
+        resp = _create_asset(
+            client, org_headers, fa_category, fa_account,
+            purchase_value=purchase_value,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+
+        # Verificar purchase_movement_id existe
+        assert data["purchase_movement_id"] is not None
+
+        # Verificar movimiento
+        mov_resp = client.get(
+            f"/api/v1/money-movements/{data['purchase_movement_id']}",
+            headers=org_headers,
+        )
+        assert mov_resp.status_code == 200
+        mov = mov_resp.json()
+        assert mov["movement_type"] == "asset_payment"
+        assert mov["amount"] == float(purchase_value)
+        assert mov["account_id"] == str(fa_account.id)
+
+        # Verificar balance descontado
+        db_session.refresh(fa_account)
+        assert float(fa_account.current_balance) == initial_balance - purchase_value
 
 
 # ---------------------------------------------------------------------------
@@ -144,11 +223,11 @@ class TestFixedAssetCreate:
 # ---------------------------------------------------------------------------
 
 class TestFixedAssetDepreciation:
-    def test_depreciate_manual(self, client: TestClient, org_headers, fa_category):
+    def test_depreciate_manual(self, client: TestClient, org_headers, fa_category, fa_account):
         """Aplicar una depreciacion manual."""
         # Crear activo con start_date en el pasado
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=10000000,
             depreciation_rate=10.0,
             depreciation_start_date="2026-01-01",
@@ -168,10 +247,10 @@ class TestFixedAssetDepreciation:
         assert dep["depreciation_number"] == 1
         assert dep["amount"] == 1000000.0
 
-    def test_depreciate_duplicate_period(self, client: TestClient, org_headers, fa_category):
+    def test_depreciate_duplicate_period(self, client: TestClient, org_headers, fa_category, fa_account):
         """Duplicar depreciacion del mismo periodo debe fallar con 409."""
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=10000000,
             depreciation_rate=10.0,
             depreciation_start_date="2026-01-01",
@@ -186,12 +265,12 @@ class TestFixedAssetDepreciation:
         resp3 = client.post(f"{BASE_URL}/{asset_id}/depreciate", headers=org_headers)
         assert resp3.status_code == 409
 
-    def test_last_quota_adjustment(self, client: TestClient, org_headers, fa_category):
+    def test_last_quota_adjustment(self, client: TestClient, org_headers, fa_category, fa_account):
         """Ultima cuota se ajusta para llegar exacto a salvage_value."""
         # Activo 10M, salvage 1M, rate 50% → monthly=5M, depreciable=9M
         # Cuota 1: 5M, queda 4M. Cuota 2: 4M (ajustada, no 5M)
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=10000000,
             salvage_value=1000000,
             depreciation_rate=50.0,
@@ -211,10 +290,10 @@ class TestFixedAssetDepreciation:
         remaining = data["current_value"] - data["salvage_value"]
         assert remaining == 4000000.0
 
-    def test_depreciate_creates_movement(self, client: TestClient, org_headers, fa_category):
+    def test_depreciate_creates_movement(self, client: TestClient, org_headers, fa_category, fa_account):
         """Depreciacion crea MoneyMovement tipo depreciation_expense."""
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=10000000,
             depreciation_rate=10.0,
             depreciation_start_date="2026-01-01",
@@ -243,18 +322,18 @@ class TestFixedAssetDepreciation:
 # ---------------------------------------------------------------------------
 
 class TestFixedAssetApplyPending:
-    def test_apply_pending_batch(self, client: TestClient, org_headers, fa_category):
+    def test_apply_pending_batch(self, client: TestClient, org_headers, fa_category, fa_account):
         """Apply-pending procesa multiples activos."""
         # Crear 2 activos con start_date en el pasado
         _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             name="Equipo A",
             purchase_value=10000000,
             depreciation_rate=10.0,
             depreciation_start_date="2026-01-01",
         )
         _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             name="Equipo B",
             purchase_value=20000000,
             depreciation_rate=5.0,
@@ -269,11 +348,11 @@ class TestFixedAssetApplyPending:
         assert "Equipo A" in names
         assert "Equipo B" in names
 
-    def test_apply_pending_skips_future_start(self, client: TestClient, org_headers, fa_category):
+    def test_apply_pending_skips_future_start(self, client: TestClient, org_headers, fa_category, fa_account):
         """Apply-pending NO deprecia activos con start_date futuro."""
         future = (date.today() + timedelta(days=60)).isoformat()
         _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             name="Equipo Futuro",
             purchase_value=10000000,
             depreciation_rate=10.0,
@@ -290,10 +369,10 @@ class TestFixedAssetApplyPending:
 # ---------------------------------------------------------------------------
 
 class TestFixedAssetDispose:
-    def test_dispose_with_accelerated(self, client: TestClient, org_headers, fa_category):
+    def test_dispose_with_accelerated(self, client: TestClient, org_headers, fa_category, fa_account):
         """Dar de baja crea depreciacion acelerada."""
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=10000000,
             salvage_value=0,
             depreciation_rate=10.0,
@@ -319,9 +398,9 @@ class TestFixedAssetDispose:
         # 2 depreciaciones: 1 normal + 1 acelerada
         assert len(data["depreciations"]) == 2
 
-    def test_dispose_already_disposed(self, client: TestClient, org_headers, fa_category):
+    def test_dispose_already_disposed(self, client: TestClient, org_headers, fa_category, fa_account):
         """Dar de baja un activo ya dado de baja falla."""
-        resp = _create_asset(client, org_headers, fa_category)
+        resp = _create_asset(client, org_headers, fa_category, fa_account)
         asset_id = resp.json()["id"]
 
         client.post(
@@ -343,9 +422,9 @@ class TestFixedAssetDispose:
 # ---------------------------------------------------------------------------
 
 class TestFixedAssetUpdate:
-    def test_update_before_depreciation(self, client: TestClient, org_headers, fa_category):
+    def test_update_before_depreciation(self, client: TestClient, org_headers, fa_category, fa_account):
         """Editar campos financieros antes de depreciar."""
-        resp = _create_asset(client, org_headers, fa_category)
+        resp = _create_asset(client, org_headers, fa_category, fa_account)
         asset_id = resp.json()["id"]
 
         resp2 = client.patch(
@@ -360,10 +439,10 @@ class TestFixedAssetUpdate:
         # Recalcula: monthly = 700M * 1% = 7M
         assert data["monthly_depreciation"] == 7000000.0
 
-    def test_update_after_depreciation_restricted(self, client: TestClient, org_headers, fa_category):
+    def test_update_after_depreciation_restricted(self, client: TestClient, org_headers, fa_category, fa_account):
         """No editar campos financieros despues de depreciar."""
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=10000000,
             depreciation_rate=10.0,
             depreciation_start_date="2026-01-01",
@@ -396,19 +475,19 @@ class TestFixedAssetUpdate:
 # ---------------------------------------------------------------------------
 
 class TestFixedAssetList:
-    def test_list_all(self, client: TestClient, org_headers, fa_category):
+    def test_list_all(self, client: TestClient, org_headers, fa_category, fa_account):
         """Listar todos los activos."""
-        _create_asset(client, org_headers, fa_category, name="A1")
-        _create_asset(client, org_headers, fa_category, name="A2")
+        _create_asset(client, org_headers, fa_category, fa_account, name="A1")
+        _create_asset(client, org_headers, fa_category, fa_account, name="A2")
 
         resp = client.get(BASE_URL + "/", headers=org_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 2
 
-    def test_list_filter_status(self, client: TestClient, org_headers, fa_category):
+    def test_list_filter_status(self, client: TestClient, org_headers, fa_category, fa_account):
         """Filtrar por status."""
-        resp = _create_asset(client, org_headers, fa_category)
+        resp = _create_asset(client, org_headers, fa_category, fa_account)
         asset_id = resp.json()["id"]
 
         # Dispose
@@ -419,7 +498,7 @@ class TestFixedAssetList:
         )
 
         # Crear otro activo
-        _create_asset(client, org_headers, fa_category, name="Otro")
+        _create_asset(client, org_headers, fa_category, fa_account, name="Otro")
 
         resp_active = client.get(f"{BASE_URL}/?status=active", headers=org_headers)
         assert resp_active.json()["total"] == 1
@@ -433,10 +512,10 @@ class TestFixedAssetList:
 # ---------------------------------------------------------------------------
 
 class TestFixedAssetReports:
-    def test_pnl_includes_depreciation(self, client: TestClient, org_headers, fa_category):
+    def test_pnl_includes_depreciation(self, client: TestClient, org_headers, fa_category, fa_account):
         """P&L incluye depreciation_expense como gasto operativo."""
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=10000000,
             depreciation_rate=10.0,
             depreciation_start_date="2026-01-01",
@@ -465,11 +544,11 @@ class TestFixedAssetReports:
         assert dep_cats[0]["total_amount"] == 1000000.0
         assert dep_cats[0]["category_name"] == "Depreciación Equipos"
 
-    def test_balance_sheet_includes_fixed_assets(self, client: TestClient, org_headers, fa_category):
+    def test_balance_sheet_includes_fixed_assets(self, client: TestClient, org_headers, fa_category, fa_account):
         """Balance Sheet incluye fixed_assets en activos."""
         # Crear activo de 50M
         _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=50000000,
             depreciation_start_date="2026-01-01",
             depreciation_rate=10.0,
@@ -489,10 +568,10 @@ class TestFixedAssetReports:
         # total_assets incluye fixed_assets
         assert bs["total_assets"] >= 45000000.0
 
-    def test_balance_sheet_excludes_disposed(self, client: TestClient, org_headers, fa_category):
+    def test_balance_sheet_excludes_disposed(self, client: TestClient, org_headers, fa_category, fa_account):
         """Balance Sheet no incluye activos dados de baja."""
         resp = _create_asset(
-            client, org_headers, fa_category,
+            client, org_headers, fa_category, fa_account,
             purchase_value=10000000,
         )
         asset_id = resp.json()["id"]

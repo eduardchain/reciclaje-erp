@@ -129,6 +129,7 @@ export interface BalanceSheetAssets {
   inventory: number;
   prepaid_expenses: number;
   provision_funds: number;
+  fixed_assets: number;
   total: number;
 }
 

@@ -200,6 +200,7 @@ def create_expense_categories(db, org: Organization) -> dict:
         ("Nomina",           "Salarios y prestaciones sociales",     False),
         ("Mantenimiento",    "Mantenimiento de equipos y vehiculos", False),
         ("Papeleria",        "Elementos de oficina y papeleria",     False),
+        ("Depreciación Equipos", "Depreciacion mensual de activos fijos", False),
     ]
     result = {}
     for nombre, desc, directo in cats:
@@ -502,7 +503,7 @@ def main():
         print(f"  3 bodegas")
         print(f"  5 cuentas de dinero (Bancolombia: $100M)")
         print(f"  4 unidades de negocio")
-        print(f"  7 categorias de gasto")
+        print(f"  8 categorias de gasto")
         print(f"  1 aporte de capital inicial")
         print()
 

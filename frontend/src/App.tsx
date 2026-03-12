@@ -33,6 +33,7 @@ import ScheduledExpenseDetailPage from "@/pages/treasury/ScheduledExpenseDetailP
 import FixedAssetsPage from "@/pages/treasury/FixedAssetsPage";
 import FixedAssetCreatePage from "@/pages/treasury/FixedAssetCreatePage";
 import FixedAssetDetailPage from "@/pages/treasury/FixedAssetDetailPage";
+import FixedAssetEditPage from "@/pages/treasury/FixedAssetEditPage";
 import StockPage from "@/pages/inventory/StockPage";
 import MovementHistoryPage from "@/pages/inventory/MovementHistoryPage";
 import AdjustmentsPage from "@/pages/inventory/AdjustmentsPage";
@@ -113,6 +114,7 @@ function App() {
               <Route path="/treasury/scheduled-expenses/:id" element={<ScheduledExpenseDetailPage />} />
               <Route path={ROUTES.TREASURY_FIXED_ASSETS} element={<FixedAssetsPage />} />
               <Route path={ROUTES.TREASURY_FIXED_ASSETS_NEW} element={<FixedAssetCreatePage />} />
+              <Route path="/treasury/fixed-assets/:id/edit" element={<FixedAssetEditPage />} />
               <Route path="/treasury/fixed-assets/:id" element={<FixedAssetDetailPage />} />
               <Route path="/treasury/:id" element={<MovementDetailPage />} />
               {/* Inventario */}

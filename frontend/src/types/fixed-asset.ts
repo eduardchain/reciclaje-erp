@@ -53,8 +53,8 @@ export interface FixedAssetCreate {
   depreciation_rate: number;
   depreciation_start_date: string;
   expense_category_id: string;
+  source_account_id: string;
   third_party_id?: string | null;
-  purchase_movement_id?: string | null;
   notes?: string | null;
 }
 
