@@ -396,18 +396,26 @@ class ReportService:
         customer_collections = mm_map.get("collection_from_client", Decimal("0"))
         service_income = mm_map.get("service_income", Decimal("0"))
         capital_injections = mm_map.get("capital_injection", Decimal("0"))
+        advance_collections = mm_map.get("advance_collection", Decimal("0"))
 
         supplier_payments = mm_map.get("payment_to_supplier", Decimal("0"))
         expenses = mm_map.get("expense", Decimal("0"))
         commission_payments = mm_map.get("commission_payment", Decimal("0"))
         capital_returns = mm_map.get("capital_return", Decimal("0"))
+        provision_deposits = mm_map.get("provision_deposit", Decimal("0"))
+        deferred_fundings = mm_map.get("deferred_funding", Decimal("0"))
+        advance_payments = mm_map.get("advance_payment", Decimal("0"))
+        asset_payments = mm_map.get("asset_payment", Decimal("0"))
 
         total_inflows = (
-            sale_collections + customer_collections + service_income + capital_injections
+            sale_collections + customer_collections + service_income
+            + capital_injections + advance_collections
         )
         total_outflows = (
             purchase_payments + supplier_payments + expenses
             + commission_payments + capital_returns
+            + provision_deposits + deferred_fundings
+            + advance_payments + asset_payments
         )
         net_flow = total_inflows - total_outflows
 
@@ -470,6 +478,7 @@ class ReportService:
                 customer_collections=float(customer_collections),
                 service_income=float(service_income),
                 capital_injections=float(capital_injections),
+                advance_collections=float(advance_collections),
                 total=float(total_inflows),
             ),
             total_inflows=float(total_inflows),
@@ -479,6 +488,10 @@ class ReportService:
                 expenses=float(expenses),
                 commission_payments=float(commission_payments),
                 capital_returns=float(capital_returns),
+                provision_deposits=float(provision_deposits),
+                deferred_fundings=float(deferred_fundings),
+                advance_payments=float(advance_payments),
+                asset_payments=float(asset_payments),
                 total=float(total_outflows),
             ),
             total_outflows=float(total_outflows),
@@ -530,7 +543,31 @@ class ReportService:
             )
         ))
 
-        total_assets = cash_and_bank + accounts_receivable + inventory
+        # Gastos prepagados (terceros system_entity con balance > 0, ej: gastos diferidos)
+        prepaid_expenses = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
+                .where(
+                    ThirdParty.organization_id == organization_id,
+                    ThirdParty.is_system_entity == True,
+                    ThirdParty.current_balance > 0,
+                )
+            )
+        ))
+
+        # Fondos en provisiones (is_provision con balance < 0 = fondos disponibles)
+        provision_funds = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
+                .where(
+                    ThirdParty.organization_id == organization_id,
+                    ThirdParty.is_provision == True,
+                    ThirdParty.current_balance < 0,
+                )
+            )
+        ))
+
+        total_assets = cash_and_bank + accounts_receivable + inventory + prepaid_expenses + provision_funds
 
         # Pasivos
         accounts_payable = Decimal(str(
@@ -555,7 +592,19 @@ class ReportService:
             )
         ))
 
-        total_liabilities = accounts_payable + investor_debt
+        # Pasivos laborales/otros (is_liability con balance < 0 = le debemos)
+        liability_debt = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
+                .where(
+                    ThirdParty.organization_id == organization_id,
+                    ThirdParty.is_liability == True,
+                    ThirdParty.current_balance < 0,
+                )
+            )
+        ))
+
+        total_liabilities = accounts_payable + investor_debt + liability_debt
         equity = total_assets - total_liabilities
 
         return BalanceSheetResponse(
@@ -564,12 +613,15 @@ class ReportService:
                 cash_and_bank=float(cash_and_bank),
                 accounts_receivable=float(accounts_receivable),
                 inventory=float(inventory),
+                prepaid_expenses=float(prepaid_expenses),
+                provision_funds=float(provision_funds),
                 total=float(total_assets),
             ),
             total_assets=float(total_assets),
             liabilities=BalanceSheetLiabilities(
                 accounts_payable=float(accounts_payable),
                 investor_debt=float(investor_debt),
+                liability_debt=float(liability_debt),
                 total=float(total_liabilities),
             ),
             total_liabilities=float(total_liabilities),

@@ -22,6 +22,12 @@ export default function BalanceSheetPage() {
                 <div className="flex justify-between"><span>Efectivo y Bancos</span><span>{formatCurrency(data.assets.cash_and_bank)}</span></div>
                 <div className="flex justify-between"><span>Cuentas por Cobrar</span><span>{formatCurrency(data.assets.accounts_receivable)}</span></div>
                 <div className="flex justify-between"><span>Inventario</span><span>{formatCurrency(data.assets.inventory)}</span></div>
+                {data.assets.provision_funds > 0 && (
+                  <div className="flex justify-between"><span>Fondos en Provisiones</span><span>{formatCurrency(data.assets.provision_funds)}</span></div>
+                )}
+                {data.assets.prepaid_expenses > 0 && (
+                  <div className="flex justify-between"><span>Gastos Prepagados</span><span>{formatCurrency(data.assets.prepaid_expenses)}</span></div>
+                )}
                 <Separator />
                 <div className="flex justify-between font-bold"><span>Total Activos</span><span>{formatCurrency(data.total_assets)}</span></div>
               </CardContent>
@@ -32,6 +38,9 @@ export default function BalanceSheetPage() {
               <CardContent className="space-y-2 text-sm">
                 <div className="flex justify-between"><span>Cuentas por Pagar</span><span>{formatCurrency(data.liabilities.accounts_payable)}</span></div>
                 <div className="flex justify-between"><span>Deuda Inversionistas</span><span>{formatCurrency(data.liabilities.investor_debt)}</span></div>
+                {data.liabilities.liability_debt > 0 && (
+                  <div className="flex justify-between"><span>Pasivos Laborales</span><span>{formatCurrency(data.liabilities.liability_debt)}</span></div>
+                )}
                 <Separator />
                 <div className="flex justify-between font-bold"><span>Total Pasivos</span><span>{formatCurrency(data.total_liabilities)}</span></div>
               </CardContent>

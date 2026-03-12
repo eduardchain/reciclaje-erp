@@ -140,6 +140,7 @@ class CashFlowInflows(BaseModel):
     customer_collections: float
     service_income: float
     capital_injections: float
+    advance_collections: float = 0.0
     total: float
 
 
@@ -149,6 +150,10 @@ class CashFlowOutflows(BaseModel):
     expenses: float
     commission_payments: float
     capital_returns: float
+    provision_deposits: float = 0.0
+    deferred_fundings: float = 0.0
+    advance_payments: float = 0.0
+    asset_payments: float = 0.0
     total: float
 
 
@@ -172,12 +177,15 @@ class BalanceSheetAssets(BaseModel):
     cash_and_bank: float
     accounts_receivable: float
     inventory: float
+    prepaid_expenses: float = 0.0
+    provision_funds: float = 0.0
     total: float
 
 
 class BalanceSheetLiabilities(BaseModel):
     accounts_payable: float
     investor_debt: float
+    liability_debt: float = 0.0
     total: float
 
 

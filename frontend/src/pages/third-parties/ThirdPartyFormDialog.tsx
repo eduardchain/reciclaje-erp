@@ -27,6 +27,7 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
   const [isCustomer, setIsCustomer] = useState(false);
   const [isInvestor, setIsInvestor] = useState(false);
   const [isProvision, setIsProvision] = useState(false);
+  const [isLiability, setIsLiability] = useState(false);
   const [initialBalance, setInitialBalance] = useState(0);
 
   useEffect(() => {
@@ -40,9 +41,10 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
       setIsCustomer(editItem.is_customer);
       setIsInvestor(editItem.is_investor);
       setIsProvision(editItem.is_provision);
+      setIsLiability(editItem.is_liability);
     } else {
       setName(""); setIdentification(""); setEmail(""); setPhone(""); setAddress("");
-      setIsSupplier(false); setIsCustomer(false); setIsInvestor(false); setIsProvision(false);
+      setIsSupplier(false); setIsCustomer(false); setIsInvestor(false); setIsProvision(false); setIsLiability(false);
       setInitialBalance(0);
     }
   }, [editItem, open]);
@@ -58,6 +60,7 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
       is_customer: isCustomer,
       is_investor: isInvestor,
       is_provision: isProvision,
+      is_liability: isLiability,
     };
     const opts = { onSuccess: () => onOpenChange(false) };
 
@@ -90,6 +93,7 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
             <div className="flex items-center justify-between"><span className="text-sm">Cliente</span><Switch checked={isCustomer} onCheckedChange={setIsCustomer} /></div>
             <div className="flex items-center justify-between"><span className="text-sm">Inversionista</span><Switch checked={isInvestor} onCheckedChange={setIsInvestor} /></div>
             <div className="flex items-center justify-between"><span className="text-sm">Provision</span><Switch checked={isProvision} onCheckedChange={setIsProvision} /></div>
+            <div className="flex items-center justify-between"><span className="text-sm">Pasivo</span><Switch checked={isLiability} onCheckedChange={setIsLiability} /></div>
           </div>
           {!editItem && (
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><MoneyInput value={initialBalance} onChange={setInitialBalance} /></div>

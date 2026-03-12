@@ -143,7 +143,7 @@ export default function LiabilitiesPage() {
                           Pagar
                         </Button>
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
                           onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${tp.id}`)}
                         >

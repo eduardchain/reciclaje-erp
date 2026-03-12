@@ -20,6 +20,7 @@ class ThirdPartyBase(BaseModel):
     is_customer: bool = Field(default=False, description="Is this third party a customer?")
     is_investor: bool = Field(default=False, description="Is this third party an investor?")
     is_provision: bool = Field(default=False, description="Is this third party a provision?")
+    is_liability: bool = Field(default=False, description="Is this third party a liability?")
 
 
 class ThirdPartyCreate(ThirdPartyBase):
@@ -44,6 +45,7 @@ class ThirdPartyUpdate(BaseModel):
     is_customer: Optional[bool] = None
     is_investor: Optional[bool] = None
     is_provision: Optional[bool] = None
+    is_liability: Optional[bool] = None
 
 
 class ThirdPartyResponse(ThirdPartyBase):

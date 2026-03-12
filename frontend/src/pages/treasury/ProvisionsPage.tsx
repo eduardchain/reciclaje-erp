@@ -1,31 +1,63 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { PiggyBank, Plus, Receipt, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { SearchInput } from "@/components/shared/SearchInput";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useProvisions } from "@/hooks/useMasterData";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { thirdPartyService } from "@/services/thirdParties";
+import { getApiErrorMessage } from "@/utils/formatters";
 import { formatCurrency } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
+import type { ThirdPartyCreate } from "@/types/third-party";
 
 export default function ProvisionsPage() {
   const navigate = useNavigate();
-  const { data, isLoading } = useProvisions();
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const { data, isLoading } = useProvisions(search || undefined);
   const provisions = data?.items ?? [];
 
   const totalAvailable = provisions.reduce((sum, p) => {
     return sum + (p.current_balance < 0 ? Math.abs(p.current_balance) : 0);
   }, 0);
 
+  // Modal crear provision
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState("");
+  const createTP = useMutation({
+    mutationFn: (data: ThirdPartyCreate) => thirdPartyService.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["third-parties"] });
+      toast.success("Provision creada exitosamente");
+      setShowCreate(false);
+      setNewName("");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al crear la provision"));
+    },
+  });
+
   return (
     <div className="space-y-6">
       <PageHeader title="Provisiones" description="Gestion de fondos provisionados">
-        <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
-          Volver a Tesoreria
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
+            Volver a Tesoreria
+          </Button>
+          <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700">
+            <Plus className="h-4 w-4 mr-2" />Nueva Provision
+          </Button>
+        </div>
       </PageHeader>
 
       <Card className="border-t-[3px] border-t-violet-500 shadow-sm">
@@ -39,6 +71,10 @@ export default function ProvisionsPage() {
         </CardContent>
       </Card>
 
+      <div className="flex gap-3 items-center">
+        <SearchInput value={search} onChange={setSearch} placeholder="Buscar provision..." />
+      </div>
+
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Provisiones</CardTitle>
@@ -49,7 +85,7 @@ export default function ProvisionsPage() {
           ) : provisions.length === 0 ? (
             <EmptyState
               title="Sin provisiones"
-              description="No hay terceros con rol de provision. Crea uno desde Terceros."
+              description="Crea una provision para apartar fondos."
             />
           ) : (
             <Table>
@@ -113,6 +149,31 @@ export default function ProvisionsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Modal: Crear provision */}
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nueva Provision</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label>
+              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Ej: Provision Vacaciones" />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
+            <Button
+              onClick={() => createTP.mutate({ name: newName, is_provision: true })}
+              disabled={!newName.trim() || createTP.isPending}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {createTP.isPending ? "Creando..." : "Crear Provision"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

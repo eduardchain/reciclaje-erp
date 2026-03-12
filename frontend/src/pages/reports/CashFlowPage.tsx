@@ -27,6 +27,9 @@ export default function CashFlowPage() {
               <div className="flex justify-between"><span>Cobros a Clientes (Tesoreria)</span><span>{formatCurrency(data.inflows.customer_collections)}</span></div>
               <div className="flex justify-between"><span>Ingresos por Servicios</span><span>{formatCurrency(data.inflows.service_income)}</span></div>
               <div className="flex justify-between"><span>Aportes de Capital</span><span>{formatCurrency(data.inflows.capital_injections)}</span></div>
+              {data.inflows.advance_collections > 0 && (
+                <div className="flex justify-between"><span>Anticipos de Clientes</span><span>{formatCurrency(data.inflows.advance_collections)}</span></div>
+              )}
               <Separator />
               <div className="flex justify-between font-bold text-emerald-700"><span>Total Ingresos</span><span>{formatCurrency(data.total_inflows)}</span></div>
             </CardContent>
@@ -40,6 +43,18 @@ export default function CashFlowPage() {
               <div className="flex justify-between"><span>Gastos</span><span>{formatCurrency(data.outflows.expenses)}</span></div>
               <div className="flex justify-between"><span>Comisiones</span><span>{formatCurrency(data.outflows.commission_payments)}</span></div>
               <div className="flex justify-between"><span>Devolucion de Capital</span><span>{formatCurrency(data.outflows.capital_returns)}</span></div>
+              {data.outflows.provision_deposits > 0 && (
+                <div className="flex justify-between"><span>Depositos a Provisiones</span><span>{formatCurrency(data.outflows.provision_deposits)}</span></div>
+              )}
+              {data.outflows.deferred_fundings > 0 && (
+                <div className="flex justify-between"><span>Pagos Gastos Diferidos</span><span>{formatCurrency(data.outflows.deferred_fundings)}</span></div>
+              )}
+              {data.outflows.advance_payments > 0 && (
+                <div className="flex justify-between"><span>Anticipos a Proveedores</span><span>{formatCurrency(data.outflows.advance_payments)}</span></div>
+              )}
+              {data.outflows.asset_payments > 0 && (
+                <div className="flex justify-between"><span>Compras de Activos Fijos</span><span>{formatCurrency(data.outflows.asset_payments)}</span></div>
+              )}
               <Separator />
               <div className="flex justify-between font-bold text-red-700"><span>Total Egresos</span><span>{formatCurrency(data.total_outflows)}</span></div>
             </CardContent>

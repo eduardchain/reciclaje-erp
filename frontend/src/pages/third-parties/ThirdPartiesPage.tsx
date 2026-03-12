@@ -23,6 +23,7 @@ function RoleBadges({ tp }: { tp: ThirdPartyResponse }) {
       {tp.is_customer && <Badge variant="outline" className="bg-emerald-50 text-emerald-700 text-xs">Cliente</Badge>}
       {tp.is_investor && <Badge variant="outline" className="bg-purple-50 text-purple-700 text-xs">Inversionista</Badge>}
       {tp.is_provision && <Badge variant="outline" className="bg-orange-50 text-orange-700 text-xs">Provision</Badge>}
+      {tp.is_liability && <Badge variant="outline" className="bg-rose-50 text-rose-700 text-xs">Pasivo</Badge>}
     </div>
   );
 }
@@ -64,7 +65,7 @@ export default function ThirdPartiesPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Terceros" description="Proveedores, clientes, inversionistas y provisiones">
+      <PageHeader title="Terceros" description="Proveedores, clientes, inversionistas, provisiones y pasivos">
         <Button onClick={() => { setEditItem(null); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
           <Plus className="h-4 w-4 mr-2" />Nuevo Tercero
         </Button>
@@ -77,6 +78,7 @@ export default function ThirdPartiesPage() {
           <TabsTrigger value="customer">Clientes</TabsTrigger>
           <TabsTrigger value="investor">Inversionistas</TabsTrigger>
           <TabsTrigger value="provision">Provisiones</TabsTrigger>
+          <TabsTrigger value="liability">Pasivos</TabsTrigger>
         </TabsList>
       </Tabs>
 

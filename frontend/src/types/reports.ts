@@ -91,6 +91,7 @@ export interface CashFlowInflows {
   customer_collections: number;
   service_income: number;
   capital_injections: number;
+  advance_collections: number;
   total: number;
 }
 
@@ -100,6 +101,10 @@ export interface CashFlowOutflows {
   expenses: number;
   commission_payments: number;
   capital_returns: number;
+  provision_deposits: number;
+  deferred_fundings: number;
+  advance_payments: number;
+  asset_payments: number;
   total: number;
 }
 
@@ -121,12 +126,15 @@ export interface BalanceSheetAssets {
   cash_and_bank: number;
   accounts_receivable: number;
   inventory: number;
+  prepaid_expenses: number;
+  provision_funds: number;
   total: number;
 }
 
 export interface BalanceSheetLiabilities {
   accounts_payable: number;
   investor_debt: number;
+  liability_debt: number;
   total: number;
 }
 
