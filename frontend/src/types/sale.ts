@@ -115,4 +115,6 @@ export interface SaleLiquidateLineUpdate {
 export interface SaleLiquidateRequest {
   lines?: SaleLiquidateLineUpdate[];
   commissions?: SaleCommissionCreate[];
+  immediate_collection?: boolean;
+  collection_account_id?: string;
 }

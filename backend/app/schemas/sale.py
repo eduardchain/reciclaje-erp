@@ -220,6 +220,14 @@ class SaleLiquidateRequest(BaseModel):
     """Schema para liquidar venta (confirmar precios, actualizar saldo cliente). Sin pago a cuenta."""
     lines: Optional[List[SaleLiquidateLineUpdate]] = Field(None, description="Precios actualizados por línea")
     commissions: Optional[List[SaleCommissionCreate]] = Field(None, description="Comisiones (reemplazan las existentes)")
+    immediate_collection: bool = Field(False, description="Crear cobro inmediato al liquidar")
+    collection_account_id: Optional[UUID] = Field(None, description="Cuenta para cobro inmediato")
+
+    @model_validator(mode="after")
+    def validate_immediate_collection(self):
+        if self.immediate_collection and not self.collection_account_id:
+            raise ValueError("collection_account_id es requerido cuando immediate_collection=True")
+        return self
 
 
 class PaginatedSaleResponse(BaseModel):

@@ -8,10 +8,11 @@ Supports 1-step and 2-step purchase workflows:
 Liquidation confirms prices, moves stock transit->liquidated, updates avg cost and supplier balance.
 Payment to supplier is a separate operation via MoneyMovement (type='payment_to_supplier').
 """
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, func, text
@@ -20,11 +21,13 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
+from app.models.money_account import MoneyAccount
 from app.models.third_party import ThirdParty
 from app.models.warehouse import Warehouse
 from app.schemas.purchase import PurchaseCreate, PurchaseUpdate, PurchaseFullUpdate
 from app.services.base import CRUDBase
 from app.services.material_cost_history import material_cost_history_service
+from app.services.money_movement import money_movement as mm_service
 
 
 class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
@@ -255,6 +258,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         organization_id: UUID,
         user_id: Optional[UUID] = None,
         line_updates: Optional[List[dict]] = None,
+        immediate_payment: bool = False,
+        payment_account_id: Optional[UUID] = None,
     ) -> Purchase:
         """
         Liquidar compra registrada (cambiar status a 'liquidated').
@@ -370,6 +375,46 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         purchase.liquidated_at = datetime.now(timezone.utc)
 
         print(f"✅ Liquidated purchase #{purchase.purchase_number} for ${purchase.total_amount}")
+
+        # Step 10 (opcional): Pago inmediato
+        if immediate_payment and payment_account_id:
+            account = db.execute(
+                select(MoneyAccount).where(
+                    MoneyAccount.id == payment_account_id,
+                    MoneyAccount.organization_id == organization_id,
+                    MoneyAccount.is_active == True,
+                )
+            ).scalar_one_or_none()
+            if not account:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Cuenta de pago no encontrada",
+                )
+            if account.current_balance < purchase.total_amount:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Fondos insuficientes. Disponible: ${account.current_balance}, Requerido: ${purchase.total_amount}",
+                )
+
+            col_today = datetime.now(ZoneInfo("America/Bogota")).date()
+            today_dt = datetime.combine(col_today, time.min, tzinfo=timezone.utc)
+
+            mm_service._create_movement(
+                db=db,
+                organization_id=organization_id,
+                movement_type="payment_to_supplier",
+                amount=purchase.total_amount,
+                account_id=payment_account_id,
+                date=today_dt,
+                description=f"Pago compra #{purchase.purchase_number}",
+                third_party_id=supplier.id,
+                purchase_id=purchase.id,
+                user_id=user_id,
+            )
+
+            account.current_balance -= purchase.total_amount
+            supplier.current_balance += purchase.total_amount
+            print(f"  💳 Pago inmediato: ${purchase.total_amount} desde {account.name}")
 
         db.commit()
         db.refresh(purchase)

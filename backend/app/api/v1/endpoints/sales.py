@@ -539,6 +539,8 @@ async def liquidate_sale(
             user_id=org_context["user_id"],
             line_updates=liquidate_in.lines,
             commissions_data=liquidate_in.commissions,
+            immediate_collection=liquidate_in.immediate_collection,
+            collection_account_id=liquidate_in.collection_account_id,
         )
         
         db.commit()

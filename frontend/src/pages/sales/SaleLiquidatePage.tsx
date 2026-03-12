@@ -7,12 +7,13 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { useSale, useLiquidateSale } from "@/hooks/useSales";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useMaterials, useCustomers, useSuppliers } from "@/hooks/useMasterData";
+import { useMaterials, useCustomers, useSuppliers, useMoneyAccounts } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import type { SaleCommissionCreate } from "@/types/sale";
@@ -53,6 +54,10 @@ export default function SaleLiquidatePage() {
 
   const [lines, setLines] = useState<LiquidationLine[]>([]);
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
+  const [immediateCollection, setImmediateCollection] = useState(false);
+  const [collectionAccountId, setCollectionAccountId] = useState("");
+  const { data: accountsData } = useMoneyAccounts();
+  const accounts = accountsData?.items ?? (Array.isArray(accountsData) ? accountsData : []);
 
   // Inicializar líneas y comisiones desde la venta cargada
   useEffect(() => {
@@ -144,7 +149,8 @@ export default function SaleLiquidatePage() {
 
   const allPricesValid = lines.every((l) => l.unit_price > 0);
   const allReceivedValid = lines.every((l) => l.received_quantity > 0);
-  const canSubmit = allPricesValid && allReceivedValid && lines.length > 0;
+  const canSubmit = allPricesValid && allReceivedValid && lines.length > 0
+    && (!immediateCollection || !!collectionAccountId);
 
   const handleSubmit = () => {
     if (!canSubmit || !id) return;
@@ -162,6 +168,9 @@ export default function SaleLiquidatePage() {
           commissions: commissions
             .filter((c) => c.third_party_id && c.commission_value > 0)
             .map(({ _key, ...rest }) => rest),
+          ...(immediateCollection && collectionAccountId
+            ? { immediate_collection: true, collection_account_id: collectionAccountId }
+            : {}),
         },
       },
       { onSuccess: () => navigate(`/sales/${id}`) },
@@ -450,6 +459,30 @@ export default function SaleLiquidatePage() {
               </>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Cobro inmediato */}
+      <Card className="shadow-sm">
+        <CardContent className="pt-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Registrar cobro inmediato</Label>
+              <p className="text-xs text-slate-500 mt-1">Registra el cobro al cliente automaticamente al liquidar.</p>
+            </div>
+            <Switch checked={immediateCollection} onCheckedChange={setImmediateCollection} />
+          </div>
+          {immediateCollection && (
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta de Cobro *</Label>
+              <EntitySelect
+                value={collectionAccountId}
+                onChange={setCollectionAccountId}
+                options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
+                placeholder="Seleccionar cuenta..."
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 

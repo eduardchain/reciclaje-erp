@@ -169,6 +169,14 @@ class PurchaseLiquidateLineUpdate(BaseModel):
 class PurchaseLiquidateRequest(BaseModel):
     """Schema for liquidating a purchase (confirmar precios, mover stock, actualizar saldo proveedor)."""
     lines: Optional[List[PurchaseLiquidateLineUpdate]] = Field(None, description="Actualizacion opcional de precios por linea")
+    immediate_payment: bool = Field(False, description="Crear pago inmediato al liquidar")
+    payment_account_id: Optional[UUID] = Field(None, description="Cuenta para pago inmediato")
+
+    @model_validator(mode="after")
+    def validate_immediate_payment(self):
+        if self.immediate_payment and not self.payment_account_id:
+            raise ValueError("payment_account_id es requerido cuando immediate_payment=True")
+        return self
 
 
 class PaginatedPurchaseResponse(BaseModel):

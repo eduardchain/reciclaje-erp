@@ -5,10 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
+import { EntitySelect } from "@/components/shared/EntitySelect";
 import { usePurchase, useLiquidatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
+import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 
@@ -30,6 +33,10 @@ export default function PurchaseLiquidatePage() {
   const liquidate = useLiquidatePurchase();
 
   const [lines, setLines] = useState<LiquidationLine[]>([]);
+  const [immediatePayment, setImmediatePayment] = useState(false);
+  const [paymentAccountId, setPaymentAccountId] = useState("");
+  const { data: accountsData } = useMoneyAccounts();
+  const accounts = accountsData?.items ?? (Array.isArray(accountsData) ? accountsData : []);
 
   // Inicializar lineas desde la compra cargada
   useEffect(() => {
@@ -71,7 +78,9 @@ export default function PurchaseLiquidatePage() {
 
   const total = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
   const allPricesValid = lines.every((l) => l.unit_price > 0);
-  const canSubmit = allPricesValid && lines.length > 0;
+  const selectedAccount = accounts.find((a) => a.id === paymentAccountId);
+  const canSubmit = allPricesValid && lines.length > 0
+    && (!immediatePayment || (paymentAccountId && (!selectedAccount || selectedAccount.current_balance >= total)));
 
   const handleSubmit = () => {
     if (!canSubmit || !id) return;
@@ -83,6 +92,9 @@ export default function PurchaseLiquidatePage() {
             line_id: l.line_id,
             unit_price: l.unit_price,
           })),
+          ...(immediatePayment && paymentAccountId
+            ? { immediate_payment: true, payment_account_id: paymentAccountId }
+            : {}),
         },
       },
       {
@@ -210,6 +222,33 @@ export default function PurchaseLiquidatePage() {
               <span className="text-lg font-bold">Total: {formatCurrency(total)}</span>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Pago inmediato */}
+      <Card className="shadow-sm">
+        <CardContent className="pt-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Registrar pago inmediato</Label>
+              <p className="text-xs text-slate-500 mt-1">Crea el pago al proveedor automaticamente al liquidar.</p>
+            </div>
+            <Switch checked={immediatePayment} onCheckedChange={setImmediatePayment} />
+          </div>
+          {immediatePayment && (
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta de Pago *</Label>
+              <EntitySelect
+                value={paymentAccountId}
+                onChange={setPaymentAccountId}
+                options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
+                placeholder="Seleccionar cuenta..."
+              />
+              {selectedAccount && selectedAccount.current_balance < total && (
+                <p className="text-xs text-red-500">Fondos insuficientes. Disponible: {formatCurrency(selectedAccount.current_balance)}, Requerido: {formatCurrency(total)}</p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

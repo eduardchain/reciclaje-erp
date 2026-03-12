@@ -12,10 +12,11 @@ Cancelacion:
 - registered: revierte stock solamente
 - liquidated: revierte stock + saldo cliente + comisiones pagadas
 """
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, func, text
@@ -28,6 +29,7 @@ from app.models.third_party import ThirdParty
 from app.models.money_account import MoneyAccount
 from app.models.warehouse import Warehouse
 from app.schemas.sale import SaleCreate, SaleUpdate, SaleFullUpdate
+from app.services.money_movement import money_movement as mm_service
 from app.models.material_cost_history import MaterialCostHistory
 from app.services.base import CRUDBase
 
@@ -265,7 +267,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         organization_id: UUID,
         user_id: Optional[UUID] = None,
         line_updates: Optional[List] = None,
-        commissions_data: Optional[List] = None
+        commissions_data: Optional[List] = None,
+        immediate_collection: bool = False,
+        collection_account_id: Optional[UUID] = None,
     ) -> Sale:
         """
         Liquidar venta registrada: confirmar precios, actualizar saldo cliente, pagar comisiones.
@@ -355,6 +359,41 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
 
         # Step 7: Pay commissions (increase recipient balances — les debemos la comision)
         self._pay_commissions(db, sale)
+
+        # Step 8 (opcional): Cobro inmediato
+        if immediate_collection and collection_account_id:
+            account = db.execute(
+                select(MoneyAccount).where(
+                    MoneyAccount.id == collection_account_id,
+                    MoneyAccount.organization_id == organization_id,
+                    MoneyAccount.is_active == True,
+                )
+            ).scalar_one_or_none()
+            if not account:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Cuenta de cobro no encontrada",
+                )
+
+            col_today = datetime.now(ZoneInfo("America/Bogota")).date()
+            today_dt = datetime.combine(col_today, time.min, tzinfo=timezone.utc)
+
+            mm_service._create_movement(
+                db=db,
+                organization_id=organization_id,
+                movement_type="collection_from_client",
+                amount=sale.total_amount,
+                account_id=collection_account_id,
+                date=today_dt,
+                description=f"Cobro venta #{sale.sale_number}",
+                third_party_id=sale.customer_id,
+                sale_id=sale.id,
+                user_id=user_id,
+            )
+
+            account.current_balance += sale.total_amount
+            customer.current_balance -= sale.total_amount
+            print(f"  💳 Cobro inmediato: ${sale.total_amount} a {account.name}")
 
         db.flush()
 

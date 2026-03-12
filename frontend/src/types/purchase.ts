@@ -84,4 +84,6 @@ export interface PurchaseLiquidateLineUpdate {
 
 export interface PurchaseLiquidateRequest {
   lines?: PurchaseLiquidateLineUpdate[];
+  immediate_payment?: boolean;
+  payment_account_id?: string;
 }

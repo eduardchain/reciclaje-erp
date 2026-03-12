@@ -514,6 +514,8 @@ async def liquidate_purchase(
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
             line_updates=line_updates,
+            immediate_payment=liquidate_data.immediate_payment,
+            payment_account_id=liquidate_data.payment_account_id,
         )
         
         response_data = _enrich_purchase_response(purchase, db)
