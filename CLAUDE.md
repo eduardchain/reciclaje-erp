@@ -2,9 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**IMPORTANTE: Siempre actualizar este archivo con decisiones importantes, cambios arquitectonicos, y nueva funcionalidad implementada. Esto es critico para mantener contexto entre sesiones.**
+## REGLA OBLIGATORIA: Persistencia de contexto
 
-## Guia para mantener este archivo
+**ANTES de considerar la tarea terminada, SIEMPRE ejecutar estos dos pasos. No son opcionales.**
+
+1. **Actualizar CLAUDE.md** si hubo: nueva funcionalidad, decision arquitectonica, nuevo patron, cambio de workflow, nuevo modulo, o cualquier informacion que una sesion futura necesitaria para no romper cosas.
+2. **Actualizar memory/** si hubo: feedback del usuario sobre como trabajar, preferencias nuevas, contexto de proyecto (deadlines, estado actual), o referencias externas utiles.
+
+**Si no hay nada que actualizar, decir explicitamente: "No hay cambios para CLAUDE.md ni memory."** Esto confirma que se evaluo y se decidio no actualizar, en vez de olvidarlo.
+
+---
+
+## Guia para mantener CLAUDE.md
 
 Al terminar una sesion donde se implemento funcionalidad nueva o se tomo una decision arquitectonica:
 
