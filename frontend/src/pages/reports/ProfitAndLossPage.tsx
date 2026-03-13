@@ -54,7 +54,7 @@ export default function ProfitAndLossPage() {
                 };
                 const order = ["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense"];
                 const sources = order.filter((s) => bySource[s] > 0);
-                if (sources.length > 1) {
+                if (sources.length >= 1) {
                   return sources.map((s) => (
                     <div key={s} className="flex justify-between text-sm pl-2 text-slate-600">
                       <span>{labels[s]}</span><span className="text-red-600">-{formatCurrency(bySource[s])}</span>

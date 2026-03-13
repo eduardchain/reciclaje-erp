@@ -42,6 +42,8 @@ export default function FixedAssetDetailPage() {
   const canDepreciate = asset.status === "active";
   const canDispose = asset.status !== "disposed";
   const progress = Math.min(asset.depreciation_progress, 100);
+  const remaining = asset.current_value - asset.salvage_value;
+  const nextDepreciationAmount = remaining <= asset.monthly_depreciation ? remaining : asset.monthly_depreciation;
 
   return (
     <div className="space-y-6">
@@ -238,7 +240,7 @@ export default function FixedAssetDetailPage() {
         open={showDepreciate}
         onOpenChange={setShowDepreciate}
         title="Aplicar Depreciacion"
-        description={`Se creara un movimiento de depreciacion por ${formatCurrency(asset.monthly_depreciation)} para el mes actual. Esta accion no se puede deshacer.`}
+        description={`Se creará un movimiento de depreciación por ${formatCurrency(nextDepreciationAmount)} para el mes actual. Esta acción no se puede deshacer.`}
         confirmLabel="Aplicar Depreciacion"
         loading={depreciate.isPending}
         onConfirm={() => {

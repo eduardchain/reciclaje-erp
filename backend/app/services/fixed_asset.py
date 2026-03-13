@@ -297,12 +297,13 @@ class CRUDFixedAsset:
         current_period = col_today.strftime("%Y-%m")
         first_of_month = col_today.replace(day=1)
 
-        # Buscar activos activos con fecha de inicio <= mes actual
+        # Buscar activos activos con fecha de inicio <= hoy
+        # (si start_date cae dentro del mes actual, el activo es elegible)
         assets = db.execute(
             select(FixedAsset).where(
                 FixedAsset.organization_id == organization_id,
                 FixedAsset.status == "active",
-                FixedAsset.depreciation_start_date <= first_of_month,
+                FixedAsset.depreciation_start_date <= col_today,
             )
         ).scalars().all()
 
