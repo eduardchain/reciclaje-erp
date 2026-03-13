@@ -11,6 +11,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Si no hay nada que actualizar, decir explicitamente: "No hay cambios para CLAUDE.md ni memory."** Esto confirma que se evaluo y se decidio no actualizar, en vez de olvidarlo.
 
+## REGLA OBLIGATORIA: Validacion de requerimientos
+
+**Cuando el usuario entregue un paquete de instrucciones o requisitos, ANTES de planear o implementar:**
+
+1. Revisar los requisitos contra el codigo actual y CLAUDE.md.
+2. Identificar: requisitos faltantes, contradicciones con patrones existentes, edge cases no cubiertos, side-effects con otros modulos.
+3. Si hay gaps, listarlos y esperar confirmacion antes de continuar.
+4. Si no hay gaps, decir "Requisitos validados, no encontre gaps" y proceder.
+
 ---
 
 ## Guia para mantener CLAUDE.md
