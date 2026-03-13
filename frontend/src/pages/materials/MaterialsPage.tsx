@@ -11,6 +11,7 @@ import { formatCurrency } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import MaterialFormDialog from "./MaterialFormDialog";
 import type { MaterialResponse } from "@/types/material";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const columns: ColumnDef<MaterialResponse, unknown>[] = [
   { accessorKey: "code", header: "Codigo", cell: ({ row }) => <span className="font-medium">{row.original.code}</span> },
@@ -24,6 +25,7 @@ const columns: ColumnDef<MaterialResponse, unknown>[] = [
 
 export default function MaterialsPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<MaterialResponse | null>(null);
@@ -35,9 +37,11 @@ export default function MaterialsPage() {
       <PageHeader title="Materiales" description="Catalogo de materiales">
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => navigate(ROUTES.MATERIALS_CATEGORIES)}>Categorias</Button>
-          <Button onClick={() => { setEditItem(null); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="h-4 w-4 mr-2" />Nuevo Material
-          </Button>
+          {hasPermission("materials.create") && (
+            <Button onClick={() => { setEditItem(null); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="h-4 w-4 mr-2" />Nuevo Material
+            </Button>
+          )}
         </div>
       </PageHeader>
 

@@ -27,6 +27,7 @@ import type { SaleResponse } from "@/types/sale";
 import type { MetricCard } from "@/types/reports";
 import { useAuthStore } from "@/stores/authStore";
 import { exportSalePDF } from "@/utils/pdfExport";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const PAGE_SIZE = 20;
 
@@ -35,11 +36,13 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
   const [cancelOpen, setCancelOpen] = useState(false);
+  const { hasPermission } = usePermissions();
 
   const cancelMutation = useCancelSale();
 
-  const canEdit = sale.status === "registered" && !sale.double_entry_id;
-  const canCancel = (sale.status === "registered" || sale.status === "liquidated") && !sale.double_entry_id;
+  const canEdit = sale.status === "registered" && !sale.double_entry_id && hasPermission("sales.edit");
+  const canLiquidate = sale.status === "registered" && !sale.double_entry_id && hasPermission("sales.liquidate");
+  const canCancel = (sale.status === "registered" || sale.status === "liquidated") && !sale.double_entry_id && hasPermission("sales.cancel");
 
   return (
     <>
@@ -65,7 +68,7 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
               Editar
             </DropdownMenuItem>
           )}
-          {canEdit && (
+          {canLiquidate && (
             <DropdownMenuItem onClick={() => navigate(`/sales/${sale.id}/liquidate`)}>
               <DollarSign className="h-4 w-4 mr-2" />
               Liquidar
@@ -104,96 +107,103 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
   );
 }
 
-const columns: ColumnDef<SaleResponse, unknown>[] = [
-  {
-    accessorKey: "sale_number",
-    header: "#",
-    cell: ({ row }) => <span className="font-medium">#{row.original.sale_number}</span>,
-  },
-  {
-    accessorKey: "date",
-    header: "FECHA",
-    enableSorting: true,
-    cell: ({ row }) => formatDate(row.original.date),
-  },
-  {
-    accessorKey: "customer_name",
-    header: "CLIENTE",
-  },
-  {
-    id: "items",
-    header: "DETALLE",
-    cell: ({ row }) => (
-      <div className="space-y-0.5">
-        {row.original.lines.map((line) => (
-          <div key={line.id} className="text-xs text-slate-600">
-            {line.material_code} - {formatWeight(line.quantity)} x {formatCurrency(line.unit_price)}
-          </div>
-        ))}
-      </div>
-    ),
-  },
-  {
-    accessorKey: "total_amount",
-    header: "TOTAL",
-    enableSorting: true,
-    cell: ({ row }) => (
-      <span className="font-medium tabular-nums">
-        {formatCurrency(row.original.total_amount)}
-        {row.original.total_amount_difference != null && Math.abs(row.original.total_amount_difference) > 0.01 && (
-          <Scale className={`inline-block ml-1 h-3.5 w-3.5 ${row.original.total_amount_difference > 0 ? "text-emerald-500" : "text-red-500"}`} />
-        )}
-      </span>
-    ),
-  },
-  {
-    accessorKey: "total_profit",
-    header: "UTILIDAD BRUTA",
-    enableSorting: true,
-    cell: ({ row }) => (
-      <span className={`font-medium tabular-nums ${row.original.total_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-        {formatCurrency(row.original.total_profit)}
-      </span>
-    ),
-  },
-  {
-    id: "commissions",
-    header: "COMISIONES",
-    cell: ({ row }) => {
-      const total = row.original.commissions.reduce((sum, c) => sum + c.commission_amount, 0);
-      return total > 0 ? (
-        <span className="text-xs tabular-nums">{formatCurrency(total)}</span>
-      ) : (
-        <span className="text-slate-300">-</span>
-      );
+function getColumns(canViewPrices: boolean): ColumnDef<SaleResponse, unknown>[] {
+  return [
+    {
+      accessorKey: "sale_number",
+      header: "#",
+      cell: ({ row }) => <span className="font-medium">#{row.original.sale_number}</span>,
     },
-  },
-  {
-    id: "double_entry",
-    header: "D.P.",
-    cell: ({ row }) =>
-      row.original.double_entry_id ? (
-        <span className="bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded font-medium">
-          DP
-        </span>
-      ) : (
-        <span className="text-slate-300">-</span>
+    {
+      accessorKey: "date",
+      header: "FECHA",
+      enableSorting: true,
+      cell: ({ row }) => formatDate(row.original.date),
+    },
+    {
+      accessorKey: "customer_name",
+      header: "CLIENTE",
+    },
+    {
+      id: "items",
+      header: "DETALLE",
+      cell: ({ row }) => (
+        <div className="space-y-0.5">
+          {row.original.lines.map((line) => (
+            <div key={line.id} className="text-xs text-slate-600">
+              {line.material_code} - {formatWeight(line.quantity)}{canViewPrices ? ` x ${formatCurrency(line.unit_price)}` : ""}
+            </div>
+          ))}
+        </div>
       ),
-  },
-  {
-    accessorKey: "status",
-    header: "ESTADO",
-    cell: ({ row }) => <StatusBadge status={row.original.status} />,
-  },
-  {
-    id: "actions",
-    header: "",
-    cell: ({ row }) => <ActionsCell sale={row.original} />,
-  },
-];
+    },
+    ...(canViewPrices ? [
+      {
+        accessorKey: "total_amount",
+        header: "TOTAL",
+        enableSorting: true,
+        cell: ({ row }: { row: { original: SaleResponse } }) => (
+          <span className="font-medium tabular-nums">
+            {formatCurrency(row.original.total_amount)}
+            {row.original.total_amount_difference != null && Math.abs(row.original.total_amount_difference) > 0.01 && (
+              <Scale className={`inline-block ml-1 h-3.5 w-3.5 ${row.original.total_amount_difference > 0 ? "text-emerald-500" : "text-red-500"}`} />
+            )}
+          </span>
+        ),
+      } as ColumnDef<SaleResponse, unknown>,
+      {
+        accessorKey: "total_profit",
+        header: "UTILIDAD BRUTA",
+        enableSorting: true,
+        cell: ({ row }: { row: { original: SaleResponse } }) => (
+          <span className={`font-medium tabular-nums ${row.original.total_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+            {formatCurrency(row.original.total_profit)}
+          </span>
+        ),
+      } as ColumnDef<SaleResponse, unknown>,
+      {
+        id: "commissions",
+        header: "COMISIONES",
+        cell: ({ row }: { row: { original: SaleResponse } }) => {
+          const total = row.original.commissions.reduce((sum, c) => sum + c.commission_amount, 0);
+          return total > 0 ? (
+            <span className="text-xs tabular-nums">{formatCurrency(total)}</span>
+          ) : (
+            <span className="text-slate-300">-</span>
+          );
+        },
+      } as ColumnDef<SaleResponse, unknown>,
+    ] : []),
+    {
+      id: "double_entry",
+      header: "D.P.",
+      cell: ({ row }) =>
+        row.original.double_entry_id ? (
+          <span className="bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded font-medium">
+            DP
+          </span>
+        ) : (
+          <span className="text-slate-300">-</span>
+        ),
+    },
+    {
+      accessorKey: "status",
+      header: "ESTADO",
+      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+    },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => <ActionsCell sale={row.original} />,
+    },
+  ];
+}
 
 export default function SalesPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canViewPrices = hasPermission("sales.view_prices");
+  const columns = useMemo(() => getColumns(canViewPrices), [canViewPrices]);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
@@ -232,10 +242,12 @@ export default function SalesPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Ventas" description="Gestion de ventas de material">
-        <Button onClick={() => navigate(ROUTES.SALES_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
-          <Plus className="h-4 w-4 mr-2" />
-          Nueva Venta
-        </Button>
+        {hasPermission("sales.create") && (
+          <Button onClick={() => navigate(ROUTES.SALES_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+            <Plus className="h-4 w-4 mr-2" />
+            Nueva Venta
+          </Button>
+        )}
       </PageHeader>
 
       {/* KPI Cards */}

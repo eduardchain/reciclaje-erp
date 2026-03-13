@@ -26,6 +26,7 @@ import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { MaterialTransformationResponse } from "@/types/inventory";
 import type { MetricCard } from "@/types/reports";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const PAGE_SIZE = 20;
 
@@ -58,6 +59,7 @@ function ActionsCell({ transformation, onAnnul }: { transformation: MaterialTran
 
 export default function TransformationsPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const [page, setPage] = useState(0);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -111,9 +113,11 @@ export default function TransformationsPage() {
           <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY)}>
             <ArrowLeft className="h-4 w-4 mr-2" />Stock
           </Button>
-          <Button onClick={() => navigate(ROUTES.INVENTORY_TRANSFORMATIONS_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="h-4 w-4 mr-2" />Nueva Transformacion
-          </Button>
+          {hasPermission("transformations.create") && (
+            <Button onClick={() => navigate(ROUTES.INVENTORY_TRANSFORMATIONS_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="h-4 w-4 mr-2" />Nueva Transformacion
+            </Button>
+          )}
         </div>
       </PageHeader>
 

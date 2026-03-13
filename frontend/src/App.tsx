@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import Layout from "@/components/layout/Layout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { PermissionGate } from "@/components/auth/PermissionGate";
 import Dashboard from "@/pages/Dashboard";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/NotFound";
@@ -74,6 +75,10 @@ const queryClient = new QueryClient({
   },
 });
 
+function P({ permission, children }: { permission: string | string[]; children: React.ReactNode }) {
+  return <PermissionGate permission={permission}>{children}</PermissionGate>;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -88,71 +93,71 @@ function App() {
               <Route path={ROUTES.DASHBOARD} element={<Dashboard />} />
 
               {/* Compras */}
-              <Route path={ROUTES.PURCHASES} element={<PurchasesPage />} />
-              <Route path={ROUTES.PURCHASES_NEW} element={<PurchaseCreatePage />} />
-              <Route path="/purchases/:id/edit" element={<PurchaseEditPage />} />
-              <Route path="/purchases/:id/liquidate" element={<PurchaseLiquidatePage />} />
-              <Route path="/purchases/:id" element={<PurchaseDetailPage />} />
+              <Route path={ROUTES.PURCHASES} element={<P permission="purchases.view"><PurchasesPage /></P>} />
+              <Route path={ROUTES.PURCHASES_NEW} element={<P permission="purchases.create"><PurchaseCreatePage /></P>} />
+              <Route path="/purchases/:id/edit" element={<P permission="purchases.edit"><PurchaseEditPage /></P>} />
+              <Route path="/purchases/:id/liquidate" element={<P permission="purchases.liquidate"><PurchaseLiquidatePage /></P>} />
+              <Route path="/purchases/:id" element={<P permission="purchases.view"><PurchaseDetailPage /></P>} />
               {/* Ventas */}
-              <Route path={ROUTES.SALES} element={<SalesPage />} />
-              <Route path={ROUTES.SALES_NEW} element={<SaleCreatePage />} />
-              <Route path="/sales/:id/edit" element={<SaleEditPage />} />
-              <Route path="/sales/:id/liquidate" element={<SaleLiquidatePage />} />
-              <Route path="/sales/:id" element={<SaleDetailPage />} />
+              <Route path={ROUTES.SALES} element={<P permission="sales.view"><SalesPage /></P>} />
+              <Route path={ROUTES.SALES_NEW} element={<P permission="sales.create"><SaleCreatePage /></P>} />
+              <Route path="/sales/:id/edit" element={<P permission="sales.edit"><SaleEditPage /></P>} />
+              <Route path="/sales/:id/liquidate" element={<P permission="sales.liquidate"><SaleLiquidatePage /></P>} />
+              <Route path="/sales/:id" element={<P permission="sales.view"><SaleDetailPage /></P>} />
               {/* Doble Partida */}
-              <Route path={ROUTES.DOUBLE_ENTRIES} element={<DoubleEntriesPage />} />
-              <Route path={ROUTES.DOUBLE_ENTRIES_NEW} element={<DoubleEntryCreatePage />} />
-              <Route path="/double-entries/:id/edit" element={<DoubleEntryEditPage />} />
-              <Route path="/double-entries/:id/liquidate" element={<DoubleEntryLiquidatePage />} />
-              <Route path="/double-entries/:id" element={<DoubleEntryDetailPage />} />
+              <Route path={ROUTES.DOUBLE_ENTRIES} element={<P permission="double_entries.view"><DoubleEntriesPage /></P>} />
+              <Route path={ROUTES.DOUBLE_ENTRIES_NEW} element={<P permission="double_entries.create"><DoubleEntryCreatePage /></P>} />
+              <Route path="/double-entries/:id/edit" element={<P permission="double_entries.edit"><DoubleEntryEditPage /></P>} />
+              <Route path="/double-entries/:id/liquidate" element={<P permission="double_entries.liquidate"><DoubleEntryLiquidatePage /></P>} />
+              <Route path="/double-entries/:id" element={<P permission="double_entries.view"><DoubleEntryDetailPage /></P>} />
               {/* Tesoreria */}
-              <Route path={ROUTES.TREASURY} element={<TreasuryPage />} />
-              <Route path={ROUTES.TREASURY_NEW} element={<MovementCreatePage />} />
-              <Route path={ROUTES.TREASURY_PROVISIONS} element={<ProvisionsPage />} />
-              <Route path={ROUTES.TREASURY_ACCOUNT_STATEMENT} element={<AccountStatementPage />} />
-              <Route path={ROUTES.TREASURY_DASHBOARD} element={<TreasuryDashboardPage />} />
-              <Route path={ROUTES.TREASURY_ACCOUNT_MOVEMENTS} element={<AccountMovementsPage />} />
-              <Route path={ROUTES.TREASURY_LIABILITIES} element={<LiabilitiesPage />} />
-              <Route path={ROUTES.TREASURY_SCHEDULED} element={<ScheduledExpensesPage />} />
-              <Route path={ROUTES.TREASURY_SCHEDULED_NEW} element={<ScheduledExpenseCreatePage />} />
-              <Route path="/treasury/scheduled-expenses/:id" element={<ScheduledExpenseDetailPage />} />
-              <Route path={ROUTES.TREASURY_FIXED_ASSETS} element={<FixedAssetsPage />} />
-              <Route path={ROUTES.TREASURY_FIXED_ASSETS_NEW} element={<FixedAssetCreatePage />} />
-              <Route path="/treasury/fixed-assets/:id/edit" element={<FixedAssetEditPage />} />
-              <Route path="/treasury/fixed-assets/:id" element={<FixedAssetDetailPage />} />
-              <Route path="/treasury/:id" element={<MovementDetailPage />} />
+              <Route path={ROUTES.TREASURY} element={<P permission="treasury.view"><TreasuryPage /></P>} />
+              <Route path={ROUTES.TREASURY_NEW} element={<P permission="treasury.create_movements"><MovementCreatePage /></P>} />
+              <Route path={ROUTES.TREASURY_PROVISIONS} element={<P permission="treasury.view"><ProvisionsPage /></P>} />
+              <Route path={ROUTES.TREASURY_ACCOUNT_STATEMENT} element={<P permission="treasury.view"><AccountStatementPage /></P>} />
+              <Route path={ROUTES.TREASURY_DASHBOARD} element={<P permission="treasury.view"><TreasuryDashboardPage /></P>} />
+              <Route path={ROUTES.TREASURY_ACCOUNT_MOVEMENTS} element={<P permission="treasury.view"><AccountMovementsPage /></P>} />
+              <Route path={ROUTES.TREASURY_LIABILITIES} element={<P permission="treasury.view"><LiabilitiesPage /></P>} />
+              <Route path={ROUTES.TREASURY_SCHEDULED} element={<P permission="treasury.view"><ScheduledExpensesPage /></P>} />
+              <Route path={ROUTES.TREASURY_SCHEDULED_NEW} element={<P permission="treasury.manage_expenses"><ScheduledExpenseCreatePage /></P>} />
+              <Route path="/treasury/scheduled-expenses/:id" element={<P permission="treasury.view"><ScheduledExpenseDetailPage /></P>} />
+              <Route path={ROUTES.TREASURY_FIXED_ASSETS} element={<P permission="treasury.view"><FixedAssetsPage /></P>} />
+              <Route path={ROUTES.TREASURY_FIXED_ASSETS_NEW} element={<P permission="treasury.manage_fixed_assets"><FixedAssetCreatePage /></P>} />
+              <Route path="/treasury/fixed-assets/:id/edit" element={<P permission="treasury.manage_fixed_assets"><FixedAssetEditPage /></P>} />
+              <Route path="/treasury/fixed-assets/:id" element={<P permission="treasury.view"><FixedAssetDetailPage /></P>} />
+              <Route path="/treasury/:id" element={<P permission="treasury.view"><MovementDetailPage /></P>} />
               {/* Inventario */}
-              <Route path={ROUTES.INVENTORY} element={<StockPage />} />
-              <Route path={ROUTES.INVENTORY_MOVEMENTS} element={<MovementHistoryPage />} />
-              <Route path={ROUTES.INVENTORY_ADJUSTMENTS} element={<AdjustmentsPage />} />
-              <Route path={ROUTES.INVENTORY_ADJUSTMENTS_NEW} element={<AdjustmentCreatePage />} />
-              <Route path="/inventory/adjustments/:id" element={<AdjustmentDetailPage />} />
-              <Route path={ROUTES.INVENTORY_TRANSFORMATIONS} element={<TransformationsPage />} />
-              <Route path={ROUTES.INVENTORY_TRANSFORMATIONS_NEW} element={<TransformationCreatePage />} />
-              <Route path="/inventory/transformations/:id" element={<TransformationDetailPage />} />
-              <Route path={ROUTES.INVENTORY_VALUATION} element={<ValuationPage />} />
-              <Route path={ROUTES.INVENTORY_TRANSIT} element={<TransitPage />} />
+              <Route path={ROUTES.INVENTORY} element={<P permission="inventory.view"><StockPage /></P>} />
+              <Route path={ROUTES.INVENTORY_MOVEMENTS} element={<P permission="inventory.view"><MovementHistoryPage /></P>} />
+              <Route path={ROUTES.INVENTORY_ADJUSTMENTS} element={<P permission="inventory.view"><AdjustmentsPage /></P>} />
+              <Route path={ROUTES.INVENTORY_ADJUSTMENTS_NEW} element={<P permission="inventory.adjust"><AdjustmentCreatePage /></P>} />
+              <Route path="/inventory/adjustments/:id" element={<P permission="inventory.view"><AdjustmentDetailPage /></P>} />
+              <Route path={ROUTES.INVENTORY_TRANSFORMATIONS} element={<P permission="transformations.view"><TransformationsPage /></P>} />
+              <Route path={ROUTES.INVENTORY_TRANSFORMATIONS_NEW} element={<P permission="transformations.create"><TransformationCreatePage /></P>} />
+              <Route path="/inventory/transformations/:id" element={<P permission="transformations.view"><TransformationDetailPage /></P>} />
+              <Route path={ROUTES.INVENTORY_VALUATION} element={<P permission="inventory.view_values"><ValuationPage /></P>} />
+              <Route path={ROUTES.INVENTORY_TRANSIT} element={<P permission="inventory.view"><TransitPage /></P>} />
               {/* Reportes */}
-              <Route path={ROUTES.REPORTS} element={<ProfitAndLossPage />} />
-              <Route path={ROUTES.REPORTS_PL} element={<ProfitAndLossPage />} />
-              <Route path={ROUTES.REPORTS_CASH_FLOW} element={<CashFlowPage />} />
-              <Route path={ROUTES.REPORTS_BALANCE_SHEET} element={<BalanceSheetPage />} />
-              <Route path={ROUTES.REPORTS_PURCHASES} element={<PurchaseReportPage />} />
-              <Route path={ROUTES.REPORTS_SALES} element={<SalesReportPage />} />
-              <Route path={ROUTES.REPORTS_MARGINS} element={<MarginAnalysisPage />} />
-              <Route path={ROUTES.REPORTS_BALANCES} element={<ThirdPartyBalancesPage />} />
-              <Route path={ROUTES.REPORTS_AUDIT} element={<AuditBalancesPage />} />
+              <Route path={ROUTES.REPORTS} element={<P permission="reports.view"><ProfitAndLossPage /></P>} />
+              <Route path={ROUTES.REPORTS_PL} element={<P permission="reports.view"><ProfitAndLossPage /></P>} />
+              <Route path={ROUTES.REPORTS_CASH_FLOW} element={<P permission="reports.view"><CashFlowPage /></P>} />
+              <Route path={ROUTES.REPORTS_BALANCE_SHEET} element={<P permission="reports.view"><BalanceSheetPage /></P>} />
+              <Route path={ROUTES.REPORTS_PURCHASES} element={<P permission="reports.view"><PurchaseReportPage /></P>} />
+              <Route path={ROUTES.REPORTS_SALES} element={<P permission="reports.view"><SalesReportPage /></P>} />
+              <Route path={ROUTES.REPORTS_MARGINS} element={<P permission="reports.view"><MarginAnalysisPage /></P>} />
+              <Route path={ROUTES.REPORTS_BALANCES} element={<P permission="reports.view"><ThirdPartyBalancesPage /></P>} />
+              <Route path={ROUTES.REPORTS_AUDIT} element={<P permission="admin.view_audit"><AuditBalancesPage /></P>} />
               {/* Maestros */}
-              <Route path={ROUTES.THIRD_PARTIES} element={<ThirdPartiesPage />} />
-              <Route path={ROUTES.MATERIALS} element={<MaterialsPage />} />
-              <Route path={ROUTES.MATERIALS_CATEGORIES} element={<CategoriesPage />} />
+              <Route path={ROUTES.THIRD_PARTIES} element={<P permission="third_parties.view"><ThirdPartiesPage /></P>} />
+              <Route path={ROUTES.MATERIALS} element={<P permission="materials.view"><MaterialsPage /></P>} />
+              <Route path={ROUTES.MATERIALS_CATEGORIES} element={<P permission="materials.view"><CategoriesPage /></P>} />
               {/* Configuracion */}
-              <Route path={ROUTES.CONFIG} element={<WarehousesPage />} />
-              <Route path={ROUTES.CONFIG_WAREHOUSES} element={<WarehousesPage />} />
-              <Route path={ROUTES.CONFIG_ACCOUNTS} element={<MoneyAccountsPage />} />
-              <Route path={ROUTES.CONFIG_BUSINESS_UNITS} element={<BusinessUnitsPage />} />
-              <Route path={ROUTES.CONFIG_EXPENSE_CATEGORIES} element={<ExpenseCategoriesPage />} />
-              <Route path={ROUTES.CONFIG_PRICE_LISTS} element={<PriceListsPage />} />
+              <Route path={ROUTES.CONFIG} element={<P permission="warehouses.view"><WarehousesPage /></P>} />
+              <Route path={ROUTES.CONFIG_WAREHOUSES} element={<P permission="warehouses.view"><WarehousesPage /></P>} />
+              <Route path={ROUTES.CONFIG_ACCOUNTS} element={<P permission="treasury.manage_accounts"><MoneyAccountsPage /></P>} />
+              <Route path={ROUTES.CONFIG_BUSINESS_UNITS} element={<P permission="materials.view"><BusinessUnitsPage /></P>} />
+              <Route path={ROUTES.CONFIG_EXPENSE_CATEGORIES} element={<P permission="treasury.manage_expenses"><ExpenseCategoriesPage /></P>} />
+              <Route path={ROUTES.CONFIG_PRICE_LISTS} element={<P permission="materials.view_prices"><PriceListsPage /></P>} />
             </Route>
           </Route>
 

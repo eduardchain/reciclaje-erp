@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,7 @@ const columns: ColumnDef<BusinessUnitResponse, unknown>[] = [
 ];
 
 export default function BusinessUnitsPage() {
+  const { hasPermission } = usePermissions();
   const { data, isLoading } = useBusinessUnits();
   const create = useCreateBusinessUnit();
   const update = useUpdateBusinessUnit();
@@ -40,11 +42,13 @@ export default function BusinessUnitsPage() {
   return (
     <ConfigLayout>
       <div className="flex justify-end">
-        <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Unidad</Button>
+        {hasPermission("materials.create") && (
+          <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Unidad</Button>
+        )}
       </div>
 
       <DataTable columns={columns} data={data?.items ?? []} loading={isLoading} pageCount={1} pageIndex={0} pageSize={100} onPageChange={() => {}}
-        onRowClick={(row) => openDialog(row)} emptyTitle="Sin unidades" emptyDescription="No hay unidades de negocio." exportFilename="ecobalance_unidades-negocio" />
+        onRowClick={hasPermission("materials.edit") ? (row) => openDialog(row) : undefined} emptyTitle="Sin unidades" emptyDescription="No hay unidades de negocio." exportFilename="ecobalance_unidades-negocio" />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-sm">

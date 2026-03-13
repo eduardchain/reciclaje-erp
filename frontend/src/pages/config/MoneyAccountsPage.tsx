@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, FileText } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,6 +38,7 @@ const getColumns = (onViewMovements: (id: string) => void): ColumnDef<MoneyAccou
 
 export default function MoneyAccountsPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const { data, isLoading } = useMoneyAccounts();
   const create = useCreateMoneyAccount();
   const update = useUpdateMoneyAccount();
@@ -80,11 +82,13 @@ export default function MoneyAccountsPage() {
             <TabsTrigger value="digital">Digital</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Cuenta</Button>
+        {hasPermission("treasury.manage_accounts") && (
+          <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Cuenta</Button>
+        )}
       </div>
 
       <DataTable columns={getColumns((id) => navigate(`${ROUTES.TREASURY_ACCOUNT_MOVEMENTS}?account_id=${id}`))} data={filteredItems} loading={isLoading} pageCount={1} pageIndex={0} pageSize={100} onPageChange={() => {}}
-        onRowClick={(row) => openDialog(row)} emptyTitle="Sin cuentas" emptyDescription="No hay cuentas de dinero." exportFilename="ecobalance_cuentas-dinero" />
+        onRowClick={hasPermission("treasury.manage_accounts") ? (row) => openDialog(row) : undefined} emptyTitle="Sin cuentas" emptyDescription="No hay cuentas de dinero." exportFilename="ecobalance_cuentas-dinero" />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-sm">

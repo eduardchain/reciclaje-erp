@@ -27,6 +27,7 @@ import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { InventoryAdjustmentResponse } from "@/types/inventory";
 import type { MetricCard } from "@/types/reports";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const PAGE_SIZE = 20;
 
@@ -73,6 +74,7 @@ function ActionsCell({ adjustment, onAnnul }: { adjustment: InventoryAdjustmentR
 
 export default function AdjustmentsPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const [page, setPage] = useState(0);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -126,9 +128,11 @@ export default function AdjustmentsPage() {
           <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY)}>
             <ArrowLeft className="h-4 w-4 mr-2" />Stock
           </Button>
-          <Button onClick={() => navigate(ROUTES.INVENTORY_ADJUSTMENTS_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="h-4 w-4 mr-2" />Nuevo Ajuste
-          </Button>
+          {hasPermission("inventory.adjust") && (
+            <Button onClick={() => navigate(ROUTES.INVENTORY_ADJUSTMENTS_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="h-4 w-4 mr-2" />Nuevo Ajuste
+            </Button>
+          )}
         </div>
       </PageHeader>
 

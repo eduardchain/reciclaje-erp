@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Receipt } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -24,6 +25,7 @@ import type { ThirdPartyCreate } from "@/types/third-party";
 
 export default function LiabilitiesPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const { data: liabilitiesData, isLoading } = useLiabilities(search || undefined);
@@ -91,9 +93,11 @@ export default function LiabilitiesPage() {
           <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
             Volver a Tesoreria
           </Button>
-          <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="h-4 w-4 mr-2" />Nuevo Pasivo
-          </Button>
+          {hasPermission("treasury.create_movements") && (
+            <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="h-4 w-4 mr-2" />Nuevo Pasivo
+            </Button>
+          )}
         </div>
       </PageHeader>
 
@@ -130,20 +134,24 @@ export default function LiabilitiesPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openAccrue(tp.id, tp.name)}
-                        >
-                          <Receipt className="h-3.5 w-3.5 mr-1" />Causar
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => navigate(`${ROUTES.TREASURY_NEW}?type=liability_payment&third_party_id=${tp.id}`)}
-                        >
-                          Pagar
-                        </Button>
+                        {hasPermission("treasury.create_movements") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openAccrue(tp.id, tp.name)}
+                          >
+                            <Receipt className="h-3.5 w-3.5 mr-1" />Causar
+                          </Button>
+                        )}
+                        {hasPermission("treasury.create_movements") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate(`${ROUTES.TREASURY_NEW}?type=liability_payment&third_party_id=${tp.id}`)}
+                          >
+                            Pagar
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"

@@ -13,6 +13,7 @@ import { useThirdParties } from "@/hooks/useMasterData";
 import ThirdPartyFormDialog from "./ThirdPartyFormDialog";
 import type { ThirdPartyResponse } from "@/types/third-party";
 import { ROUTES } from "@/utils/constants";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const PAGE_SIZE = 20;
 
@@ -49,6 +50,7 @@ function getColumns(navigate: ReturnType<typeof useNavigate>): ColumnDef<ThirdPa
 
 export default function ThirdPartiesPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const [page, setPage] = useState(0);
   const [roleFilter, setRoleFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -66,9 +68,11 @@ export default function ThirdPartiesPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Terceros" description="Proveedores, clientes, inversionistas, provisiones y pasivos">
-        <Button onClick={() => { setEditItem(null); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
-          <Plus className="h-4 w-4 mr-2" />Nuevo Tercero
-        </Button>
+        {hasPermission("third_parties.create") && (
+          <Button onClick={() => { setEditItem(null); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
+            <Plus className="h-4 w-4 mr-2" />Nuevo Tercero
+          </Button>
+        )}
       </PageHeader>
 
       <Tabs value={roleFilter} onValueChange={(v) => { setRoleFilter(v); setPage(0); }}>

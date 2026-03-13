@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +20,7 @@ const columns: ColumnDef<ExpenseCategoryResponse, unknown>[] = [
 ];
 
 export default function ExpenseCategoriesPage() {
+  const { hasPermission } = usePermissions();
   const { data, isLoading } = useExpenseCategoriesList();
   const create = useCreateExpenseCategory();
   const update = useUpdateExpenseCategory();
@@ -45,11 +47,13 @@ export default function ExpenseCategoriesPage() {
   return (
     <ConfigLayout>
       <div className="flex justify-end">
-        <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Categoria</Button>
+        {hasPermission("treasury.manage_expenses") && (
+          <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Categoria</Button>
+        )}
       </div>
 
       <DataTable columns={columns} data={data?.items ?? []} loading={isLoading} pageCount={1} pageIndex={0} pageSize={100} onPageChange={() => {}}
-        onRowClick={(row) => openDialog(row)} emptyTitle="Sin categorias" emptyDescription="No hay categorias de gasto." exportFilename="ecobalance_categorias-gasto" />
+        onRowClick={hasPermission("treasury.manage_expenses") ? (row) => openDialog(row) : undefined} emptyTitle="Sin categorias" emptyDescription="No hay categorias de gasto." exportFilename="ecobalance_categorias-gasto" />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-sm">

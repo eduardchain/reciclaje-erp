@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Play } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -28,6 +29,7 @@ const statusColors: Record<FixedAssetStatus, string> = {
 
 export default function FixedAssetsPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [showApplyPending, setShowApplyPending] = useState(false);
   const applyPending = useApplyPendingDepreciations();
@@ -43,12 +45,16 @@ export default function FixedAssetsPage() {
           <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
             Volver a Tesoreria
           </Button>
-          <Button variant="outline" onClick={() => setShowApplyPending(true)}>
-            <Play className="h-4 w-4 mr-2" />Aplicar Depreciaciones
-          </Button>
-          <Button onClick={() => navigate(ROUTES.TREASURY_FIXED_ASSETS_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="h-4 w-4 mr-2" />Nuevo Activo
-          </Button>
+          {hasPermission("treasury.manage_fixed_assets") && (
+            <Button variant="outline" onClick={() => setShowApplyPending(true)}>
+              <Play className="h-4 w-4 mr-2" />Aplicar Depreciaciones
+            </Button>
+          )}
+          {hasPermission("treasury.manage_fixed_assets") && (
+            <Button onClick={() => navigate(ROUTES.TREASURY_FIXED_ASSETS_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="h-4 w-4 mr-2" />Nuevo Activo
+            </Button>
+          )}
         </div>
       </PageHeader>
 

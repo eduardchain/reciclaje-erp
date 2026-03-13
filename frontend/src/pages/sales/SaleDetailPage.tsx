@@ -16,6 +16,7 @@ import { formatCurrency, formatDate, formatDateTime, formatWeight, formatPercent
 import { useAuthStore } from "@/stores/authStore";
 import { ROUTES } from "@/utils/constants";
 import { exportSalePDF } from "@/utils/pdfExport";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const statusBorderMap: Record<string, string> = {
   registered: "border-t-[3px] border-t-amber-400",
@@ -27,6 +28,8 @@ export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: sale, isLoading } = useSale(id!);
+  const { hasPermission } = usePermissions();
+  const canViewPrices = hasPermission("sales.view_prices");
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
   const cancel = useCancelSale();
@@ -89,8 +92,8 @@ export default function SaleDetailPage() {
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Estado</dt><dd><StatusBadge status={sale.status} /></dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</dt><dd>{formatDate(sale.date)}</dd></div>
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold text-lg">{formatCurrency(sale.total_amount)}</dd></div>
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">{totalCommissions > 0 ? "Utilidad Neta" : "Utilidad Bruta"}</dt><dd className={`font-bold ${(totalCommissions > 0 ? netProfit : sale.total_profit) >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(totalCommissions > 0 ? netProfit : sale.total_profit)}</dd></div>
+              {canViewPrices && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold text-lg">{formatCurrency(sale.total_amount)}</dd></div>}
+              {canViewPrices && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">{totalCommissions > 0 ? "Utilidad Neta" : "Utilidad Bruta"}</dt><dd className={`font-bold ${(totalCommissions > 0 ? netProfit : sale.total_profit) >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(totalCommissions > 0 ? netProfit : sale.total_profit)}</dd></div>}
             </dl>
           </CardContent>
         </Card>
@@ -132,10 +135,10 @@ export default function SaleDetailPage() {
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Dif.</TableHead>
                     </>
                   )}
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Precio Unit.</TableHead>
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Costo Unit.</TableHead>
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total</TableHead>
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Util. Bruta</TableHead>
+                  {canViewPrices && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Precio Unit.</TableHead>}
+                  {canViewPrices && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Costo Unit.</TableHead>}
+                  {canViewPrices && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total</TableHead>}
+                  {canViewPrices && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Util. Bruta</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -167,16 +170,16 @@ export default function SaleDetailPage() {
                         </TableCell>
                       </>
                     )}
-                    <TableCell className="text-right tabular-nums">{formatCurrency(line.unit_price)}</TableCell>
-                    <TableCell className="text-right tabular-nums text-slate-500">{formatCurrency(line.unit_cost)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">{formatCurrency(line.total_price)}</TableCell>
-                    <TableCell className={`text-right tabular-nums font-medium ${line.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(line.profit)}</TableCell>
+                    {canViewPrices && <TableCell className="text-right tabular-nums">{formatCurrency(line.unit_price)}</TableCell>}
+                    {canViewPrices && <TableCell className="text-right tabular-nums text-slate-500">{formatCurrency(line.unit_cost)}</TableCell>}
+                    {canViewPrices && <TableCell className="text-right tabular-nums font-medium">{formatCurrency(line.total_price)}</TableCell>}
+                    {canViewPrices && <TableCell className={`text-right tabular-nums font-medium ${line.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(line.profit)}</TableCell>}
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
-          {sale.total_amount_difference != null && Math.abs(sale.total_amount_difference) > 0.01 && (
+          {canViewPrices && sale.total_amount_difference != null && Math.abs(sale.total_amount_difference) > 0.01 && (
             <div className={`p-3 rounded-lg mt-3 ${sale.total_amount_difference > 0 ? "bg-emerald-50" : "bg-red-50"}`}>
               <div className="flex justify-between items-center text-sm">
                 <span className="font-medium">
@@ -199,7 +202,7 @@ export default function SaleDetailPage() {
       </Card>
 
       {/* Comisiones */}
-      {sale.commissions.length > 0 && (
+      {canViewPrices && sale.commissions.length > 0 && (
         <Card className="shadow-sm">
           <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones</CardTitle></CardHeader>
           <CardContent>
@@ -234,7 +237,7 @@ export default function SaleDetailPage() {
       )}
 
       {/* Resumen Financiero */}
-      <Card className="shadow-sm">
+      {canViewPrices && <Card className="shadow-sm">
         <CardHeader>
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Resumen Financiero</CardTitle>
         </CardHeader>
@@ -276,7 +279,7 @@ export default function SaleDetailPage() {
             )}
           </div>
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* Auditoria */}
       <Card className="shadow-sm">

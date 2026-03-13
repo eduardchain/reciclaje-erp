@@ -27,6 +27,7 @@ import type { PurchaseResponse } from "@/types/purchase";
 import type { MetricCard } from "@/types/reports";
 import { useAuthStore } from "@/stores/authStore";
 import { exportPurchasePDF } from "@/utils/pdfExport";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const PAGE_SIZE = 20;
 
@@ -36,10 +37,11 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
   const cancelMutation = useCancelPurchase();
+  const { hasPermission } = usePermissions();
 
-  const canEdit = purchase.status === "registered" && !purchase.double_entry_id;
-  const canLiquidate = purchase.status === "registered" && !purchase.double_entry_id;
-  const canCancel = (purchase.status === "registered" || purchase.status === "liquidated") && !purchase.double_entry_id;
+  const canEdit = purchase.status === "registered" && !purchase.double_entry_id && hasPermission("purchases.edit");
+  const canLiquidate = purchase.status === "registered" && !purchase.double_entry_id && hasPermission("purchases.liquidate");
+  const canCancel = (purchase.status === "registered" || purchase.status === "liquidated") && !purchase.double_entry_id && hasPermission("purchases.cancel");
 
   return (
     <>
@@ -108,70 +110,74 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
   );
 }
 
-const columns: ColumnDef<PurchaseResponse, unknown>[] = [
-  {
-    accessorKey: "purchase_number",
-    header: "#",
-    cell: ({ row }) => <span className="font-medium">#{row.original.purchase_number}</span>,
-  },
-  {
-    accessorKey: "date",
-    header: "FECHA",
-    enableSorting: true,
-    cell: ({ row }) => formatDate(row.original.date),
-  },
-  {
-    accessorKey: "supplier_name",
-    header: "PROVEEDOR",
-  },
-  {
-    id: "items",
-    header: "DETALLE",
-    cell: ({ row }) => (
-      <div className="space-y-0.5">
-        {row.original.lines.map((line) => (
-          <div key={line.id} className="text-xs text-slate-600">
-            {line.material_code} - {formatWeight(line.quantity)} x {formatCurrency(line.unit_price)}
-          </div>
-        ))}
-      </div>
-    ),
-  },
-  {
-    accessorKey: "total_amount",
-    header: "TOTAL",
-    enableSorting: true,
-    cell: ({ row }) => (
-      <span className="font-medium tabular-nums">{formatCurrency(row.original.total_amount)}</span>
-    ),
-  },
-  {
-    id: "double_entry",
-    header: "D.P.",
-
-    cell: ({ row }) =>
-      row.original.double_entry_id ? (
-        <span className="bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded font-medium">
-          DP
-        </span>
-      ) : (
-        <span className="text-slate-300">-</span>
+function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown>[] {
+  return [
+    {
+      accessorKey: "purchase_number",
+      header: "#",
+      cell: ({ row }) => <span className="font-medium">#{row.original.purchase_number}</span>,
+    },
+    {
+      accessorKey: "date",
+      header: "FECHA",
+      enableSorting: true,
+      cell: ({ row }) => formatDate(row.original.date),
+    },
+    {
+      accessorKey: "supplier_name",
+      header: "PROVEEDOR",
+    },
+    {
+      id: "items",
+      header: "DETALLE",
+      cell: ({ row }) => (
+        <div className="space-y-0.5">
+          {row.original.lines.map((line) => (
+            <div key={line.id} className="text-xs text-slate-600">
+              {line.material_code} - {formatWeight(line.quantity)}{canViewPrices ? ` x ${formatCurrency(line.unit_price)}` : ""}
+            </div>
+          ))}
+        </div>
       ),
-  },
-  {
-    accessorKey: "status",
-    header: "ESTADO",
-    cell: ({ row }) => <StatusBadge status={row.original.status} />,
-  },
-  {
-    id: "actions",
-    header: "",
-    cell: ({ row }) => <ActionsCell purchase={row.original} />,
-  },
-];
+    },
+    ...(canViewPrices ? [{
+      accessorKey: "total_amount",
+      header: "TOTAL",
+      enableSorting: true,
+      cell: ({ row }: { row: { original: PurchaseResponse } }) => (
+        <span className="font-medium tabular-nums">{formatCurrency(row.original.total_amount)}</span>
+      ),
+    } as ColumnDef<PurchaseResponse, unknown>] : []),
+    {
+      id: "double_entry",
+      header: "D.P.",
+      cell: ({ row }) =>
+        row.original.double_entry_id ? (
+          <span className="bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded font-medium">
+            DP
+          </span>
+        ) : (
+          <span className="text-slate-300">-</span>
+        ),
+    },
+    {
+      accessorKey: "status",
+      header: "ESTADO",
+      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+    },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => <ActionsCell purchase={row.original} />,
+    },
+  ];
+}
 
 export default function PurchasesPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canViewPrices = hasPermission("purchases.view_prices");
+  const columns = useMemo(() => getColumns(canViewPrices), [canViewPrices]);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
@@ -203,10 +209,12 @@ export default function PurchasesPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Compras" description="Gestion de compras de material">
-        <Button onClick={() => navigate(ROUTES.PURCHASES_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
-          <Plus className="h-4 w-4 mr-2" />
-          Nueva Compra
-        </Button>
+        {hasPermission("purchases.create") && (
+          <Button onClick={() => navigate(ROUTES.PURCHASES_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+            <Plus className="h-4 w-4 mr-2" />
+            Nueva Compra
+          </Button>
+        )}
       </PageHeader>
 
       {/* KPI Cards */}

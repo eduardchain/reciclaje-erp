@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,6 +28,7 @@ const statusColors: Record<ScheduledExpenseStatus, string> = {
 
 export default function ScheduledExpensesPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const filters = statusFilter !== "all" ? { status: statusFilter } : {};
@@ -40,9 +42,11 @@ export default function ScheduledExpensesPage() {
           <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
             Volver a Tesoreria
           </Button>
-          <Button onClick={() => navigate(ROUTES.TREASURY_SCHEDULED_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="h-4 w-4 mr-2" />Nuevo Gasto Diferido
-          </Button>
+          {hasPermission("treasury.manage_expenses") && (
+            <Button onClick={() => navigate(ROUTES.TREASURY_SCHEDULED_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="h-4 w-4 mr-2" />Nuevo Gasto Diferido
+            </Button>
+          )}
         </div>
       </PageHeader>
 

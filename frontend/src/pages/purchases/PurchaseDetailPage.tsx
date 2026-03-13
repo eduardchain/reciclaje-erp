@@ -20,6 +20,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import { exportPurchasePDF } from "@/utils/pdfExport";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const statusBorderMap: Record<string, string> = {
   registered: "border-t-[3px] border-t-amber-400",
@@ -32,6 +33,8 @@ export default function PurchaseDetailPage() {
   const navigate = useNavigate();
   const { data: purchase, isLoading } = usePurchase(id!);
   const cancel = useCancelPurchase();
+  const { hasPermission } = usePermissions();
+  const canViewPrices = hasPermission("purchases.view_prices");
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
 
@@ -109,10 +112,12 @@ export default function PurchaseDetailPage() {
                 <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</dt>
                 <dd>{formatDate(purchase.date)}</dd>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt>
-                <dd className="font-bold text-lg">{formatCurrency(purchase.total_amount)}</dd>
-              </div>
+              {canViewPrices && (
+                <div className="flex justify-between">
+                  <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt>
+                  <dd className="font-bold text-lg">{formatCurrency(purchase.total_amount)}</dd>
+                </div>
+              )}
             </dl>
           </CardContent>
         </Card>
@@ -173,8 +178,8 @@ export default function PurchaseDetailPage() {
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Material</TableHead>
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Bodega</TableHead>
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Cantidad</TableHead>
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Precio Unit.</TableHead>
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total</TableHead>
+                  {canViewPrices && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Precio Unit.</TableHead>}
+                  {canViewPrices && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -188,18 +193,20 @@ export default function PurchaseDetailPage() {
                     </TableCell>
                     <TableCell>{line.warehouse_name ?? "-"}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatWeight(line.quantity)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatCurrency(line.unit_price)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">{formatCurrency(line.total_price)}</TableCell>
+                    {canViewPrices && <TableCell className="text-right tabular-nums">{formatCurrency(line.unit_price)}</TableCell>}
+                    {canViewPrices && <TableCell className="text-right tabular-nums font-medium">{formatCurrency(line.total_price)}</TableCell>}
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
-          <div className="bg-slate-50 rounded-lg p-3 mt-3">
-            <div className="flex justify-end">
-              <span className="text-lg font-bold">{formatCurrency(purchase.total_amount)}</span>
+          {canViewPrices && (
+            <div className="bg-slate-50 rounded-lg p-3 mt-3">
+              <div className="flex justify-end">
+                <span className="text-lg font-bold">{formatCurrency(purchase.total_amount)}</span>
+              </div>
             </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 

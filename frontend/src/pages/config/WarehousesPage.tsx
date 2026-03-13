@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +19,7 @@ const columns: ColumnDef<WarehouseResponse, unknown>[] = [
 ];
 
 export default function WarehousesPage() {
+  const { hasPermission } = usePermissions();
   const { data, isLoading } = useWarehouses();
   const create = useCreateWarehouse();
   const update = useUpdateWarehouse();
@@ -44,11 +46,13 @@ export default function WarehousesPage() {
   return (
     <ConfigLayout>
       <div className="flex justify-end">
-        <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Bodega</Button>
+        {hasPermission("warehouses.create") && (
+          <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Bodega</Button>
+        )}
       </div>
 
       <DataTable columns={columns} data={data?.items ?? []} loading={isLoading} pageCount={1} pageIndex={0} pageSize={100} onPageChange={() => {}}
-        onRowClick={(row) => openDialog(row)} emptyTitle="Sin bodegas" emptyDescription="No hay bodegas." exportFilename="ecobalance_bodegas" />
+        onRowClick={hasPermission("warehouses.edit") ? (row) => openDialog(row) : undefined} emptyTitle="Sin bodegas" emptyDescription="No hay bodegas." exportFilename="ecobalance_bodegas" />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-sm">

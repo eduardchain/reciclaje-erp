@@ -27,6 +27,7 @@ import { exportDoubleEntryPDF } from "@/utils/pdfExport";
 import { ROUTES } from "@/utils/constants";
 import type { DoubleEntryResponse } from "@/types/double-entry";
 import type { MetricCard } from "@/types/reports";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const PAGE_SIZE = 20;
 
@@ -36,6 +37,11 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
   const cancel = useCancelDoubleEntry();
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const { hasPermission } = usePermissions();
+
+  const canEdit = de.status === "registered" && hasPermission("double_entries.edit");
+  const canLiquidate = de.status === "registered" && hasPermission("double_entries.liquidate");
+  const canCancel = (de.status === "registered" || de.status === "liquidated") && hasPermission("double_entries.cancel");
 
   return (
     <>
@@ -55,19 +61,19 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
             <Eye className="h-4 w-4 mr-2" />
             Ver detalle
           </DropdownMenuItem>
-          {de.status === "registered" && (
-            <>
-              <DropdownMenuItem onClick={() => navigate(`/double-entries/${de.id}/edit`)}>
-                <Pencil className="h-4 w-4 mr-2" />
-                Editar
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate(`/double-entries/${de.id}/liquidate`)}>
-                <CheckCircle className="h-4 w-4 mr-2" />
-                Liquidar
-              </DropdownMenuItem>
-            </>
+          {canEdit && (
+            <DropdownMenuItem onClick={() => navigate(`/double-entries/${de.id}/edit`)}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Editar
+            </DropdownMenuItem>
           )}
-          {(de.status === "registered" || de.status === "liquidated") && (
+          {canLiquidate && (
+            <DropdownMenuItem onClick={() => navigate(`/double-entries/${de.id}/liquidate`)}>
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Liquidar
+            </DropdownMenuItem>
+          )}
+          {canCancel && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setCancelOpen(true)} className="text-red-600">
@@ -120,6 +126,7 @@ const columns: ColumnDef<DoubleEntryResponse, unknown>[] = [
 
 export default function DoubleEntriesPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
@@ -153,9 +160,11 @@ export default function DoubleEntriesPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Doble Partida" description="Operaciones Pasa Mano (compra+venta simultanea)">
-        <Button onClick={() => navigate(ROUTES.DOUBLE_ENTRIES_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
-          <Plus className="h-4 w-4 mr-2" />Nueva Doble Partida
-        </Button>
+        {hasPermission("double_entries.create") && (
+          <Button onClick={() => navigate(ROUTES.DOUBLE_ENTRIES_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+            <Plus className="h-4 w-4 mr-2" />Nueva Doble Partida
+          </Button>
+        )}
       </PageHeader>
 
       {/* KPI Cards */}

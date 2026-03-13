@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +16,7 @@ import ConfigLayout from "./ConfigLayout";
 import type { PriceListResponse } from "@/types/config";
 
 export default function PriceListsPage() {
+  const { hasPermission } = usePermissions();
   const { data, isLoading } = usePriceLists();
   const { data: materialsData } = useMaterials();
   const materials = materialsData?.items ?? [];
@@ -77,11 +79,13 @@ export default function PriceListsPage() {
   return (
     <ConfigLayout>
       <div className="flex justify-end">
-        <Button onClick={() => { setMaterialId(""); setPurchasePrice(0); setSalePrice(0); setNotes(""); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nuevo Precio</Button>
+        {hasPermission("materials.edit_prices") && (
+          <Button onClick={() => { setMaterialId(""); setPurchasePrice(0); setSalePrice(0); setNotes(""); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nuevo Precio</Button>
+        )}
       </div>
 
       <DataTable columns={priceColumns} data={data?.items ?? []} loading={isLoading} pageCount={1} pageIndex={0} pageSize={200} onPageChange={() => {}}
-        onRowClick={openDialogForRow}
+        onRowClick={hasPermission("materials.edit_prices") ? openDialogForRow : undefined}
         emptyTitle="Sin precios" emptyDescription="No hay precios registrados." exportFilename="ecobalance_lista-precios" />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

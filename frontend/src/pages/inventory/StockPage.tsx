@@ -20,6 +20,7 @@ import { formatCurrency } from "@/utils/formatters";
 import { cn } from "@/utils";
 import type { StockItem } from "@/types/inventory";
 import type { MetricCard } from "@/types/reports";
+import { usePermissions } from "@/hooks/usePermissions";
 
 // --- Modal de traslado entre bodegas ---
 
@@ -132,6 +133,7 @@ function WarehouseBreakdownRow({
 }) {
   const navigate = useNavigate();
   const { data, isLoading } = useStockDetail(materialId);
+  const { hasPermission } = usePermissions();
 
   if (isLoading) {
     return (
@@ -179,18 +181,20 @@ function WarehouseBreakdownRow({
                     {w.stock.toFixed(2)} {defaultUnit}
                   </td>
                   <td className="py-2 px-3 text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onTransfer(materialId, w.warehouse_id, w.warehouse_name);
-                      }}
-                      disabled={w.stock <= 0}
-                    >
-                      <ArrowRightLeft className="h-3 w-3 mr-1" />
-                      Trasladar
-                    </Button>
+                    {hasPermission("inventory.transfer") && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onTransfer(materialId, w.warehouse_id, w.warehouse_name);
+                        }}
+                        disabled={w.stock <= 0}
+                      >
+                        <ArrowRightLeft className="h-3 w-3 mr-1" />
+                        Trasladar
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -205,13 +209,15 @@ function WarehouseBreakdownRow({
           >
             Ver Movimientos
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate(`/inventory/adjustments/new?material_id=${materialId}`)}
-          >
-            Ajustar Stock
-          </Button>
+          {hasPermission("inventory.adjust") && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/inventory/adjustments/new?material_id=${materialId}`)}
+            >
+              Ajustar Stock
+            </Button>
+          )}
         </div>
       </TableCell>
     </TableRow>
@@ -220,6 +226,8 @@ function WarehouseBreakdownRow({
 
 export default function StockPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canViewValues = hasPermission("inventory.view_values");
   const [expandedMaterial, setExpandedMaterial] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
@@ -287,7 +295,7 @@ export default function StockPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <KpiCard label="Materiales" metric={kpis.count} icon={<Package className="h-4 w-4" />} accentColor="violet" formatValue={(n) => String(n)} />
-          <KpiCard label="Valor Inventario" metric={kpis.value} icon={<DollarSign className="h-4 w-4" />} accentColor="emerald" />
+          {canViewValues && <KpiCard label="Valor Inventario" metric={kpis.value} icon={<DollarSign className="h-4 w-4" />} accentColor="emerald" />}
           <KpiCard label="Stock en Transito" metric={kpis.transit} icon={<Layers className="h-4 w-4" />} accentColor="amber" formatValue={(n) => n.toFixed(2) + " kg"} />
         </div>
       )}
@@ -329,20 +337,20 @@ export default function StockPage() {
               <TableHead className="text-right">Stock Liq.</TableHead>
               <TableHead className="text-right">Stock Trans.</TableHead>
               <TableHead className="text-right">Total</TableHead>
-              <TableHead className="text-right">Costo Prom.</TableHead>
-              <TableHead className="text-right">Valor Total</TableHead>
+              {canViewValues && <TableHead className="text-right">Costo Prom.</TableHead>}
+              {canViewValues && <TableHead className="text-right">Valor Total</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={9} className="h-24 text-center text-slate-500">
+                <TableCell colSpan={canViewValues ? 9 : 7} className="h-24 text-center text-slate-500">
                   Cargando...
                 </TableCell>
               </TableRow>
             ) : filteredItems.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="h-24 text-center text-slate-500">
+                <TableCell colSpan={canViewValues ? 9 : 7} className="h-24 text-center text-slate-500">
                   Sin materiales con stock.
                 </TableCell>
               </TableRow>
@@ -371,8 +379,8 @@ export default function StockPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right font-medium tabular-nums">{item.current_stock_total.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(item.current_average_cost)}</TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(item.total_value)}</TableCell>
+                    {canViewValues && <TableCell className="text-right">{formatCurrency(item.current_average_cost)}</TableCell>}
+                    {canViewValues && <TableCell className="text-right font-medium">{formatCurrency(item.total_value)}</TableCell>}
                   </TableRow>
 
                   {expandedMaterial === item.material_id && (

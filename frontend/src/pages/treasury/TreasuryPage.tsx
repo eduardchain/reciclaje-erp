@@ -18,6 +18,7 @@ import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { MoneyMovementResponse, MoneyMovementType } from "@/types/money-movement";
 import type { MetricCard } from "@/types/reports";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const PAGE_SIZE = 20;
 
@@ -83,6 +84,7 @@ const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [
 
 export default function TreasuryPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const [page, setPage] = useState(0);
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -111,9 +113,11 @@ export default function TreasuryPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Tesoreria" description="Movimientos de dinero">
-        <Button onClick={() => navigate(ROUTES.TREASURY_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
-          <Plus className="h-4 w-4 mr-2" />Nuevo Movimiento
-        </Button>
+        {hasPermission("treasury.create_movements") && (
+          <Button onClick={() => navigate(ROUTES.TREASURY_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+            <Plus className="h-4 w-4 mr-2" />Nuevo Movimiento
+          </Button>
+        )}
       </PageHeader>
 
       {isLoading ? (

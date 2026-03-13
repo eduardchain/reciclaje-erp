@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -38,13 +38,22 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { usePermissions } from "@/hooks/usePermissions";
+
+interface NavChild {
+  name: string;
+  path: string;
+  icon: React.ReactNode;
+  permission?: string;
+}
 
 interface NavItem {
   name: string;
   path: string;
   icon: React.ReactNode;
   section?: string;
-  children?: { name: string; path: string; icon: React.ReactNode }[];
+  permission?: string;
+  children?: NavChild[];
 }
 
 const navItems: NavItem[] = [
@@ -58,30 +67,33 @@ const navItems: NavItem[] = [
     path: ROUTES.PURCHASES,
     icon: <ShoppingCart className="w-5 h-5" />,
     section: "OPERACIONES",
+    permission: "purchases.view",
   },
   {
     name: "Ventas",
     path: ROUTES.SALES,
     icon: <DollarSign className="w-5 h-5" />,
+    permission: "sales.view",
   },
   {
     name: "Doble Partida",
     path: ROUTES.DOUBLE_ENTRIES,
     icon: <ArrowLeftRight className="w-5 h-5" />,
+    permission: "double_entries.view",
   },
   {
     name: "Tesoreria",
     path: ROUTES.TREASURY,
     icon: <Wallet className="w-5 h-5" />,
     children: [
-      { name: "Dashboard", path: ROUTES.TREASURY_DASHBOARD, icon: <LayoutDashboard className="w-4 h-4" /> },
-      { name: "Movimientos", path: ROUTES.TREASURY, icon: <ArrowDownUp className="w-4 h-4" /> },
-      { name: "Terceros", path: ROUTES.TREASURY_ACCOUNT_STATEMENT, icon: <ListOrdered className="w-4 h-4" /> },
-      { name: "Cuentas", path: ROUTES.TREASURY_ACCOUNT_MOVEMENTS, icon: <CreditCard className="w-4 h-4" /> },
-      { name: "Provisiones", path: ROUTES.TREASURY_PROVISIONS, icon: <Tag className="w-4 h-4" /> },
-      { name: "Pasivos", path: ROUTES.TREASURY_LIABILITIES, icon: <Scale className="w-4 h-4" /> },
-      { name: "Gastos Diferidos", path: ROUTES.TREASURY_SCHEDULED, icon: <CalendarClock className="w-4 h-4" /> },
-      { name: "Activos Fijos", path: ROUTES.TREASURY_FIXED_ASSETS, icon: <Building2 className="w-4 h-4" /> },
+      { name: "Dashboard", path: ROUTES.TREASURY_DASHBOARD, icon: <LayoutDashboard className="w-4 h-4" />, permission: "treasury.view" },
+      { name: "Movimientos", path: ROUTES.TREASURY, icon: <ArrowDownUp className="w-4 h-4" />, permission: "treasury.view" },
+      { name: "Terceros", path: ROUTES.TREASURY_ACCOUNT_STATEMENT, icon: <ListOrdered className="w-4 h-4" />, permission: "treasury.view" },
+      { name: "Cuentas", path: ROUTES.TREASURY_ACCOUNT_MOVEMENTS, icon: <CreditCard className="w-4 h-4" />, permission: "treasury.view" },
+      { name: "Provisiones", path: ROUTES.TREASURY_PROVISIONS, icon: <Tag className="w-4 h-4" />, permission: "treasury.view" },
+      { name: "Pasivos", path: ROUTES.TREASURY_LIABILITIES, icon: <Scale className="w-4 h-4" />, permission: "treasury.view" },
+      { name: "Gastos Diferidos", path: ROUTES.TREASURY_SCHEDULED, icon: <CalendarClock className="w-4 h-4" />, permission: "treasury.view" },
+      { name: "Activos Fijos", path: ROUTES.TREASURY_FIXED_ASSETS, icon: <Building2 className="w-4 h-4" />, permission: "treasury.view" },
     ],
   },
   {
@@ -90,12 +102,12 @@ const navItems: NavItem[] = [
     icon: <Package className="w-5 h-5" />,
     section: "INVENTARIO",
     children: [
-      { name: "Stock", path: ROUTES.INVENTORY, icon: <Boxes className="w-4 h-4" /> },
-      { name: "Movimientos", path: ROUTES.INVENTORY_MOVEMENTS, icon: <ArrowDownUp className="w-4 h-4" /> },
-      { name: "Ajustes", path: ROUTES.INVENTORY_ADJUSTMENTS, icon: <ClipboardList className="w-4 h-4" /> },
-      { name: "Transformaciones", path: ROUTES.INVENTORY_TRANSFORMATIONS, icon: <Shuffle className="w-4 h-4" /> },
-      { name: "Valorizacion", path: ROUTES.INVENTORY_VALUATION, icon: <Calculator className="w-4 h-4" /> },
-      { name: "En Transito", path: ROUTES.INVENTORY_TRANSIT, icon: <Truck className="w-4 h-4" /> },
+      { name: "Stock", path: ROUTES.INVENTORY, icon: <Boxes className="w-4 h-4" />, permission: "inventory.view" },
+      { name: "Movimientos", path: ROUTES.INVENTORY_MOVEMENTS, icon: <ArrowDownUp className="w-4 h-4" />, permission: "inventory.view" },
+      { name: "Ajustes", path: ROUTES.INVENTORY_ADJUSTMENTS, icon: <ClipboardList className="w-4 h-4" />, permission: "inventory.view" },
+      { name: "Transformaciones", path: ROUTES.INVENTORY_TRANSFORMATIONS, icon: <Shuffle className="w-4 h-4" />, permission: "transformations.view" },
+      { name: "Valorizacion", path: ROUTES.INVENTORY_VALUATION, icon: <Calculator className="w-4 h-4" />, permission: "inventory.view_values" },
+      { name: "En Transito", path: ROUTES.INVENTORY_TRANSIT, icon: <Truck className="w-4 h-4" />, permission: "inventory.view" },
     ],
   },
   {
@@ -103,17 +115,20 @@ const navItems: NavItem[] = [
     path: ROUTES.REPORTS,
     icon: <BarChart3 className="w-5 h-5" />,
     section: "ANALISIS",
+    permission: "reports.view",
   },
   {
     name: "Terceros",
     path: ROUTES.THIRD_PARTIES,
     icon: <Users className="w-5 h-5" />,
     section: "MAESTROS",
+    permission: "third_parties.view",
   },
   {
     name: "Materiales",
     path: ROUTES.MATERIALS,
     icon: <Boxes className="w-5 h-5" />,
+    permission: "materials.view",
   },
   {
     name: "Configuracion",
@@ -121,11 +136,11 @@ const navItems: NavItem[] = [
     icon: <Settings className="w-5 h-5" />,
     section: "SISTEMA",
     children: [
-      { name: "Bodegas", path: ROUTES.CONFIG_WAREHOUSES, icon: <Warehouse className="w-4 h-4" /> },
-      { name: "Cuentas", path: ROUTES.CONFIG_ACCOUNTS, icon: <CreditCard className="w-4 h-4" /> },
-      { name: "Unidades Negocio", path: ROUTES.CONFIG_BUSINESS_UNITS, icon: <Building className="w-4 h-4" /> },
-      { name: "Cat. Gastos", path: ROUTES.CONFIG_EXPENSE_CATEGORIES, icon: <Tag className="w-4 h-4" /> },
-      { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" /> },
+      { name: "Bodegas", path: ROUTES.CONFIG_WAREHOUSES, icon: <Warehouse className="w-4 h-4" />, permission: "warehouses.view" },
+      { name: "Cuentas", path: ROUTES.CONFIG_ACCOUNTS, icon: <CreditCard className="w-4 h-4" />, permission: "treasury.manage_accounts" },
+      { name: "Unidades Negocio", path: ROUTES.CONFIG_BUSINESS_UNITS, icon: <Building className="w-4 h-4" />, permission: "materials.view" },
+      { name: "Cat. Gastos", path: ROUTES.CONFIG_EXPENSE_CATEGORIES, icon: <Tag className="w-4 h-4" />, permission: "treasury.manage_expenses" },
+      { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" />, permission: "materials.view_prices" },
     ],
   },
 ];
@@ -134,6 +149,24 @@ export default function Sidebar() {
   const location = useLocation();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [collapsed, setCollapsed] = useState(false);
+  const { hasPermission, isLoading } = usePermissions();
+
+  const filteredNavItems = useMemo(() => {
+    if (isLoading) return [];
+    return navItems
+      .map((item) => {
+        if (item.children) {
+          const filteredChildren = item.children.filter(
+            (child) => !child.permission || hasPermission(child.permission)
+          );
+          if (filteredChildren.length === 0) return null;
+          return { ...item, children: filteredChildren };
+        }
+        if (item.permission && !hasPermission(item.permission)) return null;
+        return item;
+      })
+      .filter(Boolean) as NavItem[];
+  }, [isLoading, hasPermission]);
 
   const toggleExpand = (name: string) => {
     setExpanded((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -163,7 +196,7 @@ export default function Sidebar() {
         {/* Navigation */}
         <nav className={cn("flex-1 py-4", collapsed ? "px-2" : "px-3")}>
           <div className="space-y-1">
-            {navItems.map((item, index) => {
+            {filteredNavItems.map((item, index) => {
               const active = isActive(item.path);
               const hasChildren = item.children && item.children.length > 0;
               const isExpanded = expanded[item.name] || (hasChildren && isActive(item.path));
