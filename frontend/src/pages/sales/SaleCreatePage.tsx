@@ -17,7 +17,7 @@ import { useCreateSale } from "@/hooks/useSales";
 import { saleService } from "@/services/sales";
 import { inventoryService } from "@/services/inventory";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useCustomers, useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { useCustomers, useSuppliers, useMaterials, useWarehouses, useMoneyAccounts } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatWeight, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
@@ -76,11 +76,13 @@ export default function SaleCreatePage() {
   const { data: suppliersData } = useSuppliers();
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
+  const { data: accountsData } = useMoneyAccounts();
 
   const customers = customersData?.items ?? [];
   const thirdParties = [...(customersData?.items ?? []), ...(suppliersData?.items ?? [])];
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
+  const accounts = accountsData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
 
   const [customerId, setCustomerId] = useState("");
@@ -90,6 +92,8 @@ export default function SaleCreatePage() {
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [autoLiquidate, setAutoLiquidate] = useState(false);
+  const [immediateCollection, setImmediateCollection] = useState(false);
+  const [collectionAccountId, setCollectionAccountId] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
 
@@ -139,6 +143,8 @@ export default function SaleCreatePage() {
     !isFutureDate &&
     lines.length > 0 &&
     lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
+    (!autoLiquidate || lines.every((l) => l.unit_price > 0)) &&
+    (!immediateCollection || collectionAccountId !== "") &&
     commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0);
 
   const [duplicateOpen, setDuplicateOpen] = useState(false);
@@ -155,6 +161,8 @@ export default function SaleCreatePage() {
         invoice_number: invoiceNumber || null,
         notes: notes || null,
         auto_liquidate: autoLiquidate,
+        immediate_collection: immediateCollection,
+        collection_account_id: immediateCollection ? collectionAccountId : null,
         lines: lines.map(({ _key, ...rest }) => rest),
         commissions: commissions.map(({ _key, ...rest }) => rest),
       },
@@ -392,8 +400,32 @@ export default function SaleCreatePage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidar inmediatamente</Label>
               <p className="text-xs text-slate-500 mt-1">Si se activa, la venta se liquidara al crearla (confirma precios y aplica saldo al cliente)</p>
             </div>
-            <Switch checked={autoLiquidate} onCheckedChange={setAutoLiquidate} />
+            <Switch checked={autoLiquidate} onCheckedChange={(v) => { setAutoLiquidate(v); if (!v) { setImmediateCollection(false); setCollectionAccountId(""); } }} />
           </div>
+          {autoLiquidate && lines.some((l) => l.unit_price <= 0) && (
+            <p className="text-xs text-amber-600 mt-2">Todos los precios deben ser mayores a 0 para liquidar inmediatamente.</p>
+          )}
+          {autoLiquidate && (
+            <div className="flex items-center gap-4 mt-3 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={immediateCollection}
+                  onCheckedChange={(v) => { setImmediateCollection(v); if (!v) setCollectionAccountId(""); }}
+                />
+                <Label className="text-sm font-medium">Cobrar de contado</Label>
+              </div>
+              {immediateCollection && (
+                <div className="flex-1 max-w-xs">
+                  <EntitySelect
+                    value={collectionAccountId}
+                    onChange={setCollectionAccountId}
+                    options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
+                    placeholder="Cuenta de cobro..."
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

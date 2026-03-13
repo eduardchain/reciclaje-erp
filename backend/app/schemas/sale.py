@@ -128,6 +128,22 @@ class SaleCreate(SaleBase):
     lines: List[SaleLineCreate] = Field(..., min_length=1, description="Sale lines (at least 1)")
     commissions: List[SaleCommissionCreate] = Field(default_factory=list, description="Optional sale commissions")
     auto_liquidate: bool = Field(False, description="Auto-liquidate after creation (1-step workflow)")
+    immediate_collection: bool = Field(False, description="Cobrar de contado al liquidar (solo con auto_liquidate)")
+    collection_account_id: Optional[UUID] = Field(None, description="Cuenta para cobro inmediato")
+
+    @model_validator(mode='after')
+    def validate_auto_liquidate_and_collection(self):
+        """Validar auto_liquidate (precios > 0) e immediate_collection."""
+        if self.auto_liquidate:
+            for i, line in enumerate(self.lines):
+                if line.unit_price <= 0:
+                    raise ValueError(f"Todos los precios deben ser > 0 para auto-liquidar. Linea {i+1} tiene precio {line.unit_price}")
+        if self.immediate_collection:
+            if not self.auto_liquidate:
+                raise ValueError("immediate_collection requiere auto_liquidate=True")
+            if not self.collection_account_id:
+                raise ValueError("collection_account_id es requerido cuando immediate_collection=True")
+        return self
 
 
 class SaleUpdate(BaseModel):

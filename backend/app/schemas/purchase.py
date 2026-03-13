@@ -78,6 +78,8 @@ class PurchaseCreate(PurchaseBase):
     """
     lines: List[PurchaseLineCreate] = Field(..., min_length=1, description="Purchase lines (at least 1)")
     auto_liquidate: bool = Field(False, description="Auto-liquidate after creation (1-step workflow)")
+    immediate_payment: bool = Field(False, description="Pagar de contado al liquidar (solo con auto_liquidate)")
+    payment_account_id: Optional[UUID] = Field(None, description="Cuenta para pago inmediato")
 
     @model_validator(mode='after')
     def validate_auto_liquidate(self):
@@ -86,6 +88,11 @@ class PurchaseCreate(PurchaseBase):
             for i, line in enumerate(self.lines):
                 if line.unit_price <= 0:
                     raise ValueError(f"Todos los precios deben ser > 0 para auto-liquidar. Linea {i+1} tiene precio {line.unit_price}")
+        if self.immediate_payment:
+            if not self.auto_liquidate:
+                raise ValueError("immediate_payment requiere auto_liquidate=True")
+            if not self.payment_account_id:
+                raise ValueError("payment_account_id es requerido cuando immediate_payment=True")
         return self
 
 

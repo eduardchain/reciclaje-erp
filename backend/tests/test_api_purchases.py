@@ -1917,3 +1917,50 @@ class TestCostHistory:
         assert test_material.current_stock_transit == 1000
         assert test_material.current_stock_liquidated == 500
         assert test_material.current_average_cost == 2500
+
+
+class TestImmediatePayment:
+    """Tests para pago inmediato en compra 1-step (auto_liquidate + immediate_payment)."""
+
+    def test_create_with_auto_liquidate_and_immediate_payment(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, test_money_account, db_session
+    ):
+        """Crear compra con auto_liquidate + immediate_payment descuenta cuenta y balance proveedor = 0."""
+        initial_balance = float(test_money_account.current_balance)
+        purchase_total = 100 * 1000  # 100 kg a $1000
+
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": "2026-03-01T12:00:00",
+            "lines": [{"material_id": str(test_material.id), "quantity": 100, "unit_price": 1000, "warehouse_id": str(test_warehouse.id)}],
+            "auto_liquidate": True,
+            "immediate_payment": True,
+            "payment_account_id": str(test_money_account.id),
+        }
+        resp = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["status"] == "liquidated"
+
+        # Verificar cuenta descontada
+        db_session.refresh(test_money_account)
+        assert float(test_money_account.current_balance) == initial_balance - purchase_total
+
+        # Verificar balance proveedor = 0 (liquidado + pagado)
+        db_session.refresh(test_supplier)
+        assert float(test_supplier.current_balance) == 0
+
+    def test_immediate_payment_requires_auto_liquidate(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, test_money_account
+    ):
+        """immediate_payment sin auto_liquidate debe fallar 422."""
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": "2026-03-01T12:00:00",
+            "lines": [{"material_id": str(test_material.id), "quantity": 100, "unit_price": 1000, "warehouse_id": str(test_warehouse.id)}],
+            "auto_liquidate": False,
+            "immediate_payment": True,
+            "payment_account_id": str(test_money_account.id),
+        }
+        resp = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert resp.status_code == 422

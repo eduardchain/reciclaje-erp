@@ -35,7 +35,12 @@ export function useCreateSale() {
   return useMutation({
     mutationFn: (data: SaleCreate) => saleService.create(data),
     onSuccess: (sale) => {
-      invalidateAfterSale(queryClient);
+      // auto_liquidate con cobro inmediato afecta mas queries (movimientos, cuentas, etc.)
+      if (sale.status === "liquidated") {
+        invalidateAfterSaleLiquidateOrCancel(queryClient);
+      } else {
+        invalidateAfterSale(queryClient);
+      }
       toast.success("Venta creada exitosamente");
       if (sale.warnings && sale.warnings.length > 0) {
         sale.warnings.forEach((w: string) => toast.warning(w));

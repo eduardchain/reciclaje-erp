@@ -244,6 +244,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 purchase_id=purchase.id,
                 organization_id=organization_id,
                 user_id=user_id,
+                immediate_payment=obj_in.immediate_payment,
+                payment_account_id=obj_in.payment_account_id,
             )
         
         db.commit()

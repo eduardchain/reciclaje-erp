@@ -13,7 +13,7 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useCreatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { useSuppliers, useMaterials, useWarehouses, useMoneyAccounts } from "@/hooks/useMasterData";
 import { purchaseService } from "@/services/purchases";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
@@ -44,9 +44,12 @@ export default function PurchaseCreatePage() {
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
 
+  const { data: accountsData } = useMoneyAccounts();
+
   const suppliers = suppliersData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
+  const accounts = accountsData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
 
   const [supplierId, setSupplierId] = useState("");
@@ -55,6 +58,8 @@ export default function PurchaseCreatePage() {
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [autoLiquidate, setAutoLiquidate] = useState(false);
+  const [immediatePayment, setImmediatePayment] = useState(false);
+  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [duplicateCount, setDuplicateCount] = useState(0);
@@ -92,7 +97,8 @@ export default function PurchaseCreatePage() {
     !isFutureDate &&
     lines.length > 0 &&
     lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
-    (!autoLiquidate || lines.every((l) => l.unit_price > 0));
+    (!autoLiquidate || lines.every((l) => l.unit_price > 0)) &&
+    (!immediatePayment || paymentAccountId !== "");
 
   const doCreate = () => {
     createPurchase.mutate(
@@ -103,6 +109,8 @@ export default function PurchaseCreatePage() {
         invoice_number: invoiceNumber || null,
         notes: notes || null,
         auto_liquidate: autoLiquidate,
+        immediate_payment: immediatePayment,
+        payment_account_id: immediatePayment ? paymentAccountId : null,
         lines: lines.map(({ _key, ...rest }) => rest),
       },
       {
@@ -291,10 +299,31 @@ export default function PurchaseCreatePage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidar inmediatamente</Label>
               <p className="text-xs text-slate-500 mt-1">Confirma precios y mueve stock a liquidado. Requiere precios &gt; 0.</p>
             </div>
-            <Switch checked={autoLiquidate} onCheckedChange={setAutoLiquidate} />
+            <Switch checked={autoLiquidate} onCheckedChange={(v) => { setAutoLiquidate(v); if (!v) { setImmediatePayment(false); setPaymentAccountId(""); } }} />
           </div>
           {autoLiquidate && lines.some((l) => l.unit_price <= 0) && (
             <p className="text-xs text-amber-600 mt-2">Todos los precios deben ser mayores a 0 para liquidar inmediatamente.</p>
+          )}
+          {autoLiquidate && (
+            <div className="flex items-center gap-4 mt-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={immediatePayment}
+                  onCheckedChange={(v) => { setImmediatePayment(v); if (!v) setPaymentAccountId(""); }}
+                />
+                <Label className="text-sm font-medium">Pagar de contado</Label>
+              </div>
+              {immediatePayment && (
+                <div className="flex-1 max-w-xs">
+                  <EntitySelect
+                    value={paymentAccountId}
+                    onChange={setPaymentAccountId}
+                    options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
+                    placeholder="Cuenta de pago..."
+                  />
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>

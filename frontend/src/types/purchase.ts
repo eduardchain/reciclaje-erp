@@ -31,6 +31,8 @@ export interface PurchaseCreate {
   invoice_number?: string | null;
   lines: PurchaseLineCreate[];
   auto_liquidate?: boolean;
+  immediate_payment?: boolean;
+  payment_account_id?: string | null;
 }
 
 export interface PurchaseUpdate {

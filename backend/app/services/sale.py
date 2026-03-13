@@ -254,7 +254,11 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         # Step 10: If auto_liquidate, liquidate immediately
         if obj_in.auto_liquidate:
             print(f"⚡ Auto-liquidating sale #{sale_number}")
-            sale = self.liquidate(db, sale.id, organization_id, user_id=user_id)
+            sale = self.liquidate(
+                db, sale.id, organization_id, user_id=user_id,
+                immediate_collection=obj_in.immediate_collection,
+                collection_account_id=obj_in.collection_account_id,
+            )
 
         # Attach warnings as transient attribute (no se persiste en BD)
         sale._warnings = warnings

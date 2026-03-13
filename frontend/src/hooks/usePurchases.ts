@@ -35,7 +35,12 @@ export function useCreatePurchase() {
   return useMutation({
     mutationFn: (data: PurchaseCreate) => purchaseService.create(data),
     onSuccess: (purchase) => {
-      invalidateAfterPurchase(queryClient);
+      // auto_liquidate con pago inmediato afecta mas queries (movimientos, cuentas, etc.)
+      if (purchase.status === "liquidated") {
+        invalidateAfterPurchaseLiquidateOrCancel(queryClient);
+      } else {
+        invalidateAfterPurchase(queryClient);
+      }
       toast.success("Compra creada exitosamente");
       if (purchase.warnings && purchase.warnings.length > 0) {
         purchase.warnings.forEach((w) => toast.warning(w));

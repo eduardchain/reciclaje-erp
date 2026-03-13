@@ -54,6 +54,8 @@ export interface SaleCreate {
   lines: SaleLineCreate[];
   commissions?: SaleCommissionCreate[];
   auto_liquidate?: boolean;
+  immediate_collection?: boolean;
+  collection_account_id?: string | null;
 }
 
 export interface SaleUpdate {

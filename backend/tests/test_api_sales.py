@@ -1482,3 +1482,54 @@ class TestWarehouseStockValidation:
         # Verificar que unit_cost capturo el ultimo costo conocido ($30), no $0
         line = data["lines"][0]
         assert float(line["unit_cost"]) == 30.0
+
+
+class TestImmediateCollection:
+    """Tests para cobro inmediato en venta 1-step (auto_liquidate + immediate_collection)."""
+
+    def test_create_with_auto_liquidate_and_immediate_collection(
+        self, client, org_headers, test_customer, test_material_with_stock, test_warehouse, test_money_account, db_session
+    ):
+        """Crear venta con auto_liquidate + immediate_collection acredita cuenta y balance cliente = 0."""
+        initial_balance = float(test_money_account.current_balance)
+        sale_total = 10 * 500  # 10 kg a $500 = $5000
+
+        payload = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": "2026-03-01T12:00:00",
+            "lines": [{"material_id": str(test_material_with_stock.id), "quantity": 10, "unit_price": 500}],
+            "commissions": [],
+            "auto_liquidate": True,
+            "immediate_collection": True,
+            "collection_account_id": str(test_money_account.id),
+        }
+        resp = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["status"] == "liquidated"
+
+        # Verificar cuenta acreditada
+        db_session.refresh(test_money_account)
+        assert float(test_money_account.current_balance) == initial_balance + sale_total
+
+        # Verificar balance cliente = 0 (liquidado + cobrado)
+        db_session.refresh(test_customer)
+        assert float(test_customer.current_balance) == 0
+
+    def test_immediate_collection_requires_auto_liquidate(
+        self, client, org_headers, test_customer, test_material_with_stock, test_warehouse, test_money_account
+    ):
+        """immediate_collection sin auto_liquidate debe fallar 422."""
+        payload = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": "2026-03-01T12:00:00",
+            "lines": [{"material_id": str(test_material_with_stock.id), "quantity": 10, "unit_price": 500}],
+            "commissions": [],
+            "auto_liquidate": False,
+            "immediate_collection": True,
+            "collection_account_id": str(test_money_account.id),
+        }
+        resp = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        assert resp.status_code == 422
