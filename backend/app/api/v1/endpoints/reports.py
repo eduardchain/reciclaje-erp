@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.reports import (
     AuditBalancesResponse,
     BalanceSheetResponse,
@@ -32,7 +32,7 @@ router = APIRouter()
 def get_dashboard(
     date_from: date = Query(..., description="Fecha inicio del periodo"),
     date_to: date = Query(..., description="Fecha fin del periodo"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("reports.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -52,7 +52,7 @@ def get_dashboard(
 def get_profit_and_loss(
     date_from: date = Query(..., description="Fecha inicio del periodo"),
     date_to: date = Query(..., description="Fecha fin del periodo"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("reports.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -81,7 +81,7 @@ def get_profit_and_loss(
 def get_cash_flow(
     date_from: date = Query(..., description="Fecha inicio del periodo"),
     date_to: date = Query(..., description="Fecha fin del periodo"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("reports.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -100,7 +100,7 @@ def get_cash_flow(
 
 @router.get("/balance-sheet", response_model=BalanceSheetResponse)
 def get_balance_sheet(
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("reports.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -122,7 +122,7 @@ def get_purchase_report(
     date_to: date = Query(..., description="Fecha fin del periodo"),
     supplier_id: Optional[UUID] = Query(None, description="Filtrar por proveedor"),
     material_id: Optional[UUID] = Query(None, description="Filtrar por material"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("reports.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -144,7 +144,7 @@ def get_sales_report(
     date_to: date = Query(..., description="Fecha fin del periodo"),
     customer_id: Optional[UUID] = Query(None, description="Filtrar por cliente"),
     material_id: Optional[UUID] = Query(None, description="Filtrar por material"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("reports.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -164,7 +164,7 @@ def get_sales_report(
 def get_margin_analysis(
     date_from: date = Query(..., description="Fecha inicio del periodo"),
     date_to: date = Query(..., description="Fecha fin del periodo"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("reports.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -187,7 +187,7 @@ def get_third_party_balances(
         description="Filtrar: 'suppliers' o 'customers'",
         regex="^(suppliers|customers)$",
     ),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("reports.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -202,7 +202,7 @@ def get_third_party_balances(
 
 @router.get("/treasury-dashboard", response_model=TreasuryDashboardResponse)
 def get_treasury_dashboard(
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -219,7 +219,7 @@ def get_treasury_dashboard(
 
 @router.get("/audit-balances", response_model=AuditBalancesResponse)
 def audit_balances(
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("admin.view_audit")),
     db: Session = Depends(get_db),
 ):
     """

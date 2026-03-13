@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_required_org_context
+from app.api.deps import get_db, require_permission
 from app.models.double_entry import DoubleEntry
 from app.schemas.double_entry import (
     DoubleEntryCreate,
@@ -102,7 +102,7 @@ def _enrich_double_entry_response(double_entry: DoubleEntry) -> dict:
 async def create_double_entry(
     double_entry_in: DoubleEntryCreate,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("double_entries.create")),
 ) -> DoubleEntryResponse:
     """Registrar nueva doble partida."""
     try:
@@ -166,7 +166,7 @@ async def create_double_entry(
 )
 async def list_double_entries(
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("double_entries.view")),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum records to return"),
     status: Optional[str] = Query(None, description="Filter by status: 'registered', 'liquidated' or 'cancelled'"),
@@ -215,7 +215,7 @@ async def list_double_entries(
 async def get_double_entry(
     double_entry_id: UUID,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("double_entries.view")),
 ) -> DoubleEntryResponse:
     """Obtener doble partida por UUID."""
     double_entry_obj = double_entry_service.get(
@@ -242,7 +242,7 @@ async def get_double_entry(
 async def get_double_entry_by_number(
     double_entry_number: int,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("double_entries.view")),
 ) -> DoubleEntryResponse:
     """Obtener doble partida por numero secuencial."""
     double_entry_obj = double_entry_service.get_by_number(
@@ -269,7 +269,7 @@ async def get_double_entry_by_number(
 async def list_double_entries_by_supplier(
     supplier_id: UUID,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("double_entries.view")),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
 ) -> PaginatedDoubleEntryResponse:
@@ -303,7 +303,7 @@ async def list_double_entries_by_supplier(
 async def list_double_entries_by_customer(
     customer_id: UUID,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("double_entries.view")),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
 ) -> PaginatedDoubleEntryResponse:
@@ -351,7 +351,7 @@ async def liquidate_double_entry(
     double_entry_id: UUID,
     liquidate_request: DoubleEntryLiquidateRequest,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("double_entries.liquidate")),
 ) -> DoubleEntryResponse:
     """Liquidar doble partida registrada."""
     try:
@@ -406,7 +406,7 @@ async def liquidate_double_entry(
 async def cancel_double_entry(
     double_entry_id: UUID,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("double_entries.cancel")),
 ) -> DoubleEntryResponse:
     """Cancelar doble partida."""
     try:
@@ -465,7 +465,7 @@ async def edit_double_entry(
     double_entry_id: UUID,
     double_entry_update: DoubleEntryFullUpdate,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("double_entries.edit")),
 ) -> DoubleEntryResponse:
     """Editar doble partida registrada."""
     try:

@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.third_party import (
     ThirdPartyCreate,
     ThirdPartyUpdate,
@@ -29,7 +29,7 @@ def list_third_parties(
     role: Optional[str] = Query(None, description="Filter by role: supplier, customer, investor, provision"),
     sort_by: str = Query("name", description="Field to sort by"),
     sort_order: str = Query("asc", regex="^(asc|desc)$", description="Sort order"),
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -65,7 +65,7 @@ def list_suppliers(
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
     sort_order: str = Query("asc", regex="^(asc|desc)$"),
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -93,7 +93,7 @@ def list_customers(
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
     sort_order: str = Query("asc", regex="^(asc|desc)$"),
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -121,7 +121,7 @@ def list_provisions(
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
     sort_order: str = Query("asc", regex="^(asc|desc)$"),
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -149,7 +149,7 @@ def list_liabilities(
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
     sort_order: str = Query("asc", regex="^(asc|desc)$"),
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -173,7 +173,7 @@ def list_liabilities(
 @router.post("", response_model=ThirdPartyResponse, status_code=status.HTTP_201_CREATED)
 def create_third_party(
     third_party_in: ThirdPartyCreate,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("third_parties.create")),
     db: Session = Depends(get_db)
 ):
     """
@@ -196,7 +196,7 @@ def create_third_party(
 @router.get("/{third_party_id}", response_model=ThirdPartyResponse)
 def get_third_party(
     third_party_id: UUID,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -219,7 +219,7 @@ def get_third_party(
 def update_third_party(
     third_party_id: UUID,
     third_party_in: ThirdPartyUpdate,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("third_parties.edit")),
     db: Session = Depends(get_db)
 ):
     """
@@ -241,7 +241,7 @@ def update_third_party(
 @router.delete("/{third_party_id}", response_model=ThirdPartyResponse)
 def delete_third_party(
     third_party_id: UUID,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("third_parties.delete")),
     db: Session = Depends(get_db)
 ):
     """
@@ -267,7 +267,7 @@ def delete_third_party(
 def update_third_party_balance(
     third_party_id: UUID,
     balance_update: ThirdPartyBalanceUpdate,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("third_parties.view_balance")),
     db: Session = Depends(get_db)
 ):
     """

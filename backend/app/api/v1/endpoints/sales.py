@@ -15,7 +15,7 @@ from sqlalchemy import cast, or_, String
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_required_org_context
+from app.api.deps import get_db, require_permission
 from app.models.sale import Sale
 from app.models.user import User
 from app.schemas.sale import (
@@ -129,7 +129,7 @@ def _enrich_sale_response(sale: Sale, db: Session = None, warnings: list[str] | 
 async def create_sale(
     sale_in: SaleCreate,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("sales.create")),
 ) -> SaleResponse:
     """Create a new sale (1-step or 2-step workflow)."""
     try:
@@ -216,7 +216,7 @@ async def list_sales(
     date_to: Optional[date] = Query(None, description="Filter sales on or before this date"),
     search: Optional[str] = Query(None, description="Search in sale number, customer name, notes, vehicle_plate, invoice_number"),
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("sales.view")),
 ) -> PaginatedSaleResponse:
     """List sales with filters and pagination."""
     try:
@@ -270,7 +270,7 @@ async def list_pending_sales(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("sales.view")),
 ) -> PaginatedSaleResponse:
     """List sales pending liquidation (status='registered')."""
     try:
@@ -308,7 +308,7 @@ async def list_pending_sales(
 async def get_sale_by_number(
     sale_number: int,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("sales.view")),
 ) -> SaleResponse:
     """Get sale by sale_number."""
     sale = crud_sale.get_by_number(
@@ -345,7 +345,7 @@ async def list_sales_by_customer(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("sales.view")),
 ) -> PaginatedSaleResponse:
     """List sales by customer."""
     try:
@@ -383,7 +383,7 @@ async def check_duplicate_sale(
     customer_id: UUID = Query(..., description="Customer UUID"),
     date: date = Query(..., description="Sale date"),
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("sales.view")),
 ) -> dict:
     """Verificar si ya existe una venta para el mismo cliente en la misma fecha."""
     count = crud_sale.check_duplicate(
@@ -411,7 +411,7 @@ async def check_duplicate_sale(
 async def get_sale(
     sale_id: UUID,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("sales.view")),
 ) -> SaleResponse:
     """Get sale by ID."""
     sale = crud_sale.get(
@@ -452,7 +452,7 @@ async def update_sale(
     sale_id: UUID,
     sale_in: SaleFullUpdate,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("sales.edit")),
 ) -> SaleResponse:
     """Edicion completa de venta registrada."""
     try:
@@ -528,7 +528,7 @@ async def liquidate_sale(
     sale_id: UUID,
     liquidate_in: SaleLiquidateRequest,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("sales.liquidate")),
 ) -> SaleResponse:
     """Liquidate a sale (2-step workflow)."""
     try:
@@ -594,7 +594,7 @@ async def liquidate_sale(
 async def cancel_sale(
     sale_id: UUID,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("sales.cancel")),
 ) -> SaleResponse:
     """Cancel a sale."""
     try:

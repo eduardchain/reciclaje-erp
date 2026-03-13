@@ -15,7 +15,7 @@ from sqlalchemy import cast, or_, String
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_required_org_context
+from app.api.deps import get_db, require_permission
 from app.models.purchase import Purchase
 from app.models.user import User
 from app.schemas.purchase import (
@@ -96,7 +96,7 @@ async def check_duplicate(
     date: datetime = Query(...),
     total_quantity: Optional[float] = Query(None, description="Cantidad total para comparacion ±20%"),
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("purchases.view")),
 ) -> dict:
     """Retorna la cantidad de compras existentes del mismo proveedor en la misma fecha (y cantidad similar si se proporciona)."""
     from decimal import Decimal
@@ -140,7 +140,7 @@ async def check_duplicate(
 async def create_purchase(
     purchase_in: PurchaseCreate,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("purchases.create")),
 ) -> PurchaseResponse:
     """Create a new purchase (1-step or 2-step workflow)."""
     try:
@@ -213,7 +213,7 @@ async def list_purchases(
     date_to: Optional[date] = Query(None, description="Filter purchases on or before this date"),
     search: Optional[str] = Query(None, description="Search in purchase number, supplier name, notes"),
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("purchases.view")),
 ) -> PaginatedPurchaseResponse:
     """List purchases with filters and pagination."""
     try:
@@ -276,7 +276,7 @@ async def list_pending_purchases(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("purchases.view")),
 ) -> PaginatedPurchaseResponse:
     """List purchases pending liquidation (status='registered')."""
     try:
@@ -314,7 +314,7 @@ async def list_pending_purchases(
 async def get_purchase_by_number(
     purchase_number: int,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("purchases.view")),
 ) -> PurchaseResponse:
     """Get purchase by purchase_number."""
     purchase = purchase_service.get_by_number(
@@ -351,7 +351,7 @@ async def list_purchases_by_supplier(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("purchases.view")),
 ) -> PaginatedPurchaseResponse:
     """List purchases by supplier."""
     try:
@@ -397,7 +397,7 @@ async def list_purchases_by_supplier(
 async def get_purchase(
     purchase_id: UUID,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("purchases.view")),
 ) -> PurchaseResponse:
     """Get a single purchase by ID."""
     purchase = purchase_service.get(
@@ -439,7 +439,7 @@ async def update_purchase(
     purchase_id: UUID,
     purchase_in: PurchaseFullUpdate,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("purchases.edit")),
 ) -> PurchaseResponse:
     """Editar compra registrada (metadata + proveedor + lineas)."""
     try:
@@ -496,7 +496,7 @@ async def liquidate_purchase(
     purchase_id: UUID,
     liquidate_data: PurchaseLiquidateRequest,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("purchases.liquidate")),
 ) -> PurchaseResponse:
     """Liquidar compra (confirmar precios, mover stock, actualizar saldo)."""
     try:
@@ -564,7 +564,7 @@ async def liquidate_purchase(
 async def cancel_purchase(
     purchase_id: UUID,
     db: Session = Depends(get_db),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("purchases.cancel")),
 ) -> PurchaseResponse:
     """Cancel a purchase and reverse effects."""
     try:

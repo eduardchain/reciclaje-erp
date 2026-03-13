@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.money_movement import (
     SupplierPaymentCreate,
     CustomerCollectionCreate,
@@ -110,7 +110,7 @@ def _to_response(movement) -> dict:
 )
 def create_supplier_payment(
     data: SupplierPaymentCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -136,7 +136,7 @@ def create_supplier_payment(
 )
 def create_customer_collection(
     data: CustomerCollectionCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -161,7 +161,7 @@ def create_customer_collection(
 )
 def create_expense(
     data: ExpenseCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -186,7 +186,7 @@ def create_expense(
 )
 def create_service_income(
     data: ServiceIncomeCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -211,7 +211,7 @@ def create_service_income(
 )
 def create_transfer(
     data: TransferCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -237,7 +237,7 @@ def create_transfer(
 )
 def create_capital_injection(
     data: CapitalInjectionCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -262,7 +262,7 @@ def create_capital_injection(
 )
 def create_capital_return(
     data: CapitalReturnCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -287,7 +287,7 @@ def create_capital_return(
 )
 def create_commission_payment(
     data: CommissionPaymentCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -312,7 +312,7 @@ def create_commission_payment(
 )
 def create_provision_deposit(
     data: ProvisionDepositCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -337,7 +337,7 @@ def create_provision_deposit(
 )
 def create_provision_expense(
     data: ProvisionExpenseCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -362,7 +362,7 @@ def create_provision_expense(
 )
 def create_advance_payment(
     data: AdvancePaymentCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -387,7 +387,7 @@ def create_advance_payment(
 )
 def create_advance_collection(
     data: AdvanceCollectionCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -412,7 +412,7 @@ def create_advance_collection(
 )
 def create_asset_payment(
     data: AssetPaymentCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -437,7 +437,7 @@ def create_asset_payment(
 )
 def create_expense_accrual(
     data: ExpenseAccrualCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -470,7 +470,7 @@ def list_money_movements(
     date_from: Optional[date] = Query(None, description="Fecha desde"),
     date_to: Optional[date] = Query(None, description="Fecha hasta"),
     search: Optional[str] = Query(None, description="Buscar en descripcion o referencia"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.view")),
     db: Session = Depends(get_db),
 ):
     """Listar movimientos de dinero con filtros y paginacion."""
@@ -501,7 +501,7 @@ def list_money_movements(
 def get_movements_summary(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.view")),
     db: Session = Depends(get_db),
 ):
     """Resumen de movimientos agrupados por tipo para un periodo."""
@@ -518,7 +518,7 @@ def get_movements_summary(
 @router.get("/by-number/{movement_number}", response_model=MoneyMovementResponse)
 def get_by_number(
     movement_number: int,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.view")),
     db: Session = Depends(get_db),
 ):
     """Obtener movimiento por numero secuencial."""
@@ -536,7 +536,7 @@ def get_by_account(
     limit: int = Query(100, ge=1, le=500),
     date_from: Optional[date] = Query(None, description="Fecha desde"),
     date_to: Optional[date] = Query(None, description="Fecha hasta"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -618,7 +618,7 @@ def get_by_third_party(
     limit: int = Query(100, ge=1, le=500),
     date_from: Optional[date] = Query(None, description="Fecha desde"),
     date_to: Optional[date] = Query(None, description="Fecha hasta"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -940,7 +940,7 @@ ALLOWED_EVIDENCE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "pdf"}
 def upload_evidence(
     movement_id: UUID,
     file: UploadFile = File(...),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """Subir comprobante adjunto a un movimiento."""
@@ -993,7 +993,7 @@ def upload_evidence(
 @router.get("/{movement_id}/evidence")
 def download_evidence(
     movement_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.view")),
     db: Session = Depends(get_db),
 ):
     """Descargar comprobante adjunto de un movimiento."""
@@ -1018,7 +1018,7 @@ def download_evidence(
 @router.delete("/{movement_id}/evidence", response_model=MoneyMovementResponse)
 def delete_evidence(
     movement_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """Eliminar comprobante adjunto de un movimiento."""
@@ -1043,7 +1043,7 @@ def delete_evidence(
 @router.get("/{movement_id}", response_model=MoneyMovementResponse)
 def get_movement(
     movement_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.view")),
     db: Session = Depends(get_db),
 ):
     """Obtener un movimiento por ID."""
@@ -1059,7 +1059,7 @@ def get_movement(
 def annul_movement(
     movement_id: UUID,
     data: AnnulMovementRequest,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
     db: Session = Depends(get_db),
 ):
     """

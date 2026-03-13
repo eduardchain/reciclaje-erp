@@ -21,7 +21,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.inventory_adjustment import (
     IncreaseCreate,
     DecreaseCreate,
@@ -63,7 +63,7 @@ def _to_response(adj, warnings: list[str] | None = None) -> dict:
 )
 def create_increase(
     data: IncreaseCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.adjust")),
     db: Session = Depends(get_db),
 ):
     """Aumento de stock — recalcula costo promedio."""
@@ -83,7 +83,7 @@ def create_increase(
 )
 def create_decrease(
     data: DecreaseCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.adjust")),
     db: Session = Depends(get_db),
 ):
     """Disminucion de stock — usa costo promedio actual."""
@@ -103,7 +103,7 @@ def create_decrease(
 )
 def create_recount(
     data: RecountCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.adjust")),
     db: Session = Depends(get_db),
 ):
     """Conteo fisico — ajusta al stock contado."""
@@ -123,7 +123,7 @@ def create_recount(
 )
 def create_zero_out(
     data: ZeroOutCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.adjust")),
     db: Session = Depends(get_db),
 ):
     """Llevar stock a cero — elimina todo el stock liquidado."""
@@ -143,7 +143,7 @@ def create_zero_out(
 def annul_adjustment(
     adjustment_id: UUID,
     data: AnnulAdjustmentRequest,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.adjust")),
     db: Session = Depends(get_db),
 ):
     """Anular ajuste — revierte cambios de stock."""
@@ -165,7 +165,7 @@ def annul_adjustment(
 )
 def create_warehouse_transfer(
     data: WarehouseTransferCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.transfer")),
     db: Session = Depends(get_db),
 ):
     """Traslado de material entre bodegas."""
@@ -214,7 +214,7 @@ def list_adjustments(
     status: Optional[str] = Query(None, alias="status"),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.view")),
     db: Session = Depends(get_db),
 ):
     """Listar ajustes de inventario con filtros."""
@@ -244,7 +244,7 @@ def list_adjustments(
 )
 def get_adjustment_by_number(
     number: int,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.view")),
     db: Session = Depends(get_db),
 ):
     """Obtener ajuste por numero secuencial."""
@@ -261,7 +261,7 @@ def get_adjustment_by_number(
 )
 def get_adjustment(
     adjustment_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.view")),
     db: Session = Depends(get_db),
 ):
     """Obtener ajuste por ID."""

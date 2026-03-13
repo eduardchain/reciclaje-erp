@@ -11,7 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.material_transformation import (
     MaterialTransformationCreate,
     AnnulTransformationRequest,
@@ -58,7 +58,7 @@ def _to_response(t, warnings: list[str] | None = None) -> dict:
 )
 def create_transformation(
     data: MaterialTransformationCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("transformations.create")),
     db: Session = Depends(get_db),
 ):
     """
@@ -83,7 +83,7 @@ def create_transformation(
 def annul_transformation(
     transformation_id: UUID,
     data: AnnulTransformationRequest,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("transformations.create")),
     db: Session = Depends(get_db),
 ):
     """Anular transformacion — revierte stock de origen y destinos."""
@@ -113,7 +113,7 @@ def list_transformations(
     status: Optional[str] = Query(None, alias="status"),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("transformations.view")),
     db: Session = Depends(get_db),
 ):
     """Listar transformaciones con filtros."""
@@ -142,7 +142,7 @@ def list_transformations(
 )
 def get_transformation_by_number(
     number: int,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("transformations.view")),
     db: Session = Depends(get_db),
 ):
     """Obtener transformacion por numero secuencial."""
@@ -159,7 +159,7 @@ def get_transformation_by_number(
 )
 def get_transformation(
     transformation_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("transformations.view")),
     db: Session = Depends(get_db),
 ):
     """Obtener transformacion por ID."""

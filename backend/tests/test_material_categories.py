@@ -336,7 +336,7 @@ class TestUpdateMaterialCategory:
         assert response.status_code == 404
 
     def test_update_category_different_org(self, client, auth_headers, test_category, test_organization2):
-        """Test updating category from different org returns 404."""
+        """Test updating category from different org blocked by permissions (viewer has no materials.edit)."""
         # Arrange
         org2_headers = {**auth_headers, "X-Organization-ID": str(test_organization2.id)}
         update_data = {"name": "Hacked Name"}
@@ -344,8 +344,8 @@ class TestUpdateMaterialCategory:
         # Act
         response = client.patch(f"/api/v1/material-categories/{test_category.id}", json=update_data, headers=org2_headers)
 
-        # Assert
-        assert response.status_code == 404
+        # Assert — viewer no tiene materials.edit → 403
+        assert response.status_code == 403
 
 
 class TestDeleteMaterialCategory:
@@ -391,12 +391,12 @@ class TestDeleteMaterialCategory:
         assert response.status_code == 404
 
     def test_delete_category_different_org(self, client, auth_headers, test_category, test_organization2):
-        """Test deleting category from different org returns 404."""
+        """Test deleting category from different org blocked by permissions (viewer has no materials.delete)."""
         # Arrange
         org2_headers = {**auth_headers, "X-Organization-ID": str(test_organization2.id)}
 
         # Act
         response = client.delete(f"/api/v1/material-categories/{test_category.id}", headers=org2_headers)
 
-        # Assert
-        assert response.status_code == 404
+        # Assert — viewer no tiene materials.delete → 403
+        assert response.status_code == 403

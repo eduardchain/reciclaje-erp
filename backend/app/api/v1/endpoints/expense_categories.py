@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.expense_category import (
     ExpenseCategoryCreate,
     ExpenseCategoryUpdate,
@@ -29,7 +29,7 @@ def list_expense_categories(
     search: Optional[str] = Query(None, description="Buscar por nombre"),
     sort_by: str = Query("name", description="Campo para ordenar"),
     sort_order: str = Query("asc", regex="^(asc|desc)$", description="Direccion de orden"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.manage_expenses")),
     db: Session = Depends(get_db),
 ):
     """Listar categorias de gastos con paginacion y filtros."""
@@ -48,7 +48,7 @@ def list_expense_categories(
 @router.post("", response_model=ExpenseCategoryResponse, status_code=status.HTTP_201_CREATED)
 def create_expense_category(
     category_in: ExpenseCategoryCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.manage_expenses")),
     db: Session = Depends(get_db),
 ):
     """
@@ -67,7 +67,7 @@ def create_expense_category(
 @router.get("/{category_id}", response_model=ExpenseCategoryResponse)
 def get_expense_category(
     category_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.manage_expenses")),
     db: Session = Depends(get_db),
 ):
     """Obtener una categoria de gasto por ID."""
@@ -83,7 +83,7 @@ def get_expense_category(
 def update_expense_category(
     category_id: UUID,
     category_in: ExpenseCategoryUpdate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.manage_expenses")),
     db: Session = Depends(get_db),
 ):
     """Actualizar una categoria de gasto (campos parciales)."""
@@ -98,7 +98,7 @@ def update_expense_category(
 @router.delete("/{category_id}", response_model=ExpenseCategoryResponse)
 def delete_expense_category(
     category_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.manage_expenses")),
     db: Session = Depends(get_db),
 ):
     """Soft delete de categoria de gasto (is_active = False)."""

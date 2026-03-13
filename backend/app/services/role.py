@@ -112,11 +112,12 @@ SYSTEM_ROLES = {
         "display_name": "Liquidador",
         "description": "Liquidacion de compras/ventas y caja chica",
         "permissions": [
-            "purchases.view", "purchases.liquidate", "purchases.view_prices",
-            "sales.view", "sales.liquidate", "sales.view_prices",
+            "purchases.view", "purchases.liquidate", "purchases.cancel", "purchases.view_prices",
+            "sales.view", "sales.liquidate", "sales.cancel", "sales.view_prices",
             "inventory.view",
             "materials.view", "materials.view_prices", "materials.edit_prices",
             "treasury.view_own", "treasury.create_movements",
+            "reports.view",
         ],
     },
     "planillador": {

@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.business_unit import (
     BusinessUnitCreate,
     BusinessUnitUpdate,
@@ -29,7 +29,7 @@ def list_business_units(
     search: Optional[str] = Query(None, description="Buscar por nombre"),
     sort_by: str = Query("name", description="Campo para ordenar"),
     sort_order: str = Query("asc", regex="^(asc|desc)$", description="Direccion de orden"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("materials.view")),
     db: Session = Depends(get_db),
 ):
     """Listar unidades de negocio con paginacion y filtros."""
@@ -48,7 +48,7 @@ def list_business_units(
 @router.post("", response_model=BusinessUnitResponse, status_code=status.HTTP_201_CREATED)
 def create_business_unit(
     unit_in: BusinessUnitCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("materials.create")),
     db: Session = Depends(get_db),
 ):
     """Crear nueva unidad de negocio."""
@@ -62,7 +62,7 @@ def create_business_unit(
 @router.get("/{unit_id}", response_model=BusinessUnitResponse)
 def get_business_unit(
     unit_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("materials.view")),
     db: Session = Depends(get_db),
 ):
     """Obtener una unidad de negocio por ID."""
@@ -78,7 +78,7 @@ def get_business_unit(
 def update_business_unit(
     unit_id: UUID,
     unit_in: BusinessUnitUpdate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("materials.edit")),
     db: Session = Depends(get_db),
 ):
     """Actualizar una unidad de negocio (campos parciales)."""
@@ -93,7 +93,7 @@ def update_business_unit(
 @router.delete("/{unit_id}", response_model=BusinessUnitResponse)
 def delete_business_unit(
     unit_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("materials.edit")),
     db: Session = Depends(get_db),
 ):
     """Soft delete de unidad de negocio (is_active = False)."""

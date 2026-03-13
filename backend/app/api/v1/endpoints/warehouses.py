@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.warehouse import (
     WarehouseCreate,
     WarehouseUpdate,
@@ -27,7 +27,7 @@ def list_warehouses(
     search: Optional[str] = Query(None, description="Buscar por nombre o direccion"),
     sort_by: str = Query("name", description="Campo para ordenar"),
     sort_order: str = Query("asc", regex="^(asc|desc)$", description="Direccion de orden"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("warehouses.view")),
     db: Session = Depends(get_db),
 ):
     """Listar bodegas con paginacion y filtros."""
@@ -46,7 +46,7 @@ def list_warehouses(
 @router.post("", response_model=WarehouseResponse, status_code=status.HTTP_201_CREATED)
 def create_warehouse(
     warehouse_in: WarehouseCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("warehouses.create")),
     db: Session = Depends(get_db),
 ):
     """Crear nueva bodega."""
@@ -60,7 +60,7 @@ def create_warehouse(
 @router.get("/{warehouse_id}", response_model=WarehouseResponse)
 def get_warehouse(
     warehouse_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("warehouses.view")),
     db: Session = Depends(get_db),
 ):
     """Obtener una bodega por ID."""
@@ -76,7 +76,7 @@ def get_warehouse(
 def update_warehouse(
     warehouse_id: UUID,
     warehouse_in: WarehouseUpdate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("warehouses.edit")),
     db: Session = Depends(get_db),
 ):
     """Actualizar una bodega (campos parciales)."""
@@ -91,7 +91,7 @@ def update_warehouse(
 @router.delete("/{warehouse_id}", response_model=WarehouseResponse)
 def delete_warehouse(
     warehouse_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("warehouses.edit")),
     db: Session = Depends(get_db),
 ):
     """Soft delete de bodega (is_active = False)."""

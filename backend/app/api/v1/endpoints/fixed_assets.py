@@ -15,7 +15,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_required_org_context
+from app.api.deps import get_db, require_permission
 from app.schemas.fixed_asset import (
     FixedAssetCreate,
     FixedAssetUpdate,
@@ -87,7 +87,7 @@ def _build_response(asset, include_depreciations: bool = False) -> FixedAssetRes
 def create_fixed_asset(
     data: FixedAssetCreate,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.manage_fixed_assets")),
 ):
     """Crear un activo fijo."""
     asset = fixed_asset.create(
@@ -106,7 +106,7 @@ def list_fixed_assets(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.view")),
 ):
     """Listar activos fijos con filtro opcional por status."""
     items, total = fixed_asset.get_multi(
@@ -128,7 +128,7 @@ def list_fixed_assets(
 def get_fixed_asset(
     asset_id: UUID,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.view")),
 ):
     """Detalle de activo fijo con depreciaciones."""
     asset = fixed_asset.get(db, asset_id, ctx["organization_id"])
@@ -140,7 +140,7 @@ def update_fixed_asset(
     asset_id: UUID,
     data: FixedAssetUpdate,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.manage_fixed_assets")),
 ):
     """Actualizar activo fijo (restricciones si ya tiene depreciaciones)."""
     asset = fixed_asset.update(
@@ -157,7 +157,7 @@ def update_fixed_asset(
 def depreciate_asset(
     asset_id: UUID,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.manage_fixed_assets")),
 ):
     """Aplicar una cuota de depreciacion al activo."""
     asset = fixed_asset.apply_depreciation(
@@ -173,7 +173,7 @@ def depreciate_asset(
 @router.post("/apply-pending", response_model=List[ApplyPendingResult])
 def apply_pending_depreciations(
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.manage_fixed_assets")),
 ):
     """Aplicar depreciaciones pendientes a todos los activos activos del mes."""
     results = fixed_asset.apply_pending(
@@ -189,7 +189,7 @@ def dispose_asset(
     asset_id: UUID,
     data: FixedAssetDisposeRequest,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.manage_fixed_assets")),
 ):
     """Dar de baja un activo fijo (con depreciacion acelerada si aplica)."""
     asset = fixed_asset.dispose(

@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.material import (
     MaterialCreate,
     MaterialUpdate,
@@ -28,7 +28,7 @@ def list_materials(
     search: Optional[str] = Query(None, description="Search in code, name, and description"),
     sort_by: str = Query("name", description="Field to sort by"),
     sort_order: str = Query("asc", regex="^(asc|desc)$", description="Sort order"),
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -63,7 +63,7 @@ def list_materials(
 @router.post("", response_model=MaterialResponse, status_code=status.HTTP_201_CREATED)
 def create_material(
     material_in: MaterialCreate,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.create")),
     db: Session = Depends(get_db)
 ):
     """
@@ -91,7 +91,7 @@ def create_material(
 @router.get("/code/{code}", response_model=MaterialResponse)
 def get_material_by_code(
     code: str,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -121,7 +121,7 @@ def get_material_by_code(
 @router.get("/{material_id}", response_model=MaterialResponse)
 def get_material(
     material_id: UUID,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -144,7 +144,7 @@ def get_material(
 def update_material(
     material_id: UUID,
     material_in: MaterialUpdate,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.edit")),
     db: Session = Depends(get_db)
 ):
     """
@@ -172,7 +172,7 @@ def update_material(
 @router.delete("/{material_id}", response_model=MaterialResponse)
 def delete_material(
     material_id: UUID,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.delete")),
     db: Session = Depends(get_db)
 ):
     """
@@ -198,7 +198,7 @@ def delete_material(
 def update_material_stock(
     material_id: UUID,
     stock_update: MaterialStockUpdate,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.edit")),
     db: Session = Depends(get_db)
 ):
     """

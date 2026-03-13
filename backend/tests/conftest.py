@@ -87,21 +87,9 @@ def db_session() -> Generator[Session, None, None]:
     # Drop all tables and types using raw SQL
     with test_engine.begin() as connection:
         if test_engine.dialect.name == "postgresql":
-            # Drop all ENUM types first (PostgreSQL-specific)
-            result = connection.execute(text(
-                "SELECT t.typname FROM pg_type t "
-                "JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace "
-                "WHERE t.typtype = 'e' AND n.nspname = 'public'"
-            ))
-            enum_types = [row[0] for row in result]
-            for enum_type in enum_types:
-                connection.execute(text(f'DROP TYPE IF EXISTS "{enum_type}" CASCADE'))
-
-            # Get all table names and drop them
-            inspector = sqlalchemy.inspect(test_engine)
-            tables = inspector.get_table_names()
-            for table in tables:
-                connection.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+            # Clean slate: drop and recreate public schema
+            connection.execute(text("DROP SCHEMA public CASCADE"))
+            connection.execute(text("CREATE SCHEMA public"))
         else:
             # For SQLite, disable foreign keys first
             connection.execute(text("PRAGMA foreign_keys = OFF"))
@@ -112,7 +100,7 @@ def db_session() -> Generator[Session, None, None]:
             connection.execute(text("PRAGMA foreign_keys = ON"))
 
     # Create all tables using SQLAlchemy
-    Base.metadata.create_all(bind=test_engine, checkfirst=False)
+    Base.metadata.create_all(bind=test_engine)
 
     # Create a regular session
     session = TestingSessionLocal()
@@ -125,21 +113,9 @@ def db_session() -> Generator[Session, None, None]:
         # Drop all tables and types after test using the same strategy
         with test_engine.begin() as connection:
             if test_engine.dialect.name == "postgresql":
-                # Drop ENUM types first
-                result = connection.execute(text(
-                    "SELECT t.typname FROM pg_type t "
-                    "JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace "
-                    "WHERE t.typtype = 'e' AND n.nspname = 'public'"
-                ))
-                enum_types = [row[0] for row in result]
-                for enum_type in enum_types:
-                    connection.execute(text(f'DROP TYPE IF EXISTS "{enum_type}" CASCADE'))
-
-                # Drop tables
-                inspector = sqlalchemy.inspect(test_engine)
-                tables = inspector.get_table_names()
-                for table in tables:
-                    connection.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+                # Clean slate: drop and recreate public schema
+                connection.execute(text("DROP SCHEMA public CASCADE"))
+                connection.execute(text("CREATE SCHEMA public"))
             else:
                 connection.execute(text("PRAGMA foreign_keys = OFF"))
                 inspector = sqlalchemy.inspect(test_engine)
@@ -331,8 +307,21 @@ def auth_headers_user2(auth_token_user2: str) -> dict:
 def org_headers(auth_token: str, test_organization: Organization) -> dict:
     """
     Create headers with both auth and organization context.
+    test_user is admin in test_organization.
     """
     return {
         "Authorization": f"Bearer {auth_token}",
         "X-Organization-ID": str(test_organization.id),
+    }
+
+
+@pytest.fixture
+def org_headers2(auth_token: str, test_organization2: Organization) -> dict:
+    """
+    Create headers with auth and organization2 context.
+    test_user is viewer in test_organization2 (no write permissions).
+    """
+    return {
+        "Authorization": f"Bearer {auth_token}",
+        "X-Organization-ID": str(test_organization2.id),
     }

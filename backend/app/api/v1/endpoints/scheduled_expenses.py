@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_required_org_context
+from app.api.deps import get_db, require_permission
 from app.schemas.scheduled_expense import (
     ScheduledExpenseCreate,
     ScheduledExpenseResponse,
@@ -84,7 +84,7 @@ def _build_response(se, include_applications: bool = False) -> ScheduledExpenseR
 def create_scheduled_expense(
     data: ScheduledExpenseCreate,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.manage_expenses")),
 ):
     """Crear gasto diferido programado con pago upfront."""
     se = scheduled_expense.create(
@@ -103,7 +103,7 @@ def list_scheduled_expenses(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.view")),
 ):
     """Listar gastos diferidos programados."""
     items, total = scheduled_expense.get_multi(
@@ -124,7 +124,7 @@ def list_scheduled_expenses(
 @router.get("/pending", response_model=list[ScheduledExpenseResponse])
 def list_pending_scheduled_expenses(
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.view")),
 ):
     """Gastos activos con cuotas pendientes, para TreasuryDashboard."""
     items = scheduled_expense.get_pending(
@@ -138,7 +138,7 @@ def list_pending_scheduled_expenses(
 def get_scheduled_expense(
     scheduled_id: UUID,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.view")),
 ):
     """Detalle de gasto diferido con applications."""
     se = scheduled_expense.get(db, scheduled_id, ctx["organization_id"])
@@ -149,7 +149,7 @@ def get_scheduled_expense(
 def apply_next_installment(
     scheduled_id: UUID,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.manage_expenses")),
 ):
     """Aplicar la siguiente cuota del gasto diferido."""
     application = scheduled_expense.apply_next(
@@ -165,7 +165,7 @@ def apply_next_installment(
 def cancel_scheduled_expense(
     scheduled_id: UUID,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(get_required_org_context),
+    ctx: dict = Depends(require_permission("treasury.manage_expenses")),
 ):
     """Cancelar gasto diferido. Cuotas aplicadas permanecen."""
     se = scheduled_expense.cancel(

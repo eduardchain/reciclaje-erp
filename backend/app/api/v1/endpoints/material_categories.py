@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.material import (
     MaterialCategoryCreate,
     MaterialCategoryUpdate,
@@ -27,7 +27,7 @@ def list_material_categories(
     search: Optional[str] = Query(None, description="Search in name and description"),
     sort_by: str = Query("name", description="Field to sort by"),
     sort_order: str = Query("asc", regex="^(asc|desc)$", description="Sort order"),
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -62,7 +62,7 @@ def list_material_categories(
 @router.post("", response_model=MaterialCategoryResponse, status_code=status.HTTP_201_CREATED)
 def create_material_category(
     category_in: MaterialCategoryCreate,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.create")),
     db: Session = Depends(get_db)
 ):
     """
@@ -83,7 +83,7 @@ def create_material_category(
 @router.get("/{category_id}", response_model=MaterialCategoryResponse)
 def get_material_category(
     category_id: UUID,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.view")),
     db: Session = Depends(get_db)
 ):
     """
@@ -106,7 +106,7 @@ def get_material_category(
 def update_material_category(
     category_id: UUID,
     category_in: MaterialCategoryUpdate,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.edit")),
     db: Session = Depends(get_db)
 ):
     """
@@ -128,7 +128,7 @@ def update_material_category(
 @router.delete("/{category_id}", response_model=MaterialCategoryResponse)
 def delete_material_category(
     category_id: UUID,
-    org_context: tuple = Depends(get_required_org_context),
+    org_context: tuple = Depends(require_permission("materials.delete")),
     db: Session = Depends(get_db)
 ):
     """

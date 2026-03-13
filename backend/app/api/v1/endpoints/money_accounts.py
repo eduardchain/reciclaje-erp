@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.schemas.money_account import (
     MoneyAccountCreate,
     MoneyAccountUpdate,
@@ -29,7 +29,7 @@ def list_money_accounts(
     search: Optional[str] = Query(None, description="Buscar por nombre, banco o numero de cuenta"),
     sort_by: str = Query("name", description="Campo para ordenar"),
     sort_order: str = Query("asc", regex="^(asc|desc)$", description="Direccion de orden"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.view")),
     db: Session = Depends(get_db),
 ):
     """Listar cuentas de dinero con paginacion y filtros."""
@@ -48,7 +48,7 @@ def list_money_accounts(
 @router.post("", response_model=MoneyAccountResponse, status_code=status.HTTP_201_CREATED)
 def create_money_account(
     account_in: MoneyAccountCreate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.manage_accounts")),
     db: Session = Depends(get_db),
 ):
     """
@@ -67,7 +67,7 @@ def create_money_account(
 @router.get("/{account_id}", response_model=MoneyAccountResponse)
 def get_money_account(
     account_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.view")),
     db: Session = Depends(get_db),
 ):
     """Obtener una cuenta de dinero por ID."""
@@ -83,7 +83,7 @@ def get_money_account(
 def update_money_account(
     account_id: UUID,
     account_in: MoneyAccountUpdate,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.manage_accounts")),
     db: Session = Depends(get_db),
 ):
     """Actualizar una cuenta de dinero (campos parciales)."""
@@ -98,7 +98,7 @@ def update_money_account(
 @router.delete("/{account_id}", response_model=MoneyAccountResponse)
 def delete_money_account(
     account_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("treasury.manage_accounts")),
     db: Session = Depends(get_db),
 ):
     """

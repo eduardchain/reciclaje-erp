@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, field_serializer
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_required_org_context, get_db
+from app.api.deps import require_permission, get_db
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
 from app.models.warehouse import Warehouse
@@ -193,7 +193,7 @@ def get_stock_consolidated(
     category_id: Optional[UUID] = Query(None, description="Filtrar por categoria"),
     warehouse_id: Optional[UUID] = Query(None, description="Filtrar por bodega"),
     active_only: bool = Query(True, description="Solo materiales activos"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -283,7 +283,7 @@ def get_stock_consolidated(
 )
 def get_material_stock_detail(
     material_id: UUID,
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -355,7 +355,7 @@ def get_material_stock_detail(
     response_model=TransitResponse,
 )
 def get_transit_stock(
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -497,7 +497,7 @@ def list_movements(
     movement_type: Optional[str] = Query(None),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.view")),
     db: Session = Depends(get_db),
 ):
     """
@@ -631,7 +631,7 @@ def list_movements(
 )
 def get_valuation(
     category_id: Optional[UUID] = Query(None, description="Filtrar por categoria"),
-    org_context: dict = Depends(get_required_org_context),
+    org_context: dict = Depends(require_permission("inventory.view_values")),
     db: Session = Depends(get_db),
 ):
     """
