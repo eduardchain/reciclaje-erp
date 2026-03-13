@@ -13,12 +13,11 @@ class OrganizationBase(BaseModel):
 class OrganizationCreate(OrganizationBase):
     """Schema for creating a new organization."""
     slug: str | None = Field(None, min_length=2, max_length=100)
-    
+
     @field_validator('slug')
     @classmethod
     def validate_slug(cls, v: str | None) -> str | None:
         if v is not None:
-            # Validate slug format: lowercase, hyphens, alphanumeric
             if not re.match(r'^[a-z0-9-]+$', v):
                 raise ValueError('Slug must contain only lowercase letters, numbers, and hyphens')
         return v
@@ -40,8 +39,8 @@ class OrganizationResponse(OrganizationBase):
     subscription_status: str
     max_users: int
     created_at: datetime
-    member_role: str | None = None  # User's role in this organization
-    
+    member_role: str | None = None  # User's role display name in this organization
+
     class Config:
         from_attributes = True
 
@@ -49,28 +48,12 @@ class OrganizationResponse(OrganizationBase):
 class OrganizationMemberCreate(BaseModel):
     """Schema for adding a member to an organization."""
     user_id: UUID
-    role: str = Field(..., pattern=r'^(admin|manager|accountant|user|viewer)$')
-    
-    @field_validator('role')
-    @classmethod
-    def validate_role(cls, v: str) -> str:
-        valid_roles = ['admin', 'manager', 'accountant', 'user', 'viewer']
-        if v not in valid_roles:
-            raise ValueError(f'Role must be one of: {", ".join(valid_roles)}')
-        return v
+    role_id: UUID
 
 
 class OrganizationMemberUpdate(BaseModel):
     """Schema for updating a member's role."""
-    role: str = Field(..., pattern=r'^(admin|manager|accountant|user|viewer)$')
-    
-    @field_validator('role')
-    @classmethod
-    def validate_role(cls, v: str) -> str:
-        valid_roles = ['admin', 'manager', 'accountant', 'user', 'viewer']
-        if v not in valid_roles:
-            raise ValueError(f'Role must be one of: {", ".join(valid_roles)}')
-        return v
+    role_id: UUID
 
 
 class OrganizationMemberResponse(BaseModel):
@@ -78,10 +61,12 @@ class OrganizationMemberResponse(BaseModel):
     id: UUID
     user_id: UUID
     organization_id: UUID
-    role: str
+    role_id: UUID
+    role_name: str | None = None
+    role_display_name: str | None = None
     joined_at: datetime
     user_email: str | None = None
     user_full_name: str | None = None
-    
+
     class Config:
         from_attributes = True

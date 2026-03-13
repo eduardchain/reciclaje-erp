@@ -213,12 +213,15 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 30. **Activos fijos con depreciacion mensual (F5)**: Modulo completo para equipos costosos con depreciacion lineal mensual. Dos tablas: `fixed_assets` + `asset_depreciations`. Tipo de movimiento `depreciation_expense`: NO cuenta, NO tercero, solo `expense_category_id` para P&L. Cuota = `purchase_value × (rate/100)`, vida util hasta `salvage_value`. Ultima cuota ajustada exactamente al residual. Dispose con depreciacion acelerada (periodo `YYYY-MMB`). `apply_pending` deprecia batch todos los activos activos del mes. Balance Sheet incluye `fixed_assets = SUM(current_value) WHERE status != 'disposed'`. Migration: `d3e73695da43`. 20 tests. Frontend: FixedAssetsPage (list + apply batch), FixedAssetCreatePage (form + preview calculo), FixedAssetDetailPage (KPIs + progress bar + depreciaciones + dispose). Sidebar: "Activos Fijos" (Building2 icon) en Tesoreria. Labels `depreciation_expense` en 5 paginas de tesoreria.
 
+31. **Roles y permisos granulares (RBAC)**: Sistema completo de roles y permisos por organizacion. 3 tablas: `permissions` (catalogo global ~45 permisos, 11 modulos), `roles` (por org, `UniqueConstraint(org_id, name)`, flag `is_system_role`), `role_permissions` (junction M:N). `OrganizationMember.role_id` (UUID FK) reemplaza el viejo `role` string. 5 roles del sistema auto-creados por org: `admin` (todos los permisos via wildcard), `bascula` (crear compras/ventas sin precios), `liquidador` (liquidar + precios + caja), `planillador` (doble partida sin liquidar), `viewer` (solo lectura). Roles personalizados via CRUD. `require_permission(*perms)` factory en deps.py para proteger endpoints (admin bypassa). `get_required_org_context()` retorna `user_permissions: set[str]`, `is_admin: bool`, `user_role_id: UUID`. **Enforcement incremental**: esta PR es solo infraestructura; aplicar `require_permission()` a endpoints existentes se hace en PRs futuras modulo por modulo. Migration: `bbed048158b2`. Todos los miembros existentes migrados a admin (seguro). 14 tests roles + 28 tests organizaciones adaptados. 512 tests total passing. **Solo backend** — frontend (pages de roles, RBAC en UI) es segunda fase.
+
 ### Business Modules (Implemented)
 
 | Module | Endpoints | Description |
 |--------|-----------|-------------|
 | Auth | `/api/v1/auth/` | JWT login, registration |
-| Organizations | `/api/v1/organizations/` | CRUD + member management, roles (admin/manager/user/accountant/viewer) |
+| Organizations | `/api/v1/organizations/` | CRUD + member management with role_id FK |
+| Roles & Permissions | `/api/v1/roles/` | RBAC: 45 granular permissions, 5 system roles (admin/bascula/liquidador/planillador/viewer), custom roles, `require_permission()` factory |
 | Materials | `/api/v1/materials/` | Materials + categories + business units, stock tracking |
 | Third Parties | `/api/v1/third-parties/` | Multi-role entities (supplier/customer/investor/provision) with balance tracking |
 | Purchases | `/api/v1/purchases/` | 3-step buy workflow (register→liquidate→pay), supplier debt, inventory movements, full edit (PATCH) |
@@ -239,7 +242,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 ### Testing
 
-Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 498 tests. Run with `./venv/bin/pytest` from backend dir.
+Tests use a separate PostgreSQL database on port 5433. `conftest.py` provides fixtures for users, organizations, auth tokens, and org headers. Async mode is auto-enabled via pytest-asyncio. Coverage target is 80%+. Current: 512 tests. Run with `./venv/bin/pytest` from backend dir.
 
 Key fixtures: `test_user`, `auth_headers`, `org_headers` (auth + X-Organization-ID), `db_session`.
 

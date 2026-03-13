@@ -14,7 +14,10 @@ from app.api.deps import get_db  # Override the deps.get_db that endpoints actua
 from app.models import Base  # Import Base from models to get all registered tables
 from app.models.user import User, OrganizationMember
 from app.models.organization import Organization
+from app.models.role import Role, RolePermission
+from app.models.permission import Permission
 from app.core.security import get_password_hash, create_access_token
+from app.services.role import role_service
 
 # Import all models to ensure they are registered with Base.metadata
 from app.models import (
@@ -36,6 +39,9 @@ from app.models import (
     MaterialCostHistory,
     ScheduledExpense,
     ScheduledExpenseApplication,
+    Permission,
+    Role,
+    RolePermission,
 )
 
 # Test database URL (PostgreSQL on port 5433)
@@ -54,15 +60,28 @@ test_engine = create_engine(
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 
+def _seed_permissions_and_roles(db: Session, organization_id) -> dict:
+    """
+    Seed permissions and system roles for a test organization.
+    Returns dict {role_name: role_id} for easy access.
+    """
+    role_service.seed_permissions(db)
+    role_service.create_system_roles_for_org(db, organization_id)
+    db.flush()
+
+    roles = db.query(Role).filter(Role.organization_id == organization_id).all()
+    return {r.name: r.id for r in roles}
+
+
 @pytest.fixture(scope="function")
 def db_session() -> Generator[Session, None, None]:
     """
     Create a fresh database session for each test.
-    
+
     Drops tables first to ensure clean state, then creates them before test.
     This works correctly with TestClient which creates its own sessions.
-    
-    Note: Uses raw SQL with CASCADE to handle circular dependencies between 
+
+    Note: Uses raw SQL with CASCADE to handle circular dependencies between
     double_entries, purchases, sales. Also drops ENUM types for PostgreSQL.
     """
     # Drop all tables and types using raw SQL
@@ -77,7 +96,7 @@ def db_session() -> Generator[Session, None, None]:
             enum_types = [row[0] for row in result]
             for enum_type in enum_types:
                 connection.execute(text(f'DROP TYPE IF EXISTS "{enum_type}" CASCADE'))
-            
+
             # Get all table names and drop them
             inspector = sqlalchemy.inspect(test_engine)
             tables = inspector.get_table_names()
@@ -91,18 +110,18 @@ def db_session() -> Generator[Session, None, None]:
             for table in tables:
                 connection.execute(text(f'DROP TABLE IF EXISTS "{table}"'))
             connection.execute(text("PRAGMA foreign_keys = ON"))
-    
+
     # Create all tables using SQLAlchemy
     Base.metadata.create_all(bind=test_engine, checkfirst=False)
-    
+
     # Create a regular session
     session = TestingSessionLocal()
-    
+
     try:
         yield session
     finally:
         session.close()
-        
+
         # Drop all tables and types after test using the same strategy
         with test_engine.begin() as connection:
             if test_engine.dialect.name == "postgresql":
@@ -115,7 +134,7 @@ def db_session() -> Generator[Session, None, None]:
                 enum_types = [row[0] for row in result]
                 for enum_type in enum_types:
                     connection.execute(text(f'DROP TYPE IF EXISTS "{enum_type}" CASCADE'))
-                
+
                 # Drop tables
                 inspector = sqlalchemy.inspect(test_engine)
                 tables = inspector.get_table_names()
@@ -135,7 +154,7 @@ def override_db_dependency(db_session: Session):
     """
     Automatically override the database dependency for all tests.
     Makes the app use the test database engine instead of production.
-    
+
     Note: This depends on db_session to ensure tables exist before override.
     """
     def override_get_db():
@@ -145,7 +164,7 @@ def override_db_dependency(db_session: Session):
             yield db
         finally:
             db.close()
-    
+
     app.dependency_overrides[get_db] = override_get_db
     yield
     app.dependency_overrides.clear()
@@ -219,6 +238,7 @@ def test_user3(db_session: Session) -> User:
 def test_organization(db_session: Session, test_user: User) -> Organization:
     """
     Create a test organization with test_user as admin.
+    Seeds permissions and system roles.
     """
     org = Organization(
         name="Test Organization",
@@ -227,24 +247,27 @@ def test_organization(db_session: Session, test_user: User) -> Organization:
     )
     db_session.add(org)
     db_session.flush()
-    
+
+    # Seed permissions and system roles
+    role_map = _seed_permissions_and_roles(db_session, org.id)
+
     # Add test_user as admin
     membership = OrganizationMember(
         user_id=test_user.id,
         organization_id=org.id,
-        role="admin",
+        role_id=role_map["admin"],
     )
     db_session.add(membership)
     db_session.commit()
     db_session.refresh(org)
-    
+
     return org
 
 
 @pytest.fixture
 def test_organization2(db_session: Session, test_user: User) -> Organization:
     """
-    Create a second test organization.
+    Create a second test organization with test_user as viewer.
     """
     org = Organization(
         name="Second Organization",
@@ -253,17 +276,20 @@ def test_organization2(db_session: Session, test_user: User) -> Organization:
     )
     db_session.add(org)
     db_session.flush()
-    
-    # Add test_user as manager (not admin)
+
+    # Seed permissions and system roles
+    role_map = _seed_permissions_and_roles(db_session, org.id)
+
+    # Add test_user as viewer (not admin)
     membership = OrganizationMember(
         user_id=test_user.id,
         organization_id=org.id,
-        role="manager",
+        role_id=role_map["viewer"],
     )
     db_session.add(membership)
     db_session.commit()
     db_session.refresh(org)
-    
+
     return org
 
 

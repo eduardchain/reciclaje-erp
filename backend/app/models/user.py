@@ -70,11 +70,12 @@ class OrganizationMember(Base):
         index=True,
     )
     
-    role: Mapped[str] = mapped_column(
-        String(50),
+    role_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("roles.id"),
         nullable=False,
-        default="user",
-    )  # Options: 'admin', 'manager', 'user', 'accountant', 'viewer'
+        index=True,
+    )
     
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -87,10 +88,15 @@ class OrganizationMember(Base):
         "Organization",
         back_populates="members",
     )
-    
+
     user: Mapped["User"] = relationship(
         "User",
         back_populates="organizations",
+    )
+
+    role: Mapped["Role"] = relationship(
+        "Role",
+        back_populates="members",
     )
     
     def __repr__(self) -> str:

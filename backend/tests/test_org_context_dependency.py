@@ -66,6 +66,9 @@ class TestRequiredOrgContext:
         assert context["organization_id"] == test_organization.id
         assert context["user_id"] == test_user.id
         assert context["user_role"] == "admin"  # test_user is admin in test_organization
+        assert context["is_admin"] is True
+        assert "user_permissions" in context
+        assert "user_role_id" in context
         assert context["user"] == test_user
     
     @pytest.mark.asyncio
@@ -82,7 +85,7 @@ class TestRequiredOrgContext:
             db=db_session,
         )
         
-        assert context["user_role"] == "manager"  # test_user is manager in test_organization2
+        assert context["user_role"] == "viewer"  # test_user is viewer in test_organization2
 
 
 class TestOptionalOrgContext:

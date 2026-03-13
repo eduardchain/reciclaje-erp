@@ -2,11 +2,13 @@ from uuid import UUID
 import re
 
 from sqlalchemy import select, func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.organization import Organization
 from app.models.user import User, OrganizationMember
+from app.models.role import Role
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate
+from app.services.role import role_service
 
 
 def _generate_slug_from_name(name: str) -> str:
@@ -87,17 +89,24 @@ def create_organization(
     db.add(organization)
     db.flush()  # Get organization.id without committing
     
+    # Seed permisos globales (idempotente) y crear roles del sistema
+    role_service.seed_permissions(db)
+    role_service.create_system_roles_for_org(db, organization.id)
+
+    # Obtener rol admin para asignar al owner
+    admin_role = role_service.get_admin_role_for_org(db, organization.id)
+
     # Add owner as admin
     membership = OrganizationMember(
         user_id=owner_user_id,
         organization_id=organization.id,
-        role="admin",
+        role_id=admin_role.id,
     )
-    
+
     db.add(membership)
     db.commit()
     db.refresh(organization)
-    
+
     return organization
 
 
@@ -134,33 +143,33 @@ def get_organization(db: Session, organization_id: UUID, user_id: UUID) -> Organ
 
 def get_user_organizations(db: Session, user_id: UUID) -> list[tuple[Organization, str]]:
     """
-    Get all organizations where user is a member, with their role in each.
-    
+    Get all organizations where user is a member, with their role name in each.
+
     Args:
         db: Database session
         user_id: User UUID
-        
+
     Returns:
-        List of tuples (Organization, role)
+        List of tuples (Organization, role_name)
     """
-    # Query organizations with user's role
     statement = (
-        select(Organization, OrganizationMember.role)
-        .join(OrganizationMember)
+        select(Organization, Role.name)
+        .join(OrganizationMember, OrganizationMember.organization_id == Organization.id)
+        .join(Role, Role.id == OrganizationMember.role_id)
         .where(OrganizationMember.user_id == user_id)
         .order_by(Organization.created_at.desc())
     )
-    
+
     results = db.execute(statement).all()
-    
-    return [(org, role) for org, role in results]
+
+    return [(org, role_name) for org, role_name in results]
 
 
 def add_member(
     db: Session,
     organization_id: UUID,
     user_id: UUID,
-    role: str
+    role_id: UUID,
 ) -> OrganizationMember:
     """
     Add a user to an organization with specified role.
@@ -215,11 +224,21 @@ def add_member(
     if not user:
         raise ValueError("User not found")
     
+    # Verify role belongs to organization
+    role = db.execute(
+        select(Role).where(
+            Role.id == role_id,
+            Role.organization_id == organization_id,
+        )
+    ).scalar_one_or_none()
+    if not role:
+        raise ValueError("Rol no encontrado en esta organizacion")
+
     # Create membership
     membership = OrganizationMember(
         user_id=user_id,
         organization_id=organization_id,
-        role=role,
+        role_id=role_id,
     )
     
     db.add(membership)
@@ -261,16 +280,22 @@ def remove_member(
         raise ValueError("User is not a member of this organization")
     
     # If removing an admin, check if it's the last one
-    if membership.role == "admin":
+    member_role = db.execute(
+        select(Role).where(Role.id == membership.role_id)
+    ).scalar_one_or_none()
+    if member_role and member_role.name == "admin" and member_role.is_system_role:
         admin_count = db.execute(
-            select(func.count(OrganizationMember.id)).where(
+            select(func.count(OrganizationMember.id))
+            .join(Role, Role.id == OrganizationMember.role_id)
+            .where(
                 OrganizationMember.organization_id == organization_id,
-                OrganizationMember.role == "admin"
+                Role.name == "admin",
+                Role.is_system_role == True,
             )
         ).scalar()
-        
+
         if admin_count <= 1:
-            raise ValueError("Cannot remove the last admin from the organization")
+            raise ValueError("No se puede remover al ultimo administrador")
     
     db.delete(membership)
     db.commit()
@@ -282,51 +307,56 @@ def update_member_role(
     db: Session,
     organization_id: UUID,
     user_id: UUID,
-    new_role: str
+    new_role_id: UUID,
 ) -> OrganizationMember:
     """
-    Update a member's role in an organization.
-    Prevents changing the last admin to a different role.
-    
-    Args:
-        db: Database session
-        organization_id: Organization UUID
-        user_id: User UUID
-        new_role: New role to assign
-        
-    Returns:
-        Updated OrganizationMember object
-        
-    Raises:
-        ValueError: If trying to change last admin or member not found
+    Actualizar el rol de un miembro en una organizacion.
+    Previene cambiar al ultimo administrador.
     """
-    # Get membership
     membership = db.execute(
         select(OrganizationMember).where(
             OrganizationMember.organization_id == organization_id,
-            OrganizationMember.user_id == user_id
+            OrganizationMember.user_id == user_id,
         )
     ).scalar_one_or_none()
-    
+
     if not membership:
-        raise ValueError("User is not a member of this organization")
-    
-    # If changing from admin to another role, check if it's the last admin
-    if membership.role == "admin" and new_role != "admin":
+        raise ValueError("El usuario no es miembro de esta organizacion")
+
+    # Verificar que el nuevo rol pertenece a la org
+    new_role = db.execute(
+        select(Role).where(
+            Role.id == new_role_id,
+            Role.organization_id == organization_id,
+        )
+    ).scalar_one_or_none()
+    if not new_role:
+        raise ValueError("Rol no encontrado en esta organizacion")
+
+    # Si cambiando de admin a otro rol, verificar que no sea el ultimo admin
+    current_role = db.execute(
+        select(Role).where(Role.id == membership.role_id)
+    ).scalar_one_or_none()
+
+    if (current_role and current_role.name == "admin" and current_role.is_system_role
+            and not (new_role.name == "admin" and new_role.is_system_role)):
         admin_count = db.execute(
-            select(func.count(OrganizationMember.id)).where(
+            select(func.count(OrganizationMember.id))
+            .join(Role, Role.id == OrganizationMember.role_id)
+            .where(
                 OrganizationMember.organization_id == organization_id,
-                OrganizationMember.role == "admin"
+                Role.name == "admin",
+                Role.is_system_role == True,
             )
         ).scalar()
-        
+
         if admin_count <= 1:
-            raise ValueError("Cannot change role of the last admin")
-    
-    membership.role = new_role
+            raise ValueError("No se puede cambiar el rol del ultimo administrador")
+
+    membership.role_id = new_role_id
     db.commit()
     db.refresh(membership)
-    
+
     return membership
 
 
@@ -347,12 +377,13 @@ def get_organization_members(
     statement = (
         select(OrganizationMember, User)
         .join(User, OrganizationMember.user_id == User.id)
+        .options(selectinload(OrganizationMember.role))
         .where(OrganizationMember.organization_id == organization_id)
         .order_by(OrganizationMember.joined_at.desc())
     )
-    
-    results = db.execute(statement).all()
-    
+
+    results = db.execute(statement).unique().all()
+
     return [(member, user) for member, user in results]
 
 
@@ -360,30 +391,35 @@ def get_user_role_in_org(
     db: Session,
     organization_id: UUID,
     user_id: UUID
-) -> str | None:
+) -> dict | None:
     """
-    Get user's role in a specific organization.
-    
+    Get user's role info in a specific organization.
+
     NOTE: This function will be called on EVERY authenticated request
     that requires organization context. In Phase 2, we will implement
     Redis caching to avoid repeated database queries.
-    
-    Args:
-        db: Database session
-        organization_id: Organization UUID
-        user_id: User UUID
-        
+
     Returns:
-        Role string if user is member, None otherwise
+        Dict with role_id, role_name, is_admin or None if not member
     """
-    membership = db.execute(
-        select(OrganizationMember.role).where(
+    result = db.execute(
+        select(OrganizationMember.role_id, Role.name, Role.is_system_role)
+        .join(Role, Role.id == OrganizationMember.role_id)
+        .where(
             OrganizationMember.organization_id == organization_id,
-            OrganizationMember.user_id == user_id
+            OrganizationMember.user_id == user_id,
         )
-    ).scalar_one_or_none()
-    
-    return membership
+    ).first()
+
+    if not result:
+        return None
+
+    role_id, role_name, is_system_role = result
+    return {
+        "role_id": role_id,
+        "role_name": role_name,
+        "is_admin": role_name == "admin" and is_system_role,
+    }
 
 
 def update_organization(
