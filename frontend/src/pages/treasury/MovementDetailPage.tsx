@@ -30,6 +30,7 @@ const typeLabels: Record<string, string> = {
   advance_payment: "Anticipo a Proveedor",
   advance_collection: "Anticipo de Cliente",
   asset_payment: "Pago Activo Fijo",
+  asset_purchase: "Compra Activo (Crédito)",
   expense_accrual: "Gasto Causado (Pasivo)",
   deferred_funding: "Pago Gasto Diferido",
   deferred_expense: "Cuota Gasto Diferido",

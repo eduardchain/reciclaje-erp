@@ -60,6 +60,7 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "deferred_funding": 1,          # Pago gasto diferido: prepago nos debe (balance sube)
     "deferred_expense": -1,         # Cuota gasto diferido: reduce prepago (balance baja)
     "commission_accrual": -1,        # Comision causada: les debemos comision (balance baja)
+    "asset_purchase": -1,            # Compra activo a credito: le debemos (balance baja)
 }
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.

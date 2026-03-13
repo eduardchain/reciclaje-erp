@@ -126,16 +126,82 @@ class TestFixedAssetCreate:
         # depreciable = 100M - 10M = 90M, useful_life = 90M / 5M = 18
         assert data["useful_life_months"] == 18
 
-    def test_create_with_supplier(self, client: TestClient, org_headers, fa_category, fa_account, fa_supplier):
-        """Crear activo con proveedor."""
-        resp = _create_asset(
-            client, org_headers, fa_category, fa_account,
-            third_party_id=str(fa_supplier.id),
-        )
+    def test_create_with_supplier_credit(self, client: TestClient, org_headers, fa_category, fa_account, fa_supplier, db_session):
+        """Crear activo a credito con proveedor — NO afecta cuenta, SI afecta balance proveedor."""
+        initial_supplier_balance = float(fa_supplier.current_balance)
+        initial_account_balance = float(fa_account.current_balance)
+        purchase_value = 10000000
+
+        payload = {
+            "name": "Bascula Industrial",
+            "purchase_date": "2026-01-01",
+            "purchase_value": purchase_value,
+            "depreciation_rate": 2.0,
+            "depreciation_start_date": "2026-01-01",
+            "expense_category_id": str(fa_category.id),
+            "supplier_id": str(fa_supplier.id),
+        }
+        resp = client.post(BASE_URL + "/", json=payload, headers=org_headers)
         assert resp.status_code == 201
         data = resp.json()
         assert data["third_party_id"] == str(fa_supplier.id)
         assert data["third_party_name"] == "Equipos Industriales S.A."
+
+        # Movimiento debe ser asset_purchase (NO asset_payment)
+        assert data["purchase_movement_id"] is not None
+        from app.models.money_movement import MoneyMovement
+        mm = db_session.query(MoneyMovement).filter_by(id=data["purchase_movement_id"]).first()
+        assert mm.movement_type == "asset_purchase"
+        assert mm.account_id is None  # NO cuenta involucrada
+
+        # Balance proveedor baja (le debemos)
+        db_session.refresh(fa_supplier)
+        assert float(fa_supplier.current_balance) == initial_supplier_balance - purchase_value
+
+        # Balance cuenta NO cambia
+        db_session.refresh(fa_account)
+        assert float(fa_account.current_balance) == initial_account_balance
+
+    def test_create_supplier_not_supplier_role(self, client: TestClient, org_headers, fa_category, db_session, test_organization):
+        """Crear activo con tercero que NO es proveedor debe fallar."""
+        customer = ThirdParty(
+            name="Solo Cliente",
+            is_customer=True,
+            is_supplier=False,
+            organization_id=test_organization.id,
+            current_balance=Decimal("0"),
+            initial_balance=Decimal("0"),
+        )
+        db_session.add(customer)
+        db_session.commit()
+        db_session.refresh(customer)
+
+        payload = {
+            "name": "Activo Invalido",
+            "purchase_date": "2026-01-01",
+            "purchase_value": 1000000,
+            "depreciation_rate": 5.0,
+            "depreciation_start_date": "2026-01-01",
+            "expense_category_id": str(fa_category.id),
+            "supplier_id": str(customer.id),
+        }
+        resp = client.post(BASE_URL + "/", json=payload, headers=org_headers)
+        assert resp.status_code in (400, 404)
+
+    def test_create_xor_validation(self, client: TestClient, org_headers, fa_category, fa_account, fa_supplier):
+        """Enviar ambos source_account_id Y supplier_id debe fallar 422."""
+        payload = {
+            "name": "Activo Doble Fuente",
+            "purchase_date": "2026-01-01",
+            "purchase_value": 1000000,
+            "depreciation_rate": 5.0,
+            "depreciation_start_date": "2026-01-01",
+            "expense_category_id": str(fa_category.id),
+            "source_account_id": str(fa_account.id),
+            "supplier_id": str(fa_supplier.id),
+        }
+        resp = client.post(BASE_URL + "/", json=payload, headers=org_headers)
+        assert resp.status_code == 422
 
     def test_create_invalid_salvage(self, client: TestClient, org_headers, fa_category, fa_account):
         """Valor residual >= valor compra debe fallar."""
@@ -155,8 +221,8 @@ class TestFixedAssetCreate:
         )
         assert resp.status_code == 422
 
-    def test_create_requires_account(self, client: TestClient, org_headers, fa_category):
-        """Sin source_account_id debe fallar 422."""
+    def test_create_requires_account_or_supplier(self, client: TestClient, org_headers, fa_category):
+        """Sin source_account_id ni supplier_id debe fallar 422 (validacion XOR)."""
         payload = {
             "name": "Sin Cuenta",
             "purchase_date": "2026-01-01",

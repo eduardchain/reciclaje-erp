@@ -18,7 +18,7 @@ export default function FixedAssetCreatePage() {
   const create = useCreateFixedAsset();
 
   const { data: categoriesData } = useExpenseCategories();
-  const { data: suppliersData } = useThirdParties({ role: "is_supplier" });
+  const { data: suppliersData } = useThirdParties({ role: "supplier" });
   const { data: accountsData } = useMoneyAccounts();
 
   const categories = categoriesData?.items ?? [];
@@ -32,9 +32,10 @@ export default function FixedAssetCreatePage() {
   const [salvageValue, setSalvageValue] = useState(0);
   const [depreciationRate, setDepreciationRate] = useState(0);
   const [depreciationStartDate, setDepreciationStartDate] = useState(toLocalDateInput());
+  const [paymentSource, setPaymentSource] = useState<"account" | "supplier">("account");
   const [accountId, setAccountId] = useState("");
+  const [supplierId, setSupplierId] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const [thirdPartyId, setThirdPartyId] = useState("");
   const [notes, setNotes] = useState("");
 
   // Calculos en vivo
@@ -53,7 +54,7 @@ export default function FixedAssetCreatePage() {
     depreciationRate <= 100 &&
     purchaseValue > salvageValue &&
     categoryId !== "" &&
-    accountId !== "" &&
+    (paymentSource === "account" ? accountId !== "" : supplierId !== "") &&
     !create.isPending;
 
   const handleSubmit = () => {
@@ -67,8 +68,8 @@ export default function FixedAssetCreatePage() {
         depreciation_rate: depreciationRate,
         depreciation_start_date: depreciationStartDate,
         expense_category_id: categoryId,
-        source_account_id: accountId,
-        third_party_id: thirdPartyId || null,
+        source_account_id: paymentSource === "account" ? accountId : null,
+        supplier_id: paymentSource === "supplier" ? supplierId : null,
         notes: notes || null,
       },
       {
@@ -106,16 +107,43 @@ export default function FixedAssetCreatePage() {
               <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
             </div>
 
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta de Pago *</Label>
-              <EntitySelect
-                value={accountId}
-                onChange={setAccountId}
-                options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
-                placeholder="Seleccionar cuenta..."
-              />
-              <p className="text-xs mt-1 text-slate-400">Se descontara el valor de compra de esta cuenta</p>
+            <div className="md:col-span-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fuente de Pago *</Label>
+              <div className="flex gap-4 mt-2">
+                <label className={`flex items-center gap-2 px-4 py-2 rounded-lg border cursor-pointer transition-colors ${paymentSource === "account" ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:bg-slate-50"}`}>
+                  <input type="radio" name="paymentSource" checked={paymentSource === "account"} onChange={() => { setPaymentSource("account"); setSupplierId(""); }} className="accent-emerald-600" />
+                  <span className="text-sm font-medium">Pago desde Cuenta</span>
+                </label>
+                <label className={`flex items-center gap-2 px-4 py-2 rounded-lg border cursor-pointer transition-colors ${paymentSource === "supplier" ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:bg-slate-50"}`}>
+                  <input type="radio" name="paymentSource" checked={paymentSource === "supplier"} onChange={() => { setPaymentSource("supplier"); setAccountId(""); }} className="accent-emerald-600" />
+                  <span className="text-sm font-medium">A Credito (Proveedor)</span>
+                </label>
+              </div>
             </div>
+
+            {paymentSource === "account" ? (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta de Pago *</Label>
+                <EntitySelect
+                  value={accountId}
+                  onChange={setAccountId}
+                  options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
+                  placeholder="Seleccionar cuenta..."
+                />
+                <p className="text-xs mt-1 text-slate-400">Se descontara el valor de compra de esta cuenta</p>
+              </div>
+            ) : (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor *</Label>
+                <EntitySelect
+                  value={supplierId}
+                  onChange={setSupplierId}
+                  options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+                  placeholder="Seleccionar proveedor..."
+                />
+                <p className="text-xs mt-1 text-slate-400">El proveedor quedara con deuda pendiente. Pague despues con "Pago a Proveedor"</p>
+              </div>
+            )}
 
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor de Compra *</Label>
@@ -158,15 +186,6 @@ export default function FixedAssetCreatePage() {
               />
             </div>
 
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</Label>
-              <EntitySelect
-                value={thirdPartyId}
-                onChange={setThirdPartyId}
-                options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
-                placeholder="Seleccionar proveedor (opcional)..."
-              />
-            </div>
 
             <div className="md:col-span-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>

@@ -1220,6 +1220,11 @@ class CRUDMoneyMovement:
             # Tercero es solo referencia, no se reversa balance
             account.current_balance += amt
 
+        elif mt == "asset_purchase":
+            # Compra activo a credito: sin cuenta, solo reversa proveedor
+            if third_party:
+                third_party.current_balance += amt
+
         elif mt == "expense_accrual":
             # Sin cuenta, solo reversa tercero
             if third_party:

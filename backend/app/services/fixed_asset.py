@@ -41,13 +41,12 @@ class CRUDFixedAsset:
         user_id: Optional[UUID] = None,
     ) -> FixedAsset:
         """
-        Registrar activo fijo con pago desde cuenta.
+        Registrar activo fijo con pago desde cuenta O a crédito con proveedor.
 
         1. Validar categoria de gasto
-        2. Validar tercero (opcional)
-        3. Validar cuenta de pago (saldo suficiente)
-        4. Calcular depreciacion mensual y vida util
-        5. Crear FixedAsset + MoneyMovement asset_payment
+        2. Validar fuente de pago (cuenta O proveedor)
+        3. Calcular depreciacion mensual y vida util
+        4. Crear FixedAsset + MoneyMovement
         """
         # 1. Validar categoria de gasto
         cat = db.execute(
@@ -63,28 +62,31 @@ class CRUDFixedAsset:
                 detail="Categoría de gasto no encontrada",
             )
 
-        # 2. Validar tercero (opcional)
-        if data.third_party_id:
-            tp = db.execute(
+        # 2. Validar fuente de pago
+        account = None
+        supplier = None
+
+        if data.source_account_id:
+            account = mm_service._validate_account(
+                db, data.source_account_id, organization_id,
+                require_funds=data.purchase_value,
+            )
+        else:
+            supplier = db.execute(
                 select(ThirdParty).where(
-                    ThirdParty.id == data.third_party_id,
+                    ThirdParty.id == data.supplier_id,
                     ThirdParty.organization_id == organization_id,
                     ThirdParty.is_active == True,
+                    ThirdParty.is_supplier == True,
                 )
             ).scalar_one_or_none()
-            if not tp:
+            if not supplier:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Tercero no encontrado",
+                    detail="Proveedor no encontrado",
                 )
 
-        # 3. Validar cuenta de pago
-        account = mm_service._validate_account(
-            db, data.source_account_id, organization_id,
-            require_funds=data.purchase_value,
-        )
-
-        # 4. Calcular depreciacion
+        # 3. Calcular depreciacion
         monthly_depreciation = (
             data.purchase_value * (data.depreciation_rate / Decimal("100"))
         ).quantize(Decimal("0.01"))
@@ -92,7 +94,7 @@ class CRUDFixedAsset:
         depreciable = data.purchase_value - data.salvage_value
         useful_life = ceil(float(depreciable / monthly_depreciation))
 
-        # 5. Crear activo
+        # 4. Crear activo
         asset = FixedAsset(
             organization_id=organization_id,
             name=data.name,
@@ -108,31 +110,45 @@ class CRUDFixedAsset:
             monthly_depreciation=monthly_depreciation,
             useful_life_months=useful_life,
             expense_category_id=data.expense_category_id,
-            third_party_id=data.third_party_id,
+            third_party_id=data.supplier_id,
             status="active",
             created_by=user_id,
         )
         db.add(asset)
         db.flush()
 
-        # 6. Crear MoneyMovement asset_payment (dinero sale de cuenta)
+        # 5. Crear movimiento según fuente
         movement_date = datetime.combine(
             data.purchase_date, time(12, 0), tzinfo=timezone.utc
         )
-        movement = mm_service._create_movement(
-            db=db,
-            organization_id=organization_id,
-            movement_type="asset_payment",
-            amount=data.purchase_value,
-            account_id=data.source_account_id,
-            date=movement_date,
-            description=f"Compra activo: {data.name}",
-            user_id=user_id,
-            third_party_id=data.third_party_id,
-        )
 
-        # Efecto cuenta: asset_payment resta de cuenta
-        account.current_balance -= data.purchase_value
+        if account:
+            movement = mm_service._create_movement(
+                db=db,
+                organization_id=organization_id,
+                movement_type="asset_payment",
+                amount=data.purchase_value,
+                account_id=data.source_account_id,
+                date=movement_date,
+                description=f"Compra activo: {data.name}",
+                user_id=user_id,
+                third_party_id=None,
+            )
+            account.current_balance -= data.purchase_value
+        else:
+            movement = mm_service._create_movement(
+                db=db,
+                organization_id=organization_id,
+                movement_type="asset_purchase",
+                amount=data.purchase_value,
+                account_id=None,
+                date=movement_date,
+                description=f"Compra activo a crédito: {data.name}",
+                user_id=user_id,
+                third_party_id=data.supplier_id,
+            )
+            supplier.current_balance -= data.purchase_value
+
         asset.purchase_movement_id = movement.id
 
         db.commit()

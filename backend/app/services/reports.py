@@ -95,6 +95,7 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "deferred_funding": 1,          # Pago gasto diferido: prepago nos debe
     "deferred_expense": -1,         # Cuota gasto diferido: reduce prepago
     "commission_accrual": -1,        # Comision causada: les debemos comision (balance-=)
+    "asset_purchase": -1,            # Compra activo a credito: le debemos (balance-=)
 }
 
 # Tipos de money_movement que representan inflows a cuentas

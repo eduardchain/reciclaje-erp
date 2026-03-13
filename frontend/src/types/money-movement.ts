@@ -15,6 +15,7 @@ export type MoneyMovementType =
   | "advance_payment"
   | "advance_collection"
   | "asset_payment"
+  | "asset_purchase"
   | "expense_accrual"
   | "deferred_funding"
   | "deferred_expense"

@@ -21,8 +21,8 @@ class FixedAssetCreate(BaseModel):
     depreciation_rate: Decimal = Field(..., ge=Decimal("0.01"), le=Decimal("100"))
     depreciation_start_date: date
     expense_category_id: UUID
-    source_account_id: UUID
-    third_party_id: Optional[UUID] = None
+    source_account_id: Optional[UUID] = None
+    supplier_id: Optional[UUID] = None
     notes: Optional[str] = Field(None, max_length=500)
 
     @model_validator(mode="after")
@@ -32,6 +32,12 @@ class FixedAssetCreate(BaseModel):
         if self.depreciation_start_date < self.purchase_date:
             raise ValueError(
                 "La fecha de inicio de depreciación no puede ser anterior a la fecha de compra"
+            )
+        has_account = self.source_account_id is not None
+        has_supplier = self.supplier_id is not None
+        if has_account == has_supplier:
+            raise ValueError(
+                "Debe especificar exactamente una fuente: cuenta de pago O proveedor a crédito"
             )
         return self
 
