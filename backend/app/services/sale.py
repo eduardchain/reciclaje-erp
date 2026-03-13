@@ -346,6 +346,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             # Crear nuevas comisiones con el total actualizado
             if commissions_data:
                 self._process_commissions(db, sale, commissions_data, sale.total_amount, organization_id)
+                db.flush()  # Persist commissions before _pay_commissions query
 
         # Step 5: Update sale status
         sale.status = "liquidated"
