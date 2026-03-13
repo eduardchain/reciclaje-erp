@@ -2,6 +2,7 @@
 Pydantic schemas for DoubleEntry (Pasa Mano) model.
 
 Soporta multiples materiales por operacion via DoubleEntryLine.
+Workflow de 2 pasos: registrar → liquidar.
 """
 from datetime import date as date_type, datetime, time, timezone
 from decimal import Decimal
@@ -52,7 +53,7 @@ class DoubleEntryLineResponse(BaseModel):
 
 class DoubleEntryCreate(BaseModel):
     """
-    Schema para crear una doble partida con multiples materiales.
+    Schema para crear (registrar) una doble partida con multiples materiales.
 
     Validaciones:
     - supplier_id != customer_id
@@ -68,8 +69,9 @@ class DoubleEntryCreate(BaseModel):
     notes: Optional[str] = Field(None, max_length=1000)
     commissions: List[SaleCommissionCreate] = Field(
         default_factory=list,
-        description="Comisiones de venta (se pagan al liquidar la venta)"
+        description="Comisiones de venta (se pagan al liquidar)"
     )
+    auto_liquidate: bool = Field(False, description="Liquidar inmediatamente despues de registrar")
 
     @model_validator(mode='after')
     def validate_create(self):
@@ -89,6 +91,41 @@ class DoubleEntryUpdate(BaseModel):
     vehicle_plate: Optional[str] = Field(None, max_length=20)
 
 
+class DoubleEntryLiquidateLineUpdate(BaseModel):
+    """Precios actualizados para una linea durante liquidacion."""
+    line_id: UUID = Field(..., description="ID de la linea de doble partida")
+    purchase_unit_price: Decimal = Field(..., gt=0, description="Precio de compra confirmado")
+    sale_unit_price: Decimal = Field(..., gt=0, description="Precio de venta confirmado")
+
+
+class DoubleEntryLiquidateRequest(BaseModel):
+    """Schema para liquidar doble partida (confirmar precios, aplicar efectos financieros)."""
+    lines: Optional[List[DoubleEntryLiquidateLineUpdate]] = Field(None, description="Precios actualizados por linea")
+    commissions: Optional[List[SaleCommissionCreate]] = Field(None, description="Comisiones (reemplazan las existentes)")
+
+
+class DoubleEntryFullUpdate(BaseModel):
+    """Schema para edicion completa de doble partida registrada."""
+    supplier_id: Optional[UUID] = None
+    customer_id: Optional[UUID] = None
+    date: Optional[date_type] = None
+    invoice_number: Optional[str] = Field(None, max_length=50)
+    vehicle_plate: Optional[str] = Field(None, max_length=20)
+    notes: Optional[str] = Field(None, max_length=1000)
+    lines: Optional[List[DoubleEntryLineCreate]] = Field(None, min_length=1)
+    commissions: Optional[List[SaleCommissionCreate]] = None
+
+    @model_validator(mode='after')
+    def validate_update(self):
+        if self.supplier_id and self.customer_id and self.supplier_id == self.customer_id:
+            raise ValueError("Supplier and customer cannot be the same third party")
+        if self.lines:
+            material_ids = [line.material_id for line in self.lines]
+            if len(material_ids) != len(set(material_ids)):
+                raise ValueError("No se permite repetir el mismo material en diferentes lineas")
+        return self
+
+
 class DoubleEntryResponse(BaseModel):
     """Schema completo de respuesta de doble partida."""
     id: UUID
@@ -102,7 +139,7 @@ class DoubleEntryResponse(BaseModel):
     notes: Optional[str] = None
     purchase_id: UUID
     sale_id: UUID
-    status: str = Field(..., description="completed | cancelled")
+    status: str = Field(..., description="registered | liquidated | cancelled")
 
     # Lineas
     lines: List[DoubleEntryLineResponse] = Field(default_factory=list)
@@ -119,6 +156,13 @@ class DoubleEntryResponse(BaseModel):
     # Timestamps
     created_at: datetime
     updated_at: datetime
+
+    # Audit
+    created_by: Optional[UUID] = None
+    liquidated_at: Optional[datetime] = None
+    liquidated_by: Optional[UUID] = None
+    cancelled_at: Optional[datetime] = None
+    cancelled_by: Optional[UUID] = None
 
     # Joined data
     supplier_name: str

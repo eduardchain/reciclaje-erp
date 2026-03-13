@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { doubleEntryService } from "@/services/doubleEntries";
 import { getApiErrorMessage } from "@/utils/formatters";
 import { invalidateAfterDoubleEntry } from "@/utils/queryInvalidation";
-import type { DoubleEntryCreate } from "@/types/double-entry";
+import type { DoubleEntryCreate, DoubleEntryFullUpdate, DoubleEntryLiquidateRequest } from "@/types/double-entry";
 
 interface DoubleEntryFilters {
   skip?: number;
@@ -35,10 +35,40 @@ export function useCreateDoubleEntry() {
     mutationFn: (data: DoubleEntryCreate) => doubleEntryService.create(data),
     onSuccess: () => {
       invalidateAfterDoubleEntry(queryClient);
-      toast.success("Doble partida creada exitosamente");
+      toast.success("Doble partida registrada exitosamente");
     },
     onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, "Error al crear la doble partida"));
+      toast.error(getApiErrorMessage(error, "Error al registrar la doble partida"));
+    },
+  });
+}
+
+export function useEditDoubleEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: DoubleEntryFullUpdate }) =>
+      doubleEntryService.edit(id, data),
+    onSuccess: () => {
+      invalidateAfterDoubleEntry(queryClient);
+      toast.success("Doble partida actualizada exitosamente");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al actualizar la doble partida"));
+    },
+  });
+}
+
+export function useLiquidateDoubleEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: DoubleEntryLiquidateRequest }) =>
+      doubleEntryService.liquidate(id, data),
+    onSuccess: () => {
+      invalidateAfterDoubleEntry(queryClient);
+      toast.success("Doble partida liquidada exitosamente");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al liquidar la doble partida"));
     },
   });
 }

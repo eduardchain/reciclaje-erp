@@ -219,7 +219,7 @@ class ReportService:
             .join(DoubleEntry, DoubleEntryLine.double_entry_id == DoubleEntry.id)
             .where(
                 DoubleEntry.organization_id == organization_id,
-                DoubleEntry.status == "completed",
+                DoubleEntry.status == "liquidated",
                 DoubleEntry.date >= date_from,
                 DoubleEntry.date <= date_to,
             )
@@ -982,7 +982,7 @@ class ReportService:
             .join(DoubleEntry, DoubleEntryLine.double_entry_id == DoubleEntry.id)
             .where(
                 DoubleEntry.organization_id == organization_id,
-                DoubleEntry.status == "completed",
+                DoubleEntry.status == "liquidated",
                 DoubleEntry.date >= date_from,
                 DoubleEntry.date <= date_to,
             )
@@ -1202,7 +1202,7 @@ class ReportService:
                     .join(DoubleEntry, DoubleEntryLine.double_entry_id == DoubleEntry.id)
                     .where(
                         DoubleEntry.organization_id == organization_id,
-                        DoubleEntry.status == "completed",
+                        DoubleEntry.status == "liquidated",
                         DoubleEntry.date >= d_from,
                         DoubleEntry.date <= d_to,
                     )

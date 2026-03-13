@@ -3,6 +3,8 @@ REST API endpoints for double-entry (Pasa Mano) operations.
 
 A double-entry operation represents buying from a supplier and immediately
 selling to a customer without the material entering inventory.
+
+Workflow de 2 pasos: registrar → liquidar.
 """
 import logging
 from datetime import date, datetime, time as dt_time, timedelta, timezone as tz
@@ -17,7 +19,8 @@ from app.api.deps import get_db, get_required_org_context
 from app.models.double_entry import DoubleEntry
 from app.schemas.double_entry import (
     DoubleEntryCreate,
-    DoubleEntryUpdate,
+    DoubleEntryFullUpdate,
+    DoubleEntryLiquidateRequest,
     DoubleEntryResponse,
     PaginatedDoubleEntryResponse,
 )
@@ -83,32 +86,17 @@ def _enrich_double_entry_response(double_entry: DoubleEntry) -> dict:
     "",
     response_model=DoubleEntryResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create new double-entry operation",
+    summary="Registrar doble partida",
     description="""
-    Create a new double-entry (Pasa Mano) operation.
-    
-    **Business Flow:**
-    1. Material does NOT enter inventory (no stock movement)
-    2. Creates Purchase record (status='registered', no inventory)
-    3. Creates Sale record (status='registered', no inventory)
-    4. Updates supplier balance (debt increases - we owe them)
-    5. Updates customer balance (receivable increases - they owe us)
-    6. Creates commissions (if provided, paid when sale is liquidated)
-    7. Net profit = sale_total - purchase_total - commissions
-    
-    **Validations:**
-    - supplier_id != customer_id (cannot trade with same party)
-    - Supplier must have is_supplier=True
-    - Customer must have is_customer=True
-    - Material must belong to organization
-    
-    **Effects:**
-    - Generates sequential double_entry_number
-    - Generates sequential purchase_number and sale_number
-    - Supplier balance decreases (debt increases)
-    - Customer balance increases (receivable increases)
-    - NO inventory movements
-    - NO stock changes
+    Registrar nueva doble partida (Pasa Mano).
+
+    **Paso 1 — Sin efectos financieros:**
+    - Crea Purchase + Sale en status='registered'
+    - Crea SaleCommission records (sin MoneyMovement)
+    - NO actualiza balances proveedor/cliente
+    - NO crea movimientos de inventario
+
+    **Para aplicar efectos financieros, usar PATCH /{id}/liquidate**
     """,
 )
 async def create_double_entry(
@@ -116,7 +104,7 @@ async def create_double_entry(
     db: Session = Depends(get_db),
     org_context: dict = Depends(get_required_org_context),
 ) -> DoubleEntryResponse:
-    """Create a new double-entry operation."""
+    """Registrar nueva doble partida."""
     try:
         double_entry_obj = double_entry_service.create(
             db=db,
@@ -124,61 +112,56 @@ async def create_double_entry(
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
         )
-        
+
         # Reload with eager loading to get all relationships
         double_entry_obj = double_entry_service.get(
             db=db,
             double_entry_id=double_entry_obj.id,
             organization_id=org_context["organization_id"],
         )
-        
-        # Enrich with joined data
+
         response_data = _enrich_double_entry_response(double_entry_obj)
-        
+
         logger.info(
-            f"Double-entry #{double_entry_obj.double_entry_number} created by user {org_context['user_id']} "
+            f"Double-entry #{double_entry_obj.double_entry_number} registered by user {org_context['user_id']} "
             f"in org {org_context['organization_id']}"
         )
-        
+
         return DoubleEntryResponse(**response_data)
-    
+
     except HTTPException:
         db.rollback()
-        raise  # Re-raise HTTP exceptions from service
-    
+        raise
+
     except IntegrityError as e:
         db.rollback()
         logger.error(f"Integrity error creating double-entry: {e}")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Duplicate double-entry number. Please retry.",
+            detail="Numero de doble partida duplicado. Reintente.",
         )
-    
+
     except Exception as e:
         db.rollback()
         logger.error(f"Unexpected error creating double-entry: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred",
+            detail="Ocurrió un error inesperado",
         )
 
 
 @router.get(
     "",
     response_model=PaginatedDoubleEntryResponse,
-    summary="List double-entry operations",
+    summary="Listar doble partidas",
     description="""
-    Get paginated list of double-entry operations with filters.
-    
-    **Filters:**
-    - status: 'completed' or 'cancelled'
-    - material_id: Filter by material
-    - supplier_id: Filter by supplier
-    - customer_id: Filter by customer
-    - date_from, date_to: Filter by date range
-    - search: Search in double_entry_number, supplier name, customer name, notes, invoice_number
-    
-    **Ordering:** By date descending (newest first)
+    Listado paginado de doble partidas con filtros.
+
+    **Filtros:**
+    - status: 'registered', 'liquidated' o 'cancelled'
+    - material_id, supplier_id, customer_id
+    - date_from, date_to
+    - search: buscar en numero, notas, factura
     """,
 )
 async def list_double_entries(
@@ -186,7 +169,7 @@ async def list_double_entries(
     org_context: dict = Depends(get_required_org_context),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum records to return"),
-    status: Optional[str] = Query(None, description="Filter by status: 'completed' or 'cancelled'"),
+    status: Optional[str] = Query(None, description="Filter by status: 'registered', 'liquidated' or 'cancelled'"),
     material_id: Optional[UUID] = Query(None, description="Filter by material UUID"),
     supplier_id: Optional[UUID] = Query(None, description="Filter by supplier UUID"),
     customer_id: Optional[UUID] = Query(None, description="Filter by customer UUID"),
@@ -194,7 +177,7 @@ async def list_double_entries(
     date_to: Optional[date] = Query(None, description="Filter by date to (inclusive)"),
     search: Optional[str] = Query(None, description="Search in number, names, notes, invoice"),
 ) -> PaginatedDoubleEntryResponse:
-    """Get paginated list of double-entries with filters."""
+    """Listar doble partidas con filtros."""
     date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
     date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
     double_entries, total = double_entry_service.get_multi(
@@ -210,13 +193,12 @@ async def list_double_entries(
         date_to=date_to_dt,
         search=search,
     )
-    
-    # Enrich each double_entry
+
     items = [
         DoubleEntryResponse(**_enrich_double_entry_response(de))
         for de in double_entries
     ]
-    
+
     return PaginatedDoubleEntryResponse(
         items=items,
         total=total,
@@ -228,27 +210,26 @@ async def list_double_entries(
 @router.get(
     "/{double_entry_id}",
     response_model=DoubleEntryResponse,
-    summary="Get double-entry by UUID",
-    description="Get a single double-entry operation by its UUID.",
+    summary="Obtener doble partida por UUID",
 )
 async def get_double_entry(
     double_entry_id: UUID,
     db: Session = Depends(get_db),
     org_context: dict = Depends(get_required_org_context),
 ) -> DoubleEntryResponse:
-    """Get a single double-entry by UUID."""
+    """Obtener doble partida por UUID."""
     double_entry_obj = double_entry_service.get(
         db=db,
         double_entry_id=double_entry_id,
         organization_id=org_context["organization_id"],
     )
-    
+
     if not double_entry_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Doble partida no encontrada",
         )
-    
+
     response_data = _enrich_double_entry_response(double_entry_obj)
     return DoubleEntryResponse(**response_data)
 
@@ -256,27 +237,26 @@ async def get_double_entry(
 @router.get(
     "/by-number/{double_entry_number}",
     response_model=DoubleEntryResponse,
-    summary="Get double-entry by sequential number",
-    description="Get a single double-entry operation by its sequential number within the organization.",
+    summary="Obtener doble partida por numero secuencial",
 )
 async def get_double_entry_by_number(
     double_entry_number: int,
     db: Session = Depends(get_db),
     org_context: dict = Depends(get_required_org_context),
 ) -> DoubleEntryResponse:
-    """Get a single double-entry by sequential number."""
+    """Obtener doble partida por numero secuencial."""
     double_entry_obj = double_entry_service.get_by_number(
         db=db,
         double_entry_number=double_entry_number,
         organization_id=org_context["organization_id"],
     )
-    
+
     if not double_entry_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Double-entry #{double_entry_number} not found",
+            detail=f"Doble partida #{double_entry_number} no encontrada",
         )
-    
+
     response_data = _enrich_double_entry_response(double_entry_obj)
     return DoubleEntryResponse(**response_data)
 
@@ -284,8 +264,7 @@ async def get_double_entry_by_number(
 @router.get(
     "/supplier/{supplier_id}",
     response_model=PaginatedDoubleEntryResponse,
-    summary="List double-entries by supplier",
-    description="Get paginated list of double-entry operations for a specific supplier.",
+    summary="Listar doble partidas por proveedor",
 )
 async def list_double_entries_by_supplier(
     supplier_id: UUID,
@@ -294,7 +273,7 @@ async def list_double_entries_by_supplier(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
 ) -> PaginatedDoubleEntryResponse:
-    """Get double-entries by supplier."""
+    """Listar doble partidas por proveedor."""
     double_entries, total = double_entry_service.get_by_supplier(
         db=db,
         supplier_id=supplier_id,
@@ -302,12 +281,12 @@ async def list_double_entries_by_supplier(
         skip=skip,
         limit=limit,
     )
-    
+
     items = [
         DoubleEntryResponse(**_enrich_double_entry_response(de))
         for de in double_entries
     ]
-    
+
     return PaginatedDoubleEntryResponse(
         items=items,
         total=total,
@@ -319,8 +298,7 @@ async def list_double_entries_by_supplier(
 @router.get(
     "/customer/{customer_id}",
     response_model=PaginatedDoubleEntryResponse,
-    summary="List double-entries by customer",
-    description="Get paginated list of double-entry operations for a specific customer.",
+    summary="Listar doble partidas por cliente",
 )
 async def list_double_entries_by_customer(
     customer_id: UUID,
@@ -329,7 +307,7 @@ async def list_double_entries_by_customer(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
 ) -> PaginatedDoubleEntryResponse:
-    """Get double-entries by customer."""
+    """Listar doble partidas por cliente."""
     double_entries, total = double_entry_service.get_by_customer(
         db=db,
         customer_id=customer_id,
@@ -337,12 +315,12 @@ async def list_double_entries_by_customer(
         skip=skip,
         limit=limit,
     )
-    
+
     items = [
         DoubleEntryResponse(**_enrich_double_entry_response(de))
         for de in double_entries
     ]
-    
+
     return PaginatedDoubleEntryResponse(
         items=items,
         total=total,
@@ -352,25 +330,77 @@ async def list_double_entries_by_customer(
 
 
 @router.patch(
+    "/{double_entry_id}/liquidate",
+    response_model=DoubleEntryResponse,
+    summary="Liquidar doble partida",
+    description="""
+    Liquidar doble partida registrada — confirmar precios y aplicar efectos financieros.
+
+    **Paso 2 — Aplica efectos financieros:**
+    - Opcionalmente ajustar precios de compra/venta por linea
+    - Opcionalmente reemplazar comisiones
+    - Actualiza balance proveedor (deuda aumenta)
+    - Actualiza balance cliente (cuenta por cobrar aumenta)
+    - Crea MoneyMovements 'commission_accrual' + actualiza balances comisionistas
+    - Marca Purchase, Sale y DoubleEntry como 'liquidated'
+
+    **Requiere:** status == 'registered'
+    """,
+)
+async def liquidate_double_entry(
+    double_entry_id: UUID,
+    liquidate_request: DoubleEntryLiquidateRequest,
+    db: Session = Depends(get_db),
+    org_context: dict = Depends(get_required_org_context),
+) -> DoubleEntryResponse:
+    """Liquidar doble partida registrada."""
+    try:
+        double_entry_obj = double_entry_service.liquidate(
+            db=db,
+            double_entry_id=double_entry_id,
+            organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
+            line_updates=liquidate_request.lines,
+            commissions_data=liquidate_request.commissions,
+        )
+
+        # Reload with eager loading
+        double_entry_obj = double_entry_service.get(
+            db=db,
+            double_entry_id=double_entry_obj.id,
+            organization_id=org_context["organization_id"],
+        )
+
+        response_data = _enrich_double_entry_response(double_entry_obj)
+
+        logger.info(
+            f"Double-entry #{double_entry_obj.double_entry_number} liquidated by user {org_context['user_id']}"
+        )
+
+        return DoubleEntryResponse(**response_data)
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error liquidating double-entry: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Ocurrió un error inesperado",
+        )
+
+
+@router.patch(
     "/{double_entry_id}/cancel",
     response_model=DoubleEntryResponse,
-    summary="Cancel double-entry operation",
+    summary="Cancelar doble partida",
     description="""
-    Cancel a double-entry operation and reverse all changes.
-    
-    **Requirements:**
-    - Double-entry status must be 'completed'
-    - Linked Purchase must be 'registered' (not paid)
-    - Linked Sale must be 'registered' (not paid)
-    
-    **Effects:**
-    - Sets double_entry status to 'cancelled'
-    - Sets Purchase status to 'cancelled'
-    - Sets Sale status to 'cancelled'
-    - Reverts supplier balance (reduces debt)
-    - Reverts customer balance (reduces receivable)
-    - NO inventory movements (there were none)
-    - Commissions are not paid (they were never paid)
+    Cancelar doble partida y revertir efectos segun estado.
+
+    **Si status='registered':** Cancelacion trivial (sin efectos financieros que revertir).
+    **Si status='liquidated':** Revierte balances proveedor/cliente, anula comisiones causadas.
     """,
 )
 async def cancel_double_entry(
@@ -378,93 +408,94 @@ async def cancel_double_entry(
     db: Session = Depends(get_db),
     org_context: dict = Depends(get_required_org_context),
 ) -> DoubleEntryResponse:
-    """Cancel a double-entry operation."""
+    """Cancelar doble partida."""
     try:
         double_entry_obj = double_entry_service.cancel(
             db=db,
             double_entry_id=double_entry_id,
             organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
         )
-        
+
         # Reload with eager loading
         double_entry_obj = double_entry_service.get(
             db=db,
             double_entry_id=double_entry_obj.id,
             organization_id=org_context["organization_id"],
         )
-        
+
         response_data = _enrich_double_entry_response(double_entry_obj)
-        
+
         logger.info(
             f"Double-entry #{double_entry_obj.double_entry_number} cancelled by user {org_context['user_id']}"
         )
-        
+
         return DoubleEntryResponse(**response_data)
-    
+
     except HTTPException:
         db.rollback()
         raise
-    
+
     except Exception as e:
         db.rollback()
         logger.error(f"Error cancelling double-entry: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred",
+            detail="Ocurrió un error inesperado",
         )
 
 
 @router.patch(
     "/{double_entry_id}",
     response_model=DoubleEntryResponse,
-    summary="Update double-entry metadata",
+    summary="Editar doble partida registrada",
     description="""
-    Update double-entry metadata (notes, invoice_number, vehicle_plate only).
-    
-    **Allowed updates:**
-    - notes
-    - invoice_number
-    - vehicle_plate
-    
-    **Not allowed:**
-    - Cannot change amounts, dates, or parties
-    - Cannot change status (use /cancel endpoint)
+    Edicion completa de doble partida en estado 'registered'.
+
+    **Permite cambiar:**
+    - Proveedor, cliente
+    - Fecha, factura, placa, notas
+    - Lineas (materiales, cantidades, precios)
+    - Comisiones
+
+    **Requiere:** status == 'registered'
     """,
 )
-async def update_double_entry(
+async def edit_double_entry(
     double_entry_id: UUID,
-    double_entry_update: DoubleEntryUpdate,
+    double_entry_update: DoubleEntryFullUpdate,
     db: Session = Depends(get_db),
     org_context: dict = Depends(get_required_org_context),
 ) -> DoubleEntryResponse:
-    """Update double-entry metadata."""
+    """Editar doble partida registrada."""
     try:
-        double_entry_obj = double_entry_service.update(
+        double_entry_obj = double_entry_service.edit(
             db=db,
             double_entry_id=double_entry_id,
             obj_in=double_entry_update,
             organization_id=org_context["organization_id"],
+            user_id=org_context["user_id"],
         )
-        
+
         # Reload with eager loading
         double_entry_obj = double_entry_service.get(
             db=db,
             double_entry_id=double_entry_obj.id,
             organization_id=org_context["organization_id"],
         )
-        
+
         response_data = _enrich_double_entry_response(double_entry_obj)
-        
+
         return DoubleEntryResponse(**response_data)
-    
+
     except HTTPException:
         db.rollback()
         raise
-    
+
     except Exception as e:
         db.rollback()
-        logger.error(f"Error updating double-entry: {e}")
+        logger.error(f"Error editing double-entry: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred",
+            detail="Ocurrió un error inesperado",
         )

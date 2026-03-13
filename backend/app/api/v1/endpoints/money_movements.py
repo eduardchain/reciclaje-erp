@@ -780,7 +780,7 @@ def get_by_third_party(
         .options(joinedload(DoubleEntry.purchase), joinedload(DoubleEntry.sale))
         .where(
             DoubleEntry.organization_id == org_id,
-            DoubleEntry.status.in_(["completed", "cancelled"]),
+            DoubleEntry.status.in_(["liquidated", "cancelled"]),
         )
         .where(
             (DoubleEntry.supplier_id == third_party_id)
@@ -791,7 +791,7 @@ def get_by_third_party(
         de_dt = de.created_at  # datetime del registro
         purchase_amount = float(de.purchase.total_amount) if de.purchase else 0
         sale_amount = float(de.sale.total_amount) if de.sale else 0
-        is_active = de.status == "completed"
+        is_active = de.status == "liquidated"
         evt_status = "confirmed" if is_active else "cancelled"
 
         # Como proveedor
@@ -841,14 +841,14 @@ def get_by_third_party(
         .where(
             DoubleEntry.organization_id == org_id,
             SaleCommission.third_party_id == third_party_id,
-            DoubleEntry.status.in_(["completed", "cancelled"]),
+            DoubleEntry.status.in_(["liquidated", "cancelled"]),
         )
     )
     for comm, sale, de in db.execute(de_comm_query).all():
         if sale.id in sales_with_accrual:
             continue
         de_dt = de.created_at
-        is_active = de.status == "completed"
+        is_active = de.status == "liquidated"
         _evt(de.date, de_dt, 0,
              id=f"de-commission-{comm.id}", date=de.date.isoformat(),
              event_type="double_entry_commission",

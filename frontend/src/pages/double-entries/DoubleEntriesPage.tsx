@@ -2,9 +2,10 @@ import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, TrendingUp, Hash, Percent, MoreHorizontal, Eye, XCircle, FileText } from "lucide-react";
+import { Plus, TrendingUp, Hash, Percent, MoreHorizontal, Eye, XCircle, FileText, Pencil, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,17 +55,36 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
             <Eye className="h-4 w-4 mr-2" />
             Ver detalle
           </DropdownMenuItem>
-          {de.status === "completed" && (
-            <DropdownMenuItem onClick={() => setCancelOpen(true)} className="text-red-600">
-              <XCircle className="h-4 w-4 mr-2" />
-              Cancelar
-            </DropdownMenuItem>
+          {de.status === "registered" && (
+            <>
+              <DropdownMenuItem onClick={() => navigate(`/double-entries/${de.id}/edit`)}>
+                <Pencil className="h-4 w-4 mr-2" />
+                Editar
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate(`/double-entries/${de.id}/liquidate`)}>
+                <CheckCircle className="h-4 w-4 mr-2" />
+                Liquidar
+              </DropdownMenuItem>
+            </>
           )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => exportDoubleEntryPDF(de, orgName)}>
-            <FileText className="h-4 w-4 mr-2" />
-            Exportar PDF
-          </DropdownMenuItem>
+          {(de.status === "registered" || de.status === "liquidated") && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setCancelOpen(true)} className="text-red-600">
+                <XCircle className="h-4 w-4 mr-2" />
+                Cancelar
+              </DropdownMenuItem>
+            </>
+          )}
+          {de.status === "liquidated" && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => exportDoubleEntryPDF(de, orgName)}>
+                <FileText className="h-4 w-4 mr-2" />
+                Exportar PDF
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -72,7 +92,7 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
         open={cancelOpen}
         onOpenChange={setCancelOpen}
         title="Cancelar Doble Partida"
-        description={`Esto revertira la compra y venta de la Doble Partida #${de.double_entry_number}. Esta seguro?`}
+        description={`Esto ${de.status === "liquidated" ? "revertira los saldos y " : ""}cancelara la Doble Partida #${de.double_entry_number}. Esta seguro?`}
         confirmLabel="Si, cancelar"
         variant="destructive"
         onConfirm={() => cancel.mutate(de.id, { onSuccess: () => setCancelOpen(false) })}
@@ -102,11 +122,13 @@ export default function DoubleEntriesPage() {
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<string>("all");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
 
   const { data, isLoading } = useDoubleEntries({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
+    status: status === "all" ? undefined : status,
     search: search || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
@@ -167,6 +189,15 @@ export default function DoubleEntriesPage() {
           />
         </div>
       )}
+
+      <Tabs value={status} onValueChange={(v) => { setStatus(v); setPage(0); }}>
+        <TabsList>
+          <TabsTrigger value="all">Todas</TabsTrigger>
+          <TabsTrigger value="registered">Registradas</TabsTrigger>
+          <TabsTrigger value="liquidated">Liquidadas</TabsTrigger>
+          <TabsTrigger value="cancelled">Canceladas</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       <DataTable
         columns={columns}

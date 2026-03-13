@@ -309,7 +309,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         date=(now - timedelta(days=7)).date(),
         supplier_id=proveedor1.id, customer_id=cliente2.id,
         purchase_id=de_purchase.id, sale_id=de_sale.id,
-        status="completed",
+        status="liquidated",
     )
     db_session.add(doble_partida)
     db_session.flush()

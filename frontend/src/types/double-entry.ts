@@ -1,7 +1,7 @@
 import type { BaseEntity } from "./common";
 import type { SaleCommissionCreate, SaleCommissionResponse } from "./sale";
 
-export type DoubleEntryStatus = "completed" | "cancelled";
+export type DoubleEntryStatus = "registered" | "liquidated" | "cancelled";
 
 // ============================================================================
 // Line schemas
@@ -40,12 +40,29 @@ export interface DoubleEntryCreate {
   vehicle_plate?: string | null;
   notes?: string | null;
   commissions?: SaleCommissionCreate[];
+  auto_liquidate?: boolean;
 }
 
-export interface DoubleEntryUpdate {
-  notes?: string | null;
+export interface DoubleEntryFullUpdate {
+  supplier_id?: string | null;
+  customer_id?: string | null;
+  date?: string | null;
   invoice_number?: string | null;
   vehicle_plate?: string | null;
+  notes?: string | null;
+  lines?: DoubleEntryLineCreate[] | null;
+  commissions?: SaleCommissionCreate[] | null;
+}
+
+export interface DoubleEntryLiquidateLineUpdate {
+  line_id: string;
+  purchase_unit_price: number;
+  sale_unit_price: number;
+}
+
+export interface DoubleEntryLiquidateRequest {
+  lines?: DoubleEntryLiquidateLineUpdate[] | null;
+  commissions?: SaleCommissionCreate[] | null;
 }
 
 export interface DoubleEntryResponse extends BaseEntity {
@@ -69,4 +86,10 @@ export interface DoubleEntryResponse extends BaseEntity {
   supplier_name: string;
   customer_name: string;
   commissions: SaleCommissionResponse[];
+  // Audit fields
+  created_by: string | null;
+  liquidated_at: string | null;
+  liquidated_by: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, FileText, XCircle } from "lucide-react";
+import { ArrowLeft, FileText, XCircle, Pencil, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -16,7 +16,8 @@ import { useAuthStore } from "@/stores/authStore";
 import { ROUTES } from "@/utils/constants";
 
 const statusBorderMap: Record<string, string> = {
-  completed: "border-t-[3px] border-t-emerald-400",
+  registered: "border-t-[3px] border-t-amber-400",
+  liquidated: "border-t-[3px] border-t-emerald-400",
   cancelled: "border-t-[3px] border-t-rose-400",
 };
 
@@ -36,11 +37,29 @@ export default function DoubleEntryDetailPage() {
     <div className="space-y-6">
       <PageHeader title={`Doble Partida #${de.double_entry_number}`} description={de.materials_summary}>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => exportDoubleEntryPDF(de, orgName)}><FileText className="h-4 w-4 mr-2" />Exportar PDF</Button>
-          {de.status === "completed" && (
-            <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50"><XCircle className="h-4 w-4 mr-2" />Cancelar</Button>
+          {de.status === "registered" && (
+            <>
+              <Button onClick={() => navigate(`/double-entries/${de.id}/edit`)} variant="outline">
+                <Pencil className="h-4 w-4 mr-2" />Editar
+              </Button>
+              <Button onClick={() => navigate(`/double-entries/${de.id}/liquidate`)} className="bg-emerald-600 hover:bg-emerald-700">
+                <CheckCircle className="h-4 w-4 mr-2" />Liquidar
+              </Button>
+            </>
           )}
-          <Button variant="outline" onClick={() => navigate(ROUTES.DOUBLE_ENTRIES)}><ArrowLeft className="h-4 w-4 mr-2" />Volver</Button>
+          {de.status === "liquidated" && (
+            <Button variant="outline" onClick={() => exportDoubleEntryPDF(de, orgName)}>
+              <FileText className="h-4 w-4 mr-2" />Exportar PDF
+            </Button>
+          )}
+          {(de.status === "registered" || de.status === "liquidated") && (
+            <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50">
+              <XCircle className="h-4 w-4 mr-2" />Cancelar
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => navigate(ROUTES.DOUBLE_ENTRIES)}>
+            <ArrowLeft className="h-4 w-4 mr-2" />Volver
+          </Button>
         </div>
       </PageHeader>
 
@@ -53,6 +72,8 @@ export default function DoubleEntryDetailPage() {
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</dt><dd>{formatDate(de.date)}</dd></div>
               {de.invoice_number && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Factura</dt><dd>{de.invoice_number}</dd></div>}
               {de.vehicle_plate && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa</dt><dd>{de.vehicle_plate}</dd></div>}
+              {de.liquidated_at && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidada</dt><dd>{formatDate(de.liquidated_at)}</dd></div>}
+              {de.cancelled_at && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cancelada</dt><dd>{formatDate(de.cancelled_at)}</dd></div>}
             </dl>
           </CardContent>
         </Card>
@@ -169,7 +190,7 @@ export default function DoubleEntryDetailPage() {
         open={showCancel}
         onOpenChange={setShowCancel}
         title="Cancelar Doble Partida"
-        description="Esto revertira la compra y venta asociadas. Esta seguro?"
+        description={`Esto ${de.status === "liquidated" ? "revertira los saldos y " : ""}cancelara la doble partida. Esta seguro?`}
         confirmLabel="Si, cancelar"
         variant="destructive"
         onConfirm={() => cancel.mutate(id!, { onSuccess: () => setShowCancel(false) })}

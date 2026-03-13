@@ -309,7 +309,8 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string) {
 }
 
 const DE_STATUS_LABELS: Record<string, string> = {
-  completed: "Completada",
+  registered: "Registrada",
+  liquidated: "Liquidada",
   cancelled: "Cancelada",
 };
 

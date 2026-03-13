@@ -3,15 +3,12 @@ Double-Entry (Pasa Mano) model for simultaneous purchase + sale operations.
 
 Soporta multiples materiales por operacion via DoubleEntryLine.
 
-Business Flow:
-1. Material does NOT enter inventory (no stock movement)
-2. Creates linked Purchase record (status='registered', no inventory movement)
-3. Creates linked Sale record (status='registered', no inventory movement)
-4. Supplier balance increases (we owe them)
-5. Customer balance increases (they owe us)
-6. Net profit = sale_total - purchase_total - commissions
+Business Flow (2-step):
+1. REGISTRAR: Crea DP + Purchase + Sale en status='registered'. Sin efectos financieros.
+2. LIQUIDAR: Confirma precios, actualiza balances proveedor/cliente, paga comisiones.
+3. Material does NOT enter inventory (no stock movement) en ningun paso.
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -23,6 +20,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Date,
+    DateTime,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -159,8 +157,30 @@ class DoubleEntry(Base, OrganizationMixin, TimestampMixin):
 
     # Status
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="completed", index=True,
-        comment="Status: 'completed' or 'cancelled'"
+        String(20), nullable=False, default="registered", index=True,
+        comment="Status: 'registered' | 'liquidated' | 'cancelled'"
+    )
+
+    # Audit fields
+    created_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("users.id"), nullable=True,
+        comment="User who created the double entry"
+    )
+    liquidated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Timestamp of liquidation"
+    )
+    liquidated_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("users.id"), nullable=True,
+        comment="User who liquidated"
+    )
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Timestamp of cancellation"
+    )
+    cancelled_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("users.id"), nullable=True,
+        comment="User who cancelled"
     )
 
     # Relationships

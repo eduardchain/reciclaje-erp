@@ -18,6 +18,8 @@ import SaleEditPage from "@/pages/sales/SaleEditPage";
 import SaleLiquidatePage from "@/pages/sales/SaleLiquidatePage";
 import DoubleEntriesPage from "@/pages/double-entries/DoubleEntriesPage";
 import DoubleEntryCreatePage from "@/pages/double-entries/DoubleEntryCreatePage";
+import DoubleEntryEditPage from "@/pages/double-entries/DoubleEntryEditPage";
+import DoubleEntryLiquidatePage from "@/pages/double-entries/DoubleEntryLiquidatePage";
 import DoubleEntryDetailPage from "@/pages/double-entries/DoubleEntryDetailPage";
 import TreasuryPage from "@/pages/treasury/TreasuryPage";
 import MovementCreatePage from "@/pages/treasury/MovementCreatePage";
@@ -100,6 +102,8 @@ function App() {
               {/* Doble Partida */}
               <Route path={ROUTES.DOUBLE_ENTRIES} element={<DoubleEntriesPage />} />
               <Route path={ROUTES.DOUBLE_ENTRIES_NEW} element={<DoubleEntryCreatePage />} />
+              <Route path="/double-entries/:id/edit" element={<DoubleEntryEditPage />} />
+              <Route path="/double-entries/:id/liquidate" element={<DoubleEntryLiquidatePage />} />
               <Route path="/double-entries/:id" element={<DoubleEntryDetailPage />} />
               {/* Tesoreria */}
               <Route path={ROUTES.TREASURY} element={<TreasuryPage />} />

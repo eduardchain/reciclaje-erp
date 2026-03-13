@@ -1,5 +1,10 @@
 import apiClient from "./api";
-import type { DoubleEntryResponse, DoubleEntryCreate } from "@/types/double-entry";
+import type {
+  DoubleEntryResponse,
+  DoubleEntryCreate,
+  DoubleEntryFullUpdate,
+  DoubleEntryLiquidateRequest,
+} from "@/types/double-entry";
 import type { PaginatedResponse } from "@/types/common";
 
 interface DoubleEntryFilters {
@@ -24,6 +29,16 @@ export const doubleEntryService = {
 
   create: async (data: DoubleEntryCreate): Promise<DoubleEntryResponse> => {
     const response = await apiClient.post<DoubleEntryResponse>("/api/v1/double-entries", data);
+    return response.data;
+  },
+
+  edit: async (id: string, data: DoubleEntryFullUpdate): Promise<DoubleEntryResponse> => {
+    const response = await apiClient.patch<DoubleEntryResponse>(`/api/v1/double-entries/${id}`, data);
+    return response.data;
+  },
+
+  liquidate: async (id: string, data: DoubleEntryLiquidateRequest = {}): Promise<DoubleEntryResponse> => {
+    const response = await apiClient.patch<DoubleEntryResponse>(`/api/v1/double-entries/${id}/liquidate`, data);
     return response.data;
   },
 

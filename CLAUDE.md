@@ -99,7 +99,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 - Dashboard: 6 metric cards + top materials/suppliers/customers + alerts
 - Purchases: List (status tabs, search, date range, Items/DP/Actions columns) + Create (dynamic lines, auto-liquidate, price suggestions) + Edit (full revert-and-reapply) + Detail (liquidate/cancel/PDF)
 - Sales: Like purchases + commissions + profit display + stock warnings + Edit (lines + commissions)
-- Double Entries: Simultaneous buy+sell form with real-time profit calculation
+- Double Entries: 2-step workflow (register→liquidate), edit registered, liquidate with price adjustments, real-time profit calculation
 - Treasury: 14 movement types with dynamic form, annulment with reason, provisions (deposit/expense), advances (supplier/customer), account statement with running balance + PDF/Excel export, financial dashboard, fixed assets with monthly depreciation
 - Inventory: Stock view (expandable rows with warehouse breakdown, category/warehouse filters, transfer modal), movement history (material/warehouse filters, running balance/avg cost), adjustments (4 types), transformations (multi-line destinations, balance validation), warehouse transfers, valuation page, transit page (pending purchases/sales, bottleneck alerts)
 - Reports: P&L, Cash Flow, Balance Sheet, Purchase Report, Sales Report, Margin Analysis, Third Party Balances — all with date range pickers
@@ -139,9 +139,9 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 
 ### Design Decisions
 
-1. **Doble Partida SIN movimientos de inventario**: En operaciones "Pasa Mano" (compra+venta simultanea), el material NO toca bodega. Crear movimientos de inventario inflaria el costo promedio y distorsionaria estadisticas. La doble partida solo afecta saldos de terceros y cuentas.
+1. **Doble Partida SIN movimientos de inventario**: En operaciones "Pasa Mano" (compra+venta simultanea), el material NO toca bodega. Crear movimientos de inventario inflaria el costo promedio y distorsionaria estadisticas. La doble partida solo afecta saldos de terceros y cuentas. Usa workflow de 2 pasos: REGISTRAR (crea Purchase + Sale en `registered`, sin efectos financieros) → LIQUIDAR (confirma precios ajustables por linea, actualiza saldos terceros, crea comisiones `commission_accrual`). DPs registradas son completamente editables (lineas, terceros, precios, comisiones).
 
-2. **Estados**: Compras y Ventas usan `registered | liquidated | cancelled`. Workflow identico de 3 pasos: CREATE (stock) → LIQUIDATE (confirmar precios, saldo tercero, comisiones) → PAY/COLLECT (MoneyMovement separado).
+2. **Estados**: Compras, Ventas y Doble Partidas usan `registered | liquidated | cancelled`. Compras/Ventas: 3 pasos (CREATE stock → LIQUIDATE precios/saldos/comisiones → PAY/COLLECT MoneyMovement). Doble Partidas: 2 pasos (REGISTRAR sin efectos → LIQUIDAR con precios ajustables, saldos y comisiones).
 
 3. **Stock liquidado vs transito**: Las compras registradas crean stock en transito (sin efectos financieros: ni saldo proveedor, ni costo promedio). Al LIQUIDAR se confirman precios, se recalcula costo promedio, se actualiza saldo proveedor, y stock pasa de transito a liquidado. El PAGO al proveedor es una operacion separada via MoneyMovement (`payment_to_supplier`).
 
@@ -221,7 +221,7 @@ Layered architecture: **Endpoints → Services → Models**, with Pydantic schem
 | Third Parties | `/api/v1/third-parties/` | Multi-role entities (supplier/customer/investor/provision) with balance tracking |
 | Purchases | `/api/v1/purchases/` | 3-step buy workflow (register→liquidate→pay), supplier debt, inventory movements, full edit (PATCH) |
 | Sales | `/api/v1/sales/` | 2-step sell workflow, commissions (percentage/fixed), profit calculation, full edit (PATCH) |
-| Double Entries | `/api/v1/double-entries/` | Simultaneous buy+sell ("Pasa Mano"), no inventory movement |
+| Double Entries | `/api/v1/double-entries/` | 2-step workflow (register→liquidate), edit registered, price adjustments at liquidation, commissions, no inventory movement |
 | Money Accounts | `/api/v1/money-accounts/` | Cash, bank, digital accounts (Nequi, etc.) |
 | Warehouses | `/api/v1/warehouses/` | Physical storage locations |
 | Business Units | `/api/v1/business-units/` | P&L analysis segments (Fibras, Chatarra, etc.) |

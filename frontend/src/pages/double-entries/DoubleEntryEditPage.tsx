@@ -1,22 +1,21 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { ArrowLeft, Plus, Trash2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
-import { useCreateDoubleEntry } from "@/hooks/useDoubleEntries";
+import { MoneyInput } from "@/components/shared/MoneyInput";
+import { useDoubleEntry, useEditDoubleEntry } from "@/hooks/useDoubleEntries";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, useCustomers, useMaterials } from "@/hooks/useMasterData";
-import { MoneyInput } from "@/components/shared/MoneyInput";
-import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
-import { ROUTES } from "@/utils/constants";
+import { formatCurrency, utcToLocalDateInput } from "@/utils/formatters";
 import type { DoubleEntryLineCreate } from "@/types/double-entry";
 import type { SaleCommissionCreate } from "@/types/sale";
 
@@ -33,29 +32,70 @@ function createEmptyCommission(): CommissionFormData {
   return { _key: ++commKeyCounter, third_party_id: "", concept: "", commission_type: "percentage", commission_value: 0 };
 }
 
-export default function DoubleEntryCreatePage() {
+export default function DoubleEntryEditPage() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const create = useCreateDoubleEntry();
+  const { data: de, isLoading } = useDoubleEntry(id!);
+  const edit = useEditDoubleEntry();
 
   const { data: suppliersData } = useSuppliers();
   const { data: customersData } = useCustomers();
   const { data: materialsData } = useMaterials();
-
   const suppliers = suppliersData?.items ?? [];
   const customers = customersData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const allThirdParties = [...suppliers, ...customers];
   const { getSuggestedPrice } = usePriceSuggestions();
 
-  const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
+  const [lines, setLines] = useState<LineFormData[]>([]);
   const [supplierId, setSupplierId] = useState("");
   const [customerId, setCustomerId] = useState("");
-  const [date, setDate] = useState(toLocalDateInput());
+  const [dateVal, setDateVal] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [notes, setNotes] = useState("");
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
-  const [autoLiquidate, setAutoLiquidate] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+
+  // Inicializar desde DP cargada
+  useEffect(() => {
+    if (de && !initialized) {
+      setSupplierId(de.supplier_id);
+      setCustomerId(de.customer_id);
+      setDateVal(utcToLocalDateInput(de.date));
+      setInvoiceNumber(de.invoice_number ?? "");
+      setVehiclePlate(de.vehicle_plate ?? "");
+      setNotes(de.notes ?? "");
+      setLines(
+        de.lines.map((line) => ({
+          _key: ++lineKeyCounter,
+          material_id: line.material_id,
+          quantity: line.quantity,
+          purchase_unit_price: line.purchase_unit_price,
+          sale_unit_price: line.sale_unit_price,
+        })),
+      );
+      if (de.commissions.length > 0) {
+        setCommissions(
+          de.commissions.map((c) => ({
+            _key: ++commKeyCounter,
+            third_party_id: c.third_party_id,
+            concept: c.concept,
+            commission_type: c.commission_type,
+            commission_value: c.commission_value,
+          })),
+        );
+      }
+      setInitialized(true);
+    }
+  }, [de, initialized]);
+
+  // Redirigir si no es editable
+  useEffect(() => {
+    if (de && de.status !== "registered") {
+      navigate(`/double-entries/${id}`, { replace: true });
+    }
+  }, [de, id, navigate]);
 
   const updateLine = (key: number, field: keyof DoubleEntryLineCreate, value: string | number) => {
     setLines((prev) => prev.map((l) => l._key === key ? { ...l, [field]: value } : l));
@@ -79,7 +119,6 @@ export default function DoubleEntryCreatePage() {
     setLines((prev) => prev.filter((l) => l._key !== key));
   };
 
-  // Materiales ya usados en otras lineas
   const usedMaterialIds = (excludeKey: number) =>
     lines.filter((l) => l._key !== excludeKey && l.material_id).map((l) => l.material_id);
 
@@ -97,31 +136,38 @@ export default function DoubleEntryCreatePage() {
     supplierId &&
     customerId &&
     supplierId !== customerId &&
-    date &&
+    dateVal &&
     commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0);
 
   const handleSubmit = () => {
-    if (!canSubmit) return;
-    create.mutate(
+    if (!canSubmit || !id) return;
+    edit.mutate(
       {
-        lines: lines.map(({ _key, ...rest }) => rest),
-        supplier_id: supplierId,
-        customer_id: customerId,
-        date,
-        invoice_number: invoiceNumber || null,
-        vehicle_plate: vehiclePlate || null,
-        notes: notes || null,
-        commissions: commissions.map(({ _key, ...rest }) => rest),
-        auto_liquidate: autoLiquidate,
+        id,
+        data: {
+          supplier_id: supplierId,
+          customer_id: customerId,
+          date: dateVal,
+          invoice_number: invoiceNumber || null,
+          vehicle_plate: vehiclePlate || null,
+          notes: notes || null,
+          lines: lines.map(({ _key, ...rest }) => rest),
+          commissions: commissions.map(({ _key, ...rest }) => rest),
+        },
       },
-      { onSuccess: (de) => navigate(`/double-entries/${de.id}`) },
+      { onSuccess: () => navigate(`/double-entries/${id}`) },
     );
   };
 
+  if (isLoading) return <div className="space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>;
+  if (!de) return <div className="text-center py-12 text-slate-500">Doble partida no encontrada</div>;
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Nueva Doble Partida" description="Operacion Pasa Mano (compra + venta simultanea)">
-        <Button variant="outline" onClick={() => navigate(ROUTES.DOUBLE_ENTRIES)}><ArrowLeft className="h-4 w-4 mr-2" />Volver</Button>
+      <PageHeader title={`Editar Doble Partida #${de.double_entry_number}`} description={de.materials_summary}>
+        <Button variant="outline" onClick={() => navigate(`/double-entries/${id}`)}>
+          <ArrowLeft className="h-4 w-4 mr-2" />Volver
+        </Button>
       </PageHeader>
 
       {/* Datos Generales */}
@@ -139,7 +185,7 @@ export default function DoubleEntryCreatePage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
-              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <Input type="date" value={dateVal} onChange={(e) => setDateVal(e.target.value)} />
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa</Label>
@@ -159,14 +205,13 @@ export default function DoubleEntryCreatePage() {
         </CardContent>
       </Card>
 
-      {/* Materiales (lineas) */}
+      {/* Materiales */}
       <Card className="shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Materiales</CardTitle>
           <Button variant="outline" size="sm" onClick={() => setLines((p) => [...p, createEmptyLine()])}><Plus className="h-4 w-4 mr-1" />Agregar Linea</Button>
         </CardHeader>
         <CardContent className="space-y-0">
-          {/* Header */}
           <div className="grid grid-cols-12 gap-2 pb-2 border-b border-slate-200 mb-2">
             <div className="col-span-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Material</div>
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg)</div>
@@ -222,7 +267,6 @@ export default function DoubleEntryCreatePage() {
             );
           })}
 
-          {/* Totales */}
           <div className="grid grid-cols-12 gap-2 pt-3 mt-2 border-t border-slate-300">
             <div className="col-span-5 text-right text-sm font-semibold text-slate-600">Totales:</div>
             <div className="col-span-2 text-sm font-bold">{formatCurrency(totalPurchase)}</div>
@@ -290,23 +334,12 @@ export default function DoubleEntryCreatePage() {
         </CardContent>
       </Card>
 
-      {/* Liquidacion inmediata */}
-      <Card className="shadow-sm">
-        <CardContent className="pt-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidar inmediatamente</Label>
-              <p className="text-xs text-slate-500 mt-1">Confirma precios y aplica efectos financieros (saldos, comisiones).</p>
-            </div>
-            <Switch checked={autoLiquidate} onCheckedChange={setAutoLiquidate} />
-          </div>
-        </CardContent>
-      </Card>
-
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.DOUBLE_ENTRIES)}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-emerald-600 hover:bg-emerald-700">{create.isPending ? "Creando..." : autoLiquidate ? "Crear y Liquidar" : "Crear Doble Partida"}</Button>
+          <Button variant="outline" onClick={() => navigate(`/double-entries/${id}`)}>Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit || edit.isPending} className="bg-emerald-600 hover:bg-emerald-700">
+            <Save className="h-4 w-4 mr-2" />{edit.isPending ? "Guardando..." : "Guardar Cambios"}
+          </Button>
         </div>
       </div>
     </div>
