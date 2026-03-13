@@ -63,6 +63,9 @@ import MoneyAccountsPage from "@/pages/config/MoneyAccountsPage";
 import BusinessUnitsPage from "@/pages/config/BusinessUnitsPage";
 import ExpenseCategoriesPage from "@/pages/config/ExpenseCategoriesPage";
 import PriceListsPage from "@/pages/config/PriceListsPage";
+import RolesPage from "@/pages/admin/RolesPage";
+import RoleEditPage from "@/pages/admin/RoleEditPage";
+import UsersPage from "@/pages/admin/UsersPage";
 import { ROUTES } from "@/utils/constants";
 
 const queryClient = new QueryClient({
@@ -158,6 +161,10 @@ function App() {
               <Route path={ROUTES.CONFIG_BUSINESS_UNITS} element={<P permission="materials.view"><BusinessUnitsPage /></P>} />
               <Route path={ROUTES.CONFIG_EXPENSE_CATEGORIES} element={<P permission="treasury.manage_expenses"><ExpenseCategoriesPage /></P>} />
               <Route path={ROUTES.CONFIG_PRICE_LISTS} element={<P permission="materials.view_prices"><PriceListsPage /></P>} />
+              {/* Admin */}
+              <Route path={ROUTES.ADMIN_ROLES} element={<P permission="admin.manage_roles"><RolesPage /></P>} />
+              <Route path="/admin/roles/:id" element={<P permission="admin.manage_roles"><RoleEditPage /></P>} />
+              <Route path={ROUTES.ADMIN_USERS} element={<P permission="admin.manage_users"><UsersPage /></P>} />
             </Route>
           </Route>
 

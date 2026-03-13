@@ -28,6 +28,9 @@ import {
   CalendarClock,
   Scale,
   Building2,
+  Shield,
+  ShieldCheck,
+  UserCog,
 } from "lucide-react";
 import { cn } from "@/utils";
 import { ROUTES } from "@/utils/constants";
@@ -141,6 +144,16 @@ const navItems: NavItem[] = [
       { name: "Unidades Negocio", path: ROUTES.CONFIG_BUSINESS_UNITS, icon: <Building className="w-4 h-4" />, permission: "materials.view" },
       { name: "Cat. Gastos", path: ROUTES.CONFIG_EXPENSE_CATEGORIES, icon: <Tag className="w-4 h-4" />, permission: "treasury.manage_expenses" },
       { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" />, permission: "materials.view_prices" },
+    ],
+  },
+  {
+    name: "Admin",
+    path: ROUTES.ADMIN_ROLES,
+    icon: <Shield className="w-5 h-5" />,
+    section: "ADMIN",
+    children: [
+      { name: "Roles", path: ROUTES.ADMIN_ROLES, icon: <ShieldCheck className="w-4 h-4" />, permission: "admin.manage_roles" },
+      { name: "Usuarios", path: ROUTES.ADMIN_USERS, icon: <UserCog className="w-4 h-4" />, permission: "admin.manage_users" },
     ],
   },
 ];

@@ -91,10 +91,11 @@ Layered: **Endpoints → Services → Models**, with Pydantic schemas for valida
 React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios (data), Tailwind + shadcn/ui (UI), lucide-react (icons), sonner (toasts).
 
 - `services/api.ts` — Axios client: JWT auto-attach, X-Organization-ID from authStore, 401 redirect.
-- `services/*.ts` — 14 service files. `hooks/use*.ts` — 11 React Query hooks with toast on mutations.
+- `services/*.ts` — 15 service files (includes `roles.ts` for RBAC CRUD). `hooks/use*.ts` — 12 React Query hooks with toast on mutations (includes `useRoles.ts`).
 - `types/*.ts` — 15 type files matching backend schemas.
 - `components/shared/` — DataTable, PageHeader, StatusBadge, MoneyDisplay, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList, PriceSuggestion, KpiCard.
-- `pages/` — 51 page components. Forms use useState pattern.
+- `components/auth/` — ProtectedRoute, OrganizationSelector, PermissionGate (wraps content by permission check).
+- `pages/` — 54 page components. Forms use useState pattern. Admin pages: RolesPage, RoleEditPage, UsersPage.
 - `utils/queryInvalidation.ts` — Centralized cache invalidation (see decision #26).
 
 **Query Key Convention:** `['module', 'list'|'detail', filters|id]` (ej: `['purchases', 'list', filters]`, `['inventory', 'stock', params]`)
@@ -116,7 +117,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 - **Price lists**: Append-only. Current price = most recent by `created_at`. Frontend auto-fills via `usePriceSuggestions()`.
 - **Per-warehouse stock**: On-the-fly `SUM(inventory_movements.quantity) GROUP BY warehouse_id`.
 - **BusinessDate**: All business dates normalized to noon UTC (12:00) via Pydantic `BeforeValidator` in `app/utils/dates.py`. Prevents timezone display issues.
-- **RBAC**: `require_permission()` on all ~163 business endpoints. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. Frontend RBAC pending.
+- **RBAC**: `require_permission()` on all ~163 business endpoints. 49 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. Frontend: `usePermissions()` hook (staleTime 5min), `PermissionGate` component + `P` shorthand in App.tsx, sidebar filtering by permission. Admin UI: RolesPage (list/create/delete), RoleEditPage (permissions by module with checkboxes), UsersPage (list members/change role). Cache: editing role perms invalidates `["permissions", orgId]` for immediate UI update.
 
 ### Business Modules
 
@@ -203,7 +204,7 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 
 24. **Serializacion de fechas date→datetime**: `DoubleEntryResponse.date` (python `date`) necesita `field_serializer` a datetime mediodia UTC. Sin esto, JS parsea "2026-03-12" como midnight UTC → dia anterior en Colombia.
 
-25. **RBAC (Roles y Permisos)**: 3 tablas: `permissions` (~45, 11 modulos), `roles` (por org, `is_system_role`), `role_permissions` (M:N). `OrganizationMember.role_id` reemplaza viejo `role` string. `require_permission()` aplicado a todos los endpoints. Solo backend — frontend RBAC es segunda fase.
+25. **RBAC (Roles y Permisos)**: 3 tablas: `permissions` (49, 11 modulos), `roles` (por org, `is_system_role`), `role_permissions` (M:N). `OrganizationMember.role_id` reemplaza viejo `role` string. `require_permission()` en ~163 endpoints. Frontend: `usePermissions()` hook carga permisos del usuario actual, `PermissionGate` component envuelve rutas y UI. Sidebar filtra items por permiso. Admin UI: 3 paginas (RolesPage, RoleEditPage, UsersPage) con `admin.manage_roles`/`admin.manage_users`. Al editar permisos de un rol, se invalida `["permissions", orgId]` para reflejar cambios inmediatos si afecta al usuario actual.
 
 26. **Cache invalidation centralizada**: `queryInvalidation.ts`. Regla: si una operacion crea side-effects cross-module, invalidar TODOS los query keys afectados:
     - `invalidateAfterPurchase` (crear/editar): purchases + inventory + materials

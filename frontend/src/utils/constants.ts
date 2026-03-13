@@ -64,4 +64,8 @@ export const ROUTES = {
   CONFIG_BUSINESS_UNITS: "/config/business-units",
   CONFIG_EXPENSE_CATEGORIES: "/config/expense-categories",
   CONFIG_PRICE_LISTS: "/config/price-lists",
+
+  // Admin
+  ADMIN_ROLES: "/admin/roles",
+  ADMIN_USERS: "/admin/users",
 } as const;
