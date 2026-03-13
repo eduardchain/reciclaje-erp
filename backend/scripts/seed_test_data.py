@@ -31,6 +31,9 @@ from app.models.business_unit import BusinessUnit
 from app.models.expense_category import ExpenseCategory
 from app.models.price_list import PriceList
 from app.models.money_movement import MoneyMovement
+from app.models.role import Role, RolePermission
+from app.models.permission import Permission
+from app.services.role import role_service
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +108,13 @@ def clear_data(db, org_slug: str) -> None:
     db.query(ExpenseCategory).filter(ExpenseCategory.organization_id == org_id).delete()
     db.query(BusinessUnit).filter(BusinessUnit.organization_id == org_id).delete()
     db.query(OrganizationMember).filter(OrganizationMember.organization_id == org_id).delete()
+    # Limpiar roles y permisos de la organizacion
+    db.query(RolePermission).filter(
+        RolePermission.role_id.in_(
+            db.query(Role.id).filter(Role.organization_id == org_id)
+        )
+    ).delete(synchronize_session=False)
+    db.query(Role).filter(Role.organization_id == org_id).delete()
     db.query(Organization).filter(Organization.id == org_id).delete()
     db.commit()
     print("Datos eliminados.")
@@ -129,19 +139,32 @@ def create_organization(db) -> Organization:
 
 
 def create_users(db, org: Organization) -> dict:
-    """Crea 5 usuarios con diferentes roles. Retorna dict email->user."""
+    """Crea 5 usuarios con diferentes roles RBAC. Retorna dict email->user."""
+    # Seed permisos globales y crear roles del sistema para la org
+    role_service.seed_permissions(db)
+    role_service.create_system_roles_for_org(db, org.id)
+    db.flush()
+
+    # Mapear roles RBAC disponibles
+    roles_map = {}
+    for role in db.query(Role).filter(Role.organization_id == org.id).all():
+        roles_map[role.name] = role
+
+    # (email, nombre, rol_rbac)
     usuarios = [
         ("admin@reciclajes.com",    "Nixon Admin",     "admin"),
-        ("nixon@reciclajes.com",    "Nixon Gerente",   "manager"),
-        ("john@reciclajes.com",     "John Operario",   "user"),
-        ("gustavo@reciclajes.com",  "Gustavo Contador","accountant"),
-        ("ingrid@reciclajes.com",   "Ingrid Comercial","user"),
+        ("nixon@reciclajes.com",    "Nixon Gerente",   "liquidador"),
+        ("john@reciclajes.com",     "John Operario",   "bascula"),
+        ("gustavo@reciclajes.com",  "Gustavo Contador","planillador"),
+        ("ingrid@reciclajes.com",   "Ingrid Comercial","viewer"),
     ]
     result = {}
-    for email, nombre, rol in usuarios:
+    for email, nombre, rol_name in usuarios:
         existing = db.query(User).filter(User.email == email).first()
         if existing:
             user = existing
+            user.hashed_password = get_password_hash("Pass1234!")
+            user.full_name = nombre
         else:
             user = User(
                 email=email,
@@ -152,14 +175,15 @@ def create_users(db, org: Organization) -> dict:
             db.add(user)
             db.flush()
 
+        role = roles_map[rol_name]
         member = OrganizationMember(
             organization_id=org.id,
             user_id=user.id,
-            role=rol,
+            role_id=role.id,
         )
         db.add(member)
         result[email] = user
-        print(f"  Usuario: {email} ({rol})")
+        print(f"  Usuario: {email} ({role.display_name})")
     return result
 
 
@@ -499,11 +523,11 @@ def main():
         print(f"\nOrganizacion: Reciclajes El Progreso")
         print(f"Slug:          reciclajes-el-progreso")
         print(f"\nUsuarios (password: Pass1234!):")
-        print(f"  admin@reciclajes.com    - admin")
-        print(f"  nixon@reciclajes.com    - manager")
-        print(f"  john@reciclajes.com     - operario")
-        print(f"  gustavo@reciclajes.com  - contador")
-        print(f"  ingrid@reciclajes.com   - comercial")
+        print(f"  admin@reciclajes.com    - Administrador (acceso total)")
+        print(f"  nixon@reciclajes.com    - Liquidador (compras/ventas/tesoreria)")
+        print(f"  john@reciclajes.com     - Bascula (registrar compras/ventas, sin precios)")
+        print(f"  gustavo@reciclajes.com  - Planillador (doble partida)")
+        print(f"  ingrid@reciclajes.com   - Solo Lectura (consulta)")
         print(f"\nDatos maestros:")
         print(f"  20 materiales con lista de precios")
         print(f"  15 terceros (proveedores, clientes, inversores)")
