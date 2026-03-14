@@ -12,6 +12,11 @@ export const authService = {
     return response.data;
   },
 
+  changePassword: async (data: { current_password: string; new_password: string }) => {
+    const response = await apiClient.post("/api/v1/auth/change-password", data);
+    return response.data;
+  },
+
   register: async (data: { email: string; password: string; full_name?: string; organization_name?: string }) => {
     const response = await apiClient.post("/api/v1/auth/register", data);
     return response.data;

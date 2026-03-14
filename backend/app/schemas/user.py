@@ -33,6 +33,12 @@ class UserResponse(UserBase):
         from_attributes = True
 
 
+class ChangePassword(BaseModel):
+    """Schema para cambiar contraseña propia."""
+    current_password: str
+    new_password: str = Field(..., min_length=6)
+
+
 class Token(BaseModel):
     """Schema for JWT token response."""
     access_token: str

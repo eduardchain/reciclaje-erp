@@ -142,7 +142,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 | Module | Endpoints | Key Features |
 |--------|-----------|-------------|
-| Auth | `/api/v1/auth/` | JWT login, registration |
+| Auth | `/api/v1/auth/` | JWT login, registration, change password |
 | Organizations | `/api/v1/organizations/` | CRUD + members with role_id FK |
 | Roles & Permissions | `/api/v1/roles/` | 65 permissions, 11 modules, 5 system roles, custom roles, admin UI |
 | Materials | `/api/v1/materials/` | CRUD + categories + business units, stock tracking |
@@ -159,7 +159,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 547 tests.
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 565 tests.
 
 ### Database
 

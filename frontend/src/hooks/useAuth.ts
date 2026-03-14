@@ -45,6 +45,16 @@ export function useLogin() {
   });
 }
 
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (data: { current_password: string; new_password: string }) =>
+      authService.changePassword(data),
+    onSuccess: () => {
+      toast.success("Contraseña actualizada exitosamente");
+    },
+  });
+}
+
 export function useLogout() {
   const navigate = useNavigate();
   const logout = useAuthStore((s) => s.logout);
