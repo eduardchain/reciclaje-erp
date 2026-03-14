@@ -241,6 +241,29 @@ def list_all_users(
     ]
 
 
+@router.get("/organizations/{org_id}/roles")
+def get_organization_roles(
+    org_id: UUID,
+    db: Session = Depends(get_db),
+    _su: User = Depends(get_current_superuser),
+):
+    """Listar roles de una organizacion especifica."""
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organizacion no encontrada")
+
+    roles = db.query(Role).filter(Role.organization_id == org_id).order_by(Role.name).all()
+    return [
+        {
+            "id": str(r.id),
+            "name": r.name,
+            "display_name": r.display_name,
+            "is_system_role": r.is_system_role,
+        }
+        for r in roles
+    ]
+
+
 @router.post("/users/{user_id}/add-to-org", status_code=201)
 def add_user_to_organization(
     user_id: UUID,

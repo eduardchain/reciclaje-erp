@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Building2, Plus, MoreHorizontal, Power, Pencil } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Building2, Plus, MoreHorizontal, Power, Pencil, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,7 @@ const planBadgeColors: Record<string, string> = {
 };
 
 export default function SystemOrganizationsPage() {
+  const navigate = useNavigate();
   const { data: orgs, isLoading } = useSystemOrganizations(true);
   const createOrg = useCreateOrganization();
   const updateOrg = useUpdateOrganization();
@@ -157,7 +159,16 @@ export default function SystemOrganizationsPage() {
                       {org.subscription_plan}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-center tabular-nums">{org.member_count}</TableCell>
+                  <TableCell className="text-center tabular-nums">
+                    <button
+                      onClick={() => navigate(`/system/users?org=${org.id}&org_name=${encodeURIComponent(org.name)}`)}
+                      className="inline-flex items-center gap-1 hover:text-emerald-600 hover:underline cursor-pointer"
+                      title="Ver usuarios de esta organizacion"
+                    >
+                      {org.member_count}
+                      <Users className="h-3 w-3" />
+                    </button>
+                  </TableCell>
                   <TableCell className="text-center tabular-nums">{org.max_users}</TableCell>
                   <TableCell className="text-center">
                     <Badge variant="secondary" className={org.is_active ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}>

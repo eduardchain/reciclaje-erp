@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { UserPlus, Shield } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { UserPlus, Shield, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -15,21 +16,26 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useSystemOrganizations, useSystemUsers, useAddUserToOrg } from "@/hooks/useSystem";
-import { useRoles } from "@/hooks/useRoles";
+import { useSystemOrganizations, useSystemUsers, useAddUserToOrg, useOrgRoles } from "@/hooks/useSystem";
 import { formatDate } from "@/utils/formatters";
 import type { SystemUserResponse } from "@/types/organization";
 
 export default function SystemUsersPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filterOrgId = searchParams.get("org") ?? "";
+  const filterOrgName = searchParams.get("org_name") ?? "";
+
   const { data: users, isLoading } = useSystemUsers();
   const { data: orgs } = useSystemOrganizations();
-  const { data: roles } = useRoles();
   const addUserToOrg = useAddUserToOrg();
 
   // Agregar a org
   const [addTarget, setAddTarget] = useState<SystemUserResponse | null>(null);
   const [selectedOrgId, setSelectedOrgId] = useState("");
   const [selectedRoleId, setSelectedRoleId] = useState("");
+
+  // Roles de la org seleccionada (se cargan cuando cambia selectedOrgId)
+  const { data: orgRoles } = useOrgRoles(selectedOrgId);
 
   const handleAddToOrg = () => {
     if (!addTarget || !selectedOrgId || !selectedRoleId) return;
@@ -54,6 +60,15 @@ export default function SystemUsersPage() {
     setSelectedRoleId("");
   };
 
+  const handleOrgChange = (orgId: string) => {
+    setSelectedOrgId(orgId);
+    setSelectedRoleId(""); // Reset rol al cambiar org
+  };
+
+  const clearFilter = () => {
+    setSearchParams({});
+  };
+
   // Orgs en las que NO esta el usuario (para no agregar duplicados)
   const availableOrgs = addTarget
     ? (orgs ?? []).filter(
@@ -61,9 +76,28 @@ export default function SystemUsersPage() {
       )
     : [];
 
+  // Filtrar usuarios por org si hay filtro activo
+  const filteredUsers = filterOrgId
+    ? users?.filter((u) => u.memberships.some((m) => m.organization_id === filterOrgId))
+    : users;
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Usuarios del Sistema" description="Todos los usuarios registrados y sus organizaciones" />
+      <PageHeader
+        title="Usuarios del Sistema"
+        description={filterOrgId ? `Usuarios de "${filterOrgName}"` : "Todos los usuarios registrados y sus organizaciones"}
+      />
+
+      {filterOrgId && (
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="text-xs px-3 py-1">
+            Org: {filterOrgName}
+            <button onClick={clearFilter} className="ml-2 hover:text-red-600">
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="space-y-2">
@@ -86,7 +120,7 @@ export default function SystemUsersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users?.map((user) => (
+              {filteredUsers?.map((user) => (
                 <TableRow key={user.id} className={!user.is_active ? "opacity-50" : ""}>
                   <TableCell className="font-medium">{user.full_name ?? "-"}</TableCell>
                   <TableCell className="text-slate-600">{user.email}</TableCell>
@@ -130,7 +164,7 @@ export default function SystemUsersPage() {
                   </TableCell>
                 </TableRow>
               ))}
-              {users?.length === 0 && (
+              {filteredUsers?.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center text-slate-400 py-8">
                     No hay usuarios
@@ -156,7 +190,7 @@ export default function SystemUsersPage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Organizacion</Label>
-              <Select value={selectedOrgId} onValueChange={setSelectedOrgId}>
+              <Select value={selectedOrgId} onValueChange={handleOrgChange}>
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Seleccionar organizacion..." />
                 </SelectTrigger>
@@ -176,12 +210,16 @@ export default function SystemUsersPage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Rol</Label>
-              <Select value={selectedRoleId} onValueChange={setSelectedRoleId}>
+              <Select
+                value={selectedRoleId}
+                onValueChange={setSelectedRoleId}
+                disabled={!selectedOrgId}
+              >
                 <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Seleccionar rol..." />
+                  <SelectValue placeholder={selectedOrgId ? "Seleccionar rol..." : "Primero seleccione una organizacion"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {roles?.map((role) => (
+                  {orgRoles?.map((role) => (
                     <SelectItem key={role.id} value={role.id}>
                       {role.display_name}
                       {role.is_system_role ? " (Sistema)" : ""}
@@ -189,7 +227,6 @@ export default function SystemUsersPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-[11px] text-slate-400 mt-1">Los roles son los de la organizacion actual. Cada org tiene sus propios roles.</p>
             </div>
           </div>
           <DialogFooter>

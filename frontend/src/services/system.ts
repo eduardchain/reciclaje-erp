@@ -31,6 +31,12 @@ export const systemService = {
     return response.data;
   },
 
+  // Roles de una org
+  getOrgRoles: async (orgId: string): Promise<{ id: string; name: string; display_name: string; is_system_role: boolean }[]> => {
+    const response = await apiClient.get(`/api/v1/system/organizations/${orgId}/roles`);
+    return response.data;
+  },
+
   // Usuarios
   getUsers: async (): Promise<SystemUserResponse[]> => {
     const response = await apiClient.get<SystemUserResponse[]>("/api/v1/system/users");

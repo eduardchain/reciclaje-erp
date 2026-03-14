@@ -19,6 +19,14 @@ export function useSystemUsers() {
   });
 }
 
+export function useOrgRoles(orgId: string) {
+  return useQuery({
+    queryKey: ["system", "org-roles", orgId],
+    queryFn: () => systemService.getOrgRoles(orgId),
+    enabled: !!orgId,
+  });
+}
+
 // --- Mutations ---
 
 export function useCreateOrganization() {
