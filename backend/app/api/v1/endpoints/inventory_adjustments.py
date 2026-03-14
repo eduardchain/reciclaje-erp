@@ -21,7 +21,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_permission, get_db
+from app.api.deps import require_permission, require_any_permission, get_db
 from app.schemas.inventory_adjustment import (
     IncreaseCreate,
     DecreaseCreate,
@@ -214,7 +214,7 @@ def list_adjustments(
     status: Optional[str] = Query(None, alias="status"),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
-    org_context: dict = Depends(require_permission("inventory.view")),
+    org_context: dict = Depends(require_any_permission("inventory.view", "inventory.view_adjustments")),
     db: Session = Depends(get_db),
 ):
     """Listar ajustes de inventario con filtros."""
@@ -244,7 +244,7 @@ def list_adjustments(
 )
 def get_adjustment_by_number(
     number: int,
-    org_context: dict = Depends(require_permission("inventory.view")),
+    org_context: dict = Depends(require_any_permission("inventory.view", "inventory.view_adjustments")),
     db: Session = Depends(get_db),
 ):
     """Obtener ajuste por numero secuencial."""
@@ -261,7 +261,7 @@ def get_adjustment_by_number(
 )
 def get_adjustment(
     adjustment_id: UUID,
-    org_context: dict = Depends(require_permission("inventory.view")),
+    org_context: dict = Depends(require_any_permission("inventory.view", "inventory.view_adjustments")),
     db: Session = Depends(get_db),
 ):
     """Obtener ajuste por ID."""

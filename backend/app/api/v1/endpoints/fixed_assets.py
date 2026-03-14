@@ -15,7 +15,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_permission
+from app.api.deps import get_db, require_permission, require_any_permission
 from app.schemas.fixed_asset import (
     FixedAssetCreate,
     FixedAssetUpdate,
@@ -106,7 +106,7 @@ def list_fixed_assets(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_permission("treasury.view")),
+    ctx: dict = Depends(require_any_permission("treasury.view", "treasury.view_fixed_assets")),
 ):
     """Listar activos fijos con filtro opcional por status."""
     items, total = fixed_asset.get_multi(
@@ -128,7 +128,7 @@ def list_fixed_assets(
 def get_fixed_asset(
     asset_id: UUID,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_permission("treasury.view")),
+    ctx: dict = Depends(require_any_permission("treasury.view", "treasury.view_fixed_assets")),
 ):
     """Detalle de activo fijo con depreciaciones."""
     asset = fixed_asset.get(db, asset_id, ctx["organization_id"])

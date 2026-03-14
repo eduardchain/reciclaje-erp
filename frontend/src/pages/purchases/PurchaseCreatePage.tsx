@@ -18,6 +18,7 @@ import { purchaseService } from "@/services/purchases";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { PurchaseLineCreate } from "@/types/purchase";
 
 interface LineFormData extends PurchaseLineCreate {
@@ -51,6 +52,8 @@ export default function PurchaseCreatePage() {
   const warehouses = warehousesData?.items ?? [];
   const accounts = accountsData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
+  const { hasPermission } = usePermissions();
+  const canLiquidate = hasPermission("purchases.liquidate");
 
   const [supplierId, setSupplierId] = useState("");
   const [date, setDate] = useState(toLocalDateInput());
@@ -292,6 +295,7 @@ export default function PurchaseCreatePage() {
       </Card>
 
       {/* Liquidacion */}
+      {canLiquidate && (
       <Card className="shadow-sm">
         <CardContent className="pt-6">
           <div className="flex items-center justify-between">
@@ -327,6 +331,7 @@ export default function PurchaseCreatePage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Acciones */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">

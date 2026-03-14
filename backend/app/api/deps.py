@@ -204,3 +204,28 @@ def require_permission(*perms: str):
         return org_context
 
     return checker
+
+
+def require_any_permission(*perms: str):
+    """
+    Factory que retorna un Depends que verifica que el usuario tenga AL MENOS UNO
+    de los permisos dados (logica OR). Admin bypassa todos los permisos.
+
+    Uso:
+        @router.get("")
+        async def list_items(..., ctx=Depends(require_any_permission("module.view", "module.view_sub"))):
+    """
+    async def checker(
+        org_context: dict = Depends(get_required_org_context),
+    ) -> dict:
+        if org_context["is_admin"]:
+            return org_context
+
+        if not org_context["user_permissions"].intersection(perms):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permisos insuficientes: necesita al menos uno de {', '.join(sorted(perms))}",
+            )
+        return org_context
+
+    return checker

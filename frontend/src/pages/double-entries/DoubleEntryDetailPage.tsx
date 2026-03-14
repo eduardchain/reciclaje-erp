@@ -14,6 +14,7 @@ import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/ut
 import { exportDoubleEntryPDF } from "@/utils/pdfExport";
 import { useAuthStore } from "@/stores/authStore";
 import { ROUTES } from "@/utils/constants";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const statusBorderMap: Record<string, string> = {
   registered: "border-t-[3px] border-t-amber-400",
@@ -26,6 +27,7 @@ export default function DoubleEntryDetailPage() {
   const navigate = useNavigate();
   const { data: de, isLoading } = useDoubleEntry(id!);
   const cancel = useCancelDoubleEntry();
+  const { hasPermission } = usePermissions();
   const [showCancel, setShowCancel] = useState(false);
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
@@ -37,22 +39,22 @@ export default function DoubleEntryDetailPage() {
     <div className="space-y-6">
       <PageHeader title={`Doble Partida #${de.double_entry_number}`} description={de.materials_summary}>
         <div className="flex items-center gap-2">
-          {de.status === "registered" && (
-            <>
+          {de.status === "registered" && hasPermission("double_entries.edit") && (
               <Button onClick={() => navigate(`/double-entries/${de.id}/edit`)} variant="outline">
                 <Pencil className="h-4 w-4 mr-2" />Editar
               </Button>
+          )}
+          {de.status === "registered" && hasPermission("double_entries.liquidate") && (
               <Button onClick={() => navigate(`/double-entries/${de.id}/liquidate`)} className="bg-emerald-600 hover:bg-emerald-700">
                 <CheckCircle className="h-4 w-4 mr-2" />Liquidar
               </Button>
-            </>
           )}
           {de.status === "liquidated" && (
             <Button variant="outline" onClick={() => exportDoubleEntryPDF(de, orgName)}>
               <FileText className="h-4 w-4 mr-2" />Exportar PDF
             </Button>
           )}
-          {(de.status === "registered" || de.status === "liquidated") && (
+          {(de.status === "registered" || de.status === "liquidated") && hasPermission("double_entries.cancel") && (
             <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50">
               <XCircle className="h-4 w-4 mr-2" />Cancelar
             </Button>

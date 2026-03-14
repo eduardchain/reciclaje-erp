@@ -7,7 +7,6 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { useMaterials } from "@/hooks/useMasterData";
-import { formatCurrency } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import MaterialFormDialog from "./MaterialFormDialog";
 import type { MaterialResponse } from "@/types/material";
@@ -17,10 +16,7 @@ const columns: ColumnDef<MaterialResponse, unknown>[] = [
   { accessorKey: "code", header: "Codigo", cell: ({ row }) => <span className="font-medium">{row.original.code}</span> },
   { accessorKey: "name", header: "Nombre" },
   { accessorKey: "default_unit", header: "Unidad" },
-  { accessorKey: "current_stock_liquidated", header: "Stock Liq.", enableSorting: true, cell: ({ row }) => <span className="tabular-nums">{(row.original.current_stock_liquidated ?? 0).toFixed(2)}</span> },
-  { accessorKey: "current_stock_transit", header: "Stock Trans.", cell: ({ row }) => <span className="tabular-nums">{(row.original.current_stock_transit ?? 0).toFixed(2)}</span> },
-  { accessorKey: "current_average_cost", header: "Costo Prom.", enableSorting: true, cell: ({ row }) => formatCurrency(row.original.current_average_cost ?? 0) },
-  { accessorKey: "total_value", header: "Valor", cell: ({ row }) => formatCurrency((row.original.current_stock_liquidated ?? 0) * (row.original.current_average_cost ?? 0)) },
+  { accessorKey: "description", header: "Descripcion", cell: ({ row }) => <span className="text-slate-500">{row.original.description ?? "-"}</span> },
 ];
 
 export default function MaterialsPage() {

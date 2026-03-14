@@ -47,7 +47,7 @@ interface NavChild {
   name: string;
   path: string;
   icon: React.ReactNode;
-  permission?: string;
+  permission?: string | string[];
 }
 
 interface NavItem {
@@ -91,12 +91,12 @@ const navItems: NavItem[] = [
     children: [
       { name: "Dashboard", path: ROUTES.TREASURY_DASHBOARD, icon: <LayoutDashboard className="w-4 h-4" />, permission: "treasury.view" },
       { name: "Movimientos", path: ROUTES.TREASURY, icon: <ArrowDownUp className="w-4 h-4" />, permission: "treasury.view" },
-      { name: "Terceros", path: ROUTES.TREASURY_ACCOUNT_STATEMENT, icon: <ListOrdered className="w-4 h-4" />, permission: "treasury.view" },
+      { name: "Terceros", path: ROUTES.TREASURY_ACCOUNT_STATEMENT, icon: <ListOrdered className="w-4 h-4" />, permission: ["treasury.view", "treasury.view_statements"] },
       { name: "Cuentas", path: ROUTES.TREASURY_ACCOUNT_MOVEMENTS, icon: <CreditCard className="w-4 h-4" />, permission: "treasury.view" },
-      { name: "Provisiones", path: ROUTES.TREASURY_PROVISIONS, icon: <Tag className="w-4 h-4" />, permission: "treasury.view" },
-      { name: "Pasivos", path: ROUTES.TREASURY_LIABILITIES, icon: <Scale className="w-4 h-4" />, permission: "treasury.view" },
-      { name: "Gastos Diferidos", path: ROUTES.TREASURY_SCHEDULED, icon: <CalendarClock className="w-4 h-4" />, permission: "treasury.view" },
-      { name: "Activos Fijos", path: ROUTES.TREASURY_FIXED_ASSETS, icon: <Building2 className="w-4 h-4" />, permission: "treasury.view" },
+      { name: "Provisiones", path: ROUTES.TREASURY_PROVISIONS, icon: <Tag className="w-4 h-4" />, permission: ["treasury.view", "treasury.view_provisions"] },
+      { name: "Pasivos", path: ROUTES.TREASURY_LIABILITIES, icon: <Scale className="w-4 h-4" />, permission: ["treasury.view", "treasury.view_liabilities"] },
+      { name: "Gastos Diferidos", path: ROUTES.TREASURY_SCHEDULED, icon: <CalendarClock className="w-4 h-4" />, permission: ["treasury.view", "treasury.view_scheduled"] },
+      { name: "Activos Fijos", path: ROUTES.TREASURY_FIXED_ASSETS, icon: <Building2 className="w-4 h-4" />, permission: ["treasury.view", "treasury.view_fixed_assets"] },
     ],
   },
   {
@@ -106,11 +106,11 @@ const navItems: NavItem[] = [
     section: "INVENTARIO",
     children: [
       { name: "Stock", path: ROUTES.INVENTORY, icon: <Boxes className="w-4 h-4" />, permission: "inventory.view" },
-      { name: "Movimientos", path: ROUTES.INVENTORY_MOVEMENTS, icon: <ArrowDownUp className="w-4 h-4" />, permission: "inventory.view" },
-      { name: "Ajustes", path: ROUTES.INVENTORY_ADJUSTMENTS, icon: <ClipboardList className="w-4 h-4" />, permission: "inventory.view" },
-      { name: "Transformaciones", path: ROUTES.INVENTORY_TRANSFORMATIONS, icon: <Shuffle className="w-4 h-4" />, permission: "transformations.view" },
+      { name: "Movimientos", path: ROUTES.INVENTORY_MOVEMENTS, icon: <ArrowDownUp className="w-4 h-4" />, permission: ["inventory.view", "inventory.view_movements"] },
+      { name: "Ajustes", path: ROUTES.INVENTORY_ADJUSTMENTS, icon: <ClipboardList className="w-4 h-4" />, permission: ["inventory.view", "inventory.view_adjustments"] },
+      { name: "Transformaciones", path: ROUTES.INVENTORY_TRANSFORMATIONS, icon: <Shuffle className="w-4 h-4" />, permission: ["inventory.view", "transformations.view"] },
       { name: "Valorizacion", path: ROUTES.INVENTORY_VALUATION, icon: <Calculator className="w-4 h-4" />, permission: "inventory.view_values" },
-      { name: "En Transito", path: ROUTES.INVENTORY_TRANSIT, icon: <Truck className="w-4 h-4" />, permission: "inventory.view" },
+      { name: "En Transito", path: ROUTES.INVENTORY_TRANSIT, icon: <Truck className="w-4 h-4" />, permission: ["inventory.view", "inventory.view_transit"] },
     ],
   },
   {
@@ -118,7 +118,15 @@ const navItems: NavItem[] = [
     path: ROUTES.REPORTS,
     icon: <BarChart3 className="w-5 h-5" />,
     section: "ANALISIS",
-    permission: "reports.view",
+    children: [
+      { name: "Estado de Resultados", path: ROUTES.REPORTS_PL, icon: <BarChart3 className="w-4 h-4" />, permission: ["reports.view", "reports.view_pnl"] },
+      { name: "Flujo de Caja", path: ROUTES.REPORTS_CASH_FLOW, icon: <ArrowDownUp className="w-4 h-4" />, permission: ["reports.view", "reports.view_cashflow"] },
+      { name: "Balance General", path: ROUTES.REPORTS_BALANCE_SHEET, icon: <Calculator className="w-4 h-4" />, permission: ["reports.view", "reports.view_balance"] },
+      { name: "Compras", path: ROUTES.REPORTS_PURCHASES, icon: <ShoppingCart className="w-4 h-4" />, permission: ["reports.view", "reports.view_purchases"] },
+      { name: "Ventas", path: ROUTES.REPORTS_SALES, icon: <DollarSign className="w-4 h-4" />, permission: ["reports.view", "reports.view_sales"] },
+      { name: "Margenes", path: ROUTES.REPORTS_MARGINS, icon: <BarChart3 className="w-4 h-4" />, permission: ["reports.view", "reports.view_margins"] },
+      { name: "Saldos Terceros", path: ROUTES.REPORTS_BALANCES, icon: <Users className="w-4 h-4" />, permission: ["reports.view", "reports.view_third_parties"] },
+    ],
   },
   {
     name: "Terceros",
@@ -162,24 +170,29 @@ export default function Sidebar() {
   const location = useLocation();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [collapsed, setCollapsed] = useState(false);
-  const { hasPermission, isLoading } = usePermissions();
+  const { hasPermission, hasAnyPermission, isLoading } = usePermissions();
 
   const filteredNavItems = useMemo(() => {
     if (isLoading) return [];
+    const checkPerm = (perm?: string | string[]) => {
+      if (!perm) return true;
+      if (Array.isArray(perm)) return hasAnyPermission(perm);
+      return hasPermission(perm);
+    };
     return navItems
       .map((item) => {
         if (item.children) {
           const filteredChildren = item.children.filter(
-            (child) => !child.permission || hasPermission(child.permission)
+            (child) => checkPerm(child.permission)
           );
           if (filteredChildren.length === 0) return null;
           return { ...item, children: filteredChildren };
         }
-        if (item.permission && !hasPermission(item.permission)) return null;
+        if (!checkPerm(item.permission)) return null;
         return item;
       })
       .filter(Boolean) as NavItem[];
-  }, [isLoading, hasPermission]);
+  }, [isLoading, hasPermission, hasAnyPermission]);
 
   const toggleExpand = (name: string) => {
     setExpanded((prev) => ({ ...prev, [name]: !prev[name] }));

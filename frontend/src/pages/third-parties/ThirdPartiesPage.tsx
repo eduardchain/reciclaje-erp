@@ -29,23 +29,28 @@ function RoleBadges({ tp }: { tp: ThirdPartyResponse }) {
   );
 }
 
-function getColumns(navigate: ReturnType<typeof useNavigate>): ColumnDef<ThirdPartyResponse, unknown>[] {
-  return [
+function getColumns(navigate: ReturnType<typeof useNavigate>, canViewBalance: boolean): ColumnDef<ThirdPartyResponse, unknown>[] {
+  const cols: ColumnDef<ThirdPartyResponse, unknown>[] = [
     { accessorKey: "name", header: "Nombre", enableSorting: true, cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
     { accessorKey: "identification_number", header: "Identificacion", cell: ({ row }) => row.original.identification_number ?? "-" },
     { accessorKey: "roles", header: "Roles", cell: ({ row }) => <RoleBadges tp={row.original} /> },
     { accessorKey: "phone", header: "Telefono", cell: ({ row }) => row.original.phone ?? "-" },
-    { accessorKey: "current_balance", header: "Saldo", enableSorting: true, cell: ({ row }) => <MoneyDisplay amount={row.original.current_balance} /> },
-    { id: "actions", header: "", cell: ({ row }) => (
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={(e) => { e.stopPropagation(); navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${row.original.id}`); }}
-      >
-        <FileText className="h-3 w-3 mr-1" />Estado de Cuenta
-      </Button>
-    )},
   ];
+  if (canViewBalance) {
+    cols.push(
+      { accessorKey: "current_balance", header: "Saldo", enableSorting: true, cell: ({ row }) => <MoneyDisplay amount={row.original.current_balance} /> },
+      { id: "actions", header: "", cell: ({ row }) => (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={(e) => { e.stopPropagation(); navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${row.original.id}`); }}
+        >
+          <FileText className="h-3 w-3 mr-1" />Estado de Cuenta
+        </Button>
+      )},
+    );
+  }
+  return cols;
 }
 
 export default function ThirdPartiesPage() {
@@ -56,7 +61,8 @@ export default function ThirdPartiesPage() {
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<ThirdPartyResponse | null>(null);
-  const columns = getColumns(navigate);
+  const canViewBalance = hasPermission("third_parties.view_balance");
+  const columns = getColumns(navigate, canViewBalance);
 
   const { data, isLoading } = useThirdParties({
     search: search || undefined,

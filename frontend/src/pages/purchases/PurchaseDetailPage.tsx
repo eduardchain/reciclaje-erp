@@ -47,8 +47,9 @@ export default function PurchaseDetailPage() {
     });
   };
 
-  const canEdit = purchase?.status === "registered" && !purchase?.double_entry_id;
-  const canCancel = (purchase?.status === "registered" || purchase?.status === "liquidated") && !purchase?.double_entry_id;
+  const canEdit = purchase?.status === "registered" && !purchase?.double_entry_id && hasPermission("purchases.edit");
+  const canLiquidate = purchase?.status === "registered" && !purchase?.double_entry_id && hasPermission("purchases.liquidate");
+  const canCancel = (purchase?.status === "registered" || purchase?.status === "liquidated") && !purchase?.double_entry_id && hasPermission("purchases.cancel");
 
   if (isLoading) {
     return (
@@ -71,16 +72,16 @@ export default function PurchaseDetailPage() {
       >
         <div className="flex items-center gap-2">
           {canEdit && (
-            <>
               <Button variant="outline" onClick={() => navigate(`/purchases/${id}/edit`)}>
                 <Pencil className="h-4 w-4 mr-2" />
                 Editar
               </Button>
+          )}
+          {canLiquidate && (
               <Button onClick={() => navigate(`/purchases/${id}/liquidate`)} className="bg-emerald-600 hover:bg-emerald-700">
                 <CreditCard className="h-4 w-4 mr-2" />
                 Liquidar
               </Button>
-            </>
           )}
           {canCancel && (
             <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50">

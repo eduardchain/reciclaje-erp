@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_permission, get_db
+from app.api.deps import require_permission, require_any_permission, get_db
 from app.schemas.money_movement import (
     SupplierPaymentCreate,
     CustomerCollectionCreate,
@@ -618,7 +618,7 @@ def get_by_third_party(
     limit: int = Query(100, ge=1, le=500),
     date_from: Optional[date] = Query(None, description="Fecha desde"),
     date_to: Optional[date] = Query(None, description="Fecha hasta"),
-    org_context: dict = Depends(require_permission("treasury.view")),
+    org_context: dict = Depends(require_any_permission("treasury.view", "treasury.view_statements")),
     db: Session = Depends(get_db),
 ):
     """

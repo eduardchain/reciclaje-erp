@@ -43,17 +43,19 @@ EcoBalance is a multi-tenant ERP system for recycling companies (buying/selling 
 
 ### Backend (run from `/backend/`)
 
+**IMPORTANTE: Usar `./venv/bin/` para todos los comandos Python.** No usar `pip`, `pytest`, `alembic` directamente — no estan en PATH.
+
 ```bash
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-alembic upgrade head
-alembic revision --autogenerate -m "description"
+./venv/bin/pip install -r requirements.txt
+./venv/bin/uvicorn app.main:app --reload --port 8000
+./venv/bin/alembic upgrade head
+./venv/bin/alembic revision --autogenerate -m "description"
 
 # Tests (requires test PostgreSQL on port 5433)
-pytest
-pytest tests/test_api_purchases.py -xvs                                          # single file
-pytest tests/test_api_purchases.py::TestPurchaseCreation::test_create_purchase -xvs  # single method
-pytest --cov=app --cov-report=html                                                # coverage
+./venv/bin/pytest
+./venv/bin/pytest tests/test_api_purchases.py -xvs                                          # single file
+./venv/bin/pytest tests/test_api_purchases.py::TestPurchaseCreation::test_create_purchase -xvs  # single method
+./venv/bin/pytest --cov=app --cov-report=html                                                # coverage
 ```
 
 ### Frontend (run from `/frontend/`)
@@ -79,7 +81,7 @@ docker-compose -f docker-compose.test.yml up -d   # Test database (port 5433)
 Layered: **Endpoints → Services → Models**, with Pydantic schemas for validation.
 
 - **`api/v1/endpoints/`** — Route handlers, one router per module.
-- **`api/deps.py`** — DI: `get_db()`, `get_current_user()`, `get_required_org_context()`, `get_optional_org_context()`, `require_permission("module.action")` factory (admin bypasses all).
+- **`api/deps.py`** — DI: `get_db()`, `get_current_user()`, `get_required_org_context()`, `get_optional_org_context()`, `require_permission("module.action")` (AND), `require_any_permission("perm1", "perm2")` (OR). Admin bypasses all.
 - **`services/`** — Business logic. All extend `CRUDBase` (pagination, soft delete, search, auto `organization_id` filtering).
 - **`models/`** — SQLAlchemy 2.0. All domain models inherit `TimestampMixin` + `OrganizationMixin`.
 - **`schemas/`** — Pydantic v2. Use `model_validate` with `from_attributes=True`.
@@ -91,7 +93,7 @@ Layered: **Endpoints → Services → Models**, with Pydantic schemas for valida
 React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios (data), Tailwind + shadcn/ui (UI), lucide-react (icons), sonner (toasts).
 
 - `services/api.ts` — Axios client: JWT auto-attach, X-Organization-ID from authStore, 401 redirect.
-- `services/*.ts` — 15 service files (includes `roles.ts` for RBAC CRUD). `hooks/use*.ts` — 12 React Query hooks with toast on mutations (includes `useRoles.ts`).
+- `services/*.ts` — 17 service files. `hooks/use*.ts` — 15 React Query hooks with toast on mutations.
 - `types/*.ts` — 15 type files matching backend schemas.
 - `components/shared/` — DataTable, PageHeader, StatusBadge, MoneyDisplay, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList, PriceSuggestion, KpiCard.
 - `components/auth/` — ProtectedRoute, OrganizationSelector, PermissionGate (wraps content by permission check).
@@ -117,7 +119,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 - **Price lists**: Append-only. Current price = most recent by `created_at`. Frontend auto-fills via `usePriceSuggestions()`.
 - **Per-warehouse stock**: On-the-fly `SUM(inventory_movements.quantity) GROUP BY warehouse_id`.
 - **BusinessDate**: All business dates normalized to noon UTC (12:00) via Pydantic `BeforeValidator` in `app/utils/dates.py`. Prevents timezone display issues.
-- **RBAC**: `require_permission()` on all ~163 business endpoints. 49 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. Frontend: `usePermissions()` hook (staleTime 5min), `PermissionGate` component + `P` shorthand in App.tsx, sidebar filtering by permission. Admin UI: RolesPage (list/create/delete), RoleEditPage (permissions by module with checkboxes), UsersPage (list members/change role). Cache: editing role perms invalidates `["permissions", orgId]` for immediate UI update.
+- **RBAC**: `require_permission()` (AND) and `require_any_permission()` (OR) on all ~163 business endpoints. 65 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. **Master+Granular logic**: master permission (e.g., `treasury.view`) gives access to ALL sub-tabs; granular permissions (e.g., `treasury.view_provisions`) give access to specific sub-tabs WITHOUT master. Frontend: `usePermissions()` hook, `PermissionGate` component, sidebar filtering. Admin UI: RolesPage, RoleEditPage, UsersPage.
 
 ### Business Modules
 
@@ -125,7 +127,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 |--------|-----------|-------------|
 | Auth | `/api/v1/auth/` | JWT login, registration |
 | Organizations | `/api/v1/organizations/` | CRUD + members with role_id FK |
-| Roles & Permissions | `/api/v1/roles/` | 45 permissions, 5 system roles, custom roles |
+| Roles & Permissions | `/api/v1/roles/` | 65 permissions, 11 modules, 5 system roles, custom roles, admin UI |
 | Materials | `/api/v1/materials/` | CRUD + categories + business units, stock tracking |
 | Third Parties | `/api/v1/third-parties/` | Multi-role (supplier/customer/investor/provision/liability), balance tracking |
 | Purchases | `/api/v1/purchases/` | 3-step workflow, full edit (revert-and-reapply), auto-liquidate, immediate payment |
@@ -204,9 +206,11 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 
 24. **Serializacion de fechas date→datetime**: `DoubleEntryResponse.date` (python `date`) necesita `field_serializer` a datetime mediodia UTC. Sin esto, JS parsea "2026-03-12" como midnight UTC → dia anterior en Colombia.
 
-25. **RBAC (Roles y Permisos)**: 3 tablas: `permissions` (49, 11 modulos), `roles` (por org, `is_system_role`), `role_permissions` (M:N). `OrganizationMember.role_id` reemplaza viejo `role` string. `require_permission()` en ~163 endpoints. Frontend: `usePermissions()` hook carga permisos del usuario actual, `PermissionGate` component envuelve rutas y UI. Sidebar filtra items por permiso. Admin UI: 3 paginas (RolesPage, RoleEditPage, UsersPage) con `admin.manage_roles`/`admin.manage_users`. Al editar permisos de un rol, se invalida `["permissions", orgId]` para reflejar cambios inmediatos si afecta al usuario actual.
+25. **RBAC backend**: 3 tablas: `permissions` (65, 11 modulos), `roles` (por org, `is_system_role`), `role_permissions` (M:N). `require_permission()` (AND) y `require_any_permission()` (OR) en ~163 endpoints. Admin bypassa todo.
 
-26. **Cache invalidation centralizada**: `queryInvalidation.ts`. Regla: si una operacion crea side-effects cross-module, invalidar TODOS los query keys afectados:
+26. **RBAC frontend + Admin UI**: `usePermissions()` hook (staleTime 5min), `PermissionGate` component, sidebar filtering, route protection. Master+Granular: master da acceso a todos los sub-tabs, granular da acceso sin master (OR logic). Admin UI: RolesPage, RoleEditPage (65 permisos por modulo), UsersPage. Al editar permisos se invalida `["permissions", orgId]`.
+
+27. **Cache invalidation centralizada**: `queryInvalidation.ts`. Regla: si una operacion crea side-effects cross-module, invalidar TODOS los query keys afectados:
     - `invalidateAfterPurchase` (crear/editar): purchases + inventory + materials
     - `invalidateAfterPurchaseLiquidateOrCancel`: + money-movements + treasury-dashboard + third-parties + reports + money-accounts
     - `invalidateAfterSale` (crear/editar): sales + inventory + materials
@@ -214,8 +218,9 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
     - `invalidateAfterDoubleEntry`: double-entries + purchases + sales + third-parties + reports + money-accounts
     - `invalidateAfterTreasury`: money-movements + money-accounts + third-parties + reports + treasury-dashboard + scheduled-expenses
     - `invalidateAfterInventoryChange`: inventory + materials
+    - Role CRUD: roles + permissions (si afecta rol del usuario actual)
 
-27. **Scripts utilitarios**: `scripts/seed_test_data.py --clear` (datos de prueba + capital $100M COP). `scripts/load_initial_data.py` (carga maestros desde Excel, 8 hojas, resolucion FKs por nombre, `--dry-run`).
+28. **Scripts utilitarios**: `scripts/seed_test_data.py --clear` (datos de prueba + capital $100M COP). `scripts/load_initial_data.py` (carga maestros desde Excel, 8 hojas, resolucion FKs por nombre, `--dry-run`).
 
 ### Inventory Module — UX Details
 

@@ -21,6 +21,7 @@ import { useCustomers, useSuppliers, useMaterials, useWarehouses, useMoneyAccoun
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatWeight, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { SaleLineCreate, SaleCommissionCreate } from "@/types/sale";
 
 interface LineFormData extends SaleLineCreate {
@@ -84,6 +85,8 @@ export default function SaleCreatePage() {
   const warehouses = warehousesData?.items ?? [];
   const accounts = accountsData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
+  const { hasPermission } = usePermissions();
+  const canLiquidate = hasPermission("sales.liquidate");
 
   const [customerId, setCustomerId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
@@ -393,6 +396,7 @@ export default function SaleCreatePage() {
       </Card>
 
       {/* Liquidacion */}
+      {canLiquidate && (
       <Card className="shadow-sm">
         <CardContent className="pt-6">
           <div className="flex items-center justify-between">
@@ -428,6 +432,7 @@ export default function SaleCreatePage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Acciones */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">

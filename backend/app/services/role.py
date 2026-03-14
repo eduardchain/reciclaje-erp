@@ -45,6 +45,9 @@ PERMISSIONS_CATALOG = [
     ("inventory.view_values", "Ver Valores de Inventario", "inventory", "Permite ver valorizacion del inventario", 31),
     ("inventory.adjust", "Ajustar Inventario", "inventory", "Permite hacer ajustes de inventario", 32),
     ("inventory.transfer", "Trasladar entre Bodegas", "inventory", "Permite trasladar material entre bodegas", 33),
+    ("inventory.view_movements", "Ver Movimientos", "inventory", "Permite ver movimientos de inventario", 34),
+    ("inventory.view_adjustments", "Ver Ajustes", "inventory", "Permite ver ajustes de inventario", 35),
+    ("inventory.view_transit", "Ver En Transito", "inventory", "Permite ver inventario en transito", 36),
 
     # Materiales
     ("materials.view", "Ver Materiales", "materials", "Permite ver catalogo de materiales", 40),
@@ -77,16 +80,29 @@ PERMISSIONS_CATALOG = [
     ("treasury.manage_accounts", "Gestionar Cuentas", "treasury", "Permite crear/editar cuentas de dinero", 83),
     ("treasury.manage_expenses", "Gestionar Gastos", "treasury", "Permite gestionar categorias y gastos", 84),
     ("treasury.manage_fixed_assets", "Gestionar Activos Fijos", "treasury", "Permite gestionar activos fijos", 85),
+    ("treasury.view_provisions", "Ver Provisiones", "treasury", "Permite ver provisiones", 86),
+    ("treasury.view_liabilities", "Ver Pasivos", "treasury", "Permite ver pasivos laborales", 87),
+    ("treasury.view_scheduled", "Ver Gastos Diferidos", "treasury", "Permite ver gastos diferidos", 88),
+    ("treasury.view_fixed_assets", "Ver Activos Fijos", "treasury", "Permite ver activos fijos", 89),
+    ("treasury.view_statements", "Ver Estados de Cuenta", "treasury", "Permite ver estados de cuenta de terceros", 90),
 
     # Reportes
-    ("reports.view", "Ver Reportes", "reports", "Permite ver reportes financieros", 90),
-    ("reports.export", "Exportar Reportes", "reports", "Permite exportar reportes a Excel", 91),
+    ("reports.view", "Ver Reportes", "reports", "Permite ver reportes financieros", 100),
+    ("reports.export", "Exportar Reportes", "reports", "Permite exportar reportes a Excel", 101),
+    ("reports.view_dashboard", "Ver Dashboard", "reports", "Permite ver dashboard de reportes", 102),
+    ("reports.view_pnl", "Ver Estado de Resultados", "reports", "Permite ver estado de resultados", 103),
+    ("reports.view_cashflow", "Ver Flujo de Caja", "reports", "Permite ver flujo de caja", 104),
+    ("reports.view_balance", "Ver Balance General", "reports", "Permite ver balance general", 105),
+    ("reports.view_purchases", "Ver Reporte Compras", "reports", "Permite ver reporte de compras", 106),
+    ("reports.view_sales", "Ver Reporte Ventas", "reports", "Permite ver reporte de ventas", 107),
+    ("reports.view_margins", "Ver Margenes", "reports", "Permite ver analisis de margenes", 108),
+    ("reports.view_third_parties", "Ver Saldos Terceros", "reports", "Permite ver saldos de terceros", 109),
 
     # Administracion
-    ("admin.manage_users", "Gestionar Usuarios", "admin", "Permite invitar y gestionar usuarios", 100),
-    ("admin.manage_roles", "Gestionar Roles", "admin", "Permite crear y editar roles", 101),
-    ("admin.view_audit", "Ver Auditoria", "admin", "Permite ver logs de auditoria", 102),
-    ("admin.system_config", "Configuracion del Sistema", "admin", "Permite configurar parametros del sistema", 103),
+    ("admin.manage_users", "Gestionar Usuarios", "admin", "Permite invitar y gestionar usuarios", 200),
+    ("admin.manage_roles", "Gestionar Roles", "admin", "Permite crear y editar roles", 201),
+    ("admin.view_audit", "Ver Auditoria", "admin", "Permite ver logs de auditoria", 202),
+    ("admin.system_config", "Configuracion del Sistema", "admin", "Permite configurar parametros del sistema", 203),
 ]
 
 
@@ -142,11 +158,17 @@ SYSTEM_ROLES = {
             "sales.view", "sales.view_prices",
             "double_entries.view",
             "inventory.view", "inventory.view_values",
+            "inventory.view_movements", "inventory.view_adjustments", "inventory.view_transit",
             "materials.view", "materials.view_prices",
             "third_parties.view", "third_parties.view_balance",
             "warehouses.view",
             "treasury.view",
+            "treasury.view_provisions", "treasury.view_liabilities",
+            "treasury.view_scheduled", "treasury.view_fixed_assets", "treasury.view_statements",
             "reports.view", "reports.export",
+            "reports.view_dashboard", "reports.view_pnl", "reports.view_cashflow",
+            "reports.view_balance", "reports.view_purchases", "reports.view_sales",
+            "reports.view_margins", "reports.view_third_parties",
             "transformations.view",
         ],
     },
@@ -177,13 +199,13 @@ class RoleService:
     """Service para gestion de roles y permisos."""
 
     def seed_permissions(self, db: Session) -> int:
-        """Poblar tabla de permisos si esta vacia. Retorna cantidad creada."""
-        existing = db.query(Permission).count()
-        if existing > 0:
-            return 0
+        """Poblar tabla de permisos. Crea solo los que no existen (upsert por code). Retorna cantidad creada."""
+        existing_codes = {p.code for p in db.query(Permission.code).all()}
 
         created = 0
         for code, display_name, module, description, sort_order in PERMISSIONS_CATALOG:
+            if code in existing_codes:
+                continue
             perm = Permission(
                 code=code,
                 display_name=display_name,

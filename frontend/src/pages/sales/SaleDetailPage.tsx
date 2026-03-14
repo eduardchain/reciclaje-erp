@@ -59,17 +59,17 @@ export default function SaleDetailPage() {
     <div className="space-y-6">
       <PageHeader title={`Venta #${sale.sale_number}`} description={`Cliente: ${sale.customer_name}`}>
         <div className="flex items-center gap-2">
-          {sale.status === "registered" && !sale.double_entry_id && (
-            <>
+          {sale.status === "registered" && !sale.double_entry_id && hasPermission("sales.edit") && (
               <Button variant="outline" onClick={() => navigate(`/sales/${id}/edit`)}>
                 <Pencil className="h-4 w-4 mr-2" />Editar
               </Button>
+          )}
+          {sale.status === "registered" && !sale.double_entry_id && hasPermission("sales.liquidate") && (
               <Button onClick={() => navigate(`/sales/${id}/liquidate`)} className="bg-emerald-600 hover:bg-emerald-700">
                 <CreditCard className="h-4 w-4 mr-2" />Liquidar
               </Button>
-            </>
           )}
-          {(sale.status === "registered" || sale.status === "liquidated") && !sale.double_entry_id && (
+          {(sale.status === "registered" || sale.status === "liquidated") && !sale.double_entry_id && hasPermission("sales.cancel") && (
             <Button variant="outline" onClick={() => setShowCancel(true)} className="text-red-600 border-red-200 hover:bg-red-50">
               <XCircle className="h-4 w-4 mr-2" />Cancelar
             </Button>

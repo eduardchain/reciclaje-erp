@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, field_serializer
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_permission, get_db
+from app.api.deps import require_permission, require_any_permission, get_db
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
 from app.models.warehouse import Warehouse
@@ -355,7 +355,7 @@ def get_material_stock_detail(
     response_model=TransitResponse,
 )
 def get_transit_stock(
-    org_context: dict = Depends(require_permission("inventory.view")),
+    org_context: dict = Depends(require_any_permission("inventory.view", "inventory.view_transit")),
     db: Session = Depends(get_db),
 ):
     """
@@ -497,7 +497,7 @@ def list_movements(
     movement_type: Optional[str] = Query(None),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
-    org_context: dict = Depends(require_permission("inventory.view")),
+    org_context: dict = Depends(require_any_permission("inventory.view", "inventory.view_movements")),
     db: Session = Depends(get_db),
 ):
     """
