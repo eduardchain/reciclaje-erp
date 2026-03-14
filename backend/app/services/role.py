@@ -130,10 +130,13 @@ SYSTEM_ROLES = {
         "permissions": [
             "purchases.view", "purchases.liquidate", "purchases.cancel", "purchases.view_prices",
             "sales.view", "sales.liquidate", "sales.cancel", "sales.view_prices",
-            "inventory.view",
+            "inventory.view", "inventory.view_movements",
             "materials.view", "materials.view_prices", "materials.edit_prices",
             "treasury.view_own", "treasury.create_movements",
             "reports.view",
+            "reports.view_pnl", "reports.view_cashflow", "reports.view_balance",
+            "reports.view_purchases", "reports.view_sales", "reports.view_margins",
+            "reports.view_third_parties",
         ],
     },
     "planillador": {

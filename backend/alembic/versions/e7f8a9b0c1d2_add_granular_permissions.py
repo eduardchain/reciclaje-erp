@@ -77,7 +77,7 @@ def upgrade() -> None:
     ).fetchall()
     perm_map = {row[1]: row[0] for row in perms}
 
-    # 3. Asignar a todos los roles viewer del sistema
+    # 3. Asignar a todos los roles viewer del sistema (todos los granulares)
     viewer_roles = conn.execute(
         sa.text(
             "SELECT id FROM roles WHERE name = 'viewer' AND is_system_role = true"
@@ -87,6 +87,31 @@ def upgrade() -> None:
     for role_row in viewer_roles:
         role_id = role_row[0]
         for code in new_codes:
+            if code in perm_map:
+                conn.execute(
+                    sa.text(
+                        "INSERT INTO role_permissions (role_id, permission_id) "
+                        "VALUES (:role_id, :perm_id) ON CONFLICT DO NOTHING"
+                    ),
+                    {"role_id": role_id, "perm_id": perm_map[code]},
+                )
+
+    # 4. Asignar a liquidador: inventory.view_movements + todos los reports granulares
+    liquidador_codes = [
+        "inventory.view_movements",
+        "reports.view_pnl", "reports.view_cashflow", "reports.view_balance",
+        "reports.view_purchases", "reports.view_sales", "reports.view_margins",
+        "reports.view_third_parties",
+    ]
+    liquidador_roles = conn.execute(
+        sa.text(
+            "SELECT id FROM roles WHERE name = 'liquidador' AND is_system_role = true"
+        )
+    ).fetchall()
+
+    for role_row in liquidador_roles:
+        role_id = role_row[0]
+        for code in liquidador_codes:
             if code in perm_map:
                 conn.execute(
                     sa.text(
