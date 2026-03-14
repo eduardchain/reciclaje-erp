@@ -47,16 +47,13 @@ def list_user_organizations(
     """Get all organizations where current user is a member.
     Superuser ve todas las orgs activas."""
     if current_user.is_superuser:
-        # Superuser ve todas las orgs activas
+        # Superuser ve todas las orgs activas, siempre como "superadmin"
         from app.models.organization import Organization
         all_orgs = db.query(Organization).filter(Organization.is_active == True).order_by(Organization.name).all()
-        # Obtener memberships del superuser para mostrar rol real donde es miembro
-        org_list = get_user_organizations(db, current_user.id)
-        member_roles = {org.id: role_name for org, role_name in org_list}
         response = []
         for org in all_orgs:
             org_dict = OrganizationResponse.model_validate(org).model_dump()
-            org_dict["member_role"] = member_roles.get(org.id, "superadmin")
+            org_dict["member_role"] = "superadmin"
             response.append(OrganizationResponse(**org_dict))
         return response
 

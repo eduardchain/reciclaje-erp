@@ -115,13 +115,14 @@ async def get_required_org_context(
             detail="Formato de ID de organizacion invalido. Debe ser un UUID valido.",
         )
 
+    # Superuser siempre tiene acceso total a cualquier org
+    if current_user.is_superuser:
+        return _build_superuser_context(db, org_uuid, current_user)
+
     # Get user's role info
     role_info = get_user_role_in_org(db, org_uuid, current_user.id)
 
     if not role_info:
-        # Superuser bypass: acceso a cualquier org sin membership
-        if current_user.is_superuser:
-            return _build_superuser_context(db, org_uuid, current_user)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No eres miembro de esta organizacion",
@@ -185,12 +186,14 @@ async def get_optional_org_context(
             detail="Formato de ID de organizacion invalido. Debe ser un UUID valido.",
         )
 
+    # Superuser siempre tiene acceso total
+    if current_user.is_superuser:
+        return _build_superuser_context(db, org_uuid, current_user)
+
     # Get user's role info
     role_info = get_user_role_in_org(db, org_uuid, current_user.id)
 
     if not role_info:
-        if current_user.is_superuser:
-            return _build_superuser_context(db, org_uuid, current_user)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No eres miembro de esta organizacion",
