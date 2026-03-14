@@ -4,13 +4,27 @@ import { useAuthStore } from "@/stores/authStore";
 
 export function usePermissions() {
   const organizationId = useAuthStore((s) => s.organizationId);
+  const isSystemMode = organizationId === "system";
 
   const { data, isLoading } = useQuery({
     queryKey: ["permissions", organizationId],
     queryFn: rolesService.getMyPermissions,
-    enabled: !!organizationId,
+    enabled: !!organizationId && !isSystemMode,
     staleTime: 5 * 60 * 1000,
   });
+
+  // En modo sistema, superuser tiene todos los permisos
+  if (isSystemMode) {
+    return {
+      permissions: [],
+      isAdmin: true,
+      roleName: "Super Admin",
+      assignedAccountIds: [],
+      isLoading: false,
+      hasPermission: () => true,
+      hasAnyPermission: () => true,
+    };
+  }
 
   const hasPermission = (permission: string): boolean => {
     if (!data) return false;

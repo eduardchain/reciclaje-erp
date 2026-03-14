@@ -159,27 +159,29 @@ def create_users(db, org: Organization) -> dict:
     for role in db.query(Role).filter(Role.organization_id == org.id).all():
         roles_map[role.name] = role
 
-    # (email, nombre, rol_rbac)
+    # (email, nombre, rol_rbac, password, is_superuser)
     usuarios = [
-        ("gustavo@reciclajesdelacosta.com", "Gustavo",       "admin"),
-        ("admin@reciclajesdelacosta.com",   "Administrador", "admin"),
-        ("nixon@reciclajesdelacosta.com",   "Nixon",         "liquidador"),
-        ("john@reciclajesdelacosta.com",    "John",          "bascula"),
-        ("ingrid@reciclajesdelacosta.com",  "Ingrid",        "planillador"),
+        ("gustavo@reciclajesdelacosta.com", "Gustavo",       "admin",       "Pass1234!", False),
+        ("admin@ecobalance.com",   "Administrador", "admin",       "Cantillo8812", True),
+        ("nixon@reciclajesdelacosta.com",   "Nixon",         "liquidador",  "Pass1234!", False),
+        ("john@reciclajesdelacosta.com",    "John",          "bascula",     "Pass1234!", False),
+        ("ingrid@reciclajesdelacosta.com",  "Ingrid",        "planillador", "Pass1234!", False),
     ]
     result = {}
-    for email, nombre, rol_name in usuarios:
+    for email, nombre, rol_name, password, is_su in usuarios:
         existing = db.query(User).filter(User.email == email).first()
         if existing:
             user = existing
-            user.hashed_password = get_password_hash("Pass1234!")
+            user.hashed_password = get_password_hash(password)
             user.full_name = nombre
+            user.is_superuser = is_su
         else:
             user = User(
                 email=email,
-                hashed_password=get_password_hash("Pass1234!"),
+                hashed_password=get_password_hash(password),
                 full_name=nombre,
                 is_active=True,
+                is_superuser=is_su,
             )
             db.add(user)
             db.flush()
@@ -192,7 +194,8 @@ def create_users(db, org: Organization) -> dict:
         )
         db.add(member)
         result[email] = user
-        print(f"  Usuario: {email} ({role.display_name})")
+        su_tag = " [SUPERUSER]" if is_su else ""
+        print(f"  Usuario: {email} ({role.display_name}){su_tag}")
     return result
 
 
@@ -550,12 +553,12 @@ def main():
         print("="*60)
         print(f"\nOrganizacion: Reciclajes de la Costa")
         print(f"Slug:          reciclajes-de-la-costa")
-        print(f"\nUsuarios (password: Pass1234!):")
-        print(f"  gustavo@reciclajesdelacosta.com - Admin (acceso total)")
-        print(f"  admin@reciclajesdelacosta.com   - Admin (acceso total)")
-        print(f"  nixon@reciclajesdelacosta.com   - Liquidador (compras/ventas/tesoreria)")
-        print(f"  john@reciclajesdelacosta.com    - Bascula (registrar compras/ventas, sin precios)")
-        print(f"  ingrid@reciclajesdelacosta.com  - Planillador (doble partida)")
+        print(f"\nUsuarios:")
+        print(f"  admin@ecobalance.com   - Super Admin (pass: Cantillo8812)")
+        print(f"  gustavo@reciclajesdelacosta.com - Admin (pass: Pass1234!)")
+        print(f"  nixon@reciclajesdelacosta.com   - Liquidador (pass: Pass1234!)")
+        print(f"  john@reciclajesdelacosta.com    - Bascula (pass: Pass1234!)")
+        print(f"  ingrid@reciclajesdelacosta.com  - Planillador (pass: Pass1234!)")
         print(f"\nDatos maestros:")
         print(f"  20 materiales con lista de precios")
         print(f"  15 terceros (proveedores, clientes, inversores)")

@@ -68,4 +68,8 @@ export const ROUTES = {
   // Admin
   ADMIN_ROLES: "/admin/roles",
   ADMIN_USERS: "/admin/users",
+
+  // Sistema (super admin)
+  SYSTEM_ORGANIZATIONS: "/system/organizations",
+  SYSTEM_USERS: "/system/users",
 } as const;

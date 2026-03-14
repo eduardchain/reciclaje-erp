@@ -38,6 +38,7 @@ class OrganizationResponse(OrganizationBase):
     subscription_plan: str
     subscription_status: str
     max_users: int
+    is_active: bool = True
     created_at: datetime
     member_role: str | None = None  # User's role display name in this organization
 

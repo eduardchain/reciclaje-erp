@@ -136,7 +136,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 - **Price lists**: Append-only. Current price = most recent by `created_at`. Frontend auto-fills via `usePriceSuggestions()`.
 - **Per-warehouse stock**: On-the-fly `SUM(inventory_movements.quantity) GROUP BY warehouse_id`.
 - **BusinessDate**: All business dates normalized to noon UTC (12:00) via Pydantic `BeforeValidator` in `app/utils/dates.py`. Prevents timezone display issues.
-- **RBAC**: `require_permission()` (AND) and `require_any_permission()` (OR) on all ~163 business endpoints. 65 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. **Master+Granular logic**: master permission (e.g., `treasury.view`) gives access to ALL sub-tabs; granular permissions (e.g., `treasury.view_provisions`) give access to specific sub-tabs WITHOUT master. Frontend: `usePermissions()` hook, `PermissionGate` component, sidebar filtering. Admin UI: RolesPage, RoleEditPage, UsersPage.
+- **RBAC**: `require_permission()` (AND) and `require_any_permission()` (OR) on all ~163 business endpoints. 65 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. **Master+Granular logic**: master permission (e.g., `treasury.view`) gives access to ALL sub-tabs; granular permissions (e.g., `treasury.view_provisions`) give access to specific sub-tabs WITHOUT master. Frontend: `usePermissions()` hook, `PermissionGate` component, sidebar filtering. Admin UI: RolesPage, RoleEditPage, UsersPage. **Superuser**: bypasses membership check in deps.py, gets synthesized admin context with all permissions. `/system/` endpoints use separate `get_current_superuser` guard.
 
 ### Business Modules
 
@@ -156,10 +156,11 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 | Scheduled Expenses | `/api/v1/deferred-expenses/` | Deferred expenses with monthly installments |
 | Reports | `/api/v1/reports/` | Dashboard, P&L, Cash Flow, Balance Sheet, Purchase/Sales/Margin reports, Treasury Dashboard |
 | Config | Various | Warehouses, Money Accounts, Business Units, Expense Categories (direct/indirect), Price Lists |
+| System (Super Admin) | `/api/v1/system/` | CRUD orgs, list users, add user to org. `get_current_superuser` guard. Org selector + system mode |
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 565 tests.
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 567 tests.
 
 ### Database
 
@@ -238,6 +239,8 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
     - Role CRUD: roles + permissions (si afecta rol del usuario actual)
 
 28. **Scripts utilitarios**: `scripts/seed_test_data.py --clear` (datos de prueba + capital $100M COP). `scripts/load_initial_data.py` (carga maestros desde Excel, 8 hojas, resolucion FKs por nombre, `--dry-run`).
+
+29. **Super Admin + Multi-Org**: `is_superuser=True` bypasses membership en `get_required_org_context()` / `get_optional_org_context()` (sintetiza admin context con todos los permisos). `/system/` endpoints (6) protegidos con `get_current_superuser`. Frontend: `organizationId="system"` sentinel — API interceptor no envia `X-Organization-ID`, `usePermissions` retorna admin full, sidebar muestra solo seccion SISTEMA, ProtectedRoute permite pasar sin org. Header dropdown: multi-org selector + opcion "Sistema" para superusers. `queryClient.clear()` al cambiar org. Soft delete de org: `is_active=False` + desactivar usuarios huerfanos.
 
 ### Inventory Module — UX Details
 

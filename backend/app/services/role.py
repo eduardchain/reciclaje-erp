@@ -430,6 +430,10 @@ class RoleService:
         db.commit()
         return True
 
+    def get_all_permission_codes(self, db: Session) -> set[str]:
+        """Retorna todos los codigos de permisos del catalogo."""
+        return {p.code for p in db.query(Permission.code).all()}
+
     def get_user_permissions(
         self, db: Session, user_id: UUID, organization_id: UUID
     ) -> tuple[Optional[Role], set[str]]:

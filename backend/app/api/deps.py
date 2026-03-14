@@ -11,6 +11,7 @@ from app.services.user import get_user_by_id
 from app.services.organization import get_user_role_in_org
 from app.services.role import role_service
 from app.models.user import User
+from app.models.organization import Organization
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -118,6 +119,9 @@ async def get_required_org_context(
     role_info = get_user_role_in_org(db, org_uuid, current_user.id)
 
     if not role_info:
+        # Superuser bypass: acceso a cualquier org sin membership
+        if current_user.is_superuser:
+            return _build_superuser_context(db, org_uuid, current_user)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No eres miembro de esta organizacion",
@@ -134,6 +138,29 @@ async def get_required_org_context(
         "user_permissions": perms,
         "is_admin": role_info["is_admin"],
         "user": current_user,
+    }
+
+
+def _build_superuser_context(db: Session, org_uuid: UUID, user: User) -> dict:
+    """Sintetiza contexto admin para superuser sin membership."""
+    org = db.query(Organization).filter(
+        Organization.id == org_uuid,
+        Organization.is_active == True,
+    ).first()
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organizacion no encontrada o inactiva",
+        )
+    all_perms = role_service.get_all_permission_codes(db)
+    return {
+        "organization_id": org_uuid,
+        "user_id": user.id,
+        "user_role": "superadmin",
+        "user_role_id": None,
+        "user_permissions": all_perms,
+        "is_admin": True,
+        "user": user,
     }
 
 
@@ -162,6 +189,8 @@ async def get_optional_org_context(
     role_info = get_user_role_in_org(db, org_uuid, current_user.id)
 
     if not role_info:
+        if current_user.is_superuser:
+            return _build_superuser_context(db, org_uuid, current_user)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No eres miembro de esta organizacion",

@@ -19,7 +19,7 @@ apiClient.interceptors.request.use(
     }
 
     const orgId = localStorage.getItem("organizationId");
-    if (orgId) {
+    if (orgId && orgId !== "system") {
       config.headers["X-Organization-ID"] = orgId;
     }
 

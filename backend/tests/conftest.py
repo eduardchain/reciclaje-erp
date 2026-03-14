@@ -84,6 +84,9 @@ def db_session() -> Generator[Session, None, None]:
     Note: Uses raw SQL with CASCADE to handle circular dependencies between
     double_entries, purchases, sales. Also drops ENUM types for PostgreSQL.
     """
+    # Cerrar conexiones previas para evitar conflictos con ENUM types cacheados
+    test_engine.dispose()
+
     # Drop all tables and types using raw SQL
     with test_engine.begin() as connection:
         if test_engine.dialect.name == "postgresql":
@@ -109,6 +112,9 @@ def db_session() -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
+
+        # Cerrar todas las conexiones del pool antes de DDL cleanup
+        test_engine.dispose()
 
         # Drop all tables and types after test using the same strategy
         with test_engine.begin() as connection:

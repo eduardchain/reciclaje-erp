@@ -324,13 +324,15 @@ class TestRemoveMember:
         test_organization: Organization,
         test_user: User,
     ):
+        # El unico admin intenta removerse a si mismo — protegido por self-removal check
+        # (la validacion de "ultimo administrador" en el servicio es safety net adicional)
         response = client.delete(
             f"/api/v1/organizations/{test_organization.id}/members/{test_user.id}",
             headers=auth_headers,
         )
 
         assert response.status_code == 400
-        assert "ultimo administrador" in response.json()["detail"].lower()
+        assert "eliminarte a ti mismo" in response.json()["detail"].lower()
 
     def test_can_remove_admin_when_multiple_admins(
         self,

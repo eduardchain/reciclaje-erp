@@ -9,6 +9,7 @@ export function ProtectedRoute() {
   const { token, organizationId, isAuthenticated, setUser, setOrganizations, setOrganization, logout } =
     useAuthStore();
   const organizations = useAuthStore((s) => s.organizations);
+  const user = useAuthStore((s) => s.user);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -19,8 +20,8 @@ export function ProtectedRoute() {
 
     const init = async () => {
       try {
-        const user = await authService.getMe();
-        setUser(user);
+        const fetchedUser = await authService.getMe();
+        setUser(fetchedUser);
 
         const orgs = await organizationService.getOrganizations();
         setOrganizations(orgs);
@@ -28,6 +29,11 @@ export function ProtectedRoute() {
         // Auto-select si solo hay 1 org y no hay org seleccionada
         if (!organizationId && orgs.length === 1) {
           setOrganization(orgs[0].id);
+        }
+
+        // Superuser sin org seleccionada y sin orgs → modo sistema
+        if (!organizationId && orgs.length === 0 && fetchedUser.is_superuser) {
+          setOrganization("system");
         }
       } catch {
         logout();
@@ -51,13 +57,23 @@ export function ProtectedRoute() {
     return <Navigate to="/login" replace />;
   }
 
+  // Modo sistema para superuser: permitir pasar
+  if (organizationId === "system") {
+    return <Outlet />;
+  }
+
   // Si tiene token pero no org seleccionada y hay multiples orgs
   if (!organizationId && organizations.length > 1) {
     return <OrganizationSelector />;
   }
 
-  // Si no tiene organizaciones
+  // Si no tiene organizaciones y no es superuser
   if (!organizationId && organizations.length === 0) {
+    // Superuser sin orgs → modo sistema
+    if (user?.is_superuser) {
+      setOrganization("system");
+      return <Outlet />;
+    }
     return (
       <div className="h-screen flex items-center justify-center">
         <div className="text-center">

@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from .endpoints import (
-    health, auth, organizations, roles,
+    health, auth, organizations, roles, system,
     materials, material_categories, third_parties,
     purchases, sales, double_entries,
     money_accounts, warehouses, business_units,
@@ -34,3 +34,4 @@ api_router.include_router(inventory_adjustments.router, prefix="/inventory/adjus
 api_router.include_router(material_transformations.router, prefix="/inventory/transformations", tags=["inventory"])
 api_router.include_router(inventory_views.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
+api_router.include_router(system.router, prefix="/system", tags=["system"])

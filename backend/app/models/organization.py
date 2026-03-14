@@ -1,7 +1,7 @@
 from uuid import UUID, uuid4
 from typing import List
 
-from sqlalchemy import String, Integer
+from sqlalchemy import Boolean, String, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, GUID
@@ -42,7 +42,9 @@ class Organization(Base, TimestampMixin):
     )
     
     max_users: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
-    
+
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
     # Relationships
     members: Mapped[List["OrganizationMember"]] = relationship(
         "OrganizationMember",

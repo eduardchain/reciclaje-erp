@@ -42,12 +42,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useAuthStore } from "@/stores/authStore";
 
 interface NavChild {
   name: string;
   path: string;
   icon: React.ReactNode;
   permission?: string | string[];
+  superuserOnly?: boolean;
 }
 
 interface NavItem {
@@ -57,9 +59,23 @@ interface NavItem {
   section?: string;
   permission?: string;
   children?: NavChild[];
+  superuserOnly?: boolean;
 }
 
-const navItems: NavItem[] = [
+const systemNavItems: NavItem[] = [
+  {
+    name: "Sistema",
+    path: ROUTES.SYSTEM_ORGANIZATIONS,
+    icon: <Settings className="w-5 h-5" />,
+    superuserOnly: true,
+    children: [
+      { name: "Organizaciones", path: ROUTES.SYSTEM_ORGANIZATIONS, icon: <Building2 className="w-4 h-4" />, superuserOnly: true },
+      { name: "Usuarios", path: ROUTES.SYSTEM_USERS, icon: <UserCog className="w-4 h-4" />, superuserOnly: true },
+    ],
+  },
+];
+
+const orgNavItems: NavItem[] = [
   {
     name: "Dashboard",
     path: ROUTES.DASHBOARD,
@@ -171,15 +187,26 @@ export default function Sidebar() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [collapsed, setCollapsed] = useState(false);
   const { hasPermission, hasAnyPermission, isLoading } = usePermissions();
+  const user = useAuthStore((s) => s.user);
+  const organizationId = useAuthStore((s) => s.organizationId);
+  const isSuperuser = user?.is_superuser ?? false;
+  const isSystemMode = organizationId === "system";
 
   const filteredNavItems = useMemo(() => {
     if (isLoading) return [];
+
+    // En modo sistema, solo mostrar items de sistema
+    if (isSystemMode) {
+      return isSuperuser ? systemNavItems : [];
+    }
+
     const checkPerm = (perm?: string | string[]) => {
       if (!perm) return true;
       if (Array.isArray(perm)) return hasAnyPermission(perm);
       return hasPermission(perm);
     };
-    return navItems
+
+    const filtered = orgNavItems
       .map((item) => {
         if (item.children) {
           const filteredChildren = item.children.filter(
@@ -192,7 +219,9 @@ export default function Sidebar() {
         return item;
       })
       .filter(Boolean) as NavItem[];
-  }, [isLoading, hasPermission, hasAnyPermission]);
+
+    return filtered;
+  }, [isLoading, hasPermission, hasAnyPermission, isSystemMode, isSuperuser]);
 
   const toggleExpand = (name: string) => {
     setExpanded((prev) => ({ ...prev, [name]: !prev[name] }));
