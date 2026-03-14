@@ -22,7 +22,7 @@ pycparser==3.0
 pydantic==2.12.5
 pydantic-settings==2.1.0
 pydantic_core==2.41.5
-pytest==8.0.0
+pytest==8.3.4
 pytest-asyncio==1.3.0
 pytest-cov==4.1.0
 python-dotenv==1.0.0
