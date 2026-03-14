@@ -1,7 +1,7 @@
 """
 Script de datos de prueba para EcoBalance ERP.
 
-Crea datos maestros para la empresa "Reciclajes El Progreso" (Colombia).
+Crea datos maestros para la empresa "Reciclajes de la Costa" (Colombia).
 Solo inventario de: terceros, materiales, lista de precios, bodegas, cuentas,
 unidades de negocio y categorias de gastos. Sin movimientos ni operaciones.
 
@@ -126,8 +126,8 @@ def clear_data(db, org_slug: str) -> None:
 
 def create_organization(db) -> Organization:
     org = Organization(
-        name="Reciclajes El Progreso",
-        slug="reciclajes-el-progreso",
+        name="Reciclajes de la Costa",
+        slug="reciclajes-de-la-costa",
         subscription_plan="pro",
         subscription_status="active",
         max_users=20,
@@ -152,11 +152,11 @@ def create_users(db, org: Organization) -> dict:
 
     # (email, nombre, rol_rbac)
     usuarios = [
-        ("admin@reciclajes.com",    "Nixon Admin",     "admin"),
-        ("nixon@reciclajes.com",    "Nixon Gerente",   "liquidador"),
-        ("john@reciclajes.com",     "John Operario",   "bascula"),
-        ("gustavo@reciclajes.com",  "Gustavo Contador","planillador"),
-        ("ingrid@reciclajes.com",   "Ingrid Comercial","viewer"),
+        ("gustavo@reciclajesdelacosta.com", "Gustavo Chain",     "admin"),
+        ("admin@reciclajesdelacosta.com",   "Administrador",     "admin"),
+        ("nixon@reciclajesdelacosta.com",   "Nixon Liquidador",  "liquidador"),
+        ("john@reciclajesdelacosta.com",    "John Bascula",      "bascula"),
+        ("ingrid@reciclajesdelacosta.com",  "Ingrid Planillador","planillador"),
     ]
     result = {}
     for email, nombre, rol_name in usuarios:
@@ -434,7 +434,7 @@ def create_initial_capital(db, org: Organization, accounts: dict, tps: dict, use
     amount = Decimal("100000000")
     account = accounts["Bancolombia Ahorros"]
     investor = tps["Carlos Perez Inversores"]
-    admin = users["admin@reciclajes.com"]
+    admin = users["gustavo@reciclajesdelacosta.com"]
     today_noon = datetime.combine(date.today(), time(12, 0), tzinfo=timezone.utc)
 
     mov = MoneyMovement(
@@ -476,10 +476,10 @@ def main():
 
         if args.clear:
             print("\n[LIMPIEZA]")
-            clear_data(db, "reciclajes-el-progreso")
+            clear_data(db, "reciclajes-de-la-costa")
 
         # Verificar si ya existe
-        existing = db.query(Organization).filter(Organization.slug == "reciclajes-el-progreso").first()
+        existing = db.query(Organization).filter(Organization.slug == "reciclajes-de-la-costa").first()
         if existing:
             print(f"\nOrganizacion '{existing.name}' ya existe. Use --clear para recrear.")
             return
@@ -520,14 +520,14 @@ def main():
         print("  Datos maestros creados exitosamente!")
         print("  (Con aporte de capital inicial de $100M)")
         print("="*60)
-        print(f"\nOrganizacion: Reciclajes El Progreso")
-        print(f"Slug:          reciclajes-el-progreso")
+        print(f"\nOrganizacion: Reciclajes de la Costa")
+        print(f"Slug:          reciclajes-de-la-costa")
         print(f"\nUsuarios (password: Pass1234!):")
-        print(f"  admin@reciclajes.com    - Administrador (acceso total)")
-        print(f"  nixon@reciclajes.com    - Liquidador (compras/ventas/tesoreria)")
-        print(f"  john@reciclajes.com     - Bascula (registrar compras/ventas, sin precios)")
-        print(f"  gustavo@reciclajes.com  - Planillador (doble partida)")
-        print(f"  ingrid@reciclajes.com   - Solo Lectura (consulta)")
+        print(f"  gustavo@reciclajesdelacosta.com - Admin (acceso total)")
+        print(f"  admin@reciclajesdelacosta.com   - Admin (acceso total)")
+        print(f"  nixon@reciclajesdelacosta.com   - Liquidador (compras/ventas/tesoreria)")
+        print(f"  john@reciclajesdelacosta.com    - Bascula (registrar compras/ventas, sin precios)")
+        print(f"  ingrid@reciclajesdelacosta.com  - Planillador (doble partida)")
         print(f"\nDatos maestros:")
         print(f"  20 materiales con lista de precios")
         print(f"  15 terceros (proveedores, clientes, inversores)")
