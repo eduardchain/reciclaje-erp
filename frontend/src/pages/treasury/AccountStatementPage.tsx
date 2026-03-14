@@ -40,6 +40,8 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   sale_cancellation: "Venta Cancelada",
   sale_commission: "Comision de Venta",
   commission_cancellation: "Comision Cancelada",
+  purchase_commission: "Comision de Compra",
+  purchase_commission_cancellation: "Comision Compra Cancelada",
   double_entry_purchase: "Doble Partida (Compra)",
   double_entry_sale: "Doble Partida (Venta)",
   double_entry_commission: "Comision Doble Partida",

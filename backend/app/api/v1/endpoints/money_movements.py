@@ -649,6 +649,7 @@ def get_by_third_party(
     - MoneyMovements confirmados y anulados (pagos, cobros, anticipos, etc.)
     - Compras liquidadas/canceladas (solo standalone, no doble partida)
     - Ventas liquidadas/canceladas (solo standalone, no doble partida)
+    - Comisiones de compras standalone
     - Comisiones de ventas standalone
     - Doble partida (compra+venta simultanea) y sus comisiones
 
@@ -658,7 +659,7 @@ def get_by_third_party(
     from sqlalchemy import select as sa_select
     from sqlalchemy.orm import joinedload
 
-    from app.models.purchase import Purchase
+    from app.models.purchase import Purchase, PurchaseCommission
     from app.models.sale import Sale, SaleCommission
     from app.models.double_entry import DoubleEntry
 
@@ -730,6 +731,37 @@ def get_by_third_party(
                  amount=float(p.total_amount), direction=1,
                  status="annulled", reference_number=None, movement_number=None,
                  source="purchase", source_id=str(p.id), source_number=p.purchase_number)
+
+    # 2b. Comisiones de compras standalone
+    # Comisionista: balance -= commission_amount al liquidar
+    purch_comm_query = (
+        sa_select(PurchaseCommission, Purchase)
+        .join(Purchase, PurchaseCommission.purchase_id == Purchase.id)
+        .where(
+            Purchase.organization_id == org_id,
+            PurchaseCommission.third_party_id == third_party_id,
+            Purchase.status.in_(["liquidated", "cancelled"]),
+            Purchase.liquidated_at.isnot(None),
+            Purchase.double_entry_id.is_(None),
+        )
+    )
+    for comm, purch in db.execute(purch_comm_query).all():
+        _evt(purch.date, purch.liquidated_at, 0,
+             id=f"purch-commission-{comm.id}", date=purch.date.isoformat(),
+             event_type="purchase_commission",
+             description=f"Comision Compra #{purch.purchase_number}: {comm.concept}",
+             amount=float(comm.commission_amount), direction=-1,
+             status="confirmed" if purch.status == "liquidated" else "cancelled",
+             reference_number=None, movement_number=None,
+             source="purchase_commission", source_id=str(comm.id), source_number=purch.purchase_number)
+        if purch.status == "cancelled" and purch.cancelled_at:
+            _evt(purch.date, purch.cancelled_at, 2,
+                 id=f"purch-comm-cancel-{comm.id}", date=purch.date.isoformat(),
+                 event_type="purchase_commission_cancellation",
+                 description=f"Comision Compra #{purch.purchase_number} cancelada (reversa)",
+                 amount=float(comm.commission_amount), direction=1,
+                 status="annulled", reference_number=None, movement_number=None,
+                 source="purchase_commission", source_id=str(comm.id), source_number=purch.purchase_number)
 
     # 3. Ventas liquidadas (standalone, no doble partida)
     # Cliente: balance += total_amount al liquidar

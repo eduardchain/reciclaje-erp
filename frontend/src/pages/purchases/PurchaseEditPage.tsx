@@ -139,6 +139,18 @@ export default function PurchaseEditPage() {
   const totalComm = useMemo(() => commissions.reduce((sum, c) => {
     return sum + (c.commission_type === "percentage" ? (total * c.commission_value) / 100 : c.commission_value);
   }, 0), [commissions, total]);
+  const linesCostData = useMemo(() => {
+    if (totalComm === 0 || total === 0) return null;
+    return lines.map(line => {
+      const lineValue = line.quantity * line.unit_price;
+      const weight = lineValue / total;
+      const lineCommission = totalComm * weight;
+      const unitCost = line.quantity > 0
+        ? (lineValue + lineCommission) / line.quantity
+        : line.unit_price;
+      return { materialId: line.material_id, unitCost };
+    });
+  }, [lines, commissions, total, totalComm]);
   const isFutureDate = date ? new Date(date) > new Date() : false;
 
   const canSubmit =
@@ -295,7 +307,7 @@ export default function PurchaseEditPage() {
                   placeholder="0,00"
                 />
               </div>
-              <div className="col-span-2 relative">
+              <div className={linesCostData ? "col-span-1 relative" : "col-span-2 relative"}>
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit. *</Label>}
                 <MoneyInput
                   value={line.unit_price}
@@ -309,6 +321,14 @@ export default function PurchaseEditPage() {
                   />
                 </div>
               </div>
+              {linesCostData && (
+              <div className="col-span-1 text-right">
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Unit*</Label>}
+                <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums text-emerald-600">
+                  {formatCurrency(linesCostData.find(c => c.materialId === line.material_id)?.unitCost ?? line.unit_price)}
+                </p>
+              </div>
+              )}
               <div className="col-span-1 text-right">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}
                 <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">
@@ -330,6 +350,9 @@ export default function PurchaseEditPage() {
             </div>
           ))}
 
+          {linesCostData && (
+            <p className="text-xs text-slate-500 mt-2">* Costo incluye comision prorrateada</p>
+          )}
           <div className="bg-slate-50 rounded-lg p-3 mt-2">
             <div className="flex justify-end">
               <span className="text-lg font-bold">Total: {formatCurrency(total)}</span>
@@ -391,7 +414,6 @@ export default function PurchaseEditPage() {
       </Card>
 
       {/* Resumen Financiero */}
-      {totalComm > 0 && (
       <Card className="shadow-sm bg-slate-50/50">
         <CardHeader>
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Resumen Financiero</CardTitle>
@@ -402,10 +424,12 @@ export default function PurchaseEditPage() {
               <span className="text-slate-600">Subtotal Materiales</span>
               <span className="font-medium tabular-nums">{formatCurrency(total)}</span>
             </div>
+            {totalComm > 0 && (
             <div className="flex justify-between text-sm">
               <span className="text-slate-600">(+) Comisiones</span>
               <span className="font-medium tabular-nums text-amber-600">{formatCurrency(totalComm)}</span>
             </div>
+            )}
             <div className="border-t border-slate-200 pt-2" />
             <div className="flex justify-between text-sm">
               <span className="text-slate-600 font-semibold">Costo Total Inventario</span>
@@ -414,7 +438,6 @@ export default function PurchaseEditPage() {
           </div>
         </CardContent>
       </Card>
-      )}
 
       {/* Acciones */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">

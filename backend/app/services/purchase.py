@@ -351,10 +351,11 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 db.flush()
 
         # Step 4c: Calcular prorrateo de comisiones al costo
+        # Flush cambios pendientes (precios, total) y refresh para cargar comisiones
+        db.flush()
+        db.refresh(purchase)
         total_commission = Decimal("0")
         if purchase.commissions:
-            # Refresh commissions despues del flush
-            db.refresh(purchase)
             total_commission = sum(
                 c.commission_amount for c in purchase.commissions
             )
