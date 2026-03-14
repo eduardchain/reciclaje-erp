@@ -53,16 +53,26 @@ def get_my_permissions(
     db: Session = Depends(get_db),
 ) -> MyPermissionsResponse:
     """Obtener rol y permisos del usuario actual."""
-    role, perms = role_service.get_user_permissions(
-        db, ctx["user_id"], ctx["organization_id"]
-    )
     from app.services.organization import get_user_account_assignments
+
+    # Determinar display_name del rol
+    if ctx["user_role_id"]:
+        # Usuario normal con membership: cargar rol de DB
+        role = role_service.get_role_by_id(db, ctx["user_role_id"], ctx["organization_id"])
+        display_name = role.display_name if role else ctx["user_role"]
+    else:
+        # Superuser sin membership: usar nombre del contexto
+        display_name = "Super Admin"
+
+    # Permisos: usar los ya resueltos por deps.py (respeta superuser bypass)
+    perms = ctx["user_permissions"]
+
     acc_ids = get_user_account_assignments(db, ctx["user_id"], ctx["organization_id"])
 
     return MyPermissionsResponse(
         role_id=ctx["user_role_id"],
         role_name=ctx["user_role"],
-        role_display_name=role.display_name if role else ctx["user_role"],
+        role_display_name=display_name,
         is_admin=ctx["is_admin"],
         permissions=sorted(perms),
         assigned_account_ids=[str(a) for a in acc_ids],
