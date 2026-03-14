@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
 import { Building2, Check, ChevronDown, KeyRound, LogOut, Settings, User } from "lucide-react";
 import EcoBalanceLogo from "@/components/EcoBalanceLogo";
 import {
@@ -27,8 +26,7 @@ export default function Header() {
   const setOrganization = useAuthStore((s) => s.setOrganization);
   const logout = useLogout();
   const changePassword = useChangePassword();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
+  const location = useLocation();
 
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -75,16 +73,19 @@ export default function Header() {
 
   const handleSwitchOrg = (orgId: string) => {
     if (orgId === organizationId) return;
-    queryClient.clear();
     setOrganization(orgId);
-    navigate("/");
+    // Reload forzado: query keys no incluyen orgId, cache queda inconsistente sin esto
+    if (location.pathname.startsWith("/system")) {
+      window.location.href = "/";
+    } else {
+      window.location.reload();
+    }
   };
 
   const handleSwitchToSystem = () => {
     if (isSystemMode) return;
-    queryClient.clear();
     setOrganization("system");
-    navigate("/system/organizations");
+    window.location.href = "/system/organizations";
   };
 
   // Nombre a mostrar en el selector
