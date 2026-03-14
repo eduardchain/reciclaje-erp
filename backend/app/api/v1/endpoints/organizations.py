@@ -28,7 +28,7 @@ from app.services.organization import (
     update_user_account_assignments,
     get_user_org_count,
 )
-from app.services.user import get_user_by_email, create_user, reset_password, delete_user
+from app.services.user import get_user_by_email, get_user_by_id, create_user, reset_password, delete_user
 from app.schemas.user import UserCreate
 from app.models.user import User
 
@@ -192,6 +192,8 @@ def list_organization_members(
 
     response = []
     for member, user in members_list:
+        if user.is_superuser:
+            continue  # Superusers se gestionan desde Sistema > Usuarios
         acc_ids = get_user_account_assignments(db, member.user_id, organization_id)
         member_dict = {
             "id": member.id,
@@ -358,11 +360,18 @@ def update_organization_member_role(
             detail="Solo administradores pueden cambiar roles",
         )
 
+    # Superusers no se pueden modificar desde Admin > Usuarios
+    target_user = get_user_by_id(db, user_id)
+    if target_user and target_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No se puede modificar un superadmin",
+        )
+
     try:
         membership = update_member_role(db, organization_id, user_id, role_data.role_id)
 
-        from app.services.user import get_user_by_id
-        user = get_user_by_id(db, user_id)
+        user = target_user
 
         member_dict = {
             "id": membership.id,
@@ -408,6 +417,14 @@ def reset_member_password(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo administradores pueden resetear contraseñas",
+        )
+
+    # Superusers no se pueden modificar desde Admin > Usuarios
+    target_user = get_user_by_id(db, user_id)
+    if target_user and target_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No se puede resetear contraseña de un superadmin",
         )
 
     # Verificar que el usuario es miembro de esta org
@@ -458,6 +475,14 @@ def remove_organization_member(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No puedes eliminarte a ti mismo",
+        )
+
+    # Superusers no se pueden eliminar desde Admin > Usuarios
+    target_user = get_user_by_id(db, user_id)
+    if target_user and target_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No se puede eliminar un superadmin",
         )
 
     try:

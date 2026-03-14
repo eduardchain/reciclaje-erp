@@ -488,25 +488,17 @@ def main():
 
         if args.clear:
             print("\n[LIMPIEZA]")
-            clear_data(db, "reciclajes-de-la-costa")
-            clear_data(db, "reciclajes-el-progreso")
-            # Limpiar organizaciones legacy de prueba
-            for legacy_slug in ["my-test-company", "admin-test-org", "detail-test"]:
-                clear_data(db, legacy_slug)
-            # Eliminar usuarios legacy huerfanos
-            legacy_emails = [
-                "eduardo@reciclaje.com", "newuser@example.com", "solo@example.com",
-                "admin@example.com", "detail@example.com", "duplicate@example.com",
-                "admin@reciclajes.com", "john@reciclajes.com", "nixon@reciclajes.com",
-                "ingrid@reciclajes.com", "gustavo@reciclajes.com", "gustavo2@reciclajes.com",
-            ]
-            for email in legacy_emails:
-                user = db.query(User).filter(User.email == email).first()
-                if user:
-                    # Eliminar membresías y luego el usuario
-                    db.query(OrganizationMember).filter(OrganizationMember.user_id == user.id).delete()
-                    db.query(User).filter(User.id == user.id).delete()
-                    print(f"  Usuario legacy eliminado: {email}")
+            # Limpiar TODAS las organizaciones (incluida la del seed)
+            all_orgs = db.query(Organization).all()
+            for org in all_orgs:
+                clear_data(db, org.slug)
+            # Eliminar usuarios huerfanos (sin membresía en ninguna org)
+            orphan_users = db.query(User).filter(
+                ~User.id.in_(db.query(OrganizationMember.user_id))
+            ).all()
+            for user in orphan_users:
+                print(f"  Usuario huerfano eliminado: {user.email}")
+                db.query(User).filter(User.id == user.id).delete()
             db.commit()
 
         # Verificar si ya existe

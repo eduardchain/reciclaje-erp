@@ -1,7 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { systemService } from "@/services/system";
+import { organizationService } from "@/services/organizations";
+import { useAuthStore } from "@/stores/authStore";
 import type { SystemOrgCreate, SystemOrgUpdate, AddUserToOrgRequest } from "@/types/organization";
+
+/** Refresca la lista de orgs en el selector del Header. */
+async function refreshHeaderOrgs() {
+  try {
+    const orgs = await organizationService.getOrganizations();
+    useAuthStore.getState().setOrganizations(orgs);
+  } catch { /* silenciar si falla */ }
+}
 
 // --- Queries ---
 
@@ -35,6 +45,7 @@ export function useCreateOrganization() {
     mutationFn: (data: SystemOrgCreate) => systemService.createOrganization(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["system", "organizations"] });
+      refreshHeaderOrgs();
       toast.success("Organizacion creada exitosamente");
     },
     onError: () => {
@@ -50,6 +61,7 @@ export function useUpdateOrganization() {
       systemService.updateOrganization(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["system", "organizations"] });
+      refreshHeaderOrgs();
       toast.success("Organizacion actualizada");
     },
     onError: () => {
@@ -65,6 +77,7 @@ export function useDeleteOrganization() {
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["system", "organizations"] });
       qc.invalidateQueries({ queryKey: ["system", "users"] });
+      refreshHeaderOrgs();
       toast.success(result.message);
     },
     onError: () => {
