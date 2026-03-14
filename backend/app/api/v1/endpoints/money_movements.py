@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_permission, require_any_permission, get_db
+from app.api.deps import require_permission, get_db
+from app.services.organization import get_user_account_assignments
 from app.schemas.money_movement import (
     SupplierPaymentCreate,
     CustomerCollectionCreate,
@@ -86,8 +87,16 @@ ACCOUNT_BALANCE_DIRECTION = {
 
 
 # ---------------------------------------------------------------------------
-# Helpers para convertir modelo ORM a response con nombres de relaciones
+# Helpers
 # ---------------------------------------------------------------------------
+
+def _get_allowed_accounts(db: Session, ctx: dict) -> list[UUID] | None:
+    """Retorna lista de account_ids permitidos o None si ve todo."""
+    if ctx["is_admin"]:
+        return None
+    assigned = get_user_account_assignments(db, ctx["user_id"], ctx["organization_id"])
+    return assigned if assigned else None
+
 
 def _to_response(movement) -> dict:
     """Convertir MoneyMovement ORM a dict con nombres de relaciones."""
@@ -470,12 +479,13 @@ def list_money_movements(
     date_from: Optional[date] = Query(None, description="Fecha desde"),
     date_to: Optional[date] = Query(None, description="Fecha hasta"),
     search: Optional[str] = Query(None, description="Buscar en descripcion o referencia"),
-    org_context: dict = Depends(require_permission("treasury.view")),
+    org_context: dict = Depends(require_permission("treasury.view_movements")),
     db: Session = Depends(get_db),
 ):
     """Listar movimientos de dinero con filtros y paginacion."""
     date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
     date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
+    allowed = _get_allowed_accounts(db, org_context)
     movements, total = money_movement.get_multi(
         db=db,
         organization_id=org_context["organization_id"],
@@ -488,6 +498,7 @@ def list_money_movements(
         date_from=date_from_dt,
         date_to=date_to_dt,
         search=search,
+        allowed_account_ids=allowed,
     )
     return {
         "items": [_to_response(m) for m in movements],
@@ -501,24 +512,26 @@ def list_money_movements(
 def get_movements_summary(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
-    org_context: dict = Depends(require_permission("treasury.view")),
+    org_context: dict = Depends(require_permission("treasury.view_movements")),
     db: Session = Depends(get_db),
 ):
     """Resumen de movimientos agrupados por tipo para un periodo."""
     date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
     date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
+    allowed = _get_allowed_accounts(db, org_context)
     return money_movement.get_summary(
         db=db,
         organization_id=org_context["organization_id"],
         date_from=date_from_dt,
         date_to=date_to_dt,
+        allowed_account_ids=allowed,
     )
 
 
 @router.get("/by-number/{movement_number}", response_model=MoneyMovementResponse)
 def get_by_number(
     movement_number: int,
-    org_context: dict = Depends(require_permission("treasury.view")),
+    org_context: dict = Depends(require_permission("treasury.view_movements")),
     db: Session = Depends(get_db),
 ):
     """Obtener movimiento por numero secuencial."""
@@ -536,7 +549,7 @@ def get_by_account(
     limit: int = Query(100, ge=1, le=500),
     date_from: Optional[date] = Query(None, description="Fecha desde"),
     date_to: Optional[date] = Query(None, description="Fecha hasta"),
-    org_context: dict = Depends(require_permission("treasury.view")),
+    org_context: dict = Depends(require_permission("treasury.view_accounts")),
     db: Session = Depends(get_db),
 ):
     """
@@ -545,6 +558,14 @@ def get_by_account(
     Incluye movimientos confirmados y anulados. Anulados aparecen
     pero no afectan el balance. Default: ultimos 90 dias.
     """
+    # Verificar acceso a la cuenta
+    allowed = _get_allowed_accounts(db, org_context)
+    if allowed is not None and account_id not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a esta cuenta",
+        )
+
     from sqlalchemy import select as sa_select
 
     org_id = org_context["organization_id"]
@@ -618,7 +639,7 @@ def get_by_third_party(
     limit: int = Query(100, ge=1, le=500),
     date_from: Optional[date] = Query(None, description="Fecha desde"),
     date_to: Optional[date] = Query(None, description="Fecha hasta"),
-    org_context: dict = Depends(require_any_permission("treasury.view", "treasury.view_statements")),
+    org_context: dict = Depends(require_permission("treasury.view_statements")),
     db: Session = Depends(get_db),
 ):
     """
@@ -663,11 +684,16 @@ def get_by_third_party(
         events.append((txn_date, sort_dt, sort_key, filter_dt or sort_dt, kwargs))
 
     # 1. MoneyMovements confirmados y anulados
+    allowed = _get_allowed_accounts(db, org_context)
     mm_query = sa_select(MoneyMovement).where(
         MoneyMovement.organization_id == org_id,
         MoneyMovement.third_party_id == third_party_id,
         MoneyMovement.status.in_(["confirmed", "annulled"]),
     )
+    if allowed is not None:
+        mm_query = mm_query.where(
+            (MoneyMovement.account_id.in_(allowed)) | (MoneyMovement.account_id.is_(None))
+        )
     for m in db.scalars(mm_query).all():
         direction = THIRD_PARTY_BALANCE_DIRECTION.get(m.movement_type, 0)
         _evt(m.date, m.created_at, 1, filter_dt=m.date,
@@ -993,7 +1019,7 @@ def upload_evidence(
 @router.get("/{movement_id}/evidence")
 def download_evidence(
     movement_id: UUID,
-    org_context: dict = Depends(require_permission("treasury.view")),
+    org_context: dict = Depends(require_permission("treasury.view_movements")),
     db: Session = Depends(get_db),
 ):
     """Descargar comprobante adjunto de un movimiento."""
@@ -1043,7 +1069,7 @@ def delete_evidence(
 @router.get("/{movement_id}", response_model=MoneyMovementResponse)
 def get_movement(
     movement_id: UUID,
-    org_context: dict = Depends(require_permission("treasury.view")),
+    org_context: dict = Depends(require_permission("treasury.view_movements")),
     db: Session = Depends(get_db),
 ):
     """Obtener un movimiento por ID."""

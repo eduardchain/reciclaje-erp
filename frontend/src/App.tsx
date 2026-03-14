@@ -114,12 +114,12 @@ function App() {
               <Route path="/double-entries/:id/liquidate" element={<P permission="double_entries.liquidate"><DoubleEntryLiquidatePage /></P>} />
               <Route path="/double-entries/:id" element={<P permission="double_entries.view"><DoubleEntryDetailPage /></P>} />
               {/* Tesoreria */}
-              <Route path={ROUTES.TREASURY} element={<P permission="treasury.view"><TreasuryPage /></P>} />
+              <Route path={ROUTES.TREASURY} element={<P permission="treasury.view_movements"><TreasuryPage /></P>} />
               <Route path={ROUTES.TREASURY_NEW} element={<P permission="treasury.create_movements"><MovementCreatePage /></P>} />
               <Route path={ROUTES.TREASURY_PROVISIONS} element={<P permission="treasury.view_provisions"><ProvisionsPage /></P>} />
               <Route path={ROUTES.TREASURY_ACCOUNT_STATEMENT} element={<P permission="treasury.view_statements"><AccountStatementPage /></P>} />
-              <Route path={ROUTES.TREASURY_DASHBOARD} element={<P permission="treasury.view"><TreasuryDashboardPage /></P>} />
-              <Route path={ROUTES.TREASURY_ACCOUNT_MOVEMENTS} element={<P permission="treasury.view"><AccountMovementsPage /></P>} />
+              <Route path={ROUTES.TREASURY_DASHBOARD} element={<P permission="treasury.view_dashboard"><TreasuryDashboardPage /></P>} />
+              <Route path={ROUTES.TREASURY_ACCOUNT_MOVEMENTS} element={<P permission="treasury.view_accounts"><AccountMovementsPage /></P>} />
               <Route path={ROUTES.TREASURY_LIABILITIES} element={<P permission="treasury.view_liabilities"><LiabilitiesPage /></P>} />
               <Route path={ROUTES.TREASURY_SCHEDULED} element={<P permission="treasury.view_scheduled"><ScheduledExpensesPage /></P>} />
               <Route path={ROUTES.TREASURY_SCHEDULED_NEW} element={<P permission="treasury.manage_expenses"><ScheduledExpenseCreatePage /></P>} />
@@ -128,7 +128,7 @@ function App() {
               <Route path={ROUTES.TREASURY_FIXED_ASSETS_NEW} element={<P permission="treasury.manage_fixed_assets"><FixedAssetCreatePage /></P>} />
               <Route path="/treasury/fixed-assets/:id/edit" element={<P permission="treasury.manage_fixed_assets"><FixedAssetEditPage /></P>} />
               <Route path="/treasury/fixed-assets/:id" element={<P permission="treasury.view_fixed_assets"><FixedAssetDetailPage /></P>} />
-              <Route path="/treasury/:id" element={<P permission="treasury.view"><MovementDetailPage /></P>} />
+              <Route path="/treasury/:id" element={<P permission="treasury.view_movements"><MovementDetailPage /></P>} />
               {/* Inventario */}
               <Route path={ROUTES.INVENTORY} element={<P permission="inventory.view"><StockPage /></P>} />
               <Route path={ROUTES.INVENTORY_MOVEMENTS} element={<P permission="inventory.view_movements"><MovementHistoryPage /></P>} />

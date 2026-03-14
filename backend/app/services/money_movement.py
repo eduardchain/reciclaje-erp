@@ -832,12 +832,18 @@ class CRUDMoneyMovement:
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
         search: Optional[str] = None,
+        allowed_account_ids: Optional[List[UUID]] = None,
     ) -> tuple[List[MoneyMovement], int]:
         """Listar movimientos con filtros y paginacion."""
         query = select(MoneyMovement).where(
             MoneyMovement.organization_id == organization_id
         )
 
+        if allowed_account_ids is not None:
+            query = query.where(
+                (MoneyMovement.account_id.in_(allowed_account_ids))
+                | (MoneyMovement.account_id.is_(None))
+            )
         if movement_type:
             query = query.where(MoneyMovement.movement_type == movement_type)
         if status_filter:
@@ -919,6 +925,7 @@ class CRUDMoneyMovement:
         organization_id: UUID,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        allowed_account_ids: Optional[List[UUID]] = None,
     ) -> List[dict]:
         """Resumen de movimientos agrupados por tipo para un periodo."""
         query = (
@@ -933,6 +940,11 @@ class CRUDMoneyMovement:
             )
             .group_by(MoneyMovement.movement_type)
         )
+        if allowed_account_ids is not None:
+            query = query.where(
+                (MoneyMovement.account_id.in_(allowed_account_ids))
+                | (MoneyMovement.account_id.is_(None))
+            )
 
         if date_from:
             query = query.where(MoneyMovement.date >= date_from)

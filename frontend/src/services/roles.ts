@@ -36,4 +36,7 @@ export const rolesService = {
 
   updateMemberRole: (orgId: string, userId: string, roleId: string) =>
     apiClient.patch<OrgMemberResponse>(`/api/v1/organizations/${orgId}/members/${userId}`, { role_id: roleId }).then((r) => r.data),
+
+  updateAccountAssignments: (orgId: string, userId: string, accountIds: string[]) =>
+    apiClient.put<string[]>(`/api/v1/organizations/${orgId}/members/${userId}/account-assignments`, { account_ids: accountIds }).then((r) => r.data),
 };

@@ -67,6 +67,12 @@ class OrganizationMemberResponse(BaseModel):
     joined_at: datetime
     user_email: str | None = None
     user_full_name: str | None = None
+    account_ids: list[UUID] = []
 
     class Config:
         from_attributes = True
+
+
+class AccountAssignmentsUpdate(BaseModel):
+    """Schema para actualizar cuentas asignadas a un usuario."""
+    account_ids: list[UUID] = []

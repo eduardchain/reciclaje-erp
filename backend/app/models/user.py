@@ -2,7 +2,7 @@ from uuid import UUID, uuid4
 from datetime import datetime
 from typing import List
 
-from sqlalchemy import String, Boolean, ForeignKey, DateTime, func
+from sqlalchemy import String, Boolean, ForeignKey, DateTime, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, GUID
@@ -101,3 +101,22 @@ class OrganizationMember(Base):
     
     def __repr__(self) -> str:
         return f"<OrganizationMember(user_id={self.user_id}, org_id={self.organization_id}, role='{self.role}')>"
+
+
+class UserAccountAssignment(Base):
+    """Asignacion de cuentas de dinero visibles por usuario."""
+
+    __tablename__ = "user_account_assignments"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    account_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("money_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+
+    __table_args__ = (UniqueConstraint("user_id", "account_id"),)

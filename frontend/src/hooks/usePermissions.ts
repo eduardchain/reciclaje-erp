@@ -28,6 +28,7 @@ export function usePermissions() {
     permissions: data?.permissions ?? [],
     isAdmin: data?.is_admin ?? false,
     roleName: data?.role_display_name ?? "",
+    assignedAccountIds: data?.assigned_account_ids ?? [],
     isLoading,
     hasPermission,
     hasAnyPermission,

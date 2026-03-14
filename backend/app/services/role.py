@@ -69,15 +69,16 @@ PERMISSIONS_CATALOG = [
     ("third_parties.view_balance", "Ver Saldos de Terceros", "third_parties", "Permite ver estados de cuenta", 64),
 
     # Tesoreria
-    ("treasury.view", "Ver Tesoreria Completa", "treasury", "Permite ver todas las cuentas y movimientos", 80),
-    ("treasury.view_own", "Ver Solo Mi Caja", "treasury", "Permite ver solo la caja asignada", 81),
-    ("treasury.create_movements", "Crear Movimientos", "treasury", "Permite crear movimientos de dinero", 82),
+    ("treasury.view_dashboard", "Ver Dashboard Tesoreria", "treasury", "Permite ver dashboard de tesoreria", 80),
+    ("treasury.view_movements", "Ver Movimientos", "treasury", "Permite ver movimientos de dinero", 81),
+    ("treasury.view_accounts", "Ver Cuentas", "treasury", "Permite ver movimientos por cuenta", 82),
+    ("treasury.create_movements", "Crear Movimientos", "treasury", "Permite crear movimientos de dinero", 84),
     ("treasury.manage_fixed_assets", "Gestionar Activos Fijos", "treasury", "Permite gestionar activos fijos", 85),
     ("treasury.view_provisions", "Ver Provisiones", "treasury", "Permite ver provisiones", 86),
     ("treasury.view_liabilities", "Ver Pasivos", "treasury", "Permite ver pasivos laborales", 87),
     ("treasury.view_scheduled", "Ver Gastos Diferidos", "treasury", "Permite ver gastos diferidos", 88),
     ("treasury.view_fixed_assets", "Ver Activos Fijos", "treasury", "Permite ver activos fijos", 89),
-    ("treasury.view_statements", "Ver Estados de Cuenta", "treasury", "Permite ver estados de cuenta de terceros", 90),
+    ("treasury.view_statements", "Ver Terceros", "treasury", "Permite ver estados de cuenta de terceros", 90),
 
     # Reportes
     ("reports.view", "Ver Reportes", "reports", "Permite ver reportes financieros", 100),
@@ -137,7 +138,7 @@ SYSTEM_ROLES = {
             "sales.view", "sales.liquidate", "sales.cancel", "sales.view_prices", "sales.edit_prices",
             "inventory.view", "inventory.view_movements",
             "materials.view", "materials.view_prices", "materials.edit_prices",
-            "treasury.view_own", "treasury.create_movements",
+            "treasury.view_movements", "treasury.create_movements",
             "reports.view",
             "reports.view_pnl", "reports.view_cashflow", "reports.view_balance",
             "reports.view_purchases", "reports.view_sales", "reports.view_margins",
@@ -171,7 +172,7 @@ SYSTEM_ROLES = {
             "third_parties.view", "third_parties.view_balance",
             "warehouses.view",
             "config.view_business_units",
-            "treasury.view",
+            "treasury.view_dashboard", "treasury.view_movements", "treasury.view_accounts",
             "treasury.view_provisions", "treasury.view_liabilities",
             "treasury.view_scheduled", "treasury.view_fixed_assets", "treasury.view_statements",
             "reports.view", "reports.export",

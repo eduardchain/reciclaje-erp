@@ -11,6 +11,7 @@ from app.schemas.organization import (
     OrganizationMemberCreate,
     OrganizationMemberUpdate,
     OrganizationMemberResponse,
+    AccountAssignmentsUpdate,
 )
 from app.services.organization import (
     create_organization,
@@ -22,6 +23,8 @@ from app.services.organization import (
     get_organization_members,
     get_user_role_in_org,
     update_organization,
+    get_user_account_assignments,
+    update_user_account_assignments,
 )
 from app.models.user import User
 
@@ -173,6 +176,7 @@ def list_organization_members(
 
     response = []
     for member, user in members_list:
+        acc_ids = get_user_account_assignments(db, member.user_id, organization_id)
         member_dict = {
             "id": member.id,
             "user_id": member.user_id,
@@ -183,6 +187,7 @@ def list_organization_members(
             "joined_at": member.joined_at,
             "user_email": user.email,
             "user_full_name": user.full_name,
+            "account_ids": acc_ids,
         }
         response.append(OrganizationMemberResponse(**member_dict))
 
@@ -360,3 +365,42 @@ def leave_organization(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+
+
+@router.put(
+    "/{organization_id}/members/{user_id}/account-assignments",
+    response_model=list[str],
+    summary="Update account assignments",
+)
+def update_account_assignments(
+    organization_id: UUID,
+    user_id: UUID,
+    data: AccountAssignmentsUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> list[str]:
+    """Actualizar cuentas asignadas a un usuario. Solo admins."""
+    current_role_info = get_user_role_in_org(db, organization_id, current_user.id)
+
+    if not current_role_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organizacion no encontrada o no eres miembro",
+        )
+
+    if not current_role_info["is_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden asignar cuentas",
+        )
+
+    # Verificar que el usuario es miembro
+    target_role = get_user_role_in_org(db, organization_id, user_id)
+    if not target_role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El usuario no es miembro de esta organizacion",
+        )
+
+    result = update_user_account_assignments(db, user_id, organization_id, data.account_ids)
+    return [str(aid) for aid in result]

@@ -90,3 +90,4 @@ class MyPermissionsResponse(BaseModel):
     role_display_name: str
     is_admin: bool
     permissions: list[str]
+    assigned_account_ids: list[str] = []

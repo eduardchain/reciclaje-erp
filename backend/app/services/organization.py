@@ -5,7 +5,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.organization import Organization
-from app.models.user import User, OrganizationMember
+from app.models.user import User, OrganizationMember, UserAccountAssignment
 from app.models.role import Role
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate
 from app.services.role import role_service
@@ -470,5 +470,55 @@ def update_organization(
     
     db.commit()
     db.refresh(organization)
-    
+
     return organization
+
+
+# ---------------------------------------------------------------------------
+# Asignacion de cuentas por usuario
+# ---------------------------------------------------------------------------
+
+def get_user_account_assignments(
+    db: Session, user_id: UUID, organization_id: UUID
+) -> list[UUID]:
+    """Retorna lista de account_ids asignados al usuario. Lista vacia = sin restriccion."""
+    rows = db.execute(
+        select(UserAccountAssignment.account_id).where(
+            UserAccountAssignment.user_id == user_id,
+            UserAccountAssignment.organization_id == organization_id,
+        )
+    ).scalars().all()
+    return list(rows)
+
+
+def update_user_account_assignments(
+    db: Session, user_id: UUID, organization_id: UUID, account_ids: list[UUID]
+) -> list[UUID]:
+    """Reemplaza todas las asignaciones de cuentas de un usuario."""
+    # Eliminar asignaciones existentes
+    db.execute(
+        select(UserAccountAssignment).where(
+            UserAccountAssignment.user_id == user_id,
+            UserAccountAssignment.organization_id == organization_id,
+        )
+    )
+    from sqlalchemy import delete as sa_delete
+    db.execute(
+        sa_delete(UserAccountAssignment).where(
+            UserAccountAssignment.user_id == user_id,
+            UserAccountAssignment.organization_id == organization_id,
+        )
+    )
+
+    # Crear nuevas
+    from uuid import uuid4 as _uuid4
+    for acc_id in account_ids:
+        db.add(UserAccountAssignment(
+            id=_uuid4(),
+            user_id=user_id,
+            account_id=acc_id,
+            organization_id=organization_id,
+        ))
+
+    db.commit()
+    return account_ids

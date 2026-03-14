@@ -17,6 +17,7 @@ import { useSuppliers, useCustomers, useMaterials } from "@/hooks/useMasterData"
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { DoubleEntryLineCreate } from "@/types/double-entry";
 import type { SaleCommissionCreate } from "@/types/sale";
 
@@ -36,6 +37,8 @@ function createEmptyCommission(): CommissionFormData {
 export default function DoubleEntryCreatePage() {
   const navigate = useNavigate();
   const create = useCreateDoubleEntry();
+  const { hasPermission } = usePermissions();
+  const canLiquidate = hasPermission("double_entries.liquidate");
 
   const { data: suppliersData } = useSuppliers();
   const { data: customersData } = useCustomers();
@@ -291,17 +294,19 @@ export default function DoubleEntryCreatePage() {
       </Card>
 
       {/* Liquidacion inmediata */}
-      <Card className="shadow-sm">
-        <CardContent className="pt-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidar inmediatamente</Label>
-              <p className="text-xs text-slate-500 mt-1">Confirma precios y aplica efectos financieros (saldos, comisiones).</p>
+      {canLiquidate && (
+        <Card className="shadow-sm">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidar inmediatamente</Label>
+                <p className="text-xs text-slate-500 mt-1">Confirma precios y aplica efectos financieros (saldos, comisiones).</p>
+              </div>
+              <Switch checked={autoLiquidate} onCheckedChange={setAutoLiquidate} />
             </div>
-            <Switch checked={autoLiquidate} onCheckedChange={setAutoLiquidate} />
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
         <div className="flex justify-end gap-2">

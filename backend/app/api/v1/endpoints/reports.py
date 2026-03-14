@@ -202,7 +202,7 @@ def get_third_party_balances(
 
 @router.get("/treasury-dashboard", response_model=TreasuryDashboardResponse)
 def get_treasury_dashboard(
-    org_context: dict = Depends(require_permission("treasury.view")),
+    org_context: dict = Depends(require_permission("treasury.view_dashboard")),
     db: Session = Depends(get_db),
 ):
     """

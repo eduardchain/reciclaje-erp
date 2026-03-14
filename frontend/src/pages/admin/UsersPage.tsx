@@ -2,6 +2,7 @@ import { useState } from "react";
 import { UserCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,7 +16,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useOrgMembers, useRoles, useUpdateMemberRole } from "@/hooks/useRoles";
+import { useOrgMembers, useRoles, useUpdateMemberRole, useUpdateAccountAssignments } from "@/hooks/useRoles";
+import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { formatDate } from "@/utils/formatters";
 import type { OrgMemberResponse } from "@/types/role";
 
@@ -30,22 +32,57 @@ const roleBadgeColors: Record<string, string> = {
 export default function UsersPage() {
   const { data: members, isLoading } = useOrgMembers();
   const { data: roles } = useRoles();
+  const { data: accountsData } = useMoneyAccounts();
   const updateMemberRole = useUpdateMemberRole();
+  const updateAccountAssignments = useUpdateAccountAssignments();
+
+  const accounts = accountsData?.items ?? [];
 
   const [editMember, setEditMember] = useState<OrgMemberResponse | null>(null);
   const [selectedRoleId, setSelectedRoleId] = useState("");
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
 
   const openEdit = (member: OrgMemberResponse) => {
     setEditMember(member);
     setSelectedRoleId(member.role_id);
+    setSelectedAccountIds(member.account_ids ?? []);
+  };
+
+  const toggleAccount = (accountId: string) => {
+    setSelectedAccountIds((prev) =>
+      prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId],
+    );
   };
 
   const handleSave = () => {
     if (!editMember) return;
-    updateMemberRole.mutate(
-      { userId: editMember.user_id, roleId: selectedRoleId },
-      { onSuccess: () => setEditMember(null) },
-    );
+
+    const roleChanged = selectedRoleId !== editMember.role_id;
+    const originalAccIds = editMember.account_ids ?? [];
+    const accountsChanged =
+      selectedAccountIds.length !== originalAccIds.length ||
+      selectedAccountIds.some((id) => !originalAccIds.includes(id));
+
+    let pending = 0;
+    const done = () => { pending--; if (pending <= 0) setEditMember(null); };
+
+    if (roleChanged) {
+      pending++;
+      updateMemberRole.mutate(
+        { userId: editMember.user_id, roleId: selectedRoleId },
+        { onSuccess: done },
+      );
+    }
+    if (accountsChanged) {
+      pending++;
+      updateAccountAssignments.mutate(
+        { userId: editMember.user_id, accountIds: selectedAccountIds },
+        { onSuccess: done },
+      );
+    }
+    if (!roleChanged && !accountsChanged) {
+      setEditMember(null);
+    }
   };
 
   return (
@@ -105,7 +142,7 @@ export default function UsersPage() {
       <Dialog open={!!editMember} onOpenChange={(open) => !open && setEditMember(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Cambiar Rol</DialogTitle>
+            <DialogTitle>Configurar Usuario</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div>
@@ -114,7 +151,7 @@ export default function UsersPage() {
               <p className="text-xs text-slate-500">{editMember?.user_email}</p>
             </div>
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nuevo Rol</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Rol</Label>
               <Select value={selectedRoleId} onValueChange={setSelectedRoleId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Seleccionar rol..." />
@@ -129,15 +166,33 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuentas Visibles</Label>
+              <p className="text-xs text-slate-400 mt-0.5 mb-2">Dejar vacio para ver todas las cuentas</p>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto border rounded-md p-2">
+                {accounts.map((acc) => (
+                  <label key={acc.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
+                    <Checkbox
+                      checked={selectedAccountIds.includes(acc.id)}
+                      onCheckedChange={() => toggleAccount(acc.id)}
+                    />
+                    <span className="text-sm">{acc.name}</span>
+                  </label>
+                ))}
+                {accounts.length === 0 && (
+                  <p className="text-xs text-slate-400 text-center py-2">No hay cuentas</p>
+                )}
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditMember(null)}>Cancelar</Button>
             <Button
               onClick={handleSave}
-              disabled={!selectedRoleId || selectedRoleId === editMember?.role_id || updateMemberRole.isPending}
+              disabled={updateMemberRole.isPending || updateAccountAssignments.isPending}
               className="bg-emerald-600 hover:bg-emerald-700"
             >
-              {updateMemberRole.isPending ? "Guardando..." : "Guardar"}
+              {(updateMemberRole.isPending || updateAccountAssignments.isPending) ? "Guardando..." : "Guardar"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -54,12 +54,16 @@ def get_my_permissions(
     role, perms = role_service.get_user_permissions(
         db, ctx["user_id"], ctx["organization_id"]
     )
+    from app.services.organization import get_user_account_assignments
+    acc_ids = get_user_account_assignments(db, ctx["user_id"], ctx["organization_id"])
+
     return MyPermissionsResponse(
         role_id=ctx["user_role_id"],
         role_name=ctx["user_role"],
         role_display_name=role.display_name if role else ctx["user_role"],
         is_admin=ctx["is_admin"],
         permissions=sorted(perms),
+        assigned_account_ids=[str(a) for a in acc_ids],
     )
 
 

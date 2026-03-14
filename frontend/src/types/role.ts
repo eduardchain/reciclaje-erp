@@ -4,6 +4,7 @@ export interface MyPermissions {
   role_display_name: string;
   is_admin: boolean;
   permissions: string[];
+  assigned_account_ids: string[];
 }
 
 export interface RoleListItem {
@@ -66,4 +67,5 @@ export interface OrgMemberResponse {
   joined_at: string;
   user_email: string | null;
   user_full_name: string | null;
+  account_ids: string[];
 }

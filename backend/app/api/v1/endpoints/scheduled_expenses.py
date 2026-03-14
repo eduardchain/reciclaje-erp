@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_permission, require_any_permission
+from app.api.deps import get_db, require_permission
 from app.schemas.scheduled_expense import (
     ScheduledExpenseCreate,
     ScheduledExpenseResponse,
@@ -103,7 +103,7 @@ def list_scheduled_expenses(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_any_permission("treasury.view", "treasury.view_scheduled")),
+    ctx: dict = Depends(require_permission("treasury.view_scheduled")),
 ):
     """Listar gastos diferidos programados."""
     items, total = scheduled_expense.get_multi(
@@ -124,7 +124,7 @@ def list_scheduled_expenses(
 @router.get("/pending", response_model=list[ScheduledExpenseResponse])
 def list_pending_scheduled_expenses(
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_any_permission("treasury.view", "treasury.view_scheduled")),
+    ctx: dict = Depends(require_permission("treasury.view_scheduled")),
 ):
     """Gastos activos con cuotas pendientes, para TreasuryDashboard."""
     items = scheduled_expense.get_pending(
@@ -138,7 +138,7 @@ def list_pending_scheduled_expenses(
 def get_scheduled_expense(
     scheduled_id: UUID,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_any_permission("treasury.view", "treasury.view_scheduled")),
+    ctx: dict = Depends(require_permission("treasury.view_scheduled")),
 ):
     """Detalle de gasto diferido con applications."""
     se = scheduled_expense.get(db, scheduled_id, ctx["organization_id"])

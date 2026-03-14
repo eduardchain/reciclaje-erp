@@ -98,7 +98,7 @@ def list_deferred_expenses(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_permission("treasury.view")),
+    ctx: dict = Depends(require_permission("treasury.view_scheduled")),
 ):
     """Listar gastos diferidos con filtro opcional por status."""
     items, total = deferred_expense.get_multi(
@@ -119,7 +119,7 @@ def list_deferred_expenses(
 @router.get("/pending", response_model=list[DeferredExpenseResponse])
 def list_pending_deferred_expenses(
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_permission("treasury.view")),
+    ctx: dict = Depends(require_permission("treasury.view_scheduled")),
 ):
     """Gastos activos con cuotas pendientes, para TreasuryDashboard."""
     items = deferred_expense.get_pending(
@@ -133,7 +133,7 @@ def list_pending_deferred_expenses(
 def get_deferred_expense(
     deferred_id: UUID,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_permission("treasury.view")),
+    ctx: dict = Depends(require_permission("treasury.view_scheduled")),
 ):
     """Obtener detalle de gasto diferido con applications."""
     de = deferred_expense.get(db, deferred_id, ctx["organization_id"])

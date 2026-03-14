@@ -89,3 +89,17 @@ export function useUpdateMemberRole() {
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al cambiar el rol")),
   });
 }
+
+export function useUpdateAccountAssignments() {
+  const qc = useQueryClient();
+  const organizationId = useAuthStore((s) => s.organizationId);
+  return useMutation({
+    mutationFn: ({ userId, accountIds }: { userId: string; accountIds: string[] }) =>
+      rolesService.updateAccountAssignments(organizationId!, userId, accountIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org-members"] });
+      toast.success("Cuentas asignadas actualizadas");
+    },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al asignar cuentas")),
+  });
+}

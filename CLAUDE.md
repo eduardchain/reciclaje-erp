@@ -34,6 +34,7 @@ Al terminar una sesion donde se implemento funcionalidad nueva o se tomo una dec
 6. **Conteos**: actualizar `Current: N tests` en Testing, y conteos de componentes/servicios/hooks en Frontend si cambian.
 7. **Migrations**: solo mencionar migration ID si es relevante para entender la historia (ej: rename de tabla). No listar todas.
 8. **Cache invalidation**: si la nueva funcionalidad crea side-effects cross-module, actualizar el mapa en `queryInvalidation.ts` Y documentarlo aqui.
+9. **Migraciones**: si se crean nuevas migraciones, SIEMPRE correr `./venv/bin/alembic upgrade head` en la BD de desarrollo Y en la de test antes de probar. Los permisos RBAC se leen de la tabla `permissions` en BD, no del catalogo Python — sin migrar, los nuevos permisos no existen.
 
 ## Project Overview
 
