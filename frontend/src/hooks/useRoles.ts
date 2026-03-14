@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { rolesService } from "@/services/roles";
 import { useAuthStore } from "@/stores/authStore";
 import { getApiErrorMessage } from "@/utils/formatters";
-import type { RoleCreate, RoleUpdate } from "@/types/role";
+import type { RoleCreate, RoleUpdate, CreateUserWithMembership } from "@/types/role";
 
 export function useRoles() {
   return useQuery({
@@ -65,9 +65,11 @@ export function useUpdateRole() {
 export function useDeleteRole() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => rolesService.delete(id),
+    mutationFn: ({ id, reassignTo }: { id: string; reassignTo?: string }) =>
+      rolesService.delete(id, reassignTo),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["roles"] });
+      qc.invalidateQueries({ queryKey: ["org-members"] });
       toast.success("Rol eliminado exitosamente");
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al eliminar el rol")),
@@ -101,5 +103,45 @@ export function useUpdateAccountAssignments() {
       toast.success("Cuentas asignadas actualizadas");
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al asignar cuentas")),
+  });
+}
+
+export function useCreateUser() {
+  const qc = useQueryClient();
+  const organizationId = useAuthStore((s) => s.organizationId);
+  return useMutation({
+    mutationFn: (data: CreateUserWithMembership) =>
+      rolesService.createUserWithMembership(organizationId!, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org-members"] });
+      toast.success("Usuario creado exitosamente (contraseña: 123456)");
+    },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al crear usuario")),
+  });
+}
+
+export function useResetPassword() {
+  const organizationId = useAuthStore((s) => s.organizationId);
+  return useMutation({
+    mutationFn: (userId: string) =>
+      rolesService.resetPassword(organizationId!, userId),
+    onSuccess: () => {
+      toast.success("Contraseña reseteada a 123456");
+    },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al resetear contraseña")),
+  });
+}
+
+export function useDeleteMember() {
+  const qc = useQueryClient();
+  const organizationId = useAuthStore((s) => s.organizationId);
+  return useMutation({
+    mutationFn: (userId: string) =>
+      rolesService.deleteMember(organizationId!, userId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org-members"] });
+      toast.success("Usuario eliminado exitosamente");
+    },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al eliminar usuario")),
   });
 }

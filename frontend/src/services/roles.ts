@@ -7,6 +7,7 @@ import type {
   RoleUpdate,
   PermissionsByModule,
   OrgMemberResponse,
+  CreateUserWithMembership,
 } from "@/types/role";
 
 export const rolesService = {
@@ -28,8 +29,10 @@ export const rolesService = {
   update: (id: string, data: RoleUpdate) =>
     apiClient.patch<RoleResponse>(`/api/v1/roles/${id}`, data).then((r) => r.data),
 
-  delete: (id: string) =>
-    apiClient.delete(`/api/v1/roles/${id}`),
+  delete: (id: string, reassignTo?: string) =>
+    apiClient.delete(`/api/v1/roles/${id}`, {
+      params: reassignTo ? { reassign_to: reassignTo } : undefined,
+    }),
 
   getMembers: (orgId: string) =>
     apiClient.get<OrgMemberResponse[]>(`/api/v1/organizations/${orgId}/members`).then((r) => r.data),
@@ -39,4 +42,13 @@ export const rolesService = {
 
   updateAccountAssignments: (orgId: string, userId: string, accountIds: string[]) =>
     apiClient.put<string[]>(`/api/v1/organizations/${orgId}/members/${userId}/account-assignments`, { account_ids: accountIds }).then((r) => r.data),
+
+  createUserWithMembership: (orgId: string, data: CreateUserWithMembership) =>
+    apiClient.post<OrgMemberResponse>(`/api/v1/organizations/${orgId}/members/create-user`, data).then((r) => r.data),
+
+  resetPassword: (orgId: string, userId: string) =>
+    apiClient.post(`/api/v1/organizations/${orgId}/members/${userId}/reset-password`).then((r) => r.data),
+
+  deleteMember: (orgId: string, userId: string) =>
+    apiClient.delete(`/api/v1/organizations/${orgId}/members/${userId}`),
 };

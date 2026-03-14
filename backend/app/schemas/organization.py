@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 import re
 
 
@@ -68,6 +68,7 @@ class OrganizationMemberResponse(BaseModel):
     user_email: str | None = None
     user_full_name: str | None = None
     account_ids: list[UUID] = []
+    org_count: int = 1
 
     class Config:
         from_attributes = True
@@ -76,3 +77,10 @@ class OrganizationMemberResponse(BaseModel):
 class AccountAssignmentsUpdate(BaseModel):
     """Schema para actualizar cuentas asignadas a un usuario."""
     account_ids: list[UUID] = []
+
+
+class CreateUserWithMembership(BaseModel):
+    """Schema para crear usuario nuevo con membership en la org."""
+    email: EmailStr
+    full_name: str
+    role_id: UUID

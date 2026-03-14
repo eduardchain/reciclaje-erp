@@ -393,9 +393,10 @@ class RoleService:
         return role
 
     def delete_role(
-        self, db: Session, role_id: UUID, organization_id: UUID
+        self, db: Session, role_id: UUID, organization_id: UUID,
+        reassign_to: UUID | None = None,
     ) -> bool:
-        """Eliminar un rol (solo si no es del sistema y no tiene usuarios)."""
+        """Eliminar un rol. Si tiene usuarios, requiere reassign_to."""
         role = self.get_role_by_id(db, role_id, organization_id)
         if not role:
             return False
@@ -403,13 +404,28 @@ class RoleService:
         if role.is_system_role:
             raise ValueError("No se puede eliminar un rol del sistema")
 
-        member_count = db.query(OrganizationMember).filter(
+        members = db.query(OrganizationMember).filter(
             OrganizationMember.role_id == role_id,
-        ).count()
-        if member_count > 0:
+        ).all()
+
+        if members and not reassign_to:
             raise ValueError(
-                f"No se puede eliminar: hay {member_count} usuario(s) con este rol"
+                f"No se puede eliminar: hay {len(members)} usuario(s) con este rol. "
+                "Debe reasignarlos a otro rol."
             )
+
+        if members and reassign_to:
+            if reassign_to == role_id:
+                raise ValueError("No se puede reasignar al mismo rol que se elimina")
+
+            # Verificar que rol destino existe y es de la org
+            target_role = self.get_role_by_id(db, reassign_to, organization_id)
+            if not target_role:
+                raise ValueError("Rol de destino no encontrado en esta organizacion")
+
+            for member in members:
+                member.role_id = reassign_to
+            db.flush()
 
         db.delete(role)
         db.commit()

@@ -68,4 +68,11 @@ export interface OrgMemberResponse {
   user_email: string | null;
   user_full_name: string | null;
   account_ids: string[];
+  org_count: number;
+}
+
+export interface CreateUserWithMembership {
+  email: string;
+  full_name: string;
+  role_id: string;
 }

@@ -1,7 +1,9 @@
 """Endpoints para gestion de roles y permisos."""
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_required_org_context, require_permission
@@ -199,12 +201,15 @@ def update_role(
 )
 def delete_role(
     role_id: UUID,
+    reassign_to: Optional[UUID] = Query(None, description="Rol al que reasignar usuarios"),
     ctx: dict = Depends(require_permission("admin.manage_roles")),
     db: Session = Depends(get_db),
 ) -> None:
-    """Eliminar un rol (no puede ser del sistema ni tener usuarios asignados)."""
+    """Eliminar un rol. Si tiene usuarios, reasignarlos a otro rol."""
     try:
-        deleted = role_service.delete_role(db, role_id, ctx["organization_id"])
+        deleted = role_service.delete_role(
+            db, role_id, ctx["organization_id"], reassign_to=reassign_to
+        )
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

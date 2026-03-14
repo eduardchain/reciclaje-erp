@@ -1,12 +1,20 @@
 import { useState } from "react";
-import { UserCog } from "lucide-react";
+import { UserCog, UserPlus, MoreHorizontal, KeyRound, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -16,8 +24,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useOrgMembers, useRoles, useUpdateMemberRole, useUpdateAccountAssignments } from "@/hooks/useRoles";
+import {
+  useOrgMembers,
+  useRoles,
+  useUpdateMemberRole,
+  useUpdateAccountAssignments,
+  useCreateUser,
+  useResetPassword,
+  useDeleteMember,
+} from "@/hooks/useRoles";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
+import { useAuthStore } from "@/stores/authStore";
 import { formatDate } from "@/utils/formatters";
 import type { OrgMemberResponse } from "@/types/role";
 
@@ -35,12 +52,29 @@ export default function UsersPage() {
   const { data: accountsData } = useMoneyAccounts();
   const updateMemberRole = useUpdateMemberRole();
   const updateAccountAssignments = useUpdateAccountAssignments();
+  const createUser = useCreateUser();
+  const resetPassword = useResetPassword();
+  const deleteMember = useDeleteMember();
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   const accounts = accountsData?.items ?? [];
 
+  // Estado: Dialog Configurar Usuario
   const [editMember, setEditMember] = useState<OrgMemberResponse | null>(null);
   const [selectedRoleId, setSelectedRoleId] = useState("");
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+
+  // Estado: Dialog Nuevo Usuario
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newFullName, setNewFullName] = useState("");
+  const [newRoleId, setNewRoleId] = useState("");
+
+  // Estado: Confirmar Resetear Contraseña
+  const [resetTarget, setResetTarget] = useState<OrgMemberResponse | null>(null);
+
+  // Estado: Confirmar Eliminar
+  const [deleteTarget, setDeleteTarget] = useState<OrgMemberResponse | null>(null);
 
   const openEdit = (member: OrgMemberResponse) => {
     setEditMember(member);
@@ -85,9 +119,43 @@ export default function UsersPage() {
     }
   };
 
+  const handleCreateUser = () => {
+    if (!newEmail || !newFullName || !newRoleId) return;
+    createUser.mutate(
+      { email: newEmail, full_name: newFullName, role_id: newRoleId },
+      {
+        onSuccess: () => {
+          setShowCreateDialog(false);
+          setNewEmail("");
+          setNewFullName("");
+          setNewRoleId("");
+        },
+      },
+    );
+  };
+
+  const handleResetPassword = () => {
+    if (!resetTarget) return;
+    resetPassword.mutate(resetTarget.user_id, {
+      onSuccess: () => setResetTarget(null),
+    });
+  };
+
+  const handleDelete = () => {
+    if (!deleteTarget) return;
+    deleteMember.mutate(deleteTarget.user_id, {
+      onSuccess: () => setDeleteTarget(null),
+    });
+  };
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Usuarios" description="Miembros de la organizacion y sus roles" />
+      <PageHeader title="Usuarios" description="Miembros de la organizacion y sus roles">
+        <Button onClick={() => setShowCreateDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
+          <UserPlus className="h-4 w-4 mr-1.5" />
+          Nuevo Usuario
+        </Button>
+      </PageHeader>
 
       {isLoading ? (
         <div className="space-y-2">
@@ -122,14 +190,32 @@ export default function UsersPage() {
                   </TableCell>
                   <TableCell className="text-sm text-slate-500">{formatDate(member.joined_at)}</TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openEdit(member)}
-                    >
-                      <UserCog className="h-3.5 w-3.5 mr-1" />
-                      Cambiar Rol
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openEdit(member)}>
+                          <UserCog className="h-4 w-4 mr-2" />
+                          Configurar Usuario
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setResetTarget(member)}>
+                          <KeyRound className="h-4 w-4 mr-2" />
+                          Resetear Contraseña
+                        </DropdownMenuItem>
+                        {member.user_id !== currentUserId && (
+                          <DropdownMenuItem
+                            onClick={() => setDeleteTarget(member)}
+                            className="text-red-600 focus:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Eliminar
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))}
@@ -138,7 +224,7 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Dialog: Cambiar Rol */}
+      {/* Dialog: Configurar Usuario (Rol + Cuentas) */}
       <Dialog open={!!editMember} onOpenChange={(open) => !open && setEditMember(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -197,6 +283,90 @@ export default function UsersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Dialog: Nuevo Usuario */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Nuevo Usuario</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Email</Label>
+              <Input
+                type="email"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                placeholder="usuario@ejemplo.com"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre Completo</Label>
+              <Input
+                value={newFullName}
+                onChange={(e) => setNewFullName(e.target.value)}
+                placeholder="Nombre del usuario"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Rol</Label>
+              <Select value={newRoleId} onValueChange={setNewRoleId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Seleccionar rol..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {roles?.map((role) => (
+                    <SelectItem key={role.id} value={role.id}>
+                      {role.display_name}
+                      {role.is_system_role ? " (Sistema)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-slate-400">La contraseña por defecto sera: <strong>123456</strong></p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
+            <Button
+              onClick={handleCreateUser}
+              disabled={createUser.isPending || !newEmail || !newFullName || !newRoleId}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {createUser.isPending ? "Creando..." : "Crear Usuario"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm: Resetear Contraseña */}
+      <ConfirmDialog
+        open={!!resetTarget}
+        onOpenChange={(open) => !open && setResetTarget(null)}
+        onConfirm={handleResetPassword}
+        title="Resetear Contraseña"
+        description={`La contraseña de ${resetTarget?.user_full_name ?? resetTarget?.user_email} sera reseteada a "123456".`}
+        confirmLabel="Resetear"
+        loading={resetPassword.isPending}
+      />
+
+      {/* Confirm: Eliminar Usuario */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onConfirm={handleDelete}
+        title="Eliminar Usuario"
+        description={
+          deleteTarget?.org_count === 1
+            ? `"${deleteTarget?.user_full_name ?? deleteTarget?.user_email}" sera eliminado permanentemente del sistema.`
+            : `"${deleteTarget?.user_full_name ?? deleteTarget?.user_email}" sera removido de esta organizacion.`
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        loading={deleteMember.isPending}
+      />
     </div>
   );
 }

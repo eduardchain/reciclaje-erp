@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import {
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRoles, useCreateRole, useDeleteRole } from "@/hooks/useRoles";
+import type { RoleListItem } from "@/types/role";
 
 export default function RolesPage() {
   const navigate = useNavigate();
@@ -30,7 +32,9 @@ export default function RolesPage() {
   const [displayName, setDisplayName] = useState("");
   const [description, setDescription] = useState("");
 
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  // Eliminar rol: simple (sin usuarios) o con reasignacion
+  const [deleteTarget, setDeleteTarget] = useState<RoleListItem | null>(null);
+  const [reassignToId, setReassignToId] = useState("");
 
   const handleCreate = () => {
     createRole.mutate(
@@ -47,12 +51,25 @@ export default function RolesPage() {
     );
   };
 
+  const openDelete = (role: RoleListItem) => {
+    setDeleteTarget(role);
+    setReassignToId("");
+  };
+
   const handleDelete = () => {
     if (!deleteTarget) return;
-    deleteRole.mutate(deleteTarget.id, {
-      onSuccess: () => setDeleteTarget(null),
-    });
+    const reassignTo = deleteTarget.member_count > 0 ? reassignToId : undefined;
+    deleteRole.mutate(
+      { id: deleteTarget.id, reassignTo },
+      { onSuccess: () => setDeleteTarget(null) },
+    );
   };
+
+  const availableRolesForReassign = roles?.filter(
+    (r) => r.id !== deleteTarget?.id
+  ) ?? [];
+
+  const needsReassign = (deleteTarget?.member_count ?? 0) > 0;
 
   return (
     <div className="space-y-6">
@@ -103,14 +120,14 @@ export default function RolesPage() {
                   <TableCell className="text-center tabular-nums">{role.permission_count}</TableCell>
                   <TableCell className="text-center tabular-nums">{role.member_count}</TableCell>
                   <TableCell className="text-right">
-                    {!role.is_system_role && role.member_count === 0 && (
+                    {!role.is_system_role && (
                       <Button
                         variant="ghost"
                         size="sm"
                         className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setDeleteTarget({ id: role.id, name: role.display_name });
+                          openDelete(role);
                         }}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -170,17 +187,56 @@ export default function RolesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: Confirmar Eliminar */}
-      <ConfirmDialog
-        open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Eliminar Rol"
-        description={`Esta accion eliminara el rol "${deleteTarget?.name}". No se puede deshacer.`}
-        confirmLabel="Eliminar"
-        variant="destructive"
-        onConfirm={handleDelete}
-        loading={deleteRole.isPending}
-      />
+      {/* Dialog: Eliminar Rol */}
+      {needsReassign ? (
+        <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Eliminar Rol</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-slate-600">
+                El rol <strong>"{deleteTarget?.display_name}"</strong> tiene{" "}
+                <strong>{deleteTarget?.member_count}</strong> usuario(s).
+                Seran reasignados a:
+              </p>
+              <Select value={reassignToId} onValueChange={setReassignToId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar rol destino..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableRolesForReassign.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancelar</Button>
+              <Button
+                variant="destructive"
+                onClick={handleDelete}
+                disabled={!reassignToId || deleteRole.isPending}
+              >
+                {deleteRole.isPending ? "Eliminando..." : "Reasignar y Eliminar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <ConfirmDialog
+          open={!!deleteTarget}
+          onOpenChange={(open) => !open && setDeleteTarget(null)}
+          title="Eliminar Rol"
+          description={`Esta accion eliminara el rol "${deleteTarget?.display_name}". No se puede deshacer.`}
+          confirmLabel="Eliminar"
+          variant="destructive"
+          onConfirm={handleDelete}
+          loading={deleteRole.isPending}
+        />
+      )}
     </div>
   );
 }

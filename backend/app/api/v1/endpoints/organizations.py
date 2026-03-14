@@ -12,6 +12,7 @@ from app.schemas.organization import (
     OrganizationMemberUpdate,
     OrganizationMemberResponse,
     AccountAssignmentsUpdate,
+    CreateUserWithMembership,
 )
 from app.services.organization import (
     create_organization,
@@ -25,7 +26,10 @@ from app.services.organization import (
     update_organization,
     get_user_account_assignments,
     update_user_account_assignments,
+    get_user_org_count,
 )
+from app.services.user import get_user_by_email, create_user, reset_password, delete_user
+from app.schemas.user import UserCreate
 from app.models.user import User
 
 router = APIRouter()
@@ -188,10 +192,77 @@ def list_organization_members(
             "user_email": user.email,
             "user_full_name": user.full_name,
             "account_ids": acc_ids,
+            "org_count": get_user_org_count(db, member.user_id),
         }
         response.append(OrganizationMemberResponse(**member_dict))
 
     return response
+
+
+@router.post(
+    "/{organization_id}/members/create-user",
+    response_model=OrganizationMemberResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create user and add as member",
+)
+def create_user_with_membership(
+    organization_id: UUID,
+    data: CreateUserWithMembership,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> OrganizationMemberResponse:
+    """Crear usuario nuevo con contraseña default y agregarlo a la org."""
+    role_info = get_user_role_in_org(db, organization_id, current_user.id)
+
+    if not role_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organizacion no encontrada o no eres miembro",
+        )
+
+    if not role_info["is_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden crear usuarios",
+        )
+
+    # Verificar email unico
+    existing = get_user_by_email(db, data.email)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este email ya esta registrado",
+        )
+
+    try:
+        # Crear usuario con contraseña default
+        user_data = UserCreate(email=data.email, password="12345678", full_name=data.full_name)
+        new_user = create_user(db, user_data)
+
+        # Resetear a 123456 (bypass min_length del schema)
+        reset_password(db, new_user.id)
+
+        # Agregar como miembro
+        membership = add_member(db, organization_id, new_user.id, data.role_id)
+
+        return OrganizationMemberResponse(
+            id=membership.id,
+            user_id=membership.user_id,
+            organization_id=membership.organization_id,
+            role_id=membership.role_id,
+            role_name=membership.role.name if membership.role else None,
+            role_display_name=membership.role.display_name if membership.role else None,
+            joined_at=membership.joined_at,
+            user_email=new_user.email,
+            user_full_name=new_user.full_name,
+            org_count=1,
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
 
 
 @router.post(
@@ -302,6 +373,49 @@ def update_organization_member_role(
         )
 
 
+@router.post(
+    "/{organization_id}/members/{user_id}/reset-password",
+    summary="Reset member password",
+)
+def reset_member_password(
+    organization_id: UUID,
+    user_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Resetear contraseña de un miembro a '123456'. Solo admins."""
+    current_role_info = get_user_role_in_org(db, organization_id, current_user.id)
+
+    if not current_role_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organizacion no encontrada o no eres miembro",
+        )
+
+    if not current_role_info["is_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden resetear contraseñas",
+        )
+
+    # Verificar que el usuario es miembro de esta org
+    target_role = get_user_role_in_org(db, organization_id, user_id)
+    if not target_role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El usuario no es miembro de esta organizacion",
+        )
+
+    result = reset_password(db, user_id)
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado",
+        )
+
+    return {"message": "Contraseña reseteada exitosamente"}
+
+
 @router.delete(
     "/{organization_id}/members/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -313,7 +427,7 @@ def remove_organization_member(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> None:
-    """Remove a user from the organization. Only admins can remove members."""
+    """Remover miembro. Si solo pertenece a esta org, eliminar usuario completo."""
     current_role_info = get_user_role_in_org(db, organization_id, current_user.id)
 
     if not current_role_info:
@@ -328,8 +442,19 @@ def remove_organization_member(
             detail="Solo administradores pueden remover miembros",
         )
 
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No puedes eliminarte a ti mismo",
+        )
+
     try:
+        org_count = get_user_org_count(db, user_id)
         remove_member(db, organization_id, user_id)
+
+        # Si solo pertenecia a esta org, eliminar usuario completo
+        if org_count <= 1:
+            delete_user(db, user_id)
 
     except ValueError as e:
         raise HTTPException(

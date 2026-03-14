@@ -474,6 +474,15 @@ def update_organization(
     return organization
 
 
+def get_user_org_count(db: Session, user_id: UUID) -> int:
+    """Cuenta cuantas organizaciones tiene el usuario."""
+    return db.execute(
+        select(func.count(OrganizationMember.id)).where(
+            OrganizationMember.user_id == user_id
+        )
+    ).scalar() or 0
+
+
 # ---------------------------------------------------------------------------
 # Asignacion de cuentas por usuario
 # ---------------------------------------------------------------------------

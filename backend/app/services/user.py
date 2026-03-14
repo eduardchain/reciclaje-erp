@@ -104,6 +104,36 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
     return user
 
 
+def reset_password(db: Session, user_id: UUID) -> User | None:
+    """Resetear contraseña a '123456'."""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        return None
+    user.hashed_password = get_password_hash("123456")
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def delete_user(db: Session, user_id: UUID) -> bool:
+    """Eliminar usuario. Hard delete si no tiene datos, soft delete si tiene FKs."""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        return False
+    try:
+        db.delete(user)
+        db.flush()
+        db.commit()
+    except Exception:
+        db.rollback()
+        # FK constraint — desactivar en vez de eliminar
+        user = get_user_by_id(db, user_id)
+        if user:
+            user.is_active = False
+            db.commit()
+    return True
+
+
 def update_user(db: Session, user_id: UUID, **kwargs) -> User | None:
     """
     Update user attributes.

@@ -22,6 +22,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## REGLA OBLIGATORIA: Tests en toda funcionalidad nueva
+
+**Toda implementacion de funcionalidad nueva o modificacion significativa DEBE incluir tests que cubran:**
+
+1. **Caso feliz**: flujo completo con datos validos (crear, liquidar, cancelar, etc.).
+2. **Validaciones**: campos obligatorios, tipos invalidos, valores fuera de rango → esperar 422.
+3. **Edge cases**: limites del negocio (stock negativo, balance cero, duplicados, estados invalidos).
+4. **Side-effects cross-module**: verificar que operaciones que afectan otros modulos (balances, inventario, costos) producen los efectos esperados.
+5. **Permisos RBAC**: si se agregan o modifican permisos, testear acceso permitido Y denegado.
+
+**Si el paquete de instrucciones incluye criterios de aceptacion (seccion 7), cada criterio debe tener al menos un test correspondiente.**
+
+Excepciones: cambios puramente cosmeticos en frontend (CSS, labels, reordenar UI) no requieren tests backend.
+
+---
+
 ## Guia para mantener CLAUDE.md
 
 Al terminar una sesion donde se implemento funcionalidad nueva o se tomo una decision arquitectonica:
