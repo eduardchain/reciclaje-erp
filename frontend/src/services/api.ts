@@ -33,9 +33,13 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("organizationId");
-      window.location.href = "/login";
+      // No redirigir si es un intento de login (no hay token aun)
+      const isLoginRequest = error.config?.url?.includes("/auth/login");
+      if (!isLoginRequest) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("organizationId");
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   },

@@ -161,11 +161,11 @@ def create_users(db, org: Organization) -> dict:
 
     # (email, nombre, rol_rbac)
     usuarios = [
-        ("gustavo@reciclajesdelacosta.com", "Gustavo Chain",     "admin"),
-        ("admin@reciclajesdelacosta.com",   "Administrador",     "admin"),
-        ("nixon@reciclajesdelacosta.com",   "Nixon Liquidador",  "liquidador"),
-        ("john@reciclajesdelacosta.com",    "John Bascula",      "bascula"),
-        ("ingrid@reciclajesdelacosta.com",  "Ingrid Planillador","planillador"),
+        ("gustavo@reciclajesdelacosta.com", "Gustavo",       "admin"),
+        ("admin@reciclajesdelacosta.com",   "Administrador", "admin"),
+        ("nixon@reciclajesdelacosta.com",   "Nixon",         "liquidador"),
+        ("john@reciclajesdelacosta.com",    "John",          "bascula"),
+        ("ingrid@reciclajesdelacosta.com",  "Ingrid",        "planillador"),
     ]
     result = {}
     for email, nombre, rol_name in usuarios:

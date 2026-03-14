@@ -5,11 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLogin } from "@/hooks/useAuth";
 import { useAuthStore } from "@/stores/authStore";
+import { getApiErrorMessage } from "@/utils/formatters";
 import EcoBalanceLogo from "@/components/EcoBalanceLogo";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
   const login = useLogin();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
@@ -19,7 +21,15 @@ export default function Login() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    login.mutate({ email, password });
+    setLoginError("");
+    login.mutate(
+      { email, password },
+      {
+        onError: (error: unknown) => {
+          setLoginError(getApiErrorMessage(error, "Correo o contraseña incorrectos"));
+        },
+      },
+    );
   };
 
   return (
@@ -42,7 +52,7 @@ export default function Login() {
                 autoComplete="email"
                 required
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => { setEmail(e.target.value); setLoginError(""); }}
                 placeholder="correo@ejemplo.com"
               />
             </div>
@@ -54,11 +64,15 @@ export default function Login() {
                 autoComplete="current-password"
                 required
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); setLoginError(""); }}
                 placeholder="Tu contrasena"
               />
             </div>
           </div>
+
+          {loginError && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">{loginError}</p>
+          )}
 
           <Button
             type="submit"
