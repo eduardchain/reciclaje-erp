@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { UserPlus, Shield, X } from "lucide-react";
+import { UserPlus, Shield, X, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -139,28 +139,36 @@ export default function SystemUsersPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
-                      {user.memberships.length === 0 && (
-                        <span className="text-xs text-slate-400">Sin organizacion</span>
-                      )}
-                      {user.memberships.map((m) => (
-                        <Badge key={m.organization_id} variant="outline" className="text-[10px]">
-                          {m.organization_name}
-                          <span className="text-slate-400 ml-1">({m.role_display_name})</span>
+                      {user.is_superuser ? (
+                        <Badge variant="secondary" className="bg-purple-100 text-purple-700 text-[10px]">
+                          <Globe className="h-3 w-3 mr-1" />
+                          Acceso Global
                         </Badge>
-                      ))}
+                      ) : user.memberships.length === 0 ? (
+                        <span className="text-xs text-slate-400">Sin organizacion</span>
+                      ) : (
+                        user.memberships.map((m) => (
+                          <Badge key={m.organization_id} variant="outline" className="text-[10px]">
+                            {m.organization_name}
+                            <span className="text-slate-400 ml-1">({m.role_display_name})</span>
+                          </Badge>
+                        ))
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-sm text-slate-500">{formatDate(user.created_at)}</TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 px-2 text-xs"
-                      onClick={() => openAddDialog(user)}
-                    >
-                      <UserPlus className="h-3.5 w-3.5 mr-1" />
-                      Agregar a Org
-                    </Button>
+                    {!user.is_superuser && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-xs"
+                        onClick={() => openAddDialog(user)}
+                      >
+                        <UserPlus className="h-3.5 w-3.5 mr-1" />
+                        Agregar a Org
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
