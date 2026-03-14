@@ -18,7 +18,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.purchase import Purchase, PurchaseLine
+from app.models.purchase import Purchase, PurchaseCommission, PurchaseLine
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
 from app.models.money_account import MoneyAccount
@@ -234,8 +234,12 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Nota: NO se actualiza saldo del proveedor al crear.
         # El saldo se actualiza al liquidar (cuando se confirman precios).
 
+        # Step 6: Procesar comisiones (solo guardar, el prorrateo ocurre al liquidar)
+        if obj_in.commissions:
+            self._process_commissions(db, purchase, obj_in.commissions, total_amount, organization_id)
+
         db.flush()
-        
+
         # Step 7: Auto-liquidate if requested (precios ya validados > 0 en schema)
         if obj_in.auto_liquidate:
             print(f"  🔄 Auto-liquidating purchase...")
@@ -246,6 +250,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 user_id=user_id,
                 immediate_payment=obj_in.immediate_payment,
                 payment_account_id=obj_in.payment_account_id,
+                commissions_data=obj_in.commissions if obj_in.commissions else None,
             )
         
         db.commit()
@@ -262,6 +267,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         line_updates: Optional[List[dict]] = None,
         immediate_payment: bool = False,
         payment_account_id: Optional[UUID] = None,
+        commissions_data: Optional[List] = None,
     ) -> Purchase:
         """
         Liquidar compra registrada (cambiar status a 'liquidated').
@@ -285,6 +291,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             joinedload(Purchase.lines).joinedload(PurchaseLine.material),
             joinedload(Purchase.lines).joinedload(PurchaseLine.warehouse),
             joinedload(Purchase.supplier),
+            joinedload(Purchase.commissions),
         ).filter(
             Purchase.id == purchase_id,
             Purchase.organization_id == organization_id
@@ -331,8 +338,39 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             line.quantity * line.unit_price for line in purchase.lines
         )
 
+        # Step 4b: Procesar comisiones
+        if commissions_data is not None:
+            db.query(PurchaseCommission).filter(
+                PurchaseCommission.purchase_id == purchase.id
+            ).delete(synchronize_session=False)
+            db.flush()
+            if commissions_data:
+                self._process_commissions(
+                    db, purchase, commissions_data, purchase.total_amount, organization_id
+                )
+                db.flush()
+
+        # Step 4c: Calcular prorrateo de comisiones al costo
+        total_commission = Decimal("0")
+        if purchase.commissions:
+            # Refresh commissions despues del flush
+            db.refresh(purchase)
+            total_commission = sum(
+                c.commission_amount for c in purchase.commissions
+            )
+        commission_prorate = {}
+        if total_commission > 0 and purchase.total_amount > 0:
+            for line in purchase.lines:
+                line_value = line.quantity * line.unit_price
+                line_weight = line_value / purchase.total_amount
+                commission_prorate[line.id] = total_commission * line_weight
+
         # Step 5 y 6: Actualizar InventoryMovement.unit_cost y recalcular costo promedio
         for line in purchase.lines:
+            # Costo ajustado = precio + comision prorrateada
+            line_commission = commission_prorate.get(line.id, Decimal("0"))
+            adjusted_unit_cost = line.unit_price + (line_commission / line.quantity) if line.quantity > 0 else line.unit_price
+
             # Actualizar costo en movimiento de inventario
             inv_movement = db.query(InventoryMovement).filter(
                 InventoryMovement.reference_type == "purchase",
@@ -341,13 +379,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 InventoryMovement.movement_type == "purchase",
             ).first()
             if inv_movement:
-                inv_movement.unit_cost = line.unit_price
+                inv_movement.unit_cost = adjusted_unit_cost
 
-            # Recalcular costo promedio del material (con historial)
+            # Recalcular costo promedio del material con costo AJUSTADO
             material = line.material
             old_cost = material.current_average_cost
             old_liquidated_stock = material.current_stock_liquidated
-            self._apply_cost_at_liquidation(material, line.quantity, line.unit_price)
+            self._apply_cost_at_liquidation(material, line.quantity, adjusted_unit_cost)
 
             material_cost_history_service.record_cost_change(
                 db=db,
@@ -361,15 +399,24 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 organization_id=organization_id,
             )
 
-            print(f"  💲 {material.code}: precio=${line.unit_price}, nuevo costo_prom=${material.current_average_cost}")
+            if line_commission > 0:
+                print(f"  💲 {material.code}: precio=${line.unit_price} + comision=${line_commission} = costo=${adjusted_unit_cost}, costo_prom=${material.current_average_cost}")
+            else:
+                print(f"  💲 {material.code}: precio=${line.unit_price}, costo_prom=${material.current_average_cost}")
 
         # Step 7: Mover stock de transito a liquidado
         self._move_stock_transit_to_liquidated(db, purchase)
 
-        # Step 8: Actualizar saldo del proveedor (deuda)
+        # Step 8: Actualizar saldo del proveedor (deuda — solo materiales, sin comisiones)
         supplier = purchase.supplier
         supplier.current_balance -= purchase.total_amount
         print(f"  💰 Saldo proveedor: {supplier.current_balance} (deuda +${purchase.total_amount})")
+
+        # Step 8b: Actualizar saldo de comisionistas (les debemos la comision)
+        for comm in (purchase.commissions or []):
+            recipient = db.get(ThirdParty, comm.third_party_id)
+            recipient.current_balance -= comm.commission_amount
+            print(f"  💼 Comision '{comm.concept}': ${comm.commission_amount} → {recipient.name} (saldo: {recipient.current_balance})")
 
         # Step 9: Cambiar status
         purchase.status = "liquidated"
@@ -456,18 +503,19 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         """
         # Step 1: Get and validate purchase
         purchase = db.query(Purchase).options(
-            joinedload(Purchase.lines).joinedload(PurchaseLine.material)
+            joinedload(Purchase.lines).joinedload(PurchaseLine.material),
+            joinedload(Purchase.commissions),
         ).filter(
             Purchase.id == purchase_id,
             Purchase.organization_id == organization_id
         ).first()
-        
+
         if not purchase:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Compra no encontrada"
             )
-        
+
         # Validate: Cannot cancel purchase that belongs to double-entry
         if purchase.double_entry_id is not None:
             raise HTTPException(
@@ -557,7 +605,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         supplier = db.get(ThirdParty, purchase.supplier_id)
         if was_liquidated:
             supplier.current_balance += purchase.total_amount  # Reduce debt
-        
+
+            # Step 6b: Revertir saldo de comisionistas
+            for comm in (purchase.commissions or []):
+                recipient = db.get(ThirdParty, comm.third_party_id)
+                recipient.current_balance += comm.commission_amount
+                print(f"  ↩️  Comision revertida: ${comm.commission_amount} → {recipient.name}")
+
         print(f"❌ Cancelled purchase #{purchase.purchase_number}")
         print(f"   Supplier balance: {supplier.current_balance} (debt reduced by ${purchase.total_amount})")
         
@@ -592,6 +646,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             joinedload(Purchase.lines).joinedload(PurchaseLine.warehouse),
             joinedload(Purchase.supplier),
             joinedload(Purchase.payment_account),
+            joinedload(Purchase.commissions),
         ).filter(
             Purchase.id == purchase_id,
             Purchase.organization_id == organization_id
@@ -738,6 +793,17 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             purchase.supplier_id = obj_in.supplier_id
             print(f"  🔄 Proveedor cambiado a: {new_supplier.name}")
 
+        # Step 4b: Actualizar comisiones si se proporcionan
+        if obj_in.commissions is not None:
+            db.query(PurchaseCommission).filter(
+                PurchaseCommission.purchase_id == purchase.id
+            ).delete(synchronize_session=False)
+            db.flush()
+            if obj_in.commissions:
+                self._process_commissions(
+                    db, purchase, obj_in.commissions, new_total, organization_id
+                )
+
         # Step 5: Actualizar metadata
         if obj_in.date is not None:
             purchase.date = obj_in.date
@@ -777,6 +843,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             joinedload(Purchase.lines).joinedload(PurchaseLine.warehouse),
             joinedload(Purchase.supplier),
             joinedload(Purchase.payment_account),
+            joinedload(Purchase.commissions),
         ).filter(
             Purchase.id == purchase_id,
             Purchase.organization_id == organization_id
@@ -806,6 +873,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             joinedload(Purchase.lines).joinedload(PurchaseLine.warehouse),
             joinedload(Purchase.supplier),
             joinedload(Purchase.payment_account),
+            joinedload(Purchase.commissions),
         ).filter(
             Purchase.id == purchase_id,
             Purchase.organization_id == organization_id
@@ -1071,6 +1139,51 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 material.current_stock_transit -= line.quantity
                 material.current_stock_liquidated += line.quantity
                 print(f"    📦 {material.code}: transit -{line.quantity}, liquidated +{line.quantity}")
+
+
+    def _process_commissions(
+        self,
+        db: Session,
+        purchase: Purchase,
+        commissions_data: List,
+        purchase_total: Decimal,
+        organization_id: UUID,
+    ) -> None:
+        """Crear registros de comision y calcular montos."""
+        for comm_data in commissions_data:
+            recipient = db.get(ThirdParty, comm_data.third_party_id)
+            if not recipient or recipient.organization_id != organization_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Comisionista {comm_data.third_party_id} no encontrado",
+                )
+
+            commission_amount = self._calculate_commission(
+                comm_data.commission_type, comm_data.commission_value, purchase_total
+            )
+
+            commission = PurchaseCommission(
+                purchase_id=purchase.id,
+                third_party_id=comm_data.third_party_id,
+                concept=comm_data.concept,
+                commission_type=comm_data.commission_type,
+                commission_value=comm_data.commission_value,
+                commission_amount=commission_amount,
+            )
+            db.add(commission)
+            print(f"  💼 Comision: {comm_data.concept} - ${commission_amount} ({comm_data.commission_type})")
+
+    def _calculate_commission(
+        self,
+        commission_type: str,
+        commission_value: Decimal,
+        purchase_total: Decimal,
+    ) -> Decimal:
+        """Calcular monto de comision segun tipo."""
+        if commission_type == "percentage":
+            return (purchase_total * Decimal(str(commission_value))) / Decimal("100")
+        else:
+            return Decimal(str(commission_value))
 
 
 # Instance for use in endpoints

@@ -211,6 +211,65 @@ export default function PurchaseDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Comisiones */}
+      {purchase.commissions?.length > 0 && canViewPrices && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-lg border border-slate-200/80 overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Comisionista</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Concepto</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Tipo</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Valor</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Monto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {purchase.commissions.map((comm) => (
+                    <TableRow key={comm.id}>
+                      <TableCell className="font-medium">{comm.third_party_name}</TableCell>
+                      <TableCell>{comm.concept}</TableCell>
+                      <TableCell>{comm.commission_type === "percentage" ? "Porcentaje" : "Fijo"}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {comm.commission_type === "percentage" ? `${comm.commission_value}%` : formatCurrency(comm.commission_value)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">{formatCurrency(comm.commission_amount)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {/* Resumen con comisiones */}
+            <div className="bg-slate-50 rounded-lg p-3 mt-3">
+              <div className="max-w-sm ml-auto space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">Subtotal Materiales</span>
+                  <span className="tabular-nums">{formatCurrency(purchase.total_amount)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">(+) Comisiones</span>
+                  <span className="tabular-nums text-amber-600">
+                    {formatCurrency(purchase.commissions.reduce((s, c) => s + c.commission_amount, 0))}
+                  </span>
+                </div>
+                <div className="border-t border-slate-200 pt-1" />
+                <div className="flex justify-between text-sm font-semibold">
+                  <span>Costo Total Inventario</span>
+                  <span className="tabular-nums">
+                    {formatCurrency(purchase.total_amount + purchase.commissions.reduce((s, c) => s + c.commission_amount, 0))}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Auditoria */}
       <Card className="shadow-sm">
         <CardHeader>

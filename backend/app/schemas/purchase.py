@@ -12,6 +12,39 @@ from app.utils.dates import BusinessDate
 
 
 # ============================================================================
+# PurchaseCommission Schemas
+# ============================================================================
+
+
+class PurchaseCommissionBase(BaseModel):
+    """Base schema para comision de compra."""
+    third_party_id: UUID = Field(..., description="UUID del comisionista")
+    concept: str = Field(..., max_length=255, description="Concepto de la comision")
+    commission_type: str = Field(..., description="'percentage' o 'fixed'")
+    commission_value: Decimal = Field(..., gt=0, description="Porcentaje (0-100) o monto fijo")
+
+
+class PurchaseCommissionCreate(PurchaseCommissionBase):
+    """Schema para crear comision de compra. commission_amount se calcula automaticamente."""
+    pass
+
+
+class PurchaseCommissionResponse(PurchaseCommissionBase):
+    """Schema para respuesta de comision de compra."""
+    id: UUID
+    purchase_id: UUID
+    commission_amount: float
+    created_at: datetime
+    third_party_name: str = Field(..., description="Nombre del comisionista")
+
+    model_config = {"from_attributes": True}
+
+    @field_serializer('commission_value', 'commission_amount')
+    def serialize_decimals(self, value: Decimal) -> float:
+        return float(value)
+
+
+# ============================================================================
 # PurchaseLine Schemas
 # ============================================================================
 
@@ -77,6 +110,7 @@ class PurchaseCreate(PurchaseBase):
     Payment to supplier is a separate operation via MoneyMovement.
     """
     lines: List[PurchaseLineCreate] = Field(..., min_length=1, description="Purchase lines (at least 1)")
+    commissions: List[PurchaseCommissionCreate] = Field(default_factory=list, description="Comisiones opcionales")
     auto_liquidate: bool = Field(False, description="Auto-liquidate after creation (1-step workflow)")
     immediate_payment: bool = Field(False, description="Pagar de contado al liquidar (solo con auto_liquidate)")
     payment_account_id: Optional[UUID] = Field(None, description="Cuenta para pago inmediato")
@@ -121,6 +155,7 @@ class PurchaseFullUpdate(BaseModel):
     vehicle_plate: Optional[str] = Field(None, max_length=20)
     invoice_number: Optional[str] = Field(None, max_length=50)
     lines: Optional[List[PurchaseLineCreate]] = Field(None, min_length=1, description="Nuevas lineas (reemplazan todas las existentes)")
+    commissions: Optional[List[PurchaseCommissionCreate]] = Field(None, description="Comisiones (reemplazan las existentes)")
 
 
 class PurchaseResponse(PurchaseBase):
@@ -155,8 +190,9 @@ class PurchaseResponse(PurchaseBase):
     supplier_name: str = Field(..., description="Supplier name")
     payment_account_name: Optional[str] = Field(None, description="Payment account name (if liquidated)")
 
-    # Nested lines with joined data
+    # Nested lines and commissions
     lines: List[PurchaseLineResponse] = Field(..., description="Purchase lines")
+    commissions: List[PurchaseCommissionResponse] = Field(default_factory=list, description="Comisiones de compra")
     
     # Double-entry link
     double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
@@ -178,6 +214,7 @@ class PurchaseLiquidateLineUpdate(BaseModel):
 class PurchaseLiquidateRequest(BaseModel):
     """Schema for liquidating a purchase (confirmar precios, mover stock, actualizar saldo proveedor)."""
     lines: Optional[List[PurchaseLiquidateLineUpdate]] = Field(None, description="Actualizacion opcional de precios por linea")
+    commissions: Optional[List[PurchaseCommissionCreate]] = Field(None, description="Comisiones (reemplazan las existentes)")
     immediate_payment: bool = Field(False, description="Crear pago inmediato al liquidar")
     payment_account_id: Optional[UUID] = Field(None, description="Cuenta para pago inmediato")
 

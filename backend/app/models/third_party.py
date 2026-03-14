@@ -97,6 +97,12 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
         foreign_keys="SaleCommission.third_party_id",
         back_populates="third_party",
     )
+
+    purchase_commissions: Mapped[list["PurchaseCommission"]] = relationship(
+        "PurchaseCommission",
+        foreign_keys="PurchaseCommission.third_party_id",
+        back_populates="third_party",
+    )
     
     double_entries_as_supplier: Mapped[list["DoubleEntry"]] = relationship(
         "DoubleEntry",

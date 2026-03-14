@@ -2,6 +2,25 @@ import type { BaseEntity } from "./common";
 
 export type PurchaseStatus = "registered" | "liquidated" | "cancelled";
 
+export interface PurchaseCommissionCreate {
+  third_party_id: string;
+  concept: string;
+  commission_type: "percentage" | "fixed";
+  commission_value: number;
+}
+
+export interface PurchaseCommissionResponse {
+  id: string;
+  purchase_id: string;
+  third_party_id: string;
+  concept: string;
+  commission_type: "percentage" | "fixed";
+  commission_value: number;
+  commission_amount: number;
+  created_at: string;
+  third_party_name: string;
+}
+
 export interface PurchaseLineCreate {
   material_id: string;
   quantity: number;
@@ -30,6 +49,7 @@ export interface PurchaseCreate {
   vehicle_plate?: string | null;
   invoice_number?: string | null;
   lines: PurchaseLineCreate[];
+  commissions?: PurchaseCommissionCreate[];
   auto_liquidate?: boolean;
   immediate_payment?: boolean;
   payment_account_id?: string | null;
@@ -67,6 +87,7 @@ export interface PurchaseResponse extends BaseEntity {
   supplier_name: string;
   payment_account_name: string | null;
   lines: PurchaseLineResponse[];
+  commissions: PurchaseCommissionResponse[];
   warnings?: string[];
 }
 
@@ -77,6 +98,7 @@ export interface PurchaseFullUpdate {
   vehicle_plate?: string | null;
   invoice_number?: string | null;
   lines?: PurchaseLineCreate[];
+  commissions?: PurchaseCommissionCreate[];
 }
 
 export interface PurchaseLiquidateLineUpdate {
@@ -86,6 +108,7 @@ export interface PurchaseLiquidateLineUpdate {
 
 export interface PurchaseLiquidateRequest {
   lines?: PurchaseLiquidateLineUpdate[];
+  commissions?: PurchaseCommissionCreate[];
   immediate_payment?: boolean;
   payment_account_id?: string;
 }

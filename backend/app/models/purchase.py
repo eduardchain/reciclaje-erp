@@ -9,7 +9,7 @@ Payment to supplier is a separate treasury operation (MoneyMovement type='paymen
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -193,6 +193,13 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         order_by="PurchaseLine.created_at",
     )
 
+    commissions: Mapped[List["PurchaseCommission"]] = relationship(
+        "PurchaseCommission",
+        back_populates="purchase",
+        cascade="all, delete-orphan",
+        order_by="PurchaseCommission.created_at",
+    )
+
     double_entry: Mapped[Optional["DoubleEntry"]] = relationship(
         "DoubleEntry",
         foreign_keys="[DoubleEntry.purchase_id]",
@@ -312,8 +319,71 @@ class PurchaseLine(Base, TimestampMixin):
     def calculate_line_total(self) -> Decimal:
         """
         Calculate line total from quantity and unit price.
-        
+
         Returns:
             Decimal: quantity × unit_price
         """
         return self.quantity * self.unit_price
+
+
+class PurchaseCommission(Base, TimestampMixin):
+    """
+    Comision de compra pagada a intermediarios (comisionistas).
+
+    A diferencia de ventas, la comision de compra se prorratea al costo
+    del material (no aparece en P&L como gasto directo).
+    """
+    __tablename__ = "purchase_commissions"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=uuid4)
+
+    purchase_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("purchases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    third_party_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("third_parties.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+        comment="Comisionista que recibe la comision",
+    )
+
+    concept: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="Descripcion de la comision",
+    )
+
+    commission_type: Mapped[str] = mapped_column(
+        Enum("percentage", "fixed", name="commission_type", create_type=False),
+        nullable=False,
+        comment="percentage (del total de compra) o fixed",
+    )
+
+    commission_value: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        comment="Porcentaje (0-100) o monto fijo",
+    )
+
+    commission_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        comment="Monto calculado de la comision",
+    )
+
+    # Relationships
+    purchase: Mapped["Purchase"] = relationship(
+        "Purchase",
+        back_populates="commissions",
+    )
+
+    third_party: Mapped["ThirdParty"] = relationship(
+        "ThirdParty",
+        foreign_keys=[third_party_id],
+        back_populates="purchase_commissions",
+    )

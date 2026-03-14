@@ -160,7 +160,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 567 tests.
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 585 tests.
 
 ### Database
 
@@ -241,6 +241,8 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 28. **Scripts utilitarios**: `scripts/seed_test_data.py --clear` (datos de prueba + capital $100M COP). `scripts/load_initial_data.py` (carga maestros desde Excel, 8 hojas, resolucion FKs por nombre, `--dry-run`).
 
 29. **Super Admin + Multi-Org**: `is_superuser=True` bypasses membership en `get_required_org_context()` / `get_optional_org_context()` (sintetiza admin context con todos los permisos). `/system/` endpoints (6) protegidos con `get_current_superuser`. Frontend: `organizationId="system"` sentinel — API interceptor no envia `X-Organization-ID`, `usePermissions` retorna admin full, sidebar muestra solo seccion SISTEMA, ProtectedRoute permite pasar sin org. Header dropdown: multi-org selector + opcion "Sistema" para superusers. `queryClient.clear()` al cambiar org. Soft delete de org: `is_active=False` + desactivar usuarios huerfanos.
+
+30. **Comision de compra (prorrateo al costo)**: `PurchaseCommission` tabla separada (reutiliza enum `commission_type`). A diferencia de ventas (comision→P&L via `commission_accrual`), en compras la comision se **prorratea al costo** del material: `adjusted_unit_cost = unit_price + (commission_prorate / quantity)`. Afecta `InventoryMovement.unit_cost` y costo promedio. NO crea MoneyMovement — solo actualiza `third_party.balance` del comisionista. Cancelacion revierte balance. UI en Create/Edit/Liquidate/Detail pages.
 
 ### Inventory Module — UX Details
 

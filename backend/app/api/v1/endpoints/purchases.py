@@ -58,6 +58,13 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None) -> dict:
             }
             for line in purchase.lines
         ],
+        "commissions": [
+            {
+                **comm.__dict__,
+                "third_party_name": comm.third_party.name if comm.third_party else None,
+            }
+            for comm in (purchase.commissions or [])
+        ],
         "created_by_name": None,
         "liquidated_by_name": None,
         "cancelled_by_name": None,
@@ -516,6 +523,7 @@ async def liquidate_purchase(
             line_updates=line_updates,
             immediate_payment=liquidate_data.immediate_payment,
             payment_account_id=liquidate_data.payment_account_id,
+            commissions_data=liquidate_data.commissions,
         )
         
         response_data = _enrich_purchase_response(purchase, db)

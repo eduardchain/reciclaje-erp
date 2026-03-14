@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,22 +6,28 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { usePurchase, useUpdatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { useSuppliers, useCustomers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, utcToLocalDateInput } from "@/utils/formatters";
-import type { PurchaseLineCreate } from "@/types/purchase";
+import type { PurchaseLineCreate, PurchaseCommissionCreate } from "@/types/purchase";
 
 interface LineFormData extends PurchaseLineCreate {
   _key: number;
 }
 
+interface CommissionFormData extends PurchaseCommissionCreate {
+  _key: number;
+}
+
 let lineKeyCounter = 1000;
+let commKeyCounter = 1000;
 
 function createEmptyLine(): LineFormData {
   return {
@@ -33,6 +39,10 @@ function createEmptyLine(): LineFormData {
   };
 }
 
+function createEmptyCommission(): CommissionFormData {
+  return { _key: ++commKeyCounter, third_party_id: "", concept: "", commission_type: "percentage", commission_value: 0 };
+}
+
 export default function PurchaseEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -40,10 +50,12 @@ export default function PurchaseEditPage() {
 
   const { data: purchase, isLoading: loadingPurchase } = usePurchase(id!);
   const { data: suppliersData } = useSuppliers();
+  const { data: customersData } = useCustomers();
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
 
   const suppliers = suppliersData?.items ?? [];
+  const thirdParties = [...(suppliersData?.items ?? []), ...(customersData?.items ?? [])];
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
@@ -54,6 +66,7 @@ export default function PurchaseEditPage() {
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([]);
+  const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
   const [initialized, setInitialized] = useState(false);
 
   // Pre-populate form with purchase data
@@ -73,6 +86,17 @@ export default function PurchaseEditPage() {
           warehouse_id: line.warehouse_id,
         }))
       );
+      if (purchase.commissions?.length > 0) {
+        setCommissions(
+          purchase.commissions.map((c) => ({
+            _key: ++commKeyCounter,
+            third_party_id: c.third_party_id,
+            concept: c.concept,
+            commission_type: c.commission_type,
+            commission_value: c.commission_value,
+          }))
+        );
+      }
       setInitialized(true);
     }
   }, [purchase, initialized]);
@@ -107,7 +131,14 @@ export default function PurchaseEditPage() {
     setLines((prev) => [...prev, createEmptyLine()]);
   };
 
+  const updateCommission = (key: number, field: keyof PurchaseCommissionCreate, value: string | number) => {
+    setCommissions((prev) => prev.map((c) => (c._key === key ? { ...c, [field]: value } : c)));
+  };
+
   const total = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
+  const totalComm = useMemo(() => commissions.reduce((sum, c) => {
+    return sum + (c.commission_type === "percentage" ? (total * c.commission_value) / 100 : c.commission_value);
+  }, 0), [commissions, total]);
   const isFutureDate = date ? new Date(date) > new Date() : false;
 
   const canSubmit =
@@ -115,7 +146,8 @@ export default function PurchaseEditPage() {
     date &&
     !isFutureDate &&
     lines.length > 0 &&
-    lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0);
+    lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
+    commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0);
 
   const handleSubmit = () => {
     if (!canSubmit || !id) return;
@@ -129,6 +161,7 @@ export default function PurchaseEditPage() {
           invoice_number: invoiceNumber || null,
           notes: notes || null,
           lines: lines.map(({ _key, ...rest }) => rest),
+          commissions: commissions.map(({ _key, ...rest }) => rest),
         },
       },
       {
@@ -304,6 +337,84 @@ export default function PurchaseEditPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Comisiones */}
+      <Card className="shadow-sm">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones (Opcional)</CardTitle>
+          <Button variant="outline" size="sm" onClick={() => setCommissions((p) => [...p, createEmptyCommission()])}>
+            <Plus className="h-4 w-4 mr-1" />Agregar Comision
+          </Button>
+        </CardHeader>
+        {commissions.length > 0 && (
+          <CardContent className="space-y-0">
+            {commissions.map((comm, idx) => (
+              <div key={comm._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < commissions.length - 1 ? "border-b border-slate-100" : ""}`}>
+                <div className="col-span-3">
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comisionista *</Label>}
+                  <EntitySelect value={comm.third_party_id} onChange={(v) => updateCommission(comm._key, "third_party_id", v)} options={thirdParties.map((tp) => ({ id: tp.id, label: tp.name }))} placeholder="Tercero..." />
+                </div>
+                <div className="col-span-3">
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto *</Label>}
+                  <Input value={comm.concept} onChange={(e) => updateCommission(comm._key, "concept", e.target.value)} placeholder="Concepto..." />
+                </div>
+                <div className="col-span-2">
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</Label>}
+                  <Select value={comm.commission_type} onValueChange={(v) => updateCommission(comm._key, "commission_type", v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="percentage">Porcentaje</SelectItem>
+                      <SelectItem value="fixed">Fijo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-2">
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor *</Label>}
+                  <Input type="number" min={0} step="0.01" value={comm.commission_value || ""} onChange={(e) => updateCommission(comm._key, "commission_value", parseFloat(e.target.value) || 0)} placeholder={comm.commission_type === "percentage" ? "%" : "$"} />
+                </div>
+                <div className="col-span-1 text-right">
+                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Monto</Label>}
+                  <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">
+                    {comm.commission_type === "percentage"
+                      ? formatCurrency((total * comm.commission_value) / 100)
+                      : formatCurrency(comm.commission_value)}
+                  </p>
+                </div>
+                <div className="col-span-1">
+                  {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
+                  <Button variant="ghost" size="sm" onClick={() => setCommissions((p) => p.filter((c) => c._key !== comm._key))} className="text-red-500 hover:text-red-700"><Trash2 className="h-4 w-4" /></Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Resumen Financiero */}
+      {totalComm > 0 && (
+      <Card className="shadow-sm bg-slate-50/50">
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Resumen Financiero</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="max-w-sm ml-auto space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">Subtotal Materiales</span>
+              <span className="font-medium tabular-nums">{formatCurrency(total)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">(+) Comisiones</span>
+              <span className="font-medium tabular-nums text-amber-600">{formatCurrency(totalComm)}</span>
+            </div>
+            <div className="border-t border-slate-200 pt-2" />
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600 font-semibold">Costo Total Inventario</span>
+              <span className="font-bold tabular-nums text-base">{formatCurrency(total + totalComm)}</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      )}
 
       {/* Acciones */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
