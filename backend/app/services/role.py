@@ -12,7 +12,7 @@ from app.schemas.role import RoleCreate, RoleUpdate
 
 
 # ---------------------------------------------------------------------------
-# Catalogo de permisos del sistema (~45 permisos, 11 modulos)
+# Catalogo de permisos del sistema (~67 permisos, 11 modulos)
 # (code, display_name, module, description, sort_order)
 # ---------------------------------------------------------------------------
 
@@ -24,6 +24,7 @@ PERMISSIONS_CATALOG = [
     ("purchases.liquidate", "Liquidar Compras", "purchases", "Permite liquidar compras y asignar precios", 4),
     ("purchases.cancel", "Anular Compras", "purchases", "Permite anular compras", 5),
     ("purchases.view_prices", "Ver Precios en Compras", "purchases", "Permite ver precios y totales", 6),
+    ("purchases.edit_prices", "Editar Precios en Compras", "purchases", "Permite ingresar y modificar precios al crear/editar", 7),
 
     # Ventas
     ("sales.view", "Ver Ventas", "sales", "Permite ver listado e historial de ventas", 10),
@@ -32,6 +33,7 @@ PERMISSIONS_CATALOG = [
     ("sales.liquidate", "Liquidar Ventas", "sales", "Permite liquidar ventas", 13),
     ("sales.cancel", "Anular Ventas", "sales", "Permite anular ventas", 14),
     ("sales.view_prices", "Ver Precios en Ventas", "sales", "Permite ver precios y totales", 15),
+    ("sales.edit_prices", "Editar Precios en Ventas", "sales", "Permite ingresar y modificar precios al crear/editar", 16),
 
     # Doble Partida
     ("double_entries.view", "Ver Doble Partida", "double_entries", "Permite ver dobles partidas", 20),
@@ -54,8 +56,6 @@ PERMISSIONS_CATALOG = [
     ("materials.create", "Crear Materiales", "materials", "Permite crear nuevos materiales", 41),
     ("materials.edit", "Editar Materiales", "materials", "Permite editar materiales existentes", 42),
     ("materials.delete", "Eliminar Materiales", "materials", "Permite eliminar materiales", 43),
-    ("materials.view_prices", "Ver Precios de Materiales", "materials", "Permite ver lista de precios", 44),
-    ("materials.edit_prices", "Editar Precios de Materiales", "materials", "Permite modificar lista de precios", 45),
 
     # Transformaciones
     ("transformations.view", "Ver Transformaciones", "transformations", "Permite ver transformaciones", 50),
@@ -68,17 +68,10 @@ PERMISSIONS_CATALOG = [
     ("third_parties.delete", "Eliminar Terceros", "third_parties", "Permite eliminar terceros", 63),
     ("third_parties.view_balance", "Ver Saldos de Terceros", "third_parties", "Permite ver estados de cuenta", 64),
 
-    # Bodegas
-    ("warehouses.view", "Ver Bodegas", "warehouses", "Permite ver bodegas", 70),
-    ("warehouses.create", "Crear Bodegas", "warehouses", "Permite crear bodegas", 71),
-    ("warehouses.edit", "Editar Bodegas", "warehouses", "Permite editar bodegas", 72),
-
     # Tesoreria
     ("treasury.view", "Ver Tesoreria Completa", "treasury", "Permite ver todas las cuentas y movimientos", 80),
     ("treasury.view_own", "Ver Solo Mi Caja", "treasury", "Permite ver solo la caja asignada", 81),
     ("treasury.create_movements", "Crear Movimientos", "treasury", "Permite crear movimientos de dinero", 82),
-    ("treasury.manage_accounts", "Gestionar Cuentas", "treasury", "Permite crear/editar cuentas de dinero", 83),
-    ("treasury.manage_expenses", "Gestionar Gastos", "treasury", "Permite gestionar categorias y gastos", 84),
     ("treasury.manage_fixed_assets", "Gestionar Activos Fijos", "treasury", "Permite gestionar activos fijos", 85),
     ("treasury.view_provisions", "Ver Provisiones", "treasury", "Permite ver provisiones", 86),
     ("treasury.view_liabilities", "Ver Pasivos", "treasury", "Permite ver pasivos laborales", 87),
@@ -97,6 +90,17 @@ PERMISSIONS_CATALOG = [
     ("reports.view_sales", "Ver Reporte Ventas", "reports", "Permite ver reporte de ventas", 107),
     ("reports.view_margins", "Ver Margenes", "reports", "Permite ver analisis de margenes", 108),
     ("reports.view_third_parties", "Ver Saldos Terceros", "reports", "Permite ver saldos de terceros", 109),
+
+    # Configuracion
+    ("warehouses.view", "Ver Bodegas", "config", "Permite ver bodegas", 120),
+    ("warehouses.create", "Crear Bodegas", "config", "Permite crear bodegas", 121),
+    ("warehouses.edit", "Editar Bodegas", "config", "Permite editar bodegas", 122),
+    ("treasury.manage_accounts", "Gestionar Cuentas", "config", "Permite crear/editar cuentas de dinero", 123),
+    ("config.view_business_units", "Ver Unidades de Negocio", "config", "Permite ver unidades de negocio", 124),
+    ("config.manage_business_units", "Gestionar Unidades de Negocio", "config", "Permite crear/editar unidades de negocio", 125),
+    ("treasury.manage_expenses", "Gestionar Cat. Gastos", "config", "Permite gestionar categorias de gastos", 126),
+    ("materials.view_prices", "Ver Listas de Precios", "config", "Permite ver lista de precios", 127),
+    ("materials.edit_prices", "Editar Listas de Precios", "config", "Permite modificar lista de precios", 128),
 
     # Administracion
     ("admin.manage_users", "Gestionar Usuarios", "admin", "Permite invitar y gestionar usuarios", 200),
@@ -121,6 +125,7 @@ SYSTEM_ROLES = {
             "materials.view", "materials.create",
             "third_parties.view", "third_parties.create",
             "warehouses.view", "warehouses.create",
+            "config.view_business_units",
             "transformations.view", "transformations.create",
         ],
     },
@@ -128,8 +133,8 @@ SYSTEM_ROLES = {
         "display_name": "Liquidador",
         "description": "Liquidacion de compras/ventas y caja chica",
         "permissions": [
-            "purchases.view", "purchases.liquidate", "purchases.cancel", "purchases.view_prices",
-            "sales.view", "sales.liquidate", "sales.cancel", "sales.view_prices",
+            "purchases.view", "purchases.liquidate", "purchases.cancel", "purchases.view_prices", "purchases.edit_prices",
+            "sales.view", "sales.liquidate", "sales.cancel", "sales.view_prices", "sales.edit_prices",
             "inventory.view", "inventory.view_movements",
             "materials.view", "materials.view_prices", "materials.edit_prices",
             "treasury.view_own", "treasury.create_movements",
@@ -165,6 +170,7 @@ SYSTEM_ROLES = {
             "materials.view", "materials.view_prices",
             "third_parties.view", "third_parties.view_balance",
             "warehouses.view",
+            "config.view_business_units",
             "treasury.view",
             "treasury.view_provisions", "treasury.view_liabilities",
             "treasury.view_scheduled", "treasury.view_fixed_assets", "treasury.view_statements",
@@ -186,9 +192,9 @@ MODULE_DISPLAY_NAMES = {
     "materials": "Materiales",
     "transformations": "Transformaciones",
     "third_parties": "Terceros",
-    "warehouses": "Bodegas",
     "treasury": "Tesoreria",
     "reports": "Reportes",
+    "config": "Configuracion",
     "admin": "Administracion",
 }
 

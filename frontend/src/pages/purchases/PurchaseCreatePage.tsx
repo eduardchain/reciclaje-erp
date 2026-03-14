@@ -54,6 +54,8 @@ export default function PurchaseCreatePage() {
   const { getSuggestedPrice } = usePriceSuggestions();
   const { hasPermission } = usePermissions();
   const canLiquidate = hasPermission("purchases.liquidate");
+  const canViewPrices = hasPermission("purchases.view_prices");
+  const canEditPrices = hasPermission("purchases.edit_prices");
 
   const [supplierId, setSupplierId] = useState("");
   const [date, setDate] = useState(toLocalDateInput());
@@ -76,10 +78,12 @@ export default function PurchaseCreatePage() {
 
   const handleMaterialChange = (key: number, materialId: string) => {
     updateLine(key, "material_id", materialId);
-    const line = lines.find((l) => l._key === key);
-    if (line && line.unit_price === 0) {
-      const suggested = getSuggestedPrice(materialId, "purchase");
-      if (suggested) updateLine(key, "unit_price", suggested);
+    if (canEditPrices) {
+      const line = lines.find((l) => l._key === key);
+      if (line && line.unit_price === 0) {
+        const suggested = getSuggestedPrice(materialId, "purchase");
+        if (suggested) updateLine(key, "unit_price", suggested);
+      }
     }
   };
 
@@ -224,7 +228,7 @@ export default function PurchaseCreatePage() {
               key={line._key}
               className={`grid grid-cols-12 gap-2 items-end pb-8 mb-3 relative ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
             >
-              <div className="col-span-3">
+              <div className={canViewPrices ? "col-span-3" : "col-span-4"}>
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
                 <EntitySelect
                   value={line.material_id}
@@ -233,7 +237,7 @@ export default function PurchaseCreatePage() {
                   placeholder="Material..."
                 />
               </div>
-              <div className="col-span-3">
+              <div className={canViewPrices ? "col-span-3" : "col-span-4"}>
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega</Label>}
                 <EntitySelect
                   value={line.warehouse_id ?? ""}
@@ -242,7 +246,7 @@ export default function PurchaseCreatePage() {
                   placeholder="Bodega..."
                 />
               </div>
-              <div className="col-span-2">
+              <div className={canViewPrices ? "col-span-2" : "col-span-3"}>
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
                 <MoneyInput
                   value={line.quantity}
@@ -251,26 +255,33 @@ export default function PurchaseCreatePage() {
                   placeholder="0,00"
                 />
               </div>
+              {canViewPrices && (
               <div className="col-span-2 relative">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit. *</Label>}
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit. {canEditPrices ? "*" : ""}</Label>}
                 <MoneyInput
                   value={line.unit_price}
                   onChange={(v) => updateLine(line._key, "unit_price", v)}
                   placeholder="0"
+                  disabled={!canEditPrices}
                 />
+                {canEditPrices && (
                 <div className="absolute left-0 w-max" style={{ top: "100%" }}>
                   <PriceSuggestion
                     suggestedPrice={getSuggestedPrice(line.material_id, "purchase")}
                     onApply={(p) => updateLine(line._key, "unit_price", p)}
                   />
                 </div>
+                )}
               </div>
+              )}
+              {canViewPrices && (
               <div className="col-span-1 text-right">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}
                 <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">
                   {formatCurrency(line.quantity * line.unit_price)}
                 </p>
               </div>
+              )}
               <div className="col-span-1">
                 {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
                 <Button
@@ -286,11 +297,13 @@ export default function PurchaseCreatePage() {
             </div>
           ))}
 
+          {canViewPrices && (
           <div className="bg-slate-50 rounded-lg p-3 mt-2">
             <div className="flex justify-end">
               <span className="text-lg font-bold">Total: {formatCurrency(total)}</span>
             </div>
           </div>
+          )}
         </CardContent>
       </Card>
 

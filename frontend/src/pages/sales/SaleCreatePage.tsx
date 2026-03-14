@@ -87,6 +87,8 @@ export default function SaleCreatePage() {
   const { getSuggestedPrice } = usePriceSuggestions();
   const { hasPermission } = usePermissions();
   const canLiquidate = hasPermission("sales.liquidate");
+  const canViewPrices = hasPermission("sales.view_prices");
+  const canEditPrices = hasPermission("sales.edit_prices");
 
   const [customerId, setCustomerId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
@@ -106,10 +108,12 @@ export default function SaleCreatePage() {
 
   const handleMaterialChange = (key: number, materialId: string) => {
     updateLine(key, "material_id", materialId);
-    const line = lines.find((l) => l._key === key);
-    if (line && line.unit_price === 0) {
-      const suggested = getSuggestedPrice(materialId, "sale");
-      if (suggested) updateLine(key, "unit_price", suggested);
+    if (canEditPrices) {
+      const line = lines.find((l) => l._key === key);
+      if (line && line.unit_price === 0) {
+        const suggested = getSuggestedPrice(materialId, "sale");
+        if (suggested) updateLine(key, "unit_price", suggested);
+      }
     }
   };
 
@@ -248,38 +252,48 @@ export default function SaleCreatePage() {
             const lineProfit = line.unit_price > 0 && avgCost > 0 ? (line.unit_price - avgCost) * line.quantity : 0;
             return (
             <div key={line._key} className={`grid grid-cols-12 gap-2 items-end pb-8 mb-3 relative ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}>
-              <div className="col-span-3">
+              <div className={canViewPrices ? "col-span-3" : "col-span-5"}>
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
                 <EntitySelect value={line.material_id} onChange={(v) => handleMaterialChange(line._key, v)} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Material..." />
               </div>
-              <div className="col-span-2 relative">
+              <div className={canViewPrices ? "col-span-2" : "col-span-5"} style={{ position: "relative" }}>
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
                 <MoneyInput value={line.quantity} onChange={(v) => updateLine(line._key, "quantity", v)} decimals={2} placeholder="0,00" />
                 <div className="absolute left-0 w-max" style={{ top: "100%" }}>
                   <WarehouseStockIndicator materialId={line.material_id} warehouseId={warehouseId} quantity={line.quantity} />
                 </div>
               </div>
+              {canViewPrices && (
               <div className="col-span-1">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo</Label>}
                 <p className="h-10 flex items-center text-sm tabular-nums text-slate-400">{avgCost > 0 ? formatCurrency(avgCost) : "-"}</p>
               </div>
+              )}
+              {canViewPrices && (
               <div className="col-span-2 relative">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio *</Label>}
-                <MoneyInput value={line.unit_price} onChange={(v) => updateLine(line._key, "unit_price", v)} placeholder="0" />
+                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio {canEditPrices ? "*" : ""}</Label>}
+                <MoneyInput value={line.unit_price} onChange={(v) => updateLine(line._key, "unit_price", v)} placeholder="0" disabled={!canEditPrices} />
+                {canEditPrices && (
                 <div className="absolute left-0 w-max" style={{ top: "100%" }}>
                   <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "unit_price", p)} />
                 </div>
+                )}
               </div>
+              )}
+              {canViewPrices && (
               <div className="col-span-2 text-right">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}
                 <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">{formatCurrency(line.quantity * line.unit_price)}</p>
               </div>
+              )}
+              {canViewPrices && (
               <div className="col-span-1 text-right">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Util. Bruta</Label>}
                 <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                   {line.unit_price > 0 && avgCost > 0 ? formatCurrency(lineProfit) : "-"}
                 </p>
               </div>
+              )}
               <div className="col-span-1">
                 {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
                 <Button variant="ghost" size="sm" onClick={() => setLines((p) => p.filter((l) => l._key !== line._key))} disabled={lines.length === 1} className="text-red-500 hover:text-red-700"><Trash2 className="h-4 w-4" /></Button>
@@ -291,6 +305,7 @@ export default function SaleCreatePage() {
       </Card>
 
       {/* Comisiones */}
+      {canViewPrices && (
       <Card className="shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones (Opcional)</CardTitle>
@@ -341,8 +356,10 @@ export default function SaleCreatePage() {
           </CardContent>
         )}
       </Card>
+      )}
 
       {/* Resumen Financiero */}
+      {canViewPrices && (
       <Card className="shadow-sm bg-slate-50/50">
         <CardHeader>
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Resumen Financiero</CardTitle>
@@ -394,6 +411,7 @@ export default function SaleCreatePage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Liquidacion */}
       {canLiquidate && (

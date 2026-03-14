@@ -158,7 +158,7 @@ function App() {
               <Route path={ROUTES.CONFIG} element={<P permission="warehouses.view"><WarehousesPage /></P>} />
               <Route path={ROUTES.CONFIG_WAREHOUSES} element={<P permission="warehouses.view"><WarehousesPage /></P>} />
               <Route path={ROUTES.CONFIG_ACCOUNTS} element={<P permission="treasury.manage_accounts"><MoneyAccountsPage /></P>} />
-              <Route path={ROUTES.CONFIG_BUSINESS_UNITS} element={<P permission="materials.view"><BusinessUnitsPage /></P>} />
+              <Route path={ROUTES.CONFIG_BUSINESS_UNITS} element={<P permission="config.view_business_units"><BusinessUnitsPage /></P>} />
               <Route path={ROUTES.CONFIG_EXPENSE_CATEGORIES} element={<P permission="treasury.manage_expenses"><ExpenseCategoriesPage /></P>} />
               <Route path={ROUTES.CONFIG_PRICE_LISTS} element={<P permission="materials.view_prices"><PriceListsPage /></P>} />
               {/* Admin */}
