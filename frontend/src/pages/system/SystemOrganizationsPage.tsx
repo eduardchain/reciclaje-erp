@@ -146,10 +146,13 @@ export default function SystemOrganizationsPage() {
               {orgs?.map((org) => (
                 <TableRow key={org.id} className={!org.is_active ? "opacity-50" : ""}>
                   <TableCell>
-                    <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => navigate(`/system/users?org=${org.id}&org_name=${encodeURIComponent(org.name)}`)}
+                      className="flex items-center gap-2 hover:text-emerald-600 transition-colors"
+                    >
                       <Building2 className="h-4 w-4 text-slate-400" />
-                      <span className="font-medium">{org.name}</span>
-                    </div>
+                      <span className="font-medium hover:underline">{org.name}</span>
+                    </button>
                   </TableCell>
                   <TableCell>
                     <code className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{org.slug}</code>
