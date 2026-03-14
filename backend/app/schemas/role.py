@@ -85,7 +85,7 @@ class UserRoleAssignment(BaseModel):
 
 class MyPermissionsResponse(BaseModel):
     """Permisos del usuario actual."""
-    role_id: UUID
+    role_id: Optional[UUID] = None
     role_name: str
     role_display_name: str
     is_admin: bool
