@@ -138,6 +138,7 @@ const orgNavItems: NavItem[] = [
       { name: "Estado de Resultados", path: ROUTES.REPORTS_PL, icon: <BarChart3 className="w-4 h-4" />, permission: "reports.view_pnl" },
       { name: "Flujo de Caja", path: ROUTES.REPORTS_CASH_FLOW, icon: <ArrowDownUp className="w-4 h-4" />, permission: "reports.view_cashflow" },
       { name: "Balance General", path: ROUTES.REPORTS_BALANCE_SHEET, icon: <Calculator className="w-4 h-4" />, permission: "reports.view_balance" },
+      { name: "Balance Detallado", path: ROUTES.REPORTS_BALANCE_DETAILED, icon: <ClipboardList className="w-4 h-4" />, permission: "reports.view_balance" },
       { name: "Compras", path: ROUTES.REPORTS_PURCHASES, icon: <ShoppingCart className="w-4 h-4" />, permission: "reports.view_purchases" },
       { name: "Ventas", path: ROUTES.REPORTS_SALES, icon: <DollarSign className="w-4 h-4" />, permission: "reports.view_sales" },
       { name: "Margenes", path: ROUTES.REPORTS_MARGINS, icon: <BarChart3 className="w-4 h-4" />, permission: "reports.view_margins" },
