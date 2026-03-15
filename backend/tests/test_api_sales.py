@@ -77,7 +77,7 @@ def test_commission_recipient(db_session, test_organization):
     recipient = ThirdParty(
         id=uuid4(),
         name="Sales Commission Account",
-        is_supplier=False,
+        is_supplier=True,
         is_customer=False,
         current_balance=Decimal("0.00"),
         organization_id=test_organization.id,

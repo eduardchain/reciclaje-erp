@@ -77,7 +77,7 @@ export default function SaleEditPage() {
   const { data: warehousesData } = useWarehouses();
 
   const customers = customersData?.items ?? [];
-  const thirdParties = [...(customersData?.items ?? []), ...(suppliersData?.items ?? [])];
+  const suppliers = suppliersData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
@@ -391,8 +391,8 @@ export default function SaleEditPage() {
                   <EntitySelect
                     value={comm.third_party_id}
                     onChange={(v) => updateCommission(comm._key, "third_party_id", v)}
-                    options={thirdParties.map((tp) => ({ id: tp.id, label: tp.name }))}
-                    placeholder="Tercero..."
+                    options={suppliers.map((tp) => ({ id: tp.id, label: tp.name }))}
+                    placeholder="Proveedor..."
                   />
                 </div>
                 <div className="col-span-3">

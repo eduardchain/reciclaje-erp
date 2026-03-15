@@ -13,7 +13,7 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useDoubleEntry, useLiquidateDoubleEntry } from "@/hooks/useDoubleEntries";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useSuppliers, useCustomers } from "@/hooks/useMasterData";
+import { useSuppliers } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import type { SaleCommissionCreate } from "@/types/sale";
 
@@ -45,8 +45,7 @@ export default function DoubleEntryLiquidatePage() {
   const { getSuggestedPrice } = usePriceSuggestions();
 
   const { data: suppliersData } = useSuppliers();
-  const { data: customersData } = useCustomers();
-  const thirdParties = [...(suppliersData?.items ?? []), ...(customersData?.items ?? [])];
+  const suppliers = suppliersData?.items ?? [];
 
   const [lines, setLines] = useState<LiquidationLine[]>([]);
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
@@ -267,7 +266,7 @@ export default function DoubleEntryLiquidatePage() {
                 <EntitySelect
                   value={comm.third_party_id}
                   onChange={(v) => updateCommission(comm._key, "third_party_id", v)}
-                  options={thirdParties.map((tp) => ({ id: tp.id, label: tp.name }))}
+                  options={suppliers.map((tp) => ({ id: tp.id, label: tp.name }))}
                   placeholder="Seleccionar..."
                 />
               </div>

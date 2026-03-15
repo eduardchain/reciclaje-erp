@@ -86,7 +86,7 @@ def test_supplier_customer(db_session, test_organization):
 def test_commission_recipient(db_session, test_organization):
     recipient = ThirdParty(
         id=uuid4(), name="Commission Agent",
-        is_supplier=False, is_customer=False, current_balance=Decimal("0.00"),
+        is_supplier=True, is_customer=False, current_balance=Decimal("0.00"),
         organization_id=test_organization.id, is_active=True,
     )
     db_session.add(recipient)

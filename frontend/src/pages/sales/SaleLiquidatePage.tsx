@@ -13,7 +13,7 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { useSale, useLiquidateSale } from "@/hooks/useSales";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useMaterials, useCustomers, useSuppliers, useMoneyAccounts } from "@/hooks/useMasterData";
+import { useMaterials, useSuppliers, useMoneyAccounts } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import type { SaleCommissionCreate } from "@/types/sale";
@@ -44,13 +44,12 @@ export default function SaleLiquidatePage() {
   const navigate = useNavigate();
   const { data: sale, isLoading } = useSale(id!);
   const { data: materialsData } = useMaterials();
-  const { data: customersData } = useCustomers();
   const { data: suppliersData } = useSuppliers();
   const { getSuggestedPrice } = usePriceSuggestions();
   const liquidate = useLiquidateSale();
 
   const materials = materialsData?.items ?? [];
-  const thirdParties = [...(customersData?.items ?? []), ...(suppliersData?.items ?? [])];
+  const suppliers = suppliersData?.items ?? [];
 
   const [lines, setLines] = useState<LiquidationLine[]>([]);
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
@@ -365,8 +364,8 @@ export default function SaleLiquidatePage() {
                 <EntitySelect
                   value={comm.third_party_id}
                   onChange={(v) => updateCommission(comm._key, "third_party_id", v)}
-                  options={thirdParties.map((tp) => ({ id: tp.id, label: tp.name }))}
-                  placeholder="Seleccionar..."
+                  options={suppliers.map((tp) => ({ id: tp.id, label: tp.name }))}
+                  placeholder="Proveedor..."
                 />
               </div>
               <div className="col-span-3">

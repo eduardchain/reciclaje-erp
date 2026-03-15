@@ -44,7 +44,6 @@ export default function DoubleEntryEditPage() {
   const suppliers = suppliersData?.items ?? [];
   const customers = customersData?.items ?? [];
   const materials = materialsData?.items ?? [];
-  const allThirdParties = [...suppliers, ...customers];
   const { getSuggestedPrice } = usePriceSuggestions();
 
   const [lines, setLines] = useState<LineFormData[]>([]);
@@ -293,7 +292,7 @@ export default function DoubleEntryEditPage() {
               <div key={comm._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < commissions.length - 1 ? "border-b border-slate-100" : ""}`}>
                 <div className="col-span-3">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comisionista</Label>}
-                  <EntitySelect value={comm.third_party_id} onChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, third_party_id: v } : c))} options={allThirdParties.map((t) => ({ id: t.id, label: t.name }))} placeholder="Tercero..." />
+                  <EntitySelect value={comm.third_party_id} onChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, third_party_id: v } : c))} options={suppliers.map((t) => ({ id: t.id, label: t.name }))} placeholder="Proveedor..." />
                 </div>
                 <div className="col-span-3">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto</Label>}

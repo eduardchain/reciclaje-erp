@@ -992,7 +992,12 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Receptor de comision {comm_data.third_party_id} no encontrado"
                 )
-            
+            if not recipient.is_supplier:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"El comisionista '{recipient.name}' debe tener el rol Proveedor para comisiones",
+                )
+
             # Calculate commission amount
             commission_amount = self._calculate_commission(
                 comm_data.commission_type,
