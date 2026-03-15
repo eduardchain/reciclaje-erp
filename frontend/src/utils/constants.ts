@@ -46,6 +46,7 @@ export const ROUTES = {
   REPORTS_PL: "/reports/profit-and-loss",
   REPORTS_CASH_FLOW: "/reports/cash-flow",
   REPORTS_BALANCE_SHEET: "/reports/balance-sheet",
+  REPORTS_BALANCE_DETAILED: "/reports/balance-detailed",
   REPORTS_PURCHASES: "/reports/purchases",
   REPORTS_SALES: "/reports/sales",
   REPORTS_MARGINS: "/reports/margins",

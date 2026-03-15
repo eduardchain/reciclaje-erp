@@ -4,6 +4,7 @@ import type {
   ProfitAndLossResponse,
   CashFlowResponse,
   BalanceSheetResponse,
+  BalanceDetailedResponse,
   PurchaseReportResponse,
   SalesReportResponse,
   MarginAnalysisResponse,
@@ -52,4 +53,7 @@ export const reportsService = {
 
   getAuditBalances: () =>
     get<AuditBalancesResponse>("/api/v1/reports/audit-balances"),
+
+  getBalanceDetailed: () =>
+    get<BalanceDetailedResponse>("/api/v1/reports/balance-detailed"),
 };

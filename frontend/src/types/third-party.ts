@@ -13,6 +13,7 @@ export interface ThirdPartyResponse extends BaseEntity {
   is_provision: boolean;
   is_liability: boolean;
   is_system_entity: boolean;
+  investor_type: string | null;
   initial_balance: number;
   current_balance: number;
   is_active: boolean;
@@ -29,6 +30,7 @@ export interface ThirdPartyCreate {
   is_investor?: boolean;
   is_provision?: boolean;
   is_liability?: boolean;
+  investor_type?: string | null;
   initial_balance?: number;
 }
 
@@ -43,4 +45,5 @@ export interface ThirdPartyUpdate {
   is_investor?: boolean | null;
   is_provision?: boolean | null;
   is_liability?: boolean | null;
+  investor_type?: string | null;
 }

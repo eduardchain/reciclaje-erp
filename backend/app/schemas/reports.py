@@ -201,6 +201,47 @@ class BalanceSheetResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Balance Detallado (desglose por item)
+# ---------------------------------------------------------------------------
+
+class BalanceDetailedItem(BaseModel):
+    id: str
+    name: str
+    balance: float = 0.0
+    code: Optional[str] = None
+    stock: Optional[float] = None
+    avg_cost: Optional[float] = None
+    current_value: Optional[float] = None
+    purchase_value: Optional[float] = None
+    accumulated_depreciation: Optional[float] = None
+    investor_type: Optional[str] = None
+    account_type: Optional[str] = None
+
+
+class BalanceDetailedSection(BaseModel):
+    label: str
+    total: float
+    items: list[BalanceDetailedItem]
+
+
+class BalanceDetailedVerification(BaseModel):
+    formula: str
+    result: float
+    is_balanced: bool
+
+
+class BalanceDetailedResponse(BaseModel):
+    as_of_date: date
+    assets: dict[str, BalanceDetailedSection]
+    total_assets: float
+    liabilities: dict[str, BalanceDetailedSection]
+    total_liabilities: float
+    equity: float
+    equity_label: str = "Patrimonio (Capital + Utilidad Acumulada)"
+    verification: BalanceDetailedVerification
+
+
+# ---------------------------------------------------------------------------
 # Purchase Report (Section 19.1)
 # ---------------------------------------------------------------------------
 

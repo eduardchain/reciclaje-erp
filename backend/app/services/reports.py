@@ -59,6 +59,10 @@ from app.schemas.reports import (
     ThirdPartyAuditItem,
     ThirdPartyBalancesResponse,
     TreasuryDashboardResponse,
+    BalanceDetailedItem,
+    BalanceDetailedSection,
+    BalanceDetailedVerification,
+    BalanceDetailedResponse,
 )
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -643,6 +647,199 @@ class ReportService:
             total_liabilities=float(total_liabilities),
             equity=float(equity),
         )
+
+    # ------------------------------------------------------------------
+    # Balance Detallado
+    # ------------------------------------------------------------------
+
+    def get_balance_detailed(
+        self,
+        db: Session,
+        organization_id: UUID,
+    ) -> BalanceDetailedResponse:
+        """Balance general desglosado por item individual."""
+
+        def _section(label: str, items: list[BalanceDetailedItem]) -> BalanceDetailedSection:
+            total = sum(i.balance for i in items)
+            return BalanceDetailedSection(label=label, total=round(total, 2), items=items)
+
+        # --- Activos ---
+
+        # 1. Efectivo y Bancos
+        accounts = db.execute(
+            select(MoneyAccount).where(
+                MoneyAccount.organization_id == organization_id,
+                MoneyAccount.is_active == True,
+                MoneyAccount.current_balance != 0,
+            )
+        ).scalars().all()
+        cash_items = [
+            BalanceDetailedItem(
+                id=str(a.id), name=a.name,
+                balance=float(a.current_balance),
+                account_type=a.account_type,
+            ) for a in accounts
+        ]
+
+        # 2. Inventario Liquidado
+        materials = db.execute(
+            select(Material).where(
+                Material.organization_id == organization_id,
+                Material.is_active == True,
+                Material.current_stock_liquidated > 0,
+            )
+        ).scalars().all()
+        inv_liq_items = [
+            BalanceDetailedItem(
+                id=str(m.id), name=m.name,
+                code=m.code,
+                stock=float(m.current_stock_liquidated),
+                avg_cost=float(m.current_average_cost),
+                balance=round(float(m.current_stock_liquidated * m.current_average_cost), 2),
+            ) for m in materials
+        ]
+
+        # 3. Activos Fijos
+        fixed_assets = db.execute(
+            select(FixedAsset).where(
+                FixedAsset.organization_id == organization_id,
+                FixedAsset.status != "disposed",
+                FixedAsset.current_value > 0,
+            )
+        ).scalars().all()
+        fa_items = [
+            BalanceDetailedItem(
+                id=str(fa.id), name=fa.name,
+                current_value=float(fa.current_value),
+                purchase_value=float(fa.purchase_value),
+                accumulated_depreciation=float(fa.accumulated_depreciation),
+                balance=float(fa.current_value),
+            ) for fa in fixed_assets
+        ]
+
+        # 5. Terceros — cargar todos con balance != 0, clasificar
+        third_parties = db.execute(
+            select(ThirdParty).where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.is_active == True,
+                ThirdParty.current_balance != 0,
+            )
+        ).scalars().all()
+
+        # Buckets para clasificacion
+        tp_buckets: dict[str, list[BalanceDetailedItem]] = {
+            # activos
+            "customers_receivable": [],
+            "supplier_advances": [],
+            "investor_receivable": [],
+            "provision_funds": [],
+            "prepaid_expenses": [],
+            # pasivos
+            "suppliers_payable": [],
+            "investors_partners": [],
+            "investors_obligations": [],
+            "investors_legacy": [],
+            "customer_advances": [],
+            "provision_obligations": [],
+            "liabilities_other": [],
+        }
+
+        for tp in third_parties:
+            section = self._classify_third_party(tp)
+            if section and section in tp_buckets:
+                bal = float(tp.current_balance)
+                tp_buckets[section].append(BalanceDetailedItem(
+                    id=str(tp.id), name=tp.name,
+                    balance=abs(bal),
+                    investor_type=getattr(tp, 'investor_type', None),
+                ))
+
+        # Construir secciones de activos
+        assets: dict[str, BalanceDetailedSection] = {}
+        asset_sections = [
+            ("cash_and_bank", "Efectivo y Bancos", cash_items),
+            ("inventory_liquidated", "Inventario Liquidado", inv_liq_items),
+            ("customers_receivable", "CxC Clientes", tp_buckets["customers_receivable"]),
+            ("supplier_advances", "Anticipos a Proveedores", tp_buckets["supplier_advances"]),
+            ("investor_receivable", "CxC Inversionistas", tp_buckets["investor_receivable"]),
+            ("provision_funds", "Fondos en Provisiones", tp_buckets["provision_funds"]),
+            ("prepaid_expenses", "Gastos Prepagados", tp_buckets["prepaid_expenses"]),
+            ("fixed_assets", "Activos Fijos", fa_items),
+        ]
+        for key, label, items in asset_sections:
+            assets[key] = _section(label, items)
+
+        total_assets = round(sum(s.total for s in assets.values()), 2)
+
+        # Construir secciones de pasivos
+        liabilities: dict[str, BalanceDetailedSection] = {}
+        liability_sections = [
+            ("suppliers_payable", "CxP Proveedores", tp_buckets["suppliers_payable"]),
+            ("investors_partners", "Socios", tp_buckets["investors_partners"]),
+            ("investors_obligations", "Obligaciones Financieras", tp_buckets["investors_obligations"]),
+            ("investors_legacy", "Inversionistas", tp_buckets["investors_legacy"]),
+            ("customer_advances", "Anticipos de Clientes", tp_buckets["customer_advances"]),
+            ("provision_obligations", "Obligaciones Provisiones", tp_buckets["provision_obligations"]),
+            ("liabilities_other", "Pasivos Laborales/Otros", tp_buckets["liabilities_other"]),
+        ]
+        for key, label, items in liability_sections:
+            liabilities[key] = _section(label, items)
+
+        total_liabilities = round(sum(s.total for s in liabilities.values()), 2)
+
+        equity = round(total_assets - total_liabilities, 2)
+        verification_result = round(total_assets - total_liabilities - equity, 2)
+
+        return BalanceDetailedResponse(
+            as_of_date=date.today(),
+            assets=assets,
+            total_assets=total_assets,
+            liabilities=liabilities,
+            total_liabilities=total_liabilities,
+            equity=equity,
+            verification=BalanceDetailedVerification(
+                formula="Activos - Pasivos - Patrimonio",
+                result=verification_result,
+                is_balanced=verification_result == 0,
+            ),
+        )
+
+    @staticmethod
+    def _classify_third_party(tp: ThirdParty) -> str | None:
+        """Clasifica un tercero en una unica seccion del balance segun prioridad."""
+        bal = float(tp.current_balance)
+        if bal == 0:
+            return None
+        # System entities (prepagados)
+        if tp.is_system_entity and bal > 0:
+            return "prepaid_expenses"
+        # Provisiones
+        if tp.is_provision:
+            return "provision_funds" if bal < 0 else "provision_obligations"
+        if bal > 0:
+            # Nos deben / tenemos a favor
+            if tp.is_customer:
+                return "customers_receivable"
+            if tp.is_investor:
+                return "investor_receivable"
+            if tp.is_supplier:
+                return "supplier_advances"
+        else:
+            # Debemos
+            if tp.is_supplier:
+                return "suppliers_payable"
+            if tp.is_investor:
+                inv_type = getattr(tp, 'investor_type', None)
+                if inv_type == "socio":
+                    return "investors_partners"
+                if inv_type == "obligacion_financiera":
+                    return "investors_obligations"
+                return "investors_legacy"
+            if tp.is_customer:
+                return "customer_advances"
+            if tp.is_liability:
+                return "liabilities_other"
+        return None
 
     # ------------------------------------------------------------------
     # Purchase Report

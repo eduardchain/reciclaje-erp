@@ -28,6 +28,7 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
   const [isInvestor, setIsInvestor] = useState(false);
   const [isProvision, setIsProvision] = useState(false);
   const [isLiability, setIsLiability] = useState(false);
+  const [investorType, setInvestorType] = useState("");
   const [initialBalance, setInitialBalance] = useState(0);
 
   useEffect(() => {
@@ -42,9 +43,11 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
       setIsInvestor(editItem.is_investor);
       setIsProvision(editItem.is_provision);
       setIsLiability(editItem.is_liability);
+      setInvestorType(editItem.investor_type ?? "");
     } else {
       setName(""); setIdentification(""); setEmail(""); setPhone(""); setAddress("");
       setIsSupplier(false); setIsCustomer(false); setIsInvestor(false); setIsProvision(false); setIsLiability(false);
+      setInvestorType("");
       setInitialBalance(0);
     }
   }, [editItem, open]);
@@ -61,6 +64,7 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
       is_investor: isInvestor,
       is_provision: isProvision,
       is_liability: isLiability,
+      investor_type: isInvestor && investorType ? investorType : null,
     };
     const opts = { onSuccess: () => onOpenChange(false) };
 
@@ -92,11 +96,25 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
             <div className="flex items-center justify-between"><span className="text-sm">Proveedor</span><Switch checked={isSupplier} onCheckedChange={setIsSupplier} /></div>
             <div className="flex items-center justify-between"><span className="text-sm">Cliente</span><Switch checked={isCustomer} onCheckedChange={setIsCustomer} /></div>
             <div className="flex items-center justify-between"><span className="text-sm">Inversionista</span><Switch checked={isInvestor} onCheckedChange={setIsInvestor} /></div>
+            {isInvestor && (
+              <div className="ml-4">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo Inversionista</Label>
+                <select
+                  className="w-full mt-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                  value={investorType}
+                  onChange={(e) => setInvestorType(e.target.value)}
+                >
+                  <option value="">Sin clasificar</option>
+                  <option value="socio">Socio</option>
+                  <option value="obligacion_financiera">Obligacion Financiera</option>
+                </select>
+              </div>
+            )}
             <div className="flex items-center justify-between"><span className="text-sm">Provision</span><Switch checked={isProvision} onCheckedChange={setIsProvision} /></div>
             <div className="flex items-center justify-between"><span className="text-sm">Pasivo</span><Switch checked={isLiability} onCheckedChange={setIsLiability} /></div>
           </div>
           {!editItem && (
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><MoneyInput value={initialBalance} onChange={setInitialBalance} /></div>
+            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><MoneyInput value={initialBalance} onChange={setInitialBalance} min={-999999999999} /></div>
           )}
         </div>
         <DialogFooter>

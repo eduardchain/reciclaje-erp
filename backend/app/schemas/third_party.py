@@ -21,6 +21,7 @@ class ThirdPartyBase(BaseModel):
     is_investor: bool = Field(default=False, description="Is this third party an investor?")
     is_provision: bool = Field(default=False, description="Is this third party a provision?")
     is_liability: bool = Field(default=False, description="Is this third party a liability?")
+    investor_type: Optional[str] = Field(None, pattern=r"^(socio|obligacion_financiera)$", description="Tipo de inversionista")
 
 
 class ThirdPartyCreate(ThirdPartyBase):
@@ -46,6 +47,7 @@ class ThirdPartyUpdate(BaseModel):
     is_investor: Optional[bool] = None
     is_provision: Optional[bool] = None
     is_liability: Optional[bool] = None
+    investor_type: Optional[str] = Field(None, pattern=r"^(socio|obligacion_financiera)$")
 
 
 class ThirdPartyResponse(ThirdPartyBase):

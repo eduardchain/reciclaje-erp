@@ -75,3 +75,10 @@ export function useAuditBalances(enabled: boolean) {
     enabled,
   });
 }
+
+export function useBalanceDetailed() {
+  return useQuery({
+    queryKey: ["reports", "balance-detailed"],
+    queryFn: () => reportsService.getBalanceDetailed(),
+  });
+}

@@ -8,6 +8,7 @@ const tabs = [
   { value: ROUTES.REPORTS_PL, label: "P&L", permission: "reports.view_pnl" },
   { value: ROUTES.REPORTS_CASH_FLOW, label: "Flujo Caja", permission: "reports.view_cashflow" },
   { value: ROUTES.REPORTS_BALANCE_SHEET, label: "Balance", permission: "reports.view_balance" },
+  { value: ROUTES.REPORTS_BALANCE_DETAILED, label: "Balance Detallado", permission: "reports.view_balance" },
   { value: ROUTES.REPORTS_PURCHASES, label: "Compras", permission: "reports.view_purchases" },
   { value: ROUTES.REPORTS_SALES, label: "Ventas", permission: "reports.view_sales" },
   { value: ROUTES.REPORTS_MARGINS, label: "Margenes", permission: "reports.view_margins" },

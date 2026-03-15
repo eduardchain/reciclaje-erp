@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_permission, require_any_permission, get_db
 from app.schemas.reports import (
     AuditBalancesResponse,
+    BalanceDetailedResponse,
     BalanceSheetResponse,
     CashFlowResponse,
     DashboardResponse,
@@ -111,6 +112,23 @@ def get_balance_sheet(
     Patrimonio = Activos - Pasivos
     """
     return report_service.get_balance_sheet(
+        db=db,
+        organization_id=org_context["organization_id"],
+    )
+
+
+@router.get("/balance-detailed", response_model=BalanceDetailedResponse)
+def get_balance_detailed(
+    org_context: dict = Depends(require_any_permission("reports.view", "reports.view_balance")),
+    db: Session = Depends(get_db),
+):
+    """
+    Balance General Detallado (desglose por item individual).
+
+    Muestra cada cuenta, tercero, material y activo fijo que compone el balance.
+    Activos - Pasivos - Patrimonio = 0.
+    """
+    return report_service.get_balance_detailed(
         db=db,
         organization_id=org_context["organization_id"],
     )

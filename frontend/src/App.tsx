@@ -50,6 +50,7 @@ import TransitPage from "@/pages/inventory/TransitPage";
 import ProfitAndLossPage from "@/pages/reports/ProfitAndLossPage";
 import CashFlowPage from "@/pages/reports/CashFlowPage";
 import BalanceSheetPage from "@/pages/reports/BalanceSheetPage";
+import BalanceDetailedPage from "@/pages/reports/BalanceDetailedPage";
 import PurchaseReportPage from "@/pages/reports/PurchaseReportPage";
 import SalesReportPage from "@/pages/reports/SalesReportPage";
 import MarginAnalysisPage from "@/pages/reports/MarginAnalysisPage";
@@ -147,6 +148,7 @@ function App() {
               <Route path={ROUTES.REPORTS_PL} element={<P permission="reports.view_pnl"><ProfitAndLossPage /></P>} />
               <Route path={ROUTES.REPORTS_CASH_FLOW} element={<P permission="reports.view_cashflow"><CashFlowPage /></P>} />
               <Route path={ROUTES.REPORTS_BALANCE_SHEET} element={<P permission="reports.view_balance"><BalanceSheetPage /></P>} />
+              <Route path={ROUTES.REPORTS_BALANCE_DETAILED} element={<P permission="reports.view_balance"><BalanceDetailedPage /></P>} />
               <Route path={ROUTES.REPORTS_PURCHASES} element={<P permission="reports.view_purchases"><PurchaseReportPage /></P>} />
               <Route path={ROUTES.REPORTS_SALES} element={<P permission="reports.view_sales"><SalesReportPage /></P>} />
               <Route path={ROUTES.REPORTS_MARGINS} element={<P permission="reports.view_margins"><MarginAnalysisPage /></P>} />

@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { AccountStatementExportData } from "@/utils/pdfExport";
+import type { BalanceDetailedResponse } from "@/types/reports";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 
 export function exportAccountStatementExcel(data: AccountStatementExportData) {
@@ -62,4 +63,81 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
 
   const safeName = data.thirdPartyName.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 30);
   XLSX.writeFile(wb, `estado_cuenta_${safeName}.xlsx`);
+}
+
+
+const ASSET_ORDER = [
+  "cash_and_bank", "inventory_liquidated",
+  "customers_receivable", "supplier_advances", "investor_receivable",
+  "provision_funds", "prepaid_expenses", "fixed_assets",
+];
+
+const LIABILITY_ORDER = [
+  "suppliers_payable", "investors_partners", "investors_obligations",
+  "investors_legacy", "customer_advances", "provision_obligations",
+  "liabilities_other",
+];
+
+function fmtBal(v: number) {
+  return v < 0 ? `(${formatCurrency(Math.abs(v))})` : formatCurrency(v);
+}
+
+export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
+  const rows: (string | number | null)[][] = [];
+
+  rows.push([`Balance Detallado — Corte al: ${formatDate(data.as_of_date)}`]);
+  rows.push([]);
+
+  // Activos
+  rows.push(["ACTIVOS", "", "", fmtBal(data.total_assets)]);
+  rows.push(["Seccion", "Detalle", "Nombre", "Valor"]);
+
+  for (const key of ASSET_ORDER) {
+    const section = data.assets[key];
+    if (!section) continue;
+    rows.push([section.label, "", "", fmtBal(section.total)]);
+    for (const item of section.items) {
+      let detail = "";
+      if (item.stock != null && item.avg_cost != null) {
+        detail = `${item.code ?? ""} | ${item.stock} kg x ${formatCurrency(item.avg_cost)}`;
+      } else if (item.purchase_value != null && item.accumulated_depreciation != null) {
+        detail = `Costo: ${formatCurrency(item.purchase_value)} | Dep: ${formatCurrency(item.accumulated_depreciation)}`;
+      } else if (item.account_type) {
+        detail = item.account_type;
+      }
+      rows.push(["", detail, item.name, fmtBal(item.balance)]);
+    }
+  }
+
+  rows.push([]);
+
+  // Pasivos
+  rows.push(["PASIVOS", "", "", fmtBal(data.total_liabilities)]);
+  rows.push(["Seccion", "Detalle", "Nombre", "Valor"]);
+
+  for (const key of LIABILITY_ORDER) {
+    const section = data.liabilities[key];
+    if (!section) continue;
+    rows.push([section.label, "", "", fmtBal(section.total)]);
+    for (const item of section.items) {
+      const detail = item.investor_type ?? "";
+      rows.push(["", detail, item.name, fmtBal(item.balance)]);
+    }
+  }
+
+  rows.push([]);
+
+  // Patrimonio
+  rows.push(["PATRIMONIO", "", "", fmtBal(data.equity)]);
+  rows.push([data.equity_label]);
+
+  rows.push([]);
+  rows.push([`Verificacion: ${data.verification.formula} = ${fmtBal(data.verification.result)} ${data.verification.is_balanced ? "OK" : "ERROR"}`]);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 30 }, { wch: 40 }, { wch: 30 }, { wch: 20 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Balance Detallado");
+  XLSX.writeFile(wb, `balance_detallado_${data.as_of_date}.xlsx`);
 }

@@ -149,6 +149,45 @@ export interface BalanceSheetResponse {
   equity: number;
 }
 
+// --- Balance Detailed ---
+
+export interface BalanceDetailedItem {
+  id: string;
+  name: string;
+  balance: number;
+  code?: string | null;
+  stock?: number | null;
+  avg_cost?: number | null;
+  current_value?: number | null;
+  purchase_value?: number | null;
+  accumulated_depreciation?: number | null;
+  investor_type?: string | null;
+  account_type?: string | null;
+}
+
+export interface BalanceDetailedSection {
+  label: string;
+  total: number;
+  items: BalanceDetailedItem[];
+}
+
+export interface BalanceDetailedVerification {
+  formula: string;
+  result: number;
+  is_balanced: boolean;
+}
+
+export interface BalanceDetailedResponse {
+  as_of_date: string;
+  assets: Record<string, BalanceDetailedSection>;
+  total_assets: number;
+  liabilities: Record<string, BalanceDetailedSection>;
+  total_liabilities: number;
+  equity: number;
+  equity_label: string;
+  verification: BalanceDetailedVerification;
+}
+
 // --- Purchase Report ---
 
 export interface DailyTrendItem {
