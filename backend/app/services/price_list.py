@@ -176,30 +176,37 @@ class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
     ) -> PaginatedResponse:
         """
         Obtener historial de precios de un material (mas reciente primero).
+        Incluye nombre del usuario que actualizo.
         """
-        from sqlalchemy import func
-
-        query = self._base_query(organization_id).where(
+        base = self._base_query(organization_id).where(
             self.model.material_id == material_id
         )
 
         # Total
-        count_query = select(func.count()).select_from(query.subquery())
+        count_query = select(func.count()).select_from(base.subquery())
         total = db.execute(count_query).scalar_one()
 
-        # Ordenar por fecha descendente y paginar
+        # Query con JOIN a User para obtener nombre
         query = (
-            query.order_by(self.model.created_at.desc())
+            select(PriceList, User.full_name.label("updated_by_name"))
+            .select_from(PriceList)
+            .outerjoin(User, PriceList.updated_by == User.id)
+            .where(
+                PriceList.organization_id == organization_id,
+                PriceList.material_id == material_id,
+            )
+            .order_by(PriceList.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
-        result = db.execute(query)
-        items = result.scalars().all()
+        rows = db.execute(query).all()
 
-        items_data = [
-            {c.name: getattr(item, c.name) for c in item.__table__.columns}
-            for item in items
-        ]
+        items_data = []
+        for row in rows:
+            price_obj = row[0]
+            item = {c.name: getattr(price_obj, c.name) for c in price_obj.__table__.columns}
+            item["updated_by_name"] = row.updated_by_name
+            items_data.append(item)
 
         return PaginatedResponse(
             items=items_data,

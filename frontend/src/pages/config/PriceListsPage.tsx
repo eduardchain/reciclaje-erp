@@ -293,12 +293,13 @@ export default function PriceListsPage() {
                     <TableHead className="text-right">Precio Compra</TableHead>
                     <TableHead className="text-right">Precio Venta</TableHead>
                     <TableHead>Notas</TableHead>
+                    <TableHead>Usuario</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {(historyData?.items ?? []).length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-slate-400 py-4">
+                      <TableCell colSpan={5} className="text-center text-slate-400 py-4">
                         Sin registros
                       </TableCell>
                     </TableRow>
@@ -309,6 +310,7 @@ export default function PriceListsPage() {
                         <TableCell className="text-right tabular-nums">{formatCurrency(h.purchase_price)}</TableCell>
                         <TableCell className="text-right tabular-nums">{formatCurrency(h.sale_price)}</TableCell>
                         <TableCell className="text-xs text-slate-500 max-w-[200px] truncate">{h.notes ?? "-"}</TableCell>
+                        <TableCell className="text-xs text-slate-400">{((h as unknown as Record<string, unknown>).updated_by_name as string) ?? "-"}</TableCell>
                       </TableRow>
                     ))
                   )}

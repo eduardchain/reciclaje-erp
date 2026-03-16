@@ -38,7 +38,7 @@ export function useCreateMaterial() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: MaterialCreate) => materialService.create(data),
-    onSuccess: () => { toast.success("Material creado"); qc.invalidateQueries({ queryKey: ["materials"] }); },
+    onSuccess: () => { toast.success("Material creado"); qc.invalidateQueries({ queryKey: ["materials"] }); qc.invalidateQueries({ queryKey: ["price-lists", "table"] }); },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
@@ -47,7 +47,7 @@ export function useUpdateMaterial() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: MaterialUpdate }) => materialService.update(id, data),
-    onSuccess: () => { toast.success("Material actualizado"); qc.invalidateQueries({ queryKey: ["materials"] }); },
+    onSuccess: () => { toast.success("Material actualizado"); qc.invalidateQueries({ queryKey: ["materials"] }); qc.invalidateQueries({ queryKey: ["price-lists", "table"] }); },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
