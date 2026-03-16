@@ -27,18 +27,34 @@ export interface ExpenseCategoryResponse extends BaseEntity {
   description: string | null;
   is_direct_expense: boolean;
   is_active: boolean;
+  parent_id: string | null;
+  parent_name: string | null;
 }
 
 export interface ExpenseCategoryCreate {
   name: string;
   description?: string | null;
-  is_direct_expense: boolean;
+  is_direct_expense?: boolean;
+  parent_id?: string | null;
 }
 
 export interface ExpenseCategoryUpdate {
   name?: string | null;
   description?: string | null;
   is_direct_expense?: boolean | null;
+  parent_id?: string | null;
+}
+
+export interface ExpenseCategoryFlat {
+  id: string;
+  name: string;
+  display_name: string;
+  parent_id: string | null;
+  is_direct_expense: boolean;
+}
+
+export interface ExpenseCategoryFlatResponse {
+  items: ExpenseCategoryFlat[];
 }
 
 // --- Price Lists ---

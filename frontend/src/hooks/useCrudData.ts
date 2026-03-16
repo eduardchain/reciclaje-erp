@@ -159,7 +159,7 @@ export function useCreateExpenseCategory() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: ExpenseCategoryCreate) => expenseCategoryService.create(data),
-    onSuccess: () => { toast.success("Categoria de gasto creada"); qc.invalidateQueries({ queryKey: ["expense-categories"] }); },
+    onSuccess: () => { toast.success("Categoria de gasto creada"); qc.invalidateQueries({ queryKey: ["expense-categories"] }); qc.invalidateQueries({ queryKey: ["expense-categories", "flat"] }); },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }
@@ -168,7 +168,7 @@ export function useUpdateExpenseCategory() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ExpenseCategoryUpdate }) => expenseCategoryService.update(id, data),
-    onSuccess: () => { toast.success("Categoria actualizada"); qc.invalidateQueries({ queryKey: ["expense-categories"] }); },
+    onSuccess: () => { toast.success("Categoria actualizada"); qc.invalidateQueries({ queryKey: ["expense-categories"] }); qc.invalidateQueries({ queryKey: ["expense-categories", "flat"] }); },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }

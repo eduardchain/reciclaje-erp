@@ -2,6 +2,7 @@
 Endpoints API para operaciones CRUD de ExpenseCategory (Categorias de Gastos).
 
 Permite clasificar gastos en directos e indirectos para tesoreria.
+Soporta subcategorias (max 2 niveles) con endpoint flat para selectors.
 """
 from typing import Optional
 from uuid import UUID
@@ -14,6 +15,7 @@ from app.schemas.expense_category import (
     ExpenseCategoryCreate,
     ExpenseCategoryUpdate,
     ExpenseCategoryResponse,
+    ExpenseCategoryFlatResponse,
 )
 from app.services.base import PaginatedResponse
 from app.services.expense_category import expense_category
@@ -32,8 +34,8 @@ def list_expense_categories(
     org_context: dict = Depends(require_permission("treasury.manage_expenses")),
     db: Session = Depends(get_db),
 ):
-    """Listar categorias de gastos con paginacion y filtros."""
-    return expense_category.get_multi(
+    """Listar categorias de gastos con paginacion, filtros y parent_name."""
+    return expense_category.get_multi_with_parent(
         db=db,
         organization_id=org_context["organization_id"],
         skip=skip,
@@ -56,10 +58,23 @@ def create_expense_category(
 
     - is_direct_expense=True: gasto directo (flete, pesaje — afecta costo material)
     - is_direct_expense=False: gasto indirecto (arriendo, servicios — administrativo)
+    - parent_id: ID de la categoria padre (max 2 niveles, subcategoria hereda tipo del padre)
     """
     return expense_category.create(
         db=db,
         obj_in=category_in,
+        organization_id=org_context["organization_id"],
+    )
+
+
+@router.get("/flat", response_model=ExpenseCategoryFlatResponse)
+def get_flat_categories(
+    org_context: dict = Depends(require_permission("treasury.manage_expenses")),
+    db: Session = Depends(get_db),
+):
+    """Lista plana con display_name para selectors (ej: 'NÓMINA > Personal Contratado')."""
+    return expense_category.get_flat(
+        db=db,
         organization_id=org_context["organization_id"],
     )
 

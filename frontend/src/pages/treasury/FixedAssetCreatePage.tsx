@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useCreateFixedAsset } from "@/hooks/useFixedAssets";
-import { useExpenseCategories, useThirdParties, useMoneyAccounts } from "@/hooks/useMasterData";
+import { useExpenseCategoriesFlat, useThirdParties, useMoneyAccounts } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
@@ -17,7 +17,7 @@ export default function FixedAssetCreatePage() {
   const navigate = useNavigate();
   const create = useCreateFixedAsset();
 
-  const { data: categoriesData } = useExpenseCategories();
+  const { data: categoriesData } = useExpenseCategoriesFlat();
   const { data: suppliersData } = useThirdParties({ role: "supplier" });
   const { data: accountsData } = useMoneyAccounts();
 
@@ -181,7 +181,7 @@ export default function FixedAssetCreatePage() {
               <EntitySelect
                 value={categoryId}
                 onChange={setCategoryId}
-                options={categories.map((c) => ({ id: c.id, label: c.name }))}
+                options={categories.map((c) => ({ id: c.id, label: c.display_name }))}
                 placeholder="Seleccionar categoria..."
               />
             </div>

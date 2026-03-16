@@ -62,6 +62,13 @@ export function useExpenseCategories() {
   });
 }
 
+export function useExpenseCategoriesFlat() {
+  return useQuery({
+    queryKey: ["expense-categories", "flat"],
+    queryFn: () => expenseCategoryService.getFlat(),
+  });
+}
+
 export function useProvisions(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "provisions", search],

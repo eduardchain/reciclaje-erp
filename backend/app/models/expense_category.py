@@ -13,8 +13,8 @@ Esta distincion es fundamental para:
 from uuid import UUID, uuid4
 from typing import Optional
 
-from sqlalchemy import String, Boolean
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import String, Boolean, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, OrganizationMixin, GUID
 
@@ -48,6 +48,20 @@ class ExpenseCategory(Base, TimestampMixin, OrganizationMixin):
         default=False,
         nullable=False,
         comment="True = gasto directo (afecta costo material). False = gasto indirecto (administrativo).",
+    )
+
+    parent_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("expense_categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="ID de la categoria padre (max 2 niveles).",
+    )
+
+    parent: Mapped[Optional["ExpenseCategory"]] = relationship(
+        "ExpenseCategory",
+        remote_side="ExpenseCategory.id",
+        foreign_keys="ExpenseCategory.parent_id",
     )
 
     is_active: Mapped[bool] = mapped_column(

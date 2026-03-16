@@ -14,7 +14,7 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useLiabilities, useExpenseCategories } from "@/hooks/useMasterData";
+import { useLiabilities, useExpenseCategoriesFlat } from "@/hooks/useMasterData";
 import { useCreateMovement } from "@/hooks/useMoneyMovements";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -59,7 +59,7 @@ export default function LiabilitiesPage() {
   const [accrueCategoryId, setAccrueCategoryId] = useState("");
   const [accrueDescription, setAccrueDescription] = useState("");
   const [accrueDate, setAccrueDate] = useState(toLocalDateInput());
-  const { data: categoriesData } = useExpenseCategories();
+  const { data: categoriesData } = useExpenseCategoriesFlat();
   const categories = categoriesData?.items ?? [];
   const createAccrual = useCreateMovement("expense_accrual");
 
@@ -223,7 +223,7 @@ export default function LiabilitiesPage() {
               <EntitySelect
                 value={accrueCategoryId}
                 onChange={setAccrueCategoryId}
-                options={categories.map((c) => ({ id: c.id, label: c.name }))}
+                options={categories.map((c) => ({ id: c.id, label: c.display_name }))}
                 placeholder="Seleccionar categoria..."
               />
             </div>

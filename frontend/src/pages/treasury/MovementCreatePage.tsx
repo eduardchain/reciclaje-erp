@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useCreateMovement, useUploadEvidence } from "@/hooks/useMoneyMovements";
-import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategories, useThirdParties, useProvisions, useLiabilities } from "@/hooks/useMasterData";
+import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, useLiabilities } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
@@ -57,7 +57,7 @@ export default function MovementCreatePage() {
   const { data: investorsData } = useInvestors();
   const { data: thirdPartiesData } = useThirdParties();
   const { data: accountsData } = useMoneyAccounts();
-  const { data: expCategoriesData } = useExpenseCategories();
+  const { data: expCategoriesData } = useExpenseCategoriesFlat();
   const { data: provisionsData } = useProvisions();
   const { data: liabilitiesData } = useLiabilities();
 
@@ -282,7 +282,7 @@ export default function MovementCreatePage() {
             {needsExpenseCategory && (
               <div>
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria de Gasto *</Label>
-                <EntitySelect value={expCategoryId} onChange={setExpCategoryId} options={expenseCategories.map((c) => ({ id: c.id, label: c.name }))} placeholder="Seleccionar categoria..." />
+                <EntitySelect value={expCategoryId} onChange={setExpCategoryId} options={expenseCategories.map((c) => ({ id: c.id, label: c.display_name }))} placeholder="Seleccionar categoria..." />
               </div>
             )}
 

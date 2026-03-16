@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useFixedAsset, useUpdateFixedAsset } from "@/hooks/useFixedAssets";
-import { useExpenseCategories } from "@/hooks/useMasterData";
+import { useExpenseCategoriesFlat } from "@/hooks/useMasterData";
 import { formatCurrency } from "@/utils/formatters";
 
 export default function FixedAssetEditPage() {
@@ -17,7 +17,7 @@ export default function FixedAssetEditPage() {
   const navigate = useNavigate();
   const { data: asset, isLoading } = useFixedAsset(id || "");
   const update = useUpdateFixedAsset();
-  const { data: categoriesData } = useExpenseCategories();
+  const { data: categoriesData } = useExpenseCategoriesFlat();
   const categories = categoriesData?.items ?? [];
 
   const [name, setName] = useState("");
@@ -119,7 +119,7 @@ export default function FixedAssetEditPage() {
               <EntitySelect
                 value={categoryId}
                 onChange={setCategoryId}
-                options={categories.map((c) => ({ id: c.id, label: c.name }))}
+                options={categories.map((c) => ({ id: c.id, label: c.display_name }))}
                 placeholder="Seleccionar categoria..."
               />
             </div>

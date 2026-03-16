@@ -160,7 +160,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 624 tests.
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 637 tests.
 
 ### Database
 
@@ -251,6 +251,8 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 33. **Repartición de utilidades (profit_distribution)**: Causado contable — incrementa deuda a socios (`third_party.balance -= amount`) sin mover dinero de cuentas (`account_id=NULL`). MoneyMovement tipo `profit_distribution`. NO afecta P&L ni Cash Flow. Balance Sheet: `accumulated_profit` (P&L all-time via `_calculate_profit()` refactorizado) y `distributed_profit` (SUM líneas). Retiro físico usa `capital_return` existente. Permiso: `treasury.manage_distributions`. 18 tests.
 
 34. **Precios modo tabla (editable spreadsheet)**: `GET /price-lists/table` retorna todos los materiales activos con precio vigente (DISTINCT ON + LEFT JOIN). Frontend: tabla manual con celdas editables (click→input, Enter/blur→auto-save via `POST /price-lists` existente, Escape→cancel). Check verde 1.5s en save exitoso. Filtro categoría (server-side), búsqueda código/nombre (client-side). Modal historial por material. Permission-gated: `materials.edit_prices` para editar.
+
+35. **Subcategorías de gasto (max 2 niveles)**: `parent_id` FK self-referencial en `expense_categories`. Validaciones: max 2 niveles (parent no puede tener parent), misma org, activo. Subcategoría hereda `is_direct_expense` del padre. `GET /flat` retorna lista plana con `display_name` ("PADRE > HIJO"), ordenada alfabéticamente. Frontend: selector padre en dialog config (oculta switch is_direct si tiene padre), 5 formularios treasury usan `useExpenseCategoriesFlat()` + `display_name` como label. 13 tests.
 
 ### Inventory Module — UX Details
 

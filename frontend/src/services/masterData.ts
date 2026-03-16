@@ -1,5 +1,5 @@
 import apiClient from "./api";
-import type { BusinessUnitResponse, BusinessUnitCreate, BusinessUnitUpdate, CurrentPricesResponse, ExpenseCategoryResponse, ExpenseCategoryCreate, ExpenseCategoryUpdate, PriceListResponse, PriceListCreate, PriceTableResponse } from "@/types/config";
+import type { BusinessUnitResponse, BusinessUnitCreate, BusinessUnitUpdate, CurrentPricesResponse, ExpenseCategoryResponse, ExpenseCategoryCreate, ExpenseCategoryUpdate, ExpenseCategoryFlatResponse, PriceListResponse, PriceListCreate, PriceTableResponse } from "@/types/config";
 import type { MaterialCategoryResponse, MaterialCategoryCreate, MaterialCategoryUpdate } from "@/types/material";
 import type { PaginatedResponse } from "@/types/common";
 
@@ -29,6 +29,10 @@ export const expenseCategoryService = {
   },
   update: async (id: string, data: ExpenseCategoryUpdate): Promise<ExpenseCategoryResponse> => {
     const response = await apiClient.patch<ExpenseCategoryResponse>(`/api/v1/expense-categories/${id}`, data);
+    return response.data;
+  },
+  getFlat: async (): Promise<ExpenseCategoryFlatResponse> => {
+    const response = await apiClient.get<ExpenseCategoryFlatResponse>("/api/v1/expense-categories/flat");
     return response.data;
   },
 };

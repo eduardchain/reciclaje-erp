@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useCreateScheduledExpense } from "@/hooks/useScheduledExpenses";
-import { useMoneyAccounts, useExpenseCategories } from "@/hooks/useMasterData";
+import { useMoneyAccounts, useExpenseCategoriesFlat } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
@@ -18,7 +18,7 @@ export default function ScheduledExpenseCreatePage() {
   const create = useCreateScheduledExpense();
 
   const { data: accountsData } = useMoneyAccounts();
-  const { data: categoriesData } = useExpenseCategories();
+  const { data: categoriesData } = useExpenseCategoriesFlat();
 
   const accounts = accountsData?.items ?? [];
   const categories = categoriesData?.items ?? [];
@@ -121,7 +121,7 @@ export default function ScheduledExpenseCreatePage() {
               <EntitySelect
                 value={categoryId}
                 onChange={setCategoryId}
-                options={categories.map((c) => ({ id: c.id, label: c.name }))}
+                options={categories.map((c) => ({ id: c.id, label: c.display_name }))}
                 placeholder="Seleccionar categoria..."
               />
             </div>

@@ -288,3 +288,299 @@ class TestExpenseCategoryOrganizationIsolation:
         )
 
         assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Subcategorias (parent_id, max 2 niveles)
+# ---------------------------------------------------------------------------
+
+class TestExpenseCategorySubcategories:
+    """Tests para jerarquia de subcategorias (max 2 niveles)."""
+
+    def test_create_with_parent(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_direct_expense,
+    ):
+        """Crear subcategoria con parent_id valido."""
+        response = client.post(
+            "/api/v1/expense-categories",
+            json={"name": "Flete Local", "parent_id": str(test_direct_expense.id)},
+            headers=org_headers,
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["parent_id"] == str(test_direct_expense.id)
+        # Hereda is_direct_expense del padre
+        assert data["is_direct_expense"] == test_direct_expense.is_direct_expense
+
+    def test_subcategory_inherits_direct_expense(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_direct_expense,
+    ):
+        """Subcategoria hereda is_direct_expense del padre, ignora valor enviado."""
+        response = client.post(
+            "/api/v1/expense-categories",
+            json={
+                "name": "Flete Especial",
+                "parent_id": str(test_direct_expense.id),
+                "is_direct_expense": False,  # Intentar forzar False
+            },
+            headers=org_headers,
+        )
+        assert response.status_code == 201
+        # Hereda True del padre, ignora el False enviado
+        assert response.json()["is_direct_expense"] is True
+
+    def test_create_with_invalid_parent_id(
+        self, client: TestClient, org_headers: dict,
+    ):
+        """parent_id inexistente retorna 404."""
+        response = client.post(
+            "/api/v1/expense-categories",
+            json={"name": "Sub Invalida", "parent_id": str(uuid4())},
+            headers=org_headers,
+        )
+        assert response.status_code == 404
+
+    def test_create_with_parent_from_other_org(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_organization2,
+    ):
+        """parent_id de otra organizacion retorna 404."""
+        other_parent = ExpenseCategory(
+            name="Padre Org2",
+            is_direct_expense=False,
+            organization_id=test_organization2.id,
+        )
+        db_session.add(other_parent)
+        db_session.commit()
+        db_session.refresh(other_parent)
+
+        response = client.post(
+            "/api/v1/expense-categories",
+            json={"name": "Sub Cross-Org", "parent_id": str(other_parent.id)},
+            headers=org_headers,
+        )
+        assert response.status_code == 404
+
+    def test_max_two_levels(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_direct_expense,
+    ):
+        """No se puede crear sub-subcategoria (max 2 niveles)."""
+        # Crear subcategoria
+        sub = ExpenseCategory(
+            name="Flete Interno",
+            is_direct_expense=True,
+            parent_id=test_direct_expense.id,
+            organization_id=test_direct_expense.organization_id,
+        )
+        db_session.add(sub)
+        db_session.commit()
+        db_session.refresh(sub)
+
+        # Intentar crear sub-subcategoria
+        response = client.post(
+            "/api/v1/expense-categories",
+            json={"name": "Sub-Sub", "parent_id": str(sub.id)},
+            headers=org_headers,
+        )
+        assert response.status_code == 422
+        assert "2 niveles" in response.json()["detail"]
+
+    def test_cannot_assign_parent_to_category_with_children(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_direct_expense, test_indirect_expense,
+    ):
+        """Categoria con hijos no puede convertirse en subcategoria."""
+        # Crear hijo de test_direct_expense
+        child = ExpenseCategory(
+            name="Hijo",
+            is_direct_expense=True,
+            parent_id=test_direct_expense.id,
+            organization_id=test_direct_expense.organization_id,
+        )
+        db_session.add(child)
+        db_session.commit()
+
+        # Intentar asignar parent a test_direct_expense (que ya tiene hijos)
+        response = client.patch(
+            f"/api/v1/expense-categories/{test_direct_expense.id}",
+            json={"parent_id": str(test_indirect_expense.id)},
+            headers=org_headers,
+        )
+        assert response.status_code == 422
+        assert "subcategorias" in response.json()["detail"]
+
+    def test_cannot_be_own_parent(
+        self, client: TestClient, org_headers: dict,
+        test_direct_expense,
+    ):
+        """Categoria no puede ser su propia subcategoria."""
+        response = client.patch(
+            f"/api/v1/expense-categories/{test_direct_expense.id}",
+            json={"parent_id": str(test_direct_expense.id)},
+            headers=org_headers,
+        )
+        assert response.status_code == 422
+        assert "propia subcategoria" in response.json()["detail"]
+
+    def test_update_change_parent(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_direct_expense, test_indirect_expense,
+    ):
+        """Editar: cambiar parent_id funciona."""
+        # Crear subcategoria de directo
+        sub = ExpenseCategory(
+            name="Movil",
+            is_direct_expense=True,
+            parent_id=test_direct_expense.id,
+            organization_id=test_direct_expense.organization_id,
+        )
+        db_session.add(sub)
+        db_session.commit()
+        db_session.refresh(sub)
+
+        # Mover a indirecto
+        response = client.patch(
+            f"/api/v1/expense-categories/{sub.id}",
+            json={"parent_id": str(test_indirect_expense.id)},
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["parent_id"] == str(test_indirect_expense.id)
+        # Hereda is_direct_expense del nuevo padre
+        assert data["is_direct_expense"] == test_indirect_expense.is_direct_expense
+
+    def test_update_remove_parent(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_direct_expense,
+    ):
+        """Editar: quitar parent_id (null) funciona."""
+        sub = ExpenseCategory(
+            name="Temporal",
+            is_direct_expense=True,
+            parent_id=test_direct_expense.id,
+            organization_id=test_direct_expense.organization_id,
+        )
+        db_session.add(sub)
+        db_session.commit()
+        db_session.refresh(sub)
+
+        response = client.patch(
+            f"/api/v1/expense-categories/{sub.id}",
+            json={"parent_id": None},
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["parent_id"] is None
+
+
+class TestExpenseCategoryFlat:
+    """Tests para GET /flat endpoint."""
+
+    def test_flat_display_name_format(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_organization,
+    ):
+        """GET /flat retorna display_name formateado correctamente."""
+        parent = ExpenseCategory(
+            name="NOMINA",
+            is_direct_expense=False,
+            organization_id=test_organization.id,
+        )
+        db_session.add(parent)
+        db_session.commit()
+        db_session.refresh(parent)
+
+        child = ExpenseCategory(
+            name="Personal Contratado",
+            is_direct_expense=False,
+            parent_id=parent.id,
+            organization_id=test_organization.id,
+        )
+        db_session.add(child)
+        db_session.commit()
+
+        response = client.get("/api/v1/expense-categories/flat", headers=org_headers)
+        assert response.status_code == 200
+        items = response.json()["items"]
+
+        display_names = {i["display_name"] for i in items}
+        assert "NOMINA" in display_names
+        assert "NOMINA > Personal Contratado" in display_names
+
+    def test_flat_alphabetical_order(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_organization,
+    ):
+        """GET /flat ordenado alfabeticamente por display_name."""
+        # Crear categorias en desorden
+        for name in ["TRANSPORTE", "ARRIENDOS", "NOMINA"]:
+            cat = ExpenseCategory(
+                name=name, is_direct_expense=False,
+                organization_id=test_organization.id,
+            )
+            db_session.add(cat)
+        db_session.commit()
+
+        response = client.get("/api/v1/expense-categories/flat", headers=org_headers)
+        items = response.json()["items"]
+        names = [i["display_name"] for i in items]
+        assert names == sorted(names, key=str.lower)
+
+    def test_flat_excludes_inactive(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_organization,
+    ):
+        """GET /flat no incluye categorias inactivas."""
+        active = ExpenseCategory(
+            name="Activa", is_direct_expense=False,
+            organization_id=test_organization.id, is_active=True,
+        )
+        inactive = ExpenseCategory(
+            name="Inactiva", is_direct_expense=False,
+            organization_id=test_organization.id, is_active=False,
+        )
+        db_session.add_all([active, inactive])
+        db_session.commit()
+
+        response = client.get("/api/v1/expense-categories/flat", headers=org_headers)
+        items = response.json()["items"]
+        names = {i["name"] for i in items}
+        assert "Activa" in names
+        assert "Inactiva" not in names
+
+    def test_list_includes_parent_name(
+        self, client: TestClient, org_headers: dict,
+        db_session: Session, test_organization,
+    ):
+        """GET / incluye parent_name en la respuesta."""
+        parent = ExpenseCategory(
+            name="SERVICIOS",
+            is_direct_expense=False,
+            organization_id=test_organization.id,
+        )
+        db_session.add(parent)
+        db_session.commit()
+        db_session.refresh(parent)
+
+        child = ExpenseCategory(
+            name="Agua",
+            is_direct_expense=False,
+            parent_id=parent.id,
+            organization_id=test_organization.id,
+        )
+        db_session.add(child)
+        db_session.commit()
+
+        response = client.get("/api/v1/expense-categories", headers=org_headers)
+        assert response.status_code == 200
+        items = response.json()["items"]
+
+        child_item = next(i for i in items if i["name"] == "Agua")
+        assert child_item["parent_name"] == "SERVICIOS"
+
+        parent_item = next(i for i in items if i["name"] == "SERVICIOS")
+        assert parent_item["parent_name"] is None
