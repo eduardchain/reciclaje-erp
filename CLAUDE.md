@@ -160,7 +160,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 619 tests.
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 624 tests.
 
 ### Database
 
@@ -249,6 +249,8 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 32. **Comisionista requiere is_supplier**: Validación en `_process_commissions` (compras, ventas) y `_create_commission_records` (DPs): el recipient debe tener `is_supplier=True`. Razón: comisiones generan balance negativo en el tercero; si no es supplier, `_classify_third_party` no lo ubica en pasivos → patrimonio ficticio. Frontend: selector de comisionistas filtrado a `suppliers` en las 9 páginas de create/edit/liquidate.
 
 33. **Repartición de utilidades (profit_distribution)**: Causado contable — incrementa deuda a socios (`third_party.balance -= amount`) sin mover dinero de cuentas (`account_id=NULL`). MoneyMovement tipo `profit_distribution`. NO afecta P&L ni Cash Flow. Balance Sheet: `accumulated_profit` (P&L all-time via `_calculate_profit()` refactorizado) y `distributed_profit` (SUM líneas). Retiro físico usa `capital_return` existente. Permiso: `treasury.manage_distributions`. 18 tests.
+
+34. **Precios modo tabla (editable spreadsheet)**: `GET /price-lists/table` retorna todos los materiales activos con precio vigente (DISTINCT ON + LEFT JOIN). Frontend: tabla manual con celdas editables (click→input, Enter/blur→auto-save via `POST /price-lists` existente, Escape→cancel). Check verde 1.5s en save exitoso. Filtro categoría (server-side), búsqueda código/nombre (client-side). Modal historial por material. Permission-gated: `materials.edit_prices` para editar.
 
 ### Inventory Module — UX Details
 

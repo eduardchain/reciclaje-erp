@@ -1,5 +1,5 @@
 import apiClient from "./api";
-import type { BusinessUnitResponse, BusinessUnitCreate, BusinessUnitUpdate, CurrentPricesResponse, ExpenseCategoryResponse, ExpenseCategoryCreate, ExpenseCategoryUpdate, PriceListResponse, PriceListCreate } from "@/types/config";
+import type { BusinessUnitResponse, BusinessUnitCreate, BusinessUnitUpdate, CurrentPricesResponse, ExpenseCategoryResponse, ExpenseCategoryCreate, ExpenseCategoryUpdate, PriceListResponse, PriceListCreate, PriceTableResponse } from "@/types/config";
 import type { MaterialCategoryResponse, MaterialCategoryCreate, MaterialCategoryUpdate } from "@/types/material";
 import type { PaginatedResponse } from "@/types/common";
 
@@ -44,6 +44,14 @@ export const priceListService = {
   },
   create: async (data: PriceListCreate): Promise<PriceListResponse> => {
     const response = await apiClient.post<PriceListResponse>("/api/v1/price-lists", data);
+    return response.data;
+  },
+  getTable: async (categoryId?: string): Promise<PriceTableResponse> => {
+    const response = await apiClient.get<PriceTableResponse>("/api/v1/price-lists/table", { params: { category_id: categoryId } });
+    return response.data;
+  },
+  getHistory: async (materialId: string): Promise<PaginatedResponse<PriceListResponse>> => {
+    const response = await apiClient.get<PaginatedResponse<PriceListResponse>>(`/api/v1/price-lists/material/${materialId}`, { params: { limit: 50 } });
     return response.data;
   },
 };

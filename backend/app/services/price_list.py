@@ -8,12 +8,14 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.models.price_list import PriceList
 from app.models.material import Material
-from app.schemas.price_list import PriceListCreate, PriceListUpdate
+from app.models.material import MaterialCategory
+from app.models.user import User
+from app.schemas.price_list import PriceListCreate, PriceListUpdate, PriceTableItem, PriceTableResponse
 from app.services.base import CRUDBase, Select, PaginatedResponse
 
 
@@ -95,6 +97,74 @@ class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
         )
         result = db.execute(statement)
         return list(result.scalars().all())
+
+    def get_table(
+        self,
+        db: Session,
+        organization_id: UUID,
+        category_id: Optional[UUID] = None,
+    ) -> PriceTableResponse:
+        """Todos los materiales activos con su precio vigente (o null)."""
+        # Subquery: precio vigente por material (DISTINCT ON)
+        latest_price = (
+            select(
+                PriceList.material_id,
+                PriceList.purchase_price,
+                PriceList.sale_price,
+                PriceList.created_at.label("last_updated"),
+                PriceList.updated_by,
+            )
+            .where(PriceList.organization_id == organization_id)
+            .distinct(PriceList.material_id)
+            .order_by(PriceList.material_id, PriceList.created_at.desc())
+            .subquery("latest_price")
+        )
+
+        # Query principal: materiales LEFT JOIN precio vigente LEFT JOIN usuario
+        query = (
+            select(
+                Material.id.label("material_id"),
+                Material.code.label("material_code"),
+                Material.name.label("material_name"),
+                Material.category_id,
+                MaterialCategory.name.label("category_name"),
+                latest_price.c.purchase_price,
+                latest_price.c.sale_price,
+                latest_price.c.last_updated,
+                User.full_name.label("updated_by_name"),
+            )
+            .outerjoin(MaterialCategory, Material.category_id == MaterialCategory.id)
+            .outerjoin(latest_price, Material.id == latest_price.c.material_id)
+            .outerjoin(User, latest_price.c.updated_by == User.id)
+            .where(
+                Material.organization_id == organization_id,
+                Material.is_active == True,
+            )
+        )
+
+        if category_id:
+            query = query.where(Material.category_id == category_id)
+
+        query = query.order_by(Material.sort_order, Material.code)
+
+        rows = db.execute(query).all()
+
+        items = [
+            PriceTableItem(
+                material_id=row.material_id,
+                material_code=row.material_code,
+                material_name=row.material_name,
+                category_id=row.category_id,
+                category_name=row.category_name,
+                purchase_price=float(row.purchase_price) if row.purchase_price is not None else None,
+                sale_price=float(row.sale_price) if row.sale_price is not None else None,
+                last_updated=row.last_updated,
+                updated_by_name=row.updated_by_name,
+            )
+            for row in rows
+        ]
+
+        return PriceTableResponse(items=items)
 
     def get_by_material(
         self,

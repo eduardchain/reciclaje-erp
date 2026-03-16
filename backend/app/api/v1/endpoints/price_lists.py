@@ -16,6 +16,7 @@ from app.schemas.price_list import (
     CurrentPricesResponse,
     PriceListCreate,
     PriceListResponse,
+    PriceTableResponse,
 )
 from app.services.base import PaginatedResponse
 from app.services.price_list import price_list
@@ -60,6 +61,20 @@ def create_price_list(
         obj_in=price_in,
         organization_id=org_context["organization_id"],
         user_id=org_context["user_id"],
+    )
+
+
+@router.get("/table", response_model=PriceTableResponse)
+def get_price_table(
+    category_id: Optional[UUID] = Query(None, description="Filtrar por categoria"),
+    org_context: dict = Depends(require_permission("materials.view_prices")),
+    db: Session = Depends(get_db),
+):
+    """Tabla de precios: todos los materiales activos con precio vigente."""
+    return price_list.get_table(
+        db=db,
+        organization_id=org_context["organization_id"],
+        category_id=category_id,
     )
 
 

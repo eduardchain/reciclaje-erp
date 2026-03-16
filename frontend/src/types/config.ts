@@ -74,3 +74,19 @@ export interface PriceListUpdate {
   sale_price?: number | null;
   notes?: string | null;
 }
+
+export interface PriceTableItem {
+  material_id: string;
+  material_code: string;
+  material_name: string;
+  category_id: string | null;
+  category_name: string | null;
+  purchase_price: number | null;
+  sale_price: number | null;
+  last_updated: string | null;
+  updated_by_name: string | null;
+}
+
+export interface PriceTableResponse {
+  items: PriceTableItem[];
+}

@@ -432,3 +432,104 @@ class TestPriceListOrganizationIsolation:
         )
 
         assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Tests de tabla de precios
+# ---------------------------------------------------------------------------
+
+class TestPriceTable:
+    """Tests para GET /api/v1/price-lists/table."""
+
+    def test_table_returns_all_active_materials(
+        self, client: TestClient, org_headers: dict,
+        test_material, test_material2,
+    ):
+        """Tabla incluye todos los materiales activos, incluso sin precio."""
+        response = client.get("/api/v1/price-lists/table", headers=org_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        ids = {item["material_id"] for item in data["items"]}
+        assert str(test_material.id) in ids
+        assert str(test_material2.id) in ids
+
+    def test_table_with_and_without_prices(
+        self, client: TestClient, org_headers: dict,
+        test_material, test_material2,
+    ):
+        """Material con precio muestra valores; sin precio muestra null."""
+        # Crear precio solo para material 1
+        client.post("/api/v1/price-lists", json={
+            "material_id": str(test_material.id),
+            "purchase_price": 1500.0,
+            "sale_price": 2500.0,
+        }, headers=org_headers)
+
+        response = client.get("/api/v1/price-lists/table", headers=org_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        item_map = {i["material_id"]: i for i in data["items"]}
+
+        mat1 = item_map[str(test_material.id)]
+        assert mat1["purchase_price"] == 1500.0
+        assert mat1["sale_price"] == 2500.0
+
+        mat2 = item_map[str(test_material2.id)]
+        assert mat2["purchase_price"] is None
+        assert mat2["sale_price"] is None
+
+    def test_table_shows_latest_price(
+        self, client: TestClient, org_headers: dict, test_material,
+    ):
+        """Si hay multiples precios, muestra el mas reciente."""
+        client.post("/api/v1/price-lists", json={
+            "material_id": str(test_material.id),
+            "purchase_price": 100.0,
+            "sale_price": 200.0,
+        }, headers=org_headers)
+        client.post("/api/v1/price-lists", json={
+            "material_id": str(test_material.id),
+            "purchase_price": 999.0,
+            "sale_price": 1999.0,
+        }, headers=org_headers)
+
+        response = client.get("/api/v1/price-lists/table", headers=org_headers)
+        data = response.json()
+        item_map = {i["material_id"]: i for i in data["items"]}
+
+        mat = item_map[str(test_material.id)]
+        assert mat["purchase_price"] == 999.0
+        assert mat["sale_price"] == 1999.0
+
+    def test_table_filter_by_category(
+        self, client: TestClient, org_headers: dict,
+        test_material, test_material2,
+    ):
+        """Filtro por category_id retorna solo materiales de esa categoria."""
+        response = client.get("/api/v1/price-lists/table", headers=org_headers)
+        all_count = len(response.json()["items"])
+
+        # Filtrar por categoria del material 1
+        if test_material.category_id:
+            response = client.get(
+                f"/api/v1/price-lists/table?category_id={test_material.category_id}",
+                headers=org_headers,
+            )
+            filtered = response.json()["items"]
+            assert len(filtered) <= all_count
+            for item in filtered:
+                assert item["category_id"] == str(test_material.category_id)
+
+    def test_table_includes_material_info(
+        self, client: TestClient, org_headers: dict, test_material,
+    ):
+        """Cada item incluye codigo y nombre del material."""
+        response = client.get("/api/v1/price-lists/table", headers=org_headers)
+        data = response.json()
+        item_map = {i["material_id"]: i for i in data["items"]}
+
+        mat = item_map[str(test_material.id)]
+        assert mat["material_code"] == test_material.code
+        assert mat["material_name"] == test_material.name

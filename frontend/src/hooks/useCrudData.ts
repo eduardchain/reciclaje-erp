@@ -182,11 +182,28 @@ export function usePriceLists(materialId?: string) {
   });
 }
 
+export function usePriceTable(categoryId?: string) {
+  return useQuery({
+    queryKey: ["price-lists", "table", categoryId],
+    queryFn: () => priceListService.getTable(categoryId),
+  });
+}
+
+export function usePriceHistory(materialId: string | null) {
+  return useQuery({
+    queryKey: ["price-lists", "history", materialId],
+    queryFn: () => priceListService.getHistory(materialId!),
+    enabled: !!materialId,
+  });
+}
+
 export function useCreatePriceList() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: PriceListCreate) => priceListService.create(data),
-    onSuccess: () => { toast.success("Precio registrado"); qc.invalidateQueries({ queryKey: ["price-lists"] }); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["price-lists"] });
+    },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }

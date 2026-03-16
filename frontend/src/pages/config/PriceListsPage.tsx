@@ -1,108 +1,321 @@
-import { useState } from "react";
-import { type ColumnDef } from "@tanstack/react-table";
-import { Plus } from "lucide-react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { CheckCircle2, History, Loader2 } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { DataTable } from "@/components/shared/DataTable";
 import { EntitySelect } from "@/components/shared/EntitySelect";
-import { usePriceLists, useCreatePriceList } from "@/hooks/useCrudData";
-import { useMaterials } from "@/hooks/useMasterData";
-import { MoneyInput } from "@/components/shared/MoneyInput";
+import { SearchInput } from "@/components/shared/SearchInput";
+import { usePriceTable, usePriceHistory, useCreatePriceList } from "@/hooks/useCrudData";
+import { useMaterialCategories } from "@/hooks/useCrudData";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import ConfigLayout from "./ConfigLayout";
-import type { PriceListResponse } from "@/types/config";
+import type { PriceTableItem } from "@/types/config";
+
+type CellField = "purchase_price" | "sale_price";
+
+interface EditingCell {
+  materialId: string;
+  field: CellField;
+}
+
+function EditableCell({
+  item,
+  field,
+  canEdit,
+  isEditing,
+  onStartEdit,
+  onSave,
+  onCancel,
+  savingCell,
+  savedCell,
+}: {
+  item: PriceTableItem;
+  field: CellField;
+  canEdit: boolean;
+  isEditing: boolean;
+  onStartEdit: () => void;
+  onSave: (value: number) => void;
+  onCancel: () => void;
+  savingCell: string | null;
+  savedCell: string | null;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [editValue, setEditValue] = useState("");
+  const cellKey = `${item.material_id}-${field}`;
+  const isSaving = savingCell === cellKey;
+  const isSaved = savedCell === cellKey;
+  const currentValue = item[field];
+
+  useEffect(() => {
+    if (isEditing) {
+      setEditValue(currentValue != null ? String(currentValue) : "");
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [isEditing, currentValue]);
+
+  const handleSave = useCallback(() => {
+    const parsed = parseFloat(editValue) || 0;
+    const final = Math.max(0, parsed);
+    if (final !== (currentValue ?? 0)) {
+      onSave(final);
+    } else {
+      onCancel();
+    }
+  }, [editValue, currentValue, onSave, onCancel]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onCancel();
+    } else if (e.key === "Tab") {
+      handleSave();
+    }
+  }, [handleSave, onCancel]);
+
+  if (isEditing) {
+    return (
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="numeric"
+        value={editValue}
+        onChange={(e) => {
+          if (e.target.value === "" || /^\d*\.?\d*$/.test(e.target.value)) {
+            setEditValue(e.target.value);
+          }
+        }}
+        onBlur={handleSave}
+        onKeyDown={handleKeyDown}
+        className="w-full h-8 px-2 text-right text-sm border border-emerald-400 rounded bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300"
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`flex items-center justify-end gap-1 h-8 px-2 rounded text-sm tabular-nums ${canEdit ? "cursor-pointer hover:bg-emerald-50" : ""} ${currentValue == null ? "text-slate-400 italic" : ""}`}
+      onClick={canEdit ? onStartEdit : undefined}
+    >
+      {isSaving && <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />}
+      {isSaved && <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
+      <span>{currentValue != null ? formatCurrency(currentValue) : "$0"}</span>
+    </div>
+  );
+}
 
 export default function PriceListsPage() {
   const { hasPermission } = usePermissions();
-  const { data, isLoading } = usePriceLists();
-  const { data: materialsData } = useMaterials();
-  const materials = materialsData?.items ?? [];
-  const create = useCreatePriceList();
+  const canEdit = hasPermission("materials.edit_prices");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
+  const [savingCell, setSavingCell] = useState<string | null>(null);
+  const [savedCell, setSavedCell] = useState<string | null>(null);
+  const [historyMaterialId, setHistoryMaterialId] = useState<string | null>(null);
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [materialId, setMaterialId] = useState("");
-  const [purchasePrice, setPurchasePrice] = useState(0);
-  const [salePrice, setSalePrice] = useState(0);
-  const [notes, setNotes] = useState("");
+  const { data: tableData, isLoading } = usePriceTable(categoryFilter || undefined);
+  const { data: categoriesData } = useMaterialCategories();
+  const { data: historyData, isLoading: historyLoading } = usePriceHistory(historyMaterialId);
+  const createPrice = useCreatePriceList();
 
-  const materialMap = new Map(materials.map((m) => [m.id, `${m.code} - ${m.name}`]));
+  const categories = categoriesData?.items ?? [];
 
-  // Mapa de precio vigente por material (primer registro = mas reciente)
-  const currentPriceMap = new Map<string, { purchase_price: number; sale_price: number }>();
-  for (const item of data?.items ?? []) {
-    if (!currentPriceMap.has(item.material_id)) {
-      currentPriceMap.set(item.material_id, { purchase_price: Number(item.purchase_price), sale_price: Number(item.sale_price) });
-    }
-  }
+  const historyMaterialName = useMemo(() => {
+    if (!historyMaterialId || !tableData) return "";
+    const item = tableData.items.find((i) => i.material_id === historyMaterialId);
+    return item ? `${item.material_code} - ${item.material_name}` : "";
+  }, [historyMaterialId, tableData]);
 
-  const prefillFromMaterial = (matId: string) => {
-    const current = currentPriceMap.get(matId);
-    if (current) {
-      setPurchasePrice(current.purchase_price);
-      setSalePrice(current.sale_price);
-    } else {
-      setPurchasePrice(0);
-      setSalePrice(0);
-    }
-  };
+  const filteredItems = useMemo(() => {
+    if (!tableData) return [];
+    if (!searchQuery) return tableData.items;
+    const q = searchQuery.toLowerCase();
+    return tableData.items.filter(
+      (i) =>
+        i.material_code.toLowerCase().includes(q) ||
+        i.material_name.toLowerCase().includes(q)
+    );
+  }, [tableData, searchQuery]);
 
-  const handleMaterialChange = (matId: string) => {
-    setMaterialId(matId);
-    if (matId) prefillFromMaterial(matId);
-  };
+  const handleSaveCell = (item: PriceTableItem, field: CellField, newValue: number) => {
+    const cellKey = `${item.material_id}-${field}`;
+    setSavingCell(cellKey);
+    setEditingCell(null);
 
-  const openDialogForRow = (row: PriceListResponse) => {
-    setMaterialId(row.material_id);
-    prefillFromMaterial(row.material_id);
-    setNotes("");
-    setDialogOpen(true);
-  };
+    const otherField: CellField = field === "purchase_price" ? "sale_price" : "purchase_price";
+    const otherValue = item[otherField] ?? 0;
 
-  const priceColumns: ColumnDef<PriceListResponse, unknown>[] = [
-    { accessorKey: "created_at", header: "Fecha", cell: ({ row }) => formatDate(row.original.created_at) },
-    { accessorKey: "material_id", header: "Material", cell: ({ row }) => materialMap.get(row.original.material_id) ?? row.original.material_id },
-    { accessorKey: "purchase_price", header: "Precio Compra", cell: ({ row }) => formatCurrency(row.original.purchase_price) },
-    { accessorKey: "sale_price", header: "Precio Venta", cell: ({ row }) => formatCurrency(row.original.sale_price) },
-    { accessorKey: "notes", header: "Notas", cell: ({ row }) => row.original.notes ?? "-" },
-  ];
-
-  const handleSubmit = () => {
-    create.mutate(
-      { material_id: materialId, purchase_price: purchasePrice, sale_price: salePrice, notes: notes || null },
-      { onSuccess: () => { setDialogOpen(false); setMaterialId(""); setPurchasePrice(0); setSalePrice(0); setNotes(""); } },
+    createPrice.mutate(
+      {
+        material_id: item.material_id,
+        [field]: newValue,
+        [otherField]: otherValue,
+      },
+      {
+        onSuccess: () => {
+          setSavingCell(null);
+          setSavedCell(cellKey);
+          setTimeout(() => setSavedCell(null), 1500);
+        },
+        onSettled: () => {
+          setSavingCell(null);
+        },
+      }
     );
   };
 
   return (
     <ConfigLayout>
-      <div className="flex justify-end">
-        {hasPermission("materials.edit_prices") && (
-          <Button onClick={() => { setMaterialId(""); setPurchasePrice(0); setSalePrice(0); setNotes(""); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nuevo Precio</Button>
+      <div className="space-y-4">
+        {/* Filtros */}
+        <div className="flex flex-wrap items-center gap-3">
+          <EntitySelect
+            value={categoryFilter}
+            onChange={setCategoryFilter}
+            options={categories.map((c) => ({ id: c.id, label: c.name }))}
+            placeholder="Todas las categorias"
+          />
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Buscar codigo o nombre..."
+          />
+          <div className="ml-auto text-xs text-slate-400">
+            {filteredItems.length} materiales
+          </div>
+        </div>
+
+        {/* Tabla */}
+        {isLoading ? (
+          <div className="text-center text-slate-500 py-8">Cargando...</div>
+        ) : (
+          <div className="border rounded-md">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-24">Codigo</TableHead>
+                  <TableHead>Material</TableHead>
+                  <TableHead className="w-32">Categoria</TableHead>
+                  <TableHead className="w-36 text-right">Precio Compra</TableHead>
+                  <TableHead className="w-36 text-right">Precio Venta</TableHead>
+                  <TableHead className="w-36">Actualizado</TableHead>
+                  <TableHead className="w-10"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-slate-400 py-8">
+                      Sin materiales
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredItems.map((item) => (
+                    <TableRow key={item.material_id} className="group">
+                      <TableCell className="font-mono text-xs">{item.material_code}</TableCell>
+                      <TableCell className="font-medium">{item.material_name}</TableCell>
+                      <TableCell className="text-xs text-slate-500">{item.category_name ?? "-"}</TableCell>
+                      <TableCell className="p-1">
+                        <EditableCell
+                          item={item}
+                          field="purchase_price"
+                          canEdit={canEdit}
+                          isEditing={editingCell?.materialId === item.material_id && editingCell?.field === "purchase_price"}
+                          onStartEdit={() => setEditingCell({ materialId: item.material_id, field: "purchase_price" })}
+                          onSave={(v) => handleSaveCell(item, "purchase_price", v)}
+                          onCancel={() => setEditingCell(null)}
+                          savingCell={savingCell}
+                          savedCell={savedCell}
+                        />
+                      </TableCell>
+                      <TableCell className="p-1">
+                        <EditableCell
+                          item={item}
+                          field="sale_price"
+                          canEdit={canEdit}
+                          isEditing={editingCell?.materialId === item.material_id && editingCell?.field === "sale_price"}
+                          onStartEdit={() => setEditingCell({ materialId: item.material_id, field: "sale_price" })}
+                          onSave={(v) => handleSaveCell(item, "sale_price", v)}
+                          onCancel={() => setEditingCell(null)}
+                          savingCell={savingCell}
+                          savedCell={savedCell}
+                        />
+                      </TableCell>
+                      <TableCell className="text-xs text-slate-400">
+                        {item.last_updated ? (
+                          <div>
+                            <div>{formatDate(item.last_updated)}</div>
+                            {item.updated_by_name && <div className="text-slate-300">{item.updated_by_name}</div>}
+                          </div>
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
+                      <TableCell className="p-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
+                          onClick={() => setHistoryMaterialId(item.material_id)}
+                          title="Historial de precios"
+                        >
+                          <History className="w-4 h-4 text-slate-400" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </div>
 
-      <DataTable columns={priceColumns} data={data?.items ?? []} loading={isLoading} pageCount={1} pageIndex={0} pageSize={200} onPageChange={() => {}}
-        onRowClick={hasPermission("materials.edit_prices") ? openDialogForRow : undefined}
-        emptyTitle="Sin precios" emptyDescription="No hay precios registrados." exportFilename="ecobalance_lista-precios" />
-
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Registrar Precio</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label><EntitySelect value={materialId} onChange={handleMaterialChange} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Seleccionar..." /></div>
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Compra</Label><MoneyInput value={purchasePrice} onChange={setPurchasePrice} /></div>
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Venta</Label><MoneyInput value={salePrice} onChange={setSalePrice} /></div>
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={!materialId || create.isPending} className="bg-emerald-600 hover:bg-emerald-700">
-              {create.isPending ? "Guardando..." : "Registrar"}
-            </Button>
-          </DialogFooter>
+      {/* Modal Historial */}
+      <Dialog open={!!historyMaterialId} onOpenChange={(open) => !open && setHistoryMaterialId(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Historial de Precios</DialogTitle>
+            <p className="text-sm text-slate-500">{historyMaterialName}</p>
+          </DialogHeader>
+          {historyLoading ? (
+            <div className="text-center py-4 text-slate-400">Cargando...</div>
+          ) : (
+            <div className="max-h-80 overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead className="text-right">Precio Compra</TableHead>
+                    <TableHead className="text-right">Precio Venta</TableHead>
+                    <TableHead>Notas</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(historyData?.items ?? []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-slate-400 py-4">
+                        Sin registros
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    (historyData?.items ?? []).map((h, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell className="text-xs">{formatDate(h.created_at)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatCurrency(h.purchase_price)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatCurrency(h.sale_price)}</TableCell>
+                        <TableCell className="text-xs text-slate-500 max-w-[200px] truncate">{h.notes ?? "-"}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </ConfigLayout>

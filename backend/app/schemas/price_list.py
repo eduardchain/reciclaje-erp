@@ -68,3 +68,21 @@ class PaginatedPriceListResponse(BaseModel):
     total: int
     skip: int
     limit: int
+
+
+class PriceTableItem(BaseModel):
+    """Fila de la tabla de precios: material + precio vigente."""
+    material_id: UUID
+    material_code: str
+    material_name: str
+    category_id: Optional[UUID] = None
+    category_name: Optional[str] = None
+    purchase_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    last_updated: Optional[datetime] = None
+    updated_by_name: Optional[str] = None
+
+
+class PriceTableResponse(BaseModel):
+    """Respuesta de la tabla de precios completa."""
+    items: list[PriceTableItem]
