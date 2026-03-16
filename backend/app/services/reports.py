@@ -167,48 +167,68 @@ class ReportService:
     # P&L — Estado de Resultados
     # ------------------------------------------------------------------
 
-    def get_profit_and_loss(
+    def _calculate_profit(
         self,
         db: Session,
         organization_id: UUID,
-        date_from: date,
-        date_to: date,
-    ) -> ProfitAndLossResponse:
-        dt_from, dt_to = self._date_range(date_from, date_to)
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> dict:
+        """Calcula componentes de P&L. Sin fechas = acumulado historico.
+
+        Retorna dict con: sales_revenue, sales_count, cogs, de_profit, de_count,
+        transformation_profit, transformation_count, service_income,
+        operating_expenses, commissions_paid, expenses_by_cat,
+        gross_profit_sales, total_gross_profit, net_profit.
+        """
+        has_dates = date_from is not None and date_to is not None
+        if has_dates:
+            dt_from, dt_to = self._date_range(date_from, date_to)
 
         # 1. Sales Revenue (ventas normales, excluye DE)
+        sale_filters = [
+            Sale.organization_id == organization_id,
+            Sale.status == "liquidated",
+            Sale.double_entry_id.is_(None),
+        ]
+        if has_dates:
+            sale_filters += [Sale.date >= dt_from, Sale.date < dt_to]
+
         row = db.execute(
             select(
                 func.coalesce(func.sum(Sale.total_amount), 0),
                 func.count(),
-            ).where(
-                Sale.organization_id == organization_id,
-                Sale.status == "liquidated",
-                Sale.double_entry_id.is_(None),
-                Sale.date >= dt_from,
-                Sale.date < dt_to,
-            )
+            ).where(*sale_filters)
         ).one()
         sales_revenue = Decimal(str(row[0]))
         sales_count = row[1]
 
         # 2. COGS (metodo directo)
+        cogs_filters = [
+            Sale.organization_id == organization_id,
+            Sale.status == "liquidated",
+            Sale.double_entry_id.is_(None),
+        ]
+        if has_dates:
+            cogs_filters += [Sale.date >= dt_from, Sale.date < dt_to]
+
         cogs_val = db.scalar(
             select(
                 func.coalesce(func.sum(SaleLine.unit_cost * SaleLine.quantity), 0)
             ).select_from(SaleLine)
             .join(Sale, SaleLine.sale_id == Sale.id)
-            .where(
-                Sale.organization_id == organization_id,
-                Sale.status == "liquidated",
-                Sale.double_entry_id.is_(None),
-                Sale.date >= dt_from,
-                Sale.date < dt_to,
-            )
+            .where(*cogs_filters)
         )
         cogs = Decimal(str(cogs_val))
 
         # 3. Double Entry Profit (via DoubleEntryLine)
+        de_filters = [
+            DoubleEntry.organization_id == organization_id,
+            DoubleEntry.status == "liquidated",
+        ]
+        if has_dates:
+            de_filters += [DoubleEntry.date >= date_from, DoubleEntry.date <= date_to]
+
         de_row = db.execute(
             select(
                 func.coalesce(
@@ -222,12 +242,7 @@ class ReportService:
             )
             .select_from(DoubleEntryLine)
             .join(DoubleEntry, DoubleEntryLine.double_entry_id == DoubleEntry.id)
-            .where(
-                DoubleEntry.organization_id == organization_id,
-                DoubleEntry.status == "liquidated",
-                DoubleEntry.date >= date_from,
-                DoubleEntry.date <= date_to,
-            )
+            .where(*de_filters)
         ).one()
         de_profit = Decimal(str(de_row[0]))
         de_count = de_row[1]
@@ -235,22 +250,32 @@ class ReportService:
         # 3.5 Transformation profit (ganancia/perdida por valorizacion)
         from app.models.material_transformation import MaterialTransformation
 
+        trans_filters = [
+            MaterialTransformation.organization_id == organization_id,
+            MaterialTransformation.status == "confirmed",
+            MaterialTransformation.value_difference.isnot(None),
+        ]
+        if has_dates:
+            trans_filters += [MaterialTransformation.date >= dt_from, MaterialTransformation.date < dt_to]
+
         trans_row = db.execute(
             select(
                 func.coalesce(func.sum(MaterialTransformation.value_difference), 0),
                 func.count(),
-            ).where(
-                MaterialTransformation.organization_id == organization_id,
-                MaterialTransformation.status == "confirmed",
-                MaterialTransformation.value_difference.isnot(None),
-                MaterialTransformation.date >= dt_from,
-                MaterialTransformation.date < dt_to,
-            )
+            ).where(*trans_filters)
         ).one()
         transformation_profit = Decimal(str(trans_row[0]))
         transformation_count = trans_row[1]
 
         # 4. Service income + expenses by category + commissions
+        mm_filters = [
+            MoneyMovement.organization_id == organization_id,
+            MoneyMovement.status == "confirmed",
+            MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "commission_payment", "commission_accrual", "service_income"]),
+        ]
+        if has_dates:
+            mm_filters += [MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to]
+
         mm_rows = db.execute(
             select(
                 MoneyMovement.movement_type,
@@ -260,13 +285,7 @@ class ReportService:
                 func.coalesce(func.sum(MoneyMovement.amount), 0),
             )
             .outerjoin(ExpenseCategory, MoneyMovement.expense_category_id == ExpenseCategory.id)
-            .where(
-                MoneyMovement.organization_id == organization_id,
-                MoneyMovement.status == "confirmed",
-                MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "commission_payment", "commission_accrual", "service_income"]),
-                MoneyMovement.date >= dt_from,
-                MoneyMovement.date < dt_to,
-            )
+            .where(*mm_filters)
             .group_by(
                 MoneyMovement.movement_type,
                 ExpenseCategory.id,
@@ -301,36 +320,53 @@ class ReportService:
         total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
-        total_revenue_base = sales_revenue + service_income + (
-            Decimal(str(de_row[0]))  # DE total sale amount is harder, use profit base
-        )
-        # Para net_margin usamos sales_revenue + service_income como base
-        margin_base = sales_revenue + service_income
-        if de_profit > 0:
-            # Si hay DE profit, incluir la parte de revenue de DE
-            # DE revenue = profit + cost, pero solo tenemos profit.
-            # Usamos total_gross_profit como aproximacion
-            pass
+        return {
+            "sales_revenue": sales_revenue,
+            "sales_count": sales_count,
+            "cogs": cogs,
+            "de_profit": de_profit,
+            "de_count": de_count,
+            "transformation_profit": transformation_profit,
+            "transformation_count": transformation_count,
+            "service_income": service_income,
+            "operating_expenses": operating_expenses,
+            "commissions_paid": commissions_paid,
+            "expenses_by_cat": expenses_by_cat,
+            "gross_profit_sales": gross_profit_sales,
+            "total_gross_profit": total_gross_profit,
+            "net_profit": net_profit,
+        }
+
+    def get_profit_and_loss(
+        self,
+        db: Session,
+        organization_id: UUID,
+        date_from: date,
+        date_to: date,
+    ) -> ProfitAndLossResponse:
+        r = self._calculate_profit(db, organization_id, date_from, date_to)
+
+        margin_base = r["sales_revenue"] + r["service_income"]
 
         return ProfitAndLossResponse(
             period_from=date_from,
             period_to=date_to,
-            sales_revenue=float(sales_revenue),
-            sales_count=sales_count,
-            service_income=float(service_income),
-            cost_of_goods_sold=float(cogs),
-            gross_profit_sales=float(gross_profit_sales),
-            gross_margin_sales=self._safe_pct(gross_profit_sales, sales_revenue),
-            double_entry_profit=float(de_profit),
-            double_entry_count=de_count,
-            transformation_profit=float(transformation_profit),
-            transformation_count=transformation_count,
-            total_gross_profit=float(total_gross_profit),
-            operating_expenses=float(operating_expenses),
-            commissions_paid=float(commissions_paid),
-            net_profit=float(net_profit),
-            net_margin=self._safe_pct(net_profit, margin_base) if margin_base else 0.0,
-            expenses_by_category=expenses_by_cat,
+            sales_revenue=float(r["sales_revenue"]),
+            sales_count=r["sales_count"],
+            service_income=float(r["service_income"]),
+            cost_of_goods_sold=float(r["cogs"]),
+            gross_profit_sales=float(r["gross_profit_sales"]),
+            gross_margin_sales=self._safe_pct(r["gross_profit_sales"], r["sales_revenue"]),
+            double_entry_profit=float(r["de_profit"]),
+            double_entry_count=r["de_count"],
+            transformation_profit=float(r["transformation_profit"]),
+            transformation_count=r["transformation_count"],
+            total_gross_profit=float(r["total_gross_profit"]),
+            operating_expenses=float(r["operating_expenses"]),
+            commissions_paid=float(r["commissions_paid"]),
+            net_profit=float(r["net_profit"]),
+            net_margin=self._safe_pct(r["net_profit"], margin_base) if margin_base else 0.0,
+            expenses_by_category=r["expenses_by_cat"],
         )
 
     # ------------------------------------------------------------------
@@ -626,6 +662,11 @@ class ReportService:
         total_liabilities = accounts_payable + investor_debt + liability_debt
         equity = total_assets - total_liabilities
 
+        # Desglose patrimonio: utilidad acumulada y distribuida
+        accumulated_profit = self._calculate_profit(db, organization_id)["net_profit"]
+        from app.services.profit_distribution import profit_distribution_service
+        distributed_profit = profit_distribution_service.calculate_distributed_profit(db, organization_id)
+
         return BalanceSheetResponse(
             as_of_date=date.today(),
             assets=BalanceSheetAssets(
@@ -646,6 +687,8 @@ class ReportService:
             ),
             total_liabilities=float(total_liabilities),
             equity=float(equity),
+            accumulated_profit=float(accumulated_profit),
+            distributed_profit=float(distributed_profit),
         )
 
     # ------------------------------------------------------------------
@@ -790,6 +833,11 @@ class ReportService:
         equity = round(total_assets - total_liabilities, 2)
         verification_result = round(total_assets - total_liabilities - equity, 2)
 
+        # Desglose patrimonio
+        accumulated_profit = float(self._calculate_profit(db, organization_id)["net_profit"])
+        from app.services.profit_distribution import profit_distribution_service
+        distributed_profit = float(profit_distribution_service.calculate_distributed_profit(db, organization_id))
+
         return BalanceDetailedResponse(
             as_of_date=date.today(),
             assets=assets,
@@ -797,6 +845,8 @@ class ReportService:
             liabilities=liabilities,
             total_liabilities=total_liabilities,
             equity=equity,
+            accumulated_profit=accumulated_profit,
+            distributed_profit=distributed_profit,
             verification=BalanceDetailedVerification(
                 formula="Activos - Pasivos - Patrimonio",
                 result=verification_result,

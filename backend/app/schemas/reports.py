@@ -198,6 +198,8 @@ class BalanceSheetResponse(BaseModel):
     liabilities: BalanceSheetLiabilities
     total_liabilities: float
     equity: float
+    accumulated_profit: float = 0.0
+    distributed_profit: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +239,8 @@ class BalanceDetailedResponse(BaseModel):
     liabilities: dict[str, BalanceDetailedSection]
     total_liabilities: float
     equity: float
+    accumulated_profit: float = 0.0
+    distributed_profit: float = 0.0
     equity_label: str = "Patrimonio (Capital + Utilidad Acumulada)"
     verification: BalanceDetailedVerification
 

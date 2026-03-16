@@ -37,6 +37,7 @@ import FixedAssetsPage from "@/pages/treasury/FixedAssetsPage";
 import FixedAssetCreatePage from "@/pages/treasury/FixedAssetCreatePage";
 import FixedAssetDetailPage from "@/pages/treasury/FixedAssetDetailPage";
 import FixedAssetEditPage from "@/pages/treasury/FixedAssetEditPage";
+import ProfitDistributionPage from "@/pages/treasury/ProfitDistributionPage";
 import StockPage from "@/pages/inventory/StockPage";
 import MovementHistoryPage from "@/pages/inventory/MovementHistoryPage";
 import AdjustmentsPage from "@/pages/inventory/AdjustmentsPage";
@@ -131,6 +132,7 @@ function App() {
               <Route path={ROUTES.TREASURY_FIXED_ASSETS_NEW} element={<P permission="treasury.manage_fixed_assets"><FixedAssetCreatePage /></P>} />
               <Route path="/treasury/fixed-assets/:id/edit" element={<P permission="treasury.manage_fixed_assets"><FixedAssetEditPage /></P>} />
               <Route path="/treasury/fixed-assets/:id" element={<P permission="treasury.view_fixed_assets"><FixedAssetDetailPage /></P>} />
+              <Route path={ROUTES.TREASURY_PROFIT_DISTRIBUTION} element={<P permission="treasury.manage_distributions"><ProfitDistributionPage /></P>} />
               <Route path="/treasury/:id" element={<P permission="treasury.view_movements"><MovementDetailPage /></P>} />
               {/* Inventario */}
               <Route path={ROUTES.INVENTORY} element={<P permission="inventory.view"><StockPage /></P>} />

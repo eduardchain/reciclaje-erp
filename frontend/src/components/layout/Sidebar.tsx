@@ -28,6 +28,7 @@ import {
   CalendarClock,
   Scale,
   Building2,
+  PieChart,
   Shield,
   ShieldCheck,
   UserCog,
@@ -113,6 +114,7 @@ const orgNavItems: NavItem[] = [
       { name: "Pasivos", path: ROUTES.TREASURY_LIABILITIES, icon: <Scale className="w-4 h-4" />, permission: "treasury.view_liabilities" },
       { name: "Gastos Diferidos", path: ROUTES.TREASURY_SCHEDULED, icon: <CalendarClock className="w-4 h-4" />, permission: "treasury.view_scheduled" },
       { name: "Activos Fijos", path: ROUTES.TREASURY_FIXED_ASSETS, icon: <Building2 className="w-4 h-4" />, permission: "treasury.view_fixed_assets" },
+      { name: "Repartición Utilidades", path: ROUTES.TREASURY_PROFIT_DISTRIBUTION, icon: <PieChart className="w-4 h-4" />, permission: "treasury.manage_distributions" },
     ],
   },
   {

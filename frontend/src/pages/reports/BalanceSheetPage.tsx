@@ -51,8 +51,15 @@ export default function BalanceSheetPage() {
 
             <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
               <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Patrimonio</CardTitle></CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold text-emerald-700 text-center mt-4">{formatCurrency(data.equity)}</p>
+              <CardContent className="space-y-2 text-sm">
+                {(data.accumulated_profit !== 0 || data.distributed_profit !== 0) && (
+                  <>
+                    <div className="flex justify-between"><span>Utilidad Acumulada</span><span>{formatCurrency(data.accumulated_profit)}</span></div>
+                    <div className="flex justify-between text-red-600"><span>(-) Utilidades Distribuidas</span><span>{formatCurrency(data.distributed_profit)}</span></div>
+                    <Separator />
+                  </>
+                )}
+                <div className="flex justify-between font-bold text-emerald-700"><span>Patrimonio Neto</span><span>{formatCurrency(data.equity)}</span></div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 text-center mt-2">Activos - Pasivos</p>
               </CardContent>
             </Card>

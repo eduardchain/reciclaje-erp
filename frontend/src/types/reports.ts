@@ -147,6 +147,8 @@ export interface BalanceSheetResponse {
   liabilities: BalanceSheetLiabilities;
   total_liabilities: number;
   equity: number;
+  accumulated_profit: number;
+  distributed_profit: number;
 }
 
 // --- Balance Detailed ---
@@ -184,6 +186,8 @@ export interface BalanceDetailedResponse {
   liabilities: Record<string, BalanceDetailedSection>;
   total_liabilities: number;
   equity: number;
+  accumulated_profit: number;
+  distributed_profit: number;
   equity_label: string;
   verification: BalanceDetailedVerification;
 }

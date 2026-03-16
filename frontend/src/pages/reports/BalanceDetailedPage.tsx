@@ -186,7 +186,7 @@ export default function BalanceDetailedPage() {
 
           {/* Patrimonio */}
           <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
-            <CardContent className="py-4">
+            <CardContent className="py-4 space-y-2">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Patrimonio</h3>
@@ -194,6 +194,12 @@ export default function BalanceDetailedPage() {
                 </div>
                 <span className="text-2xl font-bold text-emerald-700">{fmtBalance(data.equity)}</span>
               </div>
+              {(data.accumulated_profit !== 0 || data.distributed_profit !== 0) && (
+                <div className="pt-2 border-t border-emerald-200 space-y-1 text-sm">
+                  <div className="flex justify-between"><span className="text-emerald-700">Utilidad Acumulada</span><span className="tabular-nums font-medium">{fmtBalance(data.accumulated_profit)}</span></div>
+                  <div className="flex justify-between"><span className="text-red-600">(-) Utilidades Distribuidas</span><span className="tabular-nums font-medium text-red-600">{fmtBalance(data.distributed_profit)}</span></div>
+                </div>
+              )}
             </CardContent>
           </Card>
 

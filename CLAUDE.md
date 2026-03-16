@@ -131,12 +131,12 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 - **Stock separation**: `current_stock_transit` (registered) vs `current_stock_liquidated` (confirmed). `current_stock` = total.
 - **Negative stock allowed**: Sales, adjustments, transformations return `warnings[]` instead of blocking.
 - **Sequential numbering**: Purchase/sale/double-entry numbers auto-incremented per org.
-- **Treasury**: `MoneyMovement` with 16 types. Some have `account_id=NULL` (accruals). Transfers = linked pair. Status: `confirmed|annulled`.
+- **Treasury**: `MoneyMovement` with 17 types. Some have `account_id=NULL` (accruals, profit_distribution). Transfers = linked pair. Status: `confirmed|annulled`.
 - **Provisions**: ThirdParty with `is_provision=True`. Negative balance = funds available. `provision_deposit` (account→provision), `provision_expense` (provision only, no account).
 - **Price lists**: Append-only. Current price = most recent by `created_at`. Frontend auto-fills via `usePriceSuggestions()`.
 - **Per-warehouse stock**: On-the-fly `SUM(inventory_movements.quantity) GROUP BY warehouse_id`.
 - **BusinessDate**: All business dates normalized to noon UTC (12:00) via Pydantic `BeforeValidator` in `app/utils/dates.py`. Prevents timezone display issues.
-- **RBAC**: `require_permission()` (AND) and `require_any_permission()` (OR) on all ~163 business endpoints. 65 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. **Master+Granular logic**: master permission (e.g., `treasury.view`) gives access to ALL sub-tabs; granular permissions (e.g., `treasury.view_provisions`) give access to specific sub-tabs WITHOUT master. Frontend: `usePermissions()` hook, `PermissionGate` component, sidebar filtering. Admin UI: RolesPage, RoleEditPage, UsersPage. **Superuser**: bypasses membership check in deps.py, gets synthesized admin context with all permissions. `/system/` endpoints use separate `get_current_superuser` guard.
+- **RBAC**: `require_permission()` (AND) and `require_any_permission()` (OR) on all ~167 business endpoints. 66 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. **Master+Granular logic**: master permission (e.g., `treasury.view`) gives access to ALL sub-tabs; granular permissions (e.g., `treasury.view_provisions`) give access to specific sub-tabs WITHOUT master. Frontend: `usePermissions()` hook, `PermissionGate` component, sidebar filtering. Admin UI: RolesPage, RoleEditPage, UsersPage. **Superuser**: bypasses membership check in deps.py, gets synthesized admin context with all permissions. `/system/` endpoints use separate `get_current_superuser` guard.
 
 ### Business Modules
 
@@ -150,7 +150,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 | Purchases | `/api/v1/purchases/` | 3-step workflow, full edit (revert-and-reapply), auto-liquidate, immediate payment |
 | Sales | `/api/v1/sales/` | 2-step workflow, commissions, received_quantity, full edit, immediate collection |
 | Double Entries | `/api/v1/double-entries/` | 2-step, edit registered, price adjustments at liquidation, commissions |
-| Treasury | `/api/v1/money-movements/` | 16 types, annulment with audit, unified account statement, evidence upload, PDF/Excel export |
+| Treasury | `/api/v1/money-movements/`, `/api/v1/profit-distributions/` | 17 types, annulment with audit, unified account statement, evidence upload, PDF/Excel export, profit distribution |
 | Fixed Assets | `/api/v1/fixed-assets/` | Monthly depreciation, apply-pending batch, dispose, pay from account OR credit from supplier |
 | Inventory | `/api/v1/inventory/` | Stock, movements, adjustments (4 types), transformations (3 cost methods), transfers, transit, valuation |
 | Scheduled Expenses | `/api/v1/deferred-expenses/` | Deferred expenses with monthly installments |
@@ -160,7 +160,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 585 tests.
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 619 tests.
 
 ### Database
 
@@ -224,9 +224,9 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 
 24. **Serializacion de fechas date→datetime**: `DoubleEntryResponse.date` (python `date`) necesita `field_serializer` a datetime mediodia UTC. Sin esto, JS parsea "2026-03-12" como midnight UTC → dia anterior en Colombia.
 
-25. **RBAC backend**: 3 tablas: `permissions` (65, 11 modulos), `roles` (por org, `is_system_role`), `role_permissions` (M:N). `require_permission()` (AND) y `require_any_permission()` (OR) en ~163 endpoints. Admin bypassa todo.
+25. **RBAC backend**: 3 tablas: `permissions` (66, 11 modulos), `roles` (por org, `is_system_role`), `role_permissions` (M:N). `require_permission()` (AND) y `require_any_permission()` (OR) en ~167 endpoints. Admin bypassa todo.
 
-26. **RBAC frontend + Admin UI**: `usePermissions()` hook (staleTime 5min), `PermissionGate` component, sidebar filtering, route protection. Master+Granular: master da acceso a todos los sub-tabs, granular da acceso sin master (OR logic). Admin UI: RolesPage, RoleEditPage (65 permisos por modulo), UsersPage. Al editar permisos se invalida `["permissions", orgId]`.
+26. **RBAC frontend + Admin UI**: `usePermissions()` hook (staleTime 5min), `PermissionGate` component, sidebar filtering, route protection. Master+Granular: master da acceso a todos los sub-tabs, granular da acceso sin master (OR logic). Admin UI: RolesPage, RoleEditPage (66 permisos por modulo), UsersPage. Al editar permisos se invalida `["permissions", orgId]`.
 
 27. **Cache invalidation centralizada**: `queryInvalidation.ts`. Regla: si una operacion crea side-effects cross-module, invalidar TODOS los query keys afectados:
     - `invalidateAfterPurchase` (crear/editar): purchases + inventory + materials
@@ -243,6 +243,12 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 29. **Super Admin + Multi-Org**: `is_superuser=True` bypasses membership en `get_required_org_context()` / `get_optional_org_context()` (sintetiza admin context con todos los permisos). `/system/` endpoints (6) protegidos con `get_current_superuser`. Frontend: `organizationId="system"` sentinel — API interceptor no envia `X-Organization-ID`, `usePermissions` retorna admin full, sidebar muestra solo seccion SISTEMA, ProtectedRoute permite pasar sin org. Header dropdown: multi-org selector + opcion "Sistema" para superusers. `queryClient.clear()` al cambiar org. Soft delete de org: `is_active=False` + desactivar usuarios huerfanos.
 
 30. **Comision de compra (prorrateo al costo)**: `PurchaseCommission` tabla separada (reutiliza enum `commission_type`). A diferencia de ventas (comision→P&L via `commission_accrual`), en compras la comision se **prorratea al costo** del material: `adjusted_unit_cost = unit_price + (commission_prorate / quantity)`. Afecta `InventoryMovement.unit_cost` y costo promedio. NO crea MoneyMovement — solo actualiza `third_party.balance` del comisionista. Cancelacion revierte balance. UI en Create/Edit/Liquidate/Detail pages.
+
+31. **Balance Detallado sin inventario en tránsito**: Compras `registered` no crean CxP (solo liquidación lo hace), así que incluir transit como activo desbalancearía la ecuación. Se eliminó `inventory_transit` de activos. Secciones activo: cash, inventory_liquidated, customers_receivable, investor_receivable, supplier_advances, provision_funds, prepaid_expenses, fixed_assets. Clasificación terceros: `_classify_third_party` usa prioridad por signo de balance + flags de rol. `investor_type`: `"socio"` → partners, `"obligacion_financiera"` → obligations, null → legacy.
+
+32. **Comisionista requiere is_supplier**: Validación en `_process_commissions` (compras, ventas) y `_create_commission_records` (DPs): el recipient debe tener `is_supplier=True`. Razón: comisiones generan balance negativo en el tercero; si no es supplier, `_classify_third_party` no lo ubica en pasivos → patrimonio ficticio. Frontend: selector de comisionistas filtrado a `suppliers` en las 9 páginas de create/edit/liquidate.
+
+33. **Repartición de utilidades (profit_distribution)**: Causado contable — incrementa deuda a socios (`third_party.balance -= amount`) sin mover dinero de cuentas (`account_id=NULL`). MoneyMovement tipo `profit_distribution`. NO afecta P&L ni Cash Flow. Balance Sheet: `accumulated_profit` (P&L all-time via `_calculate_profit()` refactorizado) y `distributed_profit` (SUM líneas). Retiro físico usa `capital_return` existente. Permiso: `treasury.manage_distributions`. 18 tests.
 
 ### Inventory Module — UX Details
 

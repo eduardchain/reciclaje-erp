@@ -1150,6 +1150,218 @@ class TestAuditBalances:
 
 
 # ---------------------------------------------------------------------------
+# Balance Detailed Tests
+# ---------------------------------------------------------------------------
+
+class TestBalanceDetailed:
+
+    def test_bd_endpoint_returns_structure(self, client: TestClient, org_headers: dict, report_data: dict):
+        """Endpoint retorna estructura completa con activos, pasivos, patrimonio y verificacion."""
+        response = client.get("/api/v1/reports/balance-detailed", headers=org_headers)
+        assert response.status_code == 200
+        data = response.json()
+
+        # Estructura basica
+        assert "assets" in data
+        assert "liabilities" in data
+        assert "total_assets" in data
+        assert "total_liabilities" in data
+        assert "equity" in data
+        assert "verification" in data
+        assert data["verification"]["is_balanced"] is True
+        assert data["verification"]["result"] == 0
+
+    def test_bd_asset_sections(self, client: TestClient, org_headers: dict, report_data: dict):
+        """Activos contiene secciones esperadas con items individuales."""
+        response = client.get("/api/v1/reports/balance-detailed", headers=org_headers)
+        data = response.json()
+
+        # Debe tener cash_and_bank con 2 cuentas (Caja y Banco)
+        assert "cash_and_bank" in data["assets"]
+        cash_items = data["assets"]["cash_and_bank"]["items"]
+        assert len(cash_items) == 2
+        cash_total = sum(i["balance"] for i in cash_items)
+        assert cash_total == pytest.approx(15000000, abs=1)
+
+        # Debe tener inventory_liquidated con 2 materiales (Cobre y Hierro)
+        assert "inventory_liquidated" in data["assets"]
+        inv_items = data["assets"]["inventory_liquidated"]["items"]
+        assert len(inv_items) == 2
+
+        # Debe tener customers_receivable con clientes que nos deben
+        assert "customers_receivable" in data["assets"]
+        cr_items = data["assets"]["customers_receivable"]["items"]
+        assert len(cr_items) >= 2  # cliente1 y cliente2
+
+    def test_bd_liability_sections(self, client: TestClient, org_headers: dict, report_data: dict):
+        """Pasivos contiene proveedores e inversores."""
+        response = client.get("/api/v1/reports/balance-detailed", headers=org_headers)
+        data = response.json()
+
+        # Proveedores: proveedor1 (-2M) y proveedor2 (-500K)
+        assert "suppliers_payable" in data["liabilities"]
+        sp_items = data["liabilities"]["suppliers_payable"]["items"]
+        assert len(sp_items) == 2
+        sp_total = data["liabilities"]["suppliers_payable"]["total"]
+        assert sp_total == pytest.approx(2500000, abs=1)
+
+        # Inversores
+        inv_sections = [
+            data["liabilities"].get("investors_partners", {"total": 0}),
+            data["liabilities"].get("investors_obligations", {"total": 0}),
+            data["liabilities"].get("investors_legacy", {"total": 0}),
+        ]
+        inv_total = sum(s["total"] for s in inv_sections)
+        assert inv_total == pytest.approx(5000000, abs=1)
+
+    def test_bd_equation_balances(self, client: TestClient, org_headers: dict, report_data: dict):
+        """Verificacion: Activos - Pasivos - Patrimonio = 0."""
+        response = client.get("/api/v1/reports/balance-detailed", headers=org_headers)
+        data = response.json()
+
+        result = data["total_assets"] - data["total_liabilities"] - data["equity"]
+        assert abs(result) < 0.01
+
+    def test_bd_investor_type_classification(
+        self, client: TestClient, org_headers: dict, report_data: dict, db_session: Session,
+    ):
+        """Inversores con investor_type se clasifican en secciones distintas."""
+        org_id = report_data["org_id"]
+
+        # Crear socio
+        socio = ThirdParty(
+            name="Socio Capital", organization_id=org_id,
+            is_investor=True, investor_type="socio",
+            current_balance=Decimal("-3000000"), is_active=True,
+        )
+        # Crear obligacion financiera
+        obl = ThirdParty(
+            name="Banco Credito", organization_id=org_id,
+            is_investor=True, investor_type="obligacion_financiera",
+            current_balance=Decimal("-2000000"), is_active=True,
+        )
+        db_session.add_all([socio, obl])
+        db_session.commit()
+
+        response = client.get("/api/v1/reports/balance-detailed", headers=org_headers)
+        data = response.json()
+
+        # Socio debe estar en investors_partners
+        partners = data["liabilities"].get("investors_partners", {"items": []})
+        partner_names = [i["name"] for i in partners["items"]]
+        assert "Socio Capital" in partner_names
+
+        # Obligacion financiera en investors_obligations
+        obligations = data["liabilities"].get("investors_obligations", {"items": []})
+        obl_names = [i["name"] for i in obligations["items"]]
+        assert "Banco Credito" in obl_names
+
+        # Balance sigue cuadrado
+        assert data["verification"]["is_balanced"] is True
+
+
+# ---------------------------------------------------------------------------
+# Commission is_supplier Validation Tests
+# ---------------------------------------------------------------------------
+
+class TestCommissionSupplierValidation:
+
+    def test_purchase_commission_rejects_non_supplier(
+        self, client: TestClient, org_headers: dict, report_data: dict, db_session: Session,
+    ):
+        """Comisionista sin is_supplier en compra → 400."""
+        org_id = report_data["org_id"]
+
+        # Tercero solo cliente (sin is_supplier)
+        non_supplier = ThirdParty(
+            name="Solo Cliente", organization_id=org_id,
+            is_supplier=False, is_customer=True,
+            current_balance=Decimal("0"), is_active=True,
+        )
+        db_session.add(non_supplier)
+        db_session.commit()
+
+        wh_id = str(report_data["warehouse"].id)
+        payload = {
+            "supplier_id": str(report_data["proveedor1"].id),
+            "date": datetime.now(timezone.utc).isoformat(),
+            "lines": [{
+                "material_id": str(report_data["mat_cobre"].id),
+                "warehouse_id": wh_id,
+                "quantity": 10,
+                "unit_price": 1000,
+            }],
+            "commissions": [{
+                "third_party_id": str(non_supplier.id),
+                "concept": "Test",
+                "commission_type": "fixed",
+                "commission_value": 100,
+            }],
+        }
+        response = client.post("/api/v1/purchases/", json=payload, headers=org_headers)
+        assert response.status_code == 400
+        assert "Proveedor" in response.json()["detail"]
+
+    def test_sale_commission_rejects_non_supplier(
+        self, client: TestClient, org_headers: dict, report_data: dict, db_session: Session,
+    ):
+        """Comisionista sin is_supplier en venta → 400."""
+        org_id = report_data["org_id"]
+
+        non_supplier = ThirdParty(
+            name="Solo Inversionista", organization_id=org_id,
+            is_supplier=False, is_investor=True,
+            current_balance=Decimal("0"), is_active=True,
+        )
+        db_session.add(non_supplier)
+        db_session.commit()
+
+        payload = {
+            "customer_id": str(report_data["cliente1"].id),
+            "warehouse_id": str(report_data["warehouse"].id),
+            "date": datetime.now(timezone.utc).isoformat(),
+            "lines": [{
+                "material_id": str(report_data["mat_cobre"].id),
+                "quantity": 10,
+                "unit_price": 15000,
+            }],
+            "commissions": [{
+                "third_party_id": str(non_supplier.id),
+                "concept": "Test",
+                "commission_type": "fixed",
+                "commission_value": 100,
+            }],
+        }
+        response = client.post("/api/v1/sales/", json=payload, headers=org_headers)
+        assert response.status_code == 400
+        assert "Proveedor" in response.json()["detail"]
+
+    def test_commission_accepts_supplier(
+        self, client: TestClient, org_headers: dict, report_data: dict,
+    ):
+        """Comisionista con is_supplier → aceptado (201)."""
+        wh_id = str(report_data["warehouse"].id)
+        payload = {
+            "supplier_id": str(report_data["proveedor1"].id),
+            "date": datetime.now(timezone.utc).isoformat(),
+            "lines": [{
+                "material_id": str(report_data["mat_cobre"].id),
+                "warehouse_id": wh_id,
+                "quantity": 10,
+                "unit_price": 1000,
+            }],
+            "commissions": [{
+                "third_party_id": str(report_data["proveedor2"].id),  # is_supplier=True
+                "concept": "Intermediacion",
+                "commission_type": "fixed",
+                "commission_value": 500,
+            }],
+        }
+        response = client.post("/api/v1/purchases/", json=payload, headers=org_headers)
+        assert response.status_code == 201
+
+
+# ---------------------------------------------------------------------------
 # Auth Test
 # ---------------------------------------------------------------------------
 

@@ -1263,6 +1263,11 @@ class CRUDMoneyMovement:
             # Sin cuenta ni tercero, solo anula el status del movimiento
             pass
 
+        elif mt == "profit_distribution":
+            # Sin cuenta, solo reversa tercero (reparticion hizo -=, reversa +=)
+            if third_party:
+                third_party.current_balance += amt
+
     def _get_or_404(
         self,
         db: Session,

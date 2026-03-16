@@ -36,6 +36,7 @@ const typeLabels: Record<string, string> = {
   deferred_expense: "Cuota Gasto Diferido",
   commission_accrual: "Comisión Causada",
   depreciation_expense: "Depreciación Activo",
+  profit_distribution: "Repartición Utilidades",
 };
 
 const statusBorderMap: Record<string, string> = {

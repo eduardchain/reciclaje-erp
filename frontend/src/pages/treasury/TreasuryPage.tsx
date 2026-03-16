@@ -43,6 +43,7 @@ const typeLabels: Record<MoneyMovementType, string> = {
   deferred_expense: "Cuota Gasto Diferido",
   commission_accrual: "Comisión Causada",
   depreciation_expense: "Depreciación Activo",
+  profit_distribution: "Repartición Utilidades",
 };
 
 const typeColors: Record<string, string> = {
@@ -64,6 +65,7 @@ const typeColors: Record<string, string> = {
   deferred_expense: "bg-cyan-100 text-cyan-800",
   commission_accrual: "bg-pink-100 text-pink-800",
   depreciation_expense: "bg-amber-100 text-amber-800",
+  profit_distribution: "bg-emerald-100 text-emerald-800",
 };
 
 const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [

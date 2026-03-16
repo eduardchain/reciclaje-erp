@@ -22,6 +22,7 @@ from .material_transformation import MaterialTransformation, MaterialTransformat
 from .material_cost_history import MaterialCostHistory
 from .scheduled_expense import ScheduledExpense, ScheduledExpenseApplication
 from .fixed_asset import FixedAsset, AssetDepreciation
+from .profit_distribution import ProfitDistribution, ProfitDistributionLine
 from .permission import Permission
 from .role import Role, RolePermission
 
@@ -57,6 +58,8 @@ __all__ = [
     "ScheduledExpenseApplication",
     "FixedAsset",
     "AssetDepreciation",
+    "ProfitDistribution",
+    "ProfitDistributionLine",
     "Permission",
     "Role",
     "RolePermission",
