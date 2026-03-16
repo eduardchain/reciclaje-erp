@@ -95,6 +95,12 @@ def clear_data(db, org_slug: str) -> None:
         )
     ).delete(synchronize_session=False)
     db.query(ProfitDistribution).filter(ProfitDistribution.organization_id == org_id).delete()
+    # Safety: delete orphan lines referencing third parties of this org
+    db.query(ProfitDistributionLine).filter(
+        ProfitDistributionLine.third_party_id.in_(
+            db.query(ThirdParty.id).filter(ThirdParty.organization_id == org_id)
+        )
+    ).delete(synchronize_session=False)
     db.query(MoneyMovement).filter(MoneyMovement.organization_id == org_id).delete()
     db.query(MaterialTransformationLine).filter(
         MaterialTransformationLine.transformation_id.in_(
