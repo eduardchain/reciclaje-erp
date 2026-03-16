@@ -87,7 +87,7 @@ ssh deploy@76.13.118.195 "curl -s http://localhost:8000/api/v1/health && echo ''
 
 Estado del servidor:
 ```bash
-ssh deploy@76.13.118.195 "echo '--- DB size ---' && docker exec reciclaje_db psql -U admin -d reciclaje_db -t -c \"SELECT pg_size_pretty(pg_database_size('reciclaje_db'));\" && echo '--- Disk ---' && df -h / | tail -1 | awk '{print \$3 \" used / \" \$2 \" total (\" \$5 \" used)\"}' && echo '--- Orgs ---' && docker exec reciclaje_db psql -U admin -d reciclaje_db -t -c \"SELECT name FROM organizations WHERE is_active = true;\" && echo '--- Last backup ---' && ls -lt /var/backups/ecobalance/ | head -2 && echo '--- Backend errors (last 20 lines) ---' && sudo journalctl -u reciclaje-backend -n 20 --no-pager -p err 2>/dev/null || echo 'Sin errores recientes'"
+ssh deploy@76.13.118.195 "echo '--- DB size ---' && docker exec reciclaje_db psql -U admin -d reciclaje_db -t -c \"SELECT pg_size_pretty(pg_database_size('reciclaje_db'));\" && echo '--- Disk ---' && df -h / | tail -1 | awk '{print \$3 \" used / \" \$2 \" total (\" \$5 \" used)\"}' && echo '--- Orgs ---' && docker exec reciclaje_db psql -U admin -d reciclaje_db -t -c \"SELECT name FROM organizations WHERE is_active = true;\" && echo '--- Last backup local ---' && ls -lt /var/backups/ecobalance/ | head -2 && echo '--- Last backup Backblaze ---' && /home/deploy/scripts/backup-database.sh --list-cloud 2>/dev/null || b2 ls ecobalance-backups 2>/dev/null | tail -3 && echo '--- Backend errors (last 20 lines) ---' && sudo journalctl -u reciclaje-backend -n 20 --no-pager -p err 2>/dev/null || echo 'Sin errores recientes'"
 ```
 
 ### 9. Git tag
@@ -117,7 +117,9 @@ Informar al usuario con este formato:
 - Migraciones: {aplicadas con nombre / ninguna}
 
 - Backup pre-deploy: {nombre archivo} ({tamano}, Backblaze OK/error)
-- Backups automaticos: {ultimo backup y frecuencia cada 6h}
+- Ultimo backup local: {nombre} ({fecha, tamano})
+- Ultimo backup Backblaze: {nombre} ({fecha, tamano})
+- Backups automaticos: cron cada 6h (00:00, 06:00, 12:00, 18:00 UTC)
 
 - BD: {tamano} | Disco: {usado} / {total} ({porcentaje})
 - Organizaciones activas: {count} ({nombres})

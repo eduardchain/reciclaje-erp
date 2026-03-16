@@ -88,6 +88,13 @@ def clear_data(db, org_slug: str) -> None:
         )
     ).delete(synchronize_session=False)
     db.query(FixedAsset).filter(FixedAsset.organization_id == org_id).delete()
+    from app.models.profit_distribution import ProfitDistributionLine, ProfitDistribution
+    db.query(ProfitDistributionLine).filter(
+        ProfitDistributionLine.distribution_id.in_(
+            db.query(ProfitDistribution.id).filter(ProfitDistribution.organization_id == org_id)
+        )
+    ).delete(synchronize_session=False)
+    db.query(ProfitDistribution).filter(ProfitDistribution.organization_id == org_id).delete()
     db.query(MoneyMovement).filter(MoneyMovement.organization_id == org_id).delete()
     db.query(MaterialTransformationLine).filter(
         MaterialTransformationLine.transformation_id.in_(
