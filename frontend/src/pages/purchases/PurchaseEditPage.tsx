@@ -13,7 +13,7 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { usePurchase, useUpdatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { useSuppliers, usePayableProviders, useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, utcToLocalDateInput } from "@/utils/formatters";
 import type { PurchaseLineCreate, PurchaseCommissionCreate } from "@/types/purchase";
@@ -50,10 +50,12 @@ export default function PurchaseEditPage() {
 
   const { data: purchase, isLoading: loadingPurchase } = usePurchase(id!);
   const { data: suppliersData } = useSuppliers();
+  const { data: payableData } = usePayableProviders();
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
 
   const suppliers = suppliersData?.items ?? [];
+  const payableProviders = payableData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
@@ -373,7 +375,7 @@ export default function PurchaseEditPage() {
               <div key={comm._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < commissions.length - 1 ? "border-b border-slate-100" : ""}`}>
                 <div className="col-span-3">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comisionista *</Label>}
-                  <EntitySelect value={comm.third_party_id} onChange={(v) => updateCommission(comm._key, "third_party_id", v)} options={suppliers.map((tp) => ({ id: tp.id, label: tp.name }))} placeholder="Proveedor..." />
+                  <EntitySelect value={comm.third_party_id} onChange={(v) => updateCommission(comm._key, "third_party_id", v)} options={payableProviders.map((tp) => ({ id: tp.id, label: tp.name }))} placeholder="Comisionista..." />
                 </div>
                 <div className="col-span-3">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto *</Label>}

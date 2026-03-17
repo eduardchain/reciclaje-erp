@@ -66,6 +66,7 @@ export const ROUTES = {
   CONFIG_BUSINESS_UNITS: "/config/business-units",
   CONFIG_EXPENSE_CATEGORIES: "/config/expense-categories",
   CONFIG_PRICE_LISTS: "/config/price-lists",
+  CONFIG_THIRD_PARTY_CATEGORIES: "/config/third-party-categories",
 
   // Admin
   ADMIN_ROLES: "/admin/roles",

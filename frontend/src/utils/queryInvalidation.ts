@@ -6,9 +6,10 @@ const invalidateInventory = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["materials"] });
 };
 
-// Financiero: terceros (saldos), reportes, cuentas
+// Financiero: terceros (saldos), reportes, cuentas, categorias terceros
 const invalidateFinancial = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["third-parties"] });
+  qc.invalidateQueries({ queryKey: ["third-party-categories"] });
   qc.invalidateQueries({ queryKey: ["reports"] });
   qc.invalidateQueries({ queryKey: ["money-accounts"] });
 };

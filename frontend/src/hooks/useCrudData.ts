@@ -6,6 +6,8 @@ import { materialService } from "@/services/materials";
 import { warehouseService } from "@/services/warehouses";
 import { moneyAccountService } from "@/services/moneyAccounts";
 import { businessUnitService, expenseCategoryService, priceListService, materialCategoryService } from "@/services/masterData";
+import { thirdPartyCategoryService } from "@/services/thirdPartyCategories";
+import type { ThirdPartyCategoryCreate, ThirdPartyCategoryUpdate } from "@/types/third-party-category";
 import type { ThirdPartyCreate, ThirdPartyUpdate } from "@/types/third-party";
 import type { MaterialCreate, MaterialUpdate, MaterialCategoryCreate, MaterialCategoryUpdate } from "@/types/material";
 import type { WarehouseCreate, WarehouseUpdate } from "@/types/warehouse";
@@ -169,6 +171,33 @@ export function useUpdateExpenseCategory() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ExpenseCategoryUpdate }) => expenseCategoryService.update(id, data),
     onSuccess: () => { toast.success("Categoria actualizada"); qc.invalidateQueries({ queryKey: ["expense-categories"] }); qc.invalidateQueries({ queryKey: ["expense-categories", "flat"] }); },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
+  });
+}
+
+// --- Third Party Categories ---
+
+export function useThirdPartyCategoriesList() {
+  return useQuery({
+    queryKey: ["third-party-categories", "list"],
+    queryFn: () => thirdPartyCategoryService.getAll(),
+  });
+}
+
+export function useCreateThirdPartyCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ThirdPartyCategoryCreate) => thirdPartyCategoryService.create(data),
+    onSuccess: () => { toast.success("Categoria de tercero creada"); qc.invalidateQueries({ queryKey: ["third-party-categories"] }); },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
+  });
+}
+
+export function useUpdateThirdPartyCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ThirdPartyCategoryUpdate }) => thirdPartyCategoryService.update(id, data),
+    onSuccess: () => { toast.success("Categoria actualizada"); qc.invalidateQueries({ queryKey: ["third-party-categories"] }); },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });
 }

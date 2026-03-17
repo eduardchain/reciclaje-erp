@@ -17,14 +17,23 @@ import { usePermissions } from "@/hooks/usePermissions";
 
 const PAGE_SIZE = 20;
 
-function RoleBadges({ tp }: { tp: ThirdPartyResponse }) {
+const BEHAVIOR_COLORS: Record<string, string> = {
+  material_supplier: "bg-blue-50 text-blue-700",
+  service_provider: "bg-rose-50 text-rose-700",
+  customer: "bg-emerald-50 text-emerald-700",
+  investor: "bg-purple-50 text-purple-700",
+  generic: "bg-slate-50 text-slate-700",
+  provision: "bg-orange-50 text-orange-700",
+};
+
+function CategoryBadges({ tp }: { tp: ThirdPartyResponse }) {
   return (
     <div className="flex gap-1 flex-wrap">
-      {tp.is_supplier && <Badge variant="outline" className="bg-blue-50 text-blue-700 text-xs">Proveedor</Badge>}
-      {tp.is_customer && <Badge variant="outline" className="bg-emerald-50 text-emerald-700 text-xs">Cliente</Badge>}
-      {tp.is_investor && <Badge variant="outline" className="bg-purple-50 text-purple-700 text-xs">Inversionista</Badge>}
-      {tp.is_provision && <Badge variant="outline" className="bg-orange-50 text-orange-700 text-xs">Provision</Badge>}
-      {tp.is_liability && <Badge variant="outline" className="bg-rose-50 text-rose-700 text-xs">Pasivo</Badge>}
+      {tp.categories.map((cat) => (
+        <Badge key={cat.id} variant="outline" className={`${BEHAVIOR_COLORS[cat.behavior_type] ?? ""} text-xs`}>
+          {cat.display_name}
+        </Badge>
+      ))}
     </div>
   );
 }
@@ -33,7 +42,7 @@ function getColumns(navigate: ReturnType<typeof useNavigate>, canViewBalance: bo
   const cols: ColumnDef<ThirdPartyResponse, unknown>[] = [
     { accessorKey: "name", header: "Nombre", enableSorting: true, cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
     { accessorKey: "identification_number", header: "Identificacion", cell: ({ row }) => row.original.identification_number ?? "-" },
-    { accessorKey: "roles", header: "Roles", cell: ({ row }) => <RoleBadges tp={row.original} /> },
+    { accessorKey: "categories", header: "Categorias", cell: ({ row }) => <CategoryBadges tp={row.original} /> },
     { accessorKey: "phone", header: "Telefono", cell: ({ row }) => row.original.phone ?? "-" },
   ];
   if (canViewBalance) {
@@ -73,7 +82,7 @@ export default function ThirdPartiesPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Terceros" description="Proveedores, clientes, inversionistas, provisiones y pasivos">
+      <PageHeader title="Terceros" description="Proveedores, clientes, inversionistas y mas">
         {hasPermission("third_parties.create") && (
           <Button onClick={() => { setEditItem(null); setDialogOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
             <Plus className="h-4 w-4 mr-2" />Nuevo Tercero
@@ -88,7 +97,8 @@ export default function ThirdPartiesPage() {
           <TabsTrigger value="customer">Clientes</TabsTrigger>
           <TabsTrigger value="investor">Inversionistas</TabsTrigger>
           <TabsTrigger value="provision">Provisiones</TabsTrigger>
-          <TabsTrigger value="liability">Pasivos</TabsTrigger>
+          <TabsTrigger value="liability">Servicios</TabsTrigger>
+          <TabsTrigger value="generic">Genericos</TabsTrigger>
         </TabsList>
       </Tabs>
 

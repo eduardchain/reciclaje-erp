@@ -133,8 +133,8 @@ Layered: **Endpoints → Services → Models**, with Pydantic schemas for valida
 React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios (data), Tailwind + shadcn/ui (UI), lucide-react (icons), sonner (toasts).
 
 - `services/api.ts` — Axios client: JWT auto-attach, X-Organization-ID from authStore, 401 redirect.
-- `services/*.ts` — 19 service files. `hooks/use*.ts` — 17 React Query hooks with toast on mutations.
-- `types/*.ts` — 19 type files matching backend schemas.
+- `services/*.ts` — 20 service files. `hooks/use*.ts` — 17 React Query hooks with toast on mutations.
+- `types/*.ts` — 20 type files matching backend schemas.
 - `components/shared/` — DataTable, PageHeader, StatusBadge, MoneyDisplay, MoneyInput, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList, PriceSuggestion, KpiCard.
 - `components/auth/` — ProtectedRoute, OrganizationSelector, PermissionGate (wraps content by permission check).
 - `pages/` — 75 page components. Forms use useState pattern. Admin pages: RolesPage, RoleEditPage, UsersPage.
@@ -254,7 +254,7 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 
 27. **Cache invalidation centralizada**: `queryInvalidation.ts`. Regla: si una operacion crea side-effects cross-module, invalidar TODOS los query keys afectados:
     - `invalidateAfterPurchase` (crear/editar): purchases + inventory + materials
-    - `invalidateAfterPurchaseLiquidateOrCancel`: + money-movements + treasury-dashboard + third-parties + reports + money-accounts
+    - `invalidateAfterPurchaseLiquidateOrCancel`: + money-movements + treasury-dashboard + third-parties + third-party-categories + reports + money-accounts
     - `invalidateAfterSale` (crear/editar): sales + inventory + materials
     - `invalidateAfterSaleLiquidateOrCancel`: + money-movements + treasury-dashboard + third-parties + reports + money-accounts
     - `invalidateAfterDoubleEntry`: double-entries + purchases + sales + third-parties + reports + money-accounts
@@ -279,6 +279,8 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 34. **Precios modo tabla (editable spreadsheet)**: `GET /price-lists/table` retorna todos los materiales activos con precio vigente (DISTINCT ON + LEFT JOIN). Frontend: tabla manual con celdas editables (click→input, Enter/blur→auto-save via `POST /price-lists` existente, Escape→cancel). Check verde 1.5s en save exitoso. Filtro categoría (server-side), búsqueda código/nombre (client-side). Modal historial por material. Permission-gated: `materials.edit_prices` para editar.
 
 35. **Subcategorías de gasto (max 2 niveles)**: `parent_id` FK self-referencial en `expense_categories`. Validaciones: max 2 niveles (parent no puede tener parent), misma org, activo. Subcategoría hereda `is_direct_expense` del padre. `GET /flat` retorna lista plana con `display_name` ("PADRE > HIJO"), ordenada alfabéticamente. Frontend: selector padre en dialog config (oculta switch is_direct si tiene padre), 5 formularios treasury usan `useExpenseCategoriesFlat()` + `display_name` como label. 13 tests.
+
+36. **Frontend categorías de terceros**: Eliminados flags booleanos del frontend (`is_supplier`, `is_customer`, `is_investor`, `is_provision`, `is_liability`, `investor_type`). `ThirdPartyResponse.categories[]` con `display_name` y `behavior_type`. ThirdPartyFormDialog usa multi-select checkbox de categorías flat. ThirdPartiesPage: tabs por `role` param (backend ROLE_BEHAVIOR_MAP), badges por `behavior_type`. Comisionistas: 9 pages usan `usePayableProviders()` (material_supplier + service_provider). Treasury: LiabilitiesPage/ProvisionsPage crean TP con `category_ids` auto-picked. Config: `ThirdPartyCategoriesPage` con 6 behavior_types en dropdown.
 
 ### Inventory Module — UX Details
 

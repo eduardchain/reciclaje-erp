@@ -12,7 +12,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useProvisions } from "@/hooks/useMasterData";
+import { useProvisions, useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { thirdPartyService } from "@/services/thirdParties";
 import { getApiErrorMessage } from "@/utils/formatters";
@@ -26,6 +26,9 @@ export default function ProvisionsPage() {
   const [search, setSearch] = useState("");
   const { data, isLoading } = useProvisions(search || undefined);
   const provisions = data?.items ?? [];
+  const { data: provCatsData } = useThirdPartyCategoriesFlat("provision");
+  const provisionCategories = provCatsData?.items ?? [];
+  const provisionCategoryId = provisionCategories.length > 0 ? provisionCategories[0].id : null;
 
   const totalAvailable = provisions.reduce((sum, p) => {
     return sum + (p.current_balance < 0 ? Math.abs(p.current_balance) : 0);
@@ -54,7 +57,7 @@ export default function ProvisionsPage() {
           <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
             Volver a Tesoreria
           </Button>
-          <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700">
+          <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700" disabled={!provisionCategoryId} title={!provisionCategoryId ? "Configure categorias de Provision primero" : undefined}>
             <Plus className="h-4 w-4 mr-2" />Nueva Provision
           </Button>
         </div>
@@ -165,7 +168,7 @@ export default function ProvisionsPage() {
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
             <Button
-              onClick={() => createTP.mutate({ name: newName, is_provision: true })}
+              onClick={() => createTP.mutate({ name: newName, category_ids: provisionCategoryId ? [provisionCategoryId] : [] })}
               disabled={!newName.trim() || createTP.isPending}
               className="bg-emerald-600 hover:bg-emerald-700"
             >

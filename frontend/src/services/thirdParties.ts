@@ -49,4 +49,14 @@ export const thirdPartyService = {
     const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties/liabilities", { params: filters });
     return response.data;
   },
+
+  getPayableProviders: async (filters: Omit<ThirdPartyFilters, "role"> = {}): Promise<PaginatedResponse<ThirdPartyResponse>> => {
+    const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties/payable-providers", { params: filters });
+    return response.data;
+  },
+
+  getInvestors: async (filters: Omit<ThirdPartyFilters, "role"> = {}): Promise<PaginatedResponse<ThirdPartyResponse>> => {
+    const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties/investors", { params: filters });
+    return response.data;
+  },
 };

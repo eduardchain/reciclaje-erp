@@ -14,7 +14,7 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useLiabilities, useExpenseCategoriesFlat } from "@/hooks/useMasterData";
+import { useLiabilities, useExpenseCategoriesFlat, useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
 import { useCreateMovement } from "@/hooks/useMoneyMovements";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -30,6 +30,9 @@ export default function LiabilitiesPage() {
   const [search, setSearch] = useState("");
   const { data: liabilitiesData, isLoading } = useLiabilities(search || undefined);
   const items = liabilitiesData?.items ?? [];
+  const { data: serviceCatsData } = useThirdPartyCategoriesFlat("service_provider");
+  const serviceCategories = serviceCatsData?.items ?? [];
+  const serviceCategoryId = serviceCategories.length > 0 ? serviceCategories[0].id : null;
 
   // Modal crear pasivo
   const [showCreate, setShowCreate] = useState(false);
@@ -94,7 +97,7 @@ export default function LiabilitiesPage() {
             Volver a Tesoreria
           </Button>
           {hasPermission("treasury.create_movements") && (
-            <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700" disabled={!serviceCategoryId} title={!serviceCategoryId ? "Configure categorias de Proveedor Servicios primero" : undefined}>
               <Plus className="h-4 w-4 mr-2" />Nuevo Pasivo
             </Button>
           )}
@@ -194,7 +197,7 @@ export default function LiabilitiesPage() {
             <Button
               onClick={() => createTP.mutate({
                 name: newName,
-                is_liability: true,
+                category_ids: serviceCategoryId ? [serviceCategoryId] : [],
                 identification_number: newIdNumber || undefined,
                 phone: newPhone || undefined,
               })}

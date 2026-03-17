@@ -93,6 +93,23 @@ def create_organization(
     role_service.seed_permissions(db)
     role_service.create_system_roles_for_org(db, organization.id)
 
+    # Seed categorías default de terceros para la nueva org
+    from app.models.third_party_category import ThirdPartyCategory
+    for cat_name, bt in [
+        ("Proveedor Material", "material_supplier"),
+        ("Proveedor Servicios", "service_provider"),
+        ("Cliente", "customer"),
+        ("Inversionista", "investor"),
+        ("Genérico", "generic"),
+        ("Provisión", "provision"),
+    ]:
+        db.add(ThirdPartyCategory(
+            name=cat_name,
+            behavior_type=bt,
+            organization_id=organization.id,
+        ))
+    db.flush()
+
     # Obtener rol admin para asignar al owner
     admin_role = role_service.get_admin_role_for_org(db, organization.id)
 

@@ -13,7 +13,7 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { usePurchase, useLiquidatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useSuppliers, useMoneyAccounts } from "@/hooks/useMasterData";
+import { usePayableProviders, useMoneyAccounts } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import type { PurchaseCommissionCreate } from "@/types/purchase";
@@ -44,8 +44,8 @@ export default function PurchaseLiquidatePage() {
   const { data: purchase, isLoading } = usePurchase(id!);
   const { getSuggestedPrice } = usePriceSuggestions();
   const liquidate = useLiquidatePurchase();
-  const { data: suppliersData } = useSuppliers();
-  const suppliers = suppliersData?.items ?? [];
+  const { data: payableData } = usePayableProviders();
+  const payableProviders = payableData?.items ?? [];
 
   const [lines, setLines] = useState<LiquidationLine[]>([]);
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
@@ -300,7 +300,7 @@ export default function PurchaseLiquidatePage() {
               <div key={comm._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < commissions.length - 1 ? "border-b border-slate-100" : ""}`}>
                 <div className="col-span-3">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comisionista *</Label>}
-                  <EntitySelect value={comm.third_party_id} onChange={(v) => updateCommission(comm._key, "third_party_id", v)} options={suppliers.map((tp) => ({ id: tp.id, label: tp.name }))} placeholder="Proveedor..." />
+                  <EntitySelect value={comm.third_party_id} onChange={(v) => updateCommission(comm._key, "third_party_id", v)} options={payableProviders.map((tp) => ({ id: tp.id, label: tp.name }))} placeholder="Comisionista..." />
                 </div>
                 <div className="col-span-3">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto *</Label>}

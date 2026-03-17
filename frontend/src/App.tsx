@@ -65,6 +65,7 @@ import MoneyAccountsPage from "@/pages/config/MoneyAccountsPage";
 import BusinessUnitsPage from "@/pages/config/BusinessUnitsPage";
 import ExpenseCategoriesPage from "@/pages/config/ExpenseCategoriesPage";
 import PriceListsPage from "@/pages/config/PriceListsPage";
+import ThirdPartyCategoriesPage from "@/pages/config/ThirdPartyCategoriesPage";
 import RolesPage from "@/pages/admin/RolesPage";
 import RoleEditPage from "@/pages/admin/RoleEditPage";
 import UsersPage from "@/pages/admin/UsersPage";
@@ -167,6 +168,7 @@ function App() {
               <Route path={ROUTES.CONFIG_BUSINESS_UNITS} element={<P permission="config.view_business_units"><BusinessUnitsPage /></P>} />
               <Route path={ROUTES.CONFIG_EXPENSE_CATEGORIES} element={<P permission="treasury.manage_expenses"><ExpenseCategoriesPage /></P>} />
               <Route path={ROUTES.CONFIG_PRICE_LISTS} element={<P permission="materials.view_prices"><PriceListsPage /></P>} />
+              <Route path={ROUTES.CONFIG_THIRD_PARTY_CATEGORIES} element={<P permission="third_parties.create"><ThirdPartyCategoriesPage /></P>} />
               {/* Admin */}
               <Route path={ROUTES.ADMIN_ROLES} element={<P permission="admin.manage_roles"><RolesPage /></P>} />
               <Route path="/admin/roles/:id" element={<P permission="admin.manage_roles"><RoleEditPage /></P>} />

@@ -4,6 +4,7 @@ import { materialService } from "@/services/materials";
 import { warehouseService } from "@/services/warehouses";
 import { moneyAccountService } from "@/services/moneyAccounts";
 import { expenseCategoryService } from "@/services/masterData";
+import { thirdPartyCategoryService } from "@/services/thirdPartyCategories";
 
 export function useSuppliers(search?: string) {
   return useQuery({
@@ -80,5 +81,19 @@ export function useLiabilities(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "liabilities", search],
     queryFn: () => thirdPartyService.getLiabilities({ search, limit: 100 }),
+  });
+}
+
+export function usePayableProviders(search?: string) {
+  return useQuery({
+    queryKey: ["third-parties", "payable-providers", search],
+    queryFn: () => thirdPartyService.getPayableProviders({ search, limit: 100 }),
+  });
+}
+
+export function useThirdPartyCategoriesFlat(behaviorType?: string) {
+  return useQuery({
+    queryKey: ["third-party-categories", "flat", behaviorType],
+    queryFn: () => thirdPartyCategoryService.getFlat(behaviorType),
   });
 }

@@ -15,7 +15,7 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { useSale, useUpdateSale } from "@/hooks/useSales";
 import { inventoryService } from "@/services/inventory";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useCustomers, useSuppliers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { useCustomers, usePayableProviders, useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatWeight, utcToLocalDateInput, toLocalDateInput } from "@/utils/formatters";
 import type { SaleLineCreate, SaleCommissionCreate } from "@/types/sale";
@@ -72,12 +72,12 @@ export default function SaleEditPage() {
 
   const { data: sale, isLoading: loadingSale } = useSale(id!);
   const { data: customersData } = useCustomers();
-  const { data: suppliersData } = useSuppliers();
+  const { data: payableData } = usePayableProviders();
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
 
   const customers = customersData?.items ?? [];
-  const suppliers = suppliersData?.items ?? [];
+  const payableProviders = payableData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
@@ -391,7 +391,7 @@ export default function SaleEditPage() {
                   <EntitySelect
                     value={comm.third_party_id}
                     onChange={(v) => updateCommission(comm._key, "third_party_id", v)}
-                    options={suppliers.map((tp) => ({ id: tp.id, label: tp.name }))}
+                    options={payableProviders.map((tp) => ({ id: tp.id, label: tp.name }))}
                     placeholder="Proveedor..."
                   />
                 </div>

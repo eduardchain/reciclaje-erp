@@ -10,6 +10,7 @@ const tabs = [
   { value: ROUTES.CONFIG_BUSINESS_UNITS, label: "Unidades Negocio", permission: "config.view_business_units" },
   { value: ROUTES.CONFIG_EXPENSE_CATEGORIES, label: "Cat. Gastos", permission: "treasury.manage_expenses" },
   { value: ROUTES.CONFIG_PRICE_LISTS, label: "Precios", permission: "materials.view_prices" },
+  { value: ROUTES.CONFIG_THIRD_PARTY_CATEGORIES, label: "Cat. Terceros", permission: "third_parties.create" },
 ];
 
 export default function ConfigLayout({ children }: { children: React.ReactNode }) {

@@ -3,9 +3,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useCreateThirdParty, useUpdateThirdParty } from "@/hooks/useCrudData";
+import { useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
 import type { ThirdPartyResponse } from "@/types/third-party";
 
 interface Props {
@@ -14,21 +15,27 @@ interface Props {
   editItem: ThirdPartyResponse | null;
 }
 
+const BEHAVIOR_COLORS: Record<string, string> = {
+  material_supplier: "bg-blue-50 text-blue-700",
+  service_provider: "bg-rose-50 text-rose-700",
+  customer: "bg-emerald-50 text-emerald-700",
+  investor: "bg-purple-50 text-purple-700",
+  generic: "bg-slate-50 text-slate-700",
+  provision: "bg-orange-50 text-orange-700",
+};
+
 export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: Props) {
   const create = useCreateThirdParty();
   const update = useUpdateThirdParty();
+  const { data: categoriesData } = useThirdPartyCategoriesFlat();
+  const categories = categoriesData?.items ?? [];
 
   const [name, setName] = useState("");
   const [identification, setIdentification] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
-  const [isSupplier, setIsSupplier] = useState(false);
-  const [isCustomer, setIsCustomer] = useState(false);
-  const [isInvestor, setIsInvestor] = useState(false);
-  const [isProvision, setIsProvision] = useState(false);
-  const [isLiability, setIsLiability] = useState(false);
-  const [investorType, setInvestorType] = useState("");
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [initialBalance, setInitialBalance] = useState(0);
 
   useEffect(() => {
@@ -38,19 +45,17 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
       setEmail(editItem.email ?? "");
       setPhone(editItem.phone ?? "");
       setAddress(editItem.address ?? "");
-      setIsSupplier(editItem.is_supplier);
-      setIsCustomer(editItem.is_customer);
-      setIsInvestor(editItem.is_investor);
-      setIsProvision(editItem.is_provision);
-      setIsLiability(editItem.is_liability);
-      setInvestorType(editItem.investor_type ?? "");
+      setCategoryIds(editItem.categories.map((c) => c.id));
     } else {
       setName(""); setIdentification(""); setEmail(""); setPhone(""); setAddress("");
-      setIsSupplier(false); setIsCustomer(false); setIsInvestor(false); setIsProvision(false); setIsLiability(false);
-      setInvestorType("");
+      setCategoryIds([]);
       setInitialBalance(0);
     }
   }, [editItem, open]);
+
+  const toggleCategory = (id: string) => {
+    setCategoryIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
 
   const handleSubmit = () => {
     const base = {
@@ -59,12 +64,7 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
       email: email || null,
       phone: phone || null,
       address: address || null,
-      is_supplier: isSupplier,
-      is_customer: isCustomer,
-      is_investor: isInvestor,
-      is_provision: isProvision,
-      is_liability: isLiability,
-      investor_type: isInvestor && investorType ? investorType : null,
+      category_ids: categoryIds,
     };
     const opts = { onSuccess: () => onOpenChange(false) };
 
@@ -76,6 +76,7 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
   };
 
   const isPending = create.isPending || update.isPending;
+  const selectedCategories = categories.filter((c) => categoryIds.includes(c.id));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -91,27 +92,26 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Telefono</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
           </div>
           <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Direccion</Label><Input value={address} onChange={(e) => setAddress(e.target.value)} /></div>
-          <div className="space-y-3">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Roles</Label>
-            <div className="flex items-center justify-between"><span className="text-sm">Proveedor</span><Switch checked={isSupplier} onCheckedChange={setIsSupplier} /></div>
-            <div className="flex items-center justify-between"><span className="text-sm">Cliente</span><Switch checked={isCustomer} onCheckedChange={setIsCustomer} /></div>
-            <div className="flex items-center justify-between"><span className="text-sm">Inversionista</span><Switch checked={isInvestor} onCheckedChange={setIsInvestor} /></div>
-            {isInvestor && (
-              <div className="ml-4">
-                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo Inversionista</Label>
-                <select
-                  className="w-full mt-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-                  value={investorType}
-                  onChange={(e) => setInvestorType(e.target.value)}
-                >
-                  <option value="">Sin clasificar</option>
-                  <option value="socio">Socio</option>
-                  <option value="obligacion_financiera">Obligacion Financiera</option>
-                </select>
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categorias</Label>
+            {selectedCategories.length > 0 && (
+              <div className="flex gap-1 flex-wrap">
+                {selectedCategories.map((c) => (
+                  <Badge key={c.id} variant="outline" className={`${BEHAVIOR_COLORS[c.behavior_type] ?? ""} text-xs cursor-pointer`} onClick={() => toggleCategory(c.id)}>
+                    {c.display_name} ✕
+                  </Badge>
+                ))}
               </div>
             )}
-            <div className="flex items-center justify-between"><span className="text-sm">Provision</span><Switch checked={isProvision} onCheckedChange={setIsProvision} /></div>
-            <div className="flex items-center justify-between"><span className="text-sm">Pasivo</span><Switch checked={isLiability} onCheckedChange={setIsLiability} /></div>
+            <div className="max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
+              {categories.map((cat) => (
+                <label key={cat.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
+                  <input type="checkbox" checked={categoryIds.includes(cat.id)} onChange={() => toggleCategory(cat.id)} className="rounded border-slate-300" />
+                  <span>{cat.display_name}</span>
+                </label>
+              ))}
+              {categories.length === 0 && <p className="text-xs text-slate-400">No hay categorias configuradas.</p>}
+            </div>
           </div>
           {!editItem && (
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><MoneyInput value={initialBalance} onChange={setInitialBalance} min={-999999999999} /></div>

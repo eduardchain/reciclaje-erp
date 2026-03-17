@@ -14,7 +14,7 @@ import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useDoubleEntry, useEditDoubleEntry } from "@/hooks/useDoubleEntries";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useSuppliers, useCustomers, useMaterials } from "@/hooks/useMasterData";
+import { useSuppliers, usePayableProviders, useCustomers, useMaterials } from "@/hooks/useMasterData";
 import { formatCurrency, utcToLocalDateInput } from "@/utils/formatters";
 import type { DoubleEntryLineCreate } from "@/types/double-entry";
 import type { SaleCommissionCreate } from "@/types/sale";
@@ -39,9 +39,11 @@ export default function DoubleEntryEditPage() {
   const edit = useEditDoubleEntry();
 
   const { data: suppliersData } = useSuppliers();
+  const { data: payableData } = usePayableProviders();
   const { data: customersData } = useCustomers();
   const { data: materialsData } = useMaterials();
   const suppliers = suppliersData?.items ?? [];
+  const payableProviders = payableData?.items ?? [];
   const customers = customersData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
@@ -292,7 +294,7 @@ export default function DoubleEntryEditPage() {
               <div key={comm._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < commissions.length - 1 ? "border-b border-slate-100" : ""}`}>
                 <div className="col-span-3">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comisionista</Label>}
-                  <EntitySelect value={comm.third_party_id} onChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, third_party_id: v } : c))} options={suppliers.map((t) => ({ id: t.id, label: t.name }))} placeholder="Proveedor..." />
+                  <EntitySelect value={comm.third_party_id} onChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, third_party_id: v } : c))} options={payableProviders.map((t) => ({ id: t.id, label: t.name }))} placeholder="Comisionista..." />
                 </div>
                 <div className="col-span-3">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto</Label>}
