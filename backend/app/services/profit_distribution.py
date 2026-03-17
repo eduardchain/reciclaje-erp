@@ -4,7 +4,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, func
+from sqlalchemy import select, func, exists
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.profit_distribution import ProfitDistribution, ProfitDistributionLine
@@ -56,15 +56,21 @@ class ProfitDistributionService:
         )
 
     def get_partners(self, db: Session, organization_id: UUID) -> list[PartnerResponse]:
-        """Lista de socios (investor_type='socio') con saldo actual."""
+        """Lista de socios (behavior_type='investor', subcategoria 'Socios') con saldo actual."""
+        from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
+        # Socios = inversionistas cuya categoría se llama 'Socios' (subcategoría de Inversionista)
+        # o cualquier categoría investor que NO sea 'Obligaciones Financieras'
         partners = db.execute(
-            select(ThirdParty).where(
+            select(ThirdParty)
+            .join(ThirdPartyCategoryAssignment, ThirdPartyCategoryAssignment.third_party_id == ThirdParty.id)
+            .join(ThirdPartyCategory, ThirdPartyCategoryAssignment.category_id == ThirdPartyCategory.id)
+            .where(
                 ThirdParty.organization_id == organization_id,
-                ThirdParty.is_investor == True,
-                ThirdParty.investor_type == "socio",
+                ThirdPartyCategory.behavior_type == "investor",
+                ThirdPartyCategory.name.ilike("%socio%"),
                 ThirdParty.is_active == True,
             ).order_by(ThirdParty.name)
-        ).scalars().all()
+        ).scalars().unique().all()
         return [
             PartnerResponse(
                 id=p.id,
@@ -124,10 +130,10 @@ class ProfitDistributionService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Tercero no encontrado: {line.third_party_id}",
                 )
-            if not tp.is_investor or tp.investor_type != "socio":
+            if not self._is_socio(db, tp.id):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"'{tp.name}' no es socio (investor_type='socio')",
+                    detail=f"'{tp.name}' no es socio",
                 )
             validated_lines.append((tp, line.amount))
             total_amount += line.amount
@@ -187,6 +193,24 @@ class ProfitDistributionService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_socio(db: Session, third_party_id: UUID) -> bool:
+        """Verificar si un tercero es socio (investor con categoría 'Socios')."""
+        from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
+        return db.execute(
+            select(
+                exists(
+                    select(ThirdPartyCategoryAssignment.id)
+                    .join(ThirdPartyCategory, ThirdPartyCategoryAssignment.category_id == ThirdPartyCategory.id)
+                    .where(
+                        ThirdPartyCategoryAssignment.third_party_id == third_party_id,
+                        ThirdPartyCategory.behavior_type == "investor",
+                        ThirdPartyCategory.name.ilike("%socio%"),
+                    )
+                )
+            )
+        ).scalar()
 
     @staticmethod
     def _to_response(d: ProfitDistribution) -> ProfitDistributionResponse:

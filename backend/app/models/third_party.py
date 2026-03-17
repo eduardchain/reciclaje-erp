@@ -10,6 +10,7 @@ from .base import Base, TimestampMixin, OrganizationMixin, GUID
 if TYPE_CHECKING:
     from app.models.purchase import Purchase
     from app.models.sale import Sale, SaleCommission
+    from app.models.third_party_category import ThirdPartyCategoryAssignment
 
 
 class ThirdParty(Base, TimestampMixin, OrganizationMixin):
@@ -42,34 +43,12 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
     
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     
-    # Type flags - a third party can be multiple types
-    is_supplier: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    
-    is_customer: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    
-    is_investor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    
-    is_provision: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
-    is_liability: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
     is_system_entity: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
-    investor_type: Mapped[str | None] = mapped_column(
-        String(50),
-        nullable=True,
-        comment="socio, obligacion_financiera (solo para is_investor=True)",
-    )
 
     provision_type: Mapped[str | None] = mapped_column(
         String(50),
         nullable=True,
     )  # e.g., 'tax', 'employee_benefit', 'other'
-    
-    category: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-    )  # Additional categorization
     
     initial_balance: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
@@ -110,6 +89,11 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
         back_populates="third_party",
     )
     
+    category_assignments: Mapped[list["ThirdPartyCategoryAssignment"]] = relationship(
+        "ThirdPartyCategoryAssignment",
+        cascade="all, delete-orphan",
+    )
+
     double_entries_as_supplier: Mapped[list["DoubleEntry"]] = relationship(
         "DoubleEntry",
         foreign_keys="DoubleEntry.supplier_id",
@@ -123,15 +107,4 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
     )
     
     def __repr__(self) -> str:
-        types = []
-        if self.is_supplier:
-            types.append("Supplier")
-        if self.is_customer:
-            types.append("Customer")
-        if self.is_investor:
-            types.append("Investor")
-        if self.is_provision:
-            types.append("Provision")
-        
-        type_str = ", ".join(types) if types else "None"
-        return f"<ThirdParty(id={self.id}, name='{self.name}', types=[{type_str}])>"
+        return f"<ThirdParty(id={self.id}, name='{self.name}')>"

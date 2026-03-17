@@ -37,6 +37,7 @@ from app.models import (
 )
 from app.models.money_movement import MoneyMovement
 from app.models.sale import SaleCommission
+from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 
 
 # ============================================================================
@@ -47,10 +48,15 @@ from app.models.sale import SaleCommission
 def test_supplier(db_session, test_organization):
     supplier = ThirdParty(
         id=uuid4(), name="Metal Supplier Co.", identification_number="SUP-001",
-        is_supplier=True, is_customer=False, current_balance=Decimal("0.00"),
+        current_balance=Decimal("0.00"),
         organization_id=test_organization.id, is_active=True,
     )
     db_session.add(supplier)
+    db_session.flush()
+    cat = ThirdPartyCategory(name="Proveedor Material", behavior_type="material_supplier", organization_id=test_organization.id)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=supplier.id, category_id=cat.id))
     db_session.commit()
     db_session.refresh(supplier)
     return supplier
@@ -60,10 +66,15 @@ def test_supplier(db_session, test_organization):
 def test_customer(db_session, test_organization):
     customer = ThirdParty(
         id=uuid4(), name="Customer Industries", identification_number="CUST-001",
-        is_supplier=False, is_customer=True, current_balance=Decimal("0.00"),
+        current_balance=Decimal("0.00"),
         organization_id=test_organization.id, is_active=True,
     )
     db_session.add(customer)
+    db_session.flush()
+    cat = ThirdPartyCategory(name="Cliente", behavior_type="customer", organization_id=test_organization.id)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=customer.id, category_id=cat.id))
     db_session.commit()
     db_session.refresh(customer)
     return customer
@@ -73,10 +84,19 @@ def test_customer(db_session, test_organization):
 def test_supplier_customer(db_session, test_organization):
     party = ThirdParty(
         id=uuid4(), name="Dual Role Company", identification_number="DUAL-001",
-        is_supplier=True, is_customer=True, current_balance=Decimal("0.00"),
+        current_balance=Decimal("0.00"),
         organization_id=test_organization.id, is_active=True,
     )
     db_session.add(party)
+    db_session.flush()
+    cat_sup = ThirdPartyCategory(name="Proveedor Material Dual", behavior_type="material_supplier", organization_id=test_organization.id)
+    db_session.add(cat_sup)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=party.id, category_id=cat_sup.id))
+    cat_cust = ThirdPartyCategory(name="Cliente Dual", behavior_type="customer", organization_id=test_organization.id)
+    db_session.add(cat_cust)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=party.id, category_id=cat_cust.id))
     db_session.commit()
     db_session.refresh(party)
     return party
@@ -86,10 +106,15 @@ def test_supplier_customer(db_session, test_organization):
 def test_commission_recipient(db_session, test_organization):
     recipient = ThirdParty(
         id=uuid4(), name="Commission Agent",
-        is_supplier=True, is_customer=False, current_balance=Decimal("0.00"),
+        current_balance=Decimal("0.00"),
         organization_id=test_organization.id, is_active=True,
     )
     db_session.add(recipient)
+    db_session.flush()
+    cat = ThirdPartyCategory(name="Proveedor Material Comision", behavior_type="material_supplier", organization_id=test_organization.id)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=recipient.id, category_id=cat.id))
     db_session.commit()
     db_session.refresh(recipient)
     return recipient

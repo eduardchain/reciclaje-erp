@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.expense_category import ExpenseCategory
 from app.models.money_account import MoneyAccount
 from app.models.third_party import ThirdParty
+from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 
 
 # ---------------------------------------------------------------------------
@@ -41,12 +42,16 @@ def fa_supplier(db_session: Session, test_organization) -> ThirdParty:
     """Proveedor de equipos."""
     tp = ThirdParty(
         name="Equipos Industriales S.A.",
-        is_supplier=True,
         organization_id=test_organization.id,
         current_balance=Decimal("0"),
         initial_balance=Decimal("0"),
     )
     db_session.add(tp)
+    db_session.flush()
+    cat = ThirdPartyCategory(name="Proveedores Material FA", behavior_type="material_supplier", organization_id=test_organization.id)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=tp.id, category_id=cat.id))
     db_session.commit()
     db_session.refresh(tp)
     return tp
@@ -166,13 +171,16 @@ class TestFixedAssetCreate:
         """Crear activo con tercero que NO es proveedor debe fallar."""
         customer = ThirdParty(
             name="Solo Cliente",
-            is_customer=True,
-            is_supplier=False,
             organization_id=test_organization.id,
             current_balance=Decimal("0"),
             initial_balance=Decimal("0"),
         )
         db_session.add(customer)
+        db_session.flush()
+        cat = ThirdPartyCategory(name="Clientes FA", behavior_type="customer", organization_id=test_organization.id)
+        db_session.add(cat)
+        db_session.flush()
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=customer.id, category_id=cat.id))
         db_session.commit()
         db_session.refresh(customer)
 

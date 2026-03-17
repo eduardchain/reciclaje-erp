@@ -82,7 +82,7 @@ class CRUDMoneyMovement:
         """
         # Validaciones
         account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
-        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_type=["is_supplier", "is_liability"])
+        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_behavior=["material_supplier", "service_provider"])
 
         if data.purchase_id:
             self._validate_purchase(db, data.purchase_id, organization_id, supplier_id=data.supplier_id)
@@ -131,7 +131,7 @@ class CRUDMoneyMovement:
         - Si sale_id, venta debe pertenecer al cliente
         """
         account = self._validate_account(db, data.account_id, organization_id)
-        customer = self._validate_third_party(db, data.customer_id, organization_id, require_type="is_customer")
+        customer = self._validate_third_party(db, data.customer_id, organization_id, require_behavior=["customer"])
 
         if data.sale_id:
             self._validate_sale(db, data.sale_id, organization_id, customer_id=data.customer_id)
@@ -330,7 +330,7 @@ class CRUDMoneyMovement:
         - investor.current_balance -= amount (le debemos mas)
         """
         account = self._validate_account(db, data.account_id, organization_id)
-        investor = self._validate_third_party(db, data.investor_id, organization_id, require_type="is_investor")
+        investor = self._validate_third_party(db, data.investor_id, organization_id, require_behavior=["investor"])
 
         movement = self._create_movement(
             db=db,
@@ -368,7 +368,7 @@ class CRUDMoneyMovement:
         - investor.current_balance += amount (le debemos menos)
         """
         account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
-        investor = self._validate_third_party(db, data.investor_id, organization_id, require_type="is_investor")
+        investor = self._validate_third_party(db, data.investor_id, organization_id, require_behavior=["investor"])
 
         movement = self._create_movement(
             db=db,
@@ -444,7 +444,7 @@ class CRUDMoneyMovement:
         - provision.current_balance -= amount (negativo = fondos disponibles)
         """
         account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
-        provision = self._validate_third_party(db, data.provision_id, organization_id, require_type="is_provision")
+        provision = self._validate_third_party(db, data.provision_id, organization_id, require_behavior=["provision"])
 
         movement = self._create_movement(
             db=db,
@@ -484,7 +484,7 @@ class CRUDMoneyMovement:
         - Provision no debe estar en sobregiro (balance > 0)
         - Provision debe tener fondos suficientes (abs(balance) >= amount)
         """
-        provision = self._validate_third_party(db, data.provision_id, organization_id, require_type="is_provision")
+        provision = self._validate_third_party(db, data.provision_id, organization_id, require_behavior=["provision"])
         self._validate_expense_category(db, data.expense_category_id, organization_id)
 
         # Validar fondos de provision
@@ -540,7 +540,7 @@ class CRUDMoneyMovement:
         - supplier.current_balance += amount (proveedor nos debe)
         """
         account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
-        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_type="is_supplier")
+        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_behavior=["material_supplier", "service_provider"])
 
         movement = self._create_movement(
             db=db,
@@ -579,7 +579,7 @@ class CRUDMoneyMovement:
         - customer.current_balance -= amount (nosotros debemos al cliente)
         """
         account = self._validate_account(db, data.account_id, organization_id)
-        customer = self._validate_third_party(db, data.customer_id, organization_id, require_type="is_customer")
+        customer = self._validate_third_party(db, data.customer_id, organization_id, require_behavior=["customer"])
 
         movement = self._create_movement(
             db=db,
@@ -1056,30 +1056,31 @@ class CRUDMoneyMovement:
         db: Session,
         third_party_id: UUID,
         organization_id: UUID,
-        require_type: Optional[str | list[str]] = None,
+        require_behavior: Optional[list[str]] = None,
     ) -> ThirdParty:
-        """Validar que el tercero existe, pertenece a la org, y tiene el tipo requerido.
+        """Validar que el tercero existe, pertenece a la org, y tiene behavior_type requerido.
 
-        require_type puede ser un string ("is_supplier") o una lista
-        ["is_supplier", "is_liability"] para validar que tenga AL MENOS uno (OR).
+        require_behavior: lista de behavior_types aceptados (OR). Ej: ["material_supplier", "service_provider"].
         """
+        from app.services.third_party import third_party as tp_service
+
         tp = db.get(ThirdParty, third_party_id)
         if not tp or tp.organization_id != organization_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Tercero no encontrado",
             )
-        type_labels = {
-            "is_supplier": "proveedor",
-            "is_customer": "cliente",
-            "is_investor": "inversor",
-            "is_provision": "provision",
-            "is_liability": "pasivo",
+        behavior_labels = {
+            "material_supplier": "proveedor de material",
+            "service_provider": "proveedor de servicios",
+            "customer": "cliente",
+            "investor": "inversor",
+            "provision": "provision",
+            "employee": "empleado",
         }
-        if require_type:
-            types = [require_type] if isinstance(require_type, str) else require_type
-            if not any(getattr(tp, t, False) for t in types):
-                labels = [type_labels.get(t, t) for t in types]
+        if require_behavior:
+            if not tp_service.has_behavior_type(db, third_party_id, require_behavior):
+                labels = [behavior_labels.get(b, b) for b in require_behavior]
                 label = " o ".join(labels)
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

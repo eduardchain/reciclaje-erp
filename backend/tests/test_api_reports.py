@@ -21,6 +21,7 @@ from app.models.organization import Organization
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.sale import Sale, SaleLine, SaleCommission
 from app.models.third_party import ThirdParty
+from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 from app.models.user import User
 from app.models.warehouse import Warehouse
 
@@ -98,41 +99,50 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     # --- Terceros ---
     proveedor1 = ThirdParty(
         name="Proveedor Alfa", organization_id=org_id,
-        is_supplier=True, is_customer=False,
         current_balance=Decimal("-2000000"),  # les debemos 2M
         is_active=True,
     )
     proveedor2 = ThirdParty(
         name="Proveedor Beta", organization_id=org_id,
-        is_supplier=True, is_customer=False,
         current_balance=Decimal("-500000"),
         is_active=True,
     )
     cliente1 = ThirdParty(
         name="Cliente Uno", organization_id=org_id,
-        is_supplier=False, is_customer=True,
         current_balance=Decimal("3000000"),  # nos deben 3M
         is_active=True,
     )
     cliente2 = ThirdParty(
         name="Cliente Dos", organization_id=org_id,
-        is_supplier=False, is_customer=True,
         current_balance=Decimal("1000000"),
         is_active=True,
     )
     inversor = ThirdParty(
         name="Inversor Capital", organization_id=org_id,
-        is_supplier=False, is_customer=False, is_investor=True,
         current_balance=Decimal("-5000000"),  # les debemos 5M
         is_active=True,
     )
     comisionista = ThirdParty(
         name="Vendedor Externo", organization_id=org_id,
-        is_supplier=False, is_customer=False,
         current_balance=Decimal("0"),
         is_active=True,
     )
     db_session.add_all([proveedor1, proveedor2, cliente1, cliente2, inversor, comisionista])
+    db_session.flush()
+
+    # --- Categorias de terceros ---
+    cat_supplier = ThirdPartyCategory(name="Proveedores Mat", behavior_type="material_supplier", organization_id=org_id)
+    cat_customer = ThirdPartyCategory(name="Clientes", behavior_type="customer", organization_id=org_id)
+    cat_investor = ThirdPartyCategory(name="Inversores", behavior_type="investor", organization_id=org_id)
+    db_session.add_all([cat_supplier, cat_customer, cat_investor])
+    db_session.flush()
+    db_session.add_all([
+        ThirdPartyCategoryAssignment(third_party_id=proveedor1.id, category_id=cat_supplier.id),
+        ThirdPartyCategoryAssignment(third_party_id=proveedor2.id, category_id=cat_supplier.id),
+        ThirdPartyCategoryAssignment(third_party_id=cliente1.id, category_id=cat_customer.id),
+        ThirdPartyCategoryAssignment(third_party_id=cliente2.id, category_id=cat_customer.id),
+        ThirdPartyCategoryAssignment(third_party_id=inversor.id, category_id=cat_investor.id),
+    ])
     db_session.flush()
 
     # --- Compras (3 liquidadas + 1 registrada) ---
@@ -932,18 +942,25 @@ class TestThirdPartyBalances:
         # Proveedor con balance positivo (anticipo pagado, nos debe)
         prov_advance = ThirdParty(
             name="Proveedor Anticipo", organization_id=org_id,
-            is_supplier=True, is_customer=False,
             current_balance=Decimal("300000"),  # nos debe 300K
             is_active=True,
         )
         # Cliente con balance negativo (anticipo recibido, le debemos)
         cli_advance = ThirdParty(
             name="Cliente Anticipo", organization_id=org_id,
-            is_supplier=False, is_customer=True,
             current_balance=Decimal("-200000"),  # le debemos 200K
             is_active=True,
         )
         db_session.add_all([prov_advance, cli_advance])
+        db_session.flush()
+        cat_supplier = ThirdPartyCategory(name="Proveedores Adv", behavior_type="material_supplier", organization_id=org_id)
+        cat_customer = ThirdPartyCategory(name="Clientes Adv", behavior_type="customer", organization_id=org_id)
+        db_session.add_all([cat_supplier, cat_customer])
+        db_session.flush()
+        db_session.add_all([
+            ThirdPartyCategoryAssignment(third_party_id=prov_advance.id, category_id=cat_supplier.id),
+            ThirdPartyCategoryAssignment(third_party_id=cli_advance.id, category_id=cat_customer.id),
+        ])
         db_session.commit()
 
         response = client.get("/api/v1/reports/third-party-balances", headers=org_headers)
@@ -989,20 +1006,27 @@ class TestAuditBalances:
         # Terceros
         proveedor = ThirdParty(
             name="Proveedor Audit", organization_id=org_id,
-            is_supplier=True, is_customer=False,
             current_balance=Decimal("0"), is_active=True,
         )
         cliente = ThirdParty(
             name="Cliente Audit", organization_id=org_id,
-            is_supplier=False, is_customer=True,
             current_balance=Decimal("0"), is_active=True,
         )
         comisionista = ThirdParty(
             name="Comisionista Audit", organization_id=org_id,
-            is_supplier=False, is_customer=False,
             current_balance=Decimal("0"), is_active=True,
         )
         db_session.add_all([proveedor, cliente, comisionista])
+        db_session.flush()
+
+        cat_supplier = ThirdPartyCategory(name="Proveedores Audit", behavior_type="material_supplier", organization_id=org_id)
+        cat_customer = ThirdPartyCategory(name="Clientes Audit", behavior_type="customer", organization_id=org_id)
+        db_session.add_all([cat_supplier, cat_customer])
+        db_session.flush()
+        db_session.add_all([
+            ThirdPartyCategoryAssignment(third_party_id=proveedor.id, category_id=cat_supplier.id),
+            ThirdPartyCategoryAssignment(third_party_id=cliente.id, category_id=cat_customer.id),
+        ])
         db_session.flush()
 
         # Material y bodega
@@ -1146,7 +1170,7 @@ class TestAuditBalances:
         prov_audit = tp_map["Proveedor Audit"]
         assert prov_audit["status"] == "mismatch"
         assert prov_audit["difference"] == pytest.approx(999, abs=1)
-        assert prov_audit["roles"] == ["supplier"]
+        assert prov_audit["roles"] == ["material_supplier"]
 
 
 # ---------------------------------------------------------------------------
@@ -1231,16 +1255,26 @@ class TestBalanceDetailed:
         # Crear socio
         socio = ThirdParty(
             name="Socio Capital", organization_id=org_id,
-            is_investor=True, investor_type="socio",
             current_balance=Decimal("-3000000"), is_active=True,
         )
         # Crear obligacion financiera
         obl = ThirdParty(
             name="Banco Credito", organization_id=org_id,
-            is_investor=True, investor_type="obligacion_financiera",
             current_balance=Decimal("-2000000"), is_active=True,
         )
         db_session.add_all([socio, obl])
+        db_session.flush()
+        cat_parent = ThirdPartyCategory(name="Inversionista", behavior_type="investor", organization_id=org_id)
+        db_session.add(cat_parent)
+        db_session.flush()
+        cat_socios = ThirdPartyCategory(name="Socios", behavior_type="investor", parent_id=cat_parent.id, organization_id=org_id)
+        cat_obligaciones = ThirdPartyCategory(name="Obligaciones Financieras", behavior_type="investor", parent_id=cat_parent.id, organization_id=org_id)
+        db_session.add_all([cat_socios, cat_obligaciones])
+        db_session.flush()
+        db_session.add_all([
+            ThirdPartyCategoryAssignment(third_party_id=socio.id, category_id=cat_socios.id),
+            ThirdPartyCategoryAssignment(third_party_id=obl.id, category_id=cat_obligaciones.id),
+        ])
         db_session.commit()
 
         response = client.get("/api/v1/reports/balance-detailed", headers=org_headers)
@@ -1261,7 +1295,7 @@ class TestBalanceDetailed:
 
 
 # ---------------------------------------------------------------------------
-# Commission is_supplier Validation Tests
+# Commission Supplier Category Validation Tests
 # ---------------------------------------------------------------------------
 
 class TestCommissionSupplierValidation:
@@ -1269,16 +1303,20 @@ class TestCommissionSupplierValidation:
     def test_purchase_commission_rejects_non_supplier(
         self, client: TestClient, org_headers: dict, report_data: dict, db_session: Session,
     ):
-        """Comisionista sin is_supplier en compra → 400."""
+        """Comisionista sin categoria proveedor en compra → 400."""
         org_id = report_data["org_id"]
 
-        # Tercero solo cliente (sin is_supplier)
+        # Tercero solo cliente (sin categoria proveedor)
         non_supplier = ThirdParty(
             name="Solo Cliente", organization_id=org_id,
-            is_supplier=False, is_customer=True,
             current_balance=Decimal("0"), is_active=True,
         )
         db_session.add(non_supplier)
+        db_session.flush()
+        cat_customer = ThirdPartyCategory(name="Clientes Com", behavior_type="customer", organization_id=org_id)
+        db_session.add(cat_customer)
+        db_session.flush()
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=non_supplier.id, category_id=cat_customer.id))
         db_session.commit()
 
         wh_id = str(report_data["warehouse"].id)
@@ -1300,20 +1338,24 @@ class TestCommissionSupplierValidation:
         }
         response = client.post("/api/v1/purchases/", json=payload, headers=org_headers)
         assert response.status_code == 400
-        assert "Proveedor" in response.json()["detail"]
+        assert "proveedor" in response.json()["detail"].lower()
 
     def test_sale_commission_rejects_non_supplier(
         self, client: TestClient, org_headers: dict, report_data: dict, db_session: Session,
     ):
-        """Comisionista sin is_supplier en venta → 400."""
+        """Comisionista sin categoria proveedor en venta → 400."""
         org_id = report_data["org_id"]
 
         non_supplier = ThirdParty(
             name="Solo Inversionista", organization_id=org_id,
-            is_supplier=False, is_investor=True,
             current_balance=Decimal("0"), is_active=True,
         )
         db_session.add(non_supplier)
+        db_session.flush()
+        cat_investor = ThirdPartyCategory(name="Inversores Com", behavior_type="investor", organization_id=org_id)
+        db_session.add(cat_investor)
+        db_session.flush()
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=non_supplier.id, category_id=cat_investor.id))
         db_session.commit()
 
         payload = {
@@ -1334,12 +1376,12 @@ class TestCommissionSupplierValidation:
         }
         response = client.post("/api/v1/sales/", json=payload, headers=org_headers)
         assert response.status_code == 400
-        assert "Proveedor" in response.json()["detail"]
+        assert "proveedor" in response.json()["detail"].lower()
 
     def test_commission_accepts_supplier(
         self, client: TestClient, org_headers: dict, report_data: dict,
     ):
-        """Comisionista con is_supplier → aceptado (201)."""
+        """Comisionista con categoria proveedor → aceptado (201)."""
         wh_id = str(report_data["warehouse"].id)
         payload = {
             "supplier_id": str(report_data["proveedor1"].id),
@@ -1351,7 +1393,7 @@ class TestCommissionSupplierValidation:
                 "unit_price": 1000,
             }],
             "commissions": [{
-                "third_party_id": str(report_data["proveedor2"].id),  # is_supplier=True
+                "third_party_id": str(report_data["proveedor2"].id),  # has material_supplier category
                 "concept": "Intermediacion",
                 "commission_type": "fixed",
                 "commission_value": 500,

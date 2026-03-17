@@ -72,15 +72,15 @@ class CRUDFixedAsset:
                 require_funds=data.purchase_value,
             )
         else:
+            from app.services.third_party import third_party as tp_service
             supplier = db.execute(
                 select(ThirdParty).where(
                     ThirdParty.id == data.supplier_id,
                     ThirdParty.organization_id == organization_id,
                     ThirdParty.is_active == True,
-                    ThirdParty.is_supplier == True,
                 )
             ).scalar_one_or_none()
-            if not supplier:
+            if not supplier or not tp_service.has_behavior_type(db, supplier.id, ["material_supplier", "service_provider"]):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Proveedor no encontrado",

@@ -69,7 +69,7 @@ def list_suppliers(
     db: Session = Depends(get_db)
 ):
     """
-    List only third parties marked as suppliers (is_supplier = True).
+    List only third parties with behavior_type='material_supplier'.
     """
     org_id = org_context["organization_id"]
     
@@ -97,7 +97,7 @@ def list_customers(
     db: Session = Depends(get_db)
 ):
     """
-    List only third parties marked as customers (is_customer = True).
+    List only third parties with behavior_type='customer'.
     """
     org_id = org_context["organization_id"]
     
@@ -125,7 +125,7 @@ def list_provisions(
     db: Session = Depends(get_db)
 ):
     """
-    List only third parties marked as provisions (is_provision = True).
+    List only third parties with behavior_type='provision'.
     """
     org_id = org_context["organization_id"]
     
@@ -153,8 +153,7 @@ def list_liabilities(
     db: Session = Depends(get_db)
 ):
     """
-    List only third parties marked as liabilities (is_liability = True).
-    Excluye system entities.
+    List only third parties with behavior_type='service_provider'.
     """
     org_id = org_context["organization_id"]
 
@@ -167,6 +166,49 @@ def list_liabilities(
         search=search,
         sort_by=sort_by,
         sort_order=sort_order
+    )
+
+
+@router.get("/payable-providers", response_model=PaginatedResponse)
+def list_payable_providers(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    is_active: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None),
+    sort_by: str = Query("name"),
+    sort_order: str = Query("asc", regex="^(asc|desc)$"),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
+    db: Session = Depends(get_db)
+):
+    """
+    Terceros con behavior_type material_supplier o service_provider.
+    Usado para selectors de comisiones y gastos.
+    """
+    org_id = org_context["organization_id"]
+    return third_party.get_payable_providers(
+        db=db, organization_id=org_id,
+        skip=skip, limit=limit, is_active=is_active,
+        search=search, sort_by=sort_by, sort_order=sort_order,
+    )
+
+
+@router.get("/investors", response_model=PaginatedResponse)
+def list_investors(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    is_active: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None),
+    sort_by: str = Query("name"),
+    sort_order: str = Query("asc", regex="^(asc|desc)$"),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
+    db: Session = Depends(get_db)
+):
+    """Terceros con behavior_type investor."""
+    org_id = org_context["organization_id"]
+    return third_party.get_investors(
+        db=db, organization_id=org_id,
+        skip=skip, limit=limit, is_active=is_active,
+        search=search, sort_by=sort_by, sort_order=sort_order,
     )
 
 

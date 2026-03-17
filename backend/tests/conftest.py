@@ -42,6 +42,8 @@ from app.models import (
     Permission,
     Role,
     RolePermission,
+    ThirdPartyCategory,
+    ThirdPartyCategoryAssignment,
 )
 
 # Test database URL (PostgreSQL on port 5433)
@@ -331,3 +333,65 @@ def org_headers2(auth_token: str, test_organization2: Organization) -> dict:
         "Authorization": f"Bearer {auth_token}",
         "X-Organization-ID": str(test_organization2.id),
     }
+
+
+def _get_or_create_category(
+    db: Session,
+    organization_id,
+    behavior_type: str,
+    name: str | None = None,
+) -> ThirdPartyCategory:
+    """Buscar o crear una categoria con behavior_type dado para la organizacion."""
+    cat = db.execute(
+        sqlalchemy.select(ThirdPartyCategory).where(
+            ThirdPartyCategory.organization_id == organization_id,
+            ThirdPartyCategory.behavior_type == behavior_type,
+            ThirdPartyCategory.parent_id == None,
+        ).limit(1)
+    ).scalar_one_or_none()
+
+    if not cat:
+        default_names = {
+            "material_supplier": "Proveedor Material",
+            "service_provider": "Proveedor Servicios",
+            "customer": "Cliente",
+            "investor": "Inversionista",
+            "employee": "Empleado",
+            "provision": "Provision",
+        }
+        cat = ThirdPartyCategory(
+            name=name or default_names.get(behavior_type, behavior_type),
+            behavior_type=behavior_type,
+            organization_id=organization_id,
+        )
+        db.add(cat)
+        db.flush()
+
+    return cat
+
+
+def create_third_party_with_category(
+    db: Session,
+    organization_id,
+    name: str,
+    behavior_type: str,
+    **kwargs,
+) -> ThirdParty:
+    """Helper: crea tercero + asigna categoria con behavior_type dado."""
+    cat = _get_or_create_category(db, organization_id, behavior_type)
+
+    tp = ThirdParty(
+        name=name,
+        organization_id=organization_id,
+        **kwargs,
+    )
+    db.add(tp)
+    db.flush()
+
+    db.add(ThirdPartyCategoryAssignment(
+        third_party_id=tp.id,
+        category_id=cat.id,
+    ))
+    db.flush()
+
+    return tp

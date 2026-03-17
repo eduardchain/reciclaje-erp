@@ -10,6 +10,7 @@ from app.models.material import Material, MaterialCategory
 from app.models.money_account import MoneyAccount
 from app.models.sale import Sale, SaleLine
 from app.models.third_party import ThirdParty
+from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 from app.models.warehouse import Warehouse
 
 
@@ -60,10 +61,14 @@ def test_warehouse(db_session: Session, test_organization) -> Warehouse:
 def test_customer(db_session: Session, test_organization) -> ThirdParty:
     tp = ThirdParty(
         name="Cliente Test",
-        is_customer=True,
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    cat = ThirdPartyCategory(name="Clientes", behavior_type="customer", organization_id=test_organization.id)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=tp.id, category_id=cat.id))
     db_session.commit()
     db_session.refresh(tp)
     return tp
@@ -84,43 +89,64 @@ def test_account(db_session: Session, test_organization) -> MoneyAccount:
 
 
 @pytest.fixture
-def partner_a(db_session: Session, test_organization) -> ThirdParty:
+def _investor_categories(db_session: Session, test_organization):
+    """Categoría padre 'Inversionista' + subcategorías 'Socios' y 'Obligaciones Financieras'."""
+    parent = ThirdPartyCategory(
+        name="Inversionista", behavior_type="investor", organization_id=test_organization.id
+    )
+    db_session.add(parent)
+    db_session.flush()
+    socios = ThirdPartyCategory(
+        name="Socios", behavior_type="investor", parent_id=parent.id, organization_id=test_organization.id
+    )
+    obligaciones = ThirdPartyCategory(
+        name="Obligaciones Financieras", behavior_type="investor", parent_id=parent.id, organization_id=test_organization.id
+    )
+    db_session.add_all([socios, obligaciones])
+    db_session.commit()
+    db_session.refresh(socios)
+    db_session.refresh(obligaciones)
+    return {"socios": socios, "obligaciones": obligaciones}
+
+
+@pytest.fixture
+def partner_a(db_session: Session, test_organization, _investor_categories) -> ThirdParty:
     tp = ThirdParty(
         name="Socio A",
-        is_investor=True,
-        investor_type="socio",
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=tp.id, category_id=_investor_categories["socios"].id))
     db_session.commit()
     db_session.refresh(tp)
     return tp
 
 
 @pytest.fixture
-def partner_b(db_session: Session, test_organization) -> ThirdParty:
+def partner_b(db_session: Session, test_organization, _investor_categories) -> ThirdParty:
     tp = ThirdParty(
         name="Socio B",
-        is_investor=True,
-        investor_type="socio",
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=tp.id, category_id=_investor_categories["socios"].id))
     db_session.commit()
     db_session.refresh(tp)
     return tp
 
 
 @pytest.fixture
-def non_partner(db_session: Session, test_organization) -> ThirdParty:
+def non_partner(db_session: Session, test_organization, _investor_categories) -> ThirdParty:
     """Inversionista tipo obligacion financiera (NO socio)."""
     tp = ThirdParty(
         name="Banco XYZ",
-        is_investor=True,
-        investor_type="obligacion_financiera",
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=tp.id, category_id=_investor_categories["obligaciones"].id))
     db_session.commit()
     db_session.refresh(tp)
     return tp

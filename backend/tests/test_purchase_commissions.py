@@ -22,6 +22,7 @@ from app.models import (
     MoneyMovement,
 )
 from app.models.purchase import PurchaseCommission
+from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 
 
 # ============================================================================
@@ -34,13 +35,16 @@ def test_supplier(db_session, test_organization):
         id=uuid4(),
         name="Proveedor Comisiones",
         identification_number="COM-SUP-001",
-        is_supplier=True,
-        is_customer=False,
         current_balance=Decimal("0.00"),
         organization_id=test_organization.id,
         is_active=True,
     )
     db_session.add(supplier)
+    db_session.flush()
+    cat = ThirdPartyCategory(name="Proveedores Material", behavior_type="material_supplier", organization_id=test_organization.id)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=supplier.id, category_id=cat.id))
     db_session.commit()
     db_session.refresh(supplier)
     return supplier
@@ -52,13 +56,16 @@ def test_commission_recipient(db_session, test_organization):
         id=uuid4(),
         name="Comisionista Uno",
         identification_number="COM-REC-001",
-        is_supplier=True,
-        is_customer=False,
         current_balance=Decimal("0.00"),
         organization_id=test_organization.id,
         is_active=True,
     )
     db_session.add(recipient)
+    db_session.flush()
+    cat = ThirdPartyCategory(name="Proveedores Material Comisionista1", behavior_type="material_supplier", organization_id=test_organization.id)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=recipient.id, category_id=cat.id))
     db_session.commit()
     db_session.refresh(recipient)
     return recipient
@@ -70,13 +77,16 @@ def test_commission_recipient2(db_session, test_organization):
         id=uuid4(),
         name="Comisionista Dos",
         identification_number="COM-REC-002",
-        is_supplier=True,
-        is_customer=False,
         current_balance=Decimal("0.00"),
         organization_id=test_organization.id,
         is_active=True,
     )
     db_session.add(recipient)
+    db_session.flush()
+    cat = ThirdPartyCategory(name="Proveedores Material Comisionista2", behavior_type="material_supplier", organization_id=test_organization.id)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=recipient.id, category_id=cat.id))
     db_session.commit()
     db_session.refresh(recipient)
     return recipient

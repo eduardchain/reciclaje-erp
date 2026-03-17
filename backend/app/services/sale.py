@@ -104,10 +104,11 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Cliente no encontrado"
             )
-        if not customer.is_customer:
+        from app.services.third_party import third_party as tp_service
+        if not tp_service.has_behavior_type(db, customer.id, ["customer"]):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El tercero no esta marcado como cliente"
+                detail="El tercero no es cliente"
             )
         
         # Step 3: Validate warehouse (skip for double-entry)
@@ -579,7 +580,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Nuevo cliente no encontrado"
                 )
-            if not new_customer.is_customer:
+            from app.services.third_party import third_party as tp_service
+            if not tp_service.has_behavior_type(db, new_customer.id, ["customer"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="El tercero seleccionado no es cliente"
@@ -992,10 +994,11 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Receptor de comision {comm_data.third_party_id} no encontrado"
                 )
-            if not recipient.is_supplier:
+            from app.services.third_party import third_party as tp_service
+            if not tp_service.has_behavior_type(db, recipient.id, ["material_supplier", "service_provider"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"El comisionista '{recipient.name}' debe tener el rol Proveedor para comisiones",
+                    detail=f"El comisionista '{recipient.name}' debe ser proveedor de material o servicios",
                 )
 
             # Calculate commission amount

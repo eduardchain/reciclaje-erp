@@ -122,10 +122,11 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Proveedor no encontrado"
             )
-        if not supplier.is_supplier:
+        from app.services.third_party import third_party as tp_service
+        if not tp_service.has_behavior_type(db, supplier.id, ["material_supplier"]):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El tercero no es proveedor"
+                detail="El tercero no es proveedor de material"
             )
 
         # Step 2b: Deteccion de duplicados (RN-COMP-02) - warning, no bloquea
@@ -683,10 +684,11 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Nuevo proveedor no encontrado"
                 )
-            if not new_supplier.is_supplier:
+            from app.services.third_party import third_party as tp_service
+            if not tp_service.has_behavior_type(db, new_supplier.id, ["material_supplier"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="El tercero seleccionado no es proveedor"
+                    detail="El tercero seleccionado no es proveedor de material"
                 )
 
         # Step 3: Si hay lineas nuevas, hacer revert+reapply
@@ -1158,10 +1160,11 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Comisionista {comm_data.third_party_id} no encontrado",
                 )
-            if not recipient.is_supplier:
+            from app.services.third_party import third_party as tp_service
+            if not tp_service.has_behavior_type(db, recipient.id, ["material_supplier", "service_provider"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"El comisionista '{recipient.name}' debe tener el rol Proveedor para comisiones de compra",
+                    detail=f"El comisionista '{recipient.name}' debe ser proveedor de material o servicios",
                 )
 
             commission_amount = self._calculate_commission(

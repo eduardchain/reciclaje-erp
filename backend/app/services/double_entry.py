@@ -71,15 +71,16 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         supplier = db.get(ThirdParty, obj_in.supplier_id)
         if not supplier or supplier.organization_id != organization_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado")
-        if not supplier.is_supplier:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no esta marcado como proveedor")
+        from app.services.third_party import third_party as tp_service
+        if not tp_service.has_behavior_type(db, supplier.id, ["material_supplier", "service_provider"]):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no es proveedor de material o servicios")
 
         # Step 4: Validar cliente
         customer = db.get(ThirdParty, obj_in.customer_id)
         if not customer or customer.organization_id != organization_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
-        if not customer.is_customer:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no esta marcado como cliente")
+        if not tp_service.has_behavior_type(db, customer.id, ["customer"]):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no es cliente")
 
         # Step 5: Validar materiales y calcular totales
         purchase_total, sale_total = self._validate_and_calc_totals(db, obj_in.lines, organization_id)
@@ -376,8 +377,9 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             supplier = db.get(ThirdParty, obj_in.supplier_id)
             if not supplier or supplier.organization_id != organization_id:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado")
-            if not supplier.is_supplier:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no esta marcado como proveedor")
+            from app.services.third_party import third_party as tp_service
+            if not tp_service.has_behavior_type(db, supplier.id, ["material_supplier", "service_provider"]):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no es proveedor de material o servicios")
             double_entry.supplier_id = obj_in.supplier_id
             purchase.supplier_id = obj_in.supplier_id
 
@@ -385,8 +387,9 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             customer = db.get(ThirdParty, obj_in.customer_id)
             if not customer or customer.organization_id != organization_id:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
-            if not customer.is_customer:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no esta marcado como cliente")
+            from app.services.third_party import third_party as tp_service
+            if not tp_service.has_behavior_type(db, customer.id, ["customer"]):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no es cliente")
             double_entry.customer_id = obj_in.customer_id
             sale.customer_id = obj_in.customer_id
 
@@ -743,10 +746,11 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Receptor de comision {comm_data.third_party_id} no encontrado"
                 )
-            if not recipient.is_supplier:
+            from app.services.third_party import third_party as tp_service
+            if not tp_service.has_behavior_type(db, recipient.id, ["material_supplier", "service_provider"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"El comisionista '{recipient.name}' debe tener el rol Proveedor para comisiones",
+                    detail=f"El comisionista '{recipient.name}' debe ser proveedor de material o servicios",
                 )
             commission_amount = self._calculate_commission(
                 comm_data.commission_type, comm_data.commission_value, sale_total

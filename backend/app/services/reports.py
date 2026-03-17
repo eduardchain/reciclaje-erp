@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, func, case, cast, Date
+from sqlalchemy import select, func, case, cast, Date, exists
 from sqlalchemy.orm import Session
 
 from app.models.double_entry import DoubleEntry, DoubleEntryLine
@@ -20,6 +20,7 @@ from app.models.money_movement import MoneyMovement
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.sale import Sale, SaleLine
 from app.models.third_party import ThirdParty
+from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 from app.models.fixed_asset import FixedAsset
 
 from app.models.sale import SaleCommission
@@ -132,6 +133,41 @@ class ReportService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _tp_has_behavior(*behavior_types: str):
+        """EXISTS subquery: tercero tiene alguno de los behavior_types."""
+        return exists(
+            select(ThirdPartyCategoryAssignment.id)
+            .join(ThirdPartyCategory, ThirdPartyCategoryAssignment.category_id == ThirdPartyCategory.id)
+            .where(
+                ThirdPartyCategoryAssignment.third_party_id == ThirdParty.id,
+                ThirdPartyCategory.behavior_type.in_(behavior_types),
+            )
+        )
+
+    @staticmethod
+    def _load_tp_behavior_map(db: Session, organization_id: UUID) -> tuple[dict, dict]:
+        """Pre-carga behavior_types y category_names para todos los terceros de la org.
+
+        Returns:
+            (tp_behaviors, tp_cat_names) — dict[UUID, set[str]]
+        """
+        rows = db.execute(
+            select(
+                ThirdPartyCategoryAssignment.third_party_id,
+                ThirdPartyCategory.behavior_type,
+                ThirdPartyCategory.name,
+            )
+            .join(ThirdPartyCategory, ThirdPartyCategoryAssignment.category_id == ThirdPartyCategory.id)
+            .where(ThirdPartyCategory.organization_id == organization_id)
+        ).all()
+        tp_behaviors: dict[UUID, set[str]] = {}
+        tp_cat_names: dict[UUID, set[str]] = {}
+        for tp_id, bt, name in rows:
+            tp_behaviors.setdefault(tp_id, set()).add(bt)
+            tp_cat_names.setdefault(tp_id, set()).add(name)
+        return tp_behaviors, tp_cat_names
 
     @staticmethod
     def _safe_pct(numerator: Decimal, denominator: Decimal) -> float:
@@ -568,7 +604,7 @@ class ReportService:
                 select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_customer == True,
+                    self._tp_has_behavior("customer"),
                     ThirdParty.current_balance > 0,
                 )
             )
@@ -599,13 +635,13 @@ class ReportService:
             )
         ))
 
-        # Fondos en provisiones (is_provision con balance < 0 = fondos disponibles)
+        # Fondos en provisiones (behavior_type='provision' con balance < 0 = fondos disponibles)
         provision_funds = Decimal(str(
             db.scalar(
                 select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_provision == True,
+                    self._tp_has_behavior("provision"),
                     ThirdParty.current_balance < 0,
                 )
             )
@@ -630,7 +666,7 @@ class ReportService:
                 select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_supplier == True,
+                    self._tp_has_behavior("material_supplier"),
                     ThirdParty.current_balance < 0,
                 )
             )
@@ -641,19 +677,19 @@ class ReportService:
                 select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_investor == True,
+                    self._tp_has_behavior("investor"),
                     ThirdParty.current_balance < 0,
                 )
             )
         ))
 
-        # Pasivos laborales/otros (is_liability con balance < 0 = le debemos)
+        # Pasivos laborales/otros (service_provider con balance < 0 = le debemos)
         liability_debt = Decimal(str(
             db.scalar(
                 select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_liability == True,
+                    self._tp_has_behavior("service_provider"),
                     ThirdParty.current_balance < 0,
                 )
             )
@@ -769,14 +805,19 @@ class ReportService:
             )
         ).scalars().all()
 
+        # Pre-cargar behavior_types y category_names
+        tp_behaviors, tp_cat_names = self._load_tp_behavior_map(db, organization_id)
+
         # Buckets para clasificacion
         tp_buckets: dict[str, list[BalanceDetailedItem]] = {
             # activos
             "customers_receivable": [],
             "supplier_advances": [],
+            "service_provider_advances": [],
             "investor_receivable": [],
             "provision_funds": [],
             "prepaid_expenses": [],
+            "employee_loans": [],
             # pasivos
             "suppliers_payable": [],
             "investors_partners": [],
@@ -785,16 +826,18 @@ class ReportService:
             "customer_advances": [],
             "provision_obligations": [],
             "liabilities_other": [],
+            "employee_debt": [],
         }
 
         for tp in third_parties:
-            section = self._classify_third_party(tp)
+            behaviors = tp_behaviors.get(tp.id, set())
+            cat_names = tp_cat_names.get(tp.id, set())
+            section = self._classify_third_party(tp, behaviors, cat_names)
             if section and section in tp_buckets:
                 bal = float(tp.current_balance)
                 tp_buckets[section].append(BalanceDetailedItem(
                     id=str(tp.id), name=tp.name,
                     balance=abs(bal),
-                    investor_type=getattr(tp, 'investor_type', None),
                 ))
 
         # Construir secciones de activos
@@ -803,10 +846,12 @@ class ReportService:
             ("cash_and_bank", "Efectivo y Bancos", cash_items),
             ("inventory_liquidated", "Inventario Liquidado", inv_liq_items),
             ("customers_receivable", "CxC Clientes", tp_buckets["customers_receivable"]),
-            ("supplier_advances", "Anticipos a Proveedores", tp_buckets["supplier_advances"]),
+            ("supplier_advances", "Anticipos a Proveedores Material", tp_buckets["supplier_advances"]),
+            ("service_provider_advances", "Anticipos a Proveedores Servicios", tp_buckets["service_provider_advances"]),
             ("investor_receivable", "CxC Inversionistas", tp_buckets["investor_receivable"]),
             ("provision_funds", "Fondos en Provisiones", tp_buckets["provision_funds"]),
             ("prepaid_expenses", "Gastos Prepagados", tp_buckets["prepaid_expenses"]),
+            ("employee_loans", "Préstamos a Empleados", tp_buckets["employee_loans"]),
             ("fixed_assets", "Activos Fijos", fa_items),
         ]
         for key, label, items in asset_sections:
@@ -817,13 +862,14 @@ class ReportService:
         # Construir secciones de pasivos
         liabilities: dict[str, BalanceDetailedSection] = {}
         liability_sections = [
-            ("suppliers_payable", "CxP Proveedores", tp_buckets["suppliers_payable"]),
+            ("suppliers_payable", "CxP Proveedores Material", tp_buckets["suppliers_payable"]),
             ("investors_partners", "Socios", tp_buckets["investors_partners"]),
             ("investors_obligations", "Obligaciones Financieras", tp_buckets["investors_obligations"]),
             ("investors_legacy", "Inversionistas", tp_buckets["investors_legacy"]),
             ("customer_advances", "Anticipos de Clientes", tp_buckets["customer_advances"]),
             ("provision_obligations", "Obligaciones Provisiones", tp_buckets["provision_obligations"]),
-            ("liabilities_other", "Pasivos Laborales/Otros", tp_buckets["liabilities_other"]),
+            ("liabilities_other", "CxP Proveedores Servicios", tp_buckets["liabilities_other"]),
+            ("employee_debt", "Deuda Empleados", tp_buckets["employee_debt"]),
         ]
         for key, label, items in liability_sections:
             liabilities[key] = _section(label, items)
@@ -855,7 +901,11 @@ class ReportService:
         )
 
     @staticmethod
-    def _classify_third_party(tp: ThirdParty) -> str | None:
+    def _classify_third_party(
+        tp: ThirdParty,
+        behavior_types: set[str],
+        category_names: set[str],
+    ) -> str | None:
         """Clasifica un tercero en una unica seccion del balance segun prioridad."""
         bal = float(tp.current_balance)
         if bal == 0:
@@ -864,31 +914,38 @@ class ReportService:
         if tp.is_system_entity and bal > 0:
             return "prepaid_expenses"
         # Provisiones
-        if tp.is_provision:
+        if "provision" in behavior_types:
             return "provision_funds" if bal < 0 else "provision_obligations"
         if bal > 0:
             # Nos deben / tenemos a favor
-            if tp.is_customer:
+            if "customer" in behavior_types:
                 return "customers_receivable"
-            if tp.is_investor:
+            if "investor" in behavior_types:
                 return "investor_receivable"
-            if tp.is_supplier:
+            if "material_supplier" in behavior_types:
                 return "supplier_advances"
+            if "service_provider" in behavior_types:
+                return "service_provider_advances"
+            if "employee" in behavior_types:
+                return "employee_loans"
         else:
             # Debemos
-            if tp.is_supplier:
+            if "material_supplier" in behavior_types:
                 return "suppliers_payable"
-            if tp.is_investor:
-                inv_type = getattr(tp, 'investor_type', None)
-                if inv_type == "socio":
+            if "service_provider" in behavior_types:
+                return "liabilities_other"
+            if "investor" in behavior_types:
+                # Distinguir socios de obligaciones financieras por nombre de categoria
+                lowered = {n.lower() for n in category_names}
+                if any("socio" in n for n in lowered):
                     return "investors_partners"
-                if inv_type == "obligacion_financiera":
+                if any("obligaci" in n for n in lowered):
                     return "investors_obligations"
                 return "investors_legacy"
-            if tp.is_customer:
+            if "customer" in behavior_types:
                 return "customer_advances"
-            if tp.is_liability:
-                return "liabilities_other"
+            if "employee" in behavior_types:
+                return "employee_debt"
         return None
 
     # ------------------------------------------------------------------
@@ -1331,7 +1388,7 @@ class ReportService:
                 select(ThirdParty.id, ThirdParty.name, ThirdParty.current_balance)
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_supplier == True,
+                    self._tp_has_behavior("material_supplier", "service_provider"),
                     ThirdParty.current_balance != 0,
                 )
                 .order_by(ThirdParty.current_balance.asc())
@@ -1349,7 +1406,7 @@ class ReportService:
                 select(ThirdParty.id, ThirdParty.name, ThirdParty.current_balance)
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_customer == True,
+                    self._tp_has_behavior("customer"),
                     ThirdParty.current_balance != 0,
                 )
                 .order_by(ThirdParty.current_balance.desc())
@@ -1481,7 +1538,7 @@ class ReportService:
                 select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_customer == True,
+                    self._tp_has_behavior("customer"),
                     ThirdParty.current_balance > 0,
                 )
             )
@@ -1492,7 +1549,7 @@ class ReportService:
                 select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_supplier == True,
+                    self._tp_has_behavior("material_supplier", "service_provider"),
                     ThirdParty.current_balance < 0,
                 )
             )
@@ -1739,7 +1796,7 @@ class ReportService:
             select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
             .where(
                 ThirdParty.organization_id == organization_id,
-                ThirdParty.is_customer == True,
+                self._tp_has_behavior("customer"),
                 ThirdParty.current_balance > 0,
             )
         ))
@@ -1747,7 +1804,7 @@ class ReportService:
             select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
             .where(
                 ThirdParty.organization_id == organization_id,
-                ThirdParty.is_supplier == True,
+                self._tp_has_behavior("material_supplier", "service_provider"),
                 ThirdParty.current_balance < 0,
             )
         ))
@@ -1757,7 +1814,7 @@ class ReportService:
             select(ThirdParty.id, ThirdParty.name, ThirdParty.provision_type, ThirdParty.current_balance)
             .where(
                 ThirdParty.organization_id == organization_id,
-                ThirdParty.is_provision == True,
+                self._tp_has_behavior("provision"),
                 ThirdParty.is_active == True,
             )
             .order_by(ThirdParty.name)
@@ -1933,6 +1990,8 @@ class ReportService:
             .order_by(ThirdParty.name)
         ).all())
 
+        tp_behaviors, _ = self._load_tp_behavior_map(db, organization_id)
+
         # Dict acumulador {third_party_id: calculated_balance}
         tp_calc: dict[UUID, Decimal] = {}
 
@@ -2072,15 +2131,8 @@ class ReportService:
             else:
                 tp_mismatch += 1
 
-            roles = []
-            if tp.is_supplier:
-                roles.append("supplier")
-            if tp.is_customer:
-                roles.append("customer")
-            if tp.is_investor:
-                roles.append("investor")
-            if tp.is_provision:
-                roles.append("provision")
+            behaviors = tp_behaviors.get(tp.id, set())
+            roles = list(behaviors) if behaviors else []
 
             tp_items.append(ThirdPartyAuditItem(
                 id=tp.id,

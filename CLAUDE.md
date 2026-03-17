@@ -50,7 +50,7 @@ Al terminar una sesion donde se implemento funcionalidad nueva o se tomo una dec
 6. **Conteos**: actualizar `Current: N tests` en Testing, y conteos de componentes/servicios/hooks en Frontend si cambian.
 7. **Migrations**: solo mencionar migration ID si es relevante para entender la historia (ej: rename de tabla). No listar todas.
 8. **Cache invalidation**: si la nueva funcionalidad crea side-effects cross-module, actualizar el mapa en `queryInvalidation.ts` Y documentarlo aqui.
-9. **Migraciones**: si se crean nuevas migraciones, SIEMPRE correr `./venv/bin/alembic upgrade head` en la BD de desarrollo Y en la de test antes de probar. Los permisos RBAC se leen de la tabla `permissions` en BD, no del catalogo Python — sin migrar, los nuevos permisos no existen.
+9. **Migraciones**: si se crean nuevas migraciones, SIEMPRE correr `./venv/bin/alembic upgrade head` en la BD de desarrollo (5434) Y en la de test (5433) antes de probar. NUNCA correr migraciones directamente contra produccion — las migraciones en produccion se ejecutan SOLO via la skill `/deploy`. Los permisos RBAC se leen de la tabla `permissions` en BD, no del catalogo Python — sin migrar, los nuevos permisos no existen.
 
 ## Project Overview
 
@@ -86,10 +86,33 @@ npm run lint      # ESLint
 
 ### Database
 
+**3 entornos separados — NUNCA conectar desarrollo a produccion.**
+
+| Entorno | Contenedor | Puerto | User | Password | DB | docker-compose |
+|---------|-----------|--------|------|----------|-----|----------------|
+| Desarrollo | reciclaje_dev_db | 5434 | admin | localdev123 | reciclaje_db | `docker-compose.yml` (raiz) |
+| Tests | reciclaje-test-db | 5433 | admin | test_password | reciclaje_test | `backend/docker-compose.test.yml` |
+| Produccion | VPS (76.13.118.195) | 5432 | — | — | — | SOLO via `/deploy` |
+
 ```bash
-docker-compose up -d                              # Dev database (port 5432)
-docker-compose -f docker-compose.test.yml up -d   # Test database (port 5433)
+# Levantar BDs
+POSTGRES_PASSWORD=localdev123 docker-compose up -d                         # Dev (port 5434)
+cd backend && docker-compose -f docker-compose.test.yml up -d              # Test (port 5433)
+
+# Migraciones (SOLO en dev y test, NUNCA produccion)
+cd backend && ./venv/bin/alembic upgrade head                                                        # Dev (usa .env)
+cd backend && DATABASE_URL=postgresql://admin:test_password@localhost:5433/reciclaje_test ./venv/bin/alembic upgrade head  # Test
+
+# Replicar datos de produccion a dev local
+cd backend && ./scripts/replicate_prod.sh
 ```
+
+**REGLAS DE BASE DE DATOS:**
+- **NUNCA** ejecutar queries, migraciones (`alembic upgrade`), ni scripts directamente contra la BD de produccion.
+- **Migraciones** solo en desarrollo (5434) y test (5433). Produccion se migra automaticamente via `/deploy`.
+- **Si necesitas datos reales**, primero replica produccion a local con `replicate_prod.sh`.
+- **`seed_test_data.py`** y cualquier script de carga apuntan a la BD configurada en `.env` (debe ser desarrollo).
+- **Tests (`conftest.py`)** usan `TEST_DATABASE_URL` hardcoded (`admin:test_password@localhost:5433/reciclaje_test`). No dependen de `.env`.
 
 ## Architecture
 
@@ -110,11 +133,11 @@ Layered: **Endpoints → Services → Models**, with Pydantic schemas for valida
 React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios (data), Tailwind + shadcn/ui (UI), lucide-react (icons), sonner (toasts).
 
 - `services/api.ts` — Axios client: JWT auto-attach, X-Organization-ID from authStore, 401 redirect.
-- `services/*.ts` — 17 service files. `hooks/use*.ts` — 15 React Query hooks with toast on mutations.
-- `types/*.ts` — 15 type files matching backend schemas.
-- `components/shared/` — DataTable, PageHeader, StatusBadge, MoneyDisplay, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList, PriceSuggestion, KpiCard.
+- `services/*.ts` — 19 service files. `hooks/use*.ts` — 17 React Query hooks with toast on mutations.
+- `types/*.ts` — 19 type files matching backend schemas.
+- `components/shared/` — DataTable, PageHeader, StatusBadge, MoneyDisplay, MoneyInput, DateRangePicker, SearchInput, ConfirmDialog, EmptyState, EntitySelect, WarningsList, PriceSuggestion, KpiCard.
 - `components/auth/` — ProtectedRoute, OrganizationSelector, PermissionGate (wraps content by permission check).
-- `pages/` — 54 page components. Forms use useState pattern. Admin pages: RolesPage, RoleEditPage, UsersPage.
+- `pages/` — 75 page components. Forms use useState pattern. Admin pages: RolesPage, RoleEditPage, UsersPage.
 - `utils/queryInvalidation.ts` — Centralized cache invalidation (see decision #26).
 
 **Query Key Convention:** `['module', 'list'|'detail', filters|id]` (ej: `['purchases', 'list', filters]`, `['inventory', 'stock', params]`)
@@ -131,12 +154,12 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 - **Stock separation**: `current_stock_transit` (registered) vs `current_stock_liquidated` (confirmed). `current_stock` = total.
 - **Negative stock allowed**: Sales, adjustments, transformations return `warnings[]` instead of blocking.
 - **Sequential numbering**: Purchase/sale/double-entry numbers auto-incremented per org.
-- **Treasury**: `MoneyMovement` with 17 types. Some have `account_id=NULL` (accruals, profit_distribution). Transfers = linked pair. Status: `confirmed|annulled`.
+- **Treasury**: `MoneyMovement` with 21 types. Some have `account_id=NULL` (accruals, profit_distribution). Transfers = linked pair. Status: `confirmed|annulled`.
 - **Provisions**: ThirdParty with `is_provision=True`. Negative balance = funds available. `provision_deposit` (account→provision), `provision_expense` (provision only, no account).
 - **Price lists**: Append-only. Current price = most recent by `created_at`. Frontend auto-fills via `usePriceSuggestions()`.
 - **Per-warehouse stock**: On-the-fly `SUM(inventory_movements.quantity) GROUP BY warehouse_id`.
 - **BusinessDate**: All business dates normalized to noon UTC (12:00) via Pydantic `BeforeValidator` in `app/utils/dates.py`. Prevents timezone display issues.
-- **RBAC**: `require_permission()` (AND) and `require_any_permission()` (OR) on all ~167 business endpoints. 66 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. **Master+Granular logic**: master permission (e.g., `treasury.view`) gives access to ALL sub-tabs; granular permissions (e.g., `treasury.view_provisions`) give access to specific sub-tabs WITHOUT master. Frontend: `usePermissions()` hook, `PermissionGate` component, sidebar filtering. Admin UI: RolesPage, RoleEditPage, UsersPage. **Superuser**: bypasses membership check in deps.py, gets synthesized admin context with all permissions. `/system/` endpoints use separate `get_current_superuser` guard.
+- **RBAC**: `require_permission()` (AND) and `require_any_permission()` (OR) on all ~161 business endpoints. 71 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. **Master+Granular logic**: master permission (e.g., `treasury.view`) gives access to ALL sub-tabs; granular permissions (e.g., `treasury.view_provisions`) give access to specific sub-tabs WITHOUT master. Frontend: `usePermissions()` hook, `PermissionGate` component, sidebar filtering. Admin UI: RolesPage, RoleEditPage, UsersPage. **Superuser**: bypasses membership check in deps.py, gets synthesized admin context with all permissions. `/system/` endpoints use separate `get_current_superuser` guard.
 
 ### Business Modules
 
@@ -144,23 +167,24 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 |--------|-----------|-------------|
 | Auth | `/api/v1/auth/` | JWT login, registration, change password |
 | Organizations | `/api/v1/organizations/` | CRUD + members with role_id FK |
-| Roles & Permissions | `/api/v1/roles/` | 65 permissions, 11 modules, 5 system roles, custom roles, admin UI |
+| Roles & Permissions | `/api/v1/roles/` | 71 permissions, 11 modules, 5 system roles, custom roles, admin UI |
 | Materials | `/api/v1/materials/` | CRUD + categories + business units, stock tracking |
-| Third Parties | `/api/v1/third-parties/` | Multi-role (supplier/customer/investor/provision/liability), balance tracking |
+| Third Parties | `/api/v1/third-parties/` | Category-based roles via behavior_type (material_supplier/service_provider/customer/investor/employee/provision), balance tracking |
+| Third Party Categories | `/api/v1/third-party-categories/` | Hierarchical categories (max 2 levels), behavior_type enum, CRUD + flat list |
 | Purchases | `/api/v1/purchases/` | 3-step workflow, full edit (revert-and-reapply), auto-liquidate, immediate payment |
 | Sales | `/api/v1/sales/` | 2-step workflow, commissions, received_quantity, full edit, immediate collection |
 | Double Entries | `/api/v1/double-entries/` | 2-step, edit registered, price adjustments at liquidation, commissions |
-| Treasury | `/api/v1/money-movements/`, `/api/v1/profit-distributions/` | 17 types, annulment with audit, unified account statement, evidence upload, PDF/Excel export, profit distribution |
+| Treasury | `/api/v1/money-movements/`, `/api/v1/profit-distributions/` | 21 types, annulment with audit, unified account statement, evidence upload, PDF/Excel export, profit distribution |
 | Fixed Assets | `/api/v1/fixed-assets/` | Monthly depreciation, apply-pending batch, dispose, pay from account OR credit from supplier |
 | Inventory | `/api/v1/inventory/` | Stock, movements, adjustments (4 types), transformations (3 cost methods), transfers, transit, valuation |
 | Scheduled Expenses | `/api/v1/deferred-expenses/` | Deferred expenses with monthly installments |
 | Reports | `/api/v1/reports/` | Dashboard, P&L, Cash Flow, Balance Sheet, Purchase/Sales/Margin reports, Treasury Dashboard |
-| Config | Various | Warehouses, Money Accounts, Business Units, Expense Categories (direct/indirect), Price Lists |
+| Config | Various | Warehouses, Money Accounts, Business Units, Expense Categories (direct/indirect), Price Lists, Third Party Categories |
 | System (Super Admin) | `/api/v1/system/` | CRUD orgs, list users, add user to org. `get_current_superuser` guard. Org selector + system mode |
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 637 tests.
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 675 tests.
 
 ### Database
 
@@ -224,9 +248,9 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 
 24. **Serializacion de fechas date→datetime**: `DoubleEntryResponse.date` (python `date`) necesita `field_serializer` a datetime mediodia UTC. Sin esto, JS parsea "2026-03-12" como midnight UTC → dia anterior en Colombia.
 
-25. **RBAC backend**: 3 tablas: `permissions` (66, 11 modulos), `roles` (por org, `is_system_role`), `role_permissions` (M:N). `require_permission()` (AND) y `require_any_permission()` (OR) en ~167 endpoints. Admin bypassa todo.
+25. **RBAC backend**: 3 tablas: `permissions` (71, 11 modulos), `roles` (por org, `is_system_role`), `role_permissions` (M:N). `require_permission()` (AND) y `require_any_permission()` (OR) en ~161 endpoints. Admin bypassa todo.
 
-26. **RBAC frontend + Admin UI**: `usePermissions()` hook (staleTime 5min), `PermissionGate` component, sidebar filtering, route protection. Master+Granular: master da acceso a todos los sub-tabs, granular da acceso sin master (OR logic). Admin UI: RolesPage, RoleEditPage (66 permisos por modulo), UsersPage. Al editar permisos se invalida `["permissions", orgId]`.
+26. **RBAC frontend + Admin UI**: `usePermissions()` hook (staleTime 5min), `PermissionGate` component, sidebar filtering, route protection. Master+Granular: master da acceso a todos los sub-tabs, granular da acceso sin master (OR logic). Admin UI: RolesPage, RoleEditPage (71 permisos por modulo), UsersPage. Al editar permisos se invalida `["permissions", orgId]`.
 
 27. **Cache invalidation centralizada**: `queryInvalidation.ts`. Regla: si una operacion crea side-effects cross-module, invalidar TODOS los query keys afectados:
     - `invalidateAfterPurchase` (crear/editar): purchases + inventory + materials
@@ -246,7 +270,9 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 
 31. **Balance Detallado sin inventario en tránsito**: Compras `registered` no crean CxP (solo liquidación lo hace), así que incluir transit como activo desbalancearía la ecuación. Se eliminó `inventory_transit` de activos. Secciones activo: cash, inventory_liquidated, customers_receivable, investor_receivable, supplier_advances, provision_funds, prepaid_expenses, fixed_assets. Clasificación terceros: `_classify_third_party` usa prioridad por signo de balance + flags de rol. `investor_type`: `"socio"` → partners, `"obligacion_financiera"` → obligations, null → legacy.
 
-32. **Comisionista requiere is_supplier**: Validación en `_process_commissions` (compras, ventas) y `_create_commission_records` (DPs): el recipient debe tener `is_supplier=True`. Razón: comisiones generan balance negativo en el tercero; si no es supplier, `_classify_third_party` no lo ubica en pasivos → patrimonio ficticio. Frontend: selector de comisionistas filtrado a `suppliers` en las 9 páginas de create/edit/liquidate.
+32. **Comisionista requiere behavior_type proveedor**: Validación en `_process_commissions` (compras, ventas) y `_create_commission_records` (DPs): el recipient debe tener `behavior_type` `material_supplier` o `service_provider` via `has_behavior_type()`. Razón: comisiones generan balance negativo; sin behavior_type proveedor, `_classify_third_party` no lo ubica en pasivos. Frontend: selector de comisionistas filtrado a `payable-providers`.
+
+33. **Categorías de terceros (behavior_type)**: Eliminados flags booleanos (`is_supplier`, `is_customer`, `is_investor`, `is_provision`, `is_liability`, `investor_type`, `category`). Unica fuente de verdad: `ThirdPartyCategory` con `behavior_type` enum (`material_supplier`, `service_provider`, `customer`, `investor`, `employee`, `provision`). M:N via `ThirdPartyCategoryAssignment`. Jerarquía max 2 niveles (parent_id self-referential). `_classify_third_party()` en reports usa behavior_types + category_names para clasificar (socios vs obligaciones financieras por nombre de subcategoría). Endpoints: `/suppliers` filtra `material_supplier`, `/payable-providers` filtra `material_supplier + service_provider`, `/investors` filtra `investor`. Migraciones: `2a6eec48d012` (crear tablas) + `9ad2a3d1f90c` (drop columns). Frontend pendiente de actualizar.
 
 33. **Repartición de utilidades (profit_distribution)**: Causado contable — incrementa deuda a socios (`third_party.balance -= amount`) sin mover dinero de cuentas (`account_id=NULL`). MoneyMovement tipo `profit_distribution`. NO afecta P&L ni Cash Flow. Balance Sheet: `accumulated_profit` (P&L all-time via `_calculate_profit()` refactorizado) y `distributed_profit` (SUM líneas). Retiro físico usa `capital_return` existente. Permiso: `treasury.manage_distributions`. 18 tests.
 

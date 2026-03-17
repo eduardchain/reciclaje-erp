@@ -16,6 +16,34 @@ from sqlalchemy.orm import Session
 from app.models.money_account import MoneyAccount
 from app.models.third_party import ThirdParty
 from app.models.expense_category import ExpenseCategory
+from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
+
+
+def _assign_category(db_session: Session, tp: ThirdParty, behavior_type: str, organization_id) -> None:
+    """Helper: crea categoria (si no existe) y asigna al tercero."""
+    import sqlalchemy
+    existing = db_session.execute(
+        sqlalchemy.select(ThirdPartyCategory).where(
+            ThirdPartyCategory.organization_id == organization_id,
+            ThirdPartyCategory.behavior_type == behavior_type,
+            ThirdPartyCategory.parent_id == None,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        cat = existing
+    else:
+        cat = ThirdPartyCategory(
+            name=f"Auto {behavior_type}",
+            organization_id=organization_id,
+            behavior_type=behavior_type,
+        )
+        db_session.add(cat)
+        db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(
+        third_party_id=tp.id,
+        category_id=cat.id,
+    ))
+    db_session.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -57,11 +85,12 @@ def test_supplier(db_session: Session, test_organization) -> ThirdParty:
     """Proveedor con saldo -$2,000,000 (le debemos)."""
     tp = ThirdParty(
         name="Metales XYZ",
-        is_supplier=True,
         current_balance=Decimal("-2000000.00"),
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    _assign_category(db_session, tp, "material_supplier", test_organization.id)
     db_session.commit()
     db_session.refresh(tp)
     return tp
@@ -72,11 +101,12 @@ def test_customer(db_session: Session, test_organization) -> ThirdParty:
     """Cliente con saldo +$3,000,000 (nos debe)."""
     tp = ThirdParty(
         name="Industrial ABC",
-        is_customer=True,
         current_balance=Decimal("3000000.00"),
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    _assign_category(db_session, tp, "customer", test_organization.id)
     db_session.commit()
     db_session.refresh(tp)
     return tp
@@ -87,11 +117,12 @@ def test_investor(db_session: Session, test_organization) -> ThirdParty:
     """Inversor con saldo -$5,000,000 (le debemos)."""
     tp = ThirdParty(
         name="Socio Gustavo",
-        is_investor=True,
         current_balance=Decimal("-5000000.00"),
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    _assign_category(db_session, tp, "investor", test_organization.id)
     db_session.commit()
     db_session.refresh(tp)
     return tp
@@ -102,8 +133,6 @@ def test_commission_recipient(db_session: Session, test_organization) -> ThirdPa
     """Tercero con comision pendiente (saldo negativo = le debemos)."""
     tp = ThirdParty(
         name="Vendedor Juan",
-        is_supplier=False,
-        is_customer=False,
         current_balance=Decimal("-500000.00"),
         organization_id=test_organization.id,
     )
@@ -929,12 +958,13 @@ def test_provision(db_session: Session, test_organization) -> ThirdParty:
     """Provision con fondos disponibles ($500,000)."""
     tp = ThirdParty(
         name="Provision Mantenimiento",
-        is_provision=True,
         provision_type="maintenance",
         current_balance=Decimal("-500000.00"),  # negativo = fondos disponibles
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    _assign_category(db_session, tp, "provision", test_organization.id)
     db_session.commit()
     db_session.refresh(tp)
     return tp
@@ -945,12 +975,13 @@ def test_provision_empty(db_session: Session, test_organization) -> ThirdParty:
     """Provision sin fondos (balance 0)."""
     tp = ThirdParty(
         name="Provision Vacia",
-        is_provision=True,
         provision_type="other",
         current_balance=Decimal("0.00"),
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    _assign_category(db_session, tp, "provision", test_organization.id)
     db_session.commit()
     db_session.refresh(tp)
     return tp
@@ -961,12 +992,13 @@ def test_provision_overspent(db_session: Session, test_organization) -> ThirdPar
     """Provision en sobregiro (balance > 0)."""
     tp = ThirdParty(
         name="Provision Sobregiro",
-        is_provision=True,
         provision_type="other",
         current_balance=Decimal("100000.00"),  # sobregiro
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    _assign_category(db_session, tp, "provision", test_organization.id)
     db_session.commit()
     db_session.refresh(tp)
     return tp
@@ -1265,12 +1297,13 @@ class TestAccountStatement:
         # Crear tercero con initial_balance = 5000
         tp = ThirdParty(
             name="Tercero Con Saldo Inicial",
-            is_supplier=True,
             initial_balance=Decimal("5000"),
             current_balance=Decimal("5000"),
             organization_id=test_organization.id,
         )
         db_session.add(tp)
+        db_session.flush()
+        _assign_category(db_session, tp, "material_supplier", test_organization.id)
         db_session.commit()
         db_session.refresh(tp)
 
@@ -1922,14 +1955,15 @@ class TestAssetPayment:
 
 @pytest.fixture
 def test_liability(db_session: Session, test_organization) -> ThirdParty:
-    """Tercero pasivo (is_liability=True) con balance 0."""
+    """Tercero pasivo con balance 0."""
     tp = ThirdParty(
         name="Pasivo Laboral Q1",
-        is_liability=True,
         current_balance=Decimal("0.00"),
         organization_id=test_organization.id,
     )
     db_session.add(tp)
+    db_session.flush()
+    _assign_category(db_session, tp, "service_provider", test_organization.id)
     db_session.commit()
     db_session.refresh(tp)
     return tp
@@ -1973,7 +2007,7 @@ class TestExpenseAccrual:
         self, client: TestClient, org_headers: dict,
         test_supplier, test_expense_category,
     ):
-        """Gasto causado acepta cualquier tercero activo, no solo is_liability."""
+        """Gasto causado acepta cualquier tercero activo."""
         payload = {
             "third_party_id": str(test_supplier.id),
             "amount": 500000,

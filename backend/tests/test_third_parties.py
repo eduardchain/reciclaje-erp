@@ -5,11 +5,12 @@ import pytest
 from uuid import uuid4
 
 from app.models.third_party import ThirdParty
+from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 
 
 @pytest.fixture
 def test_supplier(db_session, test_organization):
-    """Create a test supplier."""
+    """Create a test supplier with material_supplier category."""
     supplier = ThirdParty(
         id=uuid4(),
         name="Test Supplier",
@@ -17,15 +18,16 @@ def test_supplier(db_session, test_organization):
         email="supplier@test.com",
         phone="123456789",
         address="Supplier Address",
-        is_supplier=True,
-        is_customer=False,
-        is_investor=False,
-        is_provision=False,
         current_balance=0.0,
         organization_id=test_organization.id,
         is_active=True
     )
     db_session.add(supplier)
+    db_session.flush()
+    cat = ThirdPartyCategory(name="Proveedor Material", behavior_type="material_supplier", organization_id=test_organization.id)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=supplier.id, category_id=cat.id))
     db_session.commit()
     db_session.refresh(supplier)
     return supplier
@@ -33,21 +35,22 @@ def test_supplier(db_session, test_organization):
 
 @pytest.fixture
 def test_customer(db_session, test_organization):
-    """Create a test customer."""
+    """Create a test customer with customer category."""
     customer = ThirdParty(
         id=uuid4(),
         name="Test Customer",
         identification_number="CUS-001",
         email="customer@test.com",
-        is_supplier=False,
-        is_customer=True,
-        is_investor=False,
-        is_provision=False,
         current_balance=0.0,
         organization_id=test_organization.id,
         is_active=True
     )
     db_session.add(customer)
+    db_session.flush()
+    cat = ThirdPartyCategory(name="Cliente", behavior_type="customer", organization_id=test_organization.id)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=customer.id, category_id=cat.id))
     db_session.commit()
     db_session.refresh(customer)
     return customer
@@ -65,10 +68,6 @@ class TestCreateThirdParty:
             "email": "newsupplier@test.com",
             "phone": "987654321",
             "address": "New Supplier Address",
-            "is_supplier": True,
-            "is_customer": False,
-            "is_investor": False,
-            "is_provision": False
         }
 
         # Act
@@ -80,8 +79,6 @@ class TestCreateThirdParty:
         assert data["name"] == third_party_data["name"]
         assert data["identification_number"] == third_party_data["identification_number"]
         assert data["email"] == third_party_data["email"]
-        assert data["is_supplier"] is True
-        assert data["is_customer"] is False
         assert data["current_balance"] == 0.0
         assert data["is_active"] is True
         assert "id" in data
@@ -93,8 +90,6 @@ class TestCreateThirdParty:
         third_party_data = {
             "name": "New Customer",
             "identification_number": "NEW-CUS-001",
-            "is_supplier": False,
-            "is_customer": True
         }
 
         # Act
@@ -104,8 +99,6 @@ class TestCreateThirdParty:
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == third_party_data["name"]
-        assert data["is_customer"] is True
-        assert data["is_supplier"] is False
 
     def test_create_provision_success(self, client, org_headers):
         """Test creating a provision third party."""
@@ -113,7 +106,6 @@ class TestCreateThirdParty:
         third_party_data = {
             "name": "New Provision",
             "identification_number": "NEW-PROV-001",
-            "is_provision": True
         }
 
         # Act
@@ -122,18 +114,12 @@ class TestCreateThirdParty:
         # Assert
         assert response.status_code == 201
         data = response.json()
-        assert data["is_provision"] is True
-        assert data["is_supplier"] is False
-        assert data["is_customer"] is False
-
     def test_create_multiple_roles(self, client, org_headers):
         """Test creating third party with multiple roles (supplier + customer)."""
         # Arrange
         third_party_data = {
             "name": "Supplier and Customer",
             "identification_number": "BOTH-001",
-            "is_supplier": True,
-            "is_customer": True
         }
 
         # Act
@@ -142,9 +128,6 @@ class TestCreateThirdParty:
         # Assert
         assert response.status_code == 201
         data = response.json()
-        assert data["is_supplier"] is True
-        assert data["is_customer"] is True
-
     def test_create_third_party_minimal_data(self, client, org_headers):
         """Test creating third party with only required fields."""
         # Arrange
@@ -160,8 +143,6 @@ class TestCreateThirdParty:
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == third_party_data["name"]
-        assert data["is_supplier"] is False  # Default
-        assert data["is_customer"] is False  # Default
         assert data["current_balance"] == 0.0  # Default
 
     def test_create_third_party_invalid_email(self, client, org_headers):
@@ -208,7 +189,6 @@ class TestGetThirdParty:
         assert data["id"] == str(test_supplier.id)
         assert data["name"] == test_supplier.name
         assert data["identification_number"] == test_supplier.identification_number
-        assert data["is_supplier"] is True
         assert data["is_active"] is True
 
     def test_get_third_party_not_found(self, client, org_headers):
@@ -363,7 +343,6 @@ class TestGetSuppliers:
         # Assert
         assert response.status_code == 200
         data = response.json()
-        assert all(item["is_supplier"] is True for item in data["items"])
         supplier_ids = [item["id"] for item in data["items"]]
         assert str(test_supplier.id) in supplier_ids
         assert str(test_customer.id) not in supplier_ids
@@ -380,7 +359,6 @@ class TestGetCustomers:
         # Assert
         assert response.status_code == 200
         data = response.json()
-        assert all(item["is_customer"] is True for item in data["items"])
         customer_ids = [item["id"] for item in data["items"]]
         assert str(test_customer.id) in customer_ids
         assert str(test_supplier.id) not in customer_ids
@@ -396,7 +374,6 @@ class TestGetProvisions:
             id=uuid4(),
             name="Test Provision",
             identification_number="PROV-001",
-            is_provision=True,
             organization_id=test_organization.id,
             is_active=True
         )
@@ -404,11 +381,15 @@ class TestGetProvisions:
             id=uuid4(),
             name="Not Provision",
             identification_number="NOT-PROV-001",
-            is_provision=False,
             organization_id=test_organization.id,
             is_active=True
         )
         db_session.add_all([provision, non_provision])
+        db_session.flush()
+        cat = ThirdPartyCategory(name="Provisiones", behavior_type="provision", organization_id=test_organization.id)
+        db_session.add(cat)
+        db_session.flush()
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=provision.id, category_id=cat.id))
         db_session.commit()
 
         # Act
@@ -417,7 +398,6 @@ class TestGetProvisions:
         # Assert
         assert response.status_code == 200
         data = response.json()
-        assert all(item["is_provision"] is True for item in data["items"])
         provision_ids = [item["id"] for item in data["items"]]
         assert str(provision.id) in provision_ids
         assert str(non_provision.id) not in provision_ids
@@ -450,8 +430,7 @@ class TestUpdateThirdParty:
         """Test updating third party roles."""
         # Arrange
         update_data = {
-            "is_supplier": True,
-            "is_customer": True  # Add customer role
+            "name": "Updated Supplier with Customer Role",
         }
 
         # Act
@@ -460,8 +439,7 @@ class TestUpdateThirdParty:
         # Assert
         assert response.status_code == 200
         data = response.json()
-        assert data["is_supplier"] is True
-        assert data["is_customer"] is True
+        assert data["name"] == "Updated Supplier with Customer Role"
 
     def test_update_third_party_not_found(self, client, org_headers):
         """Test updating non-existent third party returns 404."""
@@ -612,3 +590,244 @@ class TestUpdateThirdPartyBalance:
 
         # Assert
         assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Tests de categorias en terceros (Fase 2)
+# ---------------------------------------------------------------------------
+
+class TestThirdPartyCategories:
+    """Tests para crear/actualizar terceros con category_ids."""
+
+    @pytest.fixture
+    def supplier_category(self, db_session, test_organization):
+        cat = ThirdPartyCategory(
+            name="Proveedor Mat", behavior_type="material_supplier",
+            organization_id=test_organization.id,
+        )
+        db_session.add(cat)
+        db_session.commit()
+        db_session.refresh(cat)
+        return cat
+
+    @pytest.fixture
+    def service_category(self, db_session, test_organization):
+        cat = ThirdPartyCategory(
+            name="Proveedor Serv", behavior_type="service_provider",
+            organization_id=test_organization.id,
+        )
+        db_session.add(cat)
+        db_session.commit()
+        db_session.refresh(cat)
+        return cat
+
+    @pytest.fixture
+    def customer_category(self, db_session, test_organization):
+        cat = ThirdPartyCategory(
+            name="Cliente", behavior_type="customer",
+            organization_id=test_organization.id,
+        )
+        db_session.add(cat)
+        db_session.commit()
+        db_session.refresh(cat)
+        return cat
+
+    @pytest.fixture
+    def investor_category(self, db_session, test_organization):
+        cat = ThirdPartyCategory(
+            name="Inversionista", behavior_type="investor",
+            organization_id=test_organization.id,
+        )
+        db_session.add(cat)
+        db_session.commit()
+        db_session.refresh(cat)
+        return cat
+
+    def test_create_with_category_ids(self, client, org_headers, supplier_category):
+        """Crear tercero con category_ids asigna correctamente."""
+        payload = {
+            "name": "Proveedor Con Cat",
+            "category_ids": [str(supplier_category.id)],
+        }
+        response = client.post("/api/v1/third-parties", json=payload, headers=org_headers)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert len(data["categories"]) == 1
+        assert data["categories"][0]["behavior_type"] == "material_supplier"
+
+    def test_create_with_multiple_categories(
+        self, client, org_headers, supplier_category, service_category,
+    ):
+        """Crear tercero con multiples categorias."""
+        payload = {
+            "name": "Multi-Cat",
+            "category_ids": [str(supplier_category.id), str(service_category.id)],
+        }
+        response = client.post("/api/v1/third-parties", json=payload, headers=org_headers)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert len(data["categories"]) == 2
+        behavior_types = {c["behavior_type"] for c in data["categories"]}
+        assert behavior_types == {"material_supplier", "service_provider"}
+
+    def test_create_with_invalid_category_id_fails(self, client, org_headers):
+        """Crear tercero con category_id inexistente falla."""
+        payload = {
+            "name": "Invalid Cat",
+            "category_ids": [str(uuid4())],
+        }
+        response = client.post("/api/v1/third-parties", json=payload, headers=org_headers)
+
+        assert response.status_code == 422
+        assert "no encontradas" in response.json()["detail"]
+
+    def test_create_without_categories_returns_empty_list(self, client, org_headers):
+        """Crear tercero sin category_ids retorna categories=[]."""
+        payload = {"name": "Sin Cat"}
+        response = client.post("/api/v1/third-parties", json=payload, headers=org_headers)
+
+        assert response.status_code == 201
+        assert response.json()["categories"] == []
+
+    def test_update_categories(
+        self, client, org_headers, db_session, test_organization,
+        supplier_category, customer_category,
+    ):
+        """Actualizar category_ids reemplaza todas las asignaciones."""
+        # Crear tercero con supplier_category
+        tp = ThirdParty(
+            name="Editable",
+            organization_id=test_organization.id,
+        )
+        db_session.add(tp)
+        db_session.flush()
+        db_session.add(ThirdPartyCategoryAssignment(
+            third_party_id=tp.id, category_id=supplier_category.id,
+        ))
+        db_session.commit()
+        db_session.refresh(tp)
+
+        # Actualizar a customer_category
+        response = client.patch(
+            f"/api/v1/third-parties/{tp.id}",
+            json={"category_ids": [str(customer_category.id)]},
+            headers=org_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["categories"]) == 1
+        assert data["categories"][0]["behavior_type"] == "customer"
+
+    def test_response_includes_categories(
+        self, client, org_headers, db_session, test_organization, supplier_category,
+    ):
+        """GET individual retorna categories en response."""
+        tp = ThirdParty(
+            name="Con Cat",
+            organization_id=test_organization.id,
+        )
+        db_session.add(tp)
+        db_session.flush()
+        db_session.add(ThirdPartyCategoryAssignment(
+            third_party_id=tp.id, category_id=supplier_category.id,
+        ))
+        db_session.commit()
+
+        response = client.get(f"/api/v1/third-parties/{tp.id}", headers=org_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["categories"]) == 1
+        assert data["categories"][0]["name"] == "Proveedor Mat"
+        assert data["categories"][0]["display_name"] == "Proveedor Mat"
+
+
+class TestPayableProviders:
+    """Tests para GET /api/v1/third-parties/payable-providers."""
+
+    def test_returns_material_suppliers_and_service_providers(
+        self, client, org_headers, db_session, test_organization,
+    ):
+        """payable-providers retorna terceros con material_supplier o service_provider."""
+        # Crear categorias
+        mat_cat = ThirdPartyCategory(
+            name="Mat Supplier", behavior_type="material_supplier",
+            organization_id=test_organization.id,
+        )
+        svc_cat = ThirdPartyCategory(
+            name="Svc Provider", behavior_type="service_provider",
+            organization_id=test_organization.id,
+        )
+        cust_cat = ThirdPartyCategory(
+            name="Customer", behavior_type="customer",
+            organization_id=test_organization.id,
+        )
+        db_session.add_all([mat_cat, svc_cat, cust_cat])
+        db_session.flush()
+
+        # Crear terceros
+        tp_mat = ThirdParty(name="Proveedor Mat", organization_id=test_organization.id)
+        tp_svc = ThirdParty(name="Proveedor Svc", organization_id=test_organization.id)
+        tp_cust = ThirdParty(name="Cliente", organization_id=test_organization.id)
+        db_session.add_all([tp_mat, tp_svc, tp_cust])
+        db_session.flush()
+
+        # Asignar categorias
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=tp_mat.id, category_id=mat_cat.id))
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=tp_svc.id, category_id=svc_cat.id))
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=tp_cust.id, category_id=cust_cat.id))
+        db_session.commit()
+
+        response = client.get("/api/v1/third-parties/payable-providers", headers=org_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        names = {item["name"] for item in data["items"]}
+        assert "Proveedor Mat" in names
+        assert "Proveedor Svc" in names
+        assert "Cliente" not in names
+
+    def test_returns_empty_when_no_matches(self, client, org_headers):
+        """payable-providers retorna vacio si no hay coincidencias."""
+        response = client.get("/api/v1/third-parties/payable-providers", headers=org_headers)
+
+        assert response.status_code == 200
+        assert response.json()["total"] == 0
+
+
+class TestInvestors:
+    """Tests para GET /api/v1/third-parties/investors."""
+
+    def test_returns_only_investors(
+        self, client, org_headers, db_session, test_organization,
+    ):
+        """investors retorna solo terceros con behavior_type investor."""
+        inv_cat = ThirdPartyCategory(
+            name="Inversionista", behavior_type="investor",
+            organization_id=test_organization.id,
+        )
+        svc_cat = ThirdPartyCategory(
+            name="Servicio", behavior_type="service_provider",
+            organization_id=test_organization.id,
+        )
+        db_session.add_all([inv_cat, svc_cat])
+        db_session.flush()
+
+        tp_inv = ThirdParty(name="Socio 1", organization_id=test_organization.id)
+        tp_svc = ThirdParty(name="Proveedor", organization_id=test_organization.id)
+        db_session.add_all([tp_inv, tp_svc])
+        db_session.flush()
+
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=tp_inv.id, category_id=inv_cat.id))
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=tp_svc.id, category_id=svc_cat.id))
+        db_session.commit()
+
+        response = client.get("/api/v1/third-parties/investors", headers=org_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "Socio 1"

@@ -26,6 +26,7 @@ from app.models import (
     BusinessUnit,
     MaterialCostHistory,
 )
+from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 
 
 # ============================================================================
@@ -33,38 +34,61 @@ from app.models import (
 # ============================================================================
 
 @pytest.fixture
-def test_supplier(db_session, test_organization):
+def material_supplier_category(db_session, test_organization):
+    """Create a shared material_supplier category for supplier fixtures."""
+    cat = ThirdPartyCategory(
+        id=uuid4(),
+        name="Proveedor Material",
+        behavior_type="material_supplier",
+        organization_id=test_organization.id,
+    )
+    db_session.add(cat)
+    db_session.commit()
+    db_session.refresh(cat)
+    return cat
+
+
+@pytest.fixture
+def test_supplier(db_session, test_organization, material_supplier_category):
     """Create a test supplier."""
     supplier = ThirdParty(
         id=uuid4(),
         name="Test Supplier Inc.",
         identification_number="12345678",
-        is_supplier=True,
-        is_customer=False,
         current_balance=Decimal("0.00"),
         organization_id=test_organization.id,
         is_active=True,
     )
     db_session.add(supplier)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(
+        id=uuid4(),
+        third_party_id=supplier.id,
+        category_id=material_supplier_category.id,
+    ))
     db_session.commit()
     db_session.refresh(supplier)
     return supplier
 
 
 @pytest.fixture
-def test_supplier2(db_session, test_organization):
+def test_supplier2(db_session, test_organization, material_supplier_category):
     """Create a second test supplier."""
     supplier = ThirdParty(
         id=uuid4(),
         name="Second Supplier LLC",
         identification_number="87654321",
-        is_supplier=True,
-        is_customer=False,
         current_balance=Decimal("0.00"),
         organization_id=test_organization.id,
         is_active=True,
     )
     db_session.add(supplier)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(
+        id=uuid4(),
+        third_party_id=supplier.id,
+        category_id=material_supplier_category.id,
+    ))
     db_session.commit()
     db_session.refresh(supplier)
     return supplier

@@ -71,15 +71,15 @@ class CRUDDeferredExpense:
                     detail="Cuenta de dinero no encontrada",
                 )
         elif data.expense_type == "provision_expense":
+            from app.services.third_party import third_party as tp_service
             provision = db.execute(
                 select(ThirdParty).where(
                     ThirdParty.id == data.provision_id,
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_provision == True,
                     ThirdParty.is_active == True,
                 )
             ).scalar_one_or_none()
-            if not provision:
+            if not provision or not tp_service.has_behavior_type(db, provision.id, ["provision"]):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Provision no encontrada o no es tipo provision",

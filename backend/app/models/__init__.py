@@ -25,6 +25,7 @@ from .fixed_asset import FixedAsset, AssetDepreciation
 from .profit_distribution import ProfitDistribution, ProfitDistributionLine
 from .permission import Permission
 from .role import Role, RolePermission
+from .third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 
 __all__ = [
     "Base",
@@ -63,4 +64,6 @@ __all__ = [
     "Permission",
     "Role",
     "RolePermission",
+    "ThirdPartyCategory",
+    "ThirdPartyCategoryAssignment",
 ]

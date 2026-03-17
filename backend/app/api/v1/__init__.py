@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from .endpoints import (
     health, auth, organizations, roles, system,
-    materials, material_categories, third_parties,
+    materials, material_categories, third_parties, third_party_categories,
     purchases, sales, double_entries,
     money_accounts, warehouses, business_units,
     price_lists, expense_categories,
@@ -20,6 +20,7 @@ api_router.include_router(roles.router, prefix="/roles", tags=["roles"])
 api_router.include_router(material_categories.router, prefix="/material-categories", tags=["material-categories"])
 api_router.include_router(materials.router, prefix="/materials", tags=["materials"])
 api_router.include_router(third_parties.router, prefix="/third-parties", tags=["third-parties"])
+api_router.include_router(third_party_categories.router, prefix="/third-party-categories", tags=["third-party-categories"])
 api_router.include_router(purchases.router, prefix="/purchases", tags=["purchases"])
 api_router.include_router(sales.router, prefix="/sales", tags=["sales"])
 api_router.include_router(double_entries.router, prefix="/double-entries", tags=["double-entries"])
