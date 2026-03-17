@@ -196,7 +196,7 @@ class TestCreateThirdPartyCategory:
         """Verificar que todos los behavior_type validos funcionan."""
         valid_types = [
             "material_supplier", "service_provider", "customer",
-            "investor", "employee", "provision",
+            "investor", "generic", "provision",
         ]
         for bt in valid_types:
             response = client.post(
@@ -629,7 +629,7 @@ class TestThirdPartyCategoryFlat:
         db_session: Session, test_organization,
     ):
         """GET /flat ordenado alfabeticamente por display_name."""
-        for name, bt in [("TRANSPORTE", "service_provider"), ("ARRIENDOS", "service_provider"), ("NOMINA", "employee")]:
+        for name, bt in [("TRANSPORTE", "service_provider"), ("ARRIENDOS", "service_provider"), ("NOMINA", "generic")]:
             cat = ThirdPartyCategory(
                 name=name, behavior_type=bt,
                 organization_id=test_organization.id,
@@ -654,7 +654,7 @@ class TestThirdPartyCategoryFlat:
             assert "behavior_type" in item
             assert item["behavior_type"] in [
                 "material_supplier", "service_provider", "customer",
-                "investor", "employee", "provision",
+                "investor", "generic", "provision",
             ]
 
 

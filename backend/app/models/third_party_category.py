@@ -6,7 +6,7 @@ Permite clasificar terceros por tipo de comportamiento:
 - service_provider: proveedor de servicios (aparece en gastos)
 - customer: cliente (aparece en ventas)
 - investor: inversionista/socio
-- employee: empleado (prestamos, obligaciones laborales)
+- generic: cuenta genérica (empleados, proyectos, varios)
 - provision: provision (fondos reservados)
 
 Maxima jerarquia: 2 niveles (categoria > subcategoria).
@@ -28,7 +28,7 @@ class BehaviorType(str, enum.Enum):
     service_provider = "service_provider"
     customer = "customer"
     investor = "investor"
-    employee = "employee"
+    generic = "generic"
     provision = "provision"
 
 

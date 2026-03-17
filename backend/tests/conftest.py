@@ -356,7 +356,7 @@ def _get_or_create_category(
             "service_provider": "Proveedor Servicios",
             "customer": "Cliente",
             "investor": "Inversionista",
-            "employee": "Empleado",
+            "generic": "Genérico",
             "provision": "Provision",
         }
         cat = ThirdPartyCategory(

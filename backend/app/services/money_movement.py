@@ -1076,7 +1076,7 @@ class CRUDMoneyMovement:
             "customer": "cliente",
             "investor": "inversor",
             "provision": "provision",
-            "employee": "empleado",
+            "generic": "cuenta genérica",
         }
         if require_behavior:
             if not tp_service.has_behavior_type(db, third_party_id, require_behavior):

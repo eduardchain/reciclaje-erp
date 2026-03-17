@@ -39,7 +39,7 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         "investor": ["investor"],
         "provision": ["provision"],
         "liability": ["service_provider"],
-        "employee": ["employee"],
+        "generic": ["generic"],
     }
 
     @staticmethod

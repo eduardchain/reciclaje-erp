@@ -817,7 +817,7 @@ class ReportService:
             "investor_receivable": [],
             "provision_funds": [],
             "prepaid_expenses": [],
-            "employee_loans": [],
+            "generic_receivable": [],
             # pasivos
             "suppliers_payable": [],
             "investors_partners": [],
@@ -826,7 +826,7 @@ class ReportService:
             "customer_advances": [],
             "provision_obligations": [],
             "liabilities_other": [],
-            "employee_debt": [],
+            "generic_payable": [],
         }
 
         for tp in third_parties:
@@ -851,7 +851,7 @@ class ReportService:
             ("investor_receivable", "CxC Inversionistas", tp_buckets["investor_receivable"]),
             ("provision_funds", "Fondos en Provisiones", tp_buckets["provision_funds"]),
             ("prepaid_expenses", "Gastos Prepagados", tp_buckets["prepaid_expenses"]),
-            ("employee_loans", "Préstamos a Empleados", tp_buckets["employee_loans"]),
+            ("generic_receivable", "Otras Cuentas por Cobrar", tp_buckets["generic_receivable"]),
             ("fixed_assets", "Activos Fijos", fa_items),
         ]
         for key, label, items in asset_sections:
@@ -869,7 +869,7 @@ class ReportService:
             ("customer_advances", "Anticipos de Clientes", tp_buckets["customer_advances"]),
             ("provision_obligations", "Obligaciones Provisiones", tp_buckets["provision_obligations"]),
             ("liabilities_other", "CxP Proveedores Servicios", tp_buckets["liabilities_other"]),
-            ("employee_debt", "Deuda Empleados", tp_buckets["employee_debt"]),
+            ("generic_payable", "Otras Cuentas por Pagar", tp_buckets["generic_payable"]),
         ]
         for key, label, items in liability_sections:
             liabilities[key] = _section(label, items)
@@ -926,8 +926,8 @@ class ReportService:
                 return "supplier_advances"
             if "service_provider" in behavior_types:
                 return "service_provider_advances"
-            if "employee" in behavior_types:
-                return "employee_loans"
+            if "generic" in behavior_types:
+                return "generic_receivable"
         else:
             # Debemos
             if "material_supplier" in behavior_types:
@@ -944,8 +944,8 @@ class ReportService:
                 return "investors_legacy"
             if "customer" in behavior_types:
                 return "customer_advances"
-            if "employee" in behavior_types:
-                return "employee_debt"
+            if "generic" in behavior_types:
+                return "generic_payable"
         return None
 
     # ------------------------------------------------------------------
