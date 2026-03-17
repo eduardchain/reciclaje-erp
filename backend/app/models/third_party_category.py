@@ -30,6 +30,7 @@ class BehaviorType(str, enum.Enum):
     investor = "investor"
     generic = "generic"
     provision = "provision"
+    liability = "liability"
 
 
 class ThirdPartyCategory(Base, TimestampMixin, OrganizationMixin):

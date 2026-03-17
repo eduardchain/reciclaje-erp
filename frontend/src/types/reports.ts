@@ -127,6 +127,8 @@ export interface BalanceSheetAssets {
   cash_and_bank: number;
   accounts_receivable: number;
   inventory: number;
+  advances: number;
+  investor_receivable: number;
   prepaid_expenses: number;
   provision_funds: number;
   fixed_assets: number;
@@ -137,6 +139,8 @@ export interface BalanceSheetLiabilities {
   accounts_payable: number;
   investor_debt: number;
   liability_debt: number;
+  customer_advances: number;
+  provision_obligations: number;
   total: number;
 }
 
@@ -167,10 +171,17 @@ export interface BalanceDetailedItem {
   account_type?: string | null;
 }
 
+export interface BalanceDetailedGroup {
+  label: string;
+  total: number;
+  items: BalanceDetailedItem[];
+}
+
 export interface BalanceDetailedSection {
   label: string;
   total: number;
   items: BalanceDetailedItem[];
+  groups?: BalanceDetailedGroup[] | null;
 }
 
 export interface BalanceDetailedVerification {

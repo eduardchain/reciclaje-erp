@@ -168,21 +168,21 @@ class TestFixedAssetCreate:
         assert float(fa_account.current_balance) == initial_account_balance
 
     def test_create_supplier_not_supplier_role(self, client: TestClient, org_headers, fa_category, db_session, test_organization):
-        """Crear activo con tercero que NO es proveedor debe fallar."""
-        customer = ThirdParty(
-            name="Solo Cliente",
+        """Crear activo con tercero provision/liability debe fallar."""
+        provision_tp = ThirdParty(
+            name="Provision TP",
             organization_id=test_organization.id,
             current_balance=Decimal("0"),
             initial_balance=Decimal("0"),
         )
-        db_session.add(customer)
+        db_session.add(provision_tp)
         db_session.flush()
-        cat = ThirdPartyCategory(name="Clientes FA", behavior_type="customer", organization_id=test_organization.id)
+        cat = ThirdPartyCategory(name="Provision FA", behavior_type="provision", organization_id=test_organization.id)
         db_session.add(cat)
         db_session.flush()
-        db_session.add(ThirdPartyCategoryAssignment(third_party_id=customer.id, category_id=cat.id))
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=provision_tp.id, category_id=cat.id))
         db_session.commit()
-        db_session.refresh(customer)
+        db_session.refresh(provision_tp)
 
         payload = {
             "name": "Activo Invalido",
@@ -191,7 +191,7 @@ class TestFixedAssetCreate:
             "depreciation_rate": 5.0,
             "depreciation_start_date": "2026-01-01",
             "expense_category_id": str(fa_category.id),
-            "supplier_id": str(customer.id),
+            "supplier_id": str(provision_tp.id),
         }
         resp = client.post(BASE_URL + "/", json=payload, headers=org_headers)
         assert resp.status_code in (400, 404)

@@ -68,14 +68,16 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
 
 const ASSET_ORDER = [
   "cash_and_bank", "inventory_liquidated",
-  "customers_receivable", "supplier_advances", "investor_receivable",
+  "customers_receivable", "supplier_advances", "service_provider_advances",
+  "liability_advances", "investor_receivable",
   "provision_funds", "prepaid_expenses", "fixed_assets",
 ];
 
 const LIABILITY_ORDER = [
-  "suppliers_payable", "investors_partners", "investors_obligations",
+  "suppliers_payable", "service_provider_payable", "liability_debt",
+  "investors_partners", "investors_obligations",
   "investors_legacy", "customer_advances", "provision_obligations",
-  "liabilities_other",
+  "generic_payable",
 ];
 
 function fmtBal(v: number) {
@@ -92,20 +94,37 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
   rows.push(["ACTIVOS", "", "", fmtBal(data.total_assets)]);
   rows.push(["Seccion", "Detalle", "Nombre", "Valor"]);
 
-  for (const key of ASSET_ORDER) {
-    const section = data.assets[key];
-    if (!section) continue;
-    rows.push([section.label, "", "", fmtBal(section.total)]);
-    for (const item of section.items) {
+  const pushItems = (items: typeof data.assets[string]["items"], defaultDetail?: (item: typeof items[0]) => string) => {
+    for (const item of items) {
       let detail = "";
-      if (item.stock != null && item.avg_cost != null) {
+      if (defaultDetail) {
+        detail = defaultDetail(item);
+      } else if (item.stock != null && item.avg_cost != null) {
         detail = `${item.code ?? ""} | ${item.stock} kg x ${formatCurrency(item.avg_cost)}`;
       } else if (item.purchase_value != null && item.accumulated_depreciation != null) {
         detail = `Costo: ${formatCurrency(item.purchase_value)} | Dep: ${formatCurrency(item.accumulated_depreciation)}`;
       } else if (item.account_type) {
         detail = item.account_type;
+      } else if (item.investor_type) {
+        detail = item.investor_type;
       }
       rows.push(["", detail, item.name, fmtBal(item.balance)]);
+    }
+  };
+
+  for (const key of ASSET_ORDER) {
+    const section = data.assets[key];
+    if (!section) continue;
+    rows.push([section.label, "", "", fmtBal(section.total)]);
+    if (section.groups && section.groups.length > 0) {
+      for (const group of section.groups) {
+        rows.push(["", group.label, "", fmtBal(group.total)]);
+        for (const item of group.items) {
+          rows.push(["", "", item.name, fmtBal(item.balance)]);
+        }
+      }
+    } else {
+      pushItems(section.items);
     }
   }
 
@@ -119,9 +138,15 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
     const section = data.liabilities[key];
     if (!section) continue;
     rows.push([section.label, "", "", fmtBal(section.total)]);
-    for (const item of section.items) {
-      const detail = item.investor_type ?? "";
-      rows.push(["", detail, item.name, fmtBal(item.balance)]);
+    if (section.groups && section.groups.length > 0) {
+      for (const group of section.groups) {
+        rows.push(["", group.label, "", fmtBal(group.total)]);
+        for (const item of group.items) {
+          rows.push(["", "", item.name, fmtBal(item.balance)]);
+        }
+      }
+    } else {
+      pushItems(section.items);
     }
   }
 

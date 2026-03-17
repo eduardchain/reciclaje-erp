@@ -102,6 +102,7 @@ def create_organization(
         ("Inversionista", "investor"),
         ("Genérico", "generic"),
         ("Provisión", "provision"),
+        ("Pasivo", "liability"),
     ]:
         db.add(ThirdPartyCategory(
             name=cat_name,

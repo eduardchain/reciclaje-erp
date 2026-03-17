@@ -72,8 +72,8 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         if not supplier or supplier.organization_id != organization_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado")
         from app.services.third_party import third_party as tp_service
-        if not tp_service.has_behavior_type(db, supplier.id, ["material_supplier", "service_provider"]):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no es proveedor de material o servicios")
+        if not tp_service.has_behavior_type(db, supplier.id, ["material_supplier"]):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no es proveedor de material")
 
         # Step 4: Validar cliente
         customer = db.get(ThirdParty, obj_in.customer_id)
@@ -378,8 +378,8 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             if not supplier or supplier.organization_id != organization_id:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado")
             from app.services.third_party import third_party as tp_service
-            if not tp_service.has_behavior_type(db, supplier.id, ["material_supplier", "service_provider"]):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no es proveedor de material o servicios")
+            if not tp_service.has_behavior_type(db, supplier.id, ["material_supplier"]):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no es proveedor de material")
             double_entry.supplier_id = obj_in.supplier_id
             purchase.supplier_id = obj_in.supplier_id
 
@@ -747,10 +747,10 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                     detail=f"Receptor de comision {comm_data.third_party_id} no encontrado"
                 )
             from app.services.third_party import third_party as tp_service
-            if not tp_service.has_behavior_type(db, recipient.id, ["material_supplier", "service_provider"]):
+            if not tp_service.has_behavior_type(db, recipient.id, ["service_provider"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"El comisionista '{recipient.name}' debe ser proveedor de material o servicios",
+                    detail=f"El comisionista '{recipient.name}' debe ser proveedor de servicios",
                 )
             commission_amount = self._calculate_commission(
                 comm_data.commission_type, comm_data.commission_value, sale_total

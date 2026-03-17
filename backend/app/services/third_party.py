@@ -14,7 +14,7 @@ from app.models.third_party_category import (
     ThirdPartyCategory,
     ThirdPartyCategoryAssignment,
 )
-from app.schemas.third_party import ThirdPartyCreate, ThirdPartyUpdate
+from app.schemas.third_party import ThirdPartyCreate, ThirdPartyUpdate, ThirdPartyResponse
 from app.services.base import CRUDBase, Select, PaginatedResponse
 
 
@@ -35,10 +35,11 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
     # Mapeo de roles a behavior_types para filtrar
     ROLE_BEHAVIOR_MAP = {
         "supplier": ["material_supplier"],
+        "service_provider": ["service_provider"],
         "customer": ["customer"],
         "investor": ["investor"],
         "provision": ["provision"],
-        "liability": ["service_provider"],
+        "liability": ["liability"],
         "generic": ["generic"],
     }
 
@@ -155,17 +156,25 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         else:
             query = query.order_by(sort_column.asc())
 
+        # Eager load category_assignments + category + parent para serializar
+        query = query.options(
+            joinedload(self.model.category_assignments)
+            .joinedload(ThirdPartyCategoryAssignment.category)
+            .joinedload(ThirdPartyCategory.parent)
+        )
+
         query = query.offset(skip).limit(limit)
         result = db.execute(query)
-        items = result.scalars().all()
+        items = result.unique().scalars().all()
 
-        items_dict = [
-            {c.name: getattr(item, c.name) for c in item.__table__.columns}
+        # Serializar a ThirdPartyResponse para incluir categories
+        items_serialized = [
+            ThirdPartyResponse.model_validate(item).model_dump()
             for item in items
         ]
 
         return PaginatedResponse(
-            items=items_dict,
+            items=items_serialized,
             total=total,
             skip=skip,
             limit=limit
@@ -218,9 +227,20 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             self._sync_category_assignments(db, db_obj.id, category_ids, organization_id)
 
         db.commit()
-        db.refresh(db_obj)
+        return self._get_with_categories(db, db_obj.id, organization_id)
 
-        return db_obj
+    def _get_with_categories(self, db: Session, id: UUID, organization_id: UUID) -> ThirdParty:
+        """Cargar tercero con category_assignments eager-loaded."""
+        result = db.execute(
+            select(ThirdParty)
+            .where(ThirdParty.id == id, ThirdParty.organization_id == organization_id)
+            .options(
+                joinedload(ThirdParty.category_assignments)
+                .joinedload(ThirdPartyCategoryAssignment.category)
+                .joinedload(ThirdPartyCategory.parent)
+            )
+        )
+        return result.unique().scalars().one()
 
     def update(
         self,
@@ -243,8 +263,7 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             self._sync_category_assignments(db, id, category_ids, organization_id)
 
         db.commit()
-        db.refresh(db_obj)
-        return db_obj
+        return self._get_with_categories(db, id, organization_id)
 
     def delete(
         self,
@@ -342,11 +361,11 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         sort_by: str = "name",
         sort_order: str = "asc"
     ) -> PaginatedResponse:
-        """Get service providers (behavior_type='service_provider') — ex-liabilities."""
+        """Get liabilities (behavior_type='liability') — pasivos/obligaciones."""
         return self._get_filtered_list(
             db=db,
             organization_id=organization_id,
-            extra_filter=self._behavior_type_filter(["service_provider"]),
+            extra_filter=self._behavior_type_filter(["liability"]),
             skip=skip, limit=limit,
             is_active=is_active, search=search,
             sort_by=sort_by, sort_order=sort_order,
@@ -363,11 +382,11 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         sort_by: str = "name",
         sort_order: str = "asc"
     ) -> PaginatedResponse:
-        """Get terceros con behavior_type material_supplier o service_provider."""
+        """Get terceros con behavior_type service_provider (comisionistas)."""
         return self._get_filtered_list(
             db=db,
             organization_id=organization_id,
-            extra_filter=self._behavior_type_filter(["material_supplier", "service_provider"]),
+            extra_filter=self._behavior_type_filter(["service_provider"]),
             skip=skip, limit=limit,
             is_active=is_active, search=search,
             sort_by=sort_by, sort_order=sort_order,

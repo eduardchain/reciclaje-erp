@@ -1963,7 +1963,7 @@ def test_liability(db_session: Session, test_organization) -> ThirdParty:
     )
     db_session.add(tp)
     db_session.flush()
-    _assign_category(db_session, tp, "service_provider", test_organization.id)
+    _assign_category(db_session, tp, "liability", test_organization.id)
     db_session.commit()
     db_session.refresh(tp)
     return tp
@@ -2106,3 +2106,35 @@ class TestExpenseAccrual:
         # Debe estar en expenses_by_category
         cat_names = [c["category_name"] for c in data["expenses_by_category"]]
         assert "Combustible" in cat_names
+
+
+class TestLiabilityPayment:
+    """Tests para pago de pasivo (liability_payment → payment_to_supplier en backend)."""
+
+    def test_payment_to_liability_third_party(
+        self, client: TestClient, org_headers: dict,
+        test_liability, test_account, db_session,
+    ):
+        """Pagar a tercero con behavior_type liability via payment_to_supplier → 201."""
+        # Primero causar deuda
+        test_liability.current_balance = Decimal("-500000.00")
+        db_session.commit()
+        db_session.refresh(test_liability)
+
+        payload = {
+            "supplier_id": str(test_liability.id),
+            "account_id": str(test_account.id),
+            "amount": 500000,
+            "date": "2026-03-15T10:00:00Z",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["movement_type"] == "payment_to_supplier"
+        assert data["amount"] == 500000.0
+
+        db_session.refresh(test_liability)
+        assert test_liability.current_balance == Decimal("0.00")

@@ -358,6 +358,7 @@ def _get_or_create_category(
             "investor": "Inversionista",
             "generic": "Genérico",
             "provision": "Provision",
+            "liability": "Pasivo",
         }
         cat = ThirdPartyCategory(
             name=name or default_names.get(behavior_type, behavior_type),

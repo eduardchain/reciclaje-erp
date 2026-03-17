@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { MoneyInput } from "@/components/shared/MoneyInput";
+
 import { useCreateThirdParty, useUpdateThirdParty } from "@/hooks/useCrudData";
 import { useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
 import type { ThirdPartyResponse } from "@/types/third-party";
@@ -22,7 +22,18 @@ const BEHAVIOR_COLORS: Record<string, string> = {
   investor: "bg-purple-50 text-purple-700",
   generic: "bg-slate-50 text-slate-700",
   provision: "bg-orange-50 text-orange-700",
+  liability: "bg-amber-50 text-amber-700",
 };
+
+const BEHAVIOR_ORDER = [
+  { value: "material_supplier", label: "PROVEEDOR MATERIAL" },
+  { value: "service_provider", label: "PROVEEDOR SERVICIOS" },
+  { value: "customer", label: "CLIENTE" },
+  { value: "investor", label: "INVERSIONISTA" },
+  { value: "generic", label: "GENÉRICO" },
+  { value: "provision", label: "PROVISIÓN" },
+  { value: "liability", label: "PASIVO" },
+];
 
 export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: Props) {
   const create = useCreateThirdParty();
@@ -36,7 +47,6 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
-  const [initialBalance, setInitialBalance] = useState(0);
 
   useEffect(() => {
     if (editItem) {
@@ -45,11 +55,10 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
       setEmail(editItem.email ?? "");
       setPhone(editItem.phone ?? "");
       setAddress(editItem.address ?? "");
-      setCategoryIds(editItem.categories.map((c) => c.id));
+      setCategoryIds((editItem.categories ?? []).map((c) => c.id));
     } else {
       setName(""); setIdentification(""); setEmail(""); setPhone(""); setAddress("");
       setCategoryIds([]);
-      setInitialBalance(0);
     }
   }, [editItem, open]);
 
@@ -71,12 +80,21 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
     if (editItem) {
       update.mutate({ id: editItem.id, data: base }, opts);
     } else {
-      create.mutate({ ...base, initial_balance: initialBalance }, opts);
+      create.mutate({ ...base, initial_balance: 0 }, opts);
     }
   };
 
   const isPending = create.isPending || update.isPending;
-  const selectedCategories = categories.filter((c) => categoryIds.includes(c.id));
+  const activeCategories = useMemo(() => categories.filter((c) => c.is_active !== false), [categories]);
+  const selectedCategories = activeCategories.filter((c) => categoryIds.includes(c.id));
+  const HIDDEN_BEHAVIORS = ["liability", "provision"];
+  const isRestrictedType = editItem && (editItem.categories ?? []).some((c) => HIDDEN_BEHAVIORS.includes(c.behavior_type));
+  const groupedCategories = useMemo(() => {
+    return BEHAVIOR_ORDER
+      .filter((bt) => !HIDDEN_BEHAVIORS.includes(bt.value))
+      .map((bt) => ({ ...bt, items: activeCategories.filter((c) => c.behavior_type === bt.value) }))
+      .filter((g) => g.items.length > 0);
+  }, [activeCategories]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -92,6 +110,19 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Telefono</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
           </div>
           <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Direccion</Label><Input value={address} onChange={(e) => setAddress(e.target.value)} /></div>
+          {isRestrictedType ? (
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</Label>
+              <div className="flex gap-1 flex-wrap mt-1">
+                {(editItem?.categories ?? []).filter((c) => HIDDEN_BEHAVIORS.includes(c.behavior_type)).map((c) => (
+                  <Badge key={c.id} variant="outline" className={`${BEHAVIOR_COLORS[c.behavior_type] ?? ""} text-xs`}>
+                    {c.display_name}
+                  </Badge>
+                ))}
+              </div>
+              <p className="text-xs text-slate-400 mt-1">Este tercero se administra desde su módulo correspondiente.</p>
+            </div>
+          ) : (
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categorias</Label>
             {selectedCategories.length > 0 && (
@@ -103,18 +134,21 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
                 ))}
               </div>
             )}
-            <div className="max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
-              {categories.map((cat) => (
-                <label key={cat.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
-                  <input type="checkbox" checked={categoryIds.includes(cat.id)} onChange={() => toggleCategory(cat.id)} className="rounded border-slate-300" />
-                  <span>{cat.display_name}</span>
-                </label>
+            <div className="max-h-48 overflow-y-auto border rounded-md p-2 space-y-2">
+              {groupedCategories.map((group) => (
+                <div key={group.value}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1 mb-0.5">{group.label}</p>
+                  {group.items.map((cat) => (
+                    <label key={cat.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
+                      <input type="checkbox" checked={categoryIds.includes(cat.id)} onChange={() => toggleCategory(cat.id)} className="rounded border-slate-300" />
+                      <span>{cat.display_name}</span>
+                    </label>
+                  ))}
+                </div>
               ))}
-              {categories.length === 0 && <p className="text-xs text-slate-400">No hay categorias configuradas.</p>}
+              {activeCategories.length === 0 && <p className="text-xs text-slate-400">No hay categorias configuradas.</p>}
             </div>
           </div>
-          {!editItem && (
-            <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</Label><MoneyInput value={initialBalance} onChange={setInitialBalance} min={-999999999999} /></div>
           )}
         </div>
         <DialogFooter>

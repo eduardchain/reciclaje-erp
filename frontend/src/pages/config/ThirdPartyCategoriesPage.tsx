@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataTable } from "@/components/shared/DataTable";
@@ -21,6 +22,7 @@ const BEHAVIOR_TYPES = [
   { value: "investor", label: "Inversionista" },
   { value: "generic", label: "Genérico" },
   { value: "provision", label: "Provisión" },
+  { value: "liability", label: "Pasivo" },
 ];
 
 const BEHAVIOR_COLORS: Record<string, string> = {
@@ -30,6 +32,7 @@ const BEHAVIOR_COLORS: Record<string, string> = {
   investor: "bg-purple-50 text-purple-700",
   generic: "bg-slate-50 text-slate-700",
   provision: "bg-orange-50 text-orange-700",
+  liability: "bg-amber-50 text-amber-700",
 };
 
 const columns: ColumnDef<ThirdPartyCategoryResponse, unknown>[] = [
@@ -45,6 +48,13 @@ const columns: ColumnDef<ThirdPartyCategoryResponse, unknown>[] = [
     },
   },
   { accessorKey: "description", header: "Descripcion", cell: ({ row }) => row.original.description ?? "-" },
+  {
+    accessorKey: "is_active",
+    header: "Estado",
+    cell: ({ row }) => row.original.is_active
+      ? <Badge variant="outline" className="bg-green-50 text-green-700">Activa</Badge>
+      : <Badge variant="outline" className="bg-red-50 text-red-700">Inactiva</Badge>,
+  },
 ];
 
 export default function ThirdPartyCategoriesPage() {
@@ -59,6 +69,7 @@ export default function ThirdPartyCategoriesPage() {
   const [description, setDescription] = useState("");
   const [behaviorType, setBehaviorType] = useState("");
   const [parentId, setParentId] = useState("");
+  const [isActive, setIsActive] = useState(true);
 
   const items = data?.items ?? [];
 
@@ -74,6 +85,7 @@ export default function ThirdPartyCategoriesPage() {
     setDescription(item?.description ?? "");
     setBehaviorType(item?.behavior_type ?? "");
     setParentId(item?.parent_id ?? "");
+    setIsActive(item?.is_active ?? true);
     setDialogOpen(true);
   };
 
@@ -85,6 +97,9 @@ export default function ThirdPartyCategoriesPage() {
     };
     if (!parentId) {
       payload.behavior_type = behaviorType;
+    }
+    if (editItem) {
+      payload.is_active = isActive;
     }
     const opts = { onSuccess: () => setDialogOpen(false) };
     if (editItem) { update.mutate({ id: editItem.id, data: payload }, opts); }
@@ -123,7 +138,7 @@ export default function ThirdPartyCategoriesPage() {
                 <Select value={behaviorType} onValueChange={setBehaviorType}>
                   <SelectTrigger><SelectValue placeholder="Seleccionar tipo..." /></SelectTrigger>
                   <SelectContent>
-                    {BEHAVIOR_TYPES.map((t) => (
+                    {BEHAVIOR_TYPES.filter((t) => !["liability", "provision"].includes(t.value)).map((t) => (
                       <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
                     ))}
                   </SelectContent>
@@ -132,6 +147,12 @@ export default function ThirdPartyCategoriesPage() {
             )}
             {parentId && (
               <p className="text-xs text-slate-400">El tipo de comportamiento se hereda de la categoria padre.</p>
+            )}
+            {editItem && (
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Activa</Label>
+                <Switch checked={isActive} onCheckedChange={setIsActive} />
+              </div>
             )}
           </div>
           <DialogFooter>

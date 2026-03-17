@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useCreateMovement, useUploadEvidence } from "@/hooks/useMoneyMovements";
-import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, usePayableProviders } from "@/hooks/useMasterData";
+import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, useLiabilities } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
@@ -59,7 +59,7 @@ export default function MovementCreatePage() {
   const { data: accountsData } = useMoneyAccounts();
   const { data: expCategoriesData } = useExpenseCategoriesFlat();
   const { data: provisionsData } = useProvisions();
-  const { data: payableData } = usePayableProviders();
+  const { data: liabilitiesData } = useLiabilities();
 
   const suppliers = suppliersData?.items ?? [];
   const customers = customersData?.items ?? [];
@@ -68,7 +68,7 @@ export default function MovementCreatePage() {
   const accounts = accountsData?.items ?? [];
   const expenseCategories = expCategoriesData?.items ?? [];
   const provisions = provisionsData?.items ?? [];
-  const payableProviders = payableData?.items ?? [];
+  const liabilities = liabilitiesData?.items ?? [];
 
   const [amount, setAmount] = useState(0);
   const [accountId, setAccountId] = useState("");
@@ -168,13 +168,13 @@ export default function MovementCreatePage() {
     switch (type) {
       case "payment_to_supplier":
       case "advance_payment": return suppliers.map((s) => ({ id: s.id, label: s.name }));
-      case "liability_payment": return payableProviders.map((l) => ({ id: l.id, label: l.name }));
+      case "liability_payment": return liabilities.map((l) => ({ id: l.id, label: l.name }));
       case "collection_from_client":
       case "advance_collection": return customers.map((c) => ({ id: c.id, label: c.name }));
       case "capital_injection":
       case "capital_return": return investors.map((i) => ({ id: i.id, label: i.name }));
       case "commission_payment": return thirdParties.map((t) => ({ id: t.id, label: t.name }));
-      case "expense_accrual": return payableProviders.map((l) => ({ id: l.id, label: l.name }));
+      case "expense_accrual": return liabilities.map((l) => ({ id: l.id, label: l.name }));
       default: return thirdParties.map((t) => ({ id: t.id, label: t.name }));
     }
   };
@@ -183,7 +183,7 @@ export default function MovementCreatePage() {
     switch (type) {
       case "payment_to_supplier":
       case "advance_payment": return "Proveedor *";
-      case "liability_payment": return "Proveedor Servicios *";
+      case "liability_payment": return "Pasivo *";
       case "collection_from_client":
       case "advance_collection": return "Cliente *";
       case "capital_injection":

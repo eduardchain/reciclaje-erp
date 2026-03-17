@@ -80,7 +80,7 @@ class CRUDFixedAsset:
                     ThirdParty.is_active == True,
                 )
             ).scalar_one_or_none()
-            if not supplier or not tp_service.has_behavior_type(db, supplier.id, ["material_supplier", "service_provider"]):
+            if not supplier or not tp_service.has_behavior_type(db, supplier.id, ["material_supplier", "service_provider", "customer", "investor", "generic"]):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Proveedor no encontrado",

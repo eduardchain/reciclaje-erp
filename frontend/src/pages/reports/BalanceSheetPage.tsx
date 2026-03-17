@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { CheckCircle2, AlertTriangle } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useBalanceSheet } from "@/hooks/useReports";
 import { formatCurrency, formatDate } from "@/utils/formatters";
@@ -22,6 +23,12 @@ export default function BalanceSheetPage() {
                 <div className="flex justify-between"><span>Efectivo y Bancos</span><span>{formatCurrency(data.assets.cash_and_bank)}</span></div>
                 <div className="flex justify-between"><span>Cuentas por Cobrar</span><span>{formatCurrency(data.assets.accounts_receivable)}</span></div>
                 <div className="flex justify-between"><span>Inventario</span><span>{formatCurrency(data.assets.inventory)}</span></div>
+                {data.assets.advances > 0 && (
+                  <div className="flex justify-between"><span>Anticipos</span><span>{formatCurrency(data.assets.advances)}</span></div>
+                )}
+                {data.assets.investor_receivable > 0 && (
+                  <div className="flex justify-between"><span>CxC Inversionistas</span><span>{formatCurrency(data.assets.investor_receivable)}</span></div>
+                )}
                 {data.assets.provision_funds > 0 && (
                   <div className="flex justify-between"><span>Fondos en Provisiones</span><span>{formatCurrency(data.assets.provision_funds)}</span></div>
                 )}
@@ -42,7 +49,13 @@ export default function BalanceSheetPage() {
                 <div className="flex justify-between"><span>Cuentas por Pagar</span><span>{formatCurrency(data.liabilities.accounts_payable)}</span></div>
                 <div className="flex justify-between"><span>Deuda Inversionistas</span><span>{formatCurrency(data.liabilities.investor_debt)}</span></div>
                 {data.liabilities.liability_debt > 0 && (
-                  <div className="flex justify-between"><span>Pasivos Laborales</span><span>{formatCurrency(data.liabilities.liability_debt)}</span></div>
+                  <div className="flex justify-between"><span>Pasivos</span><span>{formatCurrency(data.liabilities.liability_debt)}</span></div>
+                )}
+                {data.liabilities.customer_advances > 0 && (
+                  <div className="flex justify-between"><span>Anticipos de Clientes</span><span>{formatCurrency(data.liabilities.customer_advances)}</span></div>
+                )}
+                {data.liabilities.provision_obligations > 0 && (
+                  <div className="flex justify-between"><span>Obligaciones de Provisión</span><span>{formatCurrency(data.liabilities.provision_obligations)}</span></div>
                 )}
                 <Separator />
                 <div className="flex justify-between font-bold"><span>Total Pasivos</span><span>{formatCurrency(data.total_liabilities)}</span></div>
@@ -64,6 +77,19 @@ export default function BalanceSheetPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Verificacion */}
+          {(() => {
+            const diff = Math.abs(data.total_assets - data.total_liabilities - data.equity);
+            const isBalanced = diff < 0.01;
+            return (
+              <div className={`flex items-center justify-center gap-2 py-3 rounded-md text-sm font-medium ${isBalanced ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+                {isBalanced ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                <span>Activos ({formatCurrency(data.total_assets)}) = Pasivos ({formatCurrency(data.total_liabilities)}) + Patrimonio ({formatCurrency(data.equity)})</span>
+                {isBalanced && <span>Cuadrado</span>}
+              </div>
+            );
+          })()}
         </div>
       )}
     </ReportsLayout>

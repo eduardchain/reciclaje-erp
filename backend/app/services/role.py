@@ -75,7 +75,7 @@ PERMISSIONS_CATALOG = [
     ("treasury.create_movements", "Crear Movimientos", "treasury", "Permite crear movimientos de dinero", 84),
     ("treasury.manage_fixed_assets", "Gestionar Activos Fijos", "treasury", "Permite gestionar activos fijos", 85),
     ("treasury.view_provisions", "Ver Provisiones", "treasury", "Permite ver provisiones", 86),
-    ("treasury.view_liabilities", "Ver Pasivos", "treasury", "Permite ver pasivos laborales", 87),
+    ("treasury.view_liabilities", "Ver Pasivos", "treasury", "Permite ver pasivos", 87),
     ("treasury.view_scheduled", "Ver Gastos Diferidos", "treasury", "Permite ver gastos diferidos", 88),
     ("treasury.view_fixed_assets", "Ver Activos Fijos", "treasury", "Permite ver activos fijos", 89),
     ("treasury.view_statements", "Ver Terceros", "treasury", "Permite ver estados de cuenta de terceros", 90),

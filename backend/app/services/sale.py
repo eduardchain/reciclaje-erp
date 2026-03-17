@@ -995,10 +995,10 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     detail=f"Receptor de comision {comm_data.third_party_id} no encontrado"
                 )
             from app.services.third_party import third_party as tp_service
-            if not tp_service.has_behavior_type(db, recipient.id, ["material_supplier", "service_provider"]):
+            if not tp_service.has_behavior_type(db, recipient.id, ["service_provider"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"El comisionista '{recipient.name}' debe ser proveedor de material o servicios",
+                    detail=f"El comisionista '{recipient.name}' debe ser proveedor de servicios",
                 )
 
             # Calculate commission amount

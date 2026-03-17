@@ -60,6 +60,7 @@ from app.schemas.reports import (
     ThirdPartyAuditItem,
     ThirdPartyBalancesResponse,
     TreasuryDashboardResponse,
+    BalanceDetailedGroup,
     BalanceDetailedItem,
     BalanceDetailedSection,
     BalanceDetailedVerification,
@@ -147,27 +148,38 @@ class ReportService:
         )
 
     @staticmethod
-    def _load_tp_behavior_map(db: Session, organization_id: UUID) -> tuple[dict, dict]:
-        """Pre-carga behavior_types y category_names para todos los terceros de la org.
+    def _load_tp_behavior_map(db: Session, organization_id: UUID) -> tuple[dict, dict, dict]:
+        """Pre-carga behavior_types, category_names y categoria por behavior para terceros.
 
         Returns:
-            (tp_behaviors, tp_cat_names) — dict[UUID, set[str]]
+            (tp_behaviors, tp_cat_names, tp_cat_by_behavior)
+            - tp_behaviors: dict[UUID, set[str]] — behavior_types del tercero
+            - tp_cat_names: dict[UUID, set[str]] — nombres de categorias
+            - tp_cat_by_behavior: dict[UUID, dict[str, str]] — {tp_id: {behavior_type: display_name}}
         """
+        from sqlalchemy.orm import aliased
+        ParentCat = aliased(ThirdPartyCategory)
         rows = db.execute(
             select(
                 ThirdPartyCategoryAssignment.third_party_id,
                 ThirdPartyCategory.behavior_type,
                 ThirdPartyCategory.name,
+                ParentCat.name.label("parent_name"),
             )
             .join(ThirdPartyCategory, ThirdPartyCategoryAssignment.category_id == ThirdPartyCategory.id)
+            .outerjoin(ParentCat, ThirdPartyCategory.parent_id == ParentCat.id)
             .where(ThirdPartyCategory.organization_id == organization_id)
         ).all()
         tp_behaviors: dict[UUID, set[str]] = {}
         tp_cat_names: dict[UUID, set[str]] = {}
-        for tp_id, bt, name in rows:
+        tp_cat_by_behavior: dict[UUID, dict[str, str]] = {}
+        for tp_id, bt, name, parent_name in rows:
             tp_behaviors.setdefault(tp_id, set()).add(bt)
             tp_cat_names.setdefault(tp_id, set()).add(name)
-        return tp_behaviors, tp_cat_names
+            display = f"{parent_name} > {name}" if parent_name else name
+            # Solo guardar la primera categoria por behavior_type (evitar duplicados M:N)
+            tp_cat_by_behavior.setdefault(tp_id, {}).setdefault(bt, display)
+        return tp_behaviors, tp_cat_names, tp_cat_by_behavior
 
     @staticmethod
     def _safe_pct(numerator: Decimal, denominator: Decimal) -> float:
@@ -658,7 +670,33 @@ class ReportService:
             )
         ))
 
-        total_assets = cash_and_bank + accounts_receivable + inventory + prepaid_expenses + provision_funds + fixed_assets_value
+        # Anticipos a proveedores (material_supplier, service_provider, liability, generic con balance > 0)
+        advances = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
+                .where(
+                    ThirdParty.organization_id == organization_id,
+                    self._tp_has_behavior("material_supplier", "service_provider", "liability", "generic"),
+                    ThirdParty.is_system_entity == False,
+                    ThirdParty.current_balance > 0,
+                )
+            )
+        ))
+
+        # CxC Inversionistas (investor con balance > 0 = nos deben)
+        investor_receivable = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
+                .where(
+                    ThirdParty.organization_id == organization_id,
+                    self._tp_has_behavior("investor"),
+                    ThirdParty.current_balance > 0,
+                )
+            )
+        ))
+
+        total_assets = (cash_and_bank + accounts_receivable + inventory + advances
+                        + investor_receivable + prepaid_expenses + provision_funds + fixed_assets_value)
 
         # Pasivos
         accounts_payable = Decimal(str(
@@ -683,19 +721,43 @@ class ReportService:
             )
         ))
 
-        # Pasivos laborales/otros (service_provider con balance < 0 = le debemos)
+        # Pasivos (service_provider + liability con balance < 0 = le debemos)
         liability_debt = Decimal(str(
             db.scalar(
                 select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("service_provider"),
+                    self._tp_has_behavior("service_provider", "liability"),
                     ThirdParty.current_balance < 0,
                 )
             )
         ))
 
-        total_liabilities = accounts_payable + investor_debt + liability_debt
+        # Anticipos de clientes (customer con balance < 0 = le debemos)
+        customer_advances = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
+                .where(
+                    ThirdParty.organization_id == organization_id,
+                    self._tp_has_behavior("customer"),
+                    ThirdParty.current_balance < 0,
+                )
+            )
+        ))
+
+        # Obligaciones de provisión (provision con balance > 0 = debemos reintegrar)
+        provision_obligations = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
+                .where(
+                    ThirdParty.organization_id == organization_id,
+                    self._tp_has_behavior("provision"),
+                    ThirdParty.current_balance > 0,
+                )
+            )
+        ))
+
+        total_liabilities = accounts_payable + investor_debt + liability_debt + customer_advances + provision_obligations
         equity = total_assets - total_liabilities
 
         # Desglose patrimonio: utilidad acumulada y distribuida
@@ -709,6 +771,8 @@ class ReportService:
                 cash_and_bank=float(cash_and_bank),
                 accounts_receivable=float(accounts_receivable),
                 inventory=float(inventory),
+                advances=float(advances),
+                investor_receivable=float(investor_receivable),
                 prepaid_expenses=float(prepaid_expenses),
                 provision_funds=float(provision_funds),
                 fixed_assets=float(fixed_assets_value),
@@ -719,6 +783,8 @@ class ReportService:
                 accounts_payable=float(accounts_payable),
                 investor_debt=float(investor_debt),
                 liability_debt=float(liability_debt),
+                customer_advances=float(customer_advances),
+                provision_obligations=float(provision_obligations),
                 total=float(total_liabilities),
             ),
             total_liabilities=float(total_liabilities),
@@ -738,9 +804,20 @@ class ReportService:
     ) -> BalanceDetailedResponse:
         """Balance general desglosado por item individual."""
 
-        def _section(label: str, items: list[BalanceDetailedItem]) -> BalanceDetailedSection:
+        def _section(
+            label: str,
+            items: list[BalanceDetailedItem],
+            section_key: str | None = None,
+        ) -> BalanceDetailedSection:
             total = sum(i.balance for i in items)
-            return BalanceDetailedSection(label=label, total=round(total, 2), items=items)
+            groups = None
+            if section_key:
+                groups = self._group_by_category(
+                    items, section_key, tp_cat_by_behavior, self.SECTION_BEHAVIORS,
+                )
+            return BalanceDetailedSection(
+                label=label, total=round(total, 2), items=items, groups=groups,
+            )
 
         # --- Activos ---
 
@@ -806,7 +883,7 @@ class ReportService:
         ).scalars().all()
 
         # Pre-cargar behavior_types y category_names
-        tp_behaviors, tp_cat_names = self._load_tp_behavior_map(db, organization_id)
+        tp_behaviors, tp_cat_names, tp_cat_by_behavior = self._load_tp_behavior_map(db, organization_id)
 
         # Buckets para clasificacion
         tp_buckets: dict[str, list[BalanceDetailedItem]] = {
@@ -814,18 +891,20 @@ class ReportService:
             "customers_receivable": [],
             "supplier_advances": [],
             "service_provider_advances": [],
+            "liability_advances": [],
             "investor_receivable": [],
             "provision_funds": [],
             "prepaid_expenses": [],
             "generic_receivable": [],
             # pasivos
             "suppliers_payable": [],
+            "service_provider_payable": [],
+            "liability_debt": [],
             "investors_partners": [],
             "investors_obligations": [],
             "investors_legacy": [],
             "customer_advances": [],
             "provision_obligations": [],
-            "liabilities_other": [],
             "generic_payable": [],
         }
 
@@ -848,6 +927,7 @@ class ReportService:
             ("customers_receivable", "CxC Clientes", tp_buckets["customers_receivable"]),
             ("supplier_advances", "Anticipos a Proveedores Material", tp_buckets["supplier_advances"]),
             ("service_provider_advances", "Anticipos a Proveedores Servicios", tp_buckets["service_provider_advances"]),
+            ("liability_advances", "Anticipos a Pasivos", tp_buckets["liability_advances"]),
             ("investor_receivable", "CxC Inversionistas", tp_buckets["investor_receivable"]),
             ("provision_funds", "Fondos en Provisiones", tp_buckets["provision_funds"]),
             ("prepaid_expenses", "Gastos Prepagados", tp_buckets["prepaid_expenses"]),
@@ -855,7 +935,7 @@ class ReportService:
             ("fixed_assets", "Activos Fijos", fa_items),
         ]
         for key, label, items in asset_sections:
-            assets[key] = _section(label, items)
+            assets[key] = _section(label, items, section_key=key)
 
         total_assets = round(sum(s.total for s in assets.values()), 2)
 
@@ -863,16 +943,17 @@ class ReportService:
         liabilities: dict[str, BalanceDetailedSection] = {}
         liability_sections = [
             ("suppliers_payable", "CxP Proveedores Material", tp_buckets["suppliers_payable"]),
+            ("service_provider_payable", "CxP Proveedores Servicios", tp_buckets["service_provider_payable"]),
+            ("liability_debt", "CxP Pasivos", tp_buckets["liability_debt"]),
             ("investors_partners", "Socios", tp_buckets["investors_partners"]),
             ("investors_obligations", "Obligaciones Financieras", tp_buckets["investors_obligations"]),
             ("investors_legacy", "Inversionistas", tp_buckets["investors_legacy"]),
             ("customer_advances", "Anticipos de Clientes", tp_buckets["customer_advances"]),
             ("provision_obligations", "Obligaciones Provisiones", tp_buckets["provision_obligations"]),
-            ("liabilities_other", "CxP Proveedores Servicios", tp_buckets["liabilities_other"]),
             ("generic_payable", "Otras Cuentas por Pagar", tp_buckets["generic_payable"]),
         ]
         for key, label, items in liability_sections:
-            liabilities[key] = _section(label, items)
+            liabilities[key] = _section(label, items, section_key=key)
 
         total_liabilities = round(sum(s.total for s in liabilities.values()), 2)
 
@@ -926,6 +1007,8 @@ class ReportService:
                 return "supplier_advances"
             if "service_provider" in behavior_types:
                 return "service_provider_advances"
+            if "liability" in behavior_types:
+                return "liability_advances"
             if "generic" in behavior_types:
                 return "generic_receivable"
         else:
@@ -933,7 +1016,9 @@ class ReportService:
             if "material_supplier" in behavior_types:
                 return "suppliers_payable"
             if "service_provider" in behavior_types:
-                return "liabilities_other"
+                return "service_provider_payable"
+            if "liability" in behavior_types:
+                return "liability_debt"
             if "investor" in behavior_types:
                 # Distinguir socios de obligaciones financieras por nombre de categoria
                 lowered = {n.lower() for n in category_names}
@@ -947,6 +1032,63 @@ class ReportService:
             if "generic" in behavior_types:
                 return "generic_payable"
         return None
+
+    # Mapeo seccion → behavior_types relevantes para agrupacion por categoria
+    SECTION_BEHAVIORS = {
+        "customers_receivable": ["customer"],
+        "supplier_advances": ["material_supplier"],
+        "service_provider_advances": ["service_provider"],
+        "liability_advances": ["liability"],
+        "investor_receivable": ["investor"],
+        "suppliers_payable": ["material_supplier"],
+        "service_provider_payable": ["service_provider"],
+        "liability_debt": ["liability"],
+        "customer_advances": ["customer"],
+        "investors_partners": ["investor"],
+        "investors_obligations": ["investor"],
+        "investors_legacy": ["investor"],
+        "provision_funds": ["provision"],
+        "provision_obligations": ["provision"],
+        "generic_receivable": ["generic"],
+        "generic_payable": ["generic"],
+    }
+
+    @staticmethod
+    def _group_by_category(
+        items: list[BalanceDetailedItem],
+        section_key: str,
+        tp_cat_by_behavior: dict,
+        section_behaviors: dict,
+    ) -> list[BalanceDetailedGroup] | None:
+        """Agrupa items por categoria de tercero. Retorna None si no hay agrupacion util."""
+        behaviors = section_behaviors.get(section_key)
+        if not behaviors or len(items) < 2:
+            return None
+
+        groups: dict[str, list[BalanceDetailedItem]] = {}
+        for item in items:
+            tp_id_uuid = UUID(item.id)
+            cat_map = tp_cat_by_behavior.get(tp_id_uuid, {})
+            # Buscar la primera categoria que matchee algun behavior_type de la seccion
+            cat_name = None
+            for bt in behaviors:
+                if bt in cat_map:
+                    cat_name = cat_map[bt]
+                    break
+            label = cat_name or "Sin Categoría"
+            groups.setdefault(label, []).append(item)
+
+        # Solo agrupar si hay mas de 1 grupo distinto
+        if len(groups) <= 1:
+            return None
+
+        # Ordenar por total descendente, "Sin Categoría" siempre al final
+        result = []
+        for label, group_items in groups.items():
+            total = round(sum(i.balance for i in group_items), 2)
+            result.append(BalanceDetailedGroup(label=label, total=total, items=group_items))
+        result.sort(key=lambda g: (g.label == "Sin Categoría", -g.total))
+        return result
 
     # ------------------------------------------------------------------
     # Purchase Report
@@ -1388,7 +1530,7 @@ class ReportService:
                 select(ThirdParty.id, ThirdParty.name, ThirdParty.current_balance)
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("material_supplier", "service_provider"),
+                    self._tp_has_behavior("material_supplier", "service_provider", "liability"),
                     ThirdParty.current_balance != 0,
                 )
                 .order_by(ThirdParty.current_balance.asc())
@@ -1549,7 +1691,7 @@ class ReportService:
                 select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("material_supplier", "service_provider"),
+                    self._tp_has_behavior("material_supplier", "service_provider", "liability"),
                     ThirdParty.current_balance < 0,
                 )
             )
@@ -1804,7 +1946,7 @@ class ReportService:
             select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
             .where(
                 ThirdParty.organization_id == organization_id,
-                self._tp_has_behavior("material_supplier", "service_provider"),
+                self._tp_has_behavior("material_supplier", "service_provider", "liability"),
                 ThirdParty.current_balance < 0,
             )
         ))
@@ -1990,7 +2132,7 @@ class ReportService:
             .order_by(ThirdParty.name)
         ).all())
 
-        tp_behaviors, _ = self._load_tp_behavior_map(db, organization_id)
+        tp_behaviors, _, _ = self._load_tp_behavior_map(db, organization_id)
 
         # Dict acumulador {third_party_id: calculated_balance}
         tp_calc: dict[UUID, Decimal] = {}

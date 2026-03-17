@@ -46,6 +46,7 @@ class ThirdPartyCategoryUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     parent_id: Optional[UUID] = None
+    is_active: Optional[bool] = None
 
     model_config = {"from_attributes": True}
 
@@ -88,6 +89,7 @@ class ThirdPartyCategoryFlat(BaseModel):
     display_name: str
     parent_id: Optional[UUID] = None
     behavior_type: str
+    is_active: bool = True
 
 
 class ThirdPartyCategoryFlatResponse(BaseModel):

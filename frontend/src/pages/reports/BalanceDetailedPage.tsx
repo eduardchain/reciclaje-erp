@@ -8,18 +8,20 @@ import ReportsLayout from "./ReportsLayout";
 import { useBalanceDetailed } from "@/hooks/useReports";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { exportBalanceDetailedExcel } from "@/utils/excelExport";
-import type { BalanceDetailedSection, BalanceDetailedItem } from "@/types/reports";
+import type { BalanceDetailedSection, BalanceDetailedItem, BalanceDetailedGroup } from "@/types/reports";
 
 const ASSET_SECTION_ORDER = [
   "cash_and_bank", "inventory_liquidated",
-  "customers_receivable", "supplier_advances", "investor_receivable",
-  "provision_funds", "prepaid_expenses", "fixed_assets",
+  "customers_receivable", "supplier_advances", "service_provider_advances",
+  "liability_advances", "investor_receivable",
+  "provision_funds", "prepaid_expenses", "generic_receivable", "fixed_assets",
 ];
 
 const LIABILITY_SECTION_ORDER = [
-  "suppliers_payable", "investors_partners", "investors_obligations",
+  "suppliers_payable", "service_provider_payable", "liability_debt",
+  "investors_partners", "investors_obligations",
   "investors_legacy", "customer_advances", "provision_obligations",
-  "liabilities_other",
+  "generic_payable",
 ];
 
 function fmtBalance(value: number) {
@@ -58,12 +60,20 @@ export default function BalanceDetailedPage() {
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const allSectionKeys = useMemo(() => {
+  const allExpandableKeys = useMemo(() => {
     if (!data) return [];
-    return [
-      ...Object.keys(data.assets),
-      ...Object.keys(data.liabilities),
-    ];
+    const keys: string[] = [];
+    const addSections = (sections: Record<string, BalanceDetailedSection>) => {
+      for (const [key, section] of Object.entries(sections)) {
+        keys.push(key);
+        if (section.groups) {
+          for (const g of section.groups) keys.push(`${key}:${g.label}`);
+        }
+      }
+    };
+    addSections(data.assets);
+    addSections(data.liabilities);
+    return keys;
   }, [data]);
 
   const toggleSection = (key: string) => {
@@ -75,12 +85,56 @@ export default function BalanceDetailedPage() {
     });
   };
 
-  const expandAll = () => setExpanded(new Set(allSectionKeys));
+  const expandAll = () => setExpanded(new Set(allExpandableKeys));
   const collapseAll = () => setExpanded(new Set());
+
+  const renderItems = (items: BalanceDetailedItem[], sectionKey: string) =>
+    items.map((item) => {
+      const link = getItemLink(sectionKey, item);
+      return (
+        <div
+          key={item.id}
+          className={`flex items-center justify-between py-1 px-2 rounded text-sm ${link ? "hover:bg-slate-100 cursor-pointer" : ""}`}
+          onClick={() => link && navigate(link)}
+        >
+          <div className="flex flex-col">
+            <span>{item.name}</span>
+            <ItemDetail item={item} sectionKey={sectionKey} />
+          </div>
+          <span className="tabular-nums font-medium">{fmtBalance(item.balance)}</span>
+        </div>
+      );
+    });
+
+  const renderGroup = (group: BalanceDetailedGroup, sectionKey: string, colorClass: string) => {
+    const groupKey = `${sectionKey}:${group.label}`;
+    const isGroupOpen = expanded.has(groupKey);
+    return (
+      <div key={groupKey} className="border-t border-slate-50">
+        <button
+          className="w-full flex items-center justify-between px-2 py-1.5 text-sm hover:bg-slate-50 transition-colors"
+          onClick={() => toggleSection(groupKey)}
+        >
+          <div className="flex items-center gap-2">
+            {isGroupOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+            <span className="font-medium text-slate-600">{group.label}</span>
+            <span className="text-xs text-slate-400">({group.items.length})</span>
+          </div>
+          <span className={`font-medium tabular-nums text-xs ${colorClass}`}>{fmtBalance(group.total)}</span>
+        </button>
+        {isGroupOpen && (
+          <div className="pl-6 pr-2 pb-1 space-y-0.5">
+            {renderItems(group.items, sectionKey)}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderSection = (key: string, section: BalanceDetailedSection, colorClass: string) => {
     const isOpen = expanded.has(key);
     const hasItems = section.items.length > 0;
+    const hasGroups = section.groups && section.groups.length > 0;
 
     return (
       <div key={key} className="border-b border-slate-100 last:border-b-0">
@@ -102,22 +156,10 @@ export default function BalanceDetailedPage() {
         </button>
         {isOpen && hasItems && (
           <div className="pl-9 pr-3 pb-2 space-y-1">
-            {section.items.map((item) => {
-              const link = getItemLink(key, item);
-              return (
-                <div
-                  key={item.id}
-                  className={`flex items-center justify-between py-1 px-2 rounded text-sm ${link ? "hover:bg-slate-100 cursor-pointer" : ""}`}
-                  onClick={() => link && navigate(link)}
-                >
-                  <div className="flex flex-col">
-                    <span>{item.name}</span>
-                    <ItemDetail item={item} sectionKey={key} />
-                  </div>
-                  <span className="tabular-nums font-medium">{fmtBalance(item.balance)}</span>
-                </div>
-              );
-            })}
+            {hasGroups
+              ? section.groups!.map((g) => renderGroup(g, key, colorClass))
+              : renderItems(section.items, key)
+            }
           </div>
         )}
       </div>

@@ -90,7 +90,7 @@ def test_commission_recipient(db_session, test_organization):
     )
     db_session.add(recipient)
     db_session.flush()
-    cat_supplier = ThirdPartyCategory(name="Supplier Cat Commission", behavior_type="material_supplier", organization_id=test_organization.id)
+    cat_supplier = ThirdPartyCategory(name="Service Provider Commission", behavior_type="service_provider", organization_id=test_organization.id)
     db_session.add(cat_supplier)
     db_session.flush()
     db_session.add(ThirdPartyCategoryAssignment(third_party_id=recipient.id, category_id=cat_supplier.id))

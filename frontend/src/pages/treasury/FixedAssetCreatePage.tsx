@@ -18,7 +18,7 @@ export default function FixedAssetCreatePage() {
   const create = useCreateFixedAsset();
 
   const { data: categoriesData } = useExpenseCategoriesFlat();
-  const { data: suppliersData } = useThirdParties({ role: "supplier" });
+  const { data: suppliersData } = useThirdParties();
   const { data: accountsData } = useMoneyAccounts();
 
   const categories = categoriesData?.items ?? [];

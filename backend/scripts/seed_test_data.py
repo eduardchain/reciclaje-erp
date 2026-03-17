@@ -25,6 +25,7 @@ from app.models.organization import Organization
 from app.models.user import User, OrganizationMember
 from app.models.material import Material, MaterialCategory
 from app.models.third_party import ThirdParty
+from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 from app.models.warehouse import Warehouse
 from app.models.money_account import MoneyAccount
 from app.models.business_unit import BusinessUnit
@@ -115,7 +116,13 @@ def clear_data(db, org_slug: str) -> None:
     db.query(MaterialCostHistory).filter(MaterialCostHistory.organization_id == org_id).delete()
     db.query(Material).filter(Material.organization_id == org_id).delete()
     db.query(MaterialCategory).filter(MaterialCategory.organization_id == org_id).delete()
+    db.query(ThirdPartyCategoryAssignment).filter(
+        ThirdPartyCategoryAssignment.third_party_id.in_(
+            db.query(ThirdParty.id).filter(ThirdParty.organization_id == org_id)
+        )
+    ).delete(synchronize_session=False)
     db.query(ThirdParty).filter(ThirdParty.organization_id == org_id).delete()
+    db.query(ThirdPartyCategory).filter(ThirdPartyCategory.organization_id == org_id).delete()
     db.query(MoneyAccount).filter(MoneyAccount.organization_id == org_id).delete()
     db.query(Warehouse).filter(Warehouse.organization_id == org_id).delete()
     db.query(ExpenseCategory).filter(ExpenseCategory.organization_id == org_id).delete()
@@ -343,50 +350,80 @@ def create_warehouses(db, org: Organization) -> dict:
     return result
 
 
-def create_third_parties(db, org: Organization) -> dict:
-    """Crea ~15 terceros con diferentes roles."""
-    terceros = [
-        # (nombre, nit, email, tel, is_supplier, is_customer, is_investor, is_provision)
-        ("Chatarrero Martinez",     "900123456-1", "martinez@chat.co",     "3001234567", True,  False, False, False),
-        ("Recicladora del Norte",   "800234567-8", "info@rnorte.co",       "3102345678", True,  False, False, False),
-        ("Metales y Materiales SAS","700345678-9", "ventas@metales.co",    "3203456789", True,  True,  False, False),
-        ("Ferreterias El Constructor","600456789-0","compras@constructor.co","3104567890",True,  False, False, False),
-        ("Chatarrero Rodriguez",    "500567890-1", "rodriguez@gmail.com",  "3205678901", True,  False, False, False),
-        ("Acerías de Colombia SA",  "400678901-2", "compras@acerias.co",   "3016789012", False, True,  False, False),
-        ("Fundiciones Bogota Ltda", "300789012-3", "fundi@bogota.co",      "3107890123", False, True,  False, False),
-        ("Metales Exportados SAS",  "200890123-4", "exporta@metales.co",   "3208901234", False, True,  False, False),
-        ("Industrias del Pacifico", "100901234-5", "ipacifico@ind.co",     "3109012345", False, True,  False, False),
-        ("Plasticos y Fibras SA",   "150012345-6", "compras@plasticos.co", "3020123456", False, True,  False, False),
-        ("Carlos Perez Inversores", "250123456-7", "cperez@inversiones.co","3151234567", False, False, True,  False),
-        ("Diana Hernandez Capital", "350234567-8", "diana@capital.co",     "3162345678", False, False, True,  False),
-        ("Logistica Express SAS",   "450345678-9", "logistica@express.co", "3173456789", True,  False, False, False),
-        ("Reciclajes del Sur SAS",  "550456789-0", "info@rsur.co",         "3184567890", True,  True,  False, False),
-        ("Valeria Torres Comercial","650567890-1", "vtorres@comercial.co", "3195678901", False, True,  False, False),
+def create_third_party_categories(db, org: Organization) -> dict:
+    """Crea categorias de terceros por behavior_type. Retorna dict behavior_type->category."""
+    categorias = [
+        ("Proveedor Material",    "material_supplier", "Proveedores de chatarra y materiales reciclables"),
+        ("Proveedor Servicios",   "service_provider",  "Proveedores de servicios (flete, pesaje, etc.)"),
+        ("Cliente",               "customer",          "Compradores de materiales procesados"),
+        ("Inversionista - Socios","investor",           "Socios e inversionistas de capital"),
+        ("Genérico",              "generic",            "Terceros de uso general"),
+        ("Provisión",             "provision",          "Fondos provisionados"),
+        ("Pasivo",                "liability",          "Obligaciones y deudas pendientes"),
     ]
     result = {}
-    for nombre, nit, email, tel, is_sup, is_cust, is_inv, is_prov in terceros:
+    for nombre, behavior, desc in categorias:
+        cat = ThirdPartyCategory(
+            organization_id=org.id,
+            name=nombre,
+            description=desc,
+            behavior_type=behavior,
+            is_active=True,
+        )
+        db.add(cat)
+        db.flush()
+        result[behavior] = cat
+        print(f"  Cat. Tercero: {nombre} ({behavior})")
+    return result
+
+
+def create_third_parties(db, org: Organization, tp_cats: dict) -> dict:
+    """Crea ~15 terceros con categorias asignadas via behavior_type."""
+    terceros = [
+        # (nombre, nit, email, tel, [behavior_types])
+        ("Chatarrero Martinez",      "900123456-1", "martinez@chat.co",      "3001234567", ["material_supplier"]),
+        ("Recicladora del Norte",    "800234567-8", "info@rnorte.co",        "3102345678", ["material_supplier"]),
+        ("Metales y Materiales SAS", "700345678-9", "ventas@metales.co",     "3203456789", ["material_supplier", "customer"]),
+        ("Ferreterias El Constructor","600456789-0", "compras@constructor.co","3104567890", ["material_supplier"]),
+        ("Chatarrero Rodriguez",     "500567890-1", "rodriguez@gmail.com",   "3205678901", ["material_supplier"]),
+        ("Acerías de Colombia SA",   "400678901-2", "compras@acerias.co",    "3016789012", ["customer"]),
+        ("Fundiciones Bogota Ltda",  "300789012-3", "fundi@bogota.co",       "3107890123", ["customer"]),
+        ("Metales Exportados SAS",   "200890123-4", "exporta@metales.co",    "3208901234", ["customer"]),
+        ("Industrias del Pacifico",  "100901234-5", "ipacifico@ind.co",      "3109012345", ["customer"]),
+        ("Plasticos y Fibras SA",    "150012345-6", "compras@plasticos.co",  "3020123456", ["customer"]),
+        ("Carlos Perez Inversores",  "250123456-7", "cperez@inversiones.co", "3151234567", ["investor"]),
+        ("Diana Hernandez Capital",  "350234567-8", "diana@capital.co",      "3162345678", ["investor"]),
+        ("Logistica Express SAS",    "450345678-9", "logistica@express.co",  "3173456789", ["service_provider"]),
+        ("Reciclajes del Sur SAS",   "550456789-0", "info@rsur.co",          "3184567890", ["material_supplier", "customer"]),
+        ("Valeria Torres Comercial", "650567890-1", "vtorres@comercial.co",  "3195678901", ["customer"]),
+        ("Enel Colombia SA",         "750678901-2", "pagos@enel.co",         "018000123456", ["liability"]),
+        ("Arrendador Local 1",       "850789012-3", "arriendo@local.co",     "3206789012", ["liability"]),
+    ]
+    result = {}
+    for nombre, nit, email, tel, behaviors in terceros:
         tp = ThirdParty(
             organization_id=org.id,
             name=nombre,
             identification_number=nit,
             email=email,
             phone=tel,
-            is_supplier=is_sup,
-            is_customer=is_cust,
-            is_investor=is_inv,
-            is_provision=is_prov,
             current_balance=Decimal("0"),
             is_active=True,
         )
         db.add(tp)
         db.flush()
-        roles = []
-        if is_sup: roles.append("proveedor")
-        if is_cust: roles.append("cliente")
-        if is_inv: roles.append("inversor")
-        if is_prov: roles.append("provision")
+        # Asignar categorias
+        for bt in behaviors:
+            if bt in tp_cats:
+                assignment = ThirdPartyCategoryAssignment(
+                    third_party_id=tp.id,
+                    category_id=tp_cats[bt].id,
+                )
+                db.add(assignment)
+        db.flush()
+        labels = [bt.replace("_", " ") for bt in behaviors]
         result[nombre] = tp
-        print(f"  Tercero: {nombre} ({', '.join(roles)})")
+        print(f"  Tercero: {nombre} ({', '.join(labels)})")
     return result
 
 
@@ -520,41 +557,36 @@ def main():
             print(f"\nOrganizacion '{existing.name}' ya existe. Use --clear para recrear.")
             return
 
-        print("\n[1/7] Organizacion y usuarios...")
+        print("\n[1/6] Organizacion y usuarios...")
         org = create_organization(db)
         users = create_users(db, org)
         db.commit()
 
-        print("\n[2/7] Unidades de negocio y categorias...")
+        print("\n[2/6] Unidades de negocio y categorias...")
         bus = create_business_units(db, org)
         cats = create_material_categories(db, org)
         expense_cats = create_expense_categories(db, org)
         db.commit()
 
-        print("\n[3/7] Materiales...")
+        print("\n[3/6] Materiales...")
         mats = create_materials(db, org, cats, bus)
         db.commit()
 
-        print("\n[4/7] Bodegas y cuentas...")
+        print("\n[4/6] Bodegas y cuentas...")
         warehouses = create_warehouses(db, org)
         accounts = create_money_accounts(db, org)
         db.commit()
 
-        print("\n[5/7] Terceros...")
-        tps = create_third_parties(db, org)
+        print("\n[5/6] Categorias de terceros...")
+        tp_cats = create_third_party_categories(db, org)
         db.commit()
 
-        print("\n[6/7] Lista de precios...")
+        print("\n[6/6] Lista de precios...")
         create_price_lists(db, org, mats)
-        db.commit()
-
-        print("\n[7/7] Capital inicial...")
-        create_initial_capital(db, org, accounts, tps, users)
         db.commit()
 
         print("\n" + "="*60)
         print("  Datos maestros creados exitosamente!")
-        print("  (Con aporte de capital inicial de $100M)")
         print("="*60)
         print(f"\nOrganizacion: Reciclajes de la Costa")
         print(f"Slug:          reciclajes-de-la-costa")
@@ -566,12 +598,12 @@ def main():
         print(f"  ingrid@reciclajesdelacosta.com  - Planillador (pass: Pass1234!)")
         print(f"\nDatos maestros:")
         print(f"  20 materiales con lista de precios")
-        print(f"  15 terceros (proveedores, clientes, inversores)")
+        print(f"  7 categorias de terceros (behavior_type)")
+        print(f"  0 terceros (crear manualmente para probar flujos)")
         print(f"  3 bodegas")
-        print(f"  5 cuentas de dinero (Bancolombia: $100M)")
+        print(f"  5 cuentas de dinero (saldo $0)")
         print(f"  4 unidades de negocio")
         print(f"  8 categorias de gasto")
-        print(f"  1 aporte de capital inicial")
         print()
 
     except Exception as e:

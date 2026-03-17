@@ -23,6 +23,7 @@ export interface ThirdPartyCategoryUpdate {
   description?: string | null;
   parent_id?: string | null;
   behavior_type?: string;
+  is_active?: boolean;
 }
 
 export interface ThirdPartyCategoryFlat {
@@ -31,6 +32,7 @@ export interface ThirdPartyCategoryFlat {
   display_name: string;
   parent_id: string | null;
   behavior_type: string;
+  is_active: boolean;
 }
 
 export interface ThirdPartyCategoryFlatResponse {

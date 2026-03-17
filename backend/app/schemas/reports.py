@@ -178,6 +178,8 @@ class BalanceSheetAssets(BaseModel):
     cash_and_bank: float
     accounts_receivable: float
     inventory: float
+    advances: float = 0.0
+    investor_receivable: float = 0.0
     prepaid_expenses: float = 0.0
     provision_funds: float = 0.0
     fixed_assets: float = 0.0
@@ -188,6 +190,8 @@ class BalanceSheetLiabilities(BaseModel):
     accounts_payable: float
     investor_debt: float
     liability_debt: float = 0.0
+    customer_advances: float = 0.0
+    provision_obligations: float = 0.0
     total: float
 
 
@@ -220,10 +224,17 @@ class BalanceDetailedItem(BaseModel):
     account_type: Optional[str] = None
 
 
+class BalanceDetailedGroup(BaseModel):
+    label: str
+    total: float
+    items: list[BalanceDetailedItem]
+
+
 class BalanceDetailedSection(BaseModel):
     label: str
     total: float
     items: list[BalanceDetailedItem]
+    groups: list[BalanceDetailedGroup] | None = None
 
 
 class BalanceDetailedVerification(BaseModel):

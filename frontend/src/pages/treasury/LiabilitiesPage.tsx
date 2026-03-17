@@ -30,9 +30,9 @@ export default function LiabilitiesPage() {
   const [search, setSearch] = useState("");
   const { data: liabilitiesData, isLoading } = useLiabilities(search || undefined);
   const items = liabilitiesData?.items ?? [];
-  const { data: serviceCatsData } = useThirdPartyCategoriesFlat("service_provider");
-  const serviceCategories = serviceCatsData?.items ?? [];
-  const serviceCategoryId = serviceCategories.length > 0 ? serviceCategories[0].id : null;
+  const { data: liabilityCatsData } = useThirdPartyCategoriesFlat("liability");
+  const liabilityCategories = liabilityCatsData?.items ?? [];
+  const liabilityCategoryId = liabilityCategories.length > 0 ? liabilityCategories[0].id : null;
 
   // Modal crear pasivo
   const [showCreate, setShowCreate] = useState(false);
@@ -97,7 +97,7 @@ export default function LiabilitiesPage() {
             Volver a Tesoreria
           </Button>
           {hasPermission("treasury.create_movements") && (
-            <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700" disabled={!serviceCategoryId} title={!serviceCategoryId ? "Configure categorias de Proveedor Servicios primero" : undefined}>
+            <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700" disabled={!liabilityCategoryId} title={!liabilityCategoryId ? "Configure categoria Pasivo primero" : undefined}>
               <Plus className="h-4 w-4 mr-2" />Nuevo Pasivo
             </Button>
           )}
@@ -197,7 +197,7 @@ export default function LiabilitiesPage() {
             <Button
               onClick={() => createTP.mutate({
                 name: newName,
-                category_ids: serviceCategoryId ? [serviceCategoryId] : [],
+                category_ids: liabilityCategoryId ? [liabilityCategoryId] : [],
                 identification_number: newIdNumber || undefined,
                 phone: newPhone || undefined,
               })}

@@ -24,12 +24,13 @@ const BEHAVIOR_COLORS: Record<string, string> = {
   investor: "bg-purple-50 text-purple-700",
   generic: "bg-slate-50 text-slate-700",
   provision: "bg-orange-50 text-orange-700",
+  liability: "bg-amber-50 text-amber-700",
 };
 
 function CategoryBadges({ tp }: { tp: ThirdPartyResponse }) {
   return (
     <div className="flex gap-1 flex-wrap">
-      {tp.categories.map((cat) => (
+      {(tp.categories ?? []).map((cat) => (
         <Badge key={cat.id} variant="outline" className={`${BEHAVIOR_COLORS[cat.behavior_type] ?? ""} text-xs`}>
           {cat.display_name}
         </Badge>
@@ -94,10 +95,11 @@ export default function ThirdPartiesPage() {
         <TabsList>
           <TabsTrigger value="all">Todos</TabsTrigger>
           <TabsTrigger value="supplier">Proveedores</TabsTrigger>
+          <TabsTrigger value="service_provider">Servicios</TabsTrigger>
           <TabsTrigger value="customer">Clientes</TabsTrigger>
           <TabsTrigger value="investor">Inversionistas</TabsTrigger>
+          <TabsTrigger value="liability">Pasivos</TabsTrigger>
           <TabsTrigger value="provision">Provisiones</TabsTrigger>
-          <TabsTrigger value="liability">Servicios</TabsTrigger>
           <TabsTrigger value="generic">Genericos</TabsTrigger>
         </TabsList>
       </Tabs>

@@ -132,9 +132,10 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
 
     # --- Categorias de terceros ---
     cat_supplier = ThirdPartyCategory(name="Proveedores Mat", behavior_type="material_supplier", organization_id=org_id)
+    cat_service = ThirdPartyCategory(name="Proveedores Serv", behavior_type="service_provider", organization_id=org_id)
     cat_customer = ThirdPartyCategory(name="Clientes", behavior_type="customer", organization_id=org_id)
     cat_investor = ThirdPartyCategory(name="Inversores", behavior_type="investor", organization_id=org_id)
-    db_session.add_all([cat_supplier, cat_customer, cat_investor])
+    db_session.add_all([cat_supplier, cat_service, cat_customer, cat_investor])
     db_session.flush()
     db_session.add_all([
         ThirdPartyCategoryAssignment(third_party_id=proveedor1.id, category_id=cat_supplier.id),
@@ -142,6 +143,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         ThirdPartyCategoryAssignment(third_party_id=cliente1.id, category_id=cat_customer.id),
         ThirdPartyCategoryAssignment(third_party_id=cliente2.id, category_id=cat_customer.id),
         ThirdPartyCategoryAssignment(third_party_id=inversor.id, category_id=cat_investor.id),
+        ThirdPartyCategoryAssignment(third_party_id=comisionista.id, category_id=cat_service.id),
     ])
     db_session.flush()
 
@@ -450,6 +452,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         "cliente1": cliente1,
         "cliente2": cliente2,
         "inversor": inversor,
+        "comisionista": comisionista,
         "cuenta_efectivo": cuenta_efectivo,
         "cuenta_banco": cuenta_banco,
         "warehouse": warehouse,
@@ -1381,7 +1384,7 @@ class TestCommissionSupplierValidation:
     def test_commission_accepts_supplier(
         self, client: TestClient, org_headers: dict, report_data: dict,
     ):
-        """Comisionista con categoria proveedor → aceptado (201)."""
+        """Comisionista con categoria service_provider → aceptado (201)."""
         wh_id = str(report_data["warehouse"].id)
         payload = {
             "supplier_id": str(report_data["proveedor1"].id),
@@ -1393,7 +1396,7 @@ class TestCommissionSupplierValidation:
                 "unit_price": 1000,
             }],
             "commissions": [{
-                "third_party_id": str(report_data["proveedor2"].id),  # has material_supplier category
+                "third_party_id": str(report_data["comisionista"].id),  # has service_provider category
                 "concept": "Intermediacion",
                 "commission_type": "fixed",
                 "commission_value": 500,

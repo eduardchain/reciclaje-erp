@@ -82,7 +82,7 @@ class CRUDMoneyMovement:
         """
         # Validaciones
         account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
-        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_behavior=["material_supplier", "service_provider"])
+        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_behavior=["material_supplier", "service_provider", "liability"])
 
         if data.purchase_id:
             self._validate_purchase(db, data.purchase_id, organization_id, supplier_id=data.supplier_id)
@@ -540,7 +540,7 @@ class CRUDMoneyMovement:
         - supplier.current_balance += amount (proveedor nos debe)
         """
         account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
-        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_behavior=["material_supplier", "service_provider"])
+        supplier = self._validate_third_party(db, data.supplier_id, organization_id, require_behavior=["material_supplier", "service_provider", "liability"])
 
         movement = self._create_movement(
             db=db,
@@ -1077,6 +1077,7 @@ class CRUDMoneyMovement:
             "investor": "inversor",
             "provision": "provision",
             "generic": "cuenta genérica",
+            "liability": "pasivo",
         }
         if require_behavior:
             if not tp_service.has_behavior_type(db, third_party_id, require_behavior):

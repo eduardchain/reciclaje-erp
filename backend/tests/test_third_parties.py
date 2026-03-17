@@ -403,6 +403,71 @@ class TestGetProvisions:
         assert str(non_provision.id) not in provision_ids
 
 
+class TestGetLiabilities:
+    """Tests for GET /api/v1/third-parties/liabilities"""
+
+    def test_get_liabilities_only(self, client, org_headers, db_session, test_organization):
+        """Test filtering to get only liability third parties."""
+        # Arrange
+        liability = ThirdParty(
+            id=uuid4(),
+            name="Enel Colombia",
+            identification_number="LIA-001",
+            organization_id=test_organization.id,
+            is_active=True
+        )
+        non_liability = ThirdParty(
+            id=uuid4(),
+            name="Not Liability",
+            identification_number="NOT-LIA-001",
+            organization_id=test_organization.id,
+            is_active=True
+        )
+        db_session.add_all([liability, non_liability])
+        db_session.flush()
+        cat = ThirdPartyCategory(name="Pasivo", behavior_type="liability", organization_id=test_organization.id)
+        db_session.add(cat)
+        db_session.flush()
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=liability.id, category_id=cat.id))
+        db_session.commit()
+
+        # Act
+        response = client.get("/api/v1/third-parties/liabilities", headers=org_headers)
+
+        # Assert
+        assert response.status_code == 200
+        data = response.json()
+        liability_ids = [item["id"] for item in data["items"]]
+        assert str(liability.id) in liability_ids
+        assert str(non_liability.id) not in liability_ids
+
+    def test_get_liabilities_excludes_service_provider(self, client, org_headers, db_session, test_organization):
+        """Liabilities endpoint should NOT return service_provider third parties."""
+        # Arrange — service_provider tercero
+        sp = ThirdParty(
+            id=uuid4(),
+            name="Comisionista Flete",
+            organization_id=test_organization.id,
+            is_active=True
+        )
+        db_session.add(sp)
+        db_session.flush()
+        cat = ThirdPartyCategory(name="Proveedor Servicios", behavior_type="service_provider", organization_id=test_organization.id)
+        db_session.add(cat)
+        db_session.flush()
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=sp.id, category_id=cat.id))
+        db_session.commit()
+
+        # Act
+        response = client.get("/api/v1/third-parties/liabilities", headers=org_headers)
+
+        # Assert
+        assert response.status_code == 200
+        data = response.json()
+        ids = [item["id"] for item in data["items"]]
+        assert str(sp.id) not in ids
+
+
 class TestUpdateThirdParty:
     """Tests for PATCH /api/v1/third-parties/{id}"""
 
@@ -748,10 +813,10 @@ class TestThirdPartyCategories:
 class TestPayableProviders:
     """Tests para GET /api/v1/third-parties/payable-providers."""
 
-    def test_returns_material_suppliers_and_service_providers(
+    def test_returns_only_service_providers(
         self, client, org_headers, db_session, test_organization,
     ):
-        """payable-providers retorna terceros con material_supplier o service_provider."""
+        """payable-providers retorna solo terceros con service_provider (comisionistas)."""
         # Crear categorias
         mat_cat = ThirdPartyCategory(
             name="Mat Supplier", behavior_type="material_supplier",
@@ -786,7 +851,7 @@ class TestPayableProviders:
         assert response.status_code == 200
         data = response.json()
         names = {item["name"] for item in data["items"]}
-        assert "Proveedor Mat" in names
+        assert "Proveedor Mat" not in names
         assert "Proveedor Svc" in names
         assert "Cliente" not in names
 
