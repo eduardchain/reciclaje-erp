@@ -1,10 +1,13 @@
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useProfitAndLoss } from "@/hooks/useReports";
 import { formatCurrency } from "@/utils/formatters";
+import { exportPnlExcel } from "@/utils/excelExport";
 
 export default function ProfitAndLossPage() {
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
@@ -12,7 +15,8 @@ export default function ProfitAndLossPage() {
 
   return (
     <ReportsLayout>
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {data && <Button variant="outline" size="sm" onClick={() => exportPnlExcel(data)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>}
         <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
       </div>
 

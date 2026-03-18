@@ -25,8 +25,9 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Download,
+  FileSpreadsheet,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { EmptyState } from "./EmptyState";
 import { useState } from "react";
 
@@ -46,7 +47,7 @@ interface DataTableProps<TData, TValue> {
   toolbar?: React.ReactNode;
 }
 
-function exportToCsv<TData>(columns: ColumnDef<TData, unknown>[], data: TData[], filename: string) {
+function exportToExcel<TData>(columns: ColumnDef<TData, unknown>[], data: TData[], filename: string) {
   const headers = columns
     .filter((col) => col.id !== "actions" && col.id !== "select")
     .map((col) => {
@@ -61,19 +62,14 @@ function exportToCsv<TData>(columns: ColumnDef<TData, unknown>[], data: TData[],
         const key = (col as { accessorKey?: string }).accessorKey || col.id || "";
         const value = (row as Record<string, unknown>)[key];
         if (value == null) return "";
-        const str = String(value);
-        return str.includes(",") || str.includes('"') ? `"${str.replace(/"/g, '""')}"` : str;
+        return value;
       })
   );
 
-  const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${filename}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Datos");
+  XLSX.writeFile(wb, `${filename}.xlsx`);
 }
 
 export function DataTable<TData, TValue>({
@@ -109,7 +105,7 @@ export function DataTable<TData, TValue>({
 
   const handleExport = useCallback(() => {
     if (exportFilename) {
-      exportToCsv(columns as ColumnDef<TData, unknown>[], data, exportFilename);
+      exportToExcel(columns as ColumnDef<TData, unknown>[], data, exportFilename);
     }
   }, [columns, data, exportFilename]);
 
@@ -159,8 +155,8 @@ export function DataTable<TData, TValue>({
               onClick={handleExport}
               className="text-slate-600 shrink-0"
             >
-              <Download className="h-4 w-4 mr-1.5" />
-              Exportar
+              <FileSpreadsheet className="h-4 w-4 mr-1.5" />
+              Excel
             </Button>
           )}
         </div>

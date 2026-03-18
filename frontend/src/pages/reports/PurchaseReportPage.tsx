@@ -1,10 +1,13 @@
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { usePurchaseReport } from "@/hooks/useReports";
 import { formatCurrency } from "@/utils/formatters";
+import { exportPurchaseReportExcel } from "@/utils/excelExport";
 
 export default function PurchaseReportPage() {
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
@@ -12,7 +15,8 @@ export default function PurchaseReportPage() {
 
   return (
     <ReportsLayout>
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {data && <Button variant="outline" size="sm" onClick={() => exportPurchaseReportExcel(data)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>}
         <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
       </div>
 

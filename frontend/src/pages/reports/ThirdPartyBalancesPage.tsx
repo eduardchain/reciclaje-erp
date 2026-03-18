@@ -1,16 +1,25 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useThirdPartyBalances } from "@/hooks/useReports";
 import { formatCurrency } from "@/utils/formatters";
+import { exportThirdPartyBalancesExcel } from "@/utils/excelExport";
 
 export default function ThirdPartyBalancesPage() {
   const { data, isLoading } = useThirdPartyBalances();
 
   return (
     <ReportsLayout>
+      {data && (
+        <div className="flex justify-end mb-4">
+          <Button variant="outline" size="sm" onClick={() => exportThirdPartyBalancesExcel(data)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>
+        </div>
+      )}
+
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}
 
       {data && (

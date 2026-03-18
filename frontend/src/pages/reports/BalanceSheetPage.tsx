@@ -1,9 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { CheckCircle2, AlertTriangle } from "lucide-react";
+import { CheckCircle2, AlertTriangle, FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useBalanceSheet } from "@/hooks/useReports";
 import { formatCurrency, formatDate } from "@/utils/formatters";
+import { exportBalanceSheetExcel } from "@/utils/excelExport";
 
 export default function BalanceSheetPage() {
   const { data, isLoading } = useBalanceSheet();
@@ -14,7 +16,10 @@ export default function BalanceSheetPage() {
 
       {data && (
         <div className="space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Corte al: {formatDate(data.as_of_date)}</p>
+          <div className="flex justify-between items-center">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Corte al: {formatDate(data.as_of_date)}</p>
+            <Button variant="outline" size="sm" onClick={() => exportBalanceSheetExcel(data)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card className="shadow-sm">
