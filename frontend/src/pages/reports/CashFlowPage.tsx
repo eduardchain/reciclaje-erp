@@ -30,6 +30,9 @@ export default function CashFlowPage() {
               {data.inflows.advance_collections > 0 && (
                 <div className="flex justify-between"><span>Anticipos de Clientes</span><span>{formatCurrency(data.inflows.advance_collections)}</span></div>
               )}
+              {data.inflows.generic_collections > 0 && (
+                <div className="flex justify-between"><span>Cobros a Terceros Genéricos</span><span>{formatCurrency(data.inflows.generic_collections)}</span></div>
+              )}
               <Separator />
               <div className="flex justify-between font-bold text-emerald-700"><span>Total Ingresos</span><span>{formatCurrency(data.total_inflows)}</span></div>
             </CardContent>
@@ -54,6 +57,9 @@ export default function CashFlowPage() {
               )}
               {data.outflows.asset_payments > 0 && (
                 <div className="flex justify-between"><span>Compras de Activos Fijos</span><span>{formatCurrency(data.outflows.asset_payments)}</span></div>
+              )}
+              {data.outflows.generic_payments > 0 && (
+                <div className="flex justify-between"><span>Pagos a Terceros Genéricos</span><span>{formatCurrency(data.outflows.generic_payments)}</span></div>
               )}
               <Separator />
               <div className="flex justify-between font-bold text-red-700"><span>Total Egresos</span><span>{formatCurrency(data.total_outflows)}</span></div>

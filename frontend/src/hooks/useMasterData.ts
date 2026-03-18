@@ -84,6 +84,13 @@ export function useLiabilities(search?: string) {
   });
 }
 
+export function useGenericThirdParties(search?: string) {
+  return useQuery({
+    queryKey: ["third-parties", "generic", search],
+    queryFn: () => thirdPartyService.getGeneric({ search, limit: 100 }),
+  });
+}
+
 export function usePayableProviders(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "payable-providers", search],

@@ -54,6 +54,8 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   commission_accrual: "Comisión Causada",
   depreciation_expense: "Depreciación Activo",
   profit_distribution: "Repartición de Utilidades",
+  payment_to_generic: "Pago a Tercero Genérico",
+  collection_from_generic: "Cobro a Tercero Genérico",
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

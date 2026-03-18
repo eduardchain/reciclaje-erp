@@ -194,6 +194,28 @@ class ExpenseAccrualCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class GenericPaymentCreate(BaseModel):
+    """Pago a tercero generico — account(-), generic.balance(+)."""
+    third_party_id: UUID = Field(..., description="ID del tercero generico")
+    amount: Decimal = Field(..., gt=0, description="Monto a pagar")
+    account_id: UUID = Field(..., description="Cuenta de donde sale el dinero")
+    date: BusinessDate = Field(..., description="Fecha del pago")
+    description: Optional[str] = Field(None, max_length=500)
+    reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+
+class GenericCollectionCreate(BaseModel):
+    """Cobro a tercero generico — account(+), generic.balance(-)."""
+    third_party_id: UUID = Field(..., description="ID del tercero generico")
+    amount: Decimal = Field(..., gt=0, description="Monto a cobrar")
+    account_id: UUID = Field(..., description="Cuenta donde entra el dinero")
+    date: BusinessDate = Field(..., description="Fecha del cobro")
+    description: Optional[str] = Field(None, max_length=500)
+    reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Schema de anulacion
 # ---------------------------------------------------------------------------

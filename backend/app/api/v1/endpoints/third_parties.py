@@ -212,6 +212,26 @@ def list_investors(
     )
 
 
+@router.get("/generic", response_model=PaginatedResponse)
+def list_generic_third_parties(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    is_active: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None),
+    sort_by: str = Query("name"),
+    sort_order: str = Query("asc", regex="^(asc|desc)$"),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
+    db: Session = Depends(get_db)
+):
+    """Terceros con behavior_type generic."""
+    org_id = org_context["organization_id"]
+    return third_party.get_generic(
+        db=db, organization_id=org_id,
+        skip=skip, limit=limit, is_active=is_active,
+        search=search, sort_by=sort_by, sort_order=sort_order,
+    )
+
+
 @router.post("", response_model=ThirdPartyResponse, status_code=status.HTTP_201_CREATED)
 def create_third_party(
     third_party_in: ThirdPartyCreate,

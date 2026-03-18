@@ -93,6 +93,7 @@ export interface CashFlowInflows {
   service_income: number;
   capital_injections: number;
   advance_collections: number;
+  generic_collections: number;
   total: number;
 }
 
@@ -106,6 +107,7 @@ export interface CashFlowOutflows {
   deferred_fundings: number;
   advance_payments: number;
   asset_payments: number;
+  generic_payments: number;
   total: number;
 }
 

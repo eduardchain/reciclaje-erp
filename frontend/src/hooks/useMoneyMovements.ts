@@ -48,6 +48,8 @@ export function useCreateMovement(type: string) {
     advance_collection: moneyMovementService.createAdvanceCollection,
     asset_payment: moneyMovementService.createAssetPayment,
     expense_accrual: moneyMovementService.createExpenseAccrual,
+    payment_to_generic: moneyMovementService.createPaymentToGeneric,
+    collection_from_generic: moneyMovementService.createCollectionFromGeneric,
   };
 
   return useMutation({

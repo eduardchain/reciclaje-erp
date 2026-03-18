@@ -44,6 +44,8 @@ const typeLabels: Record<MoneyMovementType, string> = {
   commission_accrual: "Comisión Causada",
   depreciation_expense: "Depreciación Activo",
   profit_distribution: "Repartición Utilidades",
+  payment_to_generic: "Pago Genérico",
+  collection_from_generic: "Cobro Genérico",
 };
 
 const typeColors: Record<string, string> = {
@@ -66,6 +68,8 @@ const typeColors: Record<string, string> = {
   commission_accrual: "bg-pink-100 text-pink-800",
   depreciation_expense: "bg-amber-100 text-amber-800",
   profit_distribution: "bg-emerald-100 text-emerald-800",
+  payment_to_generic: "bg-orange-100 text-orange-800",
+  collection_from_generic: "bg-teal-100 text-teal-800",
 };
 
 const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [

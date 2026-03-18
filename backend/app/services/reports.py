@@ -111,6 +111,7 @@ INFLOW_TYPES = frozenset([
     "capital_injection",
     "transfer_in",
     "advance_collection",
+    "collection_from_generic",
 ])
 
 # Tipos de money_movement que representan outflows de cuentas
@@ -124,6 +125,7 @@ OUTFLOW_TYPES = frozenset([
     "advance_payment",    # Anticipo a proveedor: sale dinero de cuenta
     "asset_payment",      # Pago de activo fijo: sale dinero de cuenta
     "deferred_funding",   # Pago inicial gasto diferido: sale dinero de cuenta
+    "payment_to_generic", # Pago a tercero generico: sale dinero de cuenta
 ])
 # Nota: provision_expense NO va aqui — no afecta cuentas de dinero
 
@@ -498,16 +500,20 @@ class ReportService:
         deferred_fundings = mm_map.get("deferred_funding", Decimal("0"))
         advance_payments = mm_map.get("advance_payment", Decimal("0"))
         asset_payments = mm_map.get("asset_payment", Decimal("0"))
+        generic_payments = mm_map.get("payment_to_generic", Decimal("0"))
+        generic_collections = mm_map.get("collection_from_generic", Decimal("0"))
 
         total_inflows = (
             sale_collections + customer_collections + service_income
             + capital_injections + advance_collections
+            + generic_collections
         )
         total_outflows = (
             purchase_payments + supplier_payments + expenses
             + commission_payments + capital_returns
             + provision_deposits + deferred_fundings
             + advance_payments + asset_payments
+            + generic_payments
         )
         net_flow = total_inflows - total_outflows
 
@@ -571,6 +577,7 @@ class ReportService:
                 service_income=float(service_income),
                 capital_injections=float(capital_injections),
                 advance_collections=float(advance_collections),
+                generic_collections=float(generic_collections),
                 total=float(total_inflows),
             ),
             total_inflows=float(total_inflows),
@@ -584,6 +591,7 @@ class ReportService:
                 deferred_fundings=float(deferred_fundings),
                 advance_payments=float(advance_payments),
                 asset_payments=float(asset_payments),
+                generic_payments=float(generic_payments),
                 total=float(total_outflows),
             ),
             total_outflows=float(total_outflows),

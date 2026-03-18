@@ -21,7 +21,9 @@ export type MoneyMovementType =
   | "deferred_expense"
   | "commission_accrual"
   | "depreciation_expense"
-  | "profit_distribution";
+  | "profit_distribution"
+  | "payment_to_generic"
+  | "collection_from_generic";
 
 export type MovementStatus = "confirmed" | "annulled";
 
@@ -196,6 +198,26 @@ export interface ExpenseAccrualCreate {
   expense_category_id: string;
   date: string;
   description: string;
+  reference_number?: string | null;
+  notes?: string | null;
+}
+
+export interface GenericPaymentCreate {
+  third_party_id: string;
+  amount: number;
+  account_id: string;
+  date: string;
+  description?: string | null;
+  reference_number?: string | null;
+  notes?: string | null;
+}
+
+export interface GenericCollectionCreate {
+  third_party_id: string;
+  amount: number;
+  account_id: string;
+  date: string;
+  description?: string | null;
   reference_number?: string | null;
   notes?: string | null;
 }

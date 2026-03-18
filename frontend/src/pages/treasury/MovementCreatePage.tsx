@@ -11,11 +11,11 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useCreateMovement, useUploadEvidence } from "@/hooks/useMoneyMovements";
-import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, useLiabilities } from "@/hooks/useMasterData";
+import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, useLiabilities, useGenericThirdParties } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
-type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment" | "expense_accrual" | "liability_payment";
+type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment" | "expense_accrual" | "liability_payment" | "payment_to_generic" | "collection_from_generic";
 
 const typeLabels: Record<MovementType, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -33,6 +33,8 @@ const typeLabels: Record<MovementType, string> = {
   asset_payment: "Pago Activo Fijo",
   expense_accrual: "Causar Gasto (Pasivo)",
   liability_payment: "Pago de Pasivo",
+  payment_to_generic: "Pago a Tercero Generico",
+  collection_from_generic: "Cobro a Tercero Generico",
 };
 
 // Tipos frontend-only que mapean a un tipo backend diferente
@@ -60,6 +62,7 @@ export default function MovementCreatePage() {
   const { data: expCategoriesData } = useExpenseCategoriesFlat();
   const { data: provisionsData } = useProvisions();
   const { data: liabilitiesData } = useLiabilities();
+  const { data: genericData } = useGenericThirdParties();
 
   const suppliers = suppliersData?.items ?? [];
   const customers = customersData?.items ?? [];
@@ -69,6 +72,7 @@ export default function MovementCreatePage() {
   const expenseCategories = expCategoriesData?.items ?? [];
   const provisions = provisionsData?.items ?? [];
   const liabilities = liabilitiesData?.items ?? [];
+  const generics = genericData?.items ?? [];
 
   const [amount, setAmount] = useState(0);
   const [accountId, setAccountId] = useState("");
@@ -144,6 +148,9 @@ export default function MovementCreatePage() {
         return { ...base, account_id: accountId, description, third_party_id: thirdPartyId || undefined };
       case "expense_accrual":
         return { ...base, third_party_id: thirdPartyId, expense_category_id: expCategoryId, description };
+      case "payment_to_generic":
+      case "collection_from_generic":
+        return { ...base, third_party_id: thirdPartyId, account_id: accountId };
     }
   };
 
@@ -175,6 +182,8 @@ export default function MovementCreatePage() {
       case "capital_return": return investors.map((i) => ({ id: i.id, label: i.name }));
       case "commission_payment": return thirdParties.map((t) => ({ id: t.id, label: t.name }));
       case "expense_accrual": return liabilities.map((l) => ({ id: l.id, label: l.name }));
+      case "payment_to_generic":
+      case "collection_from_generic": return generics.map((g) => ({ id: g.id, label: g.name }));
       default: return thirdParties.map((t) => ({ id: t.id, label: t.name }));
     }
   };
@@ -190,11 +199,13 @@ export default function MovementCreatePage() {
       case "capital_return": return "Inversionista *";
       case "commission_payment": return "Comisionista *";
       case "expense_accrual": return "Tercero (Pasivo) *";
+      case "payment_to_generic":
+      case "collection_from_generic": return "Tercero *";
       default: return "Tercero";
     }
   };
 
-  const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment", "advance_payment", "advance_collection", "expense_accrual", "liability_payment"].includes(type);
+  const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment", "advance_payment", "advance_collection", "expense_accrual", "liability_payment", "payment_to_generic", "collection_from_generic"].includes(type);
   const optionalThirdParty = type === "asset_payment";
   const needsProvision = type === "provision_deposit" || type === "provision_expense";
   const needsExpenseCategory = type === "expense" || type === "provision_expense" || type === "expense_accrual";

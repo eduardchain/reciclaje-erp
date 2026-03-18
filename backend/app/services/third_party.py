@@ -413,6 +413,27 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             sort_by=sort_by, sort_order=sort_order,
         )
 
+    def get_generic(
+        self,
+        db: Session,
+        organization_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None,
+        sort_by: str = "name",
+        sort_order: str = "asc"
+    ) -> PaginatedResponse:
+        """Get terceros con behavior_type generic."""
+        return self._get_filtered_list(
+            db=db,
+            organization_id=organization_id,
+            extra_filter=self._behavior_type_filter(["generic"]),
+            skip=skip, limit=limit,
+            is_active=is_active, search=search,
+            sort_by=sort_by, sort_order=sort_order,
+        )
+
     def update_balance(
         self,
         db: Session,

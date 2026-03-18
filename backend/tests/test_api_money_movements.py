@@ -2138,3 +2138,155 @@ class TestLiabilityPayment:
 
         db_session.refresh(test_liability)
         assert test_liability.current_balance == Decimal("0.00")
+
+
+# ---------------------------------------------------------------------------
+# Tests: Pago / cobro a tercero generico
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def test_generic_tp(db_session: Session, test_organization) -> ThirdParty:
+    """Tercero generico (empleado) con saldo 0."""
+    tp = ThirdParty(
+        name="Juan Empleado",
+        current_balance=Decimal("0.00"),
+        organization_id=test_organization.id,
+    )
+    db_session.add(tp)
+    db_session.flush()
+    _assign_category(db_session, tp, "generic", test_organization.id)
+    db_session.commit()
+    db_session.refresh(tp)
+    return tp
+
+
+class TestGenericPaymentCollection:
+    """Tests para payment_to_generic y collection_from_generic."""
+
+    def test_pay_generic(
+        self, client: TestClient, org_headers: dict,
+        test_account: MoneyAccount, test_generic_tp: ThirdParty, db_session: Session,
+    ):
+        """Pago a tercero generico — verifica saldos."""
+        payload = {
+            "third_party_id": str(test_generic_tp.id),
+            "amount": 500000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-17T12:00:00Z",
+            "description": "Prestamo a empleado",
+        }
+        response = client.post(
+            "/api/v1/money-movements/payment-to-generic",
+            json=payload, headers=org_headers,
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["movement_type"] == "payment_to_generic"
+        assert data["amount"] == 500000.0
+        assert data["status"] == "confirmed"
+
+        db_session.refresh(test_account)
+        db_session.refresh(test_generic_tp)
+        assert test_account.current_balance == Decimal("9500000.00")  # -500K
+        assert test_generic_tp.current_balance == Decimal("500000.00")  # +500K (nos debe)
+
+    def test_collect_from_generic(
+        self, client: TestClient, org_headers: dict,
+        test_account: MoneyAccount, test_generic_tp: ThirdParty, db_session: Session,
+    ):
+        """Cobro a tercero generico — verifica saldos."""
+        # Primero darle saldo positivo (nos debe)
+        test_generic_tp.current_balance = Decimal("1000000.00")
+        db_session.commit()
+
+        payload = {
+            "third_party_id": str(test_generic_tp.id),
+            "amount": 600000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-17T12:00:00Z",
+            "description": "Descuento nomina",
+        }
+        response = client.post(
+            "/api/v1/money-movements/collection-from-generic",
+            json=payload, headers=org_headers,
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["movement_type"] == "collection_from_generic"
+
+        db_session.refresh(test_account)
+        db_session.refresh(test_generic_tp)
+        assert test_account.current_balance == Decimal("10600000.00")  # +600K
+        assert test_generic_tp.current_balance == Decimal("400000.00")  # -600K
+
+    def test_pay_generic_wrong_behavior(
+        self, client: TestClient, org_headers: dict,
+        test_account: MoneyAccount, test_customer: ThirdParty,
+    ):
+        """Tercero que no es generic retorna 400."""
+        payload = {
+            "third_party_id": str(test_customer.id),
+            "amount": 100000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-17T12:00:00Z",
+        }
+        response = client.post(
+            "/api/v1/money-movements/payment-to-generic",
+            json=payload, headers=org_headers,
+        )
+        assert response.status_code == 400
+
+    def test_pay_generic_insufficient_funds(
+        self, client: TestClient, org_headers: dict,
+        test_account: MoneyAccount, test_generic_tp: ThirdParty,
+    ):
+        """Fondos insuficientes retorna 400."""
+        payload = {
+            "third_party_id": str(test_generic_tp.id),
+            "amount": 99999999999,
+            "account_id": str(test_account.id),
+            "date": "2026-03-17T12:00:00Z",
+        }
+        response = client.post(
+            "/api/v1/money-movements/payment-to-generic",
+            json=payload, headers=org_headers,
+        )
+        assert response.status_code == 400
+        assert "Fondos insuficientes" in response.json()["detail"]
+
+    def test_annul_payment_to_generic(
+        self, client: TestClient, org_headers: dict,
+        test_account: MoneyAccount, test_generic_tp: ThirdParty, db_session: Session,
+    ):
+        """Anular pago a generico revierte saldos."""
+        payload = {
+            "third_party_id": str(test_generic_tp.id),
+            "amount": 300000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-17T12:00:00Z",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/payment-to-generic",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+        movement_id = resp.json()["id"]
+
+        db_session.refresh(test_account)
+        db_session.refresh(test_generic_tp)
+        balance_after_pay = test_account.current_balance
+        tp_balance_after_pay = test_generic_tp.current_balance
+
+        # Anular
+        annul_resp = client.post(
+            f"/api/v1/money-movements/{movement_id}/annul",
+            json={"reason": "Error"},
+            headers=org_headers,
+        )
+        assert annul_resp.status_code == 200
+        assert annul_resp.json()["status"] == "annulled"
+
+        db_session.refresh(test_account)
+        db_session.refresh(test_generic_tp)
+        assert test_account.current_balance == balance_after_pay + Decimal("300000")
+        assert test_generic_tp.current_balance == tp_balance_after_pay - Decimal("300000")

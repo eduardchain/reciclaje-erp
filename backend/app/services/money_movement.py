@@ -695,6 +695,86 @@ class CRUDMoneyMovement:
         return movement
 
     # ======================================================================
+    # Pago / cobro a tercero generico
+    # ======================================================================
+
+    def pay_generic(
+        self,
+        db: Session,
+        data: "GenericPaymentCreate",
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """
+        Pago a tercero generico — account(-), third_party.balance(+).
+
+        Efectos:
+        - account.current_balance -= amount
+        - third_party.current_balance += amount
+        """
+        account = self._validate_account(db, data.account_id, organization_id, require_funds=data.amount)
+        tp = self._validate_third_party(db, data.third_party_id, organization_id, require_behavior=["generic"])
+
+        movement = self._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="payment_to_generic",
+            amount=data.amount,
+            account_id=data.account_id,
+            date=data.date,
+            description=data.description or f"Pago a {tp.name}",
+            third_party_id=data.third_party_id,
+            reference_number=data.reference_number,
+            notes=data.notes,
+            user_id=user_id,
+        )
+
+        account.current_balance -= data.amount
+        tp.current_balance += data.amount
+
+        db.commit()
+        db.refresh(movement)
+        return movement
+
+    def collect_from_generic(
+        self,
+        db: Session,
+        data: "GenericCollectionCreate",
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """
+        Cobro a tercero generico — account(+), third_party.balance(-).
+
+        Efectos:
+        - account.current_balance += amount
+        - third_party.current_balance -= amount
+        """
+        account = self._validate_account(db, data.account_id, organization_id)
+        tp = self._validate_third_party(db, data.third_party_id, organization_id, require_behavior=["generic"])
+
+        movement = self._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="collection_from_generic",
+            amount=data.amount,
+            account_id=data.account_id,
+            date=data.date,
+            description=data.description or f"Cobro a {tp.name}",
+            third_party_id=data.third_party_id,
+            reference_number=data.reference_number,
+            notes=data.notes,
+            user_id=user_id,
+        )
+
+        account.current_balance += data.amount
+        tp.current_balance -= data.amount
+
+        db.commit()
+        db.refresh(movement)
+        return movement
+
+    # ======================================================================
     # Anulacion
     # ======================================================================
 
@@ -1165,6 +1245,8 @@ class CRUDMoneyMovement:
         - advance_payment: account(+), supplier(-)
         - advance_collection: account(-), customer(+)
         - asset_payment: account(+) (tercero es solo referencia)
+        - payment_to_generic: account(+), generic(-)
+        - collection_from_generic: account(-), generic(+)
         """
         account = db.get(MoneyAccount, movement.account_id) if movement.account_id else None
         third_party = db.get(ThirdParty, movement.third_party_id) if movement.third_party_id else None
@@ -1267,6 +1349,16 @@ class CRUDMoneyMovement:
 
         elif mt == "profit_distribution":
             # Sin cuenta, solo reversa tercero (reparticion hizo -=, reversa +=)
+            if third_party:
+                third_party.current_balance += amt
+
+        elif mt == "payment_to_generic":
+            account.current_balance += amt
+            if third_party:
+                third_party.current_balance -= amt
+
+        elif mt == "collection_from_generic":
+            account.current_balance -= amt
             if third_party:
                 third_party.current_balance += amt
 

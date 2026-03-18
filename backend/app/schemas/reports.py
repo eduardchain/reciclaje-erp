@@ -142,6 +142,7 @@ class CashFlowInflows(BaseModel):
     service_income: float
     capital_injections: float
     advance_collections: float = 0.0
+    generic_collections: float = 0.0
     total: float
 
 
@@ -155,6 +156,7 @@ class CashFlowOutflows(BaseModel):
     deferred_fundings: float = 0.0
     advance_payments: float = 0.0
     asset_payments: float = 0.0
+    generic_payments: float = 0.0
     total: float
 
 

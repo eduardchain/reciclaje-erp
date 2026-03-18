@@ -31,6 +31,8 @@ from app.schemas.money_movement import (
     AdvanceCollectionCreate,
     AssetPaymentCreate,
     ExpenseAccrualCreate,
+    GenericPaymentCreate,
+    GenericCollectionCreate,
     AnnulMovementRequest,
     AnnulMovementResponse,
     MoneyMovementResponse,
@@ -62,6 +64,8 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "deferred_expense": -1,         # Cuota gasto diferido: reduce prepago (balance baja)
     "commission_accrual": -1,        # Comision causada: les debemos comision (balance baja)
     "asset_purchase": -1,            # Compra activo a credito: le debemos (balance baja)
+    "payment_to_generic": 1,         # Pagamos a generico: su balance sube
+    "collection_from_generic": -1,   # Cobramos a generico: su balance baja
 }
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -81,6 +85,8 @@ ACCOUNT_BALANCE_DIRECTION = {
     "advance_payment": -1,
     "asset_payment": -1,
     "deferred_funding": -1,         # Pago inicial gasto diferido: sale dinero de cuenta
+    "payment_to_generic": -1,        # Pago a generico: sale dinero
+    "collection_from_generic": 1,    # Cobro a generico: entra dinero
     # expense_accrual: NO toca cuenta (account_id=None)
     # deferred_expense: NO toca cuenta (account_id=None)
 }
@@ -455,6 +461,52 @@ def create_expense_accrual(
     Efectos: third_party.balance(-), aparece en P&L.
     """
     movement = money_movement.create_expense_accrual(
+        db=db,
+        data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded)
+
+
+@router.post(
+    "/payment-to-generic",
+    response_model=MoneyMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_payment_to_generic(
+    data: GenericPaymentCreate,
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
+    db: Session = Depends(get_db),
+):
+    """
+    Pago a tercero generico — account(-), third_party.balance(+).
+    """
+    movement = money_movement.pay_generic(
+        db=db,
+        data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded)
+
+
+@router.post(
+    "/collection-from-generic",
+    response_model=MoneyMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_collection_from_generic(
+    data: GenericCollectionCreate,
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
+    db: Session = Depends(get_db),
+):
+    """
+    Cobro a tercero generico — account(+), third_party.balance(-).
+    """
+    movement = money_movement.collect_from_generic(
         db=db,
         data=data,
         organization_id=org_context["organization_id"],

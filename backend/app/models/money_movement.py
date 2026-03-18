@@ -73,6 +73,8 @@ VALID_MOVEMENT_TYPES = [
     "commission_accrual",       # Comision causada: NO cuenta, third_party.balance(-), P&L
     "depreciation_expense",     # Depreciacion activo: NO cuenta, NO tercero, expense_category, P&L
     "profit_distribution",      # Reparticion utilidades: NO cuenta, socio.balance(-), NO P&L
+    "payment_to_generic",       # Pago a tercero generico: account(-), generic.balance(+)
+    "collection_from_generic",  # Cobro a tercero generico: account(+), generic.balance(-)
 ]
 
 
