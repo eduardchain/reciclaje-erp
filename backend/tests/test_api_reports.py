@@ -1740,3 +1740,171 @@ class TestBUValidation:
             applicable_business_unit_ids=[],
         )
         assert schema.applicable_business_unit_ids is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: Edge cases de reportes por UN
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def bu_data_with_de_commission(db_session: Session, test_organization, test_user, bu_data):
+    """Extiende bu_data con una Doble Partida multi-material + comision."""
+    from sqlalchemy import select as sa_select
+    org_id = test_organization.id
+    now = datetime.now(tz=timezone.utc)
+
+    # Service provider para comision
+    sp_cat = ThirdPartyCategory(name="SP Comision BU", behavior_type="service_provider", organization_id=org_id)
+    db_session.add(sp_cat)
+    db_session.flush()
+    comisionista = ThirdParty(name="Comisionista BU", organization_id=org_id, current_balance=Decimal("0"), is_active=True)
+    db_session.add(comisionista)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=comisionista.id, category_id=sp_cat.id))
+    db_session.flush()
+
+    # Terceros para DP
+    supplier_cat = db_session.execute(
+        sa_select(ThirdPartyCategory).where(
+            ThirdPartyCategory.organization_id == org_id,
+            ThirdPartyCategory.behavior_type == "material_supplier",
+        )
+    ).scalar_one()
+    customer_cat = db_session.execute(
+        sa_select(ThirdPartyCategory).where(
+            ThirdPartyCategory.organization_id == org_id,
+            ThirdPartyCategory.behavior_type == "customer",
+        )
+    ).scalar_one()
+    de_supplier = ThirdParty(name="DP Supplier BU", organization_id=org_id, current_balance=Decimal("0"), is_active=True)
+    de_customer = ThirdParty(name="DP Customer BU", organization_id=org_id, current_balance=Decimal("0"), is_active=True)
+    db_session.add_all([de_supplier, de_customer])
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=de_supplier.id, category_id=supplier_cat.id))
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=de_customer.id, category_id=customer_cat.id))
+    db_session.flush()
+
+    # Compra y venta internas del DP
+    de_purchase = Purchase(
+        organization_id=org_id, purchase_number=901,
+        supplier_id=de_supplier.id, date=now, status="liquidated",
+        total_amount=Decimal("5000000"),
+    )
+    db_session.add(de_purchase)
+    db_session.flush()
+
+    de_sale = Sale(
+        organization_id=org_id, sale_number=901,
+        customer_id=de_customer.id, date=now, status="liquidated",
+        total_amount=Decimal("6500000"),
+    )
+    db_session.add(de_sale)
+    db_session.flush()
+
+    # DP referencia compra y venta internas
+    de = DoubleEntry(
+        organization_id=org_id, double_entry_number=900,
+        supplier_id=de_supplier.id, customer_id=de_customer.id,
+        purchase_id=de_purchase.id, sale_id=de_sale.id,
+        date=now, status="liquidated",
+    )
+    db_session.add(de)
+    db_session.flush()
+
+    # Vincular venta y compra al DP
+    de_sale.double_entry_id = de.id
+    de_purchase.double_entry_id = de.id
+
+    db_session.add(DoubleEntryLine(
+        double_entry_id=de.id, material_id=bu_data["mat_cobre"].id,
+        quantity=Decimal("100"), purchase_unit_price=Decimal("40000"), sale_unit_price=Decimal("50000"),
+    ))
+    db_session.add(DoubleEntryLine(
+        double_entry_id=de.id, material_id=bu_data["mat_chatarra"].id,
+        quantity=Decimal("200"), purchase_unit_price=Decimal("5000"), sale_unit_price=Decimal("7500"),
+    ))
+
+    db_session.add(SaleLine(
+        sale_id=de_sale.id, material_id=bu_data["mat_cobre"].id,
+        quantity=Decimal("100"), unit_price=Decimal("50000"),
+        total_price=Decimal("5000000"), unit_cost=Decimal("40000"),
+    ))
+    db_session.add(SaleLine(
+        sale_id=de_sale.id, material_id=bu_data["mat_chatarra"].id,
+        quantity=Decimal("200"), unit_price=Decimal("7500"),
+        total_price=Decimal("1500000"), unit_cost=Decimal("5000"),
+    ))
+    db_session.flush()
+
+    # Comision de $1M vinculada a la venta del DP
+    comm_movement = MoneyMovement(
+        organization_id=org_id, movement_number=910,
+        date=now, movement_type="commission_accrual",
+        amount=Decimal("1000000"),
+        account_id=None, description="Comision DP test",
+        third_party_id=comisionista.id, sale_id=de_sale.id,
+        status="confirmed",
+    )
+    db_session.add(comm_movement)
+    db_session.commit()
+
+    return {
+        **bu_data,
+        "de_commission": Decimal("1000000"),
+        "de_sale_total": Decimal("6500000"),
+        "de_cobre_line_value": Decimal("5000000"),
+        "de_chatarra_line_value": Decimal("1500000"),
+    }
+
+
+class TestDECommissionProration:
+
+    def test_de_commission_prorated_by_sale_lines(
+        self, client, org_headers, bu_data_with_de_commission,
+    ):
+        """Comision de DP $1M se prorratear: Cobre 5M/6.5M, Chatarra 1.5M/6.5M."""
+        resp = client.get(
+            "/api/v1/reports/profitability-by-business-unit",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+
+        cobre = next((bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre"), None)
+        chatarra = next((bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra"), None)
+        assert cobre is not None
+        assert chatarra is not None
+
+        # Cobre: 5M/6.5M * 1M ≈ 769,230.77
+        assert abs(cobre["sale_commissions"] - 769230.77) < 1
+        # Chatarra: 1.5M/6.5M * 1M ≈ 230,769.23
+        assert abs(chatarra["sale_commissions"] - 230769.23) < 1
+
+
+class TestEdgeCases:
+
+    def test_overhead_rate_zero_when_no_purchases(self, client, org_headers, bu_data):
+        """UN sin compras en periodo tiene overhead_rate = 0."""
+        resp = client.get(
+            "/api/v1/reports/real-cost-by-material",
+            params={"date_from": "2099-01-01", "date_to": "2099-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        for bu in data["business_units"]:
+            assert bu["overhead_rate"] == 0
+            assert bu["kg_purchased"] == 0
+
+    def test_profitability_empty_period_no_error(self, client, org_headers, bu_data):
+        """Periodo sin compras ni ventas retorna 200 con lista vacia."""
+        resp = client.get(
+            "/api/v1/reports/profitability-by-business-unit",
+            params={"date_from": "2099-01-01", "date_to": "2099-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["business_units"] == []
+        assert data["totals"]["net_profit"] == 0
