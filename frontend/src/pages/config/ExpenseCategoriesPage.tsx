@@ -105,12 +105,12 @@ export default function ExpenseCategoriesPage() {
       name,
       description: description || null,
       parent_id: parentId || null,
+      default_business_unit_id: buAllocationType === "direct" && buDirectId ? buDirectId : null,
+      default_applicable_business_unit_ids: buAllocationType === "shared" && buSharedIds.length > 0 ? buSharedIds : null,
     };
-    // Solo enviar campos propios si NO tiene padre (el backend hereda del padre)
+    // is_direct_expense solo se envía si no tiene padre (hereda del padre)
     if (!parentId) {
       payload.is_direct_expense = isDirect;
-      payload.default_business_unit_id = buAllocationType === "direct" && buDirectId ? buDirectId : null;
-      payload.default_applicable_business_unit_ids = buAllocationType === "shared" && buSharedIds.length > 0 ? buSharedIds : null;
     }
     const opts = { onSuccess: () => setDialogOpen(false) };
     if (editItem) { update.mutate({ id: editItem.id, data: payload }, opts); }
@@ -149,19 +149,17 @@ export default function ExpenseCategoriesPage() {
                 <Switch checked={isDirect} onCheckedChange={setIsDirect} />
               </div>
             )}
-            {!parentId && (
-              <BusinessUnitAllocationSelector
-                businessUnitId={buDirectId}
-                setBusinessUnitId={setBuDirectId}
-                applicableBusinessUnitIds={buSharedIds}
-                setApplicableBusinessUnitIds={setBuSharedIds}
-                allocationType={buAllocationType}
-                setAllocationType={setBuAllocationType}
-              />
-            )}
             {parentId && (
-              <p className="text-xs text-slate-400">El tipo y la unidad de negocio se heredan de la categoria padre.</p>
+              <p className="text-xs text-slate-400">El tipo de gasto (directo/indirecto) se hereda de la categoria padre.</p>
             )}
+            <BusinessUnitAllocationSelector
+              businessUnitId={buDirectId}
+              setBusinessUnitId={setBuDirectId}
+              applicableBusinessUnitIds={buSharedIds}
+              setApplicableBusinessUnitIds={setBuSharedIds}
+              allocationType={buAllocationType}
+              setAllocationType={setBuAllocationType}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>

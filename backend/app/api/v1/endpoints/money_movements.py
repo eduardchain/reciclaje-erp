@@ -12,6 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permission, get_db
@@ -105,13 +106,24 @@ def _get_allowed_accounts(db: Session, ctx: dict) -> list[UUID] | None:
     return assigned if assigned else None
 
 
-def _to_response(movement) -> dict:
+def _to_response(movement, db: Session = None) -> dict:
     """Convertir MoneyMovement ORM a dict con nombres de relaciones."""
     data = {c.name: getattr(movement, c.name) for c in movement.__table__.columns}
     # Agregar nombres de relaciones (si estan cargadas)
     data["account_name"] = movement.account.name if movement.account else None
     data["third_party_name"] = movement.third_party.name if movement.third_party else None
     data["expense_category_name"] = movement.expense_category.name if movement.expense_category else None
+    data["business_unit_name"] = movement.business_unit.name if movement.business_unit else None
+    # Resolver nombres de UNs compartidas desde JSONB
+    data["applicable_business_unit_names"] = None
+    if movement.applicable_business_unit_ids and db is not None:
+        from app.models.business_unit import BusinessUnit
+        names = db.execute(
+            select(BusinessUnit.name).where(
+                BusinessUnit.id.in_(movement.applicable_business_unit_ids)
+            )
+        ).scalars().all()
+        data["applicable_business_unit_names"] = list(names)
     return data
 
 
@@ -142,7 +154,7 @@ def create_supplier_payment(
     )
     # Recargar con relaciones para la respuesta
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -167,7 +179,7 @@ def create_customer_collection(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -192,7 +204,7 @@ def create_expense(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -217,7 +229,7 @@ def create_service_income(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -243,7 +255,7 @@ def create_transfer(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -268,7 +280,7 @@ def create_capital_injection(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -293,7 +305,7 @@ def create_capital_return(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -318,7 +330,7 @@ def create_commission_payment(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -343,7 +355,7 @@ def create_provision_deposit(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -368,7 +380,7 @@ def create_provision_expense(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -393,7 +405,7 @@ def create_advance_payment(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -418,7 +430,7 @@ def create_advance_collection(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -443,7 +455,7 @@ def create_asset_payment(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -468,7 +480,7 @@ def create_expense_accrual(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -491,7 +503,7 @@ def create_payment_to_generic(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 @router.post(
@@ -514,7 +526,7 @@ def create_collection_from_generic(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +566,7 @@ def list_money_movements(
         allowed_account_ids=allowed,
     )
     return {
-        "items": [_to_response(m) for m in movements],
+        "items": [_to_response(m, db) for m in movements],
         "total": total,
         "skip": skip,
         "limit": limit,
@@ -592,7 +604,7 @@ def get_by_number(
     if not movement:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Movimiento no encontrado")
-    return _to_response(movement)
+    return _to_response(movement, db)
 
 
 @router.get("/account/{account_id}", response_model=dict)
@@ -667,7 +679,7 @@ def get_by_account(
         if effective_date_to and m_date > effective_date_to:
             continue
 
-        item = _to_response(m)
+        item = _to_response(m, db)
         item["direction"] = direction
         item["balance_after"] = balance_after
         all_items.append(item)
@@ -1098,7 +1110,7 @@ def upload_evidence(
     mov.evidence_url = f"evidence/{org_id}/{filename}"
     db.commit()
     db.refresh(mov)
-    return _to_response(mov)
+    return _to_response(mov, db)
 
 
 @router.get("/{movement_id}/evidence")
@@ -1148,7 +1160,7 @@ def delete_evidence(
     mov.evidence_url = None
     db.commit()
     db.refresh(mov)
-    return _to_response(mov)
+    return _to_response(mov, db)
 
 
 @router.get("/{movement_id}", response_model=MoneyMovementResponse)
@@ -1159,7 +1171,7 @@ def get_movement(
 ):
     """Obtener un movimiento por ID."""
     movement = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
-    return _to_response(movement)
+    return _to_response(movement, db)
 
 
 # ---------------------------------------------------------------------------
@@ -1188,7 +1200,7 @@ def annul_movement(
         user_id=org_context["user_id"],
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    response = _to_response(loaded)
+    response = _to_response(loaded, db)
     return {**response, "warnings": warnings}
 
 
@@ -1222,4 +1234,4 @@ def update_movement_classification(
         ),
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
-    return _to_response(loaded)
+    return _to_response(loaded, db)

@@ -301,7 +301,9 @@ class MoneyMovementResponse(BaseModel):
 
     # Asignacion a Unidad de Negocio
     business_unit_id: Optional[UUID] = None
+    business_unit_name: Optional[str] = None
     applicable_business_unit_ids: Optional[list[UUID]] = None
+    applicable_business_unit_names: Optional[list[str]] = None
 
     # Detalles
     reference_number: Optional[str] = None

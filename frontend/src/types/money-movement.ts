@@ -44,7 +44,9 @@ export interface MoneyMovementResponse extends BaseEntity {
   sale_id: string | null;
   transfer_pair_id: string | null;
   business_unit_id: string | null;
+  business_unit_name: string | null;
   applicable_business_unit_ids: string[] | null;
+  applicable_business_unit_names: string[] | null;
   reference_number: string | null;
   notes: string | null;
   evidence_url: string | null;

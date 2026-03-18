@@ -111,10 +111,11 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
 function getColumns(canViewValues: boolean): ColumnDef<DoubleEntryResponse, unknown>[] {
   return [
     { accessorKey: "double_entry_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.double_entry_number}</span> },
+    { accessorKey: "invoice_number", header: "Factura" },
     { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
-    { accessorKey: "materials_summary", header: "Materiales", cell: ({ row }) => <span className="font-medium">{row.original.materials_summary}</span> },
     { accessorKey: "supplier_name", header: "Proveedor" },
     { accessorKey: "customer_name", header: "Cliente" },
+    { accessorKey: "materials_summary", header: "Materiales", cell: ({ row }) => <span className="font-medium">{row.original.materials_summary}</span> },
     ...(canViewValues ? [
       { accessorKey: "profit", header: "Utilidad", enableSorting: true, cell: ({ row }: { row: { original: DoubleEntryResponse } }) => <span className={`font-medium tabular-nums ${row.original.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(row.original.profit)}</span> },
       { accessorKey: "profit_margin", header: "Margen", enableSorting: true, cell: ({ row }: { row: { original: DoubleEntryResponse } }) => formatPercentage(row.original.profit_margin) },

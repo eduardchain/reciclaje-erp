@@ -917,6 +917,7 @@ class CRUDMoneyMovement:
                 joinedload(MoneyMovement.account),
                 joinedload(MoneyMovement.third_party),
                 joinedload(MoneyMovement.expense_category),
+                joinedload(MoneyMovement.business_unit),
             )
         )
         return db.scalar(stmt)

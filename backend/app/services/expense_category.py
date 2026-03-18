@@ -77,10 +77,8 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
 
         if obj_data.get("parent_id"):
             parent = self._validate_parent(db, obj_data["parent_id"], organization_id)
-            # Subcategoria hereda is_direct_expense y default UN del padre
+            # Subcategoria hereda solo is_direct_expense del padre (UN es independiente)
             obj_data["is_direct_expense"] = parent.is_direct_expense
-            obj_data["default_business_unit_id"] = parent.default_business_unit_id
-            obj_data["default_applicable_business_unit_ids"] = parent.default_applicable_business_unit_ids
 
         obj_data["organization_id"] = organization_id
         db_obj = self.model(**obj_data)

@@ -134,6 +134,9 @@ export default function MovementDetailPage() {
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta</dt><dd>{movement.account_name ?? "N/A (provision)"}</dd></div>
               {movement.third_party_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero</dt><dd>{movement.third_party_name}</dd></div>}
               {movement.expense_category_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria</dt><dd>{movement.expense_category_name}</dd></div>}
+              {EDITABLE_EXPENSE_TYPES.includes(movement.movement_type) && (
+                <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Unidad de Negocio</dt><dd>{movement.business_unit_name ? movement.business_unit_name : movement.applicable_business_unit_names?.length ? movement.applicable_business_unit_names.join(", ") : "General (todas)"}</dd></div>
+              )}
               {movement.reference_number && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Referencia</dt><dd>{movement.reference_number}</dd></div>}
               {movement.notes && <div><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Notas</dt><dd>{movement.notes}</dd></div>}
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Creado</dt><dd>{formatDate(movement.created_at)}</dd></div>
