@@ -681,14 +681,14 @@ class TestListAndGet:
         )
         resp1 = client.post(BASE_URL, json=payload, headers=org_headers)
         assert resp1.status_code == 201
-        t1_id = resp1.json()["id"]
 
         resp2 = client.post(BASE_URL, json=payload, headers=org_headers)
         assert resp2.status_code == 201
+        t2_id = resp2.json()["id"]
 
-        # Annul the first one
+        # Anular la mas reciente (la segunda) para evitar bloqueo por historial
         annul_resp = client.post(
-            f"{BASE_URL}/{t1_id}/annul",
+            f"{BASE_URL}/{t2_id}/annul",
             json={"reason": "Error"},
             headers=org_headers,
         )

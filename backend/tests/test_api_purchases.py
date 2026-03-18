@@ -1988,3 +1988,123 @@ class TestImmediatePayment:
         }
         resp = client.post("/api/v1/purchases", json=payload, headers=org_headers)
         assert resp.status_code == 422
+
+
+class TestCancelBlockedByTransformationSameCost:
+    """
+    Bug fix: transformacion posterior con mismo costo promedio
+    no creaba registro en MaterialCostHistory, permitiendo cancelar
+    la compra previa y corrompiendo el costo a $0.
+    """
+
+    def test_cancel_blocked_by_transformation_same_cost(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """
+        Escenario del bug FE004:
+        1. Compra liquidada: 36kg @ $1200 → costo = $1200
+        2. Transformacion: material destino recibe 100kg al mismo costo $1200
+           (costo no cambia → antes no se registraba en historial)
+        3. Intentar cancelar compra → debe BLOQUEAR (hay transformacion posterior)
+        """
+        # Crear material destino de la transformacion (distinto del source)
+        dest_material = Material(
+            code="DEST-001",
+            name="Material Destino",
+            default_unit="kg",
+            current_stock=Decimal("0"),
+            current_stock_liquidated=Decimal("0"),
+            current_stock_transit=Decimal("0"),
+            current_average_cost=Decimal("0"),
+            organization_id=test_material.organization_id,
+            is_active=True,
+        )
+        db_session.add(dest_material)
+        db_session.commit()
+        db_session.refresh(dest_material)
+
+        # 1. Compra liquidada: test_material 36kg @ $1200
+        purchase_payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.utcnow().isoformat(),
+            "auto_liquidate": True,
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 36,
+                    "unit_price": 1200,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+        }
+        r1 = client.post("/api/v1/purchases", json=purchase_payload, headers=org_headers)
+        assert r1.status_code == 201
+        purchase_id = r1.json()["id"]
+
+        # Verificar costo = 1200
+        db_session.refresh(test_material)
+        assert float(test_material.current_average_cost) == 1200
+
+        # 2. Transformacion: test_material (source) → dest_material (destination)
+        #    Source: 36kg de test_material @ $1200
+        #    Dest: 36kg a dest_material con metodo average_cost
+        #    Pero primero necesitamos que dest_material tenga costo $1200
+        #    para que la transformacion NO cambie el costo del source.
+        #    En realidad el bug es sobre el material SOURCE: la compra se
+        #    hizo sobre test_material, la transformacion SALE de test_material.
+        #    Pero check_can_revert busca en el material de la compra (test_material).
+        #    La transformacion crea MaterialCostHistory solo para DESTINO.
+        #    Entonces necesitamos que el DESTINO sea test_material tambien.
+        #
+        #    Escenario correcto: la compra Y la transformacion destino son el mismo material.
+        #    Compra: +36kg test_material @ $1200 (costo 0→1200, SI registra)
+        #    Transformacion: source=dest_material, dest=test_material +100kg @ $1200
+        #       costo test_material = (36*1200 + 100*1200) / 136 = 1200 (NO cambia)
+        #       Con el fix, ahora SI registra en historial.
+
+        # Poner stock en dest_material para usarlo como source
+        dest_material.current_stock = Decimal("100")
+        dest_material.current_stock_liquidated = Decimal("100")
+        dest_material.current_average_cost = Decimal("1200")
+        db_session.commit()
+
+        transform_payload = {
+            "source_material_id": str(dest_material.id),
+            "source_quantity": 100,
+            "source_warehouse_id": str(test_warehouse.id),
+            "waste_quantity": 0,
+            "cost_distribution_method": "average_cost",
+            "reason": "Test transformacion mismo costo",
+            "date": datetime.utcnow().isoformat(),
+            "lines": [
+                {
+                    "destination_material_id": str(test_material.id),
+                    "destination_warehouse_id": str(test_warehouse.id),
+                    "quantity": 100,
+                }
+            ],
+        }
+        r2 = client.post("/api/v1/inventory/transformations", json=transform_payload, headers=org_headers)
+        assert r2.status_code == 201, r2.json()
+
+        # Verificar: costo de test_material sigue siendo $1200
+        db_session.refresh(test_material)
+        assert float(test_material.current_average_cost) == 1200
+
+        # Verificar que ahora SI hay registro de historial para la transformacion
+        # (antes del fix, no se creaba porque costo no cambiaba)
+        transform_id = r2.json()["id"]
+        history_count = db_session.query(MaterialCostHistory).filter(
+            MaterialCostHistory.material_id == test_material.id,
+            MaterialCostHistory.source_type == "transformation_in",
+            MaterialCostHistory.source_id == transform_id,
+        ).count()
+        assert history_count == 1, "Transformacion debe registrar historial incluso si costo no cambia"
+
+        # 3. Intentar cancelar la compra → debe BLOQUEAR
+        response = client.patch(
+            f"/api/v1/purchases/{purchase_id}/cancel",
+            headers=org_headers,
+        )
+        assert response.status_code == 400
+        assert "operaciones posteriores" in response.json()["detail"]

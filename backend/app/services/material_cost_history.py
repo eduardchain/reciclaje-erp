@@ -34,11 +34,10 @@ class MaterialCostHistoryService:
     ) -> Optional[MaterialCostHistory]:
         """
         Registra un cambio de costo en el historial.
-        Solo crea registro si el costo realmente cambio.
+        Siempre crea registro, incluso si el costo no cambio,
+        porque check_can_revert() depende de la EXISTENCIA del registro
+        para detectar operaciones posteriores y bloquear cancelaciones.
         """
-        if previous_cost == new_cost:
-            return None
-
         history = MaterialCostHistory(
             organization_id=organization_id,
             material_id=material.id,

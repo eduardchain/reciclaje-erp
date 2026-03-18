@@ -581,7 +581,18 @@ def list_movements(
             qty = mov.quantity
             cost = mov.unit_cost or Decimal("0")
 
-            if qty > 0:  # Entrada
+            # Compras registradas (transit) tienen unit_cost=0 y no deben
+            # diluir el costo promedio — el costo se confirma en liquidacion
+            is_transit = (
+                mov.movement_type == "purchase"
+                and cost == 0
+                and qty > 0
+            )
+
+            if is_transit:
+                # Sumar cantidad al balance pero NO al valor (no diluir costo)
+                running_balance += qty
+            elif qty > 0:  # Entrada con costo confirmado
                 running_value += qty * cost
                 running_balance += qty
                 if running_balance > 0:
