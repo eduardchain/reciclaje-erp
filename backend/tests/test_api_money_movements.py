@@ -2290,3 +2290,329 @@ class TestGenericPaymentCollection:
         db_session.refresh(test_generic_tp)
         assert test_account.current_balance == balance_after_pay + Decimal("300000")
         assert test_generic_tp.current_balance == tp_balance_after_pay - Decimal("300000")
+
+
+# ---------------------------------------------------------------------------
+# Tests: Edicion de clasificacion
+# ---------------------------------------------------------------------------
+
+class TestUpdateClassification:
+    """Tests para PATCH /api/v1/money-movements/{id}/classification."""
+
+    URL = "/api/v1/money-movements"
+
+    def _create_expense(self, client, org_headers, account_id, category_id, amount=100000):
+        """Helper: crear un gasto confirmado."""
+        resp = client.post(
+            f"{self.URL}/expense",
+            json={
+                "amount": amount,
+                "expense_category_id": str(category_id),
+                "account_id": str(account_id),
+                "description": "Gasto de prueba",
+                "date": "2026-03-18T12:00:00Z",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        return resp.json()
+
+    def test_update_classification_expense(
+        self, client: TestClient, org_headers, test_account, test_expense_category, db_session,
+        test_organization,
+    ):
+        """PATCH expense confirmed cambia categoria y UN."""
+        mov = self._create_expense(client, org_headers, test_account.id, test_expense_category.id)
+
+        # Crear segunda categoria para cambiar
+        cat2 = ExpenseCategory(
+            name="Mantenimiento", is_direct_expense=True, organization_id=test_organization.id,
+        )
+        db_session.add(cat2)
+        db_session.commit()
+        db_session.refresh(cat2)
+
+        resp = client.patch(
+            f"{self.URL}/{mov['id']}/classification",
+            json={"expense_category_id": str(cat2.id)},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["expense_category_id"] == str(cat2.id)
+        assert data["expense_category_name"] == "Mantenimiento"
+        # Monto no cambio
+        assert data["amount"] == mov["amount"]
+
+    def test_update_classification_expense_accrual(
+        self, client: TestClient, org_headers, test_expense_category, test_liability,
+        db_session, test_organization,
+    ):
+        """PATCH expense_accrual funciona."""
+        resp = client.post(
+            f"{self.URL}/expense-accrual",
+            json={
+                "third_party_id": str(test_liability.id),
+                "amount": 200000,
+                "expense_category_id": str(test_expense_category.id),
+                "date": "2026-03-18T12:00:00Z",
+                "description": "Accrual test",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        mov = resp.json()
+
+        cat2 = ExpenseCategory(
+            name="Arriendo", is_direct_expense=False, organization_id=test_organization.id,
+        )
+        db_session.add(cat2)
+        db_session.commit()
+        db_session.refresh(cat2)
+
+        resp2 = client.patch(
+            f"{self.URL}/{mov['id']}/classification",
+            json={"expense_category_id": str(cat2.id)},
+            headers=org_headers,
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["expense_category_id"] == str(cat2.id)
+
+    def test_update_classification_provision_expense(
+        self, client: TestClient, org_headers, test_expense_category, db_session,
+        test_organization,
+    ):
+        """PATCH provision_expense funciona."""
+        # Crear provision con fondos
+        provision = ThirdParty(
+            name="Provision Test Edit",
+            organization_id=test_organization.id,
+            current_balance=Decimal("-500000"),
+        )
+        db_session.add(provision)
+        db_session.flush()
+        _assign_category(db_session, provision, "provision", test_organization.id)
+        db_session.commit()
+        db_session.refresh(provision)
+
+        resp = client.post(
+            f"{self.URL}/provision-expense",
+            json={
+                "provision_id": str(provision.id),
+                "amount": 50000,
+                "expense_category_id": str(test_expense_category.id),
+                "date": "2026-03-18T12:00:00Z",
+                "description": "Provision expense test",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        mov = resp.json()
+
+        cat2 = ExpenseCategory(
+            name="Limpieza", is_direct_expense=False, organization_id=test_organization.id,
+        )
+        db_session.add(cat2)
+        db_session.commit()
+        db_session.refresh(cat2)
+
+        resp2 = client.patch(
+            f"{self.URL}/{mov['id']}/classification",
+            json={"expense_category_id": str(cat2.id)},
+            headers=org_headers,
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["expense_category_id"] == str(cat2.id)
+
+    def test_update_classification_deferred_expense(
+        self, client: TestClient, org_headers, test_expense_category, db_session,
+        test_organization,
+    ):
+        """PATCH deferred_expense funciona (movimiento insertado directo)."""
+        from app.models.money_movement import MoneyMovement
+        mov = MoneyMovement(
+            organization_id=test_organization.id,
+            movement_type="deferred_expense",
+            amount=Decimal("100000"),
+            expense_category_id=test_expense_category.id,
+            description="Cuota diferida test",
+            date=datetime(2026, 3, 18, 12, 0, 0, tzinfo=timezone.utc),
+            status="confirmed",
+            movement_number=99990,
+        )
+        db_session.add(mov)
+        db_session.commit()
+        db_session.refresh(mov)
+
+        cat2 = ExpenseCategory(
+            name="Seguros", is_direct_expense=False, organization_id=test_organization.id,
+        )
+        db_session.add(cat2)
+        db_session.commit()
+        db_session.refresh(cat2)
+
+        resp = client.patch(
+            f"{self.URL}/{mov.id}/classification",
+            json={"expense_category_id": str(cat2.id)},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["expense_category_id"] == str(cat2.id)
+
+    def test_update_classification_depreciation_expense(
+        self, client: TestClient, org_headers, test_expense_category, db_session,
+        test_organization,
+    ):
+        """PATCH depreciation_expense funciona (movimiento insertado directo)."""
+        from app.models.money_movement import MoneyMovement
+        mov = MoneyMovement(
+            organization_id=test_organization.id,
+            movement_type="depreciation_expense",
+            amount=Decimal("50000"),
+            expense_category_id=test_expense_category.id,
+            description="Depreciacion test",
+            date=datetime(2026, 3, 18, 12, 0, 0, tzinfo=timezone.utc),
+            status="confirmed",
+            movement_number=99991,
+        )
+        db_session.add(mov)
+        db_session.commit()
+        db_session.refresh(mov)
+
+        cat2 = ExpenseCategory(
+            name="Depreciacion Equipos", is_direct_expense=True, organization_id=test_organization.id,
+        )
+        db_session.add(cat2)
+        db_session.commit()
+        db_session.refresh(cat2)
+
+        resp = client.patch(
+            f"{self.URL}/{mov.id}/classification",
+            json={"expense_category_id": str(cat2.id)},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["expense_category_id"] == str(cat2.id)
+
+    def test_update_classification_annulled_rejected(
+        self, client: TestClient, org_headers, test_account, test_expense_category,
+    ):
+        """PATCH en movimiento anulado retorna 400."""
+        mov = self._create_expense(client, org_headers, test_account.id, test_expense_category.id)
+
+        # Anular primero
+        client.post(
+            f"{self.URL}/{mov['id']}/annul",
+            json={"reason": "Error"},
+            headers=org_headers,
+        )
+
+        resp = client.patch(
+            f"{self.URL}/{mov['id']}/classification",
+            json={"expense_category_id": str(test_expense_category.id)},
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "anulado" in resp.json()["detail"].lower()
+
+    def test_update_classification_non_expense_rejected(
+        self, client: TestClient, org_headers, test_account, test_supplier,
+        test_expense_category,
+    ):
+        """PATCH en payment_to_supplier retorna 400."""
+        resp = client.post(
+            f"{self.URL}/supplier-payment",
+            json={
+                "supplier_id": str(test_supplier.id),
+                "amount": 100000,
+                "account_id": str(test_account.id),
+                "date": "2026-03-18T12:00:00Z",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        mov = resp.json()
+
+        resp2 = client.patch(
+            f"{self.URL}/{mov['id']}/classification",
+            json={"expense_category_id": str(test_expense_category.id)},
+            headers=org_headers,
+        )
+        assert resp2.status_code == 400
+        assert "gasto" in resp2.json()["detail"].lower()
+
+    def test_update_classification_invalid_category(
+        self, client: TestClient, org_headers, test_account, test_expense_category,
+    ):
+        """PATCH con categoria inexistente retorna 404."""
+        mov = self._create_expense(client, org_headers, test_account.id, test_expense_category.id)
+
+        resp = client.patch(
+            f"{self.URL}/{mov['id']}/classification",
+            json={"expense_category_id": str(uuid4())},
+            headers=org_headers,
+        )
+        assert resp.status_code == 404
+
+    def test_update_classification_mutual_exclusion(
+        self, client: TestClient, org_headers, test_account, test_expense_category,
+    ):
+        """Enviar ambos BU fields retorna 422."""
+        mov = self._create_expense(client, org_headers, test_account.id, test_expense_category.id)
+
+        resp = client.patch(
+            f"{self.URL}/{mov['id']}/classification",
+            json={
+                "expense_category_id": str(test_expense_category.id),
+                "business_unit_id": str(uuid4()),
+                "applicable_business_unit_ids": [str(uuid4())],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_update_classification_shared_bu(
+        self, client: TestClient, org_headers, test_account, test_expense_category,
+        db_session, test_organization,
+    ):
+        """PATCH con applicable_business_unit_ids almacena JSONB correctamente."""
+        from app.models.business_unit import BusinessUnit
+        bu1 = BusinessUnit(name="Chatarra", organization_id=test_organization.id)
+        bu2 = BusinessUnit(name="Fibras", organization_id=test_organization.id)
+        db_session.add_all([bu1, bu2])
+        db_session.commit()
+        db_session.refresh(bu1)
+        db_session.refresh(bu2)
+
+        mov = self._create_expense(client, org_headers, test_account.id, test_expense_category.id)
+
+        resp = client.patch(
+            f"{self.URL}/{mov['id']}/classification",
+            json={
+                "expense_category_id": str(test_expense_category.id),
+                "applicable_business_unit_ids": [str(bu1.id), str(bu2.id)],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["business_unit_id"] is None
+        returned_ids = set(data["applicable_business_unit_ids"])
+        assert str(bu1.id) in returned_ids
+        assert str(bu2.id) in returned_ids
+
+    def test_update_classification_general_bu(
+        self, client: TestClient, org_headers, test_account, test_expense_category,
+    ):
+        """PATCH sin BU fields → ambos NULL (general)."""
+        mov = self._create_expense(client, org_headers, test_account.id, test_expense_category.id)
+
+        resp = client.patch(
+            f"{self.URL}/{mov['id']}/classification",
+            json={"expense_category_id": str(test_expense_category.id)},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["business_unit_id"] is None
+        assert data["applicable_business_unit_ids"] is None

@@ -43,6 +43,8 @@ export interface MoneyMovementResponse extends BaseEntity {
   purchase_id: string | null;
   sale_id: string | null;
   transfer_pair_id: string | null;
+  business_unit_id: string | null;
+  applicable_business_unit_ids: string[] | null;
   reference_number: string | null;
   notes: string | null;
   evidence_url: string | null;
@@ -224,6 +226,12 @@ export interface GenericCollectionCreate {
 
 export interface AnnulMovementRequest {
   reason: string;
+}
+
+export interface UpdateClassificationRequest {
+  expense_category_id: string;
+  business_unit_id?: string | null;
+  applicable_business_unit_ids?: string[] | null;
 }
 
 export interface MoneyMovementWithBalance extends MoneyMovementResponse {

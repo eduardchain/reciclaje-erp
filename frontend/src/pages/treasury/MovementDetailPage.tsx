@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, XCircle, Paperclip, Eye, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, XCircle, Paperclip, Eye, Trash2, Upload, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,7 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { useMoneyMovement, useAnnulMovement, useUploadEvidence, useDeleteEvidence } from "@/hooks/useMoneyMovements";
+import { useMoneyMovement, useAnnulMovement, useUpdateClassification, useUploadEvidence, useDeleteEvidence } from "@/hooks/useMoneyMovements";
+import { usePermissions } from "@/hooks/usePermissions";
+import { EditClassificationModal } from "@/components/treasury/EditClassificationModal";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import apiClient from "@/services/api";
@@ -39,6 +41,8 @@ const typeLabels: Record<string, string> = {
   profit_distribution: "Repartición Utilidades",
 };
 
+const EDITABLE_EXPENSE_TYPES = ["expense", "expense_accrual", "provision_expense", "deferred_expense", "depreciation_expense"];
+
 const statusBorderMap: Record<string, string> = {
   confirmed: "border-t-[3px] border-t-emerald-400",
   annulled: "border-t-[3px] border-t-rose-400",
@@ -49,13 +53,16 @@ export default function MovementDetailPage() {
   const navigate = useNavigate();
   const { data: movement, isLoading } = useMoneyMovement(id!);
   const annul = useAnnulMovement();
+  const updateClassification = useUpdateClassification();
   const uploadEvidence = useUploadEvidence();
   const deleteEvidence = useDeleteEvidence();
+  const { hasPermission } = usePermissions();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [showAnnul, setShowAnnul] = useState(false);
   const [annulReason, setAnnulReason] = useState("");
   const [showDeleteEvidence, setShowDeleteEvidence] = useState(false);
+  const [showEditClassification, setShowEditClassification] = useState(false);
 
   if (isLoading) return <div className="space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>;
   if (!movement) return <div className="text-center py-12 text-slate-500">Movimiento no encontrado</div>;
@@ -92,6 +99,11 @@ export default function MovementDetailPage() {
     <div className="space-y-6">
       <PageHeader title={`Movimiento #${movement.movement_number}`} description={typeLabels[movement.movement_type] ?? movement.movement_type}>
         <div className="flex items-center gap-2">
+          {movement.status === "confirmed" && EDITABLE_EXPENSE_TYPES.includes(movement.movement_type) && hasPermission("treasury.edit_classification") && (
+            <Button variant="outline" onClick={() => setShowEditClassification(true)}>
+              <Pencil className="h-4 w-4 mr-2" />Editar Clasificacion
+            </Button>
+          )}
           {movement.status === "confirmed" && (
             <Button variant="outline" onClick={() => setShowAnnul(true)} className="text-red-600 border-red-200 hover:bg-red-50">
               <XCircle className="h-4 w-4 mr-2" />Anular
@@ -208,6 +220,19 @@ export default function MovementDetailPage() {
         onConfirm={handleDeleteEvidence}
         loading={deleteEvidence.isPending}
       />
+
+      {movement && (
+        <EditClassificationModal
+          open={showEditClassification}
+          onOpenChange={setShowEditClassification}
+          movement={movement}
+          onSave={(data) => updateClassification.mutate(
+            { id: id!, data },
+            { onSuccess: () => setShowEditClassification(false) },
+          )}
+          loading={updateClassification.isPending}
+        />
+      )}
     </div>
   );
 }

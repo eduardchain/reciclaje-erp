@@ -159,7 +159,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 - **Price lists**: Append-only. Current price = most recent by `created_at`. Frontend auto-fills via `usePriceSuggestions()`.
 - **Per-warehouse stock**: On-the-fly `SUM(inventory_movements.quantity) GROUP BY warehouse_id`.
 - **BusinessDate**: All business dates normalized to noon UTC (12:00) via Pydantic `BeforeValidator` in `app/utils/dates.py`. Prevents timezone display issues.
-- **RBAC**: `require_permission()` (AND) and `require_any_permission()` (OR) on all ~161 business endpoints. 71 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. **Master+Granular logic**: master permission (e.g., `treasury.view`) gives access to ALL sub-tabs; granular permissions (e.g., `treasury.view_provisions`) give access to specific sub-tabs WITHOUT master. Frontend: `usePermissions()` hook, `PermissionGate` component, sidebar filtering. Admin UI: RolesPage, RoleEditPage, UsersPage. **Superuser**: bypasses membership check in deps.py, gets synthesized admin context with all permissions. `/system/` endpoints use separate `get_current_superuser` guard.
+- **RBAC**: `require_permission()` (AND) and `require_any_permission()` (OR) on all ~161 business endpoints. 72 permissions across 11 modules. 5 system roles: admin, bascula, liquidador, planillador, viewer. Custom roles via CRUD. **Master+Granular logic**: master permission (e.g., `treasury.view`) gives access to ALL sub-tabs; granular permissions (e.g., `treasury.view_provisions`) give access to specific sub-tabs WITHOUT master. Frontend: `usePermissions()` hook, `PermissionGate` component, sidebar filtering. Admin UI: RolesPage, RoleEditPage, UsersPage. **Superuser**: bypasses membership check in deps.py, gets synthesized admin context with all permissions. `/system/` endpoints use separate `get_current_superuser` guard.
 
 ### Business Modules
 
@@ -167,7 +167,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 |--------|-----------|-------------|
 | Auth | `/api/v1/auth/` | JWT login, registration, change password |
 | Organizations | `/api/v1/organizations/` | CRUD + members with role_id FK |
-| Roles & Permissions | `/api/v1/roles/` | 71 permissions, 11 modules, 5 system roles, custom roles, admin UI |
+| Roles & Permissions | `/api/v1/roles/` | 72 permissions, 11 modules, 5 system roles, custom roles, admin UI |
 | Materials | `/api/v1/materials/` | CRUD + categories + business units, stock tracking |
 | Third Parties | `/api/v1/third-parties/` | Category-based roles via behavior_type (material_supplier/service_provider/customer/investor/generic/provision/liability), balance tracking |
 | Third Party Categories | `/api/v1/third-party-categories/` | Hierarchical categories (max 2 levels), behavior_type enum, CRUD + flat list |
@@ -184,7 +184,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 686 tests.
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 717 tests.
 
 ### Database
 
@@ -250,7 +250,7 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 
 25. **RBAC backend**: 3 tablas: `permissions` (71, 11 modulos), `roles` (por org, `is_system_role`), `role_permissions` (M:N). `require_permission()` (AND) y `require_any_permission()` (OR) en ~161 endpoints. Admin bypassa todo.
 
-26. **RBAC frontend + Admin UI**: `usePermissions()` hook (staleTime 5min), `PermissionGate` component, sidebar filtering, route protection. Master+Granular: master da acceso a todos los sub-tabs, granular da acceso sin master (OR logic). Admin UI: RolesPage, RoleEditPage (71 permisos por modulo), UsersPage. Al editar permisos se invalida `["permissions", orgId]`.
+26. **RBAC frontend + Admin UI**: `usePermissions()` hook (staleTime 5min), `PermissionGate` component, sidebar filtering, route protection. Master+Granular: master da acceso a todos los sub-tabs, granular da acceso sin master (OR logic). Admin UI: RolesPage, RoleEditPage (72 permisos por modulo), UsersPage. Al editar permisos se invalida `["permissions", orgId]`.
 
 27. **Cache invalidation centralizada**: `queryInvalidation.ts`. Regla: si una operacion crea side-effects cross-module, invalidar TODOS los query keys afectados:
     - `invalidateAfterPurchase` (crear/editar): purchases + inventory + materials
@@ -283,6 +283,8 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 37. **Frontend categorías de terceros**: `ThirdPartyResponse.categories[]` con `display_name` y `behavior_type`. ThirdPartyFormDialog: multi-select checkbox agrupado por behavior_type, oculta `liability` y `provision`, `initial_balance` siempre 0 (balances solo via transacciones). ThirdPartiesPage: 8 tabs (Todos, Proveedores, Servicios, Clientes, Inversionistas, Pasivos, Provisiones, Genéricos). Config: 7 behavior_types en tabla, dropdown oculta `liability`/`provision`. MovementCreatePage: `liability_payment` y `expense_accrual` usan `useLiabilities()`. LiabilitiesPage filtra categorías `"liability"`.
 
 38. **Balance Detallado: liability separado + sub-agrupación por categoría**: (a) `_classify_third_party()` separa `liability` de `service_provider` en secciones propias: `liability_advances` (activo, bal>0), `liability_debt` (pasivo, bal<0). `service_provider_payable` reemplaza `liabilities_other`. (b) Sub-agrupación opcional por `ThirdPartyCategory` en todas las secciones de terceros. `_load_tp_behavior_map()` retorna 3er dict `tp_cat_by_behavior[tp_id][behavior_type] = display_name`. `_group_by_category()` agrupa items si >1 categoría distinta; orden por total desc, "Sin Categoría" al final. Frontend: 2 niveles expand/collapse con keys `"section_key"` y `"section_key:group_label"`. Excel export con sub-grupos. `BalanceDetailedGroup` schema nuevo.
+
+39. **Edicion de clasificacion de gastos**: `PATCH /money-movements/{id}/classification` permite cambiar `expense_category_id` y asignacion UN en movimientos tipo gasto (`expense`, `expense_accrual`, `provision_expense`, `deferred_expense`, `depreciation_expense`). No modifica montos/cuentas/terceros. Permiso: `treasury.edit_classification` (admin + liquidador). Frontend: boton "Editar Clasificacion" en `MovementDetailPage` + modal `EditClassificationModal` reutiliza `BusinessUnitAllocationSelector`. No afecta saldos — solo impacta reportes (P&L por categoria, Rentabilidad por UN).
 
 ### Inventory Module — UX Details
 

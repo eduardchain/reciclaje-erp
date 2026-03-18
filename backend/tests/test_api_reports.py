@@ -420,6 +420,57 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     )
     db_session.add_all([mm_gasto, mm_arriendo, mm_comision, mm_servicio, mm_cobro])
 
+    # --- Pagos de compras y cobros de ventas (Cash Flow puro) ---
+    # Pago compra 1: $1,600,000 (cuenta efectivo)
+    mm_pago_c1 = MoneyMovement(
+        movement_number=6, organization_id=org_id,
+        date=now - timedelta(days=10),
+        movement_type="payment_to_supplier", amount=Decimal("1600000"),
+        account_id=cuenta_efectivo.id, third_party_id=proveedor1.id,
+        purchase_id=compra1.id, description="Pago compra 1", status="confirmed",
+    )
+    # Pago compra 2: $600,000 (cuenta efectivo)
+    mm_pago_c2 = MoneyMovement(
+        movement_number=7, organization_id=org_id,
+        date=now - timedelta(days=5),
+        movement_type="payment_to_supplier", amount=Decimal("600000"),
+        account_id=cuenta_efectivo.id, third_party_id=proveedor2.id,
+        purchase_id=compra2.id, description="Pago compra 2", status="confirmed",
+    )
+    # Pago compra 3: $850,000 (cuenta banco)
+    mm_pago_c3 = MoneyMovement(
+        movement_number=8, organization_id=org_id,
+        date=now - timedelta(days=3),
+        movement_type="payment_to_supplier", amount=Decimal("850000"),
+        account_id=cuenta_banco.id, third_party_id=proveedor1.id,
+        purchase_id=compra3.id, description="Pago compra 3", status="confirmed",
+    )
+    # Cobro venta 1: $1,050,000 (cuenta efectivo)
+    mm_cobro_v1 = MoneyMovement(
+        movement_number=9, organization_id=org_id,
+        date=now - timedelta(days=8),
+        movement_type="collection_from_client", amount=Decimal("1050000"),
+        account_id=cuenta_efectivo.id, third_party_id=cliente1.id,
+        sale_id=venta1.id, description="Cobro venta 1", status="confirmed",
+    )
+    # Cobro venta 2: $480,000 (cuenta banco)
+    mm_cobro_v2 = MoneyMovement(
+        movement_number=10, organization_id=org_id,
+        date=now - timedelta(days=6),
+        movement_type="collection_from_client", amount=Decimal("480000"),
+        account_id=cuenta_banco.id, third_party_id=cliente2.id,
+        sale_id=venta2.id, description="Cobro venta 2", status="confirmed",
+    )
+    # Cobro venta 3: $550,000 (cuenta efectivo)
+    mm_cobro_v3 = MoneyMovement(
+        movement_number=11, organization_id=org_id,
+        date=now - timedelta(days=2),
+        movement_type="collection_from_client", amount=Decimal("550000"),
+        account_id=cuenta_efectivo.id, third_party_id=cliente1.id,
+        sale_id=venta3.id, description="Cobro venta 3", status="confirmed",
+    )
+    db_session.add_all([mm_pago_c1, mm_pago_c2, mm_pago_c3, mm_cobro_v1, mm_cobro_v2, mm_cobro_v3])
+
     db_session.commit()
 
     # Valores esperados
@@ -578,15 +629,20 @@ class TestCashFlow:
         assert response.status_code == 200
         data = response.json()
 
-        # Inflows: sale_collections (ventas pagadas) + MM inflows
-        assert data["inflows"]["sale_collections"] > 0
+        # Inflows: customer_collections (cobros via MM) + service_income
+        # 3 cobros de ventas + 1 cobro manual = 1,050,000 + 480,000 + 550,000 + 100,000 = 2,180,000
+        assert data["inflows"]["customer_collections"] == pytest.approx(2180000, abs=1)
         assert data["inflows"]["service_income"] == pytest.approx(150000, abs=1)
-        assert data["inflows"]["customer_collections"] == pytest.approx(100000, abs=1)
+        # sale_collections = 0 (campo legacy, Cash Flow puro)
+        assert data["inflows"]["sale_collections"] == 0
 
-        # Outflows: purchase_payments (compras pagadas) + MM outflows
-        assert data["outflows"]["purchase_payments"] > 0
+        # Outflows: supplier_payments (pagos via MM) + expenses + commissions
+        # 3 pagos de compras = 1,600,000 + 600,000 + 850,000 = 3,050,000
+        assert data["outflows"]["supplier_payments"] == pytest.approx(3050000, abs=1)
         assert data["outflows"]["expenses"] == pytest.approx(700000, abs=1)
         assert data["outflows"]["commission_payments"] == pytest.approx(50000, abs=1)
+        # purchase_payments = 0 (campo legacy, Cash Flow puro)
+        assert data["outflows"]["purchase_payments"] == 0
 
     def test_cf_opening_closing_balance(self, client: TestClient, org_headers: dict, report_data: dict):
         """opening + net_flow = closing."""
@@ -602,7 +658,7 @@ class TestCashFlow:
         )
 
     def test_cf_includes_liquidation_flows(self, client: TestClient, org_headers: dict, report_data: dict):
-        """Cash flow incluye pagos de compras y cobros de ventas."""
+        """Cash flow incluye pagos de compras y cobros de ventas (solo MoneyMovements)."""
         response = client.get(
             "/api/v1/reports/cash-flow",
             params={"date_from": str(report_data["date_from"]), "date_to": str(report_data["date_to"])},
@@ -610,10 +666,10 @@ class TestCashFlow:
         )
         data = response.json()
 
-        # 3 compras pagadas + DE liquidada: 1,600,000 + 600,000 + 850,000 + 220,000 = 3,270,000
-        assert data["outflows"]["purchase_payments"] == pytest.approx(3270000, abs=1)
-        # 3 ventas pagadas + DE liquidada: 1,050,000 + 480,000 + 550,000 + 300,000 = 2,380,000
-        assert data["inflows"]["sale_collections"] == pytest.approx(2380000, abs=1)
+        # 3 compras pagadas (DE no tiene MM, no cuenta): 1,600,000 + 600,000 + 850,000 = 3,050,000
+        assert data["outflows"]["supplier_payments"] == pytest.approx(3050000, abs=1)
+        # 3 ventas cobradas + cobro manual: 1,050,000 + 480,000 + 550,000 + 100,000 = 2,180,000
+        assert data["inflows"]["customer_collections"] == pytest.approx(2180000, abs=1)
 
     def test_cf_empty_period(self, client: TestClient, org_headers: dict, report_data: dict):
         """Periodo vacio retorna zeros con opening balance correcto."""

@@ -80,6 +80,7 @@ PERMISSIONS_CATALOG = [
     ("treasury.view_scheduled", "Ver Gastos Diferidos", "treasury", "Permite ver gastos diferidos", 88),
     ("treasury.view_fixed_assets", "Ver Activos Fijos", "treasury", "Permite ver activos fijos", 89),
     ("treasury.view_statements", "Ver Terceros", "treasury", "Permite ver estados de cuenta de terceros", 90),
+    ("treasury.edit_classification", "Editar Clasificacion Gastos", "treasury", "Editar categoria y UN en movimientos de gasto", 92),
 
     # Reportes
     ("reports.view", "Ver Reportes", "reports", "Permite ver reportes financieros", 100),
@@ -144,6 +145,7 @@ SYSTEM_ROLES = {
             "materials.view", "materials.view_prices", "materials.edit_prices",
             "third_parties.view",
             "treasury.view_accounts",
+            "treasury.edit_classification",
         ],
     },
     "planillador": {

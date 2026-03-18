@@ -252,6 +252,21 @@ class GenericCollectionCreate(BaseModel):
 # Schema de anulacion
 # ---------------------------------------------------------------------------
 
+class UpdateClassificationRequest(BaseModel):
+    """Editar clasificacion de gasto en movimiento existente."""
+    expense_category_id: UUID = Field(..., description="Categoria de gasto (obligatoria)")
+    business_unit_id: Optional[UUID] = Field(None, description="Directo: 100% a esta UN")
+    applicable_business_unit_ids: Optional[list[UUID]] = Field(None, description="Compartido: prorrateo entre estas UNs")
+
+    @model_validator(mode="after")
+    def validate_business_unit_allocation(self):
+        if self.business_unit_id and self.applicable_business_unit_ids:
+            raise ValueError("Seleccione asignacion directa O compartida, no ambas")
+        if self.applicable_business_unit_ids is not None and len(self.applicable_business_unit_ids) == 0:
+            self.applicable_business_unit_ids = None
+        return self
+
+
 class AnnulMovementRequest(BaseModel):
     """Solicitud de anulacion de movimiento."""
     reason: str = Field(..., min_length=1, max_length=500, description="Razon de anulacion")

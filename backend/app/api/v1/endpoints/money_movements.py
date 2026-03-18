@@ -35,6 +35,7 @@ from app.schemas.money_movement import (
     GenericCollectionCreate,
     AnnulMovementRequest,
     AnnulMovementResponse,
+    UpdateClassificationRequest,
     MoneyMovementResponse,
     MoneyMovementSummary,
 )
@@ -1189,3 +1190,36 @@ def annul_movement(
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
     response = _to_response(loaded)
     return {**response, "warnings": warnings}
+
+
+# ---------------------------------------------------------------------------
+# Edicion de clasificacion
+# ---------------------------------------------------------------------------
+
+@router.patch("/{movement_id}/classification", response_model=MoneyMovementResponse)
+def update_movement_classification(
+    movement_id: UUID,
+    data: UpdateClassificationRequest,
+    org_context: dict = Depends(require_permission("treasury.edit_classification")),
+    db: Session = Depends(get_db),
+):
+    """
+    Editar clasificacion de un movimiento tipo gasto.
+
+    Solo permite modificar: expense_category_id, business_unit_id, applicable_business_unit_ids.
+    Solo para movimientos confirmed de tipo: expense, expense_accrual, provision_expense,
+    deferred_expense, depreciation_expense.
+    """
+    movement = money_movement.update_classification(
+        db=db,
+        movement_id=movement_id,
+        organization_id=org_context["organization_id"],
+        expense_category_id=data.expense_category_id,
+        business_unit_id=data.business_unit_id,
+        applicable_business_unit_ids=(
+            [str(uid) for uid in data.applicable_business_unit_ids]
+            if data.applicable_business_unit_ids else None
+        ),
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded)

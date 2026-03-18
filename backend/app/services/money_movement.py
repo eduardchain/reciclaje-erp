@@ -48,6 +48,13 @@ from app.schemas.money_movement import (
 )
 
 
+# Tipos de movimiento cuya clasificacion (categoria + UN) es editable
+EDITABLE_EXPENSE_TYPES = {
+    "expense", "expense_accrual", "provision_expense",
+    "deferred_expense", "depreciation_expense",
+}
+
+
 class CRUDMoneyMovement:
     """
     Operaciones para movimientos de dinero en tesoreria.
@@ -843,6 +850,51 @@ class CRUDMoneyMovement:
         db.commit()
         db.refresh(movement)
         return movement, warnings
+
+    # ======================================================================
+    # Edicion de clasificacion
+    # ======================================================================
+
+    def update_classification(
+        self,
+        db: Session,
+        movement_id: UUID,
+        organization_id: UUID,
+        expense_category_id: UUID,
+        business_unit_id: Optional[UUID] = None,
+        applicable_business_unit_ids: Optional[list[str]] = None,
+    ) -> MoneyMovement:
+        """
+        Editar clasificacion (categoria de gasto y unidad de negocio) en movimientos tipo gasto.
+
+        Solo movimientos confirmed de 5 tipos de gasto.
+        No modifica montos, cuentas ni terceros — solo campos de clasificacion.
+        """
+        movement = self._get_or_404(db, movement_id, organization_id)
+
+        if movement.status == "annulled":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No se puede editar un movimiento anulado",
+            )
+
+        if movement.movement_type not in EDITABLE_EXPENSE_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Solo se puede editar la clasificacion de movimientos tipo gasto",
+            )
+
+        # Validar que la categoria existe y pertenece a la org
+        self._validate_expense_category(db, expense_category_id, organization_id)
+
+        # Aplicar cambios de clasificacion
+        movement.expense_category_id = expense_category_id
+        movement.business_unit_id = business_unit_id
+        movement.applicable_business_unit_ids = applicable_business_unit_ids
+
+        db.commit()
+        db.refresh(movement)
+        return movement
 
     # ======================================================================
     # Queries

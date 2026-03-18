@@ -18,6 +18,7 @@ import type {
   GenericPaymentCreate,
   GenericCollectionCreate,
   AnnulMovementRequest,
+  UpdateClassificationRequest,
 } from "@/types/money-movement";
 import type { PaginatedResponse } from "@/types/common";
 
@@ -120,6 +121,11 @@ export const moneyMovementService = {
 
   createCollectionFromGeneric: async (data: GenericCollectionCreate): Promise<MoneyMovementResponse> => {
     const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/collection-from-generic", data);
+    return response.data;
+  },
+
+  updateClassification: async (id: string, data: UpdateClassificationRequest): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.patch<MoneyMovementResponse>(`/api/v1/money-movements/${id}/classification`, data);
     return response.data;
   },
 

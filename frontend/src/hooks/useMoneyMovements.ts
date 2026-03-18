@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { moneyMovementService } from "@/services/moneyMovements";
 import { getApiErrorMessage } from "@/utils/formatters";
 import { invalidateAfterTreasury } from "@/utils/queryInvalidation";
-import type { AnnulMovementRequest } from "@/types/money-movement";
+import type { AnnulMovementRequest, UpdateClassificationRequest } from "@/types/money-movement";
 
 interface MovementFilters {
   skip?: number;
@@ -111,6 +111,22 @@ export function useDeleteEvidence() {
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al eliminar el comprobante"));
+    },
+  });
+}
+
+export function useUpdateClassification() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateClassificationRequest }) =>
+      moneyMovementService.updateClassification(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["money-movements"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      toast.success("Clasificación actualizada exitosamente");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al actualizar la clasificación"));
     },
   });
 }
