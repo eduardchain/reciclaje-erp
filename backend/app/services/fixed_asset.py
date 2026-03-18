@@ -94,6 +94,11 @@ class CRUDFixedAsset:
         depreciable = data.purchase_value - data.salvage_value
         useful_life = ceil(float(depreciable / monthly_depreciation))
 
+        # Normalizar applicable_business_unit_ids
+        applicable_bu_ids = None
+        if hasattr(data, 'applicable_business_unit_ids') and data.applicable_business_unit_ids:
+            applicable_bu_ids = [str(uid) for uid in data.applicable_business_unit_ids]
+
         # 4. Crear activo
         asset = FixedAsset(
             organization_id=organization_id,
@@ -111,6 +116,8 @@ class CRUDFixedAsset:
             useful_life_months=useful_life,
             expense_category_id=data.expense_category_id,
             third_party_id=data.supplier_id,
+            business_unit_id=getattr(data, 'business_unit_id', None),
+            applicable_business_unit_ids=applicable_bu_ids,
             status="active",
             created_by=user_id,
         )
@@ -242,7 +249,7 @@ class CRUDFixedAsset:
             date(year, month, 1), time(12, 0), tzinfo=timezone.utc
         )
 
-        # Crear MoneyMovement depreciation_expense
+        # Crear MoneyMovement depreciation_expense (hereda UN del activo)
         movement = mm_service._create_movement(
             db=db,
             organization_id=organization_id,
@@ -254,6 +261,8 @@ class CRUDFixedAsset:
             third_party_id=None,
             expense_category_id=asset.expense_category_id,
             user_id=user_id,
+            business_unit_id=asset.business_unit_id,
+            applicable_business_unit_ids=asset.applicable_business_unit_ids,
         )
 
         # Numero de depreciacion
@@ -403,6 +412,8 @@ class CRUDFixedAsset:
                 third_party_id=None,
                 expense_category_id=asset.expense_category_id,
                 user_id=user_id,
+                business_unit_id=asset.business_unit_id,
+                applicable_business_unit_ids=asset.applicable_business_unit_ids,
             )
 
             dep_count = db.execute(

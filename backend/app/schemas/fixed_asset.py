@@ -24,6 +24,9 @@ class FixedAssetCreate(BaseModel):
     source_account_id: Optional[UUID] = None
     supplier_id: Optional[UUID] = None
     notes: Optional[str] = Field(None, max_length=500)
+    # Asignacion a Unidad de Negocio (hereda a depreciation_expense)
+    business_unit_id: Optional[UUID] = None
+    applicable_business_unit_ids: Optional[list[UUID]] = None
 
     @model_validator(mode="after")
     def validate_values(self):
@@ -39,6 +42,10 @@ class FixedAssetCreate(BaseModel):
             raise ValueError(
                 "Debe especificar exactamente una fuente: cuenta de pago O proveedor a crédito"
             )
+        if self.business_unit_id and self.applicable_business_unit_ids:
+            raise ValueError("Seleccione asignacion directa O compartida, no ambas")
+        if self.applicable_business_unit_ids is not None and len(self.applicable_business_unit_ids) == 0:
+            self.applicable_business_unit_ids = None
         return self
 
 
@@ -98,6 +105,8 @@ class FixedAssetResponse(BaseModel):
     third_party_id: Optional[UUID] = None
     third_party_name: Optional[str] = None
     purchase_movement_id: Optional[UUID] = None
+    business_unit_id: Optional[UUID] = None
+    applicable_business_unit_ids: Optional[list[UUID]] = None
     status: str
     disposed_at: Optional[datetime] = None
     disposed_by: Optional[UUID] = None

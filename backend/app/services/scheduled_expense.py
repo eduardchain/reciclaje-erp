@@ -118,6 +118,11 @@ class CRUDScheduledExpense:
         # 6. Calcular next_application_date
         next_date = self._calc_next_date(data.start_date, data.apply_day)
 
+        # Normalizar applicable_business_unit_ids
+        applicable_bu_ids = None
+        if hasattr(data, 'applicable_business_unit_ids') and data.applicable_business_unit_ids:
+            applicable_bu_ids = [str(uid) for uid in data.applicable_business_unit_ids]
+
         # 7. Crear ScheduledExpense
         scheduled = ScheduledExpense(
             organization_id=organization_id,
@@ -134,6 +139,8 @@ class CRUDScheduledExpense:
             start_date=data.start_date,
             apply_day=data.apply_day,
             next_application_date=next_date,
+            business_unit_id=getattr(data, 'business_unit_id', None),
+            applicable_business_unit_ids=applicable_bu_ids,
             status="active",
             created_by=user_id,
         )
@@ -188,7 +195,7 @@ class CRUDScheduledExpense:
         # Obtener prepaid third party
         prepaid_tp = db.get(ThirdParty, scheduled.prepaid_third_party_id)
 
-        # Crear MoneyMovement deferred_expense
+        # Crear MoneyMovement deferred_expense (hereda UN del gasto diferido)
         movement = mm_service._create_movement(
             db=db,
             organization_id=organization_id,
@@ -201,6 +208,8 @@ class CRUDScheduledExpense:
             expense_category_id=scheduled.expense_category_id,
             notes=f"Cuota #{next_number} de '{scheduled.name}'",
             user_id=user_id,
+            business_unit_id=scheduled.business_unit_id,
+            applicable_business_unit_ids=scheduled.applicable_business_unit_ids,
         )
 
         # Efecto: third_party(-)

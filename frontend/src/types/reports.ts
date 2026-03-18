@@ -408,3 +408,62 @@ export interface ThirdPartyBalancesResponse {
   suppliers: SupplierBalance[];
   customers: CustomerBalance[];
 }
+
+// --- Rentabilidad por Unidad de Negocio ---
+
+export interface ExpenseByCategoryItem {
+  category_id: string | null;
+  category_name: string;
+  amount: number;
+}
+
+export interface BusinessUnitProfitability {
+  business_unit_id: string | null;
+  business_unit_name: string;
+  sales_revenue: number;
+  sales_cogs: number;
+  sales_gross_profit: number;
+  de_profit: number;
+  total_gross_profit: number;
+  direct_expenses: number;
+  shared_expenses: number;
+  general_expenses: number;
+  sale_commissions: number;
+  total_expenses: number;
+  direct_expenses_detail: ExpenseByCategoryItem[];
+  net_profit: number;
+  net_margin: number;
+}
+
+export interface ProfitabilityByBUResponse {
+  period_from: string;
+  period_to: string;
+  business_units: BusinessUnitProfitability[];
+  totals: BusinessUnitProfitability;
+}
+
+// --- Costo Real por Material ---
+
+export interface MaterialRealCost {
+  material_id: string;
+  material_code: string;
+  material_name: string;
+  average_cost: number;
+  overhead_rate: number;
+  real_cost: number;
+}
+
+export interface BusinessUnitOverhead {
+  business_unit_id: string | null;
+  business_unit_name: string;
+  total_expenses: number;
+  kg_purchased: number;
+  overhead_rate: number;
+  materials: MaterialRealCost[];
+}
+
+export interface RealCostByMaterialResponse {
+  period_from: string;
+  period_to: string;
+  business_units: BusinessUnitOverhead[];
+}

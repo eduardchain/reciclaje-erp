@@ -482,3 +482,76 @@ class TreasuryDashboardResponse(BaseModel):
     mtd_expense: float
     # Ultimos movimientos
     recent_movements: list[RecentMovementItem]
+
+
+# ---------------------------------------------------------------------------
+# Rentabilidad por Unidad de Negocio
+# ---------------------------------------------------------------------------
+
+class ExpenseByCategoryItem(BaseModel):
+    """Desglose de gasto por categoria."""
+    category_id: Optional[str] = None
+    category_name: str
+    amount: float
+
+
+class BusinessUnitProfitability(BaseModel):
+    """Rentabilidad de una Unidad de Negocio."""
+    business_unit_id: Optional[str] = None
+    business_unit_name: str
+    # Ingresos
+    sales_revenue: float = 0
+    sales_cogs: float = 0
+    sales_gross_profit: float = 0
+    de_profit: float = 0
+    total_gross_profit: float = 0
+    # Gastos
+    direct_expenses: float = 0
+    shared_expenses: float = 0
+    general_expenses: float = 0
+    sale_commissions: float = 0
+    total_expenses: float = 0
+    # Desglose gastos directos por categoria
+    direct_expenses_detail: list[ExpenseByCategoryItem] = []
+    # Resultado
+    net_profit: float = 0
+    net_margin: float = 0
+
+
+class ProfitabilityByBUResponse(BaseModel):
+    """Respuesta del reporte de rentabilidad por UN."""
+    period_from: date
+    period_to: date
+    business_units: list[BusinessUnitProfitability]
+    totals: BusinessUnitProfitability
+
+
+# ---------------------------------------------------------------------------
+# Costo Real por Material
+# ---------------------------------------------------------------------------
+
+class MaterialRealCost(BaseModel):
+    """Costo real de un material."""
+    material_id: str
+    material_code: str
+    material_name: str
+    average_cost: float
+    overhead_rate: float
+    real_cost: float
+
+
+class BusinessUnitOverhead(BaseModel):
+    """Overhead y materiales de una UN."""
+    business_unit_id: Optional[str] = None
+    business_unit_name: str
+    total_expenses: float
+    kg_purchased: float
+    overhead_rate: float
+    materials: list[MaterialRealCost]
+
+
+class RealCostByMaterialResponse(BaseModel):
+    """Respuesta del reporte de costo real."""
+    period_from: date
+    period_to: date
+    business_units: list[BusinessUnitOverhead]

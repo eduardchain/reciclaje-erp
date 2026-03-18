@@ -21,7 +21,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, model_validator
 
 from app.utils.dates import BusinessDate
 
@@ -67,6 +67,18 @@ class ExpenseCreate(BaseModel):
     reference_number: Optional[str] = Field(None, max_length=100)
     evidence_url: Optional[str] = Field(None, max_length=500)
     notes: Optional[str] = None
+    # Asignacion a Unidad de Negocio
+    business_unit_id: Optional[UUID] = Field(None, description="Directo: 100% a esta UN")
+    applicable_business_unit_ids: Optional[list[UUID]] = Field(None, description="Compartido: prorrateo entre estas UNs")
+
+    @model_validator(mode="after")
+    def validate_business_unit_allocation(self):
+        if self.business_unit_id and self.applicable_business_unit_ids:
+            raise ValueError("Seleccione asignacion directa O compartida, no ambas")
+        # Array vacio = General (normalizar a None)
+        if self.applicable_business_unit_ids is not None and len(self.applicable_business_unit_ids) == 0:
+            self.applicable_business_unit_ids = None
+        return self
 
 
 class ServiceIncomeCreate(BaseModel):
@@ -145,6 +157,16 @@ class ProvisionExpenseCreate(BaseModel):
     description: str = Field(..., min_length=1, max_length=500, description="Descripcion del gasto")
     reference_number: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
+    business_unit_id: Optional[UUID] = Field(None, description="Directo: 100% a esta UN")
+    applicable_business_unit_ids: Optional[list[UUID]] = Field(None, description="Compartido: prorrateo entre estas UNs")
+
+    @model_validator(mode="after")
+    def validate_business_unit_allocation(self):
+        if self.business_unit_id and self.applicable_business_unit_ids:
+            raise ValueError("Seleccione asignacion directa O compartida, no ambas")
+        if self.applicable_business_unit_ids is not None and len(self.applicable_business_unit_ids) == 0:
+            self.applicable_business_unit_ids = None
+        return self
 
 
 class AdvancePaymentCreate(BaseModel):
@@ -192,6 +214,16 @@ class ExpenseAccrualCreate(BaseModel):
     description: str = Field(..., min_length=1, max_length=500, description="Descripcion del gasto")
     reference_number: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
+    business_unit_id: Optional[UUID] = Field(None, description="Directo: 100% a esta UN")
+    applicable_business_unit_ids: Optional[list[UUID]] = Field(None, description="Compartido: prorrateo entre estas UNs")
+
+    @model_validator(mode="after")
+    def validate_business_unit_allocation(self):
+        if self.business_unit_id and self.applicable_business_unit_ids:
+            raise ValueError("Seleccione asignacion directa O compartida, no ambas")
+        if self.applicable_business_unit_ids is not None and len(self.applicable_business_unit_ids) == 0:
+            self.applicable_business_unit_ids = None
+        return self
 
 
 class GenericPaymentCreate(BaseModel):
@@ -251,6 +283,10 @@ class MoneyMovementResponse(BaseModel):
     purchase_id: Optional[UUID] = None
     sale_id: Optional[UUID] = None
     transfer_pair_id: Optional[UUID] = None
+
+    # Asignacion a Unidad de Negocio
+    business_unit_id: Optional[UUID] = None
+    applicable_business_unit_ids: Optional[list[UUID]] = None
 
     # Detalles
     reference_number: Optional[str] = None

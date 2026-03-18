@@ -11,6 +11,8 @@ import type {
   ThirdPartyBalancesResponse,
   TreasuryDashboardResponse,
   AuditBalancesResponse,
+  ProfitabilityByBUResponse,
+  RealCostByMaterialResponse,
 } from "@/types/reports";
 
 interface DateRange {
@@ -56,4 +58,10 @@ export const reportsService = {
 
   getBalanceDetailed: () =>
     get<BalanceDetailedResponse>("/api/v1/reports/balance-detailed"),
+
+  getProfitabilityByBU: (params: DateRange) =>
+    get<ProfitabilityByBUResponse>("/api/v1/reports/profitability-by-business-unit", params),
+
+  getRealCostByMaterial: (params: DateRange) =>
+    get<RealCostByMaterialResponse>("/api/v1/reports/real-cost-by-material", params),
 };

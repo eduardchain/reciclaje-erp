@@ -53,6 +53,8 @@ export const ROUTES = {
   REPORTS_MARGINS: "/reports/margins",
   REPORTS_BALANCES: "/reports/balances",
   REPORTS_AUDIT: "/reports/audit",
+  REPORTS_PROFITABILITY_BU: "/reports/profitability-bu",
+  REPORTS_REAL_COST: "/reports/real-cost-material",
 
   // Maestros
   THIRD_PARTIES: "/third-parties",

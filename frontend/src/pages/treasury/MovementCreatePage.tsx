@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
+import { BusinessUnitAllocationSelector } from "@/components/shared/BusinessUnitAllocationSelector";
 import { useCreateMovement, useUploadEvidence } from "@/hooks/useMoneyMovements";
 import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, useLiabilities, useGenericThirdParties } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
@@ -85,6 +86,9 @@ export default function MovementCreatePage() {
   const [referenceNumber, setReferenceNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [buAllocationType, setBuAllocationType] = useState<"direct" | "shared" | "general">("general");
+  const [buDirectId, setBuDirectId] = useState("");
+  const [buSharedIds, setBuSharedIds] = useState<string[]>([]);
 
   const resetFields = () => {
     setAmount(0);
@@ -97,6 +101,9 @@ export default function MovementCreatePage() {
     setReferenceNumber("");
     setNotes("");
     setEvidenceFile(null);
+    setBuAllocationType("general");
+    setBuDirectId("");
+    setBuSharedIds([]);
   };
 
   const handleTypeChange = (v: string) => {
@@ -108,6 +115,39 @@ export default function MovementCreatePage() {
   const selectedProvision = provisions.find((p) => p.id === provisionId);
   const availableFunds = selectedProvision ? (selectedProvision.current_balance < 0 ? Math.abs(selectedProvision.current_balance) : 0) : 0;
   const isProvisionExpenseBlocked = type === "provision_expense" && provisionId && amount > availableFunds;
+
+  // Pre-seleccionar tipo de asignacion UN cuando cambia la categoria
+  const needsBusinessUnit = ["expense", "expense_accrual", "provision_expense"].includes(type);
+
+  const handleCategoryChange = (catId: string) => {
+    setExpCategoryId(catId);
+    const cat = expenseCategories.find((c) => c.id === catId);
+    if (cat) {
+      // Usar defaults de la categoria si existen
+      if (cat.default_business_unit_id) {
+        setBuAllocationType("direct");
+        setBuDirectId(cat.default_business_unit_id);
+        setBuSharedIds([]);
+      } else if (cat.default_applicable_business_unit_ids?.length) {
+        setBuAllocationType("shared");
+        setBuDirectId("");
+        setBuSharedIds(cat.default_applicable_business_unit_ids);
+      } else {
+        // Fallback: is_direct_expense sugiere tipo pero sin UN especifica
+        setBuAllocationType(cat.is_direct_expense ? "direct" : "general");
+        setBuDirectId("");
+        setBuSharedIds([]);
+      }
+    }
+  };
+
+  // Construir campos BU para payload
+  const getBuPayloadFields = () => {
+    if (!needsBusinessUnit) return {};
+    if (buAllocationType === "direct" && buDirectId) return { business_unit_id: buDirectId };
+    if (buAllocationType === "shared" && buSharedIds.length > 0) return { applicable_business_unit_ids: buSharedIds };
+    return {};
+  };
 
   const buildPayload = () => {
     const base = {
@@ -125,7 +165,7 @@ export default function MovementCreatePage() {
       case "collection_from_client":
         return { ...base, customer_id: thirdPartyId, account_id: accountId };
       case "expense":
-        return { ...base, expense_category_id: expCategoryId, account_id: accountId, description, third_party_id: thirdPartyId || undefined };
+        return { ...base, expense_category_id: expCategoryId, account_id: accountId, description, third_party_id: thirdPartyId || undefined, ...getBuPayloadFields() };
       case "service_income":
         return { ...base, account_id: accountId, description, third_party_id: thirdPartyId || undefined };
       case "transfer":
@@ -139,7 +179,7 @@ export default function MovementCreatePage() {
       case "provision_deposit":
         return { ...base, provision_id: provisionId, account_id: accountId };
       case "provision_expense":
-        return { ...base, provision_id: provisionId, expense_category_id: expCategoryId, description };
+        return { ...base, provision_id: provisionId, expense_category_id: expCategoryId, description, ...getBuPayloadFields() };
       case "advance_payment":
         return { ...base, supplier_id: thirdPartyId, account_id: accountId };
       case "advance_collection":
@@ -147,7 +187,7 @@ export default function MovementCreatePage() {
       case "asset_payment":
         return { ...base, account_id: accountId, description, third_party_id: thirdPartyId || undefined };
       case "expense_accrual":
-        return { ...base, third_party_id: thirdPartyId, expense_category_id: expCategoryId, description };
+        return { ...base, third_party_id: thirdPartyId, expense_category_id: expCategoryId, description, ...getBuPayloadFields() };
       case "payment_to_generic":
       case "collection_from_generic":
         return { ...base, third_party_id: thirdPartyId, account_id: accountId };
@@ -293,8 +333,19 @@ export default function MovementCreatePage() {
             {needsExpenseCategory && (
               <div>
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria de Gasto *</Label>
-                <EntitySelect value={expCategoryId} onChange={setExpCategoryId} options={expenseCategories.map((c) => ({ id: c.id, label: c.display_name }))} placeholder="Seleccionar categoria..." />
+                <EntitySelect value={expCategoryId} onChange={handleCategoryChange} options={expenseCategories.map((c) => ({ id: c.id, label: c.display_name }))} placeholder="Seleccionar categoria..." />
               </div>
+            )}
+
+            {needsBusinessUnit && expCategoryId && (
+              <BusinessUnitAllocationSelector
+                businessUnitId={buDirectId}
+                setBusinessUnitId={setBuDirectId}
+                applicableBusinessUnitIds={buSharedIds}
+                setApplicableBusinessUnitIds={setBuSharedIds}
+                allocationType={buAllocationType}
+                setAllocationType={setBuAllocationType}
+              />
             )}
 
             {needsAccount && !needsDestAccount && (

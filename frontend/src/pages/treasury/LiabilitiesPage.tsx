@@ -13,6 +13,7 @@ import { SearchInput } from "@/components/shared/SearchInput";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
+import { BusinessUnitAllocationSelector } from "@/components/shared/BusinessUnitAllocationSelector";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useLiabilities, useExpenseCategoriesFlat, useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
 import { useCreateMovement } from "@/hooks/useMoneyMovements";
@@ -62,6 +63,9 @@ export default function LiabilitiesPage() {
   const [accrueCategoryId, setAccrueCategoryId] = useState("");
   const [accrueDescription, setAccrueDescription] = useState("");
   const [accrueDate, setAccrueDate] = useState(toLocalDateInput());
+  const [accrueBuType, setAccrueBuType] = useState<"direct" | "shared" | "general">("general");
+  const [accrueBuDirectId, setAccrueBuDirectId] = useState("");
+  const [accrueBuSharedIds, setAccrueBuSharedIds] = useState<string[]>([]);
   const { data: categoriesData } = useExpenseCategoriesFlat();
   const categories = categoriesData?.items ?? [];
   const createAccrual = useCreateMovement("expense_accrual");
@@ -73,6 +77,9 @@ export default function LiabilitiesPage() {
     setAccrueCategoryId("");
     setAccrueDescription("");
     setAccrueDate(toLocalDateInput());
+    setAccrueBuType("general");
+    setAccrueBuDirectId("");
+    setAccrueBuSharedIds([]);
     setShowAccrue(true);
   };
 
@@ -84,6 +91,8 @@ export default function LiabilitiesPage() {
         expense_category_id: accrueCategoryId,
         date: accrueDate,
         description: accrueDescription,
+        ...(accrueBuType === "direct" && accrueBuDirectId ? { business_unit_id: accrueBuDirectId } : {}),
+        ...(accrueBuType === "shared" && accrueBuSharedIds.length > 0 ? { applicable_business_unit_ids: accrueBuSharedIds } : {}),
       },
       { onSuccess: () => setShowAccrue(false) },
     );
@@ -238,6 +247,14 @@ export default function LiabilitiesPage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Descripcion *</Label>
               <Input value={accrueDescription} onChange={(e) => setAccrueDescription(e.target.value)} placeholder="Descripcion del gasto causado" />
             </div>
+            <BusinessUnitAllocationSelector
+              businessUnitId={accrueBuDirectId}
+              setBusinessUnitId={setAccrueBuDirectId}
+              applicableBusinessUnitIds={accrueBuSharedIds}
+              setApplicableBusinessUnitIds={setAccrueBuSharedIds}
+              allocationType={accrueBuType}
+              setAllocationType={setAccrueBuType}
+            />
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setShowAccrue(false)}>Cancelar</Button>

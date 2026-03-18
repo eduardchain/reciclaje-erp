@@ -16,6 +16,8 @@ const columns: ColumnDef<MaterialResponse, unknown>[] = [
   { accessorKey: "code", header: "Codigo", cell: ({ row }) => <span className="font-medium">{row.original.code}</span> },
   { accessorKey: "name", header: "Nombre" },
   { accessorKey: "default_unit", header: "Unidad" },
+  { accessorKey: "category_name", header: "Categoria", cell: ({ row }) => row.original.category_name ?? "-" },
+  { accessorKey: "business_unit_name", header: "Unidad de Negocio", cell: ({ row }) => row.original.business_unit_name ?? "-" },
   { accessorKey: "description", header: "Descripcion", cell: ({ row }) => <span className="text-slate-500">{row.original.description ?? "-"}</span> },
 ];
 

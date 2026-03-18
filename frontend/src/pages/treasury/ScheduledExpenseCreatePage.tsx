@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
+import { BusinessUnitAllocationSelector } from "@/components/shared/BusinessUnitAllocationSelector";
 import { useCreateScheduledExpense } from "@/hooks/useScheduledExpenses";
 import { useMoneyAccounts, useExpenseCategoriesFlat } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
@@ -31,6 +32,9 @@ export default function ScheduledExpenseCreatePage() {
   const [startDate, setStartDate] = useState(toLocalDateInput());
   const [applyDay, setApplyDay] = useState(1);
   const [description, setDescription] = useState("");
+  const [buAllocationType, setBuAllocationType] = useState<"direct" | "shared" | "general">("general");
+  const [buDirectId, setBuDirectId] = useState("");
+  const [buSharedIds, setBuSharedIds] = useState<string[]>([]);
 
   const monthlyAmount = totalAmount > 0 && totalMonths >= 2
     ? Math.floor((totalAmount / totalMonths) * 100) / 100
@@ -60,6 +64,8 @@ export default function ScheduledExpenseCreatePage() {
         start_date: startDate,
         apply_day: applyDay,
         description: description || null,
+        business_unit_id: buAllocationType === "direct" && buDirectId ? buDirectId : undefined,
+        applicable_business_unit_ids: buAllocationType === "shared" && buSharedIds.length > 0 ? buSharedIds : undefined,
       },
       {
         onSuccess: () => navigate(ROUTES.TREASURY_SCHEDULED),
@@ -147,6 +153,15 @@ export default function ScheduledExpenseCreatePage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Descripcion</Label>
               <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descripcion adicional (opcional)" />
             </div>
+
+            <BusinessUnitAllocationSelector
+              businessUnitId={buDirectId}
+              setBusinessUnitId={setBuDirectId}
+              applicableBusinessUnitIds={buSharedIds}
+              setApplicableBusinessUnitIds={setBuSharedIds}
+              allocationType={buAllocationType}
+              setAllocationType={setBuAllocationType}
+            />
           </div>
         </CardContent>
       </Card>

@@ -57,6 +57,8 @@ import SalesReportPage from "@/pages/reports/SalesReportPage";
 import MarginAnalysisPage from "@/pages/reports/MarginAnalysisPage";
 import ThirdPartyBalancesPage from "@/pages/reports/ThirdPartyBalancesPage";
 import AuditBalancesPage from "@/pages/reports/AuditBalancesPage";
+import ProfitabilityBUPage from "@/pages/reports/ProfitabilityBUPage";
+import RealCostMaterialPage from "@/pages/reports/RealCostMaterialPage";
 import ThirdPartiesPage from "@/pages/third-parties/ThirdPartiesPage";
 import MaterialsPage from "@/pages/materials/MaterialsPage";
 import CategoriesPage from "@/pages/materials/CategoriesPage";
@@ -157,6 +159,8 @@ function App() {
               <Route path={ROUTES.REPORTS_MARGINS} element={<P permission="reports.view_margins"><MarginAnalysisPage /></P>} />
               <Route path={ROUTES.REPORTS_BALANCES} element={<P permission="reports.view_third_parties"><ThirdPartyBalancesPage /></P>} />
               <Route path={ROUTES.REPORTS_AUDIT} element={<P permission="admin.view_audit"><AuditBalancesPage /></P>} />
+              <Route path={ROUTES.REPORTS_PROFITABILITY_BU} element={<P permission="reports.view_pnl"><ProfitabilityBUPage /></P>} />
+              <Route path={ROUTES.REPORTS_REAL_COST} element={<P permission="reports.view_pnl"><RealCostMaterialPage /></P>} />
               {/* Maestros */}
               <Route path={ROUTES.THIRD_PARTIES} element={<P permission="third_parties.view"><ThirdPartiesPage /></P>} />
               <Route path={ROUTES.MATERIALS} element={<P permission="materials.view"><MaterialsPage /></P>} />

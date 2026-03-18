@@ -19,6 +19,7 @@ from sqlalchemy import (
     Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Index,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, OrganizationMixin, TimestampMixin, GUID
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from app.models.expense_category import ExpenseCategory
     from app.models.third_party import ThirdParty
     from app.models.money_movement import MoneyMovement
+    from app.models.business_unit import BusinessUnit
 
 
 VALID_ASSET_STATUSES = ["active", "fully_depreciated", "disposed"]
@@ -85,6 +87,15 @@ class FixedAsset(Base, OrganizationMixin, TimestampMixin):
         GUID(), ForeignKey("money_movements.id", ondelete="SET NULL"), nullable=True,
     )
 
+    # Asignacion a Unidad de Negocio (hereda a depreciation_expense)
+    business_unit_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("business_units.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    applicable_business_unit_ids: Mapped[Optional[list]] = mapped_column(
+        JSONB, nullable=True,
+    )
+
     # Estado
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
 
@@ -115,6 +126,10 @@ class FixedAsset(Base, OrganizationMixin, TimestampMixin):
 
     purchase_movement: Mapped[Optional["MoneyMovement"]] = relationship(
         "MoneyMovement", foreign_keys=[purchase_movement_id],
+    )
+
+    business_unit: Mapped[Optional["BusinessUnit"]] = relationship(
+        "BusinessUnit", foreign_keys=[business_unit_id],
     )
 
     depreciations: Mapped[List["AssetDepreciation"]] = relationship(

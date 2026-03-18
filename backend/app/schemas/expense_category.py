@@ -23,6 +23,16 @@ class ExpenseCategoryBase(BaseModel):
 class ExpenseCategoryCreate(ExpenseCategoryBase):
     """Schema para crear una categoria de gasto."""
     parent_id: Optional[UUID] = Field(None, description="ID de la categoria padre (max 2 niveles)")
+    default_business_unit_id: Optional[UUID] = Field(None, description="Default: directo a esta UN")
+    default_applicable_business_unit_ids: Optional[list[UUID]] = Field(None, description="Default: compartido entre estas UNs")
+
+    @model_validator(mode="after")
+    def validate_bu_allocation(self):
+        if self.default_business_unit_id and self.default_applicable_business_unit_ids:
+            raise ValueError("Seleccione asignacion directa O compartida, no ambas")
+        if self.default_applicable_business_unit_ids is not None and len(self.default_applicable_business_unit_ids) == 0:
+            self.default_applicable_business_unit_ids = None
+        return self
 
 
 class ExpenseCategoryUpdate(BaseModel):
@@ -31,6 +41,8 @@ class ExpenseCategoryUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=500)
     is_direct_expense: Optional[bool] = None
     parent_id: Optional[UUID] = None
+    default_business_unit_id: Optional[UUID] = None
+    default_applicable_business_unit_ids: Optional[list[UUID]] = None
 
 
 class ExpenseCategoryResponse(ExpenseCategoryBase):
@@ -39,6 +51,9 @@ class ExpenseCategoryResponse(ExpenseCategoryBase):
     organization_id: UUID
     parent_id: Optional[UUID] = None
     parent_name: Optional[str] = None
+    default_business_unit_id: Optional[UUID] = None
+    default_applicable_business_unit_ids: Optional[list[UUID]] = None
+    default_business_unit_name: Optional[str] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -72,6 +87,8 @@ class ExpenseCategoryFlat(BaseModel):
     display_name: str = Field(..., description="'NÓMINA > Personal' o 'TRANSPORTE'")
     parent_id: Optional[UUID] = None
     is_direct_expense: bool
+    default_business_unit_id: Optional[UUID] = None
+    default_applicable_business_unit_ids: Optional[list[UUID]] = None
 
 
 class ExpenseCategoryFlatResponse(BaseModel):

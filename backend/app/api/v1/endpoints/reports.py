@@ -19,7 +19,9 @@ from app.schemas.reports import (
     DashboardResponse,
     MarginAnalysisResponse,
     ProfitAndLossResponse,
+    ProfitabilityByBUResponse,
     PurchaseReportResponse,
+    RealCostByMaterialResponse,
     SalesReportResponse,
     ThirdPartyBalancesResponse,
     TreasuryDashboardResponse,
@@ -250,4 +252,46 @@ def audit_balances(
     return report_service.audit_balances(
         db=db,
         organization_id=org_context["organization_id"],
+    )
+
+
+@router.get("/profitability-by-business-unit", response_model=ProfitabilityByBUResponse)
+def get_profitability_by_bu(
+    date_from: date = Query(..., description="Fecha inicio del periodo"),
+    date_to: date = Query(..., description="Fecha fin del periodo"),
+    org_context: dict = Depends(require_any_permission("reports.view", "reports.view_pnl")),
+    db: Session = Depends(get_db),
+):
+    """
+    Rentabilidad por Unidad de Negocio.
+
+    Calcula ingresos, COGS, gastos (directos/compartidos/generales),
+    comisiones y utilidad neta por cada UN activa.
+    Gastos compartidos se prorratean por valor de compras liquidadas.
+    """
+    return report_service.get_profitability_by_business_unit(
+        db=db,
+        organization_id=org_context["organization_id"],
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+
+@router.get("/real-cost-by-material", response_model=RealCostByMaterialResponse)
+def get_real_cost_by_material(
+    date_from: date = Query(..., description="Fecha inicio del periodo"),
+    date_to: date = Query(..., description="Fecha fin del periodo"),
+    org_context: dict = Depends(require_any_permission("reports.view", "reports.view_pnl")),
+    db: Session = Depends(get_db),
+):
+    """
+    Costo real por material = costo promedio + overhead rate.
+
+    Overhead rate = gastos totales de la UN / kg comprados en el periodo.
+    """
+    return report_service.get_real_cost_by_material(
+        db=db,
+        organization_id=org_context["organization_id"],
+        date_from=date_from,
+        date_to=date_to,
     )

@@ -24,6 +24,8 @@ export interface MaterialResponse extends BaseEntity {
   description: string | null;
   category_id: string;
   business_unit_id: string;
+  business_unit_name: string | null;
+  category_name: string | null;
   default_unit: string;
   current_stock: number;
   current_stock_liquidated: number;

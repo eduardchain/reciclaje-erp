@@ -69,10 +69,18 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
         """Crear categoria con validacion de jerarquia."""
         obj_data = obj_in.model_dump()
 
+        # Normalizar applicable_business_unit_ids a strings para JSONB
+        if obj_data.get("default_applicable_business_unit_ids"):
+            obj_data["default_applicable_business_unit_ids"] = [
+                str(uid) for uid in obj_data["default_applicable_business_unit_ids"]
+            ]
+
         if obj_data.get("parent_id"):
             parent = self._validate_parent(db, obj_data["parent_id"], organization_id)
-            # Subcategoria hereda is_direct_expense del padre
+            # Subcategoria hereda is_direct_expense y default UN del padre
             obj_data["is_direct_expense"] = parent.is_direct_expense
+            obj_data["default_business_unit_id"] = parent.default_business_unit_id
+            obj_data["default_applicable_business_unit_ids"] = parent.default_applicable_business_unit_ids
 
         obj_data["organization_id"] = organization_id
         db_obj = self.model(**obj_data)
@@ -120,6 +128,12 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
                         detail="No se puede asignar padre a una categoria que ya tiene subcategorias",
                     )
 
+        # Normalizar UUIDs a strings para JSONB
+        if "default_applicable_business_unit_ids" in update_data and update_data["default_applicable_business_unit_ids"]:
+            update_data["default_applicable_business_unit_ids"] = [
+                str(uid) for uid in update_data["default_applicable_business_unit_ids"]
+            ]
+
         for field, value in update_data.items():
             setattr(db_obj, field, value)
 
@@ -166,11 +180,21 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
 
         rows = db.execute(base).all()
 
+        # Cargar nombres de UNs para default_business_unit_name
+        from app.models.business_unit import BusinessUnit
+        bu_rows = db.execute(
+            select(BusinessUnit.id, BusinessUnit.name)
+            .where(BusinessUnit.organization_id == organization_id)
+        ).all()
+        bu_names = {str(bu.id): bu.name for bu in bu_rows}
+
         items = []
         for row in rows:
             cat = row[0]
             item = {c.name: getattr(cat, c.name) for c in cat.__table__.columns}
             item["parent_name"] = row.parent_name
+            bu_id = item.get("default_business_unit_id")
+            item["default_business_unit_name"] = bu_names.get(str(bu_id)) if bu_id else None
             items.append(item)
 
         return PaginatedResponse(items=items, total=total, skip=skip, limit=limit)
@@ -189,6 +213,8 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
                 ExpenseCategory.name,
                 ExpenseCategory.parent_id,
                 ExpenseCategory.is_direct_expense,
+                ExpenseCategory.default_business_unit_id,
+                ExpenseCategory.default_applicable_business_unit_ids,
                 ParentCat.name.label("parent_name"),
             )
             .outerjoin(ParentCat, ExpenseCategory.parent_id == ParentCat.id)
@@ -213,6 +239,8 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
                 display_name=display_name,
                 parent_id=row.parent_id,
                 is_direct_expense=row.is_direct_expense,
+                default_business_unit_id=row.default_business_unit_id,
+                default_applicable_business_unit_ids=row.default_applicable_business_unit_ids,
             ))
 
         # Orden alfabetico por display_name

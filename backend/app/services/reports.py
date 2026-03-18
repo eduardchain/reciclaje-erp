@@ -22,6 +22,7 @@ from app.models.sale import Sale, SaleLine
 from app.models.third_party import ThirdParty
 from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 from app.models.fixed_asset import FixedAsset
+from app.models.business_unit import BusinessUnit
 
 from app.models.sale import SaleCommission
 from app.schemas.reports import (
@@ -65,6 +66,12 @@ from app.schemas.reports import (
     BalanceDetailedSection,
     BalanceDetailedVerification,
     BalanceDetailedResponse,
+    BusinessUnitProfitability,
+    ExpenseByCategoryItem,
+    ProfitabilityByBUResponse,
+    BusinessUnitOverhead,
+    MaterialRealCost,
+    RealCostByMaterialResponse,
 )
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -2305,6 +2312,506 @@ class ReportService:
                 third_parties_ok=tp_ok,
                 third_parties_mismatch=tp_mismatch,
             ),
+        )
+
+
+    # ==================================================================
+    # Tipos de movimiento que son gastos P&L (para reportes por UN)
+    # ==================================================================
+    EXPENSE_MOVEMENT_TYPES = [
+        "expense", "provision_expense", "expense_accrual",
+        "deferred_expense", "depreciation_expense",
+    ]
+
+    # ==================================================================
+    # Rentabilidad por Unidad de Negocio
+    # ==================================================================
+
+    def _get_purchases_by_bu(
+        self, db: Session, organization_id: UUID,
+        dt_from: datetime, dt_to: datetime,
+    ) -> dict[str, Decimal]:
+        """Valor de compras liquidadas por business_unit_id del material.
+        Retorna {bu_id_str: total_value}. Materiales sin UN van a key 'unassigned'.
+        """
+        rows = db.execute(
+            select(
+                Material.business_unit_id,
+                func.coalesce(func.sum(PurchaseLine.total_price), 0),
+            )
+            .select_from(PurchaseLine)
+            .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+            .join(Material, PurchaseLine.material_id == Material.id)
+            .where(
+                Purchase.organization_id == organization_id,
+                Purchase.status == "liquidated",
+                Purchase.double_entry_id.is_(None),
+                Purchase.date >= dt_from,
+                Purchase.date < dt_to,
+            )
+            .group_by(Material.business_unit_id)
+        ).all()
+        result: dict[str, Decimal] = {}
+        for bu_id, total in rows:
+            key = str(bu_id) if bu_id else "unassigned"
+            result[key] = Decimal(str(total))
+        return result
+
+    def _get_kg_purchased_by_bu(
+        self, db: Session, organization_id: UUID,
+        dt_from: datetime, dt_to: datetime,
+    ) -> dict[str, Decimal]:
+        """Kg comprados liquidados por UN del material."""
+        rows = db.execute(
+            select(
+                Material.business_unit_id,
+                func.coalesce(func.sum(PurchaseLine.quantity), 0),
+            )
+            .select_from(PurchaseLine)
+            .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+            .join(Material, PurchaseLine.material_id == Material.id)
+            .where(
+                Purchase.organization_id == organization_id,
+                Purchase.status == "liquidated",
+                Purchase.double_entry_id.is_(None),
+                Purchase.date >= dt_from,
+                Purchase.date < dt_to,
+            )
+            .group_by(Material.business_unit_id)
+        ).all()
+        result: dict[str, Decimal] = {}
+        for bu_id, total in rows:
+            key = str(bu_id) if bu_id else "unassigned"
+            result[key] = Decimal(str(total))
+        return result
+
+    def _prorate_expense(
+        self, amount: Decimal,
+        applicable_bu_ids: list[str] | None,
+        purchases_by_bu: dict[str, Decimal],
+    ) -> dict[str, Decimal]:
+        """Prorratear un gasto entre UNs segun valor de compras.
+        applicable_bu_ids=None -> General (todas las UNs).
+        """
+        if applicable_bu_ids:
+            target_bus = applicable_bu_ids
+        else:
+            target_bus = list(purchases_by_bu.keys())
+
+        total_purchases = sum(purchases_by_bu.get(bu, Decimal("0")) for bu in target_bus)
+        if total_purchases == 0:
+            return {}
+
+        result: dict[str, Decimal] = {}
+        for bu in target_bus:
+            bu_purchases = purchases_by_bu.get(bu, Decimal("0"))
+            if bu_purchases > 0:
+                result[bu] = amount * (bu_purchases / total_purchases)
+        return result
+
+    def get_profitability_by_business_unit(
+        self, db: Session, organization_id: UUID,
+        date_from: date, date_to: date,
+    ) -> ProfitabilityByBUResponse:
+        """Reporte de rentabilidad por Unidad de Negocio."""
+        dt_from, dt_to = self._date_range(date_from, date_to)
+
+        # 1. Obtener UNs activas
+        bus = db.execute(
+            select(BusinessUnit.id, BusinessUnit.name)
+            .where(
+                BusinessUnit.organization_id == organization_id,
+                BusinessUnit.is_active == True,
+            )
+            .order_by(BusinessUnit.name)
+        ).all()
+        bu_names = {str(bu.id): bu.name for bu in bus}
+        all_bu_keys = list(bu_names.keys()) + ["unassigned"]
+
+        # 2. Compras por UN (base para prorrateo)
+        purchases_by_bu = self._get_purchases_by_bu(db, organization_id, dt_from, dt_to)
+
+        # 3. Ingresos y COGS de ventas por UN
+        sale_filters = [
+            Sale.organization_id == organization_id,
+            Sale.status == "liquidated",
+            Sale.double_entry_id.is_(None),
+            Sale.date >= dt_from,
+            Sale.date < dt_to,
+        ]
+        sale_rows = db.execute(
+            select(
+                Material.business_unit_id,
+                func.coalesce(func.sum(SaleLine.total_price), 0),
+                func.coalesce(func.sum(SaleLine.unit_cost * SaleLine.quantity), 0),
+            )
+            .select_from(SaleLine)
+            .join(Sale, SaleLine.sale_id == Sale.id)
+            .join(Material, SaleLine.material_id == Material.id)
+            .where(*sale_filters)
+            .group_by(Material.business_unit_id)
+        ).all()
+        revenue_by_bu: dict[str, Decimal] = {}
+        cogs_by_bu: dict[str, Decimal] = {}
+        for bu_id, revenue, cogs in sale_rows:
+            key = str(bu_id) if bu_id else "unassigned"
+            revenue_by_bu[key] = Decimal(str(revenue))
+            cogs_by_bu[key] = Decimal(str(cogs))
+
+        # 4. Margen de Doble Partida por UN
+        de_filters = [
+            DoubleEntry.organization_id == organization_id,
+            DoubleEntry.status == "liquidated",
+            DoubleEntry.date >= dt_from,
+            DoubleEntry.date < dt_to,
+        ]
+        de_rows = db.execute(
+            select(
+                Material.business_unit_id,
+                func.coalesce(
+                    func.sum(
+                        (DoubleEntryLine.sale_unit_price - DoubleEntryLine.purchase_unit_price)
+                        * DoubleEntryLine.quantity
+                    ), 0
+                ),
+            )
+            .select_from(DoubleEntryLine)
+            .join(DoubleEntry, DoubleEntryLine.double_entry_id == DoubleEntry.id)
+            .join(Material, DoubleEntryLine.material_id == Material.id)
+            .where(*de_filters)
+            .group_by(Material.business_unit_id)
+        ).all()
+        de_profit_by_bu: dict[str, Decimal] = {}
+        for bu_id, profit in de_rows:
+            key = str(bu_id) if bu_id else "unassigned"
+            de_profit_by_bu[key] = Decimal(str(profit))
+
+        # 5. Gastos P&L por tipo de asignacion
+        expense_filters = [
+            MoneyMovement.organization_id == organization_id,
+            MoneyMovement.status == "confirmed",
+            MoneyMovement.movement_type.in_(self.EXPENSE_MOVEMENT_TYPES),
+            MoneyMovement.date >= dt_from,
+            MoneyMovement.date < dt_to,
+        ]
+        expense_rows = db.execute(
+            select(
+                MoneyMovement.id,
+                MoneyMovement.amount,
+                MoneyMovement.business_unit_id,
+                MoneyMovement.applicable_business_unit_ids,
+                MoneyMovement.expense_category_id,
+                ExpenseCategory.name.label("cat_name"),
+                ExpenseCategory.is_direct_expense,
+            )
+            .outerjoin(ExpenseCategory, MoneyMovement.expense_category_id == ExpenseCategory.id)
+            .where(*expense_filters)
+        ).all()
+
+        # Acumuladores por UN
+        direct_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
+        shared_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
+        general_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
+        # Desglose directo por categoria
+        direct_detail: dict[str, dict[str, Decimal]] = {k: {} for k in all_bu_keys}
+
+        for row in expense_rows:
+            amt = Decimal(str(row.amount))
+            bu_id = str(row.business_unit_id) if row.business_unit_id else None
+            applicable = row.applicable_business_unit_ids  # JSONB: list of UUID strings or None
+
+            if bu_id:
+                # DIRECTO: 100% a esta UN
+                key = bu_id if bu_id in bu_names else "unassigned"
+                direct_by_bu[key] = direct_by_bu.get(key, Decimal("0")) + amt
+                cat_name = row.cat_name or "Sin Categoría"
+                if key not in direct_detail:
+                    direct_detail[key] = {}
+                direct_detail[key][cat_name] = direct_detail[key].get(cat_name, Decimal("0")) + amt
+            elif applicable:
+                # COMPARTIDO: prorrateo entre UNs especificas
+                prorated = self._prorate_expense(amt, applicable, purchases_by_bu)
+                for k, v in prorated.items():
+                    shared_by_bu[k] = shared_by_bu.get(k, Decimal("0")) + v
+            else:
+                # GENERAL: ambos NULL
+                # Movimientos historicos: si is_direct_expense=True y sin UN -> "Sin Asignar"
+                if row.is_direct_expense and row.business_unit_id is None:
+                    direct_by_bu["unassigned"] = direct_by_bu.get("unassigned", Decimal("0")) + amt
+                    cat_name = row.cat_name or "Sin Categoría"
+                    if "unassigned" not in direct_detail:
+                        direct_detail["unassigned"] = {}
+                    direct_detail["unassigned"][cat_name] = direct_detail["unassigned"].get(cat_name, Decimal("0")) + amt
+                else:
+                    prorated = self._prorate_expense(amt, None, purchases_by_bu)
+                    for k, v in prorated.items():
+                        general_by_bu[k] = general_by_bu.get(k, Decimal("0")) + v
+
+        # 6. Comisiones de venta por UN (prorrateo por valor de linea)
+        commission_rows = db.execute(
+            select(
+                MoneyMovement.sale_id,
+                MoneyMovement.amount,
+            )
+            .where(
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.status == "confirmed",
+                MoneyMovement.movement_type == "commission_accrual",
+                MoneyMovement.sale_id.isnot(None),
+                MoneyMovement.date >= dt_from,
+                MoneyMovement.date < dt_to,
+            )
+        ).all()
+
+        commissions_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
+        if commission_rows:
+            # Agrupar comisiones por sale_id
+            sale_commissions: dict[UUID, Decimal] = {}
+            sale_ids_set: set[UUID] = set()
+            for sale_id, comm_amt in commission_rows:
+                sale_commissions[sale_id] = sale_commissions.get(sale_id, Decimal("0")) + Decimal(str(comm_amt))
+                sale_ids_set.add(sale_id)
+
+            # Obtener lineas de esas ventas con UN del material
+            if sale_ids_set:
+                line_rows = db.execute(
+                    select(
+                        SaleLine.sale_id,
+                        Material.business_unit_id,
+                        func.coalesce(func.sum(SaleLine.total_price), 0),
+                    )
+                    .select_from(SaleLine)
+                    .join(Material, SaleLine.material_id == Material.id)
+                    .where(SaleLine.sale_id.in_(sale_ids_set))
+                    .group_by(SaleLine.sale_id, Material.business_unit_id)
+                ).all()
+
+                # Construir mapa sale_id -> [(bu_key, value)]
+                sale_lines_map: dict[UUID, list[tuple[str, Decimal]]] = {}
+                for sale_id, bu_id, line_total in line_rows:
+                    key = str(bu_id) if bu_id else "unassigned"
+                    if sale_id not in sale_lines_map:
+                        sale_lines_map[sale_id] = []
+                    sale_lines_map[sale_id].append((key, Decimal(str(line_total))))
+
+                # Prorratear cada comision
+                for sale_id, total_comm in sale_commissions.items():
+                    lines = sale_lines_map.get(sale_id, [])
+                    total_sale = sum(v for _, v in lines)
+                    if total_sale > 0:
+                        for bu_key, line_val in lines:
+                            peso = line_val / total_sale
+                            commissions_by_bu[bu_key] = commissions_by_bu.get(bu_key, Decimal("0")) + total_comm * peso
+
+        # 7. Construir resultado por UN
+        result_bus: list[BusinessUnitProfitability] = []
+        totals = BusinessUnitProfitability(
+            business_unit_name="TOTAL",
+        )
+
+        for bu_key in all_bu_keys:
+            bu_name = bu_names.get(bu_key, "Sin Asignar")
+            revenue = revenue_by_bu.get(bu_key, Decimal("0"))
+            cogs = cogs_by_bu.get(bu_key, Decimal("0"))
+            de_profit = de_profit_by_bu.get(bu_key, Decimal("0"))
+            gross_profit = revenue - cogs + de_profit
+
+            direct = direct_by_bu.get(bu_key, Decimal("0"))
+            shared = shared_by_bu.get(bu_key, Decimal("0"))
+            general = general_by_bu.get(bu_key, Decimal("0"))
+            comms = commissions_by_bu.get(bu_key, Decimal("0"))
+            total_exp = direct + shared + general + comms
+            net = gross_profit - total_exp
+            margin = self._safe_pct(net, revenue) if revenue > 0 else 0.0
+
+            # Desglose directo
+            detail = [
+                ExpenseByCategoryItem(
+                    category_name=cat, amount=float(val)
+                )
+                for cat, val in sorted(
+                    direct_detail.get(bu_key, {}).items(),
+                    key=lambda x: -x[1],
+                )
+                if val != 0
+            ]
+
+            # Solo incluir si tiene alguna actividad
+            has_activity = any([revenue, cogs, de_profit, direct, shared, general, comms])
+            if not has_activity:
+                continue
+
+            bu_item = BusinessUnitProfitability(
+                business_unit_id=bu_key if bu_key != "unassigned" else None,
+                business_unit_name=bu_name,
+                sales_revenue=float(revenue),
+                sales_cogs=float(cogs),
+                sales_gross_profit=float(revenue - cogs),
+                de_profit=float(de_profit),
+                total_gross_profit=float(gross_profit),
+                direct_expenses=float(direct),
+                shared_expenses=float(shared),
+                general_expenses=float(general),
+                sale_commissions=float(comms),
+                total_expenses=float(total_exp),
+                direct_expenses_detail=detail,
+                net_profit=float(net),
+                net_margin=margin,
+            )
+            result_bus.append(bu_item)
+
+            # Acumular totales
+            totals.sales_revenue += float(revenue)
+            totals.sales_cogs += float(cogs)
+            totals.sales_gross_profit += float(revenue - cogs)
+            totals.de_profit += float(de_profit)
+            totals.total_gross_profit += float(gross_profit)
+            totals.direct_expenses += float(direct)
+            totals.shared_expenses += float(shared)
+            totals.general_expenses += float(general)
+            totals.sale_commissions += float(comms)
+            totals.total_expenses += float(total_exp)
+            totals.net_profit += float(net)
+
+        if totals.sales_revenue > 0:
+            totals.net_margin = self._safe_pct(
+                Decimal(str(totals.net_profit)),
+                Decimal(str(totals.sales_revenue)),
+            )
+
+        return ProfitabilityByBUResponse(
+            period_from=date_from,
+            period_to=date_to,
+            business_units=result_bus,
+            totals=totals,
+        )
+
+    # ==================================================================
+    # Costo Real por Material
+    # ==================================================================
+
+    def get_real_cost_by_material(
+        self, db: Session, organization_id: UUID,
+        date_from: date, date_to: date,
+    ) -> RealCostByMaterialResponse:
+        """Reporte de costo real por material = costo promedio + overhead rate."""
+        dt_from, dt_to = self._date_range(date_from, date_to)
+
+        # 1. UNs activas
+        bus = db.execute(
+            select(BusinessUnit.id, BusinessUnit.name)
+            .where(
+                BusinessUnit.organization_id == organization_id,
+                BusinessUnit.is_active == True,
+            )
+            .order_by(BusinessUnit.name)
+        ).all()
+        bu_names = {str(bu.id): bu.name for bu in bus}
+        all_bu_keys = list(bu_names.keys()) + ["unassigned"]
+
+        # 2. Compras por UN (valor + kg)
+        purchases_by_bu = self._get_purchases_by_bu(db, organization_id, dt_from, dt_to)
+        kg_by_bu = self._get_kg_purchased_by_bu(db, organization_id, dt_from, dt_to)
+
+        # 3. Gastos P&L — misma logica que profitability
+        expense_filters = [
+            MoneyMovement.organization_id == organization_id,
+            MoneyMovement.status == "confirmed",
+            MoneyMovement.movement_type.in_(self.EXPENSE_MOVEMENT_TYPES),
+            MoneyMovement.date >= dt_from,
+            MoneyMovement.date < dt_to,
+        ]
+        expense_rows = db.execute(
+            select(
+                MoneyMovement.amount,
+                MoneyMovement.business_unit_id,
+                MoneyMovement.applicable_business_unit_ids,
+                ExpenseCategory.is_direct_expense,
+            )
+            .outerjoin(ExpenseCategory, MoneyMovement.expense_category_id == ExpenseCategory.id)
+            .where(*expense_filters)
+        ).all()
+
+        total_expenses_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
+
+        for row in expense_rows:
+            amt = Decimal(str(row.amount))
+            bu_id = str(row.business_unit_id) if row.business_unit_id else None
+            applicable = row.applicable_business_unit_ids
+
+            if bu_id:
+                key = bu_id if bu_id in bu_names else "unassigned"
+                total_expenses_by_bu[key] = total_expenses_by_bu.get(key, Decimal("0")) + amt
+            elif applicable:
+                prorated = self._prorate_expense(amt, applicable, purchases_by_bu)
+                for k, v in prorated.items():
+                    total_expenses_by_bu[k] = total_expenses_by_bu.get(k, Decimal("0")) + v
+            else:
+                if row.is_direct_expense and row.business_unit_id is None:
+                    total_expenses_by_bu["unassigned"] = total_expenses_by_bu.get("unassigned", Decimal("0")) + amt
+                else:
+                    prorated = self._prorate_expense(amt, None, purchases_by_bu)
+                    for k, v in prorated.items():
+                        total_expenses_by_bu[k] = total_expenses_by_bu.get(k, Decimal("0")) + v
+
+        # 4. Materiales activos con costo promedio
+        material_rows = db.execute(
+            select(
+                Material.id,
+                Material.code,
+                Material.name,
+                Material.current_average_cost,
+                Material.business_unit_id,
+            )
+            .where(
+                Material.organization_id == organization_id,
+                Material.is_active == True,
+            )
+            .order_by(Material.code)
+        ).all()
+
+        # 5. Construir resultado por UN
+        result_bus: list[BusinessUnitOverhead] = []
+
+        for bu_key in all_bu_keys:
+            bu_name = bu_names.get(bu_key, "Sin Asignar")
+            total_exp = total_expenses_by_bu.get(bu_key, Decimal("0"))
+            kg = kg_by_bu.get(bu_key, Decimal("0"))
+            overhead_rate = (total_exp / kg) if kg > 0 else Decimal("0")
+
+            # Materiales de esta UN
+            materials: list[MaterialRealCost] = []
+            for m in material_rows:
+                m_bu_key = str(m.business_unit_id) if m.business_unit_id else "unassigned"
+                if m_bu_key != bu_key:
+                    continue
+                avg_cost = Decimal(str(m.current_average_cost))
+                real_cost = avg_cost + overhead_rate
+                materials.append(MaterialRealCost(
+                    material_id=str(m.id),
+                    material_code=m.code,
+                    material_name=m.name,
+                    average_cost=float(avg_cost),
+                    overhead_rate=float(overhead_rate),
+                    real_cost=float(real_cost),
+                ))
+
+            if not materials and total_exp == 0:
+                continue
+
+            result_bus.append(BusinessUnitOverhead(
+                business_unit_id=bu_key if bu_key != "unassigned" else None,
+                business_unit_name=bu_name,
+                total_expenses=float(total_exp),
+                kg_purchased=float(kg),
+                overhead_rate=float(overhead_rate),
+                materials=materials,
+            ))
+
+        return RealCostByMaterialResponse(
+            period_from=date_from,
+            period_to=date_to,
+            business_units=result_bus,
         )
 
 

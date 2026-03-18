@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from typing import Optional
 
 from sqlalchemy import String, Boolean, ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, OrganizationMixin, GUID
@@ -62,6 +63,20 @@ class ExpenseCategory(Base, TimestampMixin, OrganizationMixin):
         "ExpenseCategory",
         remote_side="ExpenseCategory.id",
         foreign_keys="ExpenseCategory.parent_id",
+    )
+
+    # Default de asignacion a Unidad de Negocio (sugerencia al crear gasto)
+    default_business_unit_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("business_units.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Default: asignacion directa a 1 UN",
+    )
+
+    default_applicable_business_unit_ids: Mapped[Optional[list]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Default: prorrateo compartido entre estas UNs",
     )
 
     is_active: Mapped[bool] = mapped_column(

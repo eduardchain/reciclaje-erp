@@ -29,6 +29,9 @@ export interface ExpenseCategoryResponse extends BaseEntity {
   is_active: boolean;
   parent_id: string | null;
   parent_name: string | null;
+  default_business_unit_id: string | null;
+  default_applicable_business_unit_ids: string[] | null;
+  default_business_unit_name: string | null;
 }
 
 export interface ExpenseCategoryCreate {
@@ -36,6 +39,8 @@ export interface ExpenseCategoryCreate {
   description?: string | null;
   is_direct_expense?: boolean;
   parent_id?: string | null;
+  default_business_unit_id?: string | null;
+  default_applicable_business_unit_ids?: string[] | null;
 }
 
 export interface ExpenseCategoryUpdate {
@@ -43,6 +48,8 @@ export interface ExpenseCategoryUpdate {
   description?: string | null;
   is_direct_expense?: boolean | null;
   parent_id?: string | null;
+  default_business_unit_id?: string | null;
+  default_applicable_business_unit_ids?: string[] | null;
 }
 
 export interface ExpenseCategoryFlat {
@@ -51,6 +58,8 @@ export interface ExpenseCategoryFlat {
   display_name: string;
   parent_id: string | null;
   is_direct_expense: boolean;
+  default_business_unit_id: string | null;
+  default_applicable_business_unit_ids: string[] | null;
 }
 
 export interface ExpenseCategoryFlatResponse {

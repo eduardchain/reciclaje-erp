@@ -24,6 +24,8 @@ from app.models.third_party import ThirdParty
 from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 from app.models.user import User
 from app.models.warehouse import Warehouse
+from app.models.business_unit import BusinessUnit
+from app.models.fixed_asset import FixedAsset, AssetDepreciation
 
 
 # ---------------------------------------------------------------------------
@@ -1419,3 +1421,322 @@ class TestReportsAuth:
             params={"date_from": "2025-01-01", "date_to": "2025-12-31"},
         )
         assert response.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# Tests: Gastos por Unidad de Negocio
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def bu_data(db_session: Session, test_organization, test_user):
+    """Dataset para tests de reportes por Unidad de Negocio."""
+    org_id = test_organization.id
+    now = datetime.now(tz=timezone.utc)
+
+    # UNs
+    bu_cobre = BusinessUnit(name="Cobre", organization_id=org_id, is_active=True)
+    bu_chatarra = BusinessUnit(name="Chatarra", organization_id=org_id, is_active=True)
+    db_session.add_all([bu_cobre, bu_chatarra])
+    db_session.flush()
+
+    # Categorias
+    cat_metales = MaterialCategory(name="Metales BU", organization_id=org_id, is_active=True)
+    db_session.add(cat_metales)
+    db_session.flush()
+
+    cat_gasto_directo = ExpenseCategory(name="Nomina Op", organization_id=org_id, is_direct_expense=True, is_active=True)
+    cat_gasto_indirecto = ExpenseCategory(name="Arriendo BU", organization_id=org_id, is_direct_expense=False, is_active=True)
+    db_session.add_all([cat_gasto_directo, cat_gasto_indirecto])
+    db_session.flush()
+
+    # Materiales con UN
+    mat_cobre = Material(
+        code="CU-BU", name="Cobre BU", organization_id=org_id,
+        category_id=cat_metales.id, default_unit="kg",
+        business_unit_id=bu_cobre.id,
+        current_stock=Decimal("500"), current_stock_liquidated=Decimal("500"),
+        current_stock_transit=Decimal("0"), current_average_cost=Decimal("8000"),
+        is_active=True,
+    )
+    mat_chatarra = Material(
+        code="CH-BU", name="Chatarra BU", organization_id=org_id,
+        category_id=cat_metales.id, default_unit="kg",
+        business_unit_id=bu_chatarra.id,
+        current_stock=Decimal("1000"), current_stock_liquidated=Decimal("1000"),
+        current_stock_transit=Decimal("0"), current_average_cost=Decimal("1200"),
+        is_active=True,
+    )
+    db_session.add_all([mat_cobre, mat_chatarra])
+    db_session.flush()
+
+    # Bodega, cuenta, terceros
+    wh = Warehouse(name="Bodega BU", organization_id=org_id, is_active=True)
+    cuenta = MoneyAccount(name="Caja BU", account_type="cash", organization_id=org_id, current_balance=Decimal("50000000"), is_active=True)
+    db_session.add_all([wh, cuenta])
+    db_session.flush()
+
+    supplier_cat = ThirdPartyCategory(name="Prov Mat BU", behavior_type="material_supplier", organization_id=org_id)
+    customer_cat = ThirdPartyCategory(name="Clientes BU", behavior_type="customer", organization_id=org_id)
+    db_session.add_all([supplier_cat, customer_cat])
+    db_session.flush()
+
+    supplier = ThirdParty(name="Prov BU", organization_id=org_id, current_balance=Decimal("0"), is_active=True)
+    customer = ThirdParty(name="Cliente BU", organization_id=org_id, current_balance=Decimal("0"), is_active=True)
+    db_session.add_all([supplier, customer])
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=supplier.id, category_id=supplier_cat.id))
+    db_session.add(ThirdPartyCategoryAssignment(third_party_id=customer.id, category_id=customer_cat.id))
+    db_session.flush()
+
+    # Compras liquidadas: Cobre 200kg @ $8000 = $1.6M, Chatarra 500kg @ $1200 = $600K
+    compra = Purchase(
+        organization_id=org_id, purchase_number=900,
+        supplier_id=supplier.id, date=now, status="liquidated",
+        total_amount=Decimal("2200000"),
+    )
+    db_session.add(compra)
+    db_session.flush()
+    db_session.add(PurchaseLine(
+        purchase_id=compra.id, material_id=mat_cobre.id,
+        warehouse_id=wh.id, quantity=Decimal("200"), unit_price=Decimal("8000"),
+        total_price=Decimal("1600000"),
+    ))
+    db_session.add(PurchaseLine(
+        purchase_id=compra.id, material_id=mat_chatarra.id,
+        warehouse_id=wh.id, quantity=Decimal("500"), unit_price=Decimal("1200"),
+        total_price=Decimal("600000"),
+    ))
+    db_session.flush()
+
+    # Venta liquidada: Cobre 100kg @ $12000 = $1.2M
+    venta = Sale(
+        organization_id=org_id, sale_number=900,
+        customer_id=customer.id, date=now, status="liquidated",
+        total_amount=Decimal("1200000"),
+    )
+    db_session.add(venta)
+    db_session.flush()
+    db_session.add(SaleLine(
+        sale_id=venta.id, material_id=mat_cobre.id,
+        quantity=Decimal("100"), unit_price=Decimal("12000"),
+        total_price=Decimal("1200000"), unit_cost=Decimal("8000"),
+    ))
+    db_session.flush()
+
+    # Gasto DIRECTO a Chatarra: $500K
+    gasto_directo = MoneyMovement(
+        organization_id=org_id, movement_number=900,
+        date=now, movement_type="expense", amount=Decimal("500000"),
+        account_id=cuenta.id, description="Nomina operarios Chatarra",
+        expense_category_id=cat_gasto_directo.id,
+        business_unit_id=bu_chatarra.id,
+        status="confirmed",
+    )
+    db_session.add(gasto_directo)
+
+    # Gasto GENERAL (ambos NULL): $1M
+    gasto_general = MoneyMovement(
+        organization_id=org_id, movement_number=901,
+        date=now, movement_type="expense", amount=Decimal("1000000"),
+        account_id=cuenta.id, description="Arriendo bodega",
+        expense_category_id=cat_gasto_indirecto.id,
+        status="confirmed",
+    )
+    db_session.add(gasto_general)
+
+    # Gasto COMPARTIDO entre Cobre y Chatarra: $200K
+    gasto_compartido = MoneyMovement(
+        organization_id=org_id, movement_number=902,
+        date=now, movement_type="expense", amount=Decimal("200000"),
+        account_id=cuenta.id, description="Mantenimiento prensa",
+        expense_category_id=cat_gasto_indirecto.id,
+        applicable_business_unit_ids=[str(bu_cobre.id), str(bu_chatarra.id)],
+        status="confirmed",
+    )
+    db_session.add(gasto_compartido)
+
+    db_session.commit()
+
+    return {
+        "bu_cobre": bu_cobre,
+        "bu_chatarra": bu_chatarra,
+        "mat_cobre": mat_cobre,
+        "mat_chatarra": mat_chatarra,
+        "compra_cobre_value": Decimal("1600000"),  # 200kg @ $8000
+        "compra_chatarra_value": Decimal("600000"),  # 500kg @ $1200
+        "compra_total": Decimal("2200000"),
+        "venta_cobre_revenue": Decimal("1200000"),
+        "venta_cobre_cogs": Decimal("800000"),  # 100 * 8000
+        "gasto_directo_chatarra": Decimal("500000"),
+        "gasto_general": Decimal("1000000"),
+        "gasto_compartido": Decimal("200000"),
+    }
+
+
+class TestProfitabilityByBU:
+
+    def test_endpoint_returns_200(self, client, org_headers, bu_data):
+        resp = client.get(
+            "/api/v1/reports/profitability-by-business-unit",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "business_units" in data
+        assert "totals" in data
+
+    def test_direct_expenses_assigned_correctly(self, client, org_headers, bu_data):
+        """Gasto directo de $500K debe ir 100% a Chatarra."""
+        resp = client.get(
+            "/api/v1/reports/profitability-by-business-unit",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        data = resp.json()
+        chatarra = next((bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra"), None)
+        assert chatarra is not None
+        assert chatarra["direct_expenses"] == 500000.0
+
+    def test_general_expenses_prorated(self, client, org_headers, bu_data):
+        """Gasto general $1M prorrateado por valor compras: Cobre 1.6M/2.2M, Chatarra 0.6M/2.2M."""
+        resp = client.get(
+            "/api/v1/reports/profitability-by-business-unit",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        data = resp.json()
+        cobre = next((bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre"), None)
+        chatarra = next((bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra"), None)
+        assert cobre is not None
+        assert chatarra is not None
+        # Cobre: 1.6M/2.2M * 1M ≈ 727,272.73
+        assert abs(cobre["general_expenses"] - 727272.73) < 1
+        # Chatarra: 0.6M/2.2M * 1M ≈ 272,727.27
+        assert abs(chatarra["general_expenses"] - 272727.27) < 1
+
+    def test_shared_expenses_prorated(self, client, org_headers, bu_data):
+        """Gasto compartido $200K entre Cobre y Chatarra, prorrateado por compras."""
+        resp = client.get(
+            "/api/v1/reports/profitability-by-business-unit",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        data = resp.json()
+        cobre = next((bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre"), None)
+        chatarra = next((bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra"), None)
+        # Cobre: 1.6M/2.2M * 200K ≈ 145,454.55
+        assert abs(cobre["shared_expenses"] - 145454.55) < 1
+        # Chatarra: 0.6M/2.2M * 200K ≈ 54,545.45
+        assert abs(chatarra["shared_expenses"] - 54545.45) < 1
+
+    def test_sales_revenue_by_bu(self, client, org_headers, bu_data):
+        """Venta de Cobre debe ir a UN Cobre."""
+        resp = client.get(
+            "/api/v1/reports/profitability-by-business-unit",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        data = resp.json()
+        cobre = next((bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre"), None)
+        assert cobre["sales_revenue"] == 1200000.0
+        assert cobre["sales_cogs"] == 800000.0
+
+
+class TestRealCostByMaterial:
+
+    def test_endpoint_returns_200(self, client, org_headers, bu_data):
+        resp = client.get(
+            "/api/v1/reports/real-cost-by-material",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "business_units" in data
+
+    def test_overhead_rate_calculation(self, client, org_headers, bu_data):
+        """Overhead rate = gastos totales UN / kg comprados."""
+        resp = client.get(
+            "/api/v1/reports/real-cost-by-material",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        data = resp.json()
+        chatarra = next((bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra"), None)
+        assert chatarra is not None
+        assert chatarra["kg_purchased"] == 500.0
+        # Chatarra total expenses = directo $500K + shared prorate + general prorate
+        # overhead = total / 500
+        assert chatarra["overhead_rate"] > 0
+
+    def test_real_cost_includes_overhead(self, client, org_headers, bu_data):
+        """Costo real = avg cost + overhead rate."""
+        resp = client.get(
+            "/api/v1/reports/real-cost-by-material",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        data = resp.json()
+        cobre_bu = next((bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre"), None)
+        assert cobre_bu is not None
+        assert len(cobre_bu["materials"]) >= 1
+        mat = cobre_bu["materials"][0]
+        assert mat["average_cost"] == 8000.0
+        assert mat["real_cost"] == mat["average_cost"] + mat["overhead_rate"]
+
+
+class TestBUValidation:
+
+    def test_expense_with_both_bu_fields_returns_422(self, client, org_headers, bu_data):
+        """business_unit_id Y applicable_business_unit_ids → 422."""
+        payload = {
+            "amount": 100000,
+            "expense_category_id": str(MoneyMovement.__table__.c.expense_category_id),  # dummy
+            "account_id": "dummy",
+            "date": "2026-03-17T12:00:00Z",
+            "description": "test",
+            "business_unit_id": str(bu_data["bu_cobre"].id),
+            "applicable_business_unit_ids": [str(bu_data["bu_chatarra"].id)],
+        }
+        # Intentar via el endpoint directamente no es facil sin IDs validos,
+        # asi que testeamos la validacion del schema
+        from app.schemas.money_movement import ExpenseCreate
+        import pydantic
+        with pytest.raises(pydantic.ValidationError, match="directa O compartida"):
+            ExpenseCreate(**{
+                "amount": 100000,
+                "expense_category_id": bu_data["bu_cobre"].id,
+                "account_id": bu_data["bu_cobre"].id,
+                "date": "2026-03-17T12:00:00",
+                "description": "test",
+                "business_unit_id": bu_data["bu_cobre"].id,
+                "applicable_business_unit_ids": [bu_data["bu_chatarra"].id],
+            })
+
+    def test_expense_with_direct_bu_valid(self, client, org_headers, bu_data):
+        """business_unit_id solo → valido."""
+        from app.schemas.money_movement import ExpenseCreate
+        schema = ExpenseCreate(
+            amount=100000,
+            expense_category_id=bu_data["bu_cobre"].id,
+            account_id=bu_data["bu_cobre"].id,
+            date="2026-03-17T12:00:00",
+            description="test",
+            business_unit_id=bu_data["bu_cobre"].id,
+        )
+        assert schema.business_unit_id == bu_data["bu_cobre"].id
+        assert schema.applicable_business_unit_ids is None
+
+    def test_expense_empty_applicable_normalized_to_none(self, client, org_headers, bu_data):
+        """applicable_business_unit_ids=[] → normalizado a None (General)."""
+        from app.schemas.money_movement import ExpenseCreate
+        schema = ExpenseCreate(
+            amount=100000,
+            expense_category_id=bu_data["bu_cobre"].id,
+            account_id=bu_data["bu_cobre"].id,
+            date="2026-03-17T12:00:00",
+            description="test",
+            applicable_business_unit_ids=[],
+        )
+        assert schema.applicable_business_unit_ids is None

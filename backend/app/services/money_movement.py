@@ -197,6 +197,8 @@ class CRUDMoneyMovement:
             evidence_url=data.evidence_url,
             notes=data.notes,
             user_id=user_id,
+            business_unit_id=data.business_unit_id,
+            applicable_business_unit_ids=[str(uid) for uid in data.applicable_business_unit_ids] if data.applicable_business_unit_ids else None,
         )
 
         # Aplicar efecto
@@ -513,6 +515,8 @@ class CRUDMoneyMovement:
             reference_number=data.reference_number,
             notes=data.notes,
             user_id=user_id,
+            business_unit_id=data.business_unit_id,
+            applicable_business_unit_ids=[str(uid) for uid in data.applicable_business_unit_ids] if data.applicable_business_unit_ids else None,
         )
 
         provision.current_balance += data.amount
@@ -685,6 +689,8 @@ class CRUDMoneyMovement:
             reference_number=data.reference_number,
             notes=data.notes,
             user_id=user_id,
+            business_unit_id=data.business_unit_id,
+            applicable_business_unit_ids=[str(uid) for uid in data.applicable_business_unit_ids] if data.applicable_business_unit_ids else None,
         )
 
         # Efecto: tercero nos debe mas (balance negativo = le debemos)
@@ -1078,6 +1084,8 @@ class CRUDMoneyMovement:
         reference_number: Optional[str] = None,
         evidence_url: Optional[str] = None,
         notes: Optional[str] = None,
+        business_unit_id: Optional[UUID] = None,
+        applicable_business_unit_ids: Optional[list] = None,
     ) -> MoneyMovement:
         """Crear registro de movimiento en BD (sin commit, sin aplicar efectos)."""
         number = self._generate_movement_number(db, organization_id)
@@ -1099,6 +1107,8 @@ class CRUDMoneyMovement:
             evidence_url=evidence_url,
             status="confirmed",
             created_by=user_id,
+            business_unit_id=business_unit_id,
+            applicable_business_unit_ids=applicable_business_unit_ids,
         )
         db.add(movement)
         db.flush()

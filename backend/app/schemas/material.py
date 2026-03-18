@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, model_validator
 
 
 # ============================================================================
@@ -86,10 +86,19 @@ class MaterialResponse(MaterialBase):
     current_average_cost: float
     sort_order: int = 0
     is_active: bool
+    business_unit_name: Optional[str] = None
+    category_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_bu_name(cls, data):
+        if hasattr(data, "business_unit") and data.business_unit is not None:
+            data.__dict__["business_unit_name"] = data.business_unit.name
+        return data
 
     @field_serializer('current_stock', 'current_stock_liquidated', 'current_stock_transit', 'current_average_cost')
     def serialize_decimal(self, value: Decimal) -> float:

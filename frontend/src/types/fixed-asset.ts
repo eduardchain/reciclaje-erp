@@ -56,6 +56,8 @@ export interface FixedAssetCreate {
   source_account_id?: string | null;
   supplier_id?: string | null;
   notes?: string | null;
+  business_unit_id?: string | null;
+  applicable_business_unit_ids?: string[] | null;
 }
 
 export interface FixedAssetUpdate {

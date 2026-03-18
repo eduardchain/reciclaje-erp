@@ -37,6 +37,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, OrganizationMixin, TimestampMixin, GUID
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
     from app.models.purchase import Purchase
     from app.models.sale import Sale
     from app.models.user import User
+    from app.models.business_unit import BusinessUnit
 
 
 # Tipos de movimiento validos
@@ -234,6 +236,24 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
         comment="Usuario que creo el movimiento",
     )
 
+    # Asignacion a Unidad de Negocio (solo tipos P&L: expense, expense_accrual, etc.)
+    # Directo: business_unit_id set, applicable_business_unit_ids NULL
+    # Compartido: business_unit_id NULL, applicable_business_unit_ids = [uuid, ...]
+    # General: ambos NULL
+    business_unit_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("business_units.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Asignacion directa a 1 unidad de negocio",
+    )
+
+    applicable_business_unit_ids: Mapped[Optional[list]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="UNs para prorrateo compartido (array de UUIDs)",
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -241,6 +261,11 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
     )
 
     # --- Relationships ---
+    business_unit: Mapped[Optional["BusinessUnit"]] = relationship(
+        "BusinessUnit",
+        foreign_keys=[business_unit_id],
+    )
+
     account: Mapped[Optional["MoneyAccount"]] = relationship(
         "MoneyAccount",
         foreign_keys=[account_id],

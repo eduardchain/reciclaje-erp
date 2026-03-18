@@ -50,4 +50,6 @@ export interface ScheduledExpenseCreate {
   start_date: string;
   apply_day?: number;
   description?: string | null;
+  business_unit_id?: string;
+  applicable_business_unit_ids?: string[];
 }

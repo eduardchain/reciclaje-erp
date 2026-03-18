@@ -144,6 +144,8 @@ const orgNavItems: NavItem[] = [
       { name: "Compras", path: ROUTES.REPORTS_PURCHASES, icon: <ShoppingCart className="w-4 h-4" />, permission: "reports.view_purchases" },
       { name: "Ventas", path: ROUTES.REPORTS_SALES, icon: <DollarSign className="w-4 h-4" />, permission: "reports.view_sales" },
       { name: "Margenes", path: ROUTES.REPORTS_MARGINS, icon: <BarChart3 className="w-4 h-4" />, permission: "reports.view_margins" },
+      { name: "Rentabilidad por UN", path: ROUTES.REPORTS_PROFITABILITY_BU, icon: <BarChart3 className="w-4 h-4" />, permission: "reports.view_pnl" },
+      { name: "Costo Real Material", path: ROUTES.REPORTS_REAL_COST, icon: <Calculator className="w-4 h-4" />, permission: "reports.view_pnl" },
       { name: "Saldos Terceros", path: ROUTES.REPORTS_BALANCES, icon: <Users className="w-4 h-4" />, permission: "reports.view_third_parties" },
     ],
   },

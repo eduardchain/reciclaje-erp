@@ -82,3 +82,19 @@ export function useBalanceDetailed() {
     queryFn: () => reportsService.getBalanceDetailed(),
   });
 }
+
+export function useProfitabilityByBU(params: DateRange) {
+  return useQuery({
+    queryKey: ["reports", "profitability-bu", params],
+    queryFn: () => reportsService.getProfitabilityByBU(params),
+    enabled: !!params.date_from && !!params.date_to,
+  });
+}
+
+export function useRealCostByMaterial(params: DateRange) {
+  return useQuery({
+    queryKey: ["reports", "real-cost-material", params],
+    queryFn: () => reportsService.getRealCostByMaterial(params),
+    enabled: !!params.date_from && !!params.date_to,
+  });
+}

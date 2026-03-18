@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Index,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, OrganizationMixin, TimestampMixin, GUID
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from app.models.money_account import MoneyAccount
     from app.models.third_party import ThirdParty
     from app.models.money_movement import MoneyMovement
+    from app.models.business_unit import BusinessUnit
 
 
 VALID_SCHEDULED_STATUSES = ["active", "completed", "cancelled"]
@@ -71,6 +73,15 @@ class ScheduledExpense(Base, OrganizationMixin, TimestampMixin):
         GUID(), ForeignKey("money_movements.id", ondelete="SET NULL"), nullable=True,
     )
 
+    # Asignacion a Unidad de Negocio (hereda a deferred_expense cuotas)
+    business_unit_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("business_units.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    applicable_business_unit_ids: Mapped[Optional[list]] = mapped_column(
+        JSONB, nullable=True,
+    )
+
     # Programacion
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
 
@@ -107,6 +118,10 @@ class ScheduledExpense(Base, OrganizationMixin, TimestampMixin):
 
     expense_category: Mapped["ExpenseCategory"] = relationship(
         "ExpenseCategory", foreign_keys=[expense_category_id],
+    )
+
+    business_unit: Mapped[Optional["BusinessUnit"]] = relationship(
+        "BusinessUnit", foreign_keys=[business_unit_id],
     )
 
     applications: Mapped[List["ScheduledExpenseApplication"]] = relationship(

@@ -16,7 +16,7 @@ from app.schemas.material import (
     MaterialCategoryCreate,
     MaterialCategoryUpdate
 )
-from app.services.base import CRUDBase, Select
+from app.services.base import CRUDBase, Select, PaginatedResponse
 
 
 class CRUDMaterialCategory(CRUDBase[MaterialCategory, MaterialCategoryCreate, MaterialCategoryUpdate]):
@@ -47,6 +47,27 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
             )
         )
     
+    def get_multi(self, db: Session, organization_id: UUID, **kwargs) -> PaginatedResponse:
+        """Override para incluir business_unit_name y category_name en items."""
+        result = super().get_multi(db, organization_id, **kwargs)
+        # Obtener nombres de UNs y categorias
+        bu_rows = db.execute(
+            select(BusinessUnit.id, BusinessUnit.name)
+            .where(BusinessUnit.organization_id == organization_id)
+        ).all()
+        bu_names = {str(bu.id): bu.name for bu in bu_rows}
+        cat_rows = db.execute(
+            select(MaterialCategory.id, MaterialCategory.name)
+            .where(MaterialCategory.organization_id == organization_id)
+        ).all()
+        cat_names = {str(c.id): c.name for c in cat_rows}
+        for item in result.items:
+            bu_id = item.get("business_unit_id")
+            item["business_unit_name"] = bu_names.get(str(bu_id)) if bu_id else None
+            cat_id = item.get("category_id")
+            item["category_name"] = cat_names.get(str(cat_id)) if cat_id else None
+        return result
+
     def create(
         self,
         db: Session,

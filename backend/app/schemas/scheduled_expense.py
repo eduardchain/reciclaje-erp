@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, model_validator
 
 
 class ScheduledExpenseCreate(BaseModel):
@@ -22,6 +22,16 @@ class ScheduledExpenseCreate(BaseModel):
     start_date: date = Field(..., description="Fecha de inicio")
     apply_day: int = Field(1, ge=1, le=28, description="Dia del mes para aplicar cuotas (1-28)")
     description: Optional[str] = Field(None, max_length=500)
+    business_unit_id: Optional[UUID] = None
+    applicable_business_unit_ids: Optional[list[UUID]] = None
+
+    @model_validator(mode="after")
+    def validate_business_unit_allocation(self):
+        if self.business_unit_id and self.applicable_business_unit_ids:
+            raise ValueError("Seleccione asignacion directa O compartida, no ambas")
+        if self.applicable_business_unit_ids is not None and len(self.applicable_business_unit_ids) == 0:
+            self.applicable_business_unit_ids = None
+        return self
 
 
 class ScheduledExpenseApplicationResponse(BaseModel):
@@ -57,6 +67,8 @@ class ScheduledExpenseResponse(BaseModel):
     expense_category_id: UUID
     expense_category_name: Optional[str] = None
     funding_movement_id: Optional[UUID] = None
+    business_unit_id: Optional[UUID] = None
+    applicable_business_unit_ids: Optional[list[UUID]] = None
     start_date: date
     apply_day: int
     next_application_date: Optional[date] = None
