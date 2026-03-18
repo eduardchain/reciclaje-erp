@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import type { AccountStatementExportData } from "@/utils/pdfExport";
-import type { BalanceDetailedResponse } from "@/types/reports";
+import type { BalanceDetailedResponse, ProfitabilityByBUResponse, RealCostByMaterialResponse } from "@/types/reports";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 
 export function exportAccountStatementExcel(data: AccountStatementExportData) {
@@ -165,4 +165,73 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Balance Detallado");
   XLSX.writeFile(wb, `balance_detallado_${data.as_of_date}.xlsx`);
+}
+
+
+export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
+  const fmt = (n: number) => formatCurrency(n);
+  const rows: (string | number | null)[][] = [];
+
+  rows.push(["Rentabilidad por Unidad de Negocio"]);
+  rows.push([`Periodo: ${data.period_from} - ${data.period_to}`]);
+  rows.push([]);
+
+  // Header
+  rows.push(["Unidad de Negocio", "Ventas", "COGS", "Ut. Bruta", "G. Directos", "G. Compartidos", "G. Generales", "Comisiones", "Ut. Neta", "Margen %"]);
+
+  // UNs
+  for (const bu of data.business_units) {
+    rows.push([
+      bu.business_unit_name, fmt(bu.sales_revenue), fmt(bu.sales_cogs),
+      fmt(bu.total_gross_profit), fmt(bu.direct_expenses), fmt(bu.shared_expenses),
+      fmt(bu.general_expenses), fmt(bu.sale_commissions), fmt(bu.net_profit),
+      `${bu.net_margin.toFixed(1)}%`,
+    ]);
+    // Desglose directos
+    for (const d of bu.direct_expenses_detail) {
+      rows.push(["  " + d.category_name, "", "", "", fmt(d.amount), "", "", "", "", ""]);
+    }
+  }
+
+  // Totales
+  rows.push([]);
+  const t = data.totals;
+  rows.push([
+    "TOTAL", fmt(t.sales_revenue), fmt(t.sales_cogs), fmt(t.total_gross_profit),
+    fmt(t.direct_expenses), fmt(t.shared_expenses), fmt(t.general_expenses),
+    fmt(t.sale_commissions), fmt(t.net_profit), `${t.net_margin.toFixed(1)}%`,
+  ]);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Rentabilidad UN");
+  XLSX.writeFile(wb, `rentabilidad_un_${data.period_from}_${data.period_to}.xlsx`);
+}
+
+
+export function exportRealCostMaterialExcel(data: RealCostByMaterialResponse) {
+  const fmt = (n: number) => formatCurrency(n);
+  const rows: (string | number | null)[][] = [];
+
+  rows.push(["Costo Real por Material"]);
+  rows.push([`Periodo: ${data.period_from} - ${data.period_to}`]);
+  rows.push([]);
+
+  for (const bu of data.business_units) {
+    rows.push([bu.business_unit_name, `Gastos: ${fmt(bu.total_expenses)}`, `Kg: ${bu.kg_purchased.toLocaleString()}`, `Overhead: ${fmt(bu.overhead_rate)}/kg`]);
+    rows.push(["Codigo", "Material", "Costo Promedio", "Overhead", "Costo Real"]);
+    for (const m of bu.materials) {
+      rows.push([m.material_code, m.material_name, fmt(m.average_cost), fmt(m.overhead_rate), fmt(m.real_cost)]);
+    }
+    rows.push([]);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 15 }, { wch: 25 }, { wch: 18 }, { wch: 15 }, { wch: 15 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Costo Real");
+  XLSX.writeFile(wb, `costo_real_material_${data.period_from}_${data.period_to}.xlsx`);
 }

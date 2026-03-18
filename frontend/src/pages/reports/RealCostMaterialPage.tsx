@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
+import { Button } from "@/components/ui/button";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useRealCostByMaterial } from "@/hooks/useReports";
 import { formatCurrency } from "@/utils/formatters";
+import { exportRealCostMaterialExcel } from "@/utils/excelExport";
 import type { BusinessUnitOverhead } from "@/types/reports";
 
 function BUSection({ bu }: { bu: BusinessUnitOverhead }) {
@@ -67,7 +69,14 @@ export default function RealCostMaterialPage() {
     <ReportsLayout>
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold">Costo Real por Material</h2>
-        <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
+        <div className="flex items-center gap-2">
+          {data && (
+            <Button variant="outline" size="sm" onClick={() => exportRealCostMaterialExcel(data)}>
+              <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
+            </Button>
+          )}
+          <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
+        </div>
       </div>
 
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}

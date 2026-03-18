@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useProfitabilityByBU } from "@/hooks/useReports";
 import { formatCurrency, formatPercentage } from "@/utils/formatters";
+import { exportProfitabilityBUExcel } from "@/utils/excelExport";
 import type { BusinessUnitProfitability } from "@/types/reports";
 
 function BURow({ bu, isTotal = false }: { bu: BusinessUnitProfitability; isTotal?: boolean }) {
@@ -67,7 +69,14 @@ export default function ProfitabilityBUPage() {
     <ReportsLayout>
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold">Rentabilidad por Unidad de Negocio</h2>
-        <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
+        <div className="flex items-center gap-2">
+          {data && (
+            <Button variant="outline" size="sm" onClick={() => exportProfitabilityBUExcel(data)}>
+              <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
+            </Button>
+          )}
+          <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
+        </div>
       </div>
 
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}
