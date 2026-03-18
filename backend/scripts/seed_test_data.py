@@ -254,29 +254,59 @@ def create_material_categories(db, org: Organization) -> dict:
     return result
 
 
-def create_expense_categories(db, org: Organization) -> dict:
-    cats = [
-        ("Flete",            "Transporte y acarreo de materiales",  True),
-        ("Pesaje",           "Servicio de bascula y pesaje",         True),
-        ("Arriendo",         "Arrendamiento de bodegas y predios",   False),
-        ("Servicios",        "Agua, luz, gas, internet",             False),
-        ("Nomina",           "Salarios y prestaciones sociales",     False),
-        ("Mantenimiento",    "Mantenimiento de equipos y vehiculos", False),
-        ("Papeleria",        "Elementos de oficina y papeleria",     False),
-        ("Depreciación Equipos", "Depreciacion mensual de activos fijos", False),
+def create_expense_categories(db, org: Organization, bus: dict) -> dict:
+    """Crea categorias de gasto con defaults de UN preconfigurados."""
+    # Categorias principales
+    cats_data = [
+        # (nombre, descripcion, is_direct, default_bu_id, default_applicable_bu_ids)
+        ("Flete",            "Transporte y acarreo de materiales",  True,  None, None),  # General
+        ("Pesaje",           "Servicio de bascula y pesaje",         True,  None, None),  # General
+        ("Arriendo",         "Arrendamiento de bodegas y predios",   False, None, None),  # General
+        ("Servicios",        "Agua, luz, gas, internet",             False, None,
+         [str(bus["Chatarra"].id), str(bus["No Ferrosos"].id)]),  # Compartido: Chatarra + No Ferrosos
+        ("Nomina",           "Salarios y prestaciones sociales",     False, None, None),  # General (padre)
+        ("Mantenimiento",    "Mantenimiento de equipos y vehiculos", False, None,
+         [str(bus["Chatarra"].id), str(bus["Fibras"].id)]),  # Compartido: Chatarra + Fibras
+        ("Papeleria",        "Elementos de oficina y papeleria",     False, None, None),  # General
+        ("Depreciación Equipos", "Depreciacion mensual de activos fijos", False, None, None),  # General
     ]
     result = {}
-    for nombre, desc, directo in cats:
+    for nombre, desc, directo, default_bu, default_applicable in cats_data:
         cat = ExpenseCategory(
             organization_id=org.id,
             name=nombre,
             description=desc,
             is_direct_expense=directo,
+            default_business_unit_id=default_bu,
+            default_applicable_business_unit_ids=default_applicable,
         )
         db.add(cat)
         db.flush()
         result[nombre] = cat
-        print(f"  Categoria gasto: {nombre} ({'directo' if directo else 'indirecto'})")
+        if default_applicable:
+            bu_names = [n for n, b in bus.items() if str(b.id) in default_applicable]
+            print(f"  Categoria gasto: {nombre} ({'directo' if directo else 'indirecto'}) → Compartido: {', '.join(bu_names)}")
+        elif default_bu:
+            bu_name = next((n for n, b in bus.items() if str(b.id) == str(default_bu)), "?")
+            print(f"  Categoria gasto: {nombre} ({'directo' if directo else 'indirecto'}) → Directo: {bu_name}")
+        else:
+            print(f"  Categoria gasto: {nombre} ({'directo' if directo else 'indirecto'}) → General")
+
+    # Subcategorias de Nomina (directo a UNs especificas)
+    for bu_nombre in ["Chatarra", "Fibras", "No Ferrosos", "Electronicos"]:
+        sub = ExpenseCategory(
+            organization_id=org.id,
+            name=f"Nomina {bu_nombre}",
+            description=f"Nomina operativa de {bu_nombre}",
+            is_direct_expense=False,  # hereda del padre
+            parent_id=result["Nomina"].id,
+            default_business_unit_id=bus[bu_nombre].id,
+        )
+        db.add(sub)
+        db.flush()
+        result[f"Nomina {bu_nombre}"] = sub
+        print(f"  Subcategoria: Nomina > Nomina {bu_nombre} → Directo: {bu_nombre}")
+
     return result
 
 
@@ -566,7 +596,7 @@ def main():
         print("\n[2/6] Unidades de negocio y categorias...")
         bus = create_business_units(db, org)
         cats = create_material_categories(db, org)
-        expense_cats = create_expense_categories(db, org)
+        expense_cats = create_expense_categories(db, org, bus)
         db.commit()
 
         print("\n[3/6] Materiales...")
@@ -612,7 +642,7 @@ def main():
         print(f"  3 bodegas")
         print(f"  5 cuentas de dinero")
         print(f"  4 unidades de negocio")
-        print(f"  8 categorias de gasto")
+        print(f"  12 categorias de gasto (8 principales + 4 subcategorias nomina por UN)")
         print(f"\nMovimientos:")
         print(f"  Aporte capital: $100,000,000 → Bancolombia Ahorros (Gustavo Cadena)")
         print()

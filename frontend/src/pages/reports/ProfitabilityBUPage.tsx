@@ -27,6 +27,8 @@ function BURow({ bu, isTotal = false }: { bu: BusinessUnitProfitability; isTotal
     <>
       <tr className={`text-sm border-b ${cls}`}>
         <td className="py-2 px-3">{nameEl}</td>
+        <td className="py-2 px-3 text-right tabular-nums">{formatCurrency(bu.purchases_total)}</td>
+        <td className="py-2 px-3 text-right tabular-nums text-slate-500">{formatPercentage(bu.purchases_weight_pct)}</td>
         <td className="py-2 px-3 text-right tabular-nums">{formatCurrency(bu.sales_revenue)}</td>
         <td className="py-2 px-3 text-right tabular-nums">{formatCurrency(bu.sales_cogs)}</td>
         <td className="py-2 px-3 text-right tabular-nums">{formatCurrency(bu.total_gross_profit)}</td>
@@ -43,14 +45,14 @@ function BURow({ bu, isTotal = false }: { bu: BusinessUnitProfitability; isTotal
         <>
           {bu.de_profit !== 0 && (
             <tr className="text-xs text-slate-500 bg-slate-50/50">
-              <td className="py-1 px-3 pl-8" colSpan={3}>Margen Doble Partida</td>
+              <td className="py-1 px-3 pl-8" colSpan={5}>Margen Doble Partida</td>
               <td className="py-1 px-3 text-right tabular-nums">{formatCurrency(bu.de_profit)}</td>
               <td colSpan={6} />
             </tr>
           )}
           {bu.direct_expenses_detail.map((d) => (
             <tr key={d.category_name} className="text-xs text-slate-500 bg-slate-50/50">
-              <td className="py-1 px-3 pl-8" colSpan={4}>{d.category_name}</td>
+              <td className="py-1 px-3 pl-8" colSpan={6}>{d.category_name}</td>
               <td className="py-1 px-3 text-right tabular-nums">{formatCurrency(d.amount)}</td>
               <td colSpan={5} />
             </tr>
@@ -88,6 +90,8 @@ export default function ProfitabilityBUPage() {
               <thead>
                 <tr className="border-b bg-slate-50 text-xs text-slate-500 uppercase tracking-wider">
                   <th className="py-2 px-3 text-left">Unidad de Negocio</th>
+                  <th className="py-2 px-3 text-right">Compras</th>
+                  <th className="py-2 px-3 text-right">Peso %</th>
                   <th className="py-2 px-3 text-right">Ventas</th>
                   <th className="py-2 px-3 text-right">COGS</th>
                   <th className="py-2 px-3 text-right">Ut. Bruta</th>
@@ -103,7 +107,7 @@ export default function ProfitabilityBUPage() {
                 {data.business_units.map((bu) => (
                   <BURow key={bu.business_unit_id ?? "unassigned"} bu={bu} />
                 ))}
-                <tr><td colSpan={10}><Separator /></td></tr>
+                <tr><td colSpan={12}><Separator /></td></tr>
                 <BURow bu={data.totals} isTotal />
               </tbody>
             </table>

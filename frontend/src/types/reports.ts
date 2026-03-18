@@ -420,6 +420,8 @@ export interface ExpenseByCategoryItem {
 export interface BusinessUnitProfitability {
   business_unit_id: string | null;
   business_unit_name: string;
+  purchases_total: number;
+  purchases_weight_pct: number;
   sales_revenue: number;
   sales_cogs: number;
   sales_gross_profit: number;

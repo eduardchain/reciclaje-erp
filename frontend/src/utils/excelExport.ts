@@ -188,12 +188,13 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
   rows.push([]);
 
   // Header
-  rows.push(["Unidad de Negocio", "Ventas", "COGS", "Ut. Bruta", "G. Directos", "G. Compartidos", "G. Generales", "Comisiones", "Ut. Neta", "Margen %"]);
+  rows.push(["Unidad de Negocio", "Compras", "Peso %", "Ventas", "COGS", "Ut. Bruta", "G. Directos", "G. Compartidos", "G. Generales", "Comisiones", "Ut. Neta", "Margen %"]);
 
   // UNs
   for (const bu of data.business_units) {
     rows.push([
-      bu.business_unit_name, fmt(bu.sales_revenue), fmt(bu.sales_cogs),
+      bu.business_unit_name, fmt(bu.purchases_total), `${bu.purchases_weight_pct.toFixed(1)}%`,
+      fmt(bu.sales_revenue), fmt(bu.sales_cogs),
       fmt(bu.total_gross_profit), fmt(bu.direct_expenses), fmt(bu.shared_expenses),
       fmt(bu.general_expenses), fmt(bu.sale_commissions), fmt(bu.net_profit),
       `${bu.net_margin.toFixed(1)}%`,
@@ -208,7 +209,8 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
   rows.push([]);
   const t = data.totals;
   rows.push([
-    "TOTAL", fmt(t.sales_revenue), fmt(t.sales_cogs), fmt(t.total_gross_profit),
+    "TOTAL", fmt(t.purchases_total), "100%",
+    fmt(t.sales_revenue), fmt(t.sales_cogs), fmt(t.total_gross_profit),
     fmt(t.direct_expenses), fmt(t.shared_expenses), fmt(t.general_expenses),
     fmt(t.sale_commissions), fmt(t.net_profit), `${t.net_margin.toFixed(1)}%`,
   ]);
@@ -289,7 +291,7 @@ export function exportCashFlowExcel(data: CashFlowResponse) {
   rows.push(["Saldo Inicial", fmt(data.opening_balance)]);
   rows.push([]);
   rows.push(["INGRESOS", ""]);
-  rows.push(["Cobros Ventas (Liquidacion)", fmt(data.inflows.sale_collections)]);
+  // sale_collections removido (phantom — ya capturado por collection_from_client)
   rows.push(["Cobros a Clientes (Tesoreria)", fmt(data.inflows.customer_collections)]);
   rows.push(["Ingresos por Servicios", fmt(data.inflows.service_income)]);
   rows.push(["Aportes de Capital", fmt(data.inflows.capital_injections)]);
@@ -298,7 +300,7 @@ export function exportCashFlowExcel(data: CashFlowResponse) {
   rows.push(["Total Ingresos", fmt(data.total_inflows)]);
   rows.push([]);
   rows.push(["EGRESOS", ""]);
-  rows.push(["Pagos Compras (Liquidacion)", fmt(data.outflows.purchase_payments)]);
+  // purchase_payments removido (phantom — ya capturado por payment_to_supplier)
   rows.push(["Pagos a Proveedores (Tesoreria)", fmt(data.outflows.supplier_payments)]);
   rows.push(["Gastos", fmt(data.outflows.expenses)]);
   rows.push(["Comisiones", fmt(data.outflows.commission_payments)]);

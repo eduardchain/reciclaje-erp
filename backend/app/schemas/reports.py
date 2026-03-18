@@ -499,6 +499,9 @@ class BusinessUnitProfitability(BaseModel):
     """Rentabilidad de una Unidad de Negocio."""
     business_unit_id: Optional[str] = None
     business_unit_name: str
+    # Compras (base prorrateo)
+    purchases_total: float = 0
+    purchases_weight_pct: float = 0
     # Ingresos
     sales_revenue: float = 0
     sales_cogs: float = 0

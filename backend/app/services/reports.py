@@ -452,34 +452,9 @@ class ReportService:
         ))
 
         # --- Flujos en el PERIODO (date_from..date_to) ---
-
-        # A. Ventas cobradas en periodo (inflow por liquidacion)
-        sale_collections = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(Sale.total_amount), 0))
-                .where(
-                    Sale.organization_id == organization_id,
-                    Sale.status == "liquidated",
-                    Sale.date >= dt_from,
-                    Sale.date < dt_to,
-                )
-            )
-        ))
-
-        # A. Compras pagadas en periodo (outflow por liquidacion)
-        purchase_payments = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(Purchase.total_amount), 0))
-                .where(
-                    Purchase.organization_id == organization_id,
-                    Purchase.status == "liquidated",
-                    Purchase.date >= dt_from,
-                    Purchase.date < dt_to,
-                )
-            )
-        ))
-
-        # B. Money movements en periodo
+        # Solo MoneyMovements reales (no phantom de liquidaciones).
+        # Pagos a proveedores y cobros a clientes se capturan por
+        # payment_to_supplier y collection_from_client respectivamente.
         mm_period = db.execute(
             select(
                 MoneyMovement.movement_type,
@@ -511,12 +486,12 @@ class ReportService:
         generic_collections = mm_map.get("collection_from_generic", Decimal("0"))
 
         total_inflows = (
-            sale_collections + customer_collections + service_income
+            customer_collections + service_income
             + capital_injections + advance_collections
             + generic_collections
         )
         total_outflows = (
-            purchase_payments + supplier_payments + expenses
+            supplier_payments + expenses
             + commission_payments + capital_returns
             + provision_deposits + deferred_fundings
             + advance_payments + asset_payments
@@ -524,33 +499,8 @@ class ReportService:
         )
         net_flow = total_inflows - total_outflows
 
-        # --- Opening balance: restar todos los cambios desde dt_from hasta AHORA ---
-
-        # Ventas pagadas desde dt_from hasta ahora
-        net_sales_since = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(Sale.total_amount), 0))
-                .where(
-                    Sale.organization_id == organization_id,
-                    Sale.status == "liquidated",
-                    Sale.date >= dt_from,
-                )
-            )
-        ))
-
-        # Compras pagadas desde dt_from hasta ahora
-        net_purchases_since = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(Purchase.total_amount), 0))
-                .where(
-                    Purchase.organization_id == organization_id,
-                    Purchase.status == "liquidated",
-                    Purchase.date >= dt_from,
-                )
-            )
-        ))
-
-        # Money movements net desde dt_from hasta ahora
+        # --- Opening balance: balance actual - cambios reales desde dt_from ---
+        # Solo MoneyMovements (flujo real de caja), no phantom de liquidaciones.
         mm_since = db.execute(
             select(
                 MoneyMovement.movement_type,
@@ -570,8 +520,7 @@ class ReportService:
             elif mt in OUTFLOW_TYPES:
                 net_mm_since -= amt
 
-        net_all_since = net_sales_since - net_purchases_since + net_mm_since
-        opening_balance = current_total - net_all_since
+        opening_balance = current_total - net_mm_since
         closing_balance = opening_balance + net_flow
 
         return CashFlowResponse(
@@ -579,7 +528,7 @@ class ReportService:
             period_to=date_to,
             opening_balance=float(opening_balance),
             inflows=CashFlowInflows(
-                sale_collections=float(sale_collections),
+                sale_collections=0,
                 customer_collections=float(customer_collections),
                 service_income=float(service_income),
                 capital_injections=float(capital_injections),
@@ -589,7 +538,7 @@ class ReportService:
             ),
             total_inflows=float(total_inflows),
             outflows=CashFlowOutflows(
-                purchase_payments=float(purchase_payments),
+                purchase_payments=0,
                 supplier_payments=float(supplier_payments),
                 expenses=float(expenses),
                 commission_payments=float(commission_payments),
@@ -2431,6 +2380,8 @@ class ReportService:
         # 2. Compras por UN (base para prorrateo)
         purchases_by_bu = self._get_purchases_by_bu(db, organization_id, dt_from, dt_to)
 
+        total_purchases_all = sum(purchases_by_bu.values())
+
         # 3. Ingresos y COGS de ventas por UN
         sale_filters = [
             Sale.organization_id == organization_id,
@@ -2641,9 +2592,14 @@ class ReportService:
             if not has_activity:
                 continue
 
+            bu_purchases = purchases_by_bu.get(bu_key, Decimal("0"))
+            bu_weight = self._safe_pct(bu_purchases, total_purchases_all) if total_purchases_all > 0 else 0.0
+
             bu_item = BusinessUnitProfitability(
                 business_unit_id=bu_key if bu_key != "unassigned" else None,
                 business_unit_name=bu_name,
+                purchases_total=float(bu_purchases),
+                purchases_weight_pct=bu_weight,
                 sales_revenue=float(revenue),
                 sales_cogs=float(cogs),
                 sales_gross_profit=float(revenue - cogs),
@@ -2661,6 +2617,7 @@ class ReportService:
             result_bus.append(bu_item)
 
             # Acumular totales
+            totals.purchases_total += float(bu_purchases)
             totals.sales_revenue += float(revenue)
             totals.sales_cogs += float(cogs)
             totals.sales_gross_profit += float(revenue - cogs)
@@ -2673,6 +2630,7 @@ class ReportService:
             totals.total_expenses += float(total_exp)
             totals.net_profit += float(net)
 
+        totals.purchases_weight_pct = 100.0
         if totals.sales_revenue > 0:
             totals.net_margin = self._safe_pct(
                 Decimal(str(totals.net_profit)),

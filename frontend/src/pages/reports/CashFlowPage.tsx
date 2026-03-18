@@ -27,8 +27,7 @@ export default function CashFlowPage() {
           <Card className="shadow-sm">
             <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Ingresos</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <div className="flex justify-between"><span>Cobros de Ventas (Liquidacion)</span><span>{formatCurrency(data.inflows.sale_collections)}</span></div>
-              <div className="flex justify-between"><span>Cobros a Clientes (Tesoreria)</span><span>{formatCurrency(data.inflows.customer_collections)}</span></div>
+              <div className="flex justify-between"><span>Cobros a Clientes</span><span>{formatCurrency(data.inflows.customer_collections)}</span></div>
               <div className="flex justify-between"><span>Ingresos por Servicios</span><span>{formatCurrency(data.inflows.service_income)}</span></div>
               <div className="flex justify-between"><span>Aportes de Capital</span><span>{formatCurrency(data.inflows.capital_injections)}</span></div>
               {data.inflows.advance_collections > 0 && (
@@ -45,8 +44,7 @@ export default function CashFlowPage() {
           <Card className="shadow-sm">
             <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-red-700">Egresos</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <div className="flex justify-between"><span>Pagos de Compras (Liquidacion)</span><span>{formatCurrency(data.outflows.purchase_payments)}</span></div>
-              <div className="flex justify-between"><span>Pagos a Proveedores (Tesoreria)</span><span>{formatCurrency(data.outflows.supplier_payments)}</span></div>
+              <div className="flex justify-between"><span>Pagos a Proveedores</span><span>{formatCurrency(data.outflows.supplier_payments)}</span></div>
               <div className="flex justify-between"><span>Gastos</span><span>{formatCurrency(data.outflows.expenses)}</span></div>
               <div className="flex justify-between"><span>Comisiones</span><span>{formatCurrency(data.outflows.commission_payments)}</span></div>
               <div className="flex justify-between"><span>Devolucion de Capital</span><span>{formatCurrency(data.outflows.capital_returns)}</span></div>
