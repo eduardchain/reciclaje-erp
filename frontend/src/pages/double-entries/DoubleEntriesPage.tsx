@@ -108,25 +108,31 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
   );
 }
 
-const columns: ColumnDef<DoubleEntryResponse, unknown>[] = [
-  { accessorKey: "double_entry_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.double_entry_number}</span> },
-  { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
-  { accessorKey: "materials_summary", header: "Materiales", cell: ({ row }) => <span className="font-medium">{row.original.materials_summary}</span> },
-  { accessorKey: "supplier_name", header: "Proveedor" },
-  { accessorKey: "customer_name", header: "Cliente" },
-  { accessorKey: "profit", header: "Utilidad", enableSorting: true, cell: ({ row }) => <span className={`font-medium tabular-nums ${row.original.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(row.original.profit)}</span> },
-  { accessorKey: "profit_margin", header: "Margen", enableSorting: true, cell: ({ row }) => formatPercentage(row.original.profit_margin) },
-  { accessorKey: "status", header: "Estado", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
-  {
-    id: "actions",
-    header: "",
-    cell: ({ row }) => <ActionsCell de={row.original} />,
-  },
-];
+function getColumns(canViewValues: boolean): ColumnDef<DoubleEntryResponse, unknown>[] {
+  return [
+    { accessorKey: "double_entry_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.double_entry_number}</span> },
+    { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
+    { accessorKey: "materials_summary", header: "Materiales", cell: ({ row }) => <span className="font-medium">{row.original.materials_summary}</span> },
+    { accessorKey: "supplier_name", header: "Proveedor" },
+    { accessorKey: "customer_name", header: "Cliente" },
+    ...(canViewValues ? [
+      { accessorKey: "profit", header: "Utilidad", enableSorting: true, cell: ({ row }: { row: { original: DoubleEntryResponse } }) => <span className={`font-medium tabular-nums ${row.original.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(row.original.profit)}</span> },
+      { accessorKey: "profit_margin", header: "Margen", enableSorting: true, cell: ({ row }: { row: { original: DoubleEntryResponse } }) => formatPercentage(row.original.profit_margin) },
+    ] : []),
+    { accessorKey: "status", header: "Estado", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => <ActionsCell de={row.original} />,
+    },
+  ];
+}
 
 export default function DoubleEntriesPage() {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
+  const canViewValues = hasPermission("double_entries.view_values");
+  const columns = useMemo(() => getColumns(canViewValues), [canViewValues]);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
@@ -169,19 +175,21 @@ export default function DoubleEntriesPage() {
 
       {/* KPI Cards */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
+        <div className={`grid grid-cols-1 ${canViewValues ? "md:grid-cols-3" : "md:grid-cols-1"} gap-4`}>
+          {Array.from({ length: canViewValues ? 3 : 1 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <KpiCard
-            label="Utilidad Total"
-            metric={kpis.profit}
-            icon={<TrendingUp className="h-4 w-4" />}
-            accentColor="emerald"
-          />
+        <div className={`grid grid-cols-1 ${canViewValues ? "md:grid-cols-3" : "md:grid-cols-1"} gap-4`}>
+          {canViewValues && (
+            <KpiCard
+              label="Utilidad Total"
+              metric={kpis.profit}
+              icon={<TrendingUp className="h-4 w-4" />}
+              accentColor="emerald"
+            />
+          )}
           <KpiCard
             label="Operaciones"
             metric={kpis.count}
@@ -189,13 +197,15 @@ export default function DoubleEntriesPage() {
             accentColor="sky"
             formatValue={(n) => String(n)}
           />
-          <KpiCard
-            label="Margen Promedio"
-            metric={kpis.margin}
-            icon={<Percent className="h-4 w-4" />}
-            accentColor="violet"
-            formatValue={formatPercentage}
-          />
+          {canViewValues && (
+            <KpiCard
+              label="Margen Promedio"
+              metric={kpis.margin}
+              icon={<Percent className="h-4 w-4" />}
+              accentColor="violet"
+              formatValue={formatPercentage}
+            />
+          )}
         </div>
       )}
 

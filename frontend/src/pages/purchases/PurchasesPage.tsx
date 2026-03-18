@@ -118,6 +118,11 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
       cell: ({ row }) => <span className="font-medium">#{row.original.purchase_number}</span>,
     },
     {
+      accessorKey: "invoice_number",
+      header: "FACTURA",
+      cell: ({ row }) => row.original.invoice_number || "—",
+    },
+    {
       accessorKey: "date",
       header: "FECHA",
       enableSorting: true,
@@ -219,19 +224,21 @@ export default function PurchasesPage() {
 
       {/* KPI Cards */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
+        <div className={`grid grid-cols-1 ${canViewPrices ? "md:grid-cols-3" : "md:grid-cols-1"} gap-4`}>
+          {Array.from({ length: canViewPrices ? 3 : 1 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <KpiCard
-            label="Total Compras"
-            metric={kpis.total}
-            icon={<ShoppingCart className="h-4 w-4" />}
-            accentColor="sky"
-          />
+        <div className={`grid grid-cols-1 ${canViewPrices ? "md:grid-cols-3" : "md:grid-cols-1"} gap-4`}>
+          {canViewPrices && (
+            <KpiCard
+              label="Total Compras"
+              metric={kpis.total}
+              icon={<ShoppingCart className="h-4 w-4" />}
+              accentColor="sky"
+            />
+          )}
           <KpiCard
             label="Operaciones"
             metric={kpis.count}
@@ -239,12 +246,14 @@ export default function PurchasesPage() {
             accentColor="violet"
             formatValue={(n) => String(n)}
           />
-          <KpiCard
-            label="Promedio"
-            metric={kpis.avg}
-            icon={<Calculator className="h-4 w-4" />}
-            accentColor="amber"
-          />
+          {canViewPrices && (
+            <KpiCard
+              label="Promedio"
+              metric={kpis.avg}
+              icon={<Calculator className="h-4 w-4" />}
+              accentColor="amber"
+            />
+          )}
         </div>
       )}
 

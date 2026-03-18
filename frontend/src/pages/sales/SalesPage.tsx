@@ -115,6 +115,11 @@ function getColumns(canViewPrices: boolean): ColumnDef<SaleResponse, unknown>[] 
       cell: ({ row }) => <span className="font-medium">#{row.original.sale_number}</span>,
     },
     {
+      accessorKey: "invoice_number",
+      header: "FACTURA",
+      cell: ({ row }) => row.original.invoice_number || "—",
+    },
+    {
       accessorKey: "date",
       header: "FECHA",
       enableSorting: true,
@@ -252,35 +257,41 @@ export default function SalesPage() {
 
       {/* KPI Cards */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div className={`grid grid-cols-1 ${canViewPrices ? "md:grid-cols-4" : "md:grid-cols-1"} gap-4`}>
+          {Array.from({ length: canViewPrices ? 4 : 1 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <KpiCard
-            label="Total Ventas"
-            metric={kpis.total}
-            icon={<DollarSign className="h-4 w-4" />}
-            accentColor="emerald"
-          />
-          <KpiCard
-            label="Utilidad Bruta"
-            metric={kpis.profit}
-            icon={<TrendingUp className="h-4 w-4" />}
-            accentColor="violet"
-            secondaryLabel="Margen"
-            secondaryValue={formatPercentage(kpis.margin)}
-          />
-          <KpiCard
-            label="Utilidad Neta"
-            metric={kpis.netProfit}
-            icon={<TrendingUp className="h-4 w-4" />}
-            accentColor="amber"
-            secondaryLabel="Margen Neto"
-            secondaryValue={formatPercentage(kpis.netMargin)}
-          />
+        <div className={`grid grid-cols-1 ${canViewPrices ? "md:grid-cols-4" : "md:grid-cols-1"} gap-4`}>
+          {canViewPrices && (
+            <KpiCard
+              label="Total Ventas"
+              metric={kpis.total}
+              icon={<DollarSign className="h-4 w-4" />}
+              accentColor="emerald"
+            />
+          )}
+          {canViewPrices && (
+            <KpiCard
+              label="Utilidad Bruta"
+              metric={kpis.profit}
+              icon={<TrendingUp className="h-4 w-4" />}
+              accentColor="violet"
+              secondaryLabel="Margen"
+              secondaryValue={formatPercentage(kpis.margin)}
+            />
+          )}
+          {canViewPrices && (
+            <KpiCard
+              label="Utilidad Neta"
+              metric={kpis.netProfit}
+              icon={<TrendingUp className="h-4 w-4" />}
+              accentColor="amber"
+              secondaryLabel="Margen Neto"
+              secondaryValue={formatPercentage(kpis.netMargin)}
+            />
+          )}
           <KpiCard
             label="Operaciones"
             metric={kpis.count}
