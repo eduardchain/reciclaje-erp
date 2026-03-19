@@ -222,9 +222,9 @@ export default function SaleDetailPage() {
                     <TableRow key={c.id}>
                       <TableCell className="font-medium">{c.third_party_name}</TableCell>
                       <TableCell>{c.concept}</TableCell>
-                      <TableCell>{c.commission_type === "percentage" ? "Porcentaje" : "Fijo"}</TableCell>
+                      <TableCell>{c.commission_type === "percentage" ? "Porcentaje" : c.commission_type === "per_kg" ? "Por Kilo" : "Fijo"}</TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {c.commission_type === "percentage" ? formatPercentage(c.commission_value) : formatCurrency(c.commission_value)}
+                        {c.commission_type === "percentage" ? formatPercentage(c.commission_value) : c.commission_type === "per_kg" ? `${formatCurrency(c.commission_value)}/kg` : formatCurrency(c.commission_value)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums font-medium">{formatCurrency(c.commission_amount)}</TableCell>
                     </TableRow>

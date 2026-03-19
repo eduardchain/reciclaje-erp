@@ -234,9 +234,9 @@ export default function PurchaseDetailPage() {
                     <TableRow key={comm.id}>
                       <TableCell className="font-medium">{comm.third_party_name}</TableCell>
                       <TableCell>{comm.concept}</TableCell>
-                      <TableCell>{comm.commission_type === "percentage" ? "Porcentaje" : "Fijo"}</TableCell>
+                      <TableCell>{comm.commission_type === "percentage" ? "Porcentaje" : comm.commission_type === "per_kg" ? "Por Kilo" : "Fijo"}</TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {comm.commission_type === "percentage" ? `${comm.commission_value}%` : formatCurrency(comm.commission_value)}
+                        {comm.commission_type === "percentage" ? `${comm.commission_value}%` : comm.commission_type === "per_kg" ? `${formatCurrency(comm.commission_value)}/kg` : formatCurrency(comm.commission_value)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums font-medium">{formatCurrency(comm.commission_amount)}</TableCell>
                     </TableRow>

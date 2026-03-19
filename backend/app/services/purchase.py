@@ -237,7 +237,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
         # Step 6: Procesar comisiones (solo guardar, el prorrateo ocurre al liquidar)
         if obj_in.commissions:
-            self._process_commissions(db, purchase, obj_in.commissions, total_amount, organization_id)
+            qty = sum(Decimal(str(l.quantity)) for l in obj_in.lines)
+            self._process_commissions(db, purchase, obj_in.commissions, total_amount, organization_id, qty)
 
         db.flush()
 
@@ -1151,6 +1152,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         commissions_data: List,
         purchase_total: Decimal,
         organization_id: UUID,
+        total_quantity: Optional[Decimal] = None,
     ) -> None:
         """Crear registros de comision y calcular montos."""
         for comm_data in commissions_data:
@@ -1167,8 +1169,15 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     detail=f"El comisionista '{recipient.name}' debe ser proveedor de servicios",
                 )
 
+            # Calcular total_quantity para per_kg si no viene como parametro
+            if total_quantity is None:
+                from app.models.purchase import PurchaseLine
+                total_quantity = db.scalar(
+                    select(func.coalesce(func.sum(PurchaseLine.quantity), 0))
+                    .where(PurchaseLine.purchase_id == purchase.id)
+                ) or Decimal("0")
             commission_amount = self._calculate_commission(
-                comm_data.commission_type, comm_data.commission_value, purchase_total
+                comm_data.commission_type, comm_data.commission_value, purchase_total, total_quantity
             )
 
             commission = PurchaseCommission(
@@ -1187,10 +1196,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         commission_type: str,
         commission_value: Decimal,
         purchase_total: Decimal,
+        total_quantity: Decimal = Decimal("0"),
     ) -> Decimal:
         """Calcular monto de comision segun tipo."""
         if commission_type == "percentage":
             return (purchase_total * Decimal(str(commission_value))) / Decimal("100")
+        elif commission_type == "per_kg":
+            return Decimal(str(commission_value)) * total_quantity
         else:
             return Decimal(str(commission_value))
 

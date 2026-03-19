@@ -101,8 +101,10 @@ export default function DoubleEntryLiquidatePage() {
   const totalSale = useMemo(() => lines.reduce((sum, l) => sum + l.quantity * l.sale_unit_price, 0), [lines]);
   const grossProfit = totalSale - totalPurchase;
 
+  const totalQuantity = lines.reduce((sum, l) => sum + (l.quantity || 0), 0);
   const commissionAmounts = commissions.map((c) => {
     if (c.commission_type === "percentage") return (totalSale * c.commission_value) / 100;
+    if (c.commission_type === "per_kg") return totalQuantity * c.commission_value;
     return c.commission_value;
   });
   const totalCommissions = commissionAmounts.reduce((sum, a) => sum + a, 0);
@@ -285,6 +287,7 @@ export default function DoubleEntryLiquidatePage() {
                   <SelectContent>
                     <SelectItem value="percentage">Porcentaje</SelectItem>
                     <SelectItem value="fixed">Fijo</SelectItem>
+                    <SelectItem value="per_kg">Por Kilo</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

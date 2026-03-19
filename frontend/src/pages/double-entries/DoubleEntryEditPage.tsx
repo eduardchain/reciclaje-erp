@@ -125,9 +125,10 @@ export default function DoubleEntryEditPage() {
 
   const totalPurchase = useMemo(() => lines.reduce((sum, l) => sum + l.quantity * l.purchase_unit_price, 0), [lines]);
   const totalSale = useMemo(() => lines.reduce((sum, l) => sum + l.quantity * l.sale_unit_price, 0), [lines]);
+  const totalQuantity = useMemo(() => lines.reduce((sum, l) => sum + (l.quantity || 0), 0), [lines]);
   const totalCommissions = useMemo(
-    () => commissions.reduce((sum, c) => sum + (c.commission_type === "percentage" ? (totalSale * c.commission_value) / 100 : c.commission_value), 0),
-    [commissions, totalSale],
+    () => commissions.reduce((sum, c) => sum + (c.commission_type === "percentage" ? (totalSale * c.commission_value) / 100 : c.commission_type === "per_kg" ? totalQuantity * c.commission_value : c.commission_value), 0),
+    [commissions, totalSale, totalQuantity],
   );
   const profit = totalSale - totalPurchase - totalCommissions;
 
@@ -302,7 +303,7 @@ export default function DoubleEntryEditPage() {
                 </div>
                 <div className="col-span-2">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</Label>}
-                  <Select value={comm.commission_type} onValueChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, commission_type: v as "percentage" | "fixed" } : c))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">%</SelectItem><SelectItem value="fixed">$</SelectItem></SelectContent></Select>
+                  <Select value={comm.commission_type} onValueChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, commission_type: v as "percentage" | "fixed" | "per_kg" } : c))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">Porcentaje</SelectItem><SelectItem value="fixed">Fijo</SelectItem><SelectItem value="per_kg">Por Kilo</SelectItem></SelectContent></Select>
                 </div>
                 <div className="col-span-2">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor</Label>}

@@ -147,7 +147,8 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
 
         # Step 8: Crear comisiones como registros (SIN MoneyMovement, SIN balances)
         if obj_in.commissions:
-            self._create_commission_records(db, sale.id, obj_in.commissions, sale_total, organization_id)
+            total_qty = sum(Decimal(str(l.quantity)) for l in obj_in.lines)
+            self._create_commission_records(db, sale.id, obj_in.commissions, sale_total, organization_id, total_qty)
 
         # Step 9: Crear DoubleEntry (registered)
         double_entry = DoubleEntry(
@@ -282,7 +283,8 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             db.query(SaleCommission).filter(SaleCommission.sale_id == sale.id).delete(synchronize_session=False)
             db.flush()
             if commissions_data:
-                self._create_commission_records(db, sale.id, commissions_data, sale_total, organization_id)
+                total_qty = sum(de_line.quantity for de_line in double_entry.lines)
+                self._create_commission_records(db, sale.id, commissions_data, sale_total, organization_id, total_qty)
                 db.flush()
 
         # Step 4: Actualizar balances proveedor/cliente
@@ -440,7 +442,8 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
 
             # Recrear comisiones si se proporcionaron
             if obj_in.commissions is not None and obj_in.commissions:
-                self._create_commission_records(db, sale.id, obj_in.commissions, sale_total, organization_id)
+                total_qty = sum(Decimal(str(l.quantity)) for l in obj_in.lines)
+                self._create_commission_records(db, sale.id, obj_in.commissions, sale_total, organization_id, total_qty)
         elif obj_in.commissions is not None:
             # Solo cambio de comisiones (sin cambio de lineas)
             db.query(SaleCommission).filter(SaleCommission.sale_id == sale.id).delete(synchronize_session=False)
@@ -449,7 +452,8 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                 sale_total_current = sum(
                     de_line.quantity * de_line.sale_unit_price for de_line in double_entry.lines
                 )
-                self._create_commission_records(db, sale.id, obj_in.commissions, sale_total_current, organization_id)
+                total_qty = sum(de_line.quantity for de_line in double_entry.lines)
+                self._create_commission_records(db, sale.id, obj_in.commissions, sale_total_current, organization_id, total_qty)
 
         # Actualizar metadata
         if obj_in.date is not None:
@@ -737,6 +741,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         commissions_data: List[SaleCommissionCreate],
         sale_total: Decimal,
         organization_id: UUID,
+        total_quantity: Decimal = Decimal("0"),
     ) -> None:
         """Crear SaleCommission records sin efectos financieros."""
         for comm_data in commissions_data:
@@ -753,7 +758,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                     detail=f"El comisionista '{recipient.name}' debe ser proveedor de servicios",
                 )
             commission_amount = self._calculate_commission(
-                comm_data.commission_type, comm_data.commission_value, sale_total
+                comm_data.commission_type, comm_data.commission_value, sale_total, total_quantity
             )
             db.add(SaleCommission(
                 sale_id=sale_id,
@@ -792,10 +797,13 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         self,
         commission_type: str,
         commission_value: Decimal,
-        sale_total: Decimal
+        sale_total: Decimal,
+        total_quantity: Decimal = Decimal("0"),
     ) -> Decimal:
         if commission_type == "percentage":
             return (commission_value / Decimal("100")) * sale_total
+        elif commission_type == "per_kg":
+            return commission_value * total_quantity
         elif commission_type == "fixed":
             return commission_value
         else:

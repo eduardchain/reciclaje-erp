@@ -1543,3 +1543,42 @@ class TestImmediateCollection:
         }
         resp = client.post("/api/v1/sales", json=payload, headers=org_headers)
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Tests: Comision per_kg en ventas
+# ---------------------------------------------------------------------------
+
+class TestSalePerKgCommission:
+    """Comision por kilo en ventas."""
+
+    def test_sale_per_kg_commission(
+        self, client, org_headers, test_customer, test_material_with_stock,
+        test_warehouse, test_commission_recipient,
+    ):
+        """Venta 500 kg con comision $10/kg = $5,000."""
+        payload = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": "2026-03-14T12:00:00",
+            "lines": [
+                {"material_id": str(test_material_with_stock.id), "quantity": 500, "unit_price": 100},
+            ],
+            "commissions": [
+                {
+                    "third_party_id": str(test_commission_recipient.id),
+                    "concept": "Comision por kilo",
+                    "commission_type": "per_kg",
+                    "commission_value": 10,
+                }
+            ],
+            "auto_liquidate": False,
+        }
+        resp = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        assert resp.status_code == 201
+        data = resp.json()
+
+        assert len(data["commissions"]) == 1
+        assert data["commissions"][0]["commission_type"] == "per_kg"
+        # 500 kg × $10/kg = $5,000
+        assert data["commissions"][0]["commission_amount"] == 5000.0

@@ -424,7 +424,7 @@ class SaleCommission(Base, TimestampMixin):
     )
     
     commission_type: Mapped[str] = mapped_column(
-        Enum("percentage", "fixed", name="commission_type"),
+        Enum("percentage", "fixed", "per_kg", name="commission_type"),
         nullable=False,
         comment="percentage (of sale total) or fixed amount"
     )

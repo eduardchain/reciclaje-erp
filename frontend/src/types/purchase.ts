@@ -5,7 +5,7 @@ export type PurchaseStatus = "registered" | "liquidated" | "cancelled";
 export interface PurchaseCommissionCreate {
   third_party_id: string;
   concept: string;
-  commission_type: "percentage" | "fixed";
+  commission_type: "percentage" | "fixed" | "per_kg";
   commission_value: number;
 }
 
@@ -14,7 +14,7 @@ export interface PurchaseCommissionResponse {
   purchase_id: string;
   third_party_id: string;
   concept: string;
-  commission_type: "percentage" | "fixed";
+  commission_type: "percentage" | "fixed" | "per_kg";
   commission_value: number;
   commission_amount: number;
   created_at: string;

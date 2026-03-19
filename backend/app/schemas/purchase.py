@@ -3,7 +3,7 @@ Pydantic schemas for Purchase and PurchaseLine models.
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, List
+from typing import Literal, Optional, List
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, model_validator
@@ -20,7 +20,7 @@ class PurchaseCommissionBase(BaseModel):
     """Base schema para comision de compra."""
     third_party_id: UUID = Field(..., description="UUID del comisionista")
     concept: str = Field(..., max_length=255, description="Concepto de la comision")
-    commission_type: str = Field(..., description="'percentage' o 'fixed'")
+    commission_type: Literal["percentage", "fixed", "per_kg"] = Field(..., description="'percentage', 'fixed' o 'per_kg'")
     commission_value: Decimal = Field(..., gt=0, description="Porcentaje (0-100) o monto fijo")
 
 

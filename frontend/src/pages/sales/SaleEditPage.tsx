@@ -344,8 +344,9 @@ export default function SaleEditPage() {
               const avgCost = mat?.current_average_cost ?? 0;
               return sum + (l.unit_price > 0 && avgCost > 0 ? (l.unit_price - avgCost) * l.quantity : 0);
             }, 0);
+            const totalQuantity = lines.reduce((sum, l) => sum + (l.quantity || 0), 0);
             const totalComm = commissions.reduce((sum, c) => {
-              return sum + (c.commission_type === "percentage" ? (total * c.commission_value) / 100 : c.commission_value);
+              return sum + (c.commission_type === "percentage" ? (total * c.commission_value) / 100 : c.commission_type === "per_kg" ? totalQuantity * c.commission_value : c.commission_value);
             }, 0);
             const netProfit = estProfit - totalComm;
             const margin = total > 0 ? (estProfit / total) * 100 : 0;
@@ -410,6 +411,7 @@ export default function SaleEditPage() {
                     <SelectContent>
                       <SelectItem value="percentage">Porcentaje</SelectItem>
                       <SelectItem value="fixed">Fijo</SelectItem>
+                      <SelectItem value="per_kg">Por Kilo</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -421,7 +423,7 @@ export default function SaleEditPage() {
                     step="0.01"
                     value={comm.commission_value || ""}
                     onChange={(e) => updateCommission(comm._key, "commission_value", parseFloat(e.target.value) || 0)}
-                    placeholder={comm.commission_type === "percentage" ? "%" : "$"}
+                    placeholder={comm.commission_type === "percentage" ? "%" : comm.commission_type === "per_kg" ? "$/kg" : "$"}
                   />
                 </div>
                 <div className="col-span-1 text-right">
@@ -429,6 +431,8 @@ export default function SaleEditPage() {
                   <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">
                     {comm.commission_type === "percentage"
                       ? formatCurrency((total * comm.commission_value) / 100)
+                      : comm.commission_type === "per_kg"
+                      ? formatCurrency(lines.reduce((sum, l) => sum + (l.quantity || 0), 0) * comm.commission_value)
                       : formatCurrency(comm.commission_value)}
                   </p>
                 </div>

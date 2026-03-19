@@ -862,3 +862,33 @@ class TestDoubleEntryAPI:
         )
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
+
+
+class TestDoubleEntryPerKgCommission:
+    """Comision por kilo en doble partida."""
+
+    def test_dp_per_kg_commission(
+        self, client, org_headers, test_supplier, test_customer,
+        test_material, test_commission_recipient,
+    ):
+        """DP 1000 kg con comision $10/kg = $10,000."""
+        payload = _create_payload(
+            test_supplier.id, test_customer.id, test_material.id,
+            quantity=1000.0,
+            commissions=[
+                {
+                    "third_party_id": str(test_commission_recipient.id),
+                    "concept": "Comision por kilo DP",
+                    "commission_type": "per_kg",
+                    "commission_value": 10,
+                }
+            ],
+        )
+        resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+        assert resp.status_code == 201
+        data = resp.json()
+
+        assert len(data["commissions"]) == 1
+        assert data["commissions"][0]["commission_type"] == "per_kg"
+        # 1000 kg × $10/kg = $10,000
+        assert data["commissions"][0]["commission_amount"] == 10000.0

@@ -3,7 +3,7 @@ Pydantic schemas for Sale, SaleLine, and SaleCommission models.
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, List
+from typing import Literal, Optional, List
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, model_validator
@@ -19,7 +19,7 @@ class SaleCommissionBase(BaseModel):
     """Base schema for SaleCommission."""
     third_party_id: UUID = Field(..., description="Commission recipient UUID")
     concept: str = Field(..., max_length=255, description="Commission description (e.g., 'Comisión facturación', 'Intermediario')")
-    commission_type: str = Field(..., description="'percentage' or 'fixed'")
+    commission_type: Literal["percentage", "fixed", "per_kg"] = Field(..., description="'percentage', 'fixed' or 'per_kg'")
     commission_value: Decimal = Field(..., gt=0, description="Percentage (0-100) or fixed amount")
 
 

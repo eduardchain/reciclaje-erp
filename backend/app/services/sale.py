@@ -246,8 +246,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         
         # Step 8: Process commissions
         if obj_in.commissions:
-            self._process_commissions(db, sale, obj_in.commissions, total_amount, organization_id)
-        
+            qty = sum(Decimal(str(l.quantity)) for l in obj_in.lines)
+            self._process_commissions(db, sale, obj_in.commissions, total_amount, organization_id, qty)
+
         # Step 9: Customer balance NO se actualiza aqui — se hace en liquidate()
 
         db.flush()
@@ -971,7 +972,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         sale: Sale,
         commissions_data: List,
         sale_total: Decimal,
-        organization_id: UUID
+        organization_id: UUID,
+        total_quantity: Optional[Decimal] = None,
     ) -> None:
         """
         Create commission records and calculate amounts.
@@ -1001,11 +1003,18 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     detail=f"El comisionista '{recipient.name}' debe ser proveedor de servicios",
                 )
 
-            # Calculate commission amount
+            # Calcular total_quantity para per_kg si no viene como parametro
+            if total_quantity is None:
+                from app.models.sale import SaleLine
+                total_quantity = db.scalar(
+                    select(func.coalesce(func.sum(SaleLine.quantity), 0))
+                    .where(SaleLine.sale_id == sale.id)
+                ) or Decimal("0")
             commission_amount = self._calculate_commission(
                 comm_data.commission_type,
                 comm_data.commission_value,
-                sale_total
+                sale_total,
+                total_quantity,
             )
             
             # Create commission record
@@ -1025,21 +1034,14 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         self,
         commission_type: str,
         commission_value: Decimal,
-        sale_total: Decimal
+        sale_total: Decimal,
+        total_quantity: Decimal = Decimal("0"),
     ) -> Decimal:
-        """
-        Calculate commission amount based on type and value.
-        
-        Args:
-            commission_type: 'percentage' or 'fixed'
-            commission_value: Percentage (0-100) or fixed amount
-            sale_total: Total sale amount
-            
-        Returns:
-            Calculated commission amount
-        """
+        """Calcular monto de comision segun tipo."""
         if commission_type == "percentage":
             return (sale_total * commission_value) / Decimal("100")
+        elif commission_type == "per_kg":
+            return commission_value * total_quantity
         else:  # fixed
             return commission_value
     

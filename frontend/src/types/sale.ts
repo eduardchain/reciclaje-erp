@@ -5,7 +5,7 @@ export type SaleStatus = "registered" | "liquidated" | "cancelled";
 export interface SaleCommissionCreate {
   third_party_id: string;
   concept: string;
-  commission_type: "percentage" | "fixed";
+  commission_type: "percentage" | "fixed" | "per_kg";
   commission_value: number;
 }
 
@@ -14,7 +14,7 @@ export interface SaleCommissionResponse {
   sale_id: string;
   third_party_id: string;
   concept: string;
-  commission_type: "percentage" | "fixed";
+  commission_type: "percentage" | "fixed" | "per_kg";
   commission_value: number;
   commission_amount: number;
   created_at: string;

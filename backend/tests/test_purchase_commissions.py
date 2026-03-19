@@ -680,3 +680,93 @@ class TestPurchaseCommissions:
             PurchaseCommission.purchase_id == purchase_id,
         ).count()
         assert comm_count == 1
+
+
+class TestPerKgCommission:
+    """Tests para comision tipo per_kg."""
+
+    def test_purchase_per_kg_commission(
+        self, client, org_headers, db_session,
+        test_supplier, test_commission_recipient, test_material, test_warehouse,
+    ):
+        """Comision per_kg: $5/kg × 100 kg = $500, prorrateada al costo."""
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": "2026-03-14T12:00:00",
+            "lines": [
+                {
+                    "material_id": str(test_material.id),
+                    "quantity": 100,
+                    "unit_price": 50,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+            "commissions": [
+                {
+                    "third_party_id": str(test_commission_recipient.id),
+                    "concept": "Comision por kilo",
+                    "commission_type": "per_kg",
+                    "commission_value": 5,
+                }
+            ],
+            "auto_liquidate": True,
+        }
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        data = response.json()
+
+        # Comision = 100 kg × $5/kg = $500
+        assert len(data["commissions"]) == 1
+        assert data["commissions"][0]["commission_amount"] == 500.0
+        assert data["commissions"][0]["commission_type"] == "per_kg"
+
+        # Saldo comisionista = -500
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("-500.00")
+
+        # Costo prorrateado = (5000 + 500) / 100 = 55.00
+        db_session.refresh(test_material)
+        assert abs(test_material.current_average_cost - Decimal("55.00")) < Decimal("0.01")
+
+    def test_purchase_per_kg_multiple_lines(
+        self, client, org_headers, db_session,
+        test_supplier, test_commission_recipient, test_material, test_warehouse, test_organization,
+    ):
+        """per_kg con multiples lineas: suma todas las cantidades."""
+        # Crear segundo material
+        from app.models import MaterialCategory
+        cat2 = MaterialCategory(name="Cat2 PKG", organization_id=test_organization.id)
+        db_session.add(cat2)
+        db_session.flush()
+        mat2 = Material(
+            name="Hierro PKG", code="PKG-002", category_id=cat2.id,
+            organization_id=test_organization.id,
+            current_stock=Decimal("0"), current_average_cost=Decimal("0"),
+        )
+        db_session.add(mat2)
+        db_session.commit()
+        db_session.refresh(mat2)
+
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": "2026-03-14T12:00:00",
+            "lines": [
+                {"material_id": str(test_material.id), "quantity": 300, "unit_price": 50, "warehouse_id": str(test_warehouse.id)},
+                {"material_id": str(mat2.id), "quantity": 200, "unit_price": 40, "warehouse_id": str(test_warehouse.id)},
+            ],
+            "commissions": [
+                {
+                    "third_party_id": str(test_commission_recipient.id),
+                    "concept": "Comision PKG",
+                    "commission_type": "per_kg",
+                    "commission_value": 10,
+                }
+            ],
+            "auto_liquidate": True,
+        }
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        data = response.json()
+
+        # total_quantity = 300 + 200 = 500 kg × $10/kg = $5,000
+        assert data["commissions"][0]["commission_amount"] == 5000.0
