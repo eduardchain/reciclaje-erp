@@ -1,4 +1,4 @@
-export type FixedAssetStatus = "active" | "fully_depreciated" | "disposed";
+export type FixedAssetStatus = "active" | "fully_depreciated" | "disposed" | "cancelled";
 
 export interface AssetDepreciation {
   id: string;

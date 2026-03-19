@@ -13,18 +13,19 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useFixedAssets, useApplyPendingDepreciations } from "@/hooks/useFixedAssets";
 import { formatCurrency } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
-import type { FixedAssetStatus } from "@/types/fixed-asset";
 
-const statusLabels: Record<FixedAssetStatus, string> = {
+const statusLabels: Record<string, string> = {
   active: "Activo",
   fully_depreciated: "Totalmente Depreciado",
   disposed: "Dado de Baja",
+  cancelled: "Cancelado",
 };
 
-const statusColors: Record<FixedAssetStatus, string> = {
+const statusColors: Record<string, string> = {
   active: "bg-emerald-100 text-emerald-800",
   fully_depreciated: "bg-blue-100 text-blue-800",
   disposed: "bg-red-100 text-red-800",
+  cancelled: "bg-slate-100 text-slate-800",
 };
 
 export default function FixedAssetsPage() {
@@ -68,6 +69,7 @@ export default function FixedAssetsPage() {
             <SelectItem value="active">Activos</SelectItem>
             <SelectItem value="fully_depreciated">Totalmente Depreciados</SelectItem>
             <SelectItem value="disposed">Dados de Baja</SelectItem>
+            <SelectItem value="cancelled">Cancelados</SelectItem>
           </SelectContent>
         </Select>
       </div>

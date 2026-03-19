@@ -1907,12 +1907,8 @@ class TestAssetPayment:
         assert test_account.current_balance == Decimal("9000000.00")
         assert test_supplier.current_balance == initial_supplier_balance
 
-    def test_asset_payment_annul(self, client: TestClient, org_headers, test_account, test_supplier, db_session):
-        """Anulacion de pago de activo fijo revierte cuenta, tercero nunca cambio."""
-        initial_account_balance = test_account.current_balance
-        initial_supplier_balance = test_supplier.current_balance
-
-        # Crear
+    def test_asset_payment_annul_blocked(self, client: TestClient, org_headers, test_account, db_session):
+        """Anulacion de asset_payment esta bloqueada — activos se gestionan desde su propio modulo."""
         resp = client.post(
             "/api/v1/money-movements/asset-payment",
             json={
@@ -1920,33 +1916,68 @@ class TestAssetPayment:
                 "account_id": str(test_account.id),
                 "description": "Compra montacarga",
                 "date": "2025-03-10T10:00:00Z",
-                "third_party_id": str(test_supplier.id),
             },
             headers=org_headers,
         )
         assert resp.status_code == 201
         movement_id = resp.json()["id"]
 
-        # Verificar: cuenta baja, tercero NO cambio
-        db_session.refresh(test_account)
-        db_session.refresh(test_supplier)
-        assert test_account.current_balance == initial_account_balance - Decimal("800000")
-        assert test_supplier.current_balance == initial_supplier_balance
-
-        # Anular
+        # Intentar anular — debe fallar
         resp = client.post(
             f"/api/v1/money-movements/{movement_id}/annul",
             json={"reason": "Error de digitacion"},
             headers=org_headers,
         )
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "annulled"
+        assert resp.status_code == 422
+        assert "Activos Fijos" in resp.json()["detail"]
 
-        # Verificar reversion: cuenta vuelve, tercero sigue igual
-        db_session.refresh(test_account)
-        db_session.refresh(test_supplier)
-        assert test_account.current_balance == initial_account_balance
-        assert test_supplier.current_balance == initial_supplier_balance
+    def test_depreciation_expense_annul_blocked(self, client: TestClient, org_headers, db_session, test_organization):
+        """Anulacion de depreciation_expense esta bloqueada."""
+        from app.models.money_movement import MoneyMovement
+        mov = MoneyMovement(
+            organization_id=test_organization.id,
+            movement_type="depreciation_expense",
+            amount=Decimal("50000"),
+            description="Depreciacion test",
+            date=datetime(2026, 3, 18, 12, 0, 0, tzinfo=timezone.utc),
+            status="confirmed",
+            movement_number=88881,
+        )
+        db_session.add(mov)
+        db_session.commit()
+        db_session.refresh(mov)
+
+        resp = client.post(
+            f"/api/v1/money-movements/{mov.id}/annul",
+            json={"reason": "Error"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "Activos Fijos" in resp.json()["detail"]
+
+    def test_asset_purchase_annul_blocked(self, client: TestClient, org_headers, db_session, test_organization):
+        """Anulacion de asset_purchase esta bloqueada."""
+        from app.models.money_movement import MoneyMovement
+        mov = MoneyMovement(
+            organization_id=test_organization.id,
+            movement_type="asset_purchase",
+            amount=Decimal("3000000"),
+            description="Compra activo credito test",
+            date=datetime(2026, 3, 18, 12, 0, 0, tzinfo=timezone.utc),
+            status="confirmed",
+            movement_number=88882,
+        )
+        db_session.add(mov)
+        db_session.commit()
+        db_session.refresh(mov)
+
+        resp = client.post(
+            f"/api/v1/money-movements/{mov.id}/annul",
+            json={"reason": "Error"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "Activos Fijos" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

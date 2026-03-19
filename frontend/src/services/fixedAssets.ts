@@ -48,4 +48,9 @@ export const fixedAssetService = {
     const response = await apiClient.post<FixedAsset>(`/api/v1/fixed-assets/${id}/dispose`, { reason });
     return response.data;
   },
+
+  cancel: async (id: string): Promise<FixedAsset> => {
+    const response = await apiClient.post<FixedAsset>(`/api/v1/fixed-assets/${id}/cancel`);
+    return response.data;
+  },
 };

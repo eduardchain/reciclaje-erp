@@ -9,21 +9,22 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { useFixedAsset, useDepreciateAsset, useDisposeAsset } from "@/hooks/useFixedAssets";
+import { useFixedAsset, useDepreciateAsset, useDisposeAsset, useCancelFixedAsset } from "@/hooks/useFixedAssets";
 import { formatCurrency } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
-import type { FixedAssetStatus } from "@/types/fixed-asset";
 
-const statusLabels: Record<FixedAssetStatus, string> = {
+const statusLabels: Record<string, string> = {
   active: "Activo",
   fully_depreciated: "Totalmente Depreciado",
   disposed: "Dado de Baja",
+  cancelled: "Cancelado",
 };
 
-const statusColors: Record<FixedAssetStatus, string> = {
+const statusColors: Record<string, string> = {
   active: "bg-emerald-100 text-emerald-800",
   fully_depreciated: "bg-blue-100 text-blue-800",
   disposed: "bg-red-100 text-red-800",
+  cancelled: "bg-slate-100 text-slate-800",
 };
 
 export default function FixedAssetDetailPage() {
@@ -32,15 +33,18 @@ export default function FixedAssetDetailPage() {
   const { data: asset, isLoading } = useFixedAsset(id || "");
   const depreciate = useDepreciateAsset();
   const dispose = useDisposeAsset();
+  const cancelAsset = useCancelFixedAsset();
   const [showDepreciate, setShowDepreciate] = useState(false);
   const [showDispose, setShowDispose] = useState(false);
+  const [showCancel, setShowCancel] = useState(false);
   const [disposeReason, setDisposeReason] = useState("");
 
   if (isLoading) return <p className="text-center py-12 text-slate-400">Cargando...</p>;
   if (!asset) return <p className="text-center py-12 text-slate-400">Activo fijo no encontrado</p>;
 
   const canDepreciate = asset.status === "active";
-  const canDispose = asset.status !== "disposed";
+  const canDispose = !["disposed", "cancelled"].includes(asset.status);
+  const canCancel = ["active", "fully_depreciated"].includes(asset.status);
   const progress = Math.min(asset.depreciation_progress, 100);
   const remaining = asset.current_value - asset.salvage_value;
   const nextDepreciationAmount = remaining <= asset.monthly_depreciation ? remaining : asset.monthly_depreciation;
@@ -183,6 +187,11 @@ export default function FixedAssetDetailPage() {
               <XCircle className="h-4 w-4 mr-2" />Dar de Baja
             </Button>
           )}
+          {canCancel && (
+            <Button variant="outline" onClick={() => setShowCancel(true)} className="text-slate-600 hover:text-slate-700">
+              <XCircle className="h-4 w-4 mr-2" />Cancelar Activo
+            </Button>
+          )}
       </div>
 
       {/* Tabla de depreciaciones */}
@@ -273,6 +282,18 @@ export default function FixedAssetDetailPage() {
           />
         </div>
       </ConfirmDialog>
+      <ConfirmDialog
+        open={showCancel}
+        onOpenChange={setShowCancel}
+        title="Cancelar Activo Fijo"
+        description={`Esto revertira el pago de ${formatCurrency(asset.purchase_value)}${asset.depreciations && asset.depreciations.length > 0 ? ` y las ${asset.depreciations.length} depreciacion(es) aplicadas` : ""}. La cuenta o proveedor recuperara el saldo. Esta accion no se puede deshacer.`}
+        confirmLabel="Cancelar Activo"
+        variant="destructive"
+        loading={cancelAsset.isPending}
+        onConfirm={() => {
+          cancelAsset.mutate(asset.id, { onSuccess: () => setShowCancel(false) });
+        }}
+      />
     </div>
   );
 }

@@ -86,6 +86,20 @@ export function useApplyPendingDepreciations() {
   });
 }
 
+export function useCancelFixedAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => fixedAssetService.cancel(id),
+    onSuccess: () => {
+      invalidateAfterFixedAsset(queryClient);
+      toast.success("Activo cancelado — pago y depreciaciones revertidos");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al cancelar el activo"));
+    },
+  });
+}
+
 export function useDisposeAsset() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -7,6 +7,7 @@ GET    /{id}                — Detalle con depreciaciones
 PATCH  /{id}                — Actualizar activo
 POST   /{id}/depreciate     — Aplicar UNA depreciacion
 POST   /apply-pending       — Aplicar depreciaciones pendientes (batch)
+POST   /{id}/cancel         — Cancelar activo (revertir todo)
 POST   /{id}/dispose        — Dar de baja
 """
 from typing import List
@@ -182,6 +183,23 @@ def apply_pending_depreciations(
         user_id=ctx["user_id"],
     )
     return [ApplyPendingResult(**r) for r in results]
+
+
+@router.post("/{asset_id}/cancel", response_model=FixedAssetResponse)
+def cancel_asset(
+    asset_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_permission("treasury.manage_fixed_assets")),
+):
+    """Cancelar activo fijo, revirtiendo pago y depreciaciones."""
+    asset = fixed_asset.cancel(
+        db=db,
+        asset_id=asset_id,
+        organization_id=ctx["organization_id"],
+        user_id=ctx["user_id"],
+    )
+    asset = fixed_asset.get(db, asset.id, ctx["organization_id"])
+    return _build_response(asset, include_depreciations=True)
 
 
 @router.post("/{asset_id}/dispose", response_model=FixedAssetResponse)

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from app.models.business_unit import BusinessUnit
 
 
-VALID_ASSET_STATUSES = ["active", "fully_depreciated", "disposed"]
+VALID_ASSET_STATUSES = ["active", "fully_depreciated", "disposed", "cancelled"]
 
 
 class FixedAsset(Base, OrganizationMixin, TimestampMixin):

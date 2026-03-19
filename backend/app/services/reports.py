@@ -623,13 +623,13 @@ class ReportService:
             )
         ))
 
-        # Activos fijos (valor actual de activos no dados de baja)
+        # Activos fijos (valor actual de activos no dados de baja ni cancelados)
         fixed_assets_value = Decimal(str(
             db.scalar(
                 select(func.coalesce(func.sum(FixedAsset.current_value), 0))
                 .where(
                     FixedAsset.organization_id == organization_id,
-                    FixedAsset.status != "disposed",
+                    FixedAsset.status.notin_(["disposed", "cancelled"]),
                 )
             )
         ))
@@ -823,7 +823,7 @@ class ReportService:
         fixed_assets = db.execute(
             select(FixedAsset).where(
                 FixedAsset.organization_id == organization_id,
-                FixedAsset.status != "disposed",
+                FixedAsset.status.notin_(["disposed", "cancelled"]),
                 FixedAsset.current_value > 0,
             )
         ).scalars().all()

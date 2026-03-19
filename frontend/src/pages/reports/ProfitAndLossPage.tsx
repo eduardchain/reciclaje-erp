@@ -31,7 +31,7 @@ export default function ProfitAndLossPage() {
               <div className="flex justify-between text-sm"><span>Ingresos por Servicios</span><span className="font-medium">{formatCurrency(data.service_income)}</span></div>
               <div className="flex justify-between text-sm"><span>Costo de Ventas (COGS)</span><span className="font-medium text-red-600">-{formatCurrency(data.cost_of_goods_sold)}</span></div>
               <Separator />
-              <div className="flex justify-between font-medium"><span>Utilidad Bruta Ventas</span><span className={data.gross_profit_sales >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.gross_profit_sales)} ({(data.gross_margin_sales * 100).toFixed(1)}%)</span></div>
+              <div className="flex justify-between font-medium"><span>Utilidad Bruta Ventas</span><span className={data.gross_profit_sales >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.gross_profit_sales)} ({data.gross_margin_sales.toFixed(1)}%)</span></div>
             </div>
 
             <div className="space-y-2">
@@ -70,7 +70,7 @@ export default function ProfitAndLossPage() {
               <div className="flex justify-between text-sm font-medium"><span>Total Gastos Operacionales</span><span className="font-medium text-red-600">-{formatCurrency(data.operating_expenses)}</span></div>
               <div className="flex justify-between text-sm"><span>Comisiones Pagadas</span><span className="font-medium text-red-600">-{formatCurrency(data.commissions_paid)}</span></div>
               <Separator />
-              <div className="flex justify-between text-lg font-bold"><span>Utilidad Neta</span><span className={data.net_profit >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.net_profit)} ({(data.net_margin * 100).toFixed(1)}%)</span></div>
+              <div className="flex justify-between text-lg font-bold"><span>Utilidad Neta</span><span className={data.net_profit >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.net_profit)} ({data.net_margin.toFixed(1)}%)</span></div>
             </div>
           </CardContent>
         </Card>

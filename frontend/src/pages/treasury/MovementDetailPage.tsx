@@ -104,7 +104,7 @@ export default function MovementDetailPage() {
               <Pencil className="h-4 w-4 mr-2" />Editar Clasificacion
             </Button>
           )}
-          {movement.status === "confirmed" && (
+          {movement.status === "confirmed" && !["asset_payment", "depreciation_expense", "asset_purchase"].includes(movement.movement_type) && (
             <Button variant="outline" onClick={() => setShowAnnul(true)} className="text-red-600 border-red-200 hover:bg-red-50">
               <XCircle className="h-4 w-4 mr-2" />Anular
             </Button>

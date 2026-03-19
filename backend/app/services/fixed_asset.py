@@ -550,6 +550,84 @@ class CRUDFixedAsset:
         return asset
 
     # ------------------------------------------------------------------
+    # Cancel (revertir completamente)
+    # ------------------------------------------------------------------
+
+    def cancel(
+        self,
+        db: Session,
+        asset_id: UUID,
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> FixedAsset:
+        """
+        Cancelar activo fijo, revirtiendo atomicamente todas las depreciaciones
+        y el movimiento de pago original.
+
+        A diferencia de dispose (baja), cancel revierte los efectos financieros.
+        """
+        asset = self.get(db, asset_id, organization_id)
+
+        if asset.status in ("disposed", "cancelled"):
+            msg = "dado de baja" if asset.status == "disposed" else "cancelado"
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"El activo ya esta {msg}",
+            )
+
+        now = datetime.now(timezone.utc)
+
+        # 1. Anular movimientos de depreciacion (no tienen efecto financiero)
+        depreciations = db.execute(
+            select(AssetDepreciation)
+            .where(
+                AssetDepreciation.fixed_asset_id == asset.id,
+                AssetDepreciation.is_active == True,
+            )
+            .order_by(AssetDepreciation.depreciation_number.desc())
+        ).scalars().all()
+
+        for dep in depreciations:
+            if dep.money_movement_id:
+                mov = db.get(MoneyMovement, dep.money_movement_id)
+                if mov and mov.status == "confirmed":
+                    mov.status = "annulled"
+                    mov.annulled_at = now
+                    mov.annulled_by = user_id
+                    mov.annulled_reason = f"Cancelacion de activo: {asset.name}"
+            dep.is_active = False
+
+        # 2. Revertir movimiento de pago original
+        if asset.purchase_movement_id:
+            payment_mov = db.get(MoneyMovement, asset.purchase_movement_id)
+            if payment_mov and payment_mov.status == "confirmed":
+                # Revertir efecto financiero
+                if payment_mov.movement_type == "asset_payment" and payment_mov.account_id:
+                    from app.models.money_account import MoneyAccount
+                    account = db.get(MoneyAccount, payment_mov.account_id)
+                    if account:
+                        account.current_balance += payment_mov.amount
+                elif payment_mov.movement_type == "asset_purchase" and payment_mov.third_party_id:
+                    tp = db.get(ThirdParty, payment_mov.third_party_id)
+                    if tp:
+                        tp.current_balance += payment_mov.amount
+
+                payment_mov.status = "annulled"
+                payment_mov.annulled_at = now
+                payment_mov.annulled_by = user_id
+                payment_mov.annulled_reason = f"Cancelacion de activo: {asset.name}"
+
+        # 3. Marcar activo como cancelado (reusa campos de disposal)
+        asset.status = "cancelled"
+        asset.disposed_at = now
+        asset.disposed_by = user_id
+        asset.disposal_reason = "Cancelado"
+
+        db.commit()
+        db.refresh(asset)
+        return asset
+
+    # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
 
