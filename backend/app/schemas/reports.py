@@ -120,6 +120,9 @@ class ProfitAndLossResponse(BaseModel):
     # Perdida por merma
     waste_loss: float = 0.0
 
+    # Ajustes de inventario (positivo=ganancia, negativo=perdida)
+    adjustment_net: float = 0.0
+
     # Utilidad bruta total
     total_gross_profit: float
 

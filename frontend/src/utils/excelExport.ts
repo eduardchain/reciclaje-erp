@@ -264,6 +264,7 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   rows.push(["Utilidad Pasa Mano", fmt(data.double_entry_profit)]);
   if (data.transformation_profit !== 0) rows.push(["Gan/Perd Transformaciones", fmt(data.transformation_profit)]);
   if (data.waste_loss > 0) rows.push(["Perdida por Merma", fmt(-data.waste_loss)]);
+  if (data.adjustment_net !== 0) rows.push(["Ajustes de Inventario", fmt(data.adjustment_net)]);
   rows.push(["Utilidad Bruta Total", fmt(data.total_gross_profit)]);
   rows.push([]);
   rows.push(["Gastos Operativos", fmt(data.operating_expenses)]);

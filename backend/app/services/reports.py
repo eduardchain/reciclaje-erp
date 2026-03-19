@@ -340,6 +340,30 @@ class ReportService:
             )
         ))
 
+        # 3.7 Ganancia/perdida por ajustes de inventario
+        from app.models.inventory_adjustment import InventoryAdjustment
+
+        adj_filters = [
+            InventoryAdjustment.organization_id == organization_id,
+            InventoryAdjustment.status == "confirmed",
+        ]
+        if has_dates:
+            adj_filters += [InventoryAdjustment.date >= dt_from, InventoryAdjustment.date < dt_to]
+
+        # quantity > 0 = ganancia (increase/recount+), < 0 = perdida (decrease/recount-/zero_out)
+        adjustment_net = Decimal(str(
+            db.scalar(
+                select(func.coalesce(
+                    func.sum(
+                        case(
+                            (InventoryAdjustment.quantity > 0, InventoryAdjustment.total_value),
+                            else_=-InventoryAdjustment.total_value,
+                        )
+                    ), 0
+                )).where(*adj_filters)
+            )
+        ))
+
         # 4. Service income + expenses by category + commissions
         mm_filters = [
             MoneyMovement.organization_id == organization_id,
@@ -390,7 +414,7 @@ class ReportService:
 
         # Calculos
         gross_profit_sales = sales_revenue - cogs
-        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit - waste_loss
+        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit - waste_loss + adjustment_net
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
         return {
@@ -402,6 +426,7 @@ class ReportService:
             "transformation_profit": transformation_profit,
             "transformation_count": transformation_count,
             "waste_loss": waste_loss,
+            "adjustment_net": adjustment_net,
             "service_income": service_income,
             "operating_expenses": operating_expenses,
             "commissions_paid": commissions_paid,
@@ -436,6 +461,7 @@ class ReportService:
             transformation_profit=float(r["transformation_profit"]),
             transformation_count=r["transformation_count"],
             waste_loss=float(r["waste_loss"]),
+            adjustment_net=float(r["adjustment_net"]),
             total_gross_profit=float(r["total_gross_profit"]),
             operating_expenses=float(r["operating_expenses"]),
             commissions_paid=float(r["commissions_paid"]),

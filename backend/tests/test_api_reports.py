@@ -2062,3 +2062,116 @@ class TestPnLWasteLoss:
         )
         assert resp.status_code == 200
         assert resp.json()["waste_loss"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Tests: P&L adjustment_net (ajustes de inventario)
+# ---------------------------------------------------------------------------
+
+class TestPnLAdjustmentNet:
+    """Verificar que adjustment_net aparece en P&L para ajustes de inventario."""
+
+    def _make_adjustment(self, db_session, org_id, adj_type, quantity, unit_cost, status="confirmed"):
+        from app.models.inventory_adjustment import InventoryAdjustment
+        from app.models.warehouse import Warehouse
+        adj = InventoryAdjustment(
+            organization_id=org_id,
+            adjustment_number=abs(hash(f"{adj_type}{quantity}")) % 90000 + 10000,
+            date=datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
+            adjustment_type=adj_type,
+            material_id=self._mat_id,
+            warehouse_id=self._wh_id,
+            previous_stock=Decimal("100"),
+            quantity=Decimal(str(quantity)),
+            new_stock=Decimal("100") + Decimal(str(quantity)),
+            unit_cost=Decimal(str(unit_cost)),
+            total_value=abs(Decimal(str(quantity)) * Decimal(str(unit_cost))),
+            reason="Test adjustment",
+            status=status,
+        )
+        db_session.add(adj)
+        return adj
+
+    def _setup_material(self, db_session, org_id):
+        from app.models.warehouse import Warehouse
+        cat = MaterialCategory(name="Metales ADJ", organization_id=org_id)
+        db_session.add(cat)
+        db_session.flush()
+        mat = Material(name="Cobre ADJ", code="ADJ-001", category_id=cat.id, organization_id=org_id, current_stock=Decimal("100"), current_average_cost=Decimal("5000"))
+        db_session.add(mat)
+        db_session.flush()
+        wh = Warehouse(name="Bodega ADJ", organization_id=org_id, is_active=True)
+        db_session.add(wh)
+        db_session.flush()
+        self._mat_id = mat.id
+        self._wh_id = wh.id
+
+    def test_pnl_decrease_negative(self, client: TestClient, org_headers: dict, db_session: Session, test_organization):
+        """Decrease adjustment aparece como perdida en P&L."""
+        self._setup_material(db_session, test_organization.id)
+        self._make_adjustment(db_session, test_organization.id, "decrease", -20, 5000)
+        db_session.commit()
+
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        # quantity=-20, total_value=100000 → adjustment_net = -100000
+        assert resp.json()["adjustment_net"] == -100000.0
+
+    def test_pnl_increase_positive(self, client: TestClient, org_headers: dict, db_session: Session, test_organization):
+        """Increase adjustment aparece como ganancia en P&L."""
+        self._setup_material(db_session, test_organization.id)
+        self._make_adjustment(db_session, test_organization.id, "increase", 10, 5000)
+        db_session.commit()
+
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        # quantity=10, total_value=50000 → adjustment_net = +50000
+        assert resp.json()["adjustment_net"] == 50000.0
+
+    def test_pnl_no_adjustments_zero(self, client: TestClient, org_headers: dict):
+        """Sin ajustes, adjustment_net = 0."""
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["adjustment_net"] == 0.0
+
+    def test_pnl_net_increase_and_decrease(self, client: TestClient, org_headers: dict, db_session: Session, test_organization):
+        """Increase + decrease = neto."""
+        self._setup_material(db_session, test_organization.id)
+        self._make_adjustment(db_session, test_organization.id, "increase", 10, 5000)  # +50000
+        self._make_adjustment(db_session, test_organization.id, "decrease", -30, 5000)  # -150000
+        db_session.commit()
+
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        # neto = 50000 - 150000 = -100000
+        assert resp.json()["adjustment_net"] == -100000.0
+
+    def test_pnl_annulled_excluded(self, client: TestClient, org_headers: dict, db_session: Session, test_organization):
+        """Ajustes anulados no cuentan en P&L."""
+        self._setup_material(db_session, test_organization.id)
+        self._make_adjustment(db_session, test_organization.id, "decrease", -50, 5000, status="annulled")
+        db_session.commit()
+
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["adjustment_net"] == 0.0

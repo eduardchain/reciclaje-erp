@@ -42,6 +42,9 @@ export default function ProfitAndLossPage() {
               {data.waste_loss > 0 && (
                 <div className="flex justify-between text-sm"><span>Perdida por Merma</span><span className="font-medium text-red-600">-{formatCurrency(data.waste_loss)}</span></div>
               )}
+              {data.adjustment_net !== 0 && (
+                <div className="flex justify-between text-sm"><span>Ajustes de Inventario</span><span className={`font-medium ${data.adjustment_net >= 0 ? "text-emerald-700" : "text-red-700"}`}>{data.adjustment_net >= 0 ? "" : "-"}{formatCurrency(Math.abs(data.adjustment_net))}</span></div>
+              )}
               <Separator />
               <div className="flex justify-between font-medium"><span>Utilidad Bruta Total</span><span className={data.total_gross_profit >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.total_gross_profit)}</span></div>
             </div>
