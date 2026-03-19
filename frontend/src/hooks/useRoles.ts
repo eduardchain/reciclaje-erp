@@ -100,6 +100,7 @@ export function useUpdateAccountAssignments() {
       rolesService.updateAccountAssignments(organizationId!, userId, accountIds),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["org-members"] });
+      qc.invalidateQueries({ queryKey: ["money-accounts"] });
       toast.success("Cuentas asignadas actualizadas");
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al asignar cuentas")),

@@ -68,6 +68,7 @@ export function useCancelScheduledExpense() {
     mutationFn: (id: string) => scheduledExpenseService.cancel(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scheduled-expenses"] });
+      invalidateAfterTreasury(queryClient);
       toast.success("Gasto diferido cancelado");
     },
     onError: (error: unknown) => {

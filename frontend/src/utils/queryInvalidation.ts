@@ -60,11 +60,14 @@ export const invalidateAfterTreasury = (qc: QueryClient) => {
 
 export const invalidateAfterInventoryChange = (qc: QueryClient) => {
   invalidateInventory(qc);
+  qc.invalidateQueries({ queryKey: ["reports"] });
 };
 
 export const invalidateAfterFixedAsset = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["fixed-assets"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });
   qc.invalidateQueries({ queryKey: ["money-accounts"] });
+  qc.invalidateQueries({ queryKey: ["third-parties"] });
   qc.invalidateQueries({ queryKey: ["reports"] });
+  qc.invalidateQueries({ queryKey: ["treasury-dashboard"] });
 };

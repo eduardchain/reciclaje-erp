@@ -121,8 +121,7 @@ export function useUpdateClassification() {
     mutationFn: ({ id, data }: { id: string; data: UpdateClassificationRequest }) =>
       moneyMovementService.updateClassification(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["money-movements"] });
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      invalidateAfterTreasury(queryClient);
       toast.success("Clasificación actualizada exitosamente");
     },
     onError: (error: unknown) => {
