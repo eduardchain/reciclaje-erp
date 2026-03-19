@@ -80,7 +80,7 @@ class MaterialCostHistory(Base, TimestampMixin):
     source_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        comment="purchase_liquidation | adjustment_increase | transformation_in",
+        comment="purchase_liquidation | adjustment_increase | transformation_in | transformation_out",
     )
 
     source_id: Mapped[UUID] = mapped_column(

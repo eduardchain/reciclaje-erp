@@ -184,7 +184,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 717 tests.
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 759 tests (20 integration).
 
 ### Database
 
@@ -285,6 +285,8 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 38. **Balance Detallado: liability separado + sub-agrupación por categoría**: (a) `_classify_third_party()` separa `liability` de `service_provider` en secciones propias: `liability_advances` (activo, bal>0), `liability_debt` (pasivo, bal<0). `service_provider_payable` reemplaza `liabilities_other`. (b) Sub-agrupación opcional por `ThirdPartyCategory` en todas las secciones de terceros. `_load_tp_behavior_map()` retorna 3er dict `tp_cat_by_behavior[tp_id][behavior_type] = display_name`. `_group_by_category()` agrupa items si >1 categoría distinta; orden por total desc, "Sin Categoría" al final. Frontend: 2 niveles expand/collapse con keys `"section_key"` y `"section_key:group_label"`. Excel export con sub-grupos. `BalanceDetailedGroup` schema nuevo.
 
 39. **Edicion de clasificacion de gastos**: `PATCH /money-movements/{id}/classification` permite cambiar `expense_category_id` y asignacion UN en movimientos tipo gasto (`expense`, `expense_accrual`, `provision_expense`, `deferred_expense`, `depreciation_expense`). No modifica montos/cuentas/terceros. Permiso: `treasury.edit_classification` (admin + liquidador). Frontend: boton "Editar Clasificacion" en `MovementDetailPage` + modal `EditClassificationModal` reutiliza `BusinessUnitAllocationSelector`. No afecta saldos — solo impacta reportes (P&L por categoria, Rentabilidad por UN).
+
+40. **Transformation bloquea cancelacion de compra fuente**: `MaterialCostHistory` ahora registra `transformation_out` para el material fuente al transformar. Esto bloquea cancelar compras anteriores cuyo material ya fue transformado (protege integridad del costo promedio). `annul()` tambien verifica y revierte el historial del fuente. 4 source_types: `purchase_liquidation`, `adjustment_increase`, `transformation_in`, `transformation_out`.
 
 ### Inventory Module — UX Details
 

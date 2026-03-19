@@ -107,7 +107,8 @@ class MaterialCostHistoryService:
             source_labels = {
                 "purchase_liquidation": "Liquidacion compra",
                 "adjustment_increase": "Ajuste aumento",
-                "transformation_in": "Transformacion",
+                "transformation_in": "Transformacion (entrada)",
+                "transformation_out": "Transformacion (salida)",
             }
             for op in subsequent:
                 label = source_labels.get(op.source_type, op.source_type)

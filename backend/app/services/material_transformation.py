@@ -193,8 +193,25 @@ class CRUDMaterialTransformation:
         # Aplicar efectos en stock
 
         # 1. Descontar stock del material de origen
+        old_source_cost = source_material.current_average_cost
+        old_source_liquidated = source_material.current_stock_liquidated
+
         source_material.current_stock_liquidated -= data.source_quantity
         source_material.current_stock -= data.source_quantity
+
+        # Registrar en historial del material fuente (bloquea cancelacion de compras anteriores)
+        # El avg_cost del fuente no cambia, pero el registro existe para bloquear
+        material_cost_history_service.record_cost_change(
+            db=db,
+            material=source_material,
+            previous_cost=old_source_cost,
+            previous_stock=old_source_liquidated,
+            new_cost=source_material.current_average_cost,
+            new_stock=source_material.current_stock_liquidated,
+            source_type="transformation_out",
+            source_id=transformation.id,
+            organization_id=organization_id,
+        )
 
         # Crear InventoryMovement de salida
         self._create_inventory_movement(
@@ -288,6 +305,21 @@ class CRUDMaterialTransformation:
         )
         transformation = db.scalar(stmt)
 
+        # Verificar que no hay operaciones posteriores de costo por material fuente
+        can_revert_src, blocking_src = material_cost_history_service.check_can_revert(
+            db=db,
+            material_id=transformation.source_material_id,
+            source_type="transformation_out",
+            source_id=transformation.id,
+        )
+        if not can_revert_src:
+            source_material = db.get(Material, transformation.source_material_id)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No se puede anular: existen operaciones posteriores que afectaron "
+                       f"el costo de '{source_material.name}'. Cancele primero: {', '.join(blocking_src)}"
+            )
+
         # Verificar que no hay operaciones posteriores de costo por cada material destino
         for line in transformation.lines:
             can_revert, blocking = material_cost_history_service.check_can_revert(
@@ -304,10 +336,18 @@ class CRUDMaterialTransformation:
                            f"el costo de '{dest_material.name}'. Cancele primero: {', '.join(blocking)}"
                 )
 
-        # Revertir: restaurar stock del material de origen
+        # Revertir: restaurar stock y cost history del material de origen
         source_material = db.get(Material, transformation.source_material_id)
         source_material.current_stock_liquidated += transformation.source_quantity
         source_material.current_stock += transformation.source_quantity
+
+        # Revertir cost history del fuente
+        material_cost_history_service.revert_cost_change(
+            db=db,
+            material=source_material,
+            source_type="transformation_out",
+            source_id=transformation.id,
+        )
 
         self._create_inventory_movement(
             db=db,
