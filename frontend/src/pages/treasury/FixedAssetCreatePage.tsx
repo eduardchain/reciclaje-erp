@@ -41,6 +41,25 @@ export default function FixedAssetCreatePage() {
   const [accountId, setAccountId] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const handleCategoryChange = (catId: string) => {
+    setCategoryId(catId);
+    const cat = categories.find((c) => c.id === catId);
+    if (cat) {
+      if (cat.default_business_unit_id) {
+        setBuAllocationType("direct");
+        setBuDirectId(cat.default_business_unit_id);
+        setBuSharedIds([]);
+      } else if (cat.default_applicable_business_unit_ids?.length) {
+        setBuAllocationType("shared");
+        setBuDirectId("");
+        setBuSharedIds(cat.default_applicable_business_unit_ids);
+      } else {
+        setBuAllocationType("general");
+        setBuDirectId("");
+        setBuSharedIds([]);
+      }
+    }
+  };
   const [notes, setNotes] = useState("");
   const [buAllocationType, setBuAllocationType] = useState<"direct" | "shared" | "general">("general");
   const [buDirectId, setBuDirectId] = useState("");
@@ -214,7 +233,7 @@ export default function FixedAssetCreatePage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria de Gasto *</Label>
               <EntitySelect
                 value={categoryId}
-                onChange={setCategoryId}
+                onChange={handleCategoryChange}
                 options={categories.map((c) => ({ id: c.id, label: c.display_name }))}
                 placeholder="Seleccionar categoria..."
               />

@@ -61,6 +61,25 @@ export default function LiabilitiesPage() {
   const [accrueTPName, setAccrueTPName] = useState("");
   const [accrueAmount, setAccrueAmount] = useState(0);
   const [accrueCategoryId, setAccrueCategoryId] = useState("");
+  const handleAccrueCategoryChange = (catId: string) => {
+    setAccrueCategoryId(catId);
+    const cat = categories.find((c) => c.id === catId);
+    if (cat) {
+      if (cat.default_business_unit_id) {
+        setAccrueBuType("direct");
+        setAccrueBuDirectId(cat.default_business_unit_id);
+        setAccrueBuSharedIds([]);
+      } else if (cat.default_applicable_business_unit_ids?.length) {
+        setAccrueBuType("shared");
+        setAccrueBuDirectId("");
+        setAccrueBuSharedIds(cat.default_applicable_business_unit_ids);
+      } else {
+        setAccrueBuType("general");
+        setAccrueBuDirectId("");
+        setAccrueBuSharedIds([]);
+      }
+    }
+  };
   const [accrueDescription, setAccrueDescription] = useState("");
   const [accrueDate, setAccrueDate] = useState(toLocalDateInput());
   const [accrueBuType, setAccrueBuType] = useState<"direct" | "shared" | "general">("general");
@@ -234,7 +253,7 @@ export default function LiabilitiesPage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria de Gasto *</Label>
               <EntitySelect
                 value={accrueCategoryId}
-                onChange={setAccrueCategoryId}
+                onChange={handleAccrueCategoryChange}
                 options={categories.map((c) => ({ id: c.id, label: c.display_name }))}
                 placeholder="Seleccionar categoria..."
               />

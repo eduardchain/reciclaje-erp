@@ -368,7 +368,7 @@ class ReportService:
         mm_filters = [
             MoneyMovement.organization_id == organization_id,
             MoneyMovement.status == "confirmed",
-            MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "commission_payment", "commission_accrual", "service_income"]),
+            MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "commission_accrual", "service_income"]),
         ]
         if has_dates:
             mm_filters += [MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to]
@@ -409,7 +409,7 @@ class ReportService:
                     total_amount=float(total_dec),
                     source_type=mt,
                 ))
-            elif mt in ("commission_payment", "commission_accrual"):
+            elif mt == "commission_accrual":
                 commissions_paid += total_dec
 
         # Calculos

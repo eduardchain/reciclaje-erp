@@ -29,6 +29,25 @@ export default function ScheduledExpenseCreatePage() {
   const [totalMonths, setTotalMonths] = useState(12);
   const [accountId, setAccountId] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const handleCategoryChange = (catId: string) => {
+    setCategoryId(catId);
+    const cat = categories.find((c) => c.id === catId);
+    if (cat) {
+      if (cat.default_business_unit_id) {
+        setBuAllocationType("direct");
+        setBuDirectId(cat.default_business_unit_id);
+        setBuSharedIds([]);
+      } else if (cat.default_applicable_business_unit_ids?.length) {
+        setBuAllocationType("shared");
+        setBuDirectId("");
+        setBuSharedIds(cat.default_applicable_business_unit_ids);
+      } else {
+        setBuAllocationType("general");
+        setBuDirectId("");
+        setBuSharedIds([]);
+      }
+    }
+  };
   const [startDate, setStartDate] = useState(toLocalDateInput());
   const [applyDay, setApplyDay] = useState(1);
   const [description, setDescription] = useState("");
@@ -126,7 +145,7 @@ export default function ScheduledExpenseCreatePage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria de Gasto *</Label>
               <EntitySelect
                 value={categoryId}
-                onChange={setCategoryId}
+                onChange={handleCategoryChange}
                 options={categories.map((c) => ({ id: c.id, label: c.display_name }))}
                 placeholder="Seleccionar categoria..."
               />
