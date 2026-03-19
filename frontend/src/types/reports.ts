@@ -77,6 +77,7 @@ export interface ProfitAndLossResponse {
   double_entry_count: number;
   transformation_profit: number;
   transformation_count: number;
+  waste_loss: number;
   total_gross_profit: number;
   operating_expenses: number;
   commissions_paid: number;

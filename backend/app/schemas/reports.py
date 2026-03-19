@@ -117,6 +117,9 @@ class ProfitAndLossResponse(BaseModel):
     transformation_profit: float = 0.0
     transformation_count: int = 0
 
+    # Perdida por merma
+    waste_loss: float = 0.0
+
     # Utilidad bruta total
     total_gross_profit: float
 

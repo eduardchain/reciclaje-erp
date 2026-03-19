@@ -263,6 +263,7 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   rows.push(["Utilidad Bruta Ventas", fmt(data.gross_profit_sales)]);
   rows.push(["Utilidad Pasa Mano", fmt(data.double_entry_profit)]);
   if (data.transformation_profit !== 0) rows.push(["Gan/Perd Transformaciones", fmt(data.transformation_profit)]);
+  if (data.waste_loss > 0) rows.push(["Perdida por Merma", fmt(-data.waste_loss)]);
   rows.push(["Utilidad Bruta Total", fmt(data.total_gross_profit)]);
   rows.push([]);
   rows.push(["Gastos Operativos", fmt(data.operating_expenses)]);

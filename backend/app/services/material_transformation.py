@@ -103,7 +103,7 @@ class CRUDMaterialTransformation:
         total_dest_qty = sum(line.quantity for line in data.lines)
 
         line_costs = []
-        value_difference = None  # Solo se calcula para average_cost
+        value_difference = Decimal("0")
 
         if data.cost_distribution == "average_cost":
             # Usar costo promedio del material DESTINO
@@ -148,6 +148,7 @@ class CRUDMaterialTransformation:
                         f"pero valor origen = ${expected}"
                     ),
                 )
+            value_difference = total_manual - distributable_value
 
         # Generar numero secuencial
         number = self._generate_transformation_number(db, organization_id)

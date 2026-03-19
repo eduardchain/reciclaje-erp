@@ -721,3 +721,44 @@ class TestListAndGet:
         annulled_data = annulled_resp.json()
         assert annulled_data["total"] == 1
         assert annulled_data["items"][0]["status"] == "annulled"
+
+
+# ---------------------------------------------------------------------------
+# Tests: value_difference en todos los metodos
+# ---------------------------------------------------------------------------
+
+class TestValueDifference:
+    """Verificar que value_difference se asigna en todos los metodos de costo."""
+
+    def test_proportional_weight_value_difference_is_zero(
+        self, client, org_headers, source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+    ):
+        """proportional_weight siempre asigna value_difference = 0 (no None)."""
+        payload = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+        )
+        resp = client.post(BASE_URL, json=payload, headers=org_headers)
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["value_difference"] is not None
+        assert data["value_difference"] == 0.0
+
+    def test_manual_value_difference_not_none(
+        self, client, org_headers, source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+    ):
+        """manual asigna value_difference (no None). Con costos exactos, sera ~0."""
+        lines = [
+            {"destination_material_id": str(dest_copper.id), "destination_warehouse_id": str(test_warehouse.id), "quantity": 200.0, "unit_cost": 1200.0},
+            {"destination_material_id": str(dest_iron.id), "destination_warehouse_id": str(test_warehouse.id), "quantity": 180.0, "unit_cost": 800.0},
+            {"destination_material_id": str(dest_aluminum.id), "destination_warehouse_id": str(test_warehouse.id), "quantity": 100.0, "unit_cost": 960.0},
+        ]
+        payload = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+            cost_distribution="manual", lines_override=lines,
+        )
+        resp = client.post(BASE_URL, json=payload, headers=org_headers)
+        assert resp.status_code == 201
+        data = resp.json()
+        # total_manual = 240K + 144K + 96K = 480K, distributable = 480K → diff = 0
+        assert data["value_difference"] is not None
+        assert abs(data["value_difference"]) < 1.0  # ~0 por tolerancia

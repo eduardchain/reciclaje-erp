@@ -1964,3 +1964,101 @@ class TestEdgeCases:
         data = resp.json()
         assert data["business_units"] == []
         assert data["totals"]["net_profit"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: P&L waste_loss (perdida por merma)
+# ---------------------------------------------------------------------------
+
+class TestPnLWasteLoss:
+    """Verificar que waste_loss aparece en P&L cuando hay transformaciones con merma."""
+
+    def test_pnl_includes_waste_loss(self, client: TestClient, org_headers: dict, db_session: Session, test_organization):
+        """P&L muestra waste_loss > 0 cuando hay transformacion con merma."""
+        from app.models.material_transformation import MaterialTransformation
+        from app.models.warehouse import Warehouse
+
+        org_id = test_organization.id
+        cat = MaterialCategory(name="Metales WL", organization_id=org_id)
+        db_session.add(cat)
+        db_session.flush()
+        mat = Material(name="Cable", code="WL-SRC", category_id=cat.id, organization_id=org_id, current_stock=Decimal("100"), current_average_cost=Decimal("8000"))
+        db_session.add(mat)
+        db_session.flush()
+        wh = Warehouse(name="Bodega WL", organization_id=org_id, is_active=True)
+        db_session.add(wh)
+        db_session.flush()
+
+        # Crear transformacion con merma directamente en BD
+        trans = MaterialTransformation(
+            organization_id=org_id,
+            transformation_number=9001,
+            date=datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
+            source_material_id=mat.id,
+            source_warehouse_id=wh.id,
+            source_quantity=Decimal("100"),
+            source_unit_cost=Decimal("8000"),
+            source_total_value=Decimal("800000"),
+            waste_quantity=Decimal("10"),
+            waste_value=Decimal("80000"),
+            cost_distribution="proportional_weight",
+            value_difference=Decimal("0"),
+            reason="Test waste loss",
+            status="confirmed",
+        )
+        db_session.add(trans)
+        db_session.commit()
+
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["waste_loss"] == 80000.0
+        # waste_loss reduce utilidad bruta
+        assert data["total_gross_profit"] == -80000.0  # sin ventas, solo merma
+
+    def test_pnl_no_waste_loss_without_waste(self, client: TestClient, org_headers: dict, db_session: Session, test_organization):
+        """P&L muestra waste_loss = 0 cuando transformacion sin merma."""
+        from app.models.material_transformation import MaterialTransformation
+        from app.models.warehouse import Warehouse
+
+        org_id = test_organization.id
+        cat = MaterialCategory(name="Metales NW", organization_id=org_id)
+        db_session.add(cat)
+        db_session.flush()
+        mat = Material(name="Acero", code="NW-SRC", category_id=cat.id, organization_id=org_id, current_stock=Decimal("100"), current_average_cost=Decimal("5000"))
+        db_session.add(mat)
+        db_session.flush()
+        wh = Warehouse(name="Bodega NW", organization_id=org_id, is_active=True)
+        db_session.add(wh)
+        db_session.flush()
+
+        trans = MaterialTransformation(
+            organization_id=org_id,
+            transformation_number=9002,
+            date=datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
+            source_material_id=mat.id,
+            source_warehouse_id=wh.id,
+            source_quantity=Decimal("100"),
+            source_unit_cost=Decimal("5000"),
+            source_total_value=Decimal("500000"),
+            waste_quantity=Decimal("0"),
+            waste_value=Decimal("0"),
+            cost_distribution="proportional_weight",
+            value_difference=Decimal("0"),
+            reason="Test waste loss",
+            status="confirmed",
+        )
+        db_session.add(trans)
+        db_session.commit()
+
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["waste_loss"] == 0.0

@@ -324,6 +324,22 @@ class ReportService:
         transformation_profit = Decimal(str(trans_row[0]))
         transformation_count = trans_row[1]
 
+        # 3.6 Perdida por merma en transformaciones
+        waste_filters = [
+            MaterialTransformation.organization_id == organization_id,
+            MaterialTransformation.status == "confirmed",
+            MaterialTransformation.waste_value > 0,
+        ]
+        if has_dates:
+            waste_filters += [MaterialTransformation.date >= dt_from, MaterialTransformation.date < dt_to]
+
+        waste_loss = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(MaterialTransformation.waste_value), 0))
+                .where(*waste_filters)
+            )
+        ))
+
         # 4. Service income + expenses by category + commissions
         mm_filters = [
             MoneyMovement.organization_id == organization_id,
@@ -374,7 +390,7 @@ class ReportService:
 
         # Calculos
         gross_profit_sales = sales_revenue - cogs
-        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit
+        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit - waste_loss
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
         return {
@@ -385,6 +401,7 @@ class ReportService:
             "de_count": de_count,
             "transformation_profit": transformation_profit,
             "transformation_count": transformation_count,
+            "waste_loss": waste_loss,
             "service_income": service_income,
             "operating_expenses": operating_expenses,
             "commissions_paid": commissions_paid,
@@ -418,6 +435,7 @@ class ReportService:
             double_entry_count=r["de_count"],
             transformation_profit=float(r["transformation_profit"]),
             transformation_count=r["transformation_count"],
+            waste_loss=float(r["waste_loss"]),
             total_gross_profit=float(r["total_gross_profit"]),
             operating_expenses=float(r["operating_expenses"]),
             commissions_paid=float(r["commissions_paid"]),
