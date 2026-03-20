@@ -704,9 +704,30 @@ def load_precios(api, rows, mat_map, dry_run):
     return stats, {}
 
 
-def load_inventario(api, rows, mat_map, bodega_map, dry_run):
-    """Carga inventario inicial. Positivos via increase, negativos via decrease."""
+def load_inventario(api, rows, mat_map, bodega_map, dry_run, db_url=None, org_id=None):
+    """Carga inventario inicial directo en BD (sin crear ajustes ni afectar P&L).
+
+    Actualiza Material.current_stock, current_stock_liquidated, current_average_cost
+    y crea InventoryMovement de tipo 'initial_balance' como registro auditable.
+    """
     stats = Stats()
+
+    if not dry_run and not db_url:
+        stats.errors += 1
+        stats.error_details.append("  db_url requerido para carga de inventario (no dry-run)")
+        return stats, {}
+
+    # Conectar a BD directamente (no via API)
+    db_conn = None
+    if not dry_run:
+        try:
+            from sqlalchemy import create_engine, text
+            engine = create_engine(db_url)
+            db_conn = engine.connect()
+        except Exception as e:
+            stats.errors += 1
+            stats.error_details.append(f"  Error conectando a BD: {e}")
+            return stats, {}
 
     for row in rows:
         codigo = clean_str(row.get("material_codigo"))
@@ -739,49 +760,33 @@ def load_inventario(api, rows, mat_map, bodega_map, dry_run):
             stats.created += 1
             continue
 
-        if cantidad > 0:
-            # Stock positivo → increase (requiere unit_cost)
-            if costo <= 0:
-                stats.errors += 1
-                stats.error_details.append(f"  Fila {row['_row']} ({codigo}): costo_unitario debe ser > 0 para increase")
-                continue
-            payload = {
-                "material_id": mat_id,
-                "warehouse_id": bodega_id,
-                "quantity": cantidad,
-                "unit_cost": costo,
-                "date": "2026-03-20T12:00:00",
-                "reason": "Inventario inicial - carga desde Excel",
-            }
-            status, resp = api.post("/api/v1/inventory/adjustments/increase", payload)
-        else:
-            # Stock negativo → primero increase con 0.01 para establecer avg_cost, luego decrease
-            # Alternativa: increase 1 unidad al costo dado, luego decrease (abs(cantidad)+1)
-            # Mas simple: increase pequeño para setear costo, luego decrease para llegar al negativo
-            abs_qty = abs(cantidad)
-            seed_qty = 0.01  # cantidad minima para establecer avg_cost
-            if costo > 0:
-                # Seed: crear stock minimo para que avg_cost exista
-                seed_payload = {
-                    "material_id": mat_id, "warehouse_id": bodega_id,
-                    "quantity": seed_qty, "unit_cost": costo,
-                    "date": "2026-03-20T12:00:00",
-                    "reason": "Inventario inicial - seed para stock negativo",
-                }
-                api.post("/api/v1/inventory/adjustments/increase", seed_payload)
-            # Decrease: seed + abs_qty para llegar al negativo deseado
-            payload = {
-                "material_id": mat_id, "warehouse_id": bodega_id,
-                "quantity": abs_qty + seed_qty,
-                "date": "2026-03-20T12:00:00",
-                "reason": "Inventario inicial - stock negativo desde Excel",
-            }
-            status, resp = api.post("/api/v1/inventory/adjustments/decrease", payload)
-        if status in (200, 201):
+        try:
+            # Actualizar material: stock y avg_cost
+            db_conn.execute(text("""
+                UPDATE materials SET
+                    current_stock = :qty,
+                    current_stock_liquidated = :qty,
+                    current_average_cost = :cost
+                WHERE id = :mat_id::uuid
+            """), {"qty": cantidad, "cost": abs(costo), "mat_id": mat_id})
+
+            # Crear InventoryMovement como registro auditable (no crea ajuste)
+            db_conn.execute(text("""
+                INSERT INTO inventory_movements
+                    (id, material_id, warehouse_id, movement_type, quantity, unit_cost, date, notes, organization_id)
+                VALUES
+                    (gen_random_uuid(), :mat_id::uuid, :wh_id::uuid, 'initial_balance', :qty, :cost,
+                     '2026-03-20 12:00:00+00', 'Inventario inicial - carga desde Excel', :org_id::uuid)
+            """), {"mat_id": mat_id, "wh_id": bodega_id, "qty": cantidad, "cost": abs(costo), "org_id": org_id})
+
+            db_conn.commit()
             stats.created += 1
-        else:
+        except Exception as e:
             stats.errors += 1
-            stats.error_details.append(f"  Fila {row['_row']} ({codigo}): {status} - {resp}")
+            stats.error_details.append(f"  Fila {row['_row']} ({codigo}): DB error: {e}")
+
+    if db_conn:
+        db_conn.close()
 
     return stats, {}
 
@@ -800,6 +805,8 @@ def main():
     parser.add_argument("--email", required=True, help="Email del usuario administrador")
     parser.add_argument("--password", required=True, help="Contraseña del usuario")
     parser.add_argument("--org-id", required=True, help="UUID de la organización")
+    parser.add_argument("--db-url", default=None,
+                        help="URL de BD para carga directa de inventario. Ej: postgresql://admin:password@localhost:5432/reciclaje_db")
     parser.add_argument("--dry-run", action="store_true", help="Solo validar, no crear datos")
     args = parser.parse_args()
 
@@ -911,7 +918,22 @@ def main():
     # 10. Inventario (stock inicial via adjustments/increase)
     print(f"[10/{total_sheets}] Inventario...")
     rows = read_sheet(wb, "Inventario")
-    stats, _ = load_inventario(api, rows, mat_map, bodega_map, args.dry_run)
+    db_url = args.db_url
+    if not db_url and not args.dry_run:
+        # Intentar leer de .env o variable de entorno
+        import os
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+            if os.path.exists(env_path):
+                with open(env_path) as f:
+                    for line in f:
+                        if line.startswith("DATABASE_URL="):
+                            db_url = line.split("=", 1)[1].strip().strip('"').strip("'")
+                            break
+        if not db_url:
+            print("  ⚠️  --db-url no proporcionado y DATABASE_URL no encontrada. Inventario no se cargara.")
+    stats, _ = load_inventario(api, rows, mat_map, bodega_map, args.dry_run, db_url=db_url, org_id=args.org_id)
     all_stats["Inventario"] = stats
     all_errors.extend(stats.error_details)
     print(stats.report("Inventario"))
