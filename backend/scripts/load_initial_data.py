@@ -269,7 +269,7 @@ def load_categorias_material(api, rows, dry_run):
         desc = clean_str(row.get("descripcion"))
         if desc:
             payload["description"] = desc
-        status, resp = api.post("/api/v1/materials/categories", payload)
+        status, resp = api.post("/api/v1/material-categories/", payload)
         if status in (200, 201):
             mapping[nombre] = resp["id"]
             stats.created += 1
@@ -279,7 +279,7 @@ def load_categorias_material(api, rows, dry_run):
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']} ({nombre}): {status} - {resp}")
     if stats.skipped > 0 and not dry_run:
-        _fill_mapping_from_api(api, "/api/v1/materials/categories", rows, mapping)
+        _fill_mapping_from_api(api, "/api/v1/material-categories/", rows, mapping)
     return stats, mapping
 
 
