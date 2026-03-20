@@ -319,12 +319,58 @@ python scripts/load_initial_data.py \
     --org-id <uuid_de_la_organizacion>
 ```
 
-### 8.6 Notas importantes
+### 8.6 Limpieza y Recarga (Reset de datos maestros)
+
+Si necesitas borrar todos los datos transaccionales y maestros para recargar desde cero (manteniendo org, usuarios, roles y permisos):
+
+```bash
+# 1. Backup primero
+/home/deploy/scripts/backup-database.sh
+
+# 2. Limpiar TODO excepto org/users/roles/permisos
+docker exec reciclaje_db psql -U admin -d reciclaje_db -c "
+TRUNCATE TABLE
+  profit_distribution_lines, profit_distributions,
+  scheduled_expense_applications, scheduled_expenses,
+  asset_depreciations, fixed_assets,
+  sale_commissions, purchase_commissions,
+  double_entry_lines, double_entries,
+  sale_lines, sales, purchase_lines, purchases,
+  money_movements, material_cost_histories,
+  material_transformation_lines, material_transformations,
+  inventory_adjustments, inventory_movements,
+  price_lists, user_account_assignments,
+  materials, material_categories,
+  money_accounts, warehouses, business_units,
+  expense_categories,
+  third_party_category_assignments, third_parties, third_party_categories
+CASCADE;
+"
+
+# 3. Verificar que org/users/roles siguen intactos
+docker exec reciclaje_db psql -U admin -d reciclaje_db -c "
+SELECT 'organizations' as tabla, count(*) FROM organizations
+UNION ALL SELECT 'users', count(*) FROM users
+UNION ALL SELECT 'roles', count(*) FROM roles;
+"
+
+# 4. Re-ejecutar carga inicial
+cd /home/deploy/reciclaje-erp/backend
+source venv/bin/activate
+python scripts/load_initial_data.py \
+    --file ../docs/CargaInicial_EcoBalance_v2_cliente.xlsx \
+    --email admin@ecobalance.com \
+    --password <password> \
+    --org-id <uuid>
+```
+
+### 8.7 Notas importantes
 
 - El script es **idempotente**: si se ejecuta dos veces, las entidades ya existentes se omiten
 - Los roles, permisos y la organización **no se tocan** — solo carga datos maestros
 - El orden de las hojas importa: el script procesa en orden de dependencia (UNs → Categorías → Terceros → Materiales → Precios)
-- Hacer un **backup antes** de la carga: `/home/deploy/scripts/backup-database.sh`
+- Hacer un **backup antes** de cualquier operación destructiva
+- La limpieza usa `TRUNCATE CASCADE` — borra en cascada todas las tablas dependientes
 
 ---
 

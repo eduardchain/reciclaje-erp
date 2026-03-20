@@ -4,7 +4,7 @@ import type { PaginatedResponse } from "@/types/common";
 
 export const warehouseService = {
   getAll: async (): Promise<PaginatedResponse<WarehouseResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<WarehouseResponse>>("/api/v1/warehouses", { params: { limit: 100 } });
+    const response = await apiClient.get<PaginatedResponse<WarehouseResponse>>("/api/v1/warehouses", { params: { limit: 500 } });
     return response.data;
   },
 

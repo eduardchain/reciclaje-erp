@@ -4,7 +4,7 @@ import type { PaginatedResponse } from "@/types/common";
 
 export const moneyAccountService = {
   getAll: async (): Promise<PaginatedResponse<MoneyAccountResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<MoneyAccountResponse>>("/api/v1/money-accounts", { params: { limit: 100 } });
+    const response = await apiClient.get<PaginatedResponse<MoneyAccountResponse>>("/api/v1/money-accounts", { params: { limit: 500 } });
     return response.data;
   },
 

@@ -5,7 +5,7 @@ import type { PaginatedResponse } from "@/types/common";
 
 export const businessUnitService = {
   getAll: async (): Promise<PaginatedResponse<BusinessUnitResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<BusinessUnitResponse>>("/api/v1/business-units", { params: { limit: 100 } });
+    const response = await apiClient.get<PaginatedResponse<BusinessUnitResponse>>("/api/v1/business-units", { params: { limit: 500 } });
     return response.data;
   },
   create: async (data: BusinessUnitCreate): Promise<BusinessUnitResponse> => {
@@ -20,7 +20,7 @@ export const businessUnitService = {
 
 export const expenseCategoryService = {
   getAll: async (): Promise<PaginatedResponse<ExpenseCategoryResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<ExpenseCategoryResponse>>("/api/v1/expense-categories", { params: { limit: 100 } });
+    const response = await apiClient.get<PaginatedResponse<ExpenseCategoryResponse>>("/api/v1/expense-categories", { params: { limit: 500 } });
     return response.data;
   },
   create: async (data: ExpenseCategoryCreate): Promise<ExpenseCategoryResponse> => {
@@ -39,7 +39,7 @@ export const expenseCategoryService = {
 
 export const priceListService = {
   getAll: async (materialId?: string): Promise<PaginatedResponse<PriceListResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<PriceListResponse>>("/api/v1/price-lists", { params: { material_id: materialId, limit: 200 } });
+    const response = await apiClient.get<PaginatedResponse<PriceListResponse>>("/api/v1/price-lists", { params: { material_id: materialId, limit: 500 } });
     return response.data;
   },
   getCurrentPrices: async (): Promise<CurrentPricesResponse> => {
@@ -62,7 +62,7 @@ export const priceListService = {
 
 export const materialCategoryService = {
   getAll: async (): Promise<PaginatedResponse<MaterialCategoryResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<MaterialCategoryResponse>>("/api/v1/material-categories", { params: { limit: 100 } });
+    const response = await apiClient.get<PaginatedResponse<MaterialCategoryResponse>>("/api/v1/material-categories", { params: { limit: 500 } });
     return response.data;
   },
   create: async (data: MaterialCategoryCreate): Promise<MaterialCategoryResponse> => {

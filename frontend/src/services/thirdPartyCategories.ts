@@ -4,7 +4,7 @@ import type { PaginatedResponse } from "@/types/common";
 
 export const thirdPartyCategoryService = {
   getAll: async (): Promise<PaginatedResponse<ThirdPartyCategoryResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<ThirdPartyCategoryResponse>>("/api/v1/third-party-categories", { params: { limit: 100 } });
+    const response = await apiClient.get<PaginatedResponse<ThirdPartyCategoryResponse>>("/api/v1/third-party-categories", { params: { limit: 500 } });
     return response.data;
   },
   create: async (data: ThirdPartyCategoryCreate): Promise<ThirdPartyCategoryResponse> => {
