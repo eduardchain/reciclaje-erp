@@ -717,38 +717,24 @@ def load_inventario(api, rows, mat_map, bodega_map, dry_run, db_url=None, org_id
         stats.error_details.append("  db_url requerido para carga de inventario (no dry-run)")
         return stats, {}
 
-    # Agrupar por material: sumar cantidades, promedio ponderado de costo
+    # Agrupar por material para calcular totales (UPDATE material con total)
+    # pero procesar cada fila individualmente para crear InventoryMovement por bodega
     from collections import defaultdict
     grouped = defaultdict(lambda: {"qty": 0, "value": 0, "cost": 0, "rows": []})
     for row in rows:
         codigo = clean_str(row.get("material_codigo"))
         cantidad = parse_decimal(row.get("cantidad"), 0)
         costo = parse_decimal(row.get("costo_unitario"), 0)
-        if not codigo or cantidad == 0:
+        if not codigo:
+            continue
+        if cantidad == 0:
+            stats.skipped += 1
             continue
         g = grouped[codigo]
         g["qty"] += cantidad
         g["value"] += abs(cantidad) * abs(costo)
-        g["cost"] = costo  # fallback si solo hay 1 fila
+        g["cost"] = costo
         g["rows"].append(row)
-
-    # Recalcular costo promedio ponderado por material
-    consolidated_rows = []
-    for codigo, g in grouped.items():
-        if g["qty"] > 0 and g["value"] > 0:
-            avg_cost = g["value"] / abs(g["qty"])
-        elif g["qty"] < 0 and g["value"] > 0:
-            avg_cost = g["value"] / abs(g["qty"])
-        else:
-            avg_cost = abs(g["cost"])
-        consolidated_rows.append({
-            "material_codigo": codigo,
-            "cantidad": g["qty"],
-            "costo_unitario": avg_cost,
-            "bodega": clean_str(g["rows"][0].get("bodega")),
-            "_row": g["rows"][0]["_row"],
-        })
-    rows = consolidated_rows
 
     # Conectar a BD directamente (no via API)
     db_conn = None
@@ -762,52 +748,74 @@ def load_inventario(api, rows, mat_map, bodega_map, dry_run, db_url=None, org_id
             stats.error_details.append(f"  Error conectando a BD: {e}")
             return stats, {}
 
-    for row in rows:
-        codigo = clean_str(row.get("material_codigo"))
-        cantidad = parse_decimal(row.get("cantidad"), 0)
-        costo = parse_decimal(row.get("costo_unitario"), 0)
-        bodega_nombre = clean_str(row.get("bodega"))
-
-        if not codigo:
-            stats.errors += 1
-            stats.error_details.append(f"  Fila {row['_row']}: material_codigo es obligatorio")
-            continue
-
-        if cantidad == 0:
-            stats.skipped += 1
-            continue
-
+    # Procesar por material: UPDATE con total, INSERT movimiento por bodega
+    for codigo, g in grouped.items():
         mat_id = find_in_map_ci(mat_map, codigo)
         if not mat_id:
             stats.errors += 1
-            stats.error_details.append(f"  Fila {row['_row']} ({codigo}): material no encontrado")
+            stats.error_details.append(f"  ({codigo}): material no encontrado")
             continue
 
-        bodega_id = find_in_map_ci(bodega_map, bodega_nombre) if bodega_nombre else None
-        if not bodega_id:
-            stats.errors += 1
-            stats.error_details.append(f"  Fila {row['_row']} ({codigo}): bodega '{bodega_nombre}' no encontrada")
+        # Validar bodegas
+        bodega_errors = False
+        for row in g["rows"]:
+            bodega_nombre = clean_str(row.get("bodega"))
+            bodega_id = find_in_map_ci(bodega_map, bodega_nombre) if bodega_nombre else None
+            if not bodega_id:
+                stats.errors += 1
+                stats.error_details.append(f"  Fila {row['_row']} ({codigo}): bodega '{bodega_nombre}' no encontrada")
+                bodega_errors = True
+        if bodega_errors:
             continue
 
         if dry_run:
             stats.created += 1
             continue
 
+        # Calcular avg_cost ponderado
+        total_qty = g["qty"]
+        if total_qty != 0 and g["value"] > 0:
+            avg_cost = g["value"] / abs(total_qty)
+        else:
+            avg_cost = abs(g["cost"])
+
         try:
-            # Actualizar material: stock y avg_cost (directo, sin crear ajuste ni movimiento)
+            from sqlalchemy import text
+
+            # UPDATE material con totales consolidados
             db_conn.execute(text("""
                 UPDATE materials SET
                     current_stock = :qty,
                     current_stock_liquidated = :qty,
                     current_average_cost = :cost
                 WHERE id = CAST(:mat_id AS uuid)
-            """), {"qty": cantidad, "cost": abs(costo), "mat_id": mat_id})
+            """), {"qty": total_qty, "cost": avg_cost, "mat_id": mat_id})
+
+            # INSERT InventoryMovement por cada bodega (desglose)
+            for row in g["rows"]:
+                cantidad = parse_decimal(row.get("cantidad"), 0)
+                costo = parse_decimal(row.get("costo_unitario"), 0)
+                bodega_nombre = clean_str(row.get("bodega"))
+                bodega_id = find_in_map_ci(bodega_map, bodega_nombre)
+
+                db_conn.execute(text("""
+                    INSERT INTO inventory_movements
+                        (id, material_id, warehouse_id, movement_type, quantity, unit_cost,
+                         date, notes, organization_id)
+                    VALUES
+                        (gen_random_uuid(), CAST(:mat_id AS uuid), CAST(:wh_id AS uuid),
+                         'adjustment', :qty, :cost,
+                         '2026-03-20 12:00:00+00', 'Inventario inicial', CAST(:org_id AS uuid))
+                """), {
+                    "mat_id": mat_id, "wh_id": bodega_id,
+                    "qty": cantidad, "cost": abs(costo), "org_id": org_id,
+                })
 
             db_conn.commit()
             stats.created += 1
         except Exception as e:
             stats.errors += 1
-            stats.error_details.append(f"  Fila {row['_row']} ({codigo}): DB error: {e}")
+            stats.error_details.append(f"  ({codigo}): DB error: {e}")
 
     if db_conn:
         db_conn.close()
