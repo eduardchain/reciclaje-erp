@@ -850,7 +850,7 @@ class ReportService:
             select(Material).where(
                 Material.organization_id == organization_id,
                 Material.is_active == True,
-                Material.current_stock_liquidated > 0,
+                Material.current_stock_liquidated != 0,
             )
         ).scalars().all()
         inv_liq_items = [

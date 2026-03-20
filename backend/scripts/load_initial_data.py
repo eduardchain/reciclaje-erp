@@ -704,6 +704,88 @@ def load_precios(api, rows, mat_map, dry_run):
     return stats, {}
 
 
+def load_inventario(api, rows, mat_map, bodega_map, dry_run):
+    """Carga inventario inicial. Positivos via increase, negativos via decrease."""
+    stats = Stats()
+
+    for row in rows:
+        codigo = clean_str(row.get("material_codigo"))
+        cantidad = parse_decimal(row.get("cantidad"), 0)
+        costo = parse_decimal(row.get("costo_unitario"), 0)
+        bodega_nombre = clean_str(row.get("bodega"))
+
+        if not codigo:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']}: material_codigo es obligatorio")
+            continue
+
+        if cantidad == 0:
+            stats.skipped += 1
+            continue
+
+        mat_id = find_in_map_ci(mat_map, codigo)
+        if not mat_id:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({codigo}): material no encontrado")
+            continue
+
+        bodega_id = find_in_map_ci(bodega_map, bodega_nombre) if bodega_nombre else None
+        if not bodega_id:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({codigo}): bodega '{bodega_nombre}' no encontrada")
+            continue
+
+        if dry_run:
+            stats.created += 1
+            continue
+
+        if cantidad > 0:
+            # Stock positivo → increase (requiere unit_cost)
+            if costo <= 0:
+                stats.errors += 1
+                stats.error_details.append(f"  Fila {row['_row']} ({codigo}): costo_unitario debe ser > 0 para increase")
+                continue
+            payload = {
+                "material_id": mat_id,
+                "warehouse_id": bodega_id,
+                "quantity": cantidad,
+                "unit_cost": costo,
+                "date": "2026-03-20T12:00:00",
+                "reason": "Inventario inicial - carga desde Excel",
+            }
+            status, resp = api.post("/api/v1/inventory/adjustments/increase", payload)
+        else:
+            # Stock negativo → primero increase con 0.01 para establecer avg_cost, luego decrease
+            # Alternativa: increase 1 unidad al costo dado, luego decrease (abs(cantidad)+1)
+            # Mas simple: increase pequeño para setear costo, luego decrease para llegar al negativo
+            abs_qty = abs(cantidad)
+            seed_qty = 0.01  # cantidad minima para establecer avg_cost
+            if costo > 0:
+                # Seed: crear stock minimo para que avg_cost exista
+                seed_payload = {
+                    "material_id": mat_id, "warehouse_id": bodega_id,
+                    "quantity": seed_qty, "unit_cost": costo,
+                    "date": "2026-03-20T12:00:00",
+                    "reason": "Inventario inicial - seed para stock negativo",
+                }
+                api.post("/api/v1/inventory/adjustments/increase", seed_payload)
+            # Decrease: seed + abs_qty para llegar al negativo deseado
+            payload = {
+                "material_id": mat_id, "warehouse_id": bodega_id,
+                "quantity": abs_qty + seed_qty,
+                "date": "2026-03-20T12:00:00",
+                "reason": "Inventario inicial - stock negativo desde Excel",
+            }
+            status, resp = api.post("/api/v1/inventory/adjustments/decrease", payload)
+        if status in (200, 201):
+            stats.created += 1
+        else:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({codigo}): {status} - {resp}")
+
+    return stats, {}
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -752,7 +834,7 @@ def main():
 
     all_stats = {}
     all_errors = []
-    total_sheets = 9  # Roles es opcional, no contamos
+    total_sheets = 10
 
     # 1. Unidades de Negocio
     print(f"[1/{total_sheets}] UnidadesNegocio...")
@@ -773,7 +855,7 @@ def main():
     # 3. Bodegas
     print(f"[3/{total_sheets}] Bodegas...")
     rows = read_sheet(wb, "Bodegas")
-    stats, _ = load_bodegas(api, rows, args.dry_run)
+    stats, bodega_map = load_bodegas(api, rows, args.dry_run)
     all_stats["Bodegas"] = stats
     all_errors.extend(stats.error_details)
     print(stats.report("Bodegas"))
@@ -825,6 +907,14 @@ def main():
     all_stats["Precios"] = stats
     all_errors.extend(stats.error_details)
     print(stats.report("Precios"))
+
+    # 10. Inventario (stock inicial via adjustments/increase)
+    print(f"[10/{total_sheets}] Inventario...")
+    rows = read_sheet(wb, "Inventario")
+    stats, _ = load_inventario(api, rows, mat_map, bodega_map, args.dry_run)
+    all_stats["Inventario"] = stats
+    all_errors.extend(stats.error_details)
+    print(stats.report("Inventario"))
 
     wb.close()
 
