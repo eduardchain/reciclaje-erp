@@ -46,6 +46,8 @@ const typeLabels: Record<MoneyMovementType, string> = {
   profit_distribution: "Repartición Utilidades",
   payment_to_generic: "Pago Genérico",
   collection_from_generic: "Cobro Genérico",
+  tp_transfer_out: "Transferencia Terceros (Salida)",
+  tp_transfer_in: "Transferencia Terceros (Entrada)",
 };
 
 const typeColors: Record<string, string> = {
@@ -70,6 +72,8 @@ const typeColors: Record<string, string> = {
   profit_distribution: "bg-emerald-100 text-emerald-800",
   payment_to_generic: "bg-orange-100 text-orange-800",
   collection_from_generic: "bg-teal-100 text-teal-800",
+  tp_transfer_out: "bg-purple-100 text-purple-800",
+  tp_transfer_in: "bg-purple-100 text-purple-800",
 };
 
 const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [

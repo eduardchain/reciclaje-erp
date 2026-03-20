@@ -77,6 +77,8 @@ VALID_MOVEMENT_TYPES = [
     "profit_distribution",      # Reparticion utilidades: NO cuenta, socio.balance(-), NO P&L
     "payment_to_generic",       # Pago a tercero generico: account(-), generic.balance(+)
     "collection_from_generic",  # Cobro a tercero generico: account(+), generic.balance(-)
+    "tp_transfer_out",          # Transferencia entre terceros (salida): NO cuenta, source.balance(+)
+    "tp_transfer_in",           # Transferencia entre terceros (entrada): NO cuenta, dest.balance(-)
 ]
 
 

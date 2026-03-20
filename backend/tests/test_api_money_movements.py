@@ -2647,3 +2647,135 @@ class TestUpdateClassification:
         data = resp.json()
         assert data["business_unit_id"] is None
         assert data["applicable_business_unit_ids"] is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: Transferencia entre Terceros (tp-transfer)
+# ---------------------------------------------------------------------------
+
+class TestThirdPartyTransfer:
+    """Tests para transferencia entre terceros (cruce de cuentas)."""
+
+    def test_tp_transfer_basic(self, client: TestClient, org_headers, test_supplier, test_customer, db_session):
+        """Transferencia basica: cliente paga a proveedor."""
+        initial_supplier = test_supplier.current_balance
+        initial_customer = test_customer.current_balance
+
+        resp = client.post(
+            "/api/v1/money-movements/tp-transfer",
+            json={
+                "source_third_party_id": str(test_customer.id),
+                "destination_third_party_id": str(test_supplier.id),
+                "amount": 50000,
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Cliente paga directo al proveedor",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["movement_type"] == "tp_transfer_out"
+        assert data["account_id"] is None
+        assert data["third_party_id"] == str(test_customer.id)
+
+        # Source (cliente): balance += 50K (se le abona)
+        db_session.refresh(test_customer)
+        assert test_customer.current_balance == initial_customer + Decimal("50000")
+
+        # Destination (proveedor): balance -= 50K (se le cobra)
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == initial_supplier - Decimal("50000")
+
+    def test_tp_transfer_annul(self, client: TestClient, org_headers, test_supplier, test_customer, db_session):
+        """Anular tp-transfer revierte ambos saldos."""
+        initial_supplier = test_supplier.current_balance
+        initial_customer = test_customer.current_balance
+
+        resp = client.post(
+            "/api/v1/money-movements/tp-transfer",
+            json={
+                "source_third_party_id": str(test_customer.id),
+                "destination_third_party_id": str(test_supplier.id),
+                "amount": 30000,
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Para anular",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        movement_id = resp.json()["id"]
+
+        # Anular
+        resp2 = client.post(
+            f"/api/v1/money-movements/{movement_id}/annul",
+            json={"reason": "Error"},
+            headers=org_headers,
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["status"] == "annulled"
+
+        # Saldos revertidos
+        db_session.refresh(test_customer)
+        db_session.refresh(test_supplier)
+        assert test_customer.current_balance == initial_customer
+        assert test_supplier.current_balance == initial_supplier
+
+    def test_tp_transfer_same_third_party(self, client: TestClient, org_headers, test_customer):
+        """Mismo tercero source y destination → 400."""
+        resp = client.post(
+            "/api/v1/money-movements/tp-transfer",
+            json={
+                "source_third_party_id": str(test_customer.id),
+                "destination_third_party_id": str(test_customer.id),
+                "amount": 10000,
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Mismo tercero",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "diferentes" in resp.json()["detail"]
+
+    def test_tp_transfer_system_entity_blocked(self, client: TestClient, org_headers, db_session, test_organization, test_customer):
+        """Tercero is_system_entity=True → 400."""
+        system_tp = ThirdParty(
+            name="[Prepago] Test",
+            organization_id=test_organization.id,
+            is_system_entity=True,
+        )
+        db_session.add(system_tp)
+        db_session.commit()
+        db_session.refresh(system_tp)
+
+        resp = client.post(
+            "/api/v1/money-movements/tp-transfer",
+            json={
+                "source_third_party_id": str(system_tp.id),
+                "destination_third_party_id": str(test_customer.id),
+                "amount": 10000,
+                "date": "2026-03-20T12:00:00Z",
+                "description": "System entity",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "sistema" in resp.json()["detail"].lower()
+
+    def test_tp_transfer_no_account_effect(self, client: TestClient, org_headers, test_supplier, test_customer, test_account, db_session):
+        """tp-transfer NO afecta cuentas bancarias."""
+        initial_balance = test_account.current_balance
+
+        client.post(
+            "/api/v1/money-movements/tp-transfer",
+            json={
+                "source_third_party_id": str(test_customer.id),
+                "destination_third_party_id": str(test_supplier.id),
+                "amount": 100000,
+                "date": "2026-03-20T12:00:00Z",
+                "description": "No afecta cuenta",
+            },
+            headers=org_headers,
+        )
+
+        db_session.refresh(test_account)
+        assert test_account.current_balance == initial_balance

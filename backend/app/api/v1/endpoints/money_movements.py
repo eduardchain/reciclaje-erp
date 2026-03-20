@@ -34,6 +34,7 @@ from app.schemas.money_movement import (
     ExpenseAccrualCreate,
     GenericPaymentCreate,
     GenericCollectionCreate,
+    ThirdPartyTransferCreate,
     AnnulMovementRequest,
     AnnulMovementResponse,
     UpdateClassificationRequest,
@@ -68,6 +69,8 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "asset_purchase": -1,            # Compra activo a credito: le debemos (balance baja)
     "payment_to_generic": 1,         # Pagamos a generico: su balance sube
     "collection_from_generic": -1,   # Cobramos a generico: su balance baja
+    "tp_transfer_out": 1,            # Transferencia entre terceros: source se le abona
+    "tp_transfer_in": -1,            # Transferencia entre terceros: dest se le cobra
 }
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -520,6 +523,26 @@ def create_collection_from_generic(
     Cobro a tercero generico — account(+), third_party.balance(-).
     """
     movement = money_movement.collect_from_generic(
+        db=db,
+        data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded, db)
+
+
+@router.post("/tp-transfer", response_model=MoneyMovementResponse, status_code=status.HTTP_201_CREATED)
+def create_tp_transfer(
+    data: ThirdPartyTransferCreate,
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
+    db: Session = Depends(get_db),
+):
+    """
+    Transferencia entre terceros — cruce de cuentas sin mover dinero.
+    Un tercero paga directamente a otro, sin pasar por cuentas de la empresa.
+    """
+    movement = money_movement.create_tp_transfer(
         db=db,
         data=data,
         organization_id=org_context["organization_id"],

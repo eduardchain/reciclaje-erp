@@ -248,6 +248,17 @@ class GenericCollectionCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class ThirdPartyTransferCreate(BaseModel):
+    """Transferencia entre terceros — NO cuenta, source.balance(+), dest.balance(-)."""
+    source_third_party_id: UUID = Field(..., description="Tercero que paga (se le abona)")
+    destination_third_party_id: UUID = Field(..., description="Tercero que recibe (se le cobra)")
+    amount: Decimal = Field(..., gt=0, description="Monto de la transferencia")
+    date: BusinessDate = Field(..., description="Fecha de la transferencia")
+    description: str = Field(..., min_length=1, max_length=500, description="Descripcion")
+    reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Schema de anulacion
 # ---------------------------------------------------------------------------

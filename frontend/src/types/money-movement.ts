@@ -23,7 +23,9 @@ export type MoneyMovementType =
   | "depreciation_expense"
   | "profit_distribution"
   | "payment_to_generic"
-  | "collection_from_generic";
+  | "collection_from_generic"
+  | "tp_transfer_out"
+  | "tp_transfer_in";
 
 export type MovementStatus = "confirmed" | "annulled";
 
@@ -222,6 +224,16 @@ export interface GenericCollectionCreate {
   account_id: string;
   date: string;
   description?: string | null;
+  reference_number?: string | null;
+  notes?: string | null;
+}
+
+export interface ThirdPartyTransferCreate {
+  source_third_party_id: string;
+  destination_third_party_id: string;
+  amount: number;
+  date: string;
+  description: string;
   reference_number?: string | null;
   notes?: string | null;
 }

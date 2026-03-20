@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { moneyMovementService } from "@/services/moneyMovements";
 import { getApiErrorMessage } from "@/utils/formatters";
 import { invalidateAfterTreasury } from "@/utils/queryInvalidation";
-import type { AnnulMovementRequest, UpdateClassificationRequest } from "@/types/money-movement";
+import type { AnnulMovementRequest, UpdateClassificationRequest, ThirdPartyTransferCreate } from "@/types/money-movement";
 
 interface MovementFilters {
   skip?: number;
@@ -64,6 +64,21 @@ export function useCreateMovement(type: string) {
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al crear el movimiento"));
+    },
+  });
+}
+
+export function useCreateTpTransfer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ThirdPartyTransferCreate) =>
+      moneyMovementService.createTpTransfer(data),
+    onSuccess: () => {
+      invalidateAfterTreasury(queryClient);
+      toast.success("Transferencia entre terceros registrada");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al crear la transferencia entre terceros"));
     },
   });
 }

@@ -11,12 +11,12 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { BusinessUnitAllocationSelector } from "@/components/shared/BusinessUnitAllocationSelector";
-import { useCreateMovement, useUploadEvidence } from "@/hooks/useMoneyMovements";
+import { useCreateMovement, useUploadEvidence, useCreateTpTransfer } from "@/hooks/useMoneyMovements";
 import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, useLiabilities, useGenericThirdParties } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
-type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment" | "expense_accrual" | "liability_payment" | "payment_to_generic" | "collection_from_generic";
+type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment" | "expense_accrual" | "liability_payment" | "payment_to_generic" | "collection_from_generic" | "tp_transfer";
 
 const typeLabels: Record<MovementType, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -36,6 +36,7 @@ const typeLabels: Record<MovementType, string> = {
   liability_payment: "Pago de Pasivo",
   payment_to_generic: "Pago a Tercero Generico",
   collection_from_generic: "Cobro a Tercero Generico",
+  tp_transfer: "Transferencia entre Terceros",
 };
 
 // Tipos frontend-only que mapean a un tipo backend diferente
@@ -53,6 +54,7 @@ export default function MovementCreatePage() {
   const isTypeLocked = !!searchParams.get("type");
   const backendType = backendTypeMap[type] ?? type;
   const create = useCreateMovement(backendType);
+  const createTpTransfer = useCreateTpTransfer();
   const uploadEvidence = useUploadEvidence();
 
   const { data: suppliersData } = useSuppliers();
@@ -78,6 +80,7 @@ export default function MovementCreatePage() {
   const [amount, setAmount] = useState(0);
   const [accountId, setAccountId] = useState("");
   const [thirdPartyId, setThirdPartyId] = useState(initialThirdPartyId);
+  const [destThirdPartyId, setDestThirdPartyId] = useState("");
   const [provisionId, setProvisionId] = useState(initialProvisionId);
   const [expCategoryId, setExpCategoryId] = useState("");
   const [destAccountId, setDestAccountId] = useState("");
@@ -94,6 +97,7 @@ export default function MovementCreatePage() {
     setAmount(0);
     setAccountId("");
     setThirdPartyId("");
+    setDestThirdPartyId("");
     setProvisionId("");
     setExpCategoryId("");
     setDestAccountId("");
@@ -195,6 +199,21 @@ export default function MovementCreatePage() {
   };
 
   const handleSubmit = () => {
+    if (type === "tp_transfer") {
+      const tpPayload = {
+        source_third_party_id: thirdPartyId,
+        destination_third_party_id: destThirdPartyId,
+        amount,
+        date,
+        description,
+        reference_number: referenceNumber || undefined,
+        notes: notes || undefined,
+      };
+      createTpTransfer.mutate(tpPayload, {
+        onSuccess: () => navigate(ROUTES.TREASURY),
+      });
+      return;
+    }
     const payload = buildPayload();
     create.mutate(payload, {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -245,13 +264,14 @@ export default function MovementCreatePage() {
     }
   };
 
+  const isTpTransfer = type === "tp_transfer";
   const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment", "advance_payment", "advance_collection", "expense_accrual", "liability_payment", "payment_to_generic", "collection_from_generic"].includes(type);
   const optionalThirdParty = type === "asset_payment";
   const needsProvision = type === "provision_deposit" || type === "provision_expense";
   const needsExpenseCategory = type === "expense" || type === "provision_expense" || type === "expense_accrual";
   const needsDestAccount = type === "transfer";
-  const needsAccount = type !== "transfer" && type !== "provision_expense" && type !== "expense_accrual";
-  const needsDescription = ["expense", "service_income", "transfer", "provision_expense", "asset_payment", "expense_accrual"].includes(type);
+  const needsAccount = type !== "transfer" && type !== "provision_expense" && type !== "expense_accrual" && !isTpTransfer;
+  const needsDescription = ["expense", "service_income", "transfer", "provision_expense", "asset_payment", "expense_accrual", "tp_transfer"].includes(type);
 
   return (
     <div className="space-y-6">
@@ -308,6 +328,19 @@ export default function MovementCreatePage() {
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero (opcional)</Label>
                 <EntitySelect value={thirdPartyId} onChange={setThirdPartyId} options={getThirdPartyOptions()} placeholder="Seleccionar tercero..." />
               </div>
+            )}
+
+            {isTpTransfer && (
+              <>
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero Origen *</Label>
+                  <EntitySelect value={thirdPartyId} onChange={setThirdPartyId} options={thirdParties.map((t) => ({ id: t.id, label: t.name }))} placeholder="Seleccionar tercero origen..." />
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero Destino *</Label>
+                  <EntitySelect value={destThirdPartyId} onChange={setDestThirdPartyId} options={thirdParties.filter((t) => t.id !== thirdPartyId).map((t) => ({ id: t.id, label: t.name }))} placeholder="Seleccionar tercero destino..." />
+                </div>
+              </>
             )}
 
             {needsProvision && (
@@ -425,10 +458,10 @@ export default function MovementCreatePage() {
           <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
-            disabled={create.isPending || amount <= 0 || !!isProvisionExpenseBlocked}
+            disabled={create.isPending || createTpTransfer.isPending || amount <= 0 || !!isProvisionExpenseBlocked || (isTpTransfer && (!thirdPartyId || !destThirdPartyId || !description))}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
-            {create.isPending ? "Creando..." : "Crear Movimiento"}
+            {(create.isPending || createTpTransfer.isPending) ? "Creando..." : "Crear Movimiento"}
           </Button>
         </div>
       </div>

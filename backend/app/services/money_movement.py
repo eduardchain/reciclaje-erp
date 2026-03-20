@@ -787,6 +787,85 @@ class CRUDMoneyMovement:
         db.refresh(movement)
         return movement
 
+    def create_tp_transfer(
+        self,
+        db: Session,
+        data: "ThirdPartyTransferCreate",
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """
+        Transferencia entre terceros — cruce de cuentas sin mover dinero.
+
+        Un tercero paga directamente a otro. NO toca cuentas bancarias.
+        Crea par vinculado: tp_transfer_out + tp_transfer_in.
+
+        Efectos:
+        - source.current_balance += amount (se le abona, reduce deuda)
+        - destination.current_balance -= amount (se le cobra, aumenta deuda)
+        """
+        if data.source_third_party_id == data.destination_third_party_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Los terceros origen y destino deben ser diferentes",
+            )
+
+        source = self._validate_third_party(db, data.source_third_party_id, organization_id)
+        if source.is_system_entity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"El tercero '{source.name}' es una entidad del sistema y no puede participar en transferencias",
+            )
+
+        destination = self._validate_third_party(db, data.destination_third_party_id, organization_id)
+        if destination.is_system_entity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"El tercero '{destination.name}' es una entidad del sistema y no puede participar en transferencias",
+            )
+
+        # Crear movimiento de salida (source — se le abona)
+        movement_out = self._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="tp_transfer_out",
+            amount=data.amount,
+            account_id=None,
+            date=data.date,
+            description=data.description,
+            third_party_id=data.source_third_party_id,
+            reference_number=data.reference_number,
+            notes=data.notes,
+            user_id=user_id,
+        )
+
+        # Crear movimiento de entrada (destination — se le cobra)
+        movement_in = self._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="tp_transfer_in",
+            amount=data.amount,
+            account_id=None,
+            date=data.date,
+            description=data.description,
+            third_party_id=data.destination_third_party_id,
+            reference_number=data.reference_number,
+            notes=data.notes,
+            user_id=user_id,
+        )
+
+        # Vincular el par
+        movement_out.transfer_pair_id = movement_in.id
+        movement_in.transfer_pair_id = movement_out.id
+
+        # Aplicar efectos
+        source.current_balance += data.amount
+        destination.current_balance -= data.amount
+
+        db.commit()
+        db.refresh(movement_out)
+        return movement_out
+
     # ======================================================================
     # Anulacion
     # ======================================================================
@@ -1431,6 +1510,16 @@ class CRUDMoneyMovement:
 
         elif mt == "collection_from_generic":
             account.current_balance -= amt
+            if third_party:
+                third_party.current_balance += amt
+
+        elif mt == "tp_transfer_out":
+            # Reversa: source habia hecho +=, ahora -=
+            if third_party:
+                third_party.current_balance -= amt
+
+        elif mt == "tp_transfer_in":
+            # Reversa: dest habia hecho -=, ahora +=
             if third_party:
                 third_party.current_balance += amt
 
