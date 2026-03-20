@@ -707,8 +707,8 @@ def load_precios(api, rows, mat_map, dry_run):
 def load_inventario(api, rows, mat_map, bodega_map, dry_run, db_url=None, org_id=None):
     """Carga inventario inicial directo en BD (sin crear ajustes ni afectar P&L).
 
-    Actualiza Material.current_stock, current_stock_liquidated, current_average_cost
-    y crea InventoryMovement de tipo 'initial_balance' como registro auditable.
+    Si un material aparece en multiples bodegas, suma las cantidades y usa
+    promedio ponderado para el costo. Actualiza stock global del material.
     """
     stats = Stats()
 
@@ -716,6 +716,39 @@ def load_inventario(api, rows, mat_map, bodega_map, dry_run, db_url=None, org_id
         stats.errors += 1
         stats.error_details.append("  db_url requerido para carga de inventario (no dry-run)")
         return stats, {}
+
+    # Agrupar por material: sumar cantidades, promedio ponderado de costo
+    from collections import defaultdict
+    grouped = defaultdict(lambda: {"qty": 0, "value": 0, "cost": 0, "rows": []})
+    for row in rows:
+        codigo = clean_str(row.get("material_codigo"))
+        cantidad = parse_decimal(row.get("cantidad"), 0)
+        costo = parse_decimal(row.get("costo_unitario"), 0)
+        if not codigo or cantidad == 0:
+            continue
+        g = grouped[codigo]
+        g["qty"] += cantidad
+        g["value"] += abs(cantidad) * abs(costo)
+        g["cost"] = costo  # fallback si solo hay 1 fila
+        g["rows"].append(row)
+
+    # Recalcular costo promedio ponderado por material
+    consolidated_rows = []
+    for codigo, g in grouped.items():
+        if g["qty"] > 0 and g["value"] > 0:
+            avg_cost = g["value"] / abs(g["qty"])
+        elif g["qty"] < 0 and g["value"] > 0:
+            avg_cost = g["value"] / abs(g["qty"])
+        else:
+            avg_cost = abs(g["cost"])
+        consolidated_rows.append({
+            "material_codigo": codigo,
+            "cantidad": g["qty"],
+            "costo_unitario": avg_cost,
+            "bodega": clean_str(g["rows"][0].get("bodega")),
+            "_row": g["rows"][0]["_row"],
+        })
+    rows = consolidated_rows
 
     # Conectar a BD directamente (no via API)
     db_conn = None
@@ -761,29 +794,126 @@ def load_inventario(api, rows, mat_map, bodega_map, dry_run, db_url=None, org_id
             continue
 
         try:
-            # Actualizar material: stock y avg_cost
+            # Actualizar material: stock y avg_cost (directo, sin crear ajuste ni movimiento)
             db_conn.execute(text("""
                 UPDATE materials SET
                     current_stock = :qty,
                     current_stock_liquidated = :qty,
                     current_average_cost = :cost
-                WHERE id = :mat_id::uuid
+                WHERE id = CAST(:mat_id AS uuid)
             """), {"qty": cantidad, "cost": abs(costo), "mat_id": mat_id})
-
-            # Crear InventoryMovement como registro auditable (no crea ajuste)
-            db_conn.execute(text("""
-                INSERT INTO inventory_movements
-                    (id, material_id, warehouse_id, movement_type, quantity, unit_cost, date, notes, organization_id)
-                VALUES
-                    (gen_random_uuid(), :mat_id::uuid, :wh_id::uuid, 'initial_balance', :qty, :cost,
-                     '2026-03-20 12:00:00+00', 'Inventario inicial - carga desde Excel', :org_id::uuid)
-            """), {"mat_id": mat_id, "wh_id": bodega_id, "qty": cantidad, "cost": abs(costo), "org_id": org_id})
 
             db_conn.commit()
             stats.created += 1
         except Exception as e:
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']} ({codigo}): DB error: {e}")
+
+    if db_conn:
+        db_conn.close()
+
+    return stats, {}
+
+
+def load_activos_fijos(api, rows, gastos_map, dry_run, db_url=None, org_id=None):
+    """Carga activos fijos directo en BD (sin crear MoneyMovement ni afectar cuentas/terceros)."""
+    stats = Stats()
+
+    if not dry_run and not db_url:
+        stats.errors += 1
+        stats.error_details.append("  db_url requerido para carga de activos (no dry-run)")
+        return stats, {}
+
+    db_conn = None
+    if not dry_run:
+        try:
+            from sqlalchemy import create_engine, text
+            engine = create_engine(db_url)
+            db_conn = engine.connect()
+        except Exception as e:
+            stats.errors += 1
+            stats.error_details.append(f"  Error conectando a BD: {e}")
+            return stats, {}
+
+    for row in rows:
+        nombre = clean_str(row.get("nombre"))
+        if not nombre:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']}: nombre es obligatorio")
+            continue
+
+        valor_compra = parse_decimal(row.get("valor_compra"), 0)
+        if valor_compra <= 0:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({nombre}): valor_compra debe ser > 0")
+            continue
+
+        valor_residual = parse_decimal(row.get("valor_residual"), 0)
+        tasa = parse_decimal(row.get("tasa_depreciacion"), 0)
+        if tasa <= 0:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({nombre}): tasa_depreciacion debe ser > 0")
+            continue
+
+        dep_acumulada = parse_decimal(row.get("depreciacion_acumulada"), 0)
+        current_value = valor_compra - dep_acumulada
+
+        fecha_compra = clean_str(row.get("fecha_compra"))
+        fecha_inicio = clean_str(row.get("fecha_inicio_depreciacion"))
+        if not fecha_compra or not fecha_inicio:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({nombre}): fechas son obligatorias")
+            continue
+
+        cat_nombre = clean_str(row.get("categoria_gasto"))
+        cat_id = find_in_map_ci(gastos_map, cat_nombre) if cat_nombre else None
+
+        codigo = clean_str(row.get("codigo_activo"))
+        notas = clean_str(row.get("notas"))
+
+        # Calcular depreciacion mensual y vida util
+        monthly_dep = round(valor_compra * (tasa / 100), 2)
+        depreciable = valor_compra - valor_residual
+        useful_life = int(depreciable / monthly_dep) if monthly_dep > 0 else 0
+
+        # Determinar status
+        if current_value <= valor_residual:
+            status_val = "fully_depreciated"
+        else:
+            status_val = "active"
+
+        if dry_run:
+            stats.created += 1
+            continue
+
+        try:
+            from sqlalchemy import text
+            db_conn.execute(text("""
+                INSERT INTO fixed_assets
+                    (id, organization_id, name, asset_code, notes,
+                     purchase_date, depreciation_start_date,
+                     purchase_value, salvage_value, current_value, accumulated_depreciation,
+                     depreciation_rate, monthly_depreciation, useful_life_months,
+                     expense_category_id, status)
+                VALUES
+                    (gen_random_uuid(), CAST(:org_id AS uuid), :name, :code, :notes,
+                     CAST(:purchase_date AS date), CAST(:dep_start AS date),
+                     :purchase_value, :salvage_value, :current_value, :accumulated_dep,
+                     :dep_rate, :monthly_dep, :useful_life,
+                     CAST(:cat_id AS uuid), :status)
+            """), {
+                "org_id": org_id, "name": nombre, "code": codigo, "notes": notas,
+                "purchase_date": fecha_compra, "dep_start": fecha_inicio,
+                "purchase_value": valor_compra, "salvage_value": valor_residual,
+                "current_value": current_value, "accumulated_dep": dep_acumulada,
+                "dep_rate": tasa, "monthly_dep": monthly_dep, "useful_life": useful_life,
+                "cat_id": cat_id, "status": status_val,
+            })
+            db_conn.commit()
+            stats.created += 1
+        except Exception as e:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({nombre}): DB error: {e}")
 
     if db_conn:
         db_conn.close()
@@ -841,7 +971,7 @@ def main():
 
     all_stats = {}
     all_errors = []
-    total_sheets = 10
+    total_sheets = 11
 
     # 1. Unidades de Negocio
     print(f"[1/{total_sheets}] UnidadesNegocio...")
@@ -878,7 +1008,7 @@ def main():
     # 5. Categorías de Gastos
     print(f"[5/{total_sheets}] CategoriaGastos...")
     rows = read_sheet(wb, "CategoriaGastos")
-    stats, _ = load_categoria_gastos(api, rows, un_map, args.dry_run)
+    stats, gastos_map = load_categoria_gastos(api, rows, un_map, args.dry_run)
     all_stats["CategoriaGastos"] = stats
     all_errors.extend(stats.error_details)
     print(stats.report("CategoriaGastos"))
@@ -937,6 +1067,14 @@ def main():
     all_stats["Inventario"] = stats
     all_errors.extend(stats.error_details)
     print(stats.report("Inventario"))
+
+    # 11. Activos Fijos (directo en BD)
+    print(f"[11/{total_sheets}] ActivosFijos...")
+    rows = read_sheet(wb, "ActivosFijos")
+    stats, _ = load_activos_fijos(api, rows, gastos_map, args.dry_run, db_url=db_url, org_id=args.org_id)
+    all_stats["ActivosFijos"] = stats
+    all_errors.extend(stats.error_details)
+    print(stats.report("ActivosFijos"))
 
     wb.close()
 

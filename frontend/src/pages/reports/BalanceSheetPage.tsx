@@ -56,11 +56,17 @@ export default function BalanceSheetPage() {
                 {data.liabilities.liability_debt > 0 && (
                   <div className="flex justify-between"><span>Pasivos</span><span>{formatCurrency(data.liabilities.liability_debt)}</span></div>
                 )}
+                {data.liabilities.service_provider_payable > 0 && (
+                  <div className="flex justify-between"><span>Proveedores Servicios</span><span>{formatCurrency(data.liabilities.service_provider_payable)}</span></div>
+                )}
                 {data.liabilities.customer_advances > 0 && (
                   <div className="flex justify-between"><span>Anticipos de Clientes</span><span>{formatCurrency(data.liabilities.customer_advances)}</span></div>
                 )}
                 {data.liabilities.provision_obligations > 0 && (
                   <div className="flex justify-between"><span>Obligaciones de Provisión</span><span>{formatCurrency(data.liabilities.provision_obligations)}</span></div>
+                )}
+                {data.liabilities.generic_payable > 0 && (
+                  <div className="flex justify-between"><span>Otras Cuentas por Pagar</span><span>{formatCurrency(data.liabilities.generic_payable)}</span></div>
                 )}
                 <Separator />
                 <div className="flex justify-between font-bold"><span>Total Pasivos</span><span>{formatCurrency(data.total_liabilities)}</span></div>

@@ -729,13 +729,25 @@ class ReportService:
             )
         ))
 
-        # Pasivos (service_provider + liability con balance < 0 = le debemos)
+        # Pasivos (liability con balance < 0 = gastos causados pendientes)
         liability_debt = Decimal(str(
             db.scalar(
                 select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
                 .where(
                     ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("service_provider", "liability"),
+                    self._tp_has_behavior("liability"),
+                    ThirdParty.current_balance < 0,
+                )
+            )
+        ))
+
+        # Proveedores de servicios (service_provider con balance < 0)
+        service_provider_payable = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
+                .where(
+                    ThirdParty.organization_id == organization_id,
+                    self._tp_has_behavior("service_provider"),
                     ThirdParty.current_balance < 0,
                 )
             )
@@ -765,7 +777,19 @@ class ReportService:
             )
         ))
 
-        total_liabilities = accounts_payable + investor_debt + liability_debt + customer_advances + provision_obligations
+        # Pasivos genéricos (generic con balance < 0)
+        generic_payable = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
+                .where(
+                    ThirdParty.organization_id == organization_id,
+                    self._tp_has_behavior("generic"),
+                    ThirdParty.current_balance < 0,
+                )
+            )
+        ))
+
+        total_liabilities = accounts_payable + investor_debt + liability_debt + service_provider_payable + customer_advances + provision_obligations + generic_payable
         equity = total_assets - total_liabilities
 
         # Desglose patrimonio: utilidad acumulada y distribuida
@@ -791,8 +815,10 @@ class ReportService:
                 accounts_payable=float(accounts_payable),
                 investor_debt=float(investor_debt),
                 liability_debt=float(liability_debt),
+                service_provider_payable=float(service_provider_payable),
                 customer_advances=float(customer_advances),
                 provision_obligations=float(provision_obligations),
+                generic_payable=float(generic_payable),
                 total=float(total_liabilities),
             ),
             total_liabilities=float(total_liabilities),

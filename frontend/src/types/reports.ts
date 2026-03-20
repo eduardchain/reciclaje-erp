@@ -143,8 +143,10 @@ export interface BalanceSheetLiabilities {
   accounts_payable: number;
   investor_debt: number;
   liability_debt: number;
+  service_provider_payable: number;
   customer_advances: number;
   provision_obligations: number;
+  generic_payable: number;
   total: number;
 }
 

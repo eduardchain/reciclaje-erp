@@ -198,8 +198,10 @@ class BalanceSheetLiabilities(BaseModel):
     accounts_payable: float
     investor_debt: float
     liability_debt: float = 0.0
+    service_provider_payable: float = 0.0
     customer_advances: float = 0.0
     provision_obligations: float = 0.0
+    generic_payable: float = 0.0
     total: float
 
 
