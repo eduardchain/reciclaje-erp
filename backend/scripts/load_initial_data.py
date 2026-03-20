@@ -1,29 +1,31 @@
 """
 Carga inicial de datos maestros desde archivo Excel.
 
-Lee un archivo Excel con 8 hojas (en orden de dependencia) y carga los datos
+Lee un archivo Excel con 10 hojas (en orden de dependencia) y carga los datos
 via API REST autenticada. Permite re-ejecucion segura (omite duplicados).
 
 Hojas del Excel (en orden):
-  1. Categorias       → Categorías de materiales
-  2. UnidadesNegocio  → Unidades de negocio
-  3. Bodegas          → Bodegas / almacenes
-  4. Cuentas          → Cuentas monetarias
-  5. Gastos           → Categorías de gastos
-  6. Terceros         → Proveedores, clientes, inversionistas, provisiones
-  7. Materiales       → Materiales (requiere Categorias + UnidadesNegocio)
-  8. Precios          → Lista de precios (requiere Materiales)
+  1. UnidadesNegocio      → Unidades de negocio
+  2. CategoriaMateriales  → Categorías de materiales
+  3. Bodegas              → Bodegas / almacenes
+  4. Cuentas              → Cuentas monetarias
+  5. CategoriaGastos      → Categorías de gastos (con jerarquia padre-hijo + UN)
+  6. CategoriaTerceros    → Categorías de terceros (con behavior_type + jerarquia)
+  7. Terceros             → Proveedores, clientes, etc. (asignados a categorias por nombre)
+  8. Materiales           → Materiales (requiere CategoriaMateriales + UnidadesNegocio)
+  9. Precios              → Lista de precios (requiere Materiales)
+  10. Roles               → Roles personalizados (opcional)
 
 Uso:
     cd backend
-    python scripts/load_initial_data.py \\
-        --file datos_cliente.xlsx \\
+    ./venv/bin/python scripts/load_initial_data.py \\
+        --file docs/CargaInicial_EcoBalance_v2_cliente.xlsx \\
         --email admin@empresa.com \\
         --password secreto \\
         --org-id 550e8400-e29b-41d4-a716-446655440000
 
     # Solo validar sin crear:
-    python scripts/load_initial_data.py --file datos.xlsx --dry-run \\
+    ./venv/bin/python scripts/load_initial_data.py --file datos.xlsx --dry-run \\
         --email admin@test.com --password test --org-id <uuid>
 """
 import argparse
@@ -49,26 +51,43 @@ ACCOUNT_TYPE_MAP = {
     "digital": "digital",
 }
 
+BEHAVIOR_TYPE_MAP = {
+    "proveedor_material": "material_supplier",
+    "proveedor_servicios": "service_provider",
+    "cliente": "customer",
+    "inversionista": "investor",
+    "generico": "generic",
+    "provision": "provision",
+    "pasivo": "liability",
+    # Aceptar tambien valores backend directos
+    "material_supplier": "material_supplier",
+    "service_provider": "service_provider",
+    "customer": "customer",
+    "investor": "investor",
+    "generic": "generic",
+    "liability": "liability",
+}
+
 
 def parse_bool(value) -> bool:
-    """Convierte SI/NO/True/1 a bool."""
     if value is None:
         return False
     return str(value).strip().upper() in ("SI", "SÍ", "YES", "1", "TRUE")
 
 
 def parse_decimal(value, default=0) -> float:
-    """Convierte valor a float, manejando None y strings."""
     if value is None:
         return default
+    s = str(value).strip()
+    if s in ("", "$", "$ -", "-"):
+        return default
     try:
-        return float(Decimal(str(value)))
+        return float(Decimal(s.replace("$", "").replace(",", "").strip()))
     except (InvalidOperation, ValueError):
         return default
 
 
 def clean_str(value) -> str | None:
-    """Limpia string, retorna None si vacio."""
     if value is None:
         return None
     s = str(value).strip()
@@ -76,23 +95,19 @@ def clean_str(value) -> str | None:
 
 
 def read_sheet(wb, sheet_name: str) -> list[dict]:
-    """Lee una hoja del Excel y retorna lista de dicts con headers como keys."""
     if sheet_name not in wb.sheetnames:
         return []
-
     ws = wb[sheet_name]
     rows = list(ws.iter_rows(values_only=True))
     if len(rows) < 2:
         return []
-
     headers = [clean_str(h) or f"col_{i}" for i, h in enumerate(rows[0])]
-    # Normalizar headers: minusculas, sin asteriscos (marcadores de obligatorio)
     headers = [h.lower().strip().rstrip("*").strip() for h in headers]
 
     result = []
     for row_idx, row in enumerate(rows[1:], start=2):
         if all(v is None for v in row):
-            continue  # Fila completamente vacia
+            continue
         data = {}
         for col_idx, val in enumerate(row):
             if col_idx < len(headers):
@@ -100,6 +115,17 @@ def read_sheet(wb, sheet_name: str) -> list[dict]:
         data["_row"] = row_idx
         result.append(data)
     return result
+
+
+def find_in_map_ci(mapping: dict, key: str) -> str | None:
+    """Buscar en mapping case-insensitive. Retorna el ID o None."""
+    if not key:
+        return None
+    key_lower = key.lower().strip()
+    for k, v in mapping.items():
+        if k.lower().strip() == key_lower:
+            return v
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +140,6 @@ class APIClient:
         self.session = requests.Session()
 
     def login(self, email: str, password: str) -> bool:
-        """Autenticar via JWT."""
         resp = self.session.post(
             f"{self.base_url}/api/v1/auth/login/json",
             json={"email": email, "password": password},
@@ -130,7 +155,6 @@ class APIClient:
         return False
 
     def post(self, path: str, data: dict) -> tuple[int, dict | str]:
-        """POST a la API. Retorna (status_code, response_json o error_text)."""
         resp = self.session.post(f"{self.base_url}{path}", json=data)
         try:
             return resp.status_code, resp.json()
@@ -138,7 +162,6 @@ class APIClient:
             return resp.status_code, resp.text
 
     def get(self, path: str, params: dict | None = None) -> tuple[int, dict | str]:
-        """GET a la API."""
         resp = self.session.get(f"{self.base_url}{path}", params=params)
         try:
             return resp.status_code, resp.json()
@@ -147,11 +170,10 @@ class APIClient:
 
 
 # ---------------------------------------------------------------------------
-# Loaders por entidad
+# Stats
 # ---------------------------------------------------------------------------
 
 class Stats:
-    """Contadores de resultado por hoja."""
     def __init__(self):
         self.created = 0
         self.skipped = 0
@@ -169,118 +191,111 @@ class Stats:
         return f"  {sheet}: {', '.join(parts) if parts else 'vacio'}"
 
 
-def load_categorias(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats, dict]:
-    """Carga categorías de materiales. Retorna stats y mapping nombre→id."""
-    stats = Stats()
-    mapping = {}
-
-    for row in rows:
-        nombre = clean_str(row.get("nombre"))
-        if not nombre:
-            stats.errors += 1
-            stats.error_details.append(f"  Fila {row['_row']}: nombre es obligatorio")
-            continue
-
-        if dry_run:
-            stats.created += 1
-            mapping[nombre] = f"dry-run-{nombre}"
-            continue
-
-        payload = {"name": nombre}
-        desc = clean_str(row.get("descripcion"))
-        if desc:
-            payload["description"] = desc
-
-        status, resp = api.post("/api/v1/materials/categories", payload)
-        if status in (200, 201):
-            mapping[nombre] = resp["id"]
-            stats.created += 1
-        elif status == 409 or (status == 400 and "ya existe" in str(resp).lower()):
-            stats.skipped += 1
-            # Intentar obtener el ID existente
-        else:
-            stats.errors += 1
-            stats.error_details.append(f"  Fila {row['_row']} ({nombre}): {status} - {resp}")
-
-    # Si hubo omitidos, cargar IDs existentes
-    if stats.skipped > 0 and not dry_run:
-        _fill_missing_categories(api, rows, mapping)
-
-    return stats, mapping
+def _is_duplicate(status_code, resp):
+    """Detectar si el error es un duplicado (ya existe)."""
+    if status_code == 409:
+        return True
+    resp_str = str(resp).lower()
+    return status_code == 400 and ("ya existe" in resp_str or "duplicate" in resp_str)
 
 
-def _fill_missing_categories(api: APIClient, rows: list[dict], mapping: dict):
-    """Carga IDs de categorías que ya existian."""
-    status, resp = api.get("/api/v1/materials/categories", {"limit": 500})
-    if status == 200:
-        existing = {item["name"]: item["id"] for item in resp.get("items", [])}
+def _fill_mapping_from_api(api, path, rows, mapping, key_field="nombre", resp_key="name"):
+    """Cargar IDs de entidades existentes para completar el mapping."""
+    st, resp = api.get(path, {"limit": 1000})
+    if st == 200:
+        items = resp.get("items", resp) if isinstance(resp, dict) else resp
+        if isinstance(items, dict):
+            items = items.get("items", [])
+        existing = {item[resp_key]: item["id"] for item in items if resp_key in item}
         for row in rows:
-            nombre = clean_str(row.get("nombre"))
-            if nombre and nombre not in mapping and nombre in existing:
-                mapping[nombre] = existing[nombre]
+            nombre = clean_str(row.get(key_field))
+            if nombre and nombre not in mapping:
+                # Case-insensitive match
+                for k, v in existing.items():
+                    if k.lower().strip() == nombre.lower().strip():
+                        mapping[nombre] = v
+                        break
 
 
-def load_unidades_negocio(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats, dict]:
-    """Carga unidades de negocio."""
+# ---------------------------------------------------------------------------
+# Loaders
+# ---------------------------------------------------------------------------
+
+def load_unidades_negocio(api, rows, dry_run):
     stats = Stats()
     mapping = {}
-
     for row in rows:
         nombre = clean_str(row.get("nombre"))
         if not nombre:
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']}: nombre es obligatorio")
             continue
-
         if dry_run:
             stats.created += 1
             mapping[nombre] = f"dry-run-{nombre}"
             continue
-
         payload = {"name": nombre}
         desc = clean_str(row.get("descripcion"))
         if desc:
             payload["description"] = desc
-
         status, resp = api.post("/api/v1/business-units/", payload)
         if status in (200, 201):
             mapping[nombre] = resp["id"]
             stats.created += 1
-        elif status == 409 or (status == 400 and "ya existe" in str(resp).lower()):
+        elif _is_duplicate(status, resp):
             stats.skipped += 1
         else:
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']} ({nombre}): {status} - {resp}")
-
     if stats.skipped > 0 and not dry_run:
-        st, resp = api.get("/api/v1/business-units/", {"limit": 500})
-        if st == 200:
-            existing = {item["name"]: item["id"] for item in resp.get("items", [])}
-            for row in rows:
-                nombre = clean_str(row.get("nombre"))
-                if nombre and nombre not in mapping and nombre in existing:
-                    mapping[nombre] = existing[nombre]
-
+        _fill_mapping_from_api(api, "/api/v1/business-units/", rows, mapping)
     return stats, mapping
 
 
-def load_bodegas(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats, dict]:
-    """Carga bodegas."""
+def load_categorias_material(api, rows, dry_run):
     stats = Stats()
     mapping = {}
-
     for row in rows:
         nombre = clean_str(row.get("nombre"))
         if not nombre:
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']}: nombre es obligatorio")
             continue
-
         if dry_run:
             stats.created += 1
             mapping[nombre] = f"dry-run-{nombre}"
             continue
+        payload = {"name": nombre}
+        desc = clean_str(row.get("descripcion"))
+        if desc:
+            payload["description"] = desc
+        status, resp = api.post("/api/v1/materials/categories", payload)
+        if status in (200, 201):
+            mapping[nombre] = resp["id"]
+            stats.created += 1
+        elif _is_duplicate(status, resp):
+            stats.skipped += 1
+        else:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({nombre}): {status} - {resp}")
+    if stats.skipped > 0 and not dry_run:
+        _fill_mapping_from_api(api, "/api/v1/materials/categories", rows, mapping)
+    return stats, mapping
 
+
+def load_bodegas(api, rows, dry_run):
+    stats = Stats()
+    mapping = {}
+    for row in rows:
+        nombre = clean_str(row.get("nombre"))
+        if not nombre:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']}: nombre es obligatorio")
+            continue
+        if dry_run:
+            stats.created += 1
+            mapping[nombre] = f"dry-run-{nombre}"
+            continue
         payload = {"name": nombre}
         desc = clean_str(row.get("descripcion"))
         if desc:
@@ -288,38 +303,26 @@ def load_bodegas(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats
         addr = clean_str(row.get("direccion"))
         if addr:
             payload["address"] = addr
-
         status, resp = api.post("/api/v1/warehouses/", payload)
         if status in (200, 201):
             mapping[nombre] = resp["id"]
             stats.created += 1
-        elif status == 409 or (status == 400 and "ya existe" in str(resp).lower()):
+        elif _is_duplicate(status, resp):
             stats.skipped += 1
         else:
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']} ({nombre}): {status} - {resp}")
-
     if stats.skipped > 0 and not dry_run:
-        st, resp = api.get("/api/v1/warehouses/", {"limit": 500})
-        if st == 200:
-            existing = {item["name"]: item["id"] for item in resp.get("items", [])}
-            for row in rows:
-                nombre = clean_str(row.get("nombre"))
-                if nombre and nombre not in mapping and nombre in existing:
-                    mapping[nombre] = existing[nombre]
-
+        _fill_mapping_from_api(api, "/api/v1/warehouses/", rows, mapping)
     return stats, mapping
 
 
-def load_cuentas(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats, dict]:
-    """Carga cuentas monetarias."""
+def load_cuentas(api, rows, dry_run):
     stats = Stats()
     mapping = {}
-
     for row in rows:
         nombre = clean_str(row.get("nombre"))
         tipo_raw = clean_str(row.get("tipo"))
-
         if not nombre:
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']}: nombre es obligatorio")
@@ -328,21 +331,15 @@ def load_cuentas(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']} ({nombre}): tipo es obligatorio")
             continue
-
         tipo = ACCOUNT_TYPE_MAP.get(tipo_raw.lower())
         if not tipo:
             stats.errors += 1
-            stats.error_details.append(
-                f"  Fila {row['_row']} ({nombre}): tipo '{tipo_raw}' invalido. "
-                f"Usar: {', '.join(ACCOUNT_TYPE_MAP.keys())}"
-            )
+            stats.error_details.append(f"  Fila {row['_row']} ({nombre}): tipo '{tipo_raw}' invalido")
             continue
-
         if dry_run:
             stats.created += 1
             mapping[nombre] = f"dry-run-{nombre}"
             continue
-
         payload = {
             "name": nombre,
             "account_type": tipo,
@@ -354,40 +351,45 @@ def load_cuentas(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats
         banco = clean_str(row.get("banco"))
         if banco:
             payload["bank_name"] = banco
-
         status, resp = api.post("/api/v1/money-accounts/", payload)
         if status in (200, 201):
             mapping[nombre] = resp["id"]
             stats.created += 1
-        elif status == 409 or (status == 400 and "ya existe" in str(resp).lower()):
+        elif _is_duplicate(status, resp):
             stats.skipped += 1
         else:
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']} ({nombre}): {status} - {resp}")
-
     if stats.skipped > 0 and not dry_run:
-        st, resp = api.get("/api/v1/money-accounts/", {"limit": 500})
-        if st == 200:
-            existing = {item["name"]: item["id"] for item in resp.get("items", [])}
-            for row in rows:
-                nombre = clean_str(row.get("nombre"))
-                if nombre and nombre not in mapping and nombre in existing:
-                    mapping[nombre] = existing[nombre]
-
+        _fill_mapping_from_api(api, "/api/v1/money-accounts/", rows, mapping)
     return stats, mapping
 
 
-def load_gastos(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats, dict]:
-    """Carga categorías de gastos."""
+def load_categoria_gastos(api, rows, un_map, dry_run):
+    """Carga categorias de gasto con jerarquia padre-hijo + asignacion UN.
+    Procesa en 2 pasadas: primero raices (sin padre), luego hijas."""
     stats = Stats()
-    mapping = {}
+    mapping = {}  # nombre → id
 
-    for row in rows:
+    # Separar raices e hijas
+    raices = [r for r in rows if not clean_str(r.get("padre"))]
+    hijas = [r for r in rows if clean_str(r.get("padre"))]
+
+    for row in raices + hijas:
         nombre = clean_str(row.get("nombre"))
         if not nombre:
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']}: nombre es obligatorio")
             continue
+
+        padre_nombre = clean_str(row.get("padre"))
+        parent_id = None
+        if padre_nombre:
+            parent_id = find_in_map_ci(mapping, padre_nombre)
+            if not parent_id and not dry_run:
+                stats.errors += 1
+                stats.error_details.append(f"  Fila {row['_row']} ({nombre}): padre '{padre_nombre}' no encontrado")
+                continue
 
         if dry_run:
             stats.created += 1
@@ -396,17 +398,36 @@ def load_gastos(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats,
 
         payload = {
             "name": nombre,
-            "is_direct_expense": parse_bool(row.get("es_directo")),
+            "is_direct_expense": parse_bool(row.get("es_directo")) if not padre_nombre else False,
         }
-        desc = clean_str(row.get("descripcion"))
-        if desc:
-            payload["description"] = desc
+        if parent_id:
+            payload["parent_id"] = parent_id
+
+        # Asignacion UN
+        asignacion = clean_str(row.get("asignacion_un"))
+        if asignacion:
+            asignacion_lower = asignacion.lower().strip()
+            if asignacion_lower == "directo":
+                un_nombre = clean_str(row.get("unidad_negocio"))
+                un_id = find_in_map_ci(un_map, un_nombre) if un_nombre else None
+                if un_id:
+                    payload["default_business_unit_id"] = un_id
+            elif asignacion_lower == "compartido":
+                uns_raw = clean_str(row.get("unidades_negocio"))
+                if uns_raw:
+                    un_ids = []
+                    for un_name in [u.strip() for u in uns_raw.split(",") if u.strip()]:
+                        uid = find_in_map_ci(un_map, un_name)
+                        if uid:
+                            un_ids.append(uid)
+                    if un_ids:
+                        payload["default_applicable_business_unit_ids"] = un_ids
 
         status, resp = api.post("/api/v1/expense-categories/", payload)
         if status in (200, 201):
             mapping[nombre] = resp["id"]
             stats.created += 1
-        elif status == 409 or (status == 400 and "ya existe" in str(resp).lower()):
+        elif _is_duplicate(status, resp):
             stats.skipped += 1
         else:
             stats.errors += 1
@@ -415,17 +436,88 @@ def load_gastos(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats,
     if stats.skipped > 0 and not dry_run:
         st, resp = api.get("/api/v1/expense-categories/", {"limit": 500})
         if st == 200:
-            existing = {item["name"]: item["id"] for item in resp.get("items", [])}
-            for row in rows:
-                nombre = clean_str(row.get("nombre"))
-                if nombre and nombre not in mapping and nombre in existing:
-                    mapping[nombre] = existing[nombre]
+            for item in resp.get("items", []):
+                if item["name"] not in mapping:
+                    mapping[item["name"]] = item["id"]
 
     return stats, mapping
 
 
-def load_terceros(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stats, dict]:
-    """Carga terceros (proveedores, clientes, etc.)."""
+def load_categoria_terceros(api, rows, dry_run):
+    """Carga categorias de terceros con behavior_type + jerarquia.
+    Procesa en 2 pasadas: primero raices, luego hijas."""
+    stats = Stats()
+    mapping = {}  # nombre → id
+
+    raices = [r for r in rows if not clean_str(r.get("padre"))]
+    hijas = [r for r in rows if clean_str(r.get("padre"))]
+
+    for row in raices + hijas:
+        nombre = clean_str(row.get("nombre"))
+        if not nombre:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']}: nombre es obligatorio")
+            continue
+
+        padre_nombre = clean_str(row.get("padre"))
+        parent_id = None
+        if padre_nombre:
+            parent_id = find_in_map_ci(mapping, padre_nombre)
+            if not parent_id and not dry_run:
+                stats.errors += 1
+                stats.error_details.append(f"  Fila {row['_row']} ({nombre}): padre '{padre_nombre}' no encontrado")
+                continue
+
+        # behavior_type: obligatorio para raices, opcional para hijas
+        bt_raw = clean_str(row.get("tipo_comportamiento"))
+        behavior_type = None
+        if bt_raw:
+            behavior_type = BEHAVIOR_TYPE_MAP.get(bt_raw.lower().strip())
+            if not behavior_type:
+                stats.errors += 1
+                stats.error_details.append(
+                    f"  Fila {row['_row']} ({nombre}): tipo_comportamiento '{bt_raw}' invalido. "
+                    f"Valores: {', '.join(BEHAVIOR_TYPE_MAP.keys())}"
+                )
+                continue
+        elif not padre_nombre:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({nombre}): tipo_comportamiento obligatorio para categorias raiz")
+            continue
+
+        if dry_run:
+            stats.created += 1
+            mapping[nombre] = f"dry-run-{nombre}"
+            continue
+
+        payload = {"name": nombre}
+        if behavior_type:
+            payload["behavior_type"] = behavior_type
+        if parent_id:
+            payload["parent_id"] = parent_id
+
+        status, resp = api.post("/api/v1/third-party-categories/", payload)
+        if status in (200, 201):
+            mapping[nombre] = resp["id"]
+            stats.created += 1
+        elif _is_duplicate(status, resp):
+            stats.skipped += 1
+        else:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({nombre}): {status} - {resp}")
+
+    if stats.skipped > 0 and not dry_run:
+        st, resp = api.get("/api/v1/third-party-categories/", {"limit": 500})
+        if st == 200:
+            for item in resp.get("items", []):
+                if item["name"] not in mapping:
+                    mapping[item["name"]] = item["id"]
+
+    return stats, mapping
+
+
+def load_terceros(api, rows, tp_cat_map, dry_run):
+    """Carga terceros asignando categorias por nombre (separadas por coma)."""
     stats = Stats()
     mapping = {}
 
@@ -436,17 +528,26 @@ def load_terceros(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stat
             stats.error_details.append(f"  Fila {row['_row']}: nombre es obligatorio")
             continue
 
-        # Al menos un rol debe estar marcado
-        es_proveedor = parse_bool(row.get("es_proveedor"))
-        es_cliente = parse_bool(row.get("es_cliente"))
-        es_inversionista = parse_bool(row.get("es_inversionista"))
-        es_provision = parse_bool(row.get("es_provision"))
+        # Resolver categorias
+        cats_raw = clean_str(row.get("categorias"))
+        if not cats_raw:
+            stats.errors += 1
+            stats.error_details.append(f"  Fila {row['_row']} ({nombre}): categorias es obligatorio")
+            continue
 
-        if not any([es_proveedor, es_cliente, es_inversionista, es_provision]):
+        category_ids = []
+        cat_errors = []
+        for cat_name in [c.strip() for c in cats_raw.split(",") if c.strip()]:
+            cat_id = find_in_map_ci(tp_cat_map, cat_name)
+            if cat_id:
+                category_ids.append(cat_id)
+            else:
+                cat_errors.append(cat_name)
+
+        if cat_errors:
             stats.errors += 1
             stats.error_details.append(
-                f"  Fila {row['_row']} ({nombre}): debe tener al menos un rol "
-                "(es_proveedor, es_cliente, es_inversionista, es_provision)"
+                f"  Fila {row['_row']} ({nombre}): categorias no encontradas: {', '.join(cat_errors)}"
             )
             continue
 
@@ -457,13 +558,9 @@ def load_terceros(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stat
 
         payload = {
             "name": nombre,
-            "is_supplier": es_proveedor,
-            "is_customer": es_cliente,
-            "is_investor": es_inversionista,
-            "is_provision": es_provision,
             "initial_balance": parse_decimal(row.get("saldo_inicial"), 0),
+            "category_ids": category_ids,
         }
-
         ident = clean_str(row.get("identificacion"))
         if ident:
             payload["identification_number"] = ident
@@ -481,35 +578,21 @@ def load_terceros(api: APIClient, rows: list[dict], dry_run: bool) -> tuple[Stat
         if status in (200, 201):
             mapping[nombre] = resp["id"]
             stats.created += 1
-        elif status == 409 or (status == 400 and "ya existe" in str(resp).lower()):
+        elif _is_duplicate(status, resp):
             stats.skipped += 1
         else:
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']} ({nombre}): {status} - {resp}")
 
     if stats.skipped > 0 and not dry_run:
-        st, resp = api.get("/api/v1/third-parties/", {"limit": 1000})
-        if st == 200:
-            existing = {item["name"]: item["id"] for item in resp.get("items", [])}
-            for row in rows:
-                nombre = clean_str(row.get("nombre"))
-                if nombre and nombre not in mapping and nombre in existing:
-                    mapping[nombre] = existing[nombre]
+        _fill_mapping_from_api(api, "/api/v1/third-parties/", rows, mapping)
 
     return stats, mapping
 
 
-def load_materiales(
-    api: APIClient,
-    rows: list[dict],
-    cat_map: dict,
-    un_map: dict,
-    dry_run: bool,
-) -> tuple[Stats, dict]:
-    """Carga materiales. Requiere mappings de categorías y unidades de negocio."""
+def load_materiales(api, rows, cat_map, un_map, dry_run):
     stats = Stats()
-    mapping = {}  # codigo → id
-
+    mapping = {}
     for row in rows:
         codigo = clean_str(row.get("codigo"))
         nombre = clean_str(row.get("nombre"))
@@ -521,14 +604,18 @@ def load_materiales(
             errors.append("codigo es obligatorio")
         if not nombre:
             errors.append("nombre es obligatorio")
+
+        cat_id = find_in_map_ci(cat_map, categoria) if categoria else None
         if not categoria:
             errors.append("categoria es obligatorio")
-        elif categoria not in cat_map:
-            errors.append(f"categoria '{categoria}' no encontrada en hoja Categorias")
+        elif not cat_id:
+            errors.append(f"categoria '{categoria}' no encontrada")
+
+        un_id = find_in_map_ci(un_map, unidad_negocio) if unidad_negocio else None
         if not unidad_negocio:
             errors.append("unidad_negocio es obligatorio")
-        elif unidad_negocio not in un_map:
-            errors.append(f"unidad_negocio '{unidad_negocio}' no encontrada en hoja UnidadesNegocio")
+        elif not un_id:
+            errors.append(f"unidad_negocio '{unidad_negocio}' no encontrada")
 
         if errors:
             stats.errors += 1
@@ -543,8 +630,8 @@ def load_materiales(
         payload = {
             "code": codigo,
             "name": nombre,
-            "category_id": cat_map[categoria],
-            "business_unit_id": un_map[unidad_negocio],
+            "category_id": cat_id,
+            "business_unit_id": un_id,
             "default_unit": clean_str(row.get("unidad")) or "kg",
         }
         desc = clean_str(row.get("descripcion"))
@@ -555,33 +642,20 @@ def load_materiales(
         if status in (200, 201):
             mapping[codigo] = resp["id"]
             stats.created += 1
-        elif status == 409 or (status == 400 and ("ya existe" in str(resp).lower() or "duplicate" in str(resp).lower())):
+        elif _is_duplicate(status, resp):
             stats.skipped += 1
         else:
             stats.errors += 1
             stats.error_details.append(f"  Fila {row['_row']} ({codigo}): {status} - {resp}")
 
     if stats.skipped > 0 and not dry_run:
-        st, resp = api.get("/api/v1/materials/", {"limit": 1000})
-        if st == 200:
-            existing = {item["code"]: item["id"] for item in resp.get("items", [])}
-            for row in rows:
-                codigo = clean_str(row.get("codigo"))
-                if codigo and codigo not in mapping and codigo in existing:
-                    mapping[codigo] = existing[codigo]
+        _fill_mapping_from_api(api, "/api/v1/materials/", rows, mapping, key_field="codigo", resp_key="code")
 
     return stats, mapping
 
 
-def load_precios(
-    api: APIClient,
-    rows: list[dict],
-    mat_map: dict,
-    dry_run: bool,
-) -> tuple[Stats, dict]:
-    """Carga lista de precios. Requiere mapping de materiales (codigo→id)."""
+def load_precios(api, rows, mat_map, dry_run):
     stats = Stats()
-
     for row in rows:
         codigo = clean_str(row.get("material_codigo"))
         if not codigo:
@@ -589,32 +663,43 @@ def load_precios(
             stats.error_details.append(f"  Fila {row['_row']}: material_codigo es obligatorio")
             continue
 
-        if codigo not in mat_map:
+        mat_id = find_in_map_ci(mat_map, codigo)
+        if not mat_id:
             stats.errors += 1
-            stats.error_details.append(
-                f"  Fila {row['_row']} ({codigo}): material no encontrado en hoja Materiales"
-            )
+            stats.error_details.append(f"  Fila {row['_row']} ({codigo}): material no encontrado")
+            continue
+
+        precio_compra = parse_decimal(row.get("precio_compra"), 0)
+        precio_venta = parse_decimal(row.get("precio_venta"), 0)
+
+        if precio_compra == 0 and precio_venta == 0:
+            stats.skipped += 1
             continue
 
         if dry_run:
             stats.created += 1
             continue
 
-        payload = {
-            "material_id": mat_map[codigo],
-            "purchase_price": parse_decimal(row.get("precio_compra"), 0),
-            "sale_price": parse_decimal(row.get("precio_venta"), 0),
-        }
-        notas = clean_str(row.get("notas"))
-        if notas:
-            payload["notes"] = notas
+        if precio_compra > 0:
+            payload = {"material_id": mat_id, "purchase_price": precio_compra}
+            notas = clean_str(row.get("notas"))
+            if notas:
+                payload["notes"] = notas
+            status, resp = api.post("/api/v1/price-lists/", payload)
+            if status in (200, 201):
+                stats.created += 1
+            else:
+                stats.errors += 1
+                stats.error_details.append(f"  Fila {row['_row']} ({codigo}) compra: {status} - {resp}")
 
-        status, resp = api.post("/api/v1/price-lists/", payload)
-        if status in (200, 201):
-            stats.created += 1
-        else:
-            stats.errors += 1
-            stats.error_details.append(f"  Fila {row['_row']} ({codigo}): {status} - {resp}")
+        if precio_venta > 0:
+            payload = {"material_id": mat_id, "sale_price": precio_venta}
+            status, resp = api.post("/api/v1/price-lists/", payload)
+            if status in (200, 201):
+                stats.created += 1
+            else:
+                stats.errors += 1
+                stats.error_details.append(f"  Fila {row['_row']} ({codigo}) venta: {status} - {resp}")
 
     return stats, {}
 
@@ -625,16 +710,8 @@ def load_precios(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Carga inicial de datos maestros desde Excel",
+        description="Carga inicial de datos maestros desde Excel v2",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Ejemplo:
-    python scripts/load_initial_data.py \\
-        --file datos_cliente.xlsx \\
-        --email admin@empresa.com \\
-        --password secreto \\
-        --org-id 550e8400-e29b-41d4-a716-446655440000
-        """,
     )
     parser.add_argument("--file", required=True, help="Ruta al archivo Excel")
     parser.add_argument("--api-url", default="http://localhost:8000", help="URL base de la API")
@@ -644,9 +721,8 @@ Ejemplo:
     parser.add_argument("--dry-run", action="store_true", help="Solo validar, no crear datos")
     args = parser.parse_args()
 
-    # Cargar Excel
     print(f"\n{'=' * 60}")
-    print(f"  CARGA INICIAL DE DATOS MAESTROS")
+    print(f"  CARGA INICIAL DE DATOS MAESTROS v2")
     print(f"  {'(MODO DRY-RUN - solo validación)' if args.dry_run else ''}")
     print(f"{'=' * 60}")
     print(f"\nArchivo: {args.file}")
@@ -664,39 +740,38 @@ Ejemplo:
 
     print(f"Hojas encontradas: {', '.join(wb.sheetnames)}\n")
 
-    # Login
     api = APIClient(args.api_url, args.org_id)
     if not args.dry_run:
         print("Autenticando...")
         if not api.login(args.email, args.password):
-            print("ERROR: No se pudo autenticar. Verificar credenciales.")
+            print("ERROR: No se pudo autenticar.")
             sys.exit(1)
         print("  OK\n")
     else:
         print("(Dry-run: saltando autenticación)\n")
 
-    # Cargar en orden de dependencia
     all_stats = {}
     all_errors = []
+    total_sheets = 9  # Roles es opcional, no contamos
 
-    # 1. Categorías
-    print("[1/8] Categorias...")
-    rows = read_sheet(wb, "Categorias")
-    stats, cat_map = load_categorias(api, rows, args.dry_run)
-    all_stats["Categorias"] = stats
-    all_errors.extend(stats.error_details)
-    print(stats.report("Categorias"))
-
-    # 2. Unidades de Negocio
-    print("[2/8] UnidadesNegocio...")
+    # 1. Unidades de Negocio
+    print(f"[1/{total_sheets}] UnidadesNegocio...")
     rows = read_sheet(wb, "UnidadesNegocio")
     stats, un_map = load_unidades_negocio(api, rows, args.dry_run)
     all_stats["UnidadesNegocio"] = stats
     all_errors.extend(stats.error_details)
     print(stats.report("UnidadesNegocio"))
 
+    # 2. Categorías de Materiales
+    print(f"[2/{total_sheets}] CategoriaMateriales...")
+    rows = read_sheet(wb, "CategoriaMateriales")
+    stats, cat_map = load_categorias_material(api, rows, args.dry_run)
+    all_stats["CategoriaMateriales"] = stats
+    all_errors.extend(stats.error_details)
+    print(stats.report("CategoriaMateriales"))
+
     # 3. Bodegas
-    print("[3/8] Bodegas...")
+    print(f"[3/{total_sheets}] Bodegas...")
     rows = read_sheet(wb, "Bodegas")
     stats, _ = load_bodegas(api, rows, args.dry_run)
     all_stats["Bodegas"] = stats
@@ -704,39 +779,47 @@ Ejemplo:
     print(stats.report("Bodegas"))
 
     # 4. Cuentas
-    print("[4/8] Cuentas...")
+    print(f"[4/{total_sheets}] Cuentas...")
     rows = read_sheet(wb, "Cuentas")
     stats, _ = load_cuentas(api, rows, args.dry_run)
     all_stats["Cuentas"] = stats
     all_errors.extend(stats.error_details)
     print(stats.report("Cuentas"))
 
-    # 5. Gastos
-    print("[5/8] Gastos...")
-    rows = read_sheet(wb, "Gastos")
-    stats, _ = load_gastos(api, rows, args.dry_run)
-    all_stats["Gastos"] = stats
+    # 5. Categorías de Gastos
+    print(f"[5/{total_sheets}] CategoriaGastos...")
+    rows = read_sheet(wb, "CategoriaGastos")
+    stats, _ = load_categoria_gastos(api, rows, un_map, args.dry_run)
+    all_stats["CategoriaGastos"] = stats
     all_errors.extend(stats.error_details)
-    print(stats.report("Gastos"))
+    print(stats.report("CategoriaGastos"))
 
-    # 6. Terceros
-    print("[6/8] Terceros...")
+    # 6. Categorías de Terceros
+    print(f"[6/{total_sheets}] CategoriaTerceros...")
+    rows = read_sheet(wb, "CategoriaTerceros")
+    stats, tp_cat_map = load_categoria_terceros(api, rows, args.dry_run)
+    all_stats["CategoriaTerceros"] = stats
+    all_errors.extend(stats.error_details)
+    print(stats.report("CategoriaTerceros"))
+
+    # 7. Terceros
+    print(f"[7/{total_sheets}] Terceros...")
     rows = read_sheet(wb, "Terceros")
-    stats, _ = load_terceros(api, rows, args.dry_run)
+    stats, _ = load_terceros(api, rows, tp_cat_map, args.dry_run)
     all_stats["Terceros"] = stats
     all_errors.extend(stats.error_details)
     print(stats.report("Terceros"))
 
-    # 7. Materiales (depende de Categorias + UnidadesNegocio)
-    print("[7/8] Materiales...")
+    # 8. Materiales
+    print(f"[8/{total_sheets}] Materiales...")
     rows = read_sheet(wb, "Materiales")
     stats, mat_map = load_materiales(api, rows, cat_map, un_map, args.dry_run)
     all_stats["Materiales"] = stats
     all_errors.extend(stats.error_details)
     print(stats.report("Materiales"))
 
-    # 8. Precios (depende de Materiales)
-    print("[8/8] Precios...")
+    # 9. Precios
+    print(f"[9/{total_sheets}] Precios...")
     rows = read_sheet(wb, "Precios")
     stats, _ = load_precios(api, rows, mat_map, args.dry_run)
     all_stats["Precios"] = stats

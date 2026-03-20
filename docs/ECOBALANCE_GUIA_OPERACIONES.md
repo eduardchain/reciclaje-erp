@@ -272,7 +272,63 @@ Pedir al usuario que limpie la caché del navegador (Ctrl+Shift+R).
 
 ---
 
-## 8. Información de Contacto
+## 8. Carga Inicial de Datos Maestros
+
+Para cargar datos maestros (materiales, terceros, categorías, etc.) desde un archivo Excel.
+
+### 8.1 Subir el archivo Excel al servidor
+
+```bash
+scp docs/CargaInicial_EcoBalance_v2_cliente.xlsx deploy@76.13.118.195:/home/deploy/reciclaje-erp/docs/
+```
+
+### 8.2 Conectar al servidor
+
+```bash
+ssh deploy@76.13.118.195
+```
+
+### 8.3 Obtener el UUID de la organización
+
+```bash
+docker exec reciclaje_db psql -U admin -d reciclaje_db -c "SELECT id, name FROM organizations;"
+```
+
+### 8.4 Ejecutar validación (dry-run)
+
+```bash
+cd /home/deploy/reciclaje-erp/backend
+source venv/bin/activate
+python scripts/load_initial_data.py \
+    --file ../docs/CargaInicial_EcoBalance_v2_cliente.xlsx \
+    --email admin@empresa.com \
+    --password <password> \
+    --org-id <uuid_de_la_organizacion> \
+    --dry-run
+```
+
+Verificar que el resumen muestre **0 errores** antes de continuar.
+
+### 8.5 Ejecutar carga real
+
+```bash
+python scripts/load_initial_data.py \
+    --file ../docs/CargaInicial_EcoBalance_v2_cliente.xlsx \
+    --email admin@empresa.com \
+    --password <password> \
+    --org-id <uuid_de_la_organizacion>
+```
+
+### 8.6 Notas importantes
+
+- El script es **idempotente**: si se ejecuta dos veces, las entidades ya existentes se omiten
+- Los roles, permisos y la organización **no se tocan** — solo carga datos maestros
+- El orden de las hojas importa: el script procesa en orden de dependencia (UNs → Categorías → Terceros → Materiales → Precios)
+- Hacer un **backup antes** de la carga: `/home/deploy/scripts/backup-database.sh`
+
+---
+
+## 9. Información de Contacto
 
 Para soporte técnico o emergencias:
 

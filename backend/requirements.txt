@@ -39,3 +39,6 @@ uvicorn==0.27.0
 uvloop==0.22.1
 watchfiles==1.1.1
 websockets==16.0
+# Scripts de carga inicial
+openpyxl==3.1.5
+requests==2.32.5
