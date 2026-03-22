@@ -2678,13 +2678,13 @@ class TestThirdPartyTransfer:
         assert data["account_id"] is None
         assert data["third_party_id"] == str(test_customer.id)
 
-        # Source (cliente): balance += 50K (se le abona)
+        # Source (cliente): balance -= 50K (paga, su saldo baja)
         db_session.refresh(test_customer)
-        assert test_customer.current_balance == initial_customer + Decimal("50000")
+        assert test_customer.current_balance == initial_customer - Decimal("50000")
 
-        # Destination (proveedor): balance -= 50K (se le cobra)
+        # Destination (proveedor): balance += 50K (recibe pago, su saldo sube)
         db_session.refresh(test_supplier)
-        assert test_supplier.current_balance == initial_supplier - Decimal("50000")
+        assert test_supplier.current_balance == initial_supplier + Decimal("50000")
 
     def test_tp_transfer_annul(self, client: TestClient, org_headers, test_supplier, test_customer, db_session):
         """Anular tp-transfer revierte ambos saldos."""

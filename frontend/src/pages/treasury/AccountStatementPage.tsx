@@ -56,8 +56,8 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   profit_distribution: "Repartición de Utilidades",
   payment_to_generic: "Pago a Tercero Genérico",
   collection_from_generic: "Cobro a Tercero Genérico",
-  tp_transfer_out: "Transferencia Terceros (Salida)",
-  tp_transfer_in: "Transferencia Terceros (Entrada)",
+  tp_transfer_out: "Cruce Terceros (Origen)",
+  tp_transfer_in: "Cruce Terceros (Destino)",
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -69,8 +69,8 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "asset_purchase": -1,            # Compra activo a credito: le debemos (balance baja)
     "payment_to_generic": 1,         # Pagamos a generico: su balance sube
     "collection_from_generic": -1,   # Cobramos a generico: su balance baja
-    "tp_transfer_out": 1,            # Transferencia entre terceros: source se le abona
-    "tp_transfer_in": -1,            # Transferencia entre terceros: dest se le cobra
+    "tp_transfer_out": -1,           # Transferencia entre terceros: source paga (balance baja)
+    "tp_transfer_in": 1,             # Transferencia entre terceros: dest recibe pago (se le abona)
 }
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.

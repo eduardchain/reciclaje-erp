@@ -858,9 +858,9 @@ class CRUDMoneyMovement:
         movement_out.transfer_pair_id = movement_in.id
         movement_in.transfer_pair_id = movement_out.id
 
-        # Aplicar efectos
-        source.current_balance += data.amount
-        destination.current_balance -= data.amount
+        # Aplicar efectos: source paga (balance baja), dest recibe (balance sube)
+        source.current_balance -= data.amount
+        destination.current_balance += data.amount
 
         db.commit()
         db.refresh(movement_out)
@@ -1514,14 +1514,14 @@ class CRUDMoneyMovement:
                 third_party.current_balance += amt
 
         elif mt == "tp_transfer_out":
-            # Reversa: source habia hecho +=, ahora -=
-            if third_party:
-                third_party.current_balance -= amt
-
-        elif mt == "tp_transfer_in":
-            # Reversa: dest habia hecho -=, ahora +=
+            # Reversa: source habia hecho -=, ahora +=
             if third_party:
                 third_party.current_balance += amt
+
+        elif mt == "tp_transfer_in":
+            # Reversa: dest habia hecho +=, ahora -=
+            if third_party:
+                third_party.current_balance -= amt
 
     def _get_or_404(
         self,

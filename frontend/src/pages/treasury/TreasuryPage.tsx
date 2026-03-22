@@ -46,8 +46,8 @@ const typeLabels: Record<MoneyMovementType, string> = {
   profit_distribution: "Repartición Utilidades",
   payment_to_generic: "Pago Genérico",
   collection_from_generic: "Cobro Genérico",
-  tp_transfer_out: "Transferencia Terceros (Salida)",
-  tp_transfer_in: "Transferencia Terceros (Entrada)",
+  tp_transfer_out: "Cruce Terceros (Origen)",
+  tp_transfer_in: "Cruce Terceros (Destino)",
 };
 
 const typeColors: Record<string, string> = {
