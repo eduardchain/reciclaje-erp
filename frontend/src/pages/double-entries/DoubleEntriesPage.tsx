@@ -85,7 +85,7 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
           {de.status === "liquidated" && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => exportDoubleEntryPDF(de, orgName)}>
+              <DropdownMenuItem onClick={() => exportDoubleEntryPDF(de, orgName, { showProfit: hasPermission("double_entries.view_profit") })}>
                 <FileText className="h-4 w-4 mr-2" />
                 Exportar PDF
               </DropdownMenuItem>
@@ -133,7 +133,8 @@ export default function DoubleEntriesPage() {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   const canViewValues = hasPermission("double_entries.view_values");
-  const columns = useMemo(() => getColumns(canViewValues), [canViewValues]);
+  const canViewProfit = hasPermission("double_entries.view_profit");
+  const columns = useMemo(() => getColumns(canViewProfit), [canViewProfit]);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
@@ -176,14 +177,14 @@ export default function DoubleEntriesPage() {
 
       {/* KPI Cards */}
       {isLoading ? (
-        <div className={`grid grid-cols-1 ${canViewValues ? "md:grid-cols-3" : "md:grid-cols-1"} gap-4`}>
-          {Array.from({ length: canViewValues ? 3 : 1 }).map((_, i) => (
+        <div className={`grid grid-cols-1 ${canViewProfit ? "md:grid-cols-3" : "md:grid-cols-1"} gap-4`}>
+          {Array.from({ length: canViewProfit ? 3 : 1 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-lg" />
           ))}
         </div>
       ) : (
         <div className={`grid grid-cols-1 ${canViewValues ? "md:grid-cols-3" : "md:grid-cols-1"} gap-4`}>
-          {canViewValues && (
+          {canViewProfit && (
             <KpiCard
               label="Utilidad Total"
               metric={kpis.profit}
@@ -198,7 +199,7 @@ export default function DoubleEntriesPage() {
             accentColor="sky"
             formatValue={(n) => String(n)}
           />
-          {canViewValues && (
+          {canViewProfit && (
             <KpiCard
               label="Margen Promedio"
               metric={kpis.margin}

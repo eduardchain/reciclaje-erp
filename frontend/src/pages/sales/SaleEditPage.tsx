@@ -18,6 +18,7 @@ import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useCustomers, usePayableProviders, useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatWeight, utcToLocalDateInput, toLocalDateInput } from "@/utils/formatters";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { SaleLineCreate, SaleCommissionCreate } from "@/types/sale";
 
 interface LineFormData extends SaleLineCreate {
@@ -81,6 +82,8 @@ export default function SaleEditPage() {
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
+  const { hasPermission } = usePermissions();
+  const canViewProfit = hasPermission("sales.view_profit");
 
   const [customerId, setCustomerId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
@@ -316,12 +319,14 @@ export default function SaleEditPage() {
                   {formatCurrency(line.quantity * line.unit_price)}
                 </p>
               </div>
+              {canViewProfit && (
               <div className="col-span-1 text-right">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Utilidad</Label>}
                 <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                   {line.unit_price > 0 && avgCost > 0 ? formatCurrency(lineProfit) : "-"}
                 </p>
               </div>
+              )}
               <div className="col-span-1">
                 {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
                 <Button
@@ -354,13 +359,13 @@ export default function SaleEditPage() {
               <div className="bg-slate-50 rounded-lg p-3 mt-2 space-y-1">
                 <div className="flex justify-end gap-6">
                   <span className="text-lg font-bold">Total: {formatCurrency(total)}</span>
-                  {estProfit !== 0 && (
+                  {canViewProfit && estProfit !== 0 && (
                     <span className={`text-lg font-bold ${estProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                       Util. Bruta: {formatCurrency(estProfit)} ({margin.toFixed(1)}%)
                     </span>
                   )}
                 </div>
-                {totalComm > 0 && (
+                {canViewProfit && totalComm > 0 && (
                   <div className="flex justify-end gap-6 text-sm">
                     <span className="text-amber-600">Comisiones: -{formatCurrency(totalComm)}</span>
                     <span className={`font-semibold ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>

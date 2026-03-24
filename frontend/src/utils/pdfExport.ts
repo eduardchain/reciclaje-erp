@@ -151,7 +151,9 @@ const SALE_STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelada",
 };
 
-export function exportSalePDF(sale: SaleResponse, orgName?: string) {
+export function exportSalePDF(sale: SaleResponse, orgName?: string, options?: { showPrices?: boolean; showProfit?: boolean }) {
+  const showPrices = options?.showPrices !== false;
+  const showProfit = options?.showProfit !== false;
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 20;
@@ -238,10 +240,12 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string) {
   doc.setFontSize(9);
   doc.text("Material", colX.material, y);
   doc.text("Cantidad", colX.qty, y, { align: "right" });
-  doc.text("Precio U.", colX.price, y, { align: "right" });
-  doc.text("Costo U.", colX.cost, y, { align: "right" });
-  doc.text("Total", colX.total, y, { align: "right" });
-  doc.text("Utilidad", pageWidth - 14, y, { align: "right" });
+  if (showPrices) {
+    doc.text("Precio U.", colX.price, y, { align: "right" });
+    doc.text("Costo U.", colX.cost, y, { align: "right" });
+    doc.text("Total", colX.total, y, { align: "right" });
+  }
+  if (showProfit) doc.text("Utilidad", pageWidth - 14, y, { align: "right" });
   y += 7;
 
   // Tabla de lineas - Rows
@@ -254,15 +258,17 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string) {
     }
     doc.text(`${line.material_code} - ${line.material_name}`.substring(0, 40), colX.material, y);
     doc.text(formatWeight(line.quantity), colX.qty, y, { align: "right" });
-    doc.text(formatCurrency(line.unit_price), colX.price, y, { align: "right" });
-    doc.text(formatCurrency(line.unit_cost), colX.cost, y, { align: "right" });
-    doc.text(formatCurrency(line.total_price), colX.total, y, { align: "right" });
-    doc.text(formatCurrency(line.profit), pageWidth - 14, y, { align: "right" });
+    if (showPrices) {
+      doc.text(formatCurrency(line.unit_price), colX.price, y, { align: "right" });
+      doc.text(formatCurrency(line.unit_cost), colX.cost, y, { align: "right" });
+      doc.text(formatCurrency(line.total_price), colX.total, y, { align: "right" });
+    }
+    if (showProfit) doc.text(formatCurrency(line.profit), pageWidth - 14, y, { align: "right" });
     y += 6;
   }
 
-  // Comisiones
-  if (sale.commissions.length > 0) {
+  // Comisiones (solo si puede ver profit)
+  if (showProfit && sale.commissions.length > 0) {
     y += 6;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
@@ -300,10 +306,14 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string) {
   doc.line(colX.total - 10, y - 3, pageWidth - 14, y - 3);
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
-  doc.text(`Total: ${formatCurrency(sale.total_amount)}`, pageWidth - 14, y + 2, { align: "right" });
-  y += 8;
-  doc.setFontSize(10);
-  doc.text(`Utilidad: ${formatCurrency(sale.total_profit)}`, pageWidth - 14, y + 2, { align: "right" });
+  if (showPrices) {
+    doc.text(`Total: ${formatCurrency(sale.total_amount)}`, pageWidth - 14, y + 2, { align: "right" });
+    y += 8;
+  }
+  if (showProfit) {
+    doc.setFontSize(10);
+    doc.text(`Utilidad: ${formatCurrency(sale.total_profit)}`, pageWidth - 14, y + 2, { align: "right" });
+  }
 
   doc.save(`venta_${sale.sale_number}.pdf`);
 }
@@ -314,7 +324,8 @@ const DE_STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelada",
 };
 
-export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string) {
+export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string, options?: { showProfit?: boolean }) {
+  const showProfit = options?.showProfit !== false;
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 20;
@@ -395,7 +406,7 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string) 
   doc.text("P. Venta", colX.pVenta, y, { align: "right" });
   doc.text("T. Compra", colX.tCompra, y, { align: "right" });
   doc.text("T. Venta", colX.tVenta, y, { align: "right" });
-  doc.text("Ganancia", pageWidth - 14, y, { align: "right" });
+  if (showProfit) doc.text("Ganancia", pageWidth - 14, y, { align: "right" });
   y += 7;
 
   // Tabla de materiales — Rows
@@ -412,12 +423,12 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string) 
     doc.text(formatCurrency(line.sale_unit_price), colX.pVenta, y, { align: "right" });
     doc.text(formatCurrency(line.total_purchase), colX.tCompra, y, { align: "right" });
     doc.text(formatCurrency(line.total_sale), colX.tVenta, y, { align: "right" });
-    doc.text(formatCurrency(line.profit), pageWidth - 14, y, { align: "right" });
+    if (showProfit) doc.text(formatCurrency(line.profit), pageWidth - 14, y, { align: "right" });
     y += 6;
   }
 
   // Comisiones
-  if (de.commissions.length > 0) {
+  if (showProfit && de.commissions.length > 0) {
     y += 6;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
@@ -463,20 +474,22 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string) 
   y += 6;
   doc.text(`Total Venta: ${formatCurrency(de.total_sale_amount)}`, pageWidth - 14, y + 2, { align: "right" });
 
-  if (totalCommissions > 0) {
-    y += 6;
-    doc.text(`Comisiones: -${formatCurrency(totalCommissions)}`, pageWidth - 14, y + 2, { align: "right" });
-  }
+  if (showProfit) {
+    if (totalCommissions > 0) {
+      y += 6;
+      doc.text(`Comisiones: -${formatCurrency(totalCommissions)}`, pageWidth - 14, y + 2, { align: "right" });
+    }
 
-  y += 8;
-  doc.setFontSize(12);
-  doc.setFont("helvetica", "bold");
-  doc.text(
-    `Ganancia Neta: ${formatCurrency(totalCommissions > 0 ? netProfit : de.profit)}  (${formatPercentage(de.profit_margin)})`,
-    pageWidth - 14,
-    y + 2,
-    { align: "right" },
-  );
+    y += 8;
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text(
+      `Ganancia Neta: ${formatCurrency(totalCommissions > 0 ? netProfit : de.profit)}  (${formatPercentage(de.profit_margin)})`,
+      pageWidth - 14,
+      y + 2,
+      { align: "right" },
+    );
+  }
 
   // Footer
   y += 14;

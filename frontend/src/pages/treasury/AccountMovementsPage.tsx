@@ -95,7 +95,7 @@ export default function AccountMovementsPage() {
     totalDebit: totalInflow,
     totalCredit: totalOutflow,
     openingBalance: openingBalance ?? 0,
-    movements: movements.map((m) => ({
+    movements: movements.filter((m) => m.status !== "annulled" && m.status !== "cancelled").map((m) => ({
       movement_number: m.movement_number,
       date: m.date,
       movement_type: m.movement_type,

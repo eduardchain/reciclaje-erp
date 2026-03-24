@@ -15,6 +15,7 @@ import { useDoubleEntry, useLiquidateDoubleEntry } from "@/hooks/useDoubleEntrie
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { usePayableProviders } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { SaleCommissionCreate } from "@/types/sale";
 
 interface LiquidationLine {
@@ -43,6 +44,8 @@ export default function DoubleEntryLiquidatePage() {
   const { data: de, isLoading } = useDoubleEntry(id!);
   const liquidate = useLiquidateDoubleEntry();
   const { getSuggestedPrice } = usePriceSuggestions();
+  const { hasPermission } = usePermissions();
+  const canViewProfit = hasPermission("double_entries.view_profit");
 
   const { data: payableData } = usePayableProviders();
   const payableProviders = payableData?.items ?? [];
@@ -237,12 +240,12 @@ export default function DoubleEntryLiquidatePage() {
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Venta</Label>}
                   <p className="h-10 flex items-center justify-end text-sm tabular-nums">{formatCurrency(line.quantity * line.sale_unit_price)}</p>
                 </div>
-                <div className="col-span-2 text-right">
+                {canViewProfit && <div className="col-span-2 text-right">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ganancia</Label>}
                   <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                     {formatCurrency(lineProfit)}
                   </p>
-                </div>
+                </div>}
               </div>
             );
           })}
@@ -328,22 +331,26 @@ export default function DoubleEntryLiquidatePage() {
               <span className="text-slate-600">Total Venta</span>
               <span className="font-bold tabular-nums text-base">{formatCurrency(totalSale)}</span>
             </div>
-            <div className="border-t border-slate-200 pt-2" />
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-600">Utilidad Bruta</span>
-              <span className={`font-semibold tabular-nums ${grossProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>{formatCurrency(grossProfit)}</span>
-            </div>
-            {totalCommissions > 0 && (
+            {canViewProfit && (
               <>
+                <div className="border-t border-slate-200 pt-2" />
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-600">(-) Comisiones</span>
-                  <span className="tabular-nums text-amber-600">-{formatCurrency(totalCommissions)}</span>
+                  <span className="text-slate-600">Utilidad Bruta</span>
+                  <span className={`font-semibold tabular-nums ${grossProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>{formatCurrency(grossProfit)}</span>
                 </div>
-                <div className="border-t border-dashed border-slate-200" />
-                <div className="flex justify-between text-sm">
-                  <span className="font-medium text-slate-700">Utilidad Neta</span>
-                  <span className={`font-bold tabular-nums ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>{formatCurrency(netProfit)}</span>
-                </div>
+                {totalCommissions > 0 && (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">(-) Comisiones</span>
+                      <span className="tabular-nums text-amber-600">-{formatCurrency(totalCommissions)}</span>
+                    </div>
+                    <div className="border-t border-dashed border-slate-200" />
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium text-slate-700">Utilidad Neta</span>
+                      <span className={`font-bold tabular-nums ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>{formatCurrency(netProfit)}</span>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

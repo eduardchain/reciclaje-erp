@@ -89,6 +89,7 @@ export default function SaleCreatePage() {
   const canLiquidate = hasPermission("sales.liquidate");
   const canViewPrices = hasPermission("sales.view_prices");
   const canEditPrices = hasPermission("sales.edit_prices");
+  const canViewProfit = hasPermission("sales.view_profit");
 
   const [customerId, setCustomerId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
@@ -253,7 +254,7 @@ export default function SaleCreatePage() {
             const lineProfit = line.unit_price > 0 && avgCost > 0 ? (line.unit_price - avgCost) * line.quantity : 0;
             return (
             <div key={line._key} className={`grid grid-cols-12 gap-2 items-end pb-8 mb-3 relative ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}>
-              <div className={canViewPrices ? "col-span-3" : "col-span-5"}>
+              <div className={canViewPrices ? (canViewProfit ? "col-span-3" : "col-span-4") : "col-span-5"}>
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
                 <EntitySelect value={line.material_id} onChange={(v) => handleMaterialChange(line._key, v)} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Material..." />
               </div>
@@ -287,7 +288,7 @@ export default function SaleCreatePage() {
                 <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">{formatCurrency(line.quantity * line.unit_price)}</p>
               </div>
               )}
-              {canViewPrices && (
+              {canViewProfit && (
               <div className="col-span-1 text-right">
                 {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Util. Bruta</Label>}
                 <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
@@ -374,7 +375,7 @@ export default function SaleCreatePage() {
               <span className="text-slate-600">Total Venta</span>
               <span className="font-bold tabular-nums text-base">{formatCurrency(total)}</span>
             </div>
-            {estCost > 0 && (
+            {canViewProfit && estCost > 0 && (
               <>
                 <div className="border-t border-slate-200 pt-2" />
                 <div className="flex justify-between text-sm">
@@ -391,7 +392,7 @@ export default function SaleCreatePage() {
                 </div>
               </>
             )}
-            {totalComm > 0 && (
+            {canViewProfit && totalComm > 0 && (
               <>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">(-) Comisiones</span>

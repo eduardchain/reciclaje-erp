@@ -39,6 +39,7 @@ export default function DoubleEntryCreatePage() {
   const create = useCreateDoubleEntry();
   const { hasPermission } = usePermissions();
   const canLiquidate = hasPermission("double_entries.liquidate");
+  const canViewProfit = hasPermission("double_entries.view_profit");
 
   const { data: suppliersData } = useSuppliers();
   const { data: payableData } = usePayableProviders();
@@ -177,7 +178,7 @@ export default function DoubleEntryCreatePage() {
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg)</div>
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">P. Compra</div>
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">P. Venta</div>
-            <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 text-right">Ganancia</div>
+            {canViewProfit && <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 text-right">Ganancia</div>}
             <div className="col-span-1" />
           </div>
 
@@ -211,11 +212,13 @@ export default function DoubleEntryCreatePage() {
                     <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "sale_unit_price", p)} />
                   </div>
                 </div>
-                <div className="col-span-2 text-right pt-2">
-                  <span className={`font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                    {formatCurrency(lineProfit)}
-                  </span>
-                </div>
+                {canViewProfit && (
+                  <div className="col-span-2 text-right pt-2">
+                    <span className={`font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                      {formatCurrency(lineProfit)}
+                    </span>
+                  </div>
+                )}
                 <div className="col-span-1 text-center pt-1">
                   {lines.length > 1 && (
                     <Button variant="ghost" size="sm" onClick={() => removeLine(line._key)} className="text-red-500 h-8 w-8 p-0">
@@ -279,21 +282,23 @@ export default function DoubleEntryCreatePage() {
       </Card>
 
       {/* Resumen */}
-      <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
-        <CardContent className="pt-6">
-          <div className="flex justify-between items-center">
-            <div className="space-y-1 text-sm">
-              <div>Compra: <span className="font-medium">{formatCurrency(totalPurchase)}</span></div>
-              <div>Venta: <span className="font-medium">{formatCurrency(totalSale)}</span></div>
-              {totalCommissions > 0 && <div>Comisiones: <span className="font-medium text-red-600">-{formatCurrency(totalCommissions)}</span></div>}
+      {canViewProfit && (
+        <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
+          <CardContent className="pt-6">
+            <div className="flex justify-between items-center">
+              <div className="space-y-1 text-sm">
+                <div>Compra: <span className="font-medium">{formatCurrency(totalPurchase)}</span></div>
+                <div>Venta: <span className="font-medium">{formatCurrency(totalSale)}</span></div>
+                {totalCommissions > 0 && <div>Comisiones: <span className="font-medium text-red-600">-{formatCurrency(totalCommissions)}</span></div>}
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-slate-500">Utilidad estimada</p>
+                <p className={`text-3xl font-bold ${profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(profit)}</p>
+              </div>
             </div>
-            <div className="text-right">
-              <p className="text-sm text-slate-500">Utilidad estimada</p>
-              <p className={`text-3xl font-bold ${profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(profit)}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Liquidacion inmediata */}
       {canLiquidate && (

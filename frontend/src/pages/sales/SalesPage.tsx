@@ -81,7 +81,7 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => exportSalePDF(sale, orgName)}>
+          <DropdownMenuItem onClick={() => exportSalePDF(sale, orgName, { showPrices: hasPermission("sales.view_prices"), showProfit: hasPermission("sales.view_profit") })}>
             <FileText className="h-4 w-4 mr-2" />
             Exportar PDF
           </DropdownMenuItem>
@@ -107,7 +107,7 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
   );
 }
 
-function getColumns(canViewPrices: boolean): ColumnDef<SaleResponse, unknown>[] {
+function getColumns(canViewPrices: boolean, canViewProfit: boolean): ColumnDef<SaleResponse, unknown>[] {
   return [
     {
       accessorKey: "sale_number",
@@ -156,6 +156,8 @@ function getColumns(canViewPrices: boolean): ColumnDef<SaleResponse, unknown>[] 
           </span>
         ),
       } as ColumnDef<SaleResponse, unknown>,
+    ] : []),
+    ...(canViewProfit ? [
       {
         accessorKey: "total_profit",
         header: "UTILIDAD BRUTA",
@@ -208,7 +210,8 @@ export default function SalesPage() {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   const canViewPrices = hasPermission("sales.view_prices");
-  const columns = useMemo(() => getColumns(canViewPrices), [canViewPrices]);
+  const canViewProfit = hasPermission("sales.view_profit");
+  const columns = useMemo(() => getColumns(canViewPrices, canViewProfit), [canViewPrices, canViewProfit]);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
@@ -257,13 +260,13 @@ export default function SalesPage() {
 
       {/* KPI Cards */}
       {isLoading ? (
-        <div className={`grid grid-cols-1 ${canViewPrices ? "md:grid-cols-4" : "md:grid-cols-1"} gap-4`}>
-          {Array.from({ length: canViewPrices ? 4 : 1 }).map((_, i) => (
+        <div className={`grid grid-cols-1 md:grid-cols-${canViewPrices ? (canViewProfit ? 4 : 2) : 1} gap-4`}>
+          {Array.from({ length: canViewPrices ? (canViewProfit ? 4 : 2) : 1 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className={`grid grid-cols-1 ${canViewPrices ? "md:grid-cols-4" : "md:grid-cols-1"} gap-4`}>
+        <div className={`grid grid-cols-1 md:grid-cols-${canViewPrices ? (canViewProfit ? 4 : 2) : 1} gap-4`}>
           {canViewPrices && (
             <KpiCard
               label="Total Ventas"
@@ -272,7 +275,7 @@ export default function SalesPage() {
               accentColor="emerald"
             />
           )}
-          {canViewPrices && (
+          {canViewProfit && (
             <KpiCard
               label="Utilidad Bruta"
               metric={kpis.profit}
@@ -282,7 +285,7 @@ export default function SalesPage() {
               secondaryValue={formatPercentage(kpis.margin)}
             />
           )}
-          {canViewPrices && (
+          {canViewProfit && (
             <KpiCard
               label="Utilidad Neta"
               metric={kpis.netProfit}

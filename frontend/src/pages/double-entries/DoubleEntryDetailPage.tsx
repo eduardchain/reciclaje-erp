@@ -28,6 +28,7 @@ export default function DoubleEntryDetailPage() {
   const { data: de, isLoading } = useDoubleEntry(id!);
   const cancel = useCancelDoubleEntry();
   const { hasPermission } = usePermissions();
+  const canViewProfit = hasPermission("double_entries.view_profit");
   const [showCancel, setShowCancel] = useState(false);
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
@@ -50,7 +51,7 @@ export default function DoubleEntryDetailPage() {
               </Button>
           )}
           {de.status === "liquidated" && (
-            <Button variant="outline" onClick={() => exportDoubleEntryPDF(de, orgName)}>
+            <Button variant="outline" onClick={() => exportDoubleEntryPDF(de, orgName, { showProfit: canViewProfit })}>
               <FileText className="h-4 w-4 mr-2" />Exportar PDF
             </Button>
           )}
@@ -115,7 +116,7 @@ export default function DoubleEntryDetailPage() {
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">P. Venta</TableHead>
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total Compra</TableHead>
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total Venta</TableHead>
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Ganancia</TableHead>
+                  {canViewProfit && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Ganancia</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -127,7 +128,7 @@ export default function DoubleEntryDetailPage() {
                     <TableCell className="text-right tabular-nums">{formatCurrency(line.sale_unit_price)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(line.total_purchase)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(line.total_sale)}</TableCell>
-                    <TableCell className={`text-right tabular-nums font-medium ${line.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(line.profit)}</TableCell>
+                    {canViewProfit && <TableCell className={`text-right tabular-nums font-medium ${line.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(line.profit)}</TableCell>}
                   </TableRow>
                 ))}
               </TableBody>
@@ -136,7 +137,7 @@ export default function DoubleEntryDetailPage() {
                   <TableCell colSpan={4}>Totales</TableCell>
                   <TableCell className="text-right tabular-nums">{formatCurrency(de.total_purchase_cost)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatCurrency(de.total_sale_amount)}</TableCell>
-                  <TableCell className={`text-right tabular-nums ${de.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(de.profit)}</TableCell>
+                  {canViewProfit && <TableCell className={`text-right tabular-nums ${de.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(de.profit)}</TableCell>}
                 </TableRow>
               </TableFooter>
             </Table>
@@ -145,19 +146,21 @@ export default function DoubleEntryDetailPage() {
       </Card>
 
       {/* Resumen Utilidad */}
-      <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
-        <CardContent className="pt-6 flex justify-between items-center">
-          <div className="text-sm space-y-1">
-            <div>Compra: {formatCurrency(de.total_purchase_cost)}</div>
-            <div>Venta: {formatCurrency(de.total_sale_amount)}</div>
-            <div>Margen: {formatPercentage(de.profit_margin)}</div>
-          </div>
-          <div className="text-right">
-            <p className="text-sm text-slate-500">Utilidad</p>
-            <p className={`text-3xl font-bold ${de.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(de.profit)}</p>
-          </div>
-        </CardContent>
-      </Card>
+      {canViewProfit && (
+        <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
+          <CardContent className="pt-6 flex justify-between items-center">
+            <div className="text-sm space-y-1">
+              <div>Compra: {formatCurrency(de.total_purchase_cost)}</div>
+              <div>Venta: {formatCurrency(de.total_sale_amount)}</div>
+              <div>Margen: {formatPercentage(de.profit_margin)}</div>
+            </div>
+            <div className="text-right">
+              <p className="text-sm text-slate-500">Utilidad</p>
+              <p className={`text-3xl font-bold ${de.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(de.profit)}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Comisiones */}
       {de.commissions.length > 0 && (

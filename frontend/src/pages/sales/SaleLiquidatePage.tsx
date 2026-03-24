@@ -16,6 +16,7 @@ import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useMaterials, usePayableProviders, useMoneyAccounts } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { SaleCommissionCreate } from "@/types/sale";
 
 interface LiquidationLine {
@@ -47,6 +48,8 @@ export default function SaleLiquidatePage() {
   const { data: payableData } = usePayableProviders();
   const { getSuggestedPrice } = usePriceSuggestions();
   const liquidate = useLiquidateSale();
+  const { hasPermission } = usePermissions();
+  const canViewProfit = hasPermission("sales.view_profit");
 
   const materials = materialsData?.items ?? [];
   const payableProviders = payableData?.items ?? [];
@@ -315,12 +318,14 @@ export default function SaleLiquidatePage() {
                     {formatCurrency(lineTotal)}
                   </p>
                 </div>
+                {canViewProfit && (
                 <div className="col-span-2 text-right">
                   {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Util. Bruta</Label>}
                   <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                     {formatCurrency(lineProfit)}
                   </p>
                 </div>
+                )}
               </div>
             );
           })}
@@ -430,34 +435,38 @@ export default function SaleLiquidatePage() {
               <span className="text-slate-600">Total Venta</span>
               <span className="font-bold tabular-nums text-base">{formatCurrency(subtotal)}</span>
             </div>
-            <div className="border-t border-slate-200 pt-2" />
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-600">Costo de Venta</span>
-              <span className="tabular-nums text-slate-500">{formatCurrency(totalCost)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-600">
-                Utilidad Bruta <span className="text-xs text-slate-400">({marginPct.toFixed(1)}%)</span>
-              </span>
-              <span className={`font-semibold tabular-nums ${totalProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                {formatCurrency(totalProfit)}
-              </span>
-            </div>
-            {totalCommissions > 0 && (
+            {canViewProfit && (
               <>
+                <div className="border-t border-slate-200 pt-2" />
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-600">(-) Comisiones</span>
-                  <span className="tabular-nums text-amber-600">-{formatCurrency(totalCommissions)}</span>
+                  <span className="text-slate-600">Costo de Venta</span>
+                  <span className="tabular-nums text-slate-500">{formatCurrency(totalCost)}</span>
                 </div>
-                <div className="border-t border-dashed border-slate-200" />
                 <div className="flex justify-between text-sm">
-                  <span className="font-medium text-slate-700">
-                    Utilidad Neta <span className="text-xs text-slate-400">({netMarginPct.toFixed(1)}%)</span>
+                  <span className="text-slate-600">
+                    Utilidad Bruta <span className="text-xs text-slate-400">({marginPct.toFixed(1)}%)</span>
                   </span>
-                  <span className={`font-bold tabular-nums ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                    {formatCurrency(netProfit)}
+                  <span className={`font-semibold tabular-nums ${totalProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    {formatCurrency(totalProfit)}
                   </span>
                 </div>
+                {totalCommissions > 0 && (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">(-) Comisiones</span>
+                      <span className="tabular-nums text-amber-600">-{formatCurrency(totalCommissions)}</span>
+                    </div>
+                    <div className="border-t border-dashed border-slate-200" />
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium text-slate-700">
+                        Utilidad Neta <span className="text-xs text-slate-400">({netMarginPct.toFixed(1)}%)</span>
+                      </span>
+                      <span className={`font-bold tabular-nums ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                        {formatCurrency(netProfit)}
+                      </span>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

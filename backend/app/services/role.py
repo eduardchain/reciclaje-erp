@@ -34,6 +34,7 @@ PERMISSIONS_CATALOG = [
     ("sales.cancel", "Anular Ventas", "sales", "Permite anular ventas", 14),
     ("sales.view_prices", "Ver Precios en Ventas", "sales", "Permite ver precios y totales", 15),
     ("sales.edit_prices", "Editar Precios en Ventas", "sales", "Permite ingresar y modificar precios al crear/editar", 16),
+    ("sales.view_profit", "Ver Utilidad en Ventas", "sales", "Permite ver utilidad bruta y neta en ventas", 17),
 
     # Doble Partida
     ("double_entries.view", "Ver Doble Partida", "double_entries", "Permite ver dobles partidas", 20),
@@ -42,6 +43,7 @@ PERMISSIONS_CATALOG = [
     ("double_entries.liquidate", "Liquidar Doble Partida", "double_entries", "Permite liquidar dobles partidas", 23),
     ("double_entries.cancel", "Anular Doble Partida", "double_entries", "Permite anular dobles partidas", 24),
     ("double_entries.view_values", "Ver Valores en Doble Partida", "double_entries", "Permite ver utilidades y margenes", 25),
+    ("double_entries.view_profit", "Ver Utilidad en Doble Partida", "double_entries", "Permite ver utilidad y margen en doble partida", 26),
 
     # Inventario
     ("inventory.view", "Ver Inventario", "inventory", "Permite ver cantidades en inventario", 30),
@@ -140,8 +142,8 @@ SYSTEM_ROLES = {
             "purchases.view_prices", "purchases.edit_prices",
             "sales.view", "sales.create", "sales.edit",
             "sales.liquidate", "sales.cancel",
-            "sales.view_prices", "sales.edit_prices",
-            "double_entries.view_values",
+            "sales.view_prices", "sales.edit_prices", "sales.view_profit",
+            "double_entries.view_values", "double_entries.view_profit",
             "materials.view", "materials.view_prices", "materials.edit_prices",
             "third_parties.view",
             "treasury.view_accounts",
@@ -167,8 +169,8 @@ SYSTEM_ROLES = {
         "description": "Solo consulta, sin modificaciones",
         "permissions": [
             "purchases.view", "purchases.view_prices",
-            "sales.view", "sales.view_prices",
-            "double_entries.view", "double_entries.view_values",
+            "sales.view", "sales.view_prices", "sales.view_profit",
+            "double_entries.view", "double_entries.view_values", "double_entries.view_profit",
             "inventory.view", "inventory.view_values",
             "inventory.view_movements", "inventory.view_adjustments", "inventory.view_transit",
             "materials.view", "materials.view_prices",

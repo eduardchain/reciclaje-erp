@@ -119,7 +119,7 @@ export default function AccountStatementPage() {
     totalDebit,
     totalCredit,
     openingBalance,
-    movements: movements.map((m) => ({
+    movements: movements.filter((m) => m.status !== "annulled" && m.status !== "cancelled").map((m) => ({
       movement_number: m.movement_number ?? "",
       date: m.date,
       movement_type: m.event_type,

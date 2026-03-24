@@ -450,7 +450,7 @@ async def update_purchase(
 ) -> PurchaseResponse:
     """Editar compra registrada (metadata + proveedor + lineas)."""
     try:
-        purchase = purchase_service.update(
+        purchase, warnings = purchase_service.update(
             db=db,
             purchase_id=purchase_id,
             obj_in=purchase_in,
@@ -459,6 +459,8 @@ async def update_purchase(
         )
 
         response_data = _enrich_purchase_response(purchase, db)
+        if warnings:
+            response_data["warnings"] = warnings
 
         logger.info(
             f"Purchase #{purchase.purchase_number} updated by user {org_context['user_id']}"

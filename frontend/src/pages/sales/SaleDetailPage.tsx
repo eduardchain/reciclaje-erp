@@ -30,6 +30,7 @@ export default function SaleDetailPage() {
   const { data: sale, isLoading } = useSale(id!);
   const { hasPermission } = usePermissions();
   const canViewPrices = hasPermission("sales.view_prices");
+  const canViewProfit = hasPermission("sales.view_profit");
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
   const cancel = useCancelSale();
@@ -74,7 +75,7 @@ export default function SaleDetailPage() {
               <XCircle className="h-4 w-4 mr-2" />Cancelar
             </Button>
           )}
-          <Button variant="outline" onClick={() => exportSalePDF(sale, orgName)}>
+          <Button variant="outline" onClick={() => exportSalePDF(sale, orgName, { showPrices: canViewPrices, showProfit: canViewProfit })}>
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
           <Button variant="outline" onClick={() => navigate(ROUTES.SALES)}>
@@ -93,7 +94,7 @@ export default function SaleDetailPage() {
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Estado</dt><dd><StatusBadge status={sale.status} /></dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</dt><dd>{formatDate(sale.date)}</dd></div>
               {canViewPrices && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold text-lg">{formatCurrency(sale.total_amount)}</dd></div>}
-              {canViewPrices && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">{totalCommissions > 0 ? "Utilidad Neta" : "Utilidad Bruta"}</dt><dd className={`font-bold ${(totalCommissions > 0 ? netProfit : sale.total_profit) >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(totalCommissions > 0 ? netProfit : sale.total_profit)}</dd></div>}
+              {canViewProfit && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">{totalCommissions > 0 ? "Utilidad Neta" : "Utilidad Bruta"}</dt><dd className={`font-bold ${(totalCommissions > 0 ? netProfit : sale.total_profit) >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(totalCommissions > 0 ? netProfit : sale.total_profit)}</dd></div>}
             </dl>
           </CardContent>
         </Card>
@@ -138,7 +139,7 @@ export default function SaleDetailPage() {
                   {canViewPrices && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Precio Unit.</TableHead>}
                   {canViewPrices && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Costo Unit.</TableHead>}
                   {canViewPrices && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total</TableHead>}
-                  {canViewPrices && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Util. Bruta</TableHead>}
+                  {canViewProfit && <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Util. Bruta</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -173,7 +174,7 @@ export default function SaleDetailPage() {
                     {canViewPrices && <TableCell className="text-right tabular-nums">{formatCurrency(line.unit_price)}</TableCell>}
                     {canViewPrices && <TableCell className="text-right tabular-nums text-slate-500">{formatCurrency(line.unit_cost)}</TableCell>}
                     {canViewPrices && <TableCell className="text-right tabular-nums font-medium">{formatCurrency(line.total_price)}</TableCell>}
-                    {canViewPrices && <TableCell className={`text-right tabular-nums font-medium ${line.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(line.profit)}</TableCell>}
+                    {canViewProfit && <TableCell className={`text-right tabular-nums font-medium ${line.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(line.profit)}</TableCell>}
                   </TableRow>
                 ))}
               </TableBody>
@@ -247,34 +248,38 @@ export default function SaleDetailPage() {
               <span className="text-slate-600">Total Venta</span>
               <span className="font-bold tabular-nums text-base">{formatCurrency(sale.total_amount)}</span>
             </div>
-            <div className="border-t border-slate-200 pt-2" />
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-600">Costo de Venta</span>
-              <span className="tabular-nums text-slate-500">{formatCurrency(totalCost)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-600">
-                Utilidad Bruta <span className="text-xs text-slate-400">({marginPct.toFixed(1)}%)</span>
-              </span>
-              <span className={`font-semibold tabular-nums ${sale.total_profit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                {formatCurrency(sale.total_profit)}
-              </span>
-            </div>
-            {totalCommissions > 0 && (
+            {canViewProfit && (
               <>
+                <div className="border-t border-slate-200 pt-2" />
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-600">(-) Comisiones</span>
-                  <span className="tabular-nums text-amber-600">-{formatCurrency(totalCommissions)}</span>
+                  <span className="text-slate-600">Costo de Venta</span>
+                  <span className="tabular-nums text-slate-500">{formatCurrency(totalCost)}</span>
                 </div>
-                <div className="border-t border-dashed border-slate-200" />
                 <div className="flex justify-between text-sm">
-                  <span className="font-medium text-slate-700">
-                    Utilidad Neta <span className="text-xs text-slate-400">({netMarginPct.toFixed(1)}%)</span>
+                  <span className="text-slate-600">
+                    Utilidad Bruta <span className="text-xs text-slate-400">({marginPct.toFixed(1)}%)</span>
                   </span>
-                  <span className={`font-bold tabular-nums ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                    {formatCurrency(netProfit)}
+                  <span className={`font-semibold tabular-nums ${sale.total_profit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    {formatCurrency(sale.total_profit)}
                   </span>
                 </div>
+                {totalCommissions > 0 && (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">(-) Comisiones</span>
+                      <span className="tabular-nums text-amber-600">-{formatCurrency(totalCommissions)}</span>
+                    </div>
+                    <div className="border-t border-dashed border-slate-200" />
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium text-slate-700">
+                        Utilidad Neta <span className="text-xs text-slate-400">({netMarginPct.toFixed(1)}%)</span>
+                      </span>
+                      <span className={`font-bold tabular-nums ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                        {formatCurrency(netProfit)}
+                      </span>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

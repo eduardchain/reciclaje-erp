@@ -630,7 +630,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         obj_in: PurchaseFullUpdate,
         organization_id: UUID,
         user_id: Optional[UUID] = None
-    ) -> Purchase:
+    ) -> tuple[Purchase, list[str]]:
         """
         Edicion completa de compra (metadata + proveedor + lineas).
 
@@ -693,15 +693,17 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 )
 
         # Step 3: Si hay lineas nuevas, hacer revert+reapply
+        warnings: list[str] = []
         if obj_in.lines is not None:
-            # 3a. Validar stock suficiente para revertir cada linea actual
+            # 3a. Detectar stock negativo al revertir (warning, no bloquea)
             for line in purchase.lines:
                 material = line.material
                 if material.current_stock < line.quantity:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Stock insuficiente para revertir {material.code}. "
-                               f"Actual: {material.current_stock}, Requerido: {line.quantity}"
+                    resulting = material.current_stock - line.quantity
+                    warnings.append(
+                        f"Stock negativo para {material.code} tras revertir. "
+                        f"Actual: {material.current_stock}, Requerido: {line.quantity}, "
+                        f"Resultante: {resulting}"
                     )
 
             # 3b. Revertir efectos de lineas actuales
@@ -826,7 +828,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
         print(f"✏️ Purchase #{purchase.purchase_number} updated")
 
-        return purchase
+        return purchase, warnings
 
     def get_with_details(
         self,
