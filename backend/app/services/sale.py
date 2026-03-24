@@ -231,9 +231,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 )
                 db.add(inventory_movement)
                 
-                # Update material stock (decrease from liquidated and total)
+                # Update material stock (decrease from transit and total — not liquidated until liquidation)
                 material.current_stock -= line_data.quantity
-                material.current_stock_liquidated -= line_data.quantity
+                material.current_stock_transit -= line_data.quantity
                 # Note: Do NOT update current_average_cost on sales, only on purchases
                 
                 print(f"  📤 Sold {line_data.quantity} of {material.name} @ ${line_data.unit_price}/unit (cost: ${unit_cost})")
@@ -358,6 +358,14 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         sale.status = "liquidated"
         sale.liquidated_by = user_id
         sale.liquidated_at = datetime.now(timezone.utc)
+
+        # Step 5b: Move stock from transit to liquidated (confirmar salida)
+        stmt_lines = select(SaleLine).where(SaleLine.sale_id == sale.id)
+        sale_lines = db.scalars(stmt_lines).all()
+        for line in sale_lines:
+            material = db.get(Material, line.material_id)
+            material.current_stock_transit += line.quantity      # devolver de transit
+            material.current_stock_liquidated -= line.quantity   # confirmar en liquidated
 
         # Step 6: Update customer balance (ahora el cliente nos debe)
         customer = db.get(ThirdParty, sale.customer_id)
@@ -487,7 +495,10 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             db.add(reversal_movement)
 
             material.current_stock += line.quantity
-            material.current_stock_liquidated += line.quantity
+            if was_liquidated:
+                material.current_stock_liquidated += line.quantity
+            else:
+                material.current_stock_transit += line.quantity
             print(f"  🔄 Restored {line.quantity} of {material.name}, stock: {material.current_stock - line.quantity} → {material.current_stock}")
 
         # Step 6: Si estaba liquidada, revertir saldo cliente y comisiones
@@ -603,8 +614,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             for line in sale.lines:
                 material = line.material
                 material.current_stock += line.quantity
-                material.current_stock_liquidated += line.quantity
-                # Stock revertido para material {material.code}
+                material.current_stock_transit += line.quantity
+                # Stock revertido para material {material.code} (transit, sale was registered)
 
             # 3b. Eliminar movimientos de inventario originales
             db.query(InventoryMovement).filter(
@@ -685,9 +696,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 )
                 db.add(movement)
 
-                # Actualizar stock
+                # Actualizar stock (transit, sale is registered)
                 material.current_stock -= quantity
-                material.current_stock_liquidated -= quantity
+                material.current_stock_transit -= quantity
                 # Nueva linea: {material.code} x {quantity}
 
             sale.total_amount = new_total

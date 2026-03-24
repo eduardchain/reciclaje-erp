@@ -160,7 +160,7 @@ def test_material_with_stock(db_session, test_organization, test_category, test_
         unit_cost=Decimal("45.00"),
         reference_type="adjustment",
         reference_id=uuid4(),
-        date=datetime.now(),
+        date=datetime(2026, 3, 20, 12, 0, 0),
         notes="Seed stock for test",
     )
     db_session.add(seed_movement)
@@ -211,7 +211,7 @@ def test_sale(db_session, test_organization, test_customer, test_material_with_s
     sale_data = SaleCreate(
         customer_id=test_customer.id,
         warehouse_id=test_warehouse.id,
-        date=datetime.now(),
+        date=datetime(2026, 3, 20, 12, 0, 0),
         vehicle_plate="ABC-123",
         invoice_number="FAC-001",
         notes="Test sale",
@@ -258,7 +258,7 @@ class TestCreateSale:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "vehicle_plate": "XYZ-789",
             "invoice_number": "INV-001",
             "notes": "Test sale 2-step",
@@ -275,7 +275,7 @@ class TestCreateSale:
         
         # Act
         response = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
-        
+
         # Assert
         assert response.status_code == 201
         data = response.json()
@@ -309,7 +309,7 @@ class TestCreateSale:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "notes": "Sale with commissions",
             "lines": [
                 {
@@ -357,7 +357,7 @@ class TestCreateSale:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "notes": "Test sale 1-step",
             "lines": [
                 {
@@ -392,7 +392,7 @@ class TestCreateSale:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "lines": [
                 {
                     "material_id": str(test_material_with_stock.id),
@@ -430,7 +430,7 @@ class TestCreateSale:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "lines": [
                 {
                     "material_id": str(test_material_with_stock.id),
@@ -496,7 +496,7 @@ class TestListSales:
             sale_data = SaleCreate(
                 customer_id=test_customer.id,
                 warehouse_id=test_warehouse.id,
-                date=datetime.now(),
+                date=datetime(2026, 3, 20, 12, 0, 0),
                 notes=f"Sale {i}",
                 lines=[
                     SaleLineCreate(
@@ -1022,7 +1022,7 @@ class TestEnhancedLiquidation:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "lines": [
                 {
                     "material_id": str(test_material_with_stock.id),
@@ -1065,7 +1065,7 @@ class TestEnhancedLiquidation:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "lines": [
                 {
                     "material_id": str(test_material_with_stock.id),
@@ -1136,7 +1136,7 @@ class TestEnhancedLiquidation:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "lines": [
                 {
                     "material_id": str(test_material_with_stock.id),
@@ -1186,7 +1186,7 @@ class TestEnhancedLiquidation:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "lines": [
                 {
                     "material_id": str(test_material_with_stock.id),
@@ -1295,7 +1295,7 @@ class TestFutureDateAndDuplicate:
         from app.services.sale import crud_sale
         from app.schemas.sale import SaleCreate, SaleLineCreate
 
-        sale_date = datetime.now()
+        sale_date = datetime(2026, 3, 20, 12, 0, 0)
 
         # Crear y cancelar una venta
         sale_data = SaleCreate(
@@ -1361,7 +1361,7 @@ class TestWarehouseStockValidation:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(warehouse2.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "lines": [
                 {
                     "material_id": str(test_material_with_stock.id),
@@ -1393,7 +1393,7 @@ class TestWarehouseStockValidation:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "lines": [
                 {
                     "material_id": str(test_material_with_stock.id),
@@ -1451,7 +1451,7 @@ class TestWarehouseStockValidation:
             unit_cost=Decimal("0"),
             reference_type="adjustment",
             reference_id=uuid4(),
-            date=datetime.now(),
+            date=datetime(2026, 3, 20, 12, 0, 0),
             notes="Seed",
         )
         db_session.add(seed)
@@ -1474,7 +1474,7 @@ class TestWarehouseStockValidation:
         sale_data = {
             "customer_id": str(test_customer.id),
             "warehouse_id": str(test_warehouse.id),
-            "date": datetime.now().isoformat(),
+            "date": "2026-03-20T12:00:00",
             "lines": [
                 {
                     "material_id": str(material.id),
