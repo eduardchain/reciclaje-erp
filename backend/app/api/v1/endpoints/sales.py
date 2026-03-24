@@ -396,6 +396,26 @@ async def check_duplicate_sale(
 
 
 @router.get(
+    "/check-invoice",
+    summary="Check for duplicate invoice number",
+)
+async def check_invoice_sale(
+    invoice_number: str = Query(...),
+    exclude_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    org_context: dict = Depends(require_permission("sales.view")),
+) -> dict:
+    """Busca ventas con el mismo numero de factura."""
+    matches = crud_sale.check_invoice(
+        db=db,
+        invoice_number=invoice_number,
+        organization_id=org_context["organization_id"],
+        exclude_id=exclude_id,
+    )
+    return {"matches": matches}
+
+
+@router.get(
     "/{sale_id}",
     response_model=SaleResponse,
     summary="Get single sale",

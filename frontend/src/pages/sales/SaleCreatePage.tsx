@@ -159,6 +159,8 @@ export default function SaleCreatePage() {
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [duplicateCount, setDuplicateCount] = useState(0);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [invoiceMatches, setInvoiceMatches] = useState<Array<{ id: string; number: number; date: string; status: string; third_party_name: string; total_amount: number }>>([]);
 
   const doCreate = () => {
     createSale.mutate(
@@ -179,6 +181,20 @@ export default function SaleCreatePage() {
     );
   };
 
+  const checkInvoiceAndCreate = async () => {
+    if (invoiceNumber.trim()) {
+      try {
+        const { matches } = await saleService.checkInvoice(invoiceNumber.trim());
+        if (matches.length > 0) {
+          setInvoiceMatches(matches);
+          setInvoiceOpen(true);
+          return;
+        }
+      } catch { /* si falla, continuar */ }
+    }
+    doCreate();
+  };
+
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setCheckingDuplicate(true);
@@ -188,10 +204,10 @@ export default function SaleCreatePage() {
         setDuplicateCount(count);
         setDuplicateOpen(true);
       } else {
-        doCreate();
+        await checkInvoiceAndCreate();
       }
     } catch {
-      doCreate();
+      await checkInvoiceAndCreate();
     } finally {
       setCheckingDuplicate(false);
     }
@@ -473,8 +489,27 @@ export default function SaleCreatePage() {
         title="Posible venta duplicada"
         description={`Ya existen ${duplicateCount} venta(s) del mismo cliente en esta fecha. ¿Desea crear la venta de todas formas?`}
         confirmLabel="Sí, crear"
-        onConfirm={() => { setDuplicateOpen(false); doCreate(); }}
+        onConfirm={() => { setDuplicateOpen(false); checkInvoiceAndCreate(); }}
       />
+
+      <ConfirmDialog
+        open={invoiceOpen}
+        onOpenChange={setInvoiceOpen}
+        title="Factura duplicada"
+        description={`El numero de factura "${invoiceNumber}" ya existe en:`}
+        confirmLabel="Crear de todas formas"
+        variant="default"
+        onConfirm={() => { setInvoiceOpen(false); doCreate(); }}
+      >
+        <div className="mt-2 space-y-1 text-sm">
+          {invoiceMatches.map((m) => (
+            <div key={m.id} className="flex justify-between bg-slate-50 rounded px-3 py-2">
+              <span>Venta #{m.number} — {m.third_party_name}</span>
+              <span className="text-slate-500">{m.date?.split("T")[0]}</span>
+            </div>
+          ))}
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

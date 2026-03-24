@@ -118,6 +118,26 @@ async def check_duplicate(
     return {"count": count}
 
 
+@router.get(
+    "/check-invoice",
+    summary="Check for duplicate invoice number",
+)
+async def check_invoice(
+    invoice_number: str = Query(...),
+    exclude_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    org_context: dict = Depends(require_permission("purchases.view")),
+) -> dict:
+    """Busca compras con el mismo numero de factura."""
+    matches = purchase_service.check_invoice(
+        db=db,
+        invoice_number=invoice_number,
+        organization_id=org_context["organization_id"],
+        exclude_id=exclude_id,
+    )
+    return {"matches": matches}
+
+
 @router.post(
     "",
     response_model=PurchaseResponse,

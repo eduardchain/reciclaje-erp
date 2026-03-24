@@ -19,6 +19,8 @@ import { useCustomers, usePayableProviders, useMaterials, useWarehouses } from "
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatWeight, utcToLocalDateInput, toLocalDateInput } from "@/utils/formatters";
 import { usePermissions } from "@/hooks/usePermissions";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { saleService } from "@/services/sales";
 import type { SaleLineCreate, SaleCommissionCreate } from "@/types/sale";
 
 interface LineFormData extends SaleLineCreate {
@@ -161,8 +163,11 @@ export default function SaleEditPage() {
     lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
     commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0);
 
-  const handleSubmit = () => {
-    if (!canSubmit || !id) return;
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [invoiceMatches, setInvoiceMatches] = useState<Array<{ id: string; number: number; date: string; status: string; third_party_name: string; total_amount: number }>>([]);
+
+  const doUpdate = () => {
+    if (!id) return;
     updateSale.mutate(
       {
         id,
@@ -177,12 +182,23 @@ export default function SaleEditPage() {
           commissions: commissions.map(({ _key, ...rest }) => rest),
         },
       },
-      {
-        onSuccess: () => {
-          navigate(`/sales/${id}`);
-        },
-      }
+      { onSuccess: () => navigate(`/sales/${id}`) }
     );
+  };
+
+  const handleSubmit = async () => {
+    if (!canSubmit || !id) return;
+    if (invoiceNumber.trim()) {
+      try {
+        const { matches } = await saleService.checkInvoice(invoiceNumber.trim(), id);
+        if (matches.length > 0) {
+          setInvoiceMatches(matches);
+          setInvoiceOpen(true);
+          return;
+        }
+      } catch { /* continuar */ }
+    }
+    doUpdate();
   };
 
   if (loadingSale) {
@@ -473,6 +489,25 @@ export default function SaleEditPage() {
           </Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={invoiceOpen}
+        onOpenChange={setInvoiceOpen}
+        title="Factura duplicada"
+        description={`El numero de factura "${invoiceNumber}" ya existe en:`}
+        confirmLabel="Guardar de todas formas"
+        variant="default"
+        onConfirm={() => { setInvoiceOpen(false); doUpdate(); }}
+      >
+        <div className="mt-2 space-y-1 text-sm">
+          {invoiceMatches.map((m) => (
+            <div key={m.id} className="flex justify-between bg-slate-50 rounded px-3 py-2">
+              <span>Venta #{m.number} — {m.third_party_name}</span>
+              <span className="text-slate-500">{m.date?.split("T")[0]}</span>
+            </div>
+          ))}
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

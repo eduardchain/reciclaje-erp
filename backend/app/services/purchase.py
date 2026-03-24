@@ -71,6 +71,41 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
         return base_query.count()
 
+    def check_invoice(
+        self,
+        db: Session,
+        invoice_number: str,
+        organization_id: UUID,
+        exclude_id: Optional[UUID] = None,
+    ) -> list[dict]:
+        """Busca compras con el mismo numero de factura (case-insensitive, trimmed)."""
+        cleaned = invoice_number.strip()
+        if not cleaned:
+            return []
+        query = (
+            select(Purchase, ThirdParty.name.label("supplier_name"))
+            .join(ThirdParty, Purchase.supplier_id == ThirdParty.id)
+            .where(
+                Purchase.organization_id == organization_id,
+                func.lower(Purchase.invoice_number) == cleaned.lower(),
+                Purchase.status != "cancelled",
+            )
+        )
+        if exclude_id:
+            query = query.where(Purchase.id != exclude_id)
+        rows = db.execute(query).all()
+        return [
+            {
+                "id": str(p.id),
+                "number": p.purchase_number,
+                "date": p.date.isoformat() if p.date else None,
+                "status": p.status,
+                "third_party_name": supplier_name,
+                "total_amount": float(p.total_amount),
+            }
+            for p, supplier_name in rows
+        ]
+
     def create(
         self,
         db: Session,

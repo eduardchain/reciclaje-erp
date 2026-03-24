@@ -49,4 +49,11 @@ export const saleService = {
     });
     return response.data;
   },
+
+  checkInvoice: async (invoiceNumber: string, excludeId?: string): Promise<{ matches: Array<{ id: string; number: number; date: string; status: string; third_party_name: string; total_amount: number }> }> => {
+    const response = await apiClient.get("/api/v1/sales/check-invoice", {
+      params: { invoice_number: invoiceNumber, exclude_id: excludeId },
+    });
+    return response.data;
+  },
 };

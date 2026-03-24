@@ -760,6 +760,41 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         )
         return db.scalar(stmt) or 0
 
+    def check_invoice(
+        self,
+        db: Session,
+        invoice_number: str,
+        organization_id: UUID,
+        exclude_id: Optional[UUID] = None,
+    ) -> list[dict]:
+        """Busca ventas con el mismo numero de factura (case-insensitive, trimmed)."""
+        cleaned = invoice_number.strip()
+        if not cleaned:
+            return []
+        query = (
+            select(Sale, ThirdParty.name.label("customer_name"))
+            .join(ThirdParty, Sale.customer_id == ThirdParty.id)
+            .where(
+                Sale.organization_id == organization_id,
+                func.lower(Sale.invoice_number) == cleaned.lower(),
+                Sale.status != "cancelled",
+            )
+        )
+        if exclude_id:
+            query = query.where(Sale.id != exclude_id)
+        rows = db.execute(query).all()
+        return [
+            {
+                "id": str(s.id),
+                "number": s.sale_number,
+                "date": s.date.isoformat() if s.date else None,
+                "status": s.status,
+                "third_party_name": customer_name,
+                "total_amount": float(s.total_amount),
+            }
+            for s, customer_name in rows
+        ]
+
     def get_by_number(
         self,
         db: Session,

@@ -15,7 +15,9 @@ import { usePurchase, useUpdatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, usePayableProviders, useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { formatCurrency, utcToLocalDateInput } from "@/utils/formatters";
+import { purchaseService } from "@/services/purchases";
 import type { PurchaseLineCreate, PurchaseCommissionCreate } from "@/types/purchase";
 
 interface LineFormData extends PurchaseLineCreate {
@@ -162,8 +164,11 @@ export default function PurchaseEditPage() {
     lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
     commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0);
 
-  const handleSubmit = () => {
-    if (!canSubmit || !id) return;
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [invoiceMatches, setInvoiceMatches] = useState<Array<{ id: string; number: number; date: string; status: string; third_party_name: string; total_amount: number }>>([]);
+
+  const doUpdate = () => {
+    if (!id) return;
     updatePurchase.mutate(
       {
         id,
@@ -177,12 +182,23 @@ export default function PurchaseEditPage() {
           commissions: commissions.map(({ _key, ...rest }) => rest),
         },
       },
-      {
-        onSuccess: () => {
-          navigate(`/purchases/${id}`);
-        },
-      }
+      { onSuccess: () => navigate(`/purchases/${id}`) }
     );
+  };
+
+  const handleSubmit = async () => {
+    if (!canSubmit || !id) return;
+    if (invoiceNumber.trim()) {
+      try {
+        const { matches } = await purchaseService.checkInvoice(invoiceNumber.trim(), id);
+        if (matches.length > 0) {
+          setInvoiceMatches(matches);
+          setInvoiceOpen(true);
+          return;
+        }
+      } catch { /* continuar */ }
+    }
+    doUpdate();
   };
 
   if (loadingPurchase) {
@@ -458,6 +474,24 @@ export default function PurchaseEditPage() {
           </Button>
         </div>
       </div>
+      <ConfirmDialog
+        open={invoiceOpen}
+        onOpenChange={setInvoiceOpen}
+        title="Factura duplicada"
+        description={`El numero de factura "${invoiceNumber}" ya existe en:`}
+        confirmLabel="Guardar de todas formas"
+        variant="default"
+        onConfirm={() => { setInvoiceOpen(false); doUpdate(); }}
+      >
+        <div className="mt-2 space-y-1 text-sm">
+          {invoiceMatches.map((m) => (
+            <div key={m.id} className="flex justify-between bg-slate-50 rounded px-3 py-2">
+              <span>Compra #{m.number} — {m.third_party_name}</span>
+              <span className="text-slate-500">{m.date?.split("T")[0]}</span>
+            </div>
+          ))}
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }
