@@ -85,6 +85,26 @@ def list_suppliers(
     )
 
 
+@router.get("/payable-suppliers", response_model=PaginatedResponse)
+def list_payable_suppliers(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    is_active: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None),
+    sort_by: str = Query("name"),
+    sort_order: str = Query("asc", regex="^(asc|desc)$"),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
+    db: Session = Depends(get_db)
+):
+    """List third parties with behavior_type material_supplier or service_provider (for payments/advances)."""
+    org_id = org_context["organization_id"]
+    return third_party.get_payable_suppliers(
+        db=db, organization_id=org_id,
+        skip=skip, limit=limit, is_active=is_active, search=search,
+        sort_by=sort_by, sort_order=sort_order
+    )
+
+
 @router.get("/customers", response_model=PaginatedResponse)
 def list_customers(
     skip: int = Query(0, ge=0),

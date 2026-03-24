@@ -12,7 +12,7 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { BusinessUnitAllocationSelector } from "@/components/shared/BusinessUnitAllocationSelector";
 import { useCreateMovement, useUploadEvidence, useCreateTpTransfer } from "@/hooks/useMoneyMovements";
-import { useSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, useLiabilities, useGenericThirdParties } from "@/hooks/useMasterData";
+import { usePayableSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, useLiabilities, useGenericThirdParties } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
@@ -57,7 +57,7 @@ export default function MovementCreatePage() {
   const createTpTransfer = useCreateTpTransfer();
   const uploadEvidence = useUploadEvidence();
 
-  const { data: suppliersData } = useSuppliers();
+  const { data: payableSuppliersData } = usePayableSuppliers();
   const { data: customersData } = useCustomers();
   const { data: investorsData } = useInvestors();
   const { data: thirdPartiesData } = useThirdParties();
@@ -67,7 +67,7 @@ export default function MovementCreatePage() {
   const { data: liabilitiesData } = useLiabilities();
   const { data: genericData } = useGenericThirdParties();
 
-  const suppliers = suppliersData?.items ?? [];
+  const payableSuppliers = payableSuppliersData?.items ?? [];
   const customers = customersData?.items ?? [];
   const investors = investorsData?.items ?? [];
   const thirdParties = thirdPartiesData?.items ?? [];
@@ -233,7 +233,7 @@ export default function MovementCreatePage() {
   const getThirdPartyOptions = () => {
     switch (type) {
       case "payment_to_supplier":
-      case "advance_payment": return suppliers.map((s) => ({ id: s.id, label: s.name }));
+      case "advance_payment": return payableSuppliers.map((s) => ({ id: s.id, label: s.name }));
       case "liability_payment": return liabilities.map((l) => ({ id: l.id, label: l.name }));
       case "collection_from_client":
       case "advance_collection": return customers.map((c) => ({ id: c.id, label: c.name }));

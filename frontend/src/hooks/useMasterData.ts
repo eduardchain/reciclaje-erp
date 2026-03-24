@@ -13,6 +13,13 @@ export function useSuppliers(search?: string) {
   });
 }
 
+export function usePayableSuppliers(search?: string) {
+  return useQuery({
+    queryKey: ["third-parties", "payable-suppliers", search],
+    queryFn: () => thirdPartyService.getPayableSuppliers({ search, limit: 500 }),
+  });
+}
+
 export function useCustomers(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "customers", search],
