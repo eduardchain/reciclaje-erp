@@ -103,8 +103,8 @@ class TestSaleStress:
         assert venta_1["status"] == "registered"
         assert venta_1["total_amount"] == 70_000.0
 
-        # Stock baja al registrar (no al liquidar)
-        assert_material(client, h, cu_id, total=300, liquidated=300, avg_cost=200)
+        # Stock transit baja al registrar, liquidated sin cambio
+        assert_material(client, h, cu_id, total=300, transit=-200, liquidated=500, avg_cost=200)
         # COGS capturado al crear
         assert venta_1["lines"][0]["unit_cost"] == pytest.approx(200, abs=0.01)
         # Sin efecto financiero
@@ -115,8 +115,8 @@ class TestSaleStress:
         # =================================================================
         api_liquidate_sale(client, h, venta_1["id"])
 
-        # Stock sin cambio (ya bajo al registrar)
-        assert_material(client, h, cu_id, total=300, liquidated=300, avg_cost=200)
+        # Transit restaurado a 0, liquidated baja
+        assert_material(client, h, cu_id, total=300, transit=0, liquidated=300, avg_cost=200)
         # Cliente: +$70K (nos debe)
         assert_tp_balance(client, h, cust_id, 70_000)
         # Cuenta: sin cambio
@@ -245,8 +245,8 @@ class TestSaleStress:
             lines=[{"material_id": s["mat_chatarra"].id, "quantity": 100, "unit_price": 100}],
         )
         assert venta_recv["status"] == "registered"
-        # Chatarra: 1000 - 300(p6) - 200(p8) - 100(p9) - 100(p10) = 300
-        assert_material(client, h, ch_id, total=300, liquidated=300, avg_cost=50)
+        # Chatarra: total 1000-300-200-100-100=300, transit=-100, liquidated=400
+        assert_material(client, h, ch_id, total=300, transit=-100, liquidated=400, avg_cost=50)
 
         # Liquidar con received_quantity (unit_price requerido en line_updates)
         liq_payload = {
@@ -274,8 +274,8 @@ class TestSaleStress:
             lines=[{"material_id": s["mat_cobre"].id, "quantity": 30, "unit_price": 450}],
         )
         assert venta_edit["status"] == "registered"
-        # Stock bajo: Cobre 300 - 30 = 270
-        assert_material(client, h, cu_id, total=270, liquidated=270, avg_cost=200)
+        # Stock bajo: Cobre total=300-30=270, transit=-30, liquidated=300
+        assert_material(client, h, cu_id, total=270, transit=-30, liquidated=300, avg_cost=200)
 
         # Editar: cambiar a 20kg × $500
         resp_edit = client.patch(f"/api/v1/sales/{venta_edit['id']}", json={
@@ -285,8 +285,8 @@ class TestSaleStress:
         edited = resp_edit.json()
         assert edited["total_amount"] == pytest.approx(10_000, abs=1)
 
-        # Stock: revirtio 30, desconto 20 → Cobre 300 - 20 = 280
-        assert_material(client, h, cu_id, total=280, liquidated=280, avg_cost=200)
+        # Stock: revirtio 30 transit, desconto 20 transit → total=280, transit=-20, liquidated=300
+        assert_material(client, h, cu_id, total=280, transit=-20, liquidated=300, avg_cost=200)
 
         # Liquidar la editada
         api_liquidate_sale(client, h, venta_edit["id"],
@@ -302,7 +302,7 @@ class TestSaleStress:
             lines=[{"material_id": s["mat_cobre"].id, "quantity": 10, "unit_price": 300}],
         )
         assert venta_reg["status"] == "registered"
-        assert_material(client, h, cu_id, total=270, liquidated=270, avg_cost=200)
+        assert_material(client, h, cu_id, total=270, transit=-10, liquidated=280, avg_cost=200)
 
         cancelled_reg = api_cancel_sale(client, h, venta_reg["id"])
         assert cancelled_reg["status"] == "cancelled"

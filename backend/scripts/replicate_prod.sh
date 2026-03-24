@@ -16,15 +16,19 @@ BACKUP_DIR="/tmp/ecobalance-replicate"
 echo "=== Replicar Produccion → Desarrollo ==="
 echo ""
 
-# 1. Obtener backup mas reciente del VPS
-echo "[1/4] Descargando backup mas reciente del VPS..."
+# 1. Crear backup fresco en produccion
+echo "[1/5] Creando backup fresco en produccion..."
+ssh "$VPS" "/home/deploy/scripts/backup-database.sh" 2>&1 | grep -E "✅|Backup"
+
+# 2. Descargar el backup
+echo "[2/5] Descargando backup..."
 mkdir -p "$BACKUP_DIR"
 LATEST=$(ssh "$VPS" "ls -t /var/backups/ecobalance/*.sql.gz | head -1")
 echo "  Backup: $(basename $LATEST)"
 scp "$VPS:$LATEST" "$BACKUP_DIR/latest.sql.gz"
 
 # 2. Verificar que el contenedor local esta corriendo
-echo "[2/4] Verificando BD local..."
+echo "[3/5] Verificando BD local..."
 if ! docker ps --format '{{.Names}}' | grep -q "$LOCAL_CONTAINER"; then
     echo "  ERROR: Contenedor $LOCAL_CONTAINER no esta corriendo."
     echo "  Ejecuta: POSTGRES_PASSWORD=localdev123 docker-compose up -d"
@@ -32,7 +36,7 @@ if ! docker ps --format '{{.Names}}' | grep -q "$LOCAL_CONTAINER"; then
 fi
 
 # 3. Restaurar
-echo "[3/4] Restaurando en BD local (esto borra todos los datos locales)..."
+echo "[4/5] Restaurando en BD local (esto borra todos los datos locales)..."
 gunzip -c "$BACKUP_DIR/latest.sql.gz" > "$BACKUP_DIR/latest.sql"
 
 # Drop y recrear la BD
@@ -44,7 +48,7 @@ docker cp "$BACKUP_DIR/latest.sql" "$LOCAL_CONTAINER:/tmp/restore.sql"
 docker exec "$LOCAL_CONTAINER" psql -U "$LOCAL_USER" -d "$LOCAL_DB" -f /tmp/restore.sql -q 2>/dev/null
 
 # 4. Limpiar
-echo "[4/4] Limpiando archivos temporales..."
+echo "[5/5] Limpiando archivos temporales..."
 rm -rf "$BACKUP_DIR"
 docker exec "$LOCAL_CONTAINER" rm -f /tmp/restore.sql
 
