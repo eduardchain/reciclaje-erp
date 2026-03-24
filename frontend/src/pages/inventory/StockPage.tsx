@@ -372,8 +372,8 @@ export default function StockPage() {
                     <TableCell>{item.default_unit}</TableCell>
                     <TableCell className="text-right tabular-nums">{item.current_stock_liquidated.toFixed(2)}</TableCell>
                     <TableCell className="text-right">
-                      {item.current_stock_transit > 0 ? (
-                        <Badge variant="outline" className="bg-yellow-50 text-yellow-700">{item.current_stock_transit.toFixed(2)}</Badge>
+                      {item.current_stock_transit !== 0 ? (
+                        <Badge variant="outline" className={item.current_stock_transit > 0 ? "bg-yellow-50 text-yellow-700" : "bg-red-50 text-red-700"}>{item.current_stock_transit.toFixed(2)}</Badge>
                       ) : (
                         <span className="text-slate-400">0</span>
                       )}
