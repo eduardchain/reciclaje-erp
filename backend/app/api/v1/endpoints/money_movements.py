@@ -944,7 +944,7 @@ def get_by_third_party(
         # Como proveedor
         if de.supplier_id == third_party_id:
             _evt(de.date, de_dt, 0,
-                 id=f"de-supplier-{de.id}", date=de.date.isoformat(),
+                 id=f"de-supplier-{de.id}", date=datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat(),
                  event_type="double_entry_purchase",
                  description=f"Doble Partida #{de.double_entry_number} (como proveedor)",
                  amount=purchase_amount, direction=-1,
@@ -953,7 +953,7 @@ def get_by_third_party(
         # Como cliente
         if de.customer_id == third_party_id:
             _evt(de.date, de_dt, 0,
-                 id=f"de-customer-{de.id}", date=de.date.isoformat(),
+                 id=f"de-customer-{de.id}", date=datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat(),
                  event_type="double_entry_sale",
                  description=f"Doble Partida #{de.double_entry_number} (como cliente)",
                  amount=sale_amount, direction=1,
@@ -965,7 +965,7 @@ def get_by_third_party(
             cancel_dt = de.updated_at or de_dt
             if de.supplier_id == third_party_id:
                 _evt(de.date, cancel_dt, 2,
-                     id=f"de-cancel-supplier-{de.id}", date=de.date.isoformat(),
+                     id=f"de-cancel-supplier-{de.id}", date=datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat(),
                      event_type="double_entry_cancellation",
                      description=f"Doble Partida #{de.double_entry_number} cancelada (reversa proveedor)",
                      amount=purchase_amount, direction=1,
@@ -973,7 +973,7 @@ def get_by_third_party(
                      source="double_entry", source_id=str(de.id), source_number=de.double_entry_number)
             if de.customer_id == third_party_id:
                 _evt(de.date, cancel_dt, 2,
-                     id=f"de-cancel-customer-{de.id}", date=de.date.isoformat(),
+                     id=f"de-cancel-customer-{de.id}", date=datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat(),
                      event_type="double_entry_cancellation",
                      description=f"Doble Partida #{de.double_entry_number} cancelada (reversa cliente)",
                      amount=sale_amount, direction=-1,
@@ -997,7 +997,7 @@ def get_by_third_party(
         de_dt = de.created_at
         is_active = de.status == "liquidated"
         _evt(de.date, de_dt, 0,
-             id=f"de-commission-{comm.id}", date=de.date.isoformat(),
+             id=f"de-commission-{comm.id}", date=datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat(),
              event_type="double_entry_commission",
              description=f"Comision DP #{de.double_entry_number}: {comm.concept}",
              amount=float(comm.commission_amount), direction=1,
@@ -1007,7 +1007,7 @@ def get_by_third_party(
         if de.status == "cancelled":
             cancel_dt = de.updated_at or de_dt
             _evt(de.date, cancel_dt, 2,
-                 id=f"de-comm-cancel-{comm.id}", date=de.date.isoformat(),
+                 id=f"de-comm-cancel-{comm.id}", date=datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat(),
                  event_type="double_entry_commission_cancellation",
                  description=f"Comision DP #{de.double_entry_number} cancelada (reversa)",
                  amount=float(comm.commission_amount), direction=-1,
