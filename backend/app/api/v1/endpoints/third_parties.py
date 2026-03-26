@@ -345,6 +345,17 @@ def delete_third_party(
     )
 
 
+@router.patch("/{third_party_id}/reactivate", response_model=ThirdPartyResponse)
+def reactivate_third_party(
+    third_party_id: UUID,
+    org_context: tuple = Depends(require_permission("third_parties.delete")),
+    db: Session = Depends(get_db)
+):
+    """Reactivar un tercero desactivado."""
+    org_id = org_context["organization_id"]
+    return third_party.reactivate(db=db, id=third_party_id, organization_id=org_id)
+
+
 @router.post("/{third_party_id}/balance", response_model=ThirdPartyResponse)
 def update_third_party_balance(
     third_party_id: UUID,

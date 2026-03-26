@@ -71,6 +71,8 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         supplier = db.get(ThirdParty, obj_in.supplier_id)
         if not supplier or supplier.organization_id != organization_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado")
+        if not supplier.is_active:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"El proveedor '{supplier.name}' esta inactivo")
         from app.services.third_party import third_party as tp_service
         if not tp_service.has_behavior_type(db, supplier.id, ["material_supplier"]):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no es proveedor de material")
@@ -79,6 +81,8 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         customer = db.get(ThirdParty, obj_in.customer_id)
         if not customer or customer.organization_id != organization_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+        if not customer.is_active:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"El cliente '{customer.name}' esta inactivo")
         if not tp_service.has_behavior_type(db, customer.id, ["customer"]):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero no es cliente")
 

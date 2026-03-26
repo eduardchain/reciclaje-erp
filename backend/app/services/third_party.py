@@ -9,11 +9,16 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, or_, exists
 from sqlalchemy.orm import Session, joinedload
 
+from sqlalchemy import func
+
 from app.models.third_party import ThirdParty
 from app.models.third_party_category import (
     ThirdPartyCategory,
     ThirdPartyCategoryAssignment,
 )
+from app.models.purchase import Purchase
+from app.models.sale import Sale
+from app.models.double_entry import DoubleEntry
 from app.schemas.third_party import ThirdPartyCreate, ThirdPartyUpdate, ThirdPartyResponse
 from app.services.base import CRUDBase, Select, PaginatedResponse
 
@@ -271,20 +276,81 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         id: UUID,
         organization_id: UUID
     ) -> ThirdParty:
-        """Soft delete third party."""
+        """Soft delete third party con validaciones de negocio."""
         db_obj = self.get_or_404(db, id, organization_id, detail="Tercero no encontrado")
 
+        # Entidad del sistema
+        if db_obj.is_system_entity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Entidad del sistema, no se puede desactivar"
+            )
+
+        # Saldo pendiente
         if db_obj.current_balance != 0:
             balance_type = "deuda" if db_obj.current_balance < 0 else "credito"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"No se puede eliminar el tercero con saldo pendiente de {balance_type} ({db_obj.current_balance}). Liquide el saldo primero."
+                detail=f"No se puede desactivar con saldo pendiente de {balance_type} ({db_obj.current_balance}). Liquide el saldo primero."
+            )
+
+        # Compras registradas
+        pending_purchases = db.scalar(
+            select(func.count()).select_from(Purchase).where(
+                Purchase.supplier_id == id, Purchase.status == "registered"
+            )
+        ) or 0
+        if pending_purchases > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Tiene {pending_purchases} compra(s) pendientes de liquidar"
+            )
+
+        # Ventas registradas
+        pending_sales = db.scalar(
+            select(func.count()).select_from(Sale).where(
+                Sale.customer_id == id, Sale.status == "registered"
+            )
+        ) or 0
+        if pending_sales > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Tiene {pending_sales} venta(s) pendientes de liquidar"
+            )
+
+        # Doble partidas registradas
+        pending_des = db.scalar(
+            select(func.count()).select_from(DoubleEntry).where(
+                or_(DoubleEntry.supplier_id == id, DoubleEntry.customer_id == id),
+                DoubleEntry.status == "registered"
+            )
+        ) or 0
+        if pending_des > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Tiene {pending_des} doble partida(s) pendientes"
             )
 
         db_obj.is_active = False
         db.commit()
         db.refresh(db_obj)
+        return db_obj
 
+    def reactivate(
+        self,
+        db: Session,
+        id: UUID,
+        organization_id: UUID
+    ) -> ThirdParty:
+        """Reactivar tercero desactivado."""
+        db_obj = db.get(ThirdParty, id)
+        if not db_obj or db_obj.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tercero no encontrado")
+        if db_obj.is_active:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tercero ya esta activo")
+        db_obj.is_active = True
+        db.commit()
+        db.refresh(db_obj)
         return db_obj
 
     def get_suppliers(

@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Receipt } from "lucide-react";
+import { Plus, Receipt, Power, PowerOff } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -15,7 +17,9 @@ import { MoneyInput } from "@/components/shared/MoneyInput";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { BusinessUnitAllocationSelector } from "@/components/shared/BusinessUnitAllocationSelector";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useLiabilities, useExpenseCategoriesFlat, useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
+import { useDeactivateThirdParty, useReactivateThirdParty } from "@/hooks/useCrudData";
 import { useCreateMovement } from "@/hooks/useMoneyMovements";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -23,17 +27,25 @@ import { thirdPartyService } from "@/services/thirdParties";
 import { getApiErrorMessage, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { ThirdPartyCreate } from "@/types/third-party";
+import type { ThirdPartyResponse } from "@/types/third-party";
 
 export default function LiabilitiesPage() {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const { data: liabilitiesData, isLoading } = useLiabilities(search || undefined);
+  const [showInactive, setShowInactive] = useState(false);
+  const { data: liabilitiesData, isLoading } = useLiabilities(search || undefined, showInactive ? undefined : true);
   const items = liabilitiesData?.items ?? [];
   const { data: liabilityCatsData } = useThirdPartyCategoriesFlat("liability");
   const liabilityCategories = liabilityCatsData?.items ?? [];
   const liabilityCategoryId = liabilityCategories.length > 0 ? liabilityCategories[0].id : null;
+
+  const canDelete = hasPermission("third_parties.delete");
+  const deactivateMutation = useDeactivateThirdParty();
+  const reactivateMutation = useReactivateThirdParty();
+  const [deactivateTarget, setDeactivateTarget] = useState<ThirdPartyResponse | null>(null);
+  const [reactivateTarget, setReactivateTarget] = useState<ThirdPartyResponse | null>(null);
 
   // Modal crear pasivo
   const [showCreate, setShowCreate] = useState(false);
@@ -134,6 +146,16 @@ export default function LiabilitiesPage() {
 
       <div className="flex gap-3 items-center">
         <SearchInput value={search} onChange={setSearch} placeholder="Buscar pasivo..." />
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="show-inactive-liabilities"
+            checked={showInactive}
+            onCheckedChange={(checked) => setShowInactive(checked === true)}
+          />
+          <label htmlFor="show-inactive-liabilities" className="text-sm text-slate-600 cursor-pointer whitespace-nowrap">
+            Mostrar inactivos
+          </label>
+        </div>
       </div>
 
       <Card className="shadow-sm">
@@ -159,13 +181,18 @@ export default function LiabilitiesPage() {
               <TableBody>
                 {items.map((tp) => (
                   <TableRow key={tp.id}>
-                    <TableCell className="font-medium">{tp.name}</TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className={`font-medium ${!tp.is_active ? "opacity-50" : ""}`}>
+                      <div className="flex items-center gap-2">
+                        {tp.name}
+                        {!tp.is_active && <Badge variant="secondary" className="text-xs">Inactivo</Badge>}
+                      </div>
+                    </TableCell>
+                    <TableCell className={`text-right ${!tp.is_active ? "opacity-50" : ""}`}>
                       <MoneyDisplay amount={tp.current_balance} />
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {hasPermission("treasury.create_movements") && (
+                        {hasPermission("treasury.create_movements") && tp.is_active && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -174,7 +201,7 @@ export default function LiabilitiesPage() {
                             <Receipt className="h-3.5 w-3.5 mr-1" />Causar
                           </Button>
                         )}
-                        {hasPermission("treasury.create_movements") && (
+                        {hasPermission("treasury.create_movements") && tp.is_active && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -190,6 +217,26 @@ export default function LiabilitiesPage() {
                         >
                           Estado de Cuenta
                         </Button>
+                        {canDelete && tp.is_active && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => setDeactivateTarget(tp)}
+                          >
+                            <PowerOff className="h-3 w-3 mr-1" />Desactivar
+                          </Button>
+                        )}
+                        {canDelete && !tp.is_active && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                            onClick={() => setReactivateTarget(tp)}
+                          >
+                            <Power className="h-3 w-3 mr-1" />Reactivar
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -287,6 +334,40 @@ export default function LiabilitiesPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deactivateTarget}
+        onOpenChange={(open) => { if (!open) setDeactivateTarget(null); }}
+        title="Desactivar tercero"
+        description={`¿Desactivar "${deactivateTarget?.name}"? No aparecerá en selectores.`}
+        confirmLabel="Desactivar"
+        variant="destructive"
+        loading={deactivateMutation.isPending}
+        onConfirm={() => {
+          if (deactivateTarget) {
+            deactivateMutation.mutate(deactivateTarget.id, {
+              onSuccess: () => setDeactivateTarget(null),
+            });
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!reactivateTarget}
+        onOpenChange={(open) => { if (!open) setReactivateTarget(null); }}
+        title="Reactivar tercero"
+        description={`¿Reactivar "${reactivateTarget?.name}"?`}
+        confirmLabel="Reactivar"
+        variant="default"
+        loading={reactivateMutation.isPending}
+        onConfirm={() => {
+          if (reactivateTarget) {
+            reactivateMutation.mutate(reactivateTarget.id, {
+              onSuccess: () => setReactivateTarget(null),
+            });
+          }
+        }}
+      />
     </div>
   );
 }

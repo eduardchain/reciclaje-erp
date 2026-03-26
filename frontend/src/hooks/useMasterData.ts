@@ -9,25 +9,25 @@ import { thirdPartyCategoryService } from "@/services/thirdPartyCategories";
 export function useSuppliers(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "suppliers", search],
-    queryFn: () => thirdPartyService.getSuppliers({ search, limit: 500 }),
+    queryFn: () => thirdPartyService.getSuppliers({ search, limit: 500, is_active: true }),
   });
 }
 
 export function usePayableSuppliers(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "payable-suppliers", search],
-    queryFn: () => thirdPartyService.getPayableSuppliers({ search, limit: 500 }),
+    queryFn: () => thirdPartyService.getPayableSuppliers({ search, limit: 500, is_active: true }),
   });
 }
 
 export function useCustomers(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "customers", search],
-    queryFn: () => thirdPartyService.getCustomers({ search, limit: 500 }),
+    queryFn: () => thirdPartyService.getCustomers({ search, limit: 500, is_active: true }),
   });
 }
 
-export function useThirdParties(filters?: { search?: string; role?: string }, options?: { staleTime?: number }) {
+export function useThirdParties(filters?: { search?: string; role?: string; is_active?: boolean }, options?: { staleTime?: number }) {
   return useQuery({
     queryKey: ["third-parties", "list", filters],
     queryFn: () => thirdPartyService.getAll({ ...filters, limit: 500 }),
@@ -59,7 +59,7 @@ export function useMoneyAccounts() {
 export function useInvestors(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "investors", search],
-    queryFn: () => thirdPartyService.getAll({ role: "investor", search, limit: 500 }),
+    queryFn: () => thirdPartyService.getAll({ role: "investor", search, limit: 500, is_active: true }),
   });
 }
 
@@ -77,31 +77,31 @@ export function useExpenseCategoriesFlat() {
   });
 }
 
-export function useProvisions(search?: string) {
+export function useProvisions(search?: string, is_active?: boolean) {
   return useQuery({
-    queryKey: ["third-parties", "provisions", search],
-    queryFn: () => thirdPartyService.getProvisions({ search, limit: 500 }),
+    queryKey: ["third-parties", "provisions", search, is_active],
+    queryFn: () => thirdPartyService.getProvisions({ search, limit: 500, is_active }),
   });
 }
 
-export function useLiabilities(search?: string) {
+export function useLiabilities(search?: string, is_active?: boolean) {
   return useQuery({
-    queryKey: ["third-parties", "liabilities", search],
-    queryFn: () => thirdPartyService.getLiabilities({ search, limit: 500 }),
+    queryKey: ["third-parties", "liabilities", search, is_active],
+    queryFn: () => thirdPartyService.getLiabilities({ search, limit: 500, is_active }),
   });
 }
 
 export function useGenericThirdParties(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "generic", search],
-    queryFn: () => thirdPartyService.getGeneric({ search, limit: 500 }),
+    queryFn: () => thirdPartyService.getGeneric({ search, limit: 500, is_active: true }),
   });
 }
 
 export function usePayableProviders(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "payable-providers", search],
-    queryFn: () => thirdPartyService.getPayableProviders({ search, limit: 500 }),
+    queryFn: () => thirdPartyService.getPayableProviders({ search, limit: 500, is_active: true }),
   });
 }
 

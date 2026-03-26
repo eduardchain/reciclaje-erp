@@ -104,6 +104,11 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Cliente no encontrado"
             )
+        if not customer.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"El cliente '{customer.name}' esta inactivo"
+            )
         from app.services.third_party import third_party as tp_service
         if not tp_service.has_behavior_type(db, customer.id, ["customer"]):
             raise HTTPException(

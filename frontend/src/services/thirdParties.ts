@@ -7,6 +7,7 @@ interface ThirdPartyFilters {
   limit?: number;
   search?: string;
   role?: string;
+  is_active?: boolean;
 }
 
 export const thirdPartyService = {
@@ -27,6 +28,16 @@ export const thirdPartyService = {
 
   update: async (id: string, data: ThirdPartyUpdate): Promise<ThirdPartyResponse> => {
     const response = await apiClient.patch<ThirdPartyResponse>(`/api/v1/third-parties/${id}`, data);
+    return response.data;
+  },
+
+  deactivate: async (id: string): Promise<ThirdPartyResponse> => {
+    const response = await apiClient.delete<ThirdPartyResponse>(`/api/v1/third-parties/${id}`);
+    return response.data;
+  },
+
+  reactivate: async (id: string): Promise<ThirdPartyResponse> => {
+    const response = await apiClient.patch<ThirdPartyResponse>(`/api/v1/third-parties/${id}/reactivate`);
     return response.data;
   },
 

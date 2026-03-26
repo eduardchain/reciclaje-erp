@@ -90,6 +90,9 @@ ACCOUNT_BALANCE_DIRECTION = {
     "provision_deposit": -1,
     "advance_payment": -1,
     "asset_payment": -1,
+    "deferred_funding": -1,
+    "payment_to_generic": -1,
+    "collection_from_generic": 1,
 }
 
 # Direccion del efecto en el balance del tercero por tipo de movimiento.
@@ -109,6 +112,10 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "deferred_expense": -1,         # Cuota gasto diferido: reduce prepago
     "commission_accrual": -1,        # Comision causada: les debemos comision (balance-=)
     "asset_purchase": -1,            # Compra activo a credito: le debemos (balance-=)
+    "payment_to_generic": 1,         # Pagamos a generico: su balance sube
+    "collection_from_generic": -1,   # Cobramos a generico: su balance baja
+    "tp_transfer_out": -1,           # Transferencia entre terceros: source paga
+    "tp_transfer_in": 1,             # Transferencia entre terceros: dest recibe
 }
 
 # Tipos de money_movement que representan inflows a cuentas
@@ -2189,21 +2196,8 @@ class ReportService:
         for tp_id, total in purchase_rows:
             _add(tp_id, -Decimal(str(total)))
 
-        # 2b. Compras canceladas post-liquidacion: reversal (+total_amount)
-        purchase_cancel_rows = db.execute(
-            select(
-                Purchase.supplier_id,
-                func.coalesce(func.sum(Purchase.total_amount), 0),
-            )
-            .where(
-                Purchase.organization_id == organization_id,
-                Purchase.status == "cancelled",
-                Purchase.liquidated_at.isnot(None),
-            )
-            .group_by(Purchase.supplier_id)
-        ).all()
-        for tp_id, total in purchase_cancel_rows:
-            _add(tp_id, Decimal(str(total)))
+        # 2b. Compras canceladas post-liquidacion: neto es 0
+        # (step 2a ya las excluye porque status != 'liquidated', asi que no sumar)
 
         # 2c. Ventas liquidadas: customer.balance += total_amount
         sale_rows = db.execute(
@@ -2220,58 +2214,13 @@ class ReportService:
         for tp_id, total in sale_rows:
             _add(tp_id, Decimal(str(total)))
 
-        # 2d. Ventas canceladas post-liquidacion: reversal (-total_amount)
-        sale_cancel_rows = db.execute(
-            select(
-                Sale.customer_id,
-                func.coalesce(func.sum(Sale.total_amount), 0),
-            )
-            .where(
-                Sale.organization_id == organization_id,
-                Sale.status == "cancelled",
-                Sale.liquidated_at.isnot(None),
-            )
-            .group_by(Sale.customer_id)
-        ).all()
-        for tp_id, total in sale_cancel_rows:
-            _add(tp_id, -Decimal(str(total)))
+        # 2d. Ventas canceladas post-liquidacion: neto es 0
+        # (step 2c ya las excluye porque status != 'liquidated', asi que no restar)
 
-        # 2e. Comisiones de ventas liquidadas: recipient.balance += commission_amount
-        comm_rows = db.execute(
-            select(
-                SaleCommission.third_party_id,
-                func.coalesce(func.sum(SaleCommission.commission_amount), 0),
-            )
-            .select_from(SaleCommission)
-            .join(Sale, SaleCommission.sale_id == Sale.id)
-            .where(
-                Sale.organization_id == organization_id,
-                Sale.status == "liquidated",
-            )
-            .group_by(SaleCommission.third_party_id)
-        ).all()
-        for tp_id, total in comm_rows:
-            _add(tp_id, Decimal(str(total)))
+        # 2e. Comisiones: capturadas via commission_accrual MoneyMovement en paso siguiente
+        # (no contar SaleCommission directamente para evitar doble conteo)
 
-        # 2f. Comisiones de ventas canceladas post-liquidacion: reversal
-        comm_cancel_rows = db.execute(
-            select(
-                SaleCommission.third_party_id,
-                func.coalesce(func.sum(SaleCommission.commission_amount), 0),
-            )
-            .select_from(SaleCommission)
-            .join(Sale, SaleCommission.sale_id == Sale.id)
-            .where(
-                Sale.organization_id == organization_id,
-                Sale.status == "cancelled",
-                Sale.liquidated_at.isnot(None),
-            )
-            .group_by(SaleCommission.third_party_id)
-        ).all()
-        for tp_id, total in comm_cancel_rows:
-            _add(tp_id, -Decimal(str(total)))
-
-        # 2g. MoneyMovements confirmados con third_party_id
+        # 2f. MoneyMovements confirmados con third_party_id
         mm_tp_rows = db.execute(
             select(
                 MoneyMovement.third_party_id,

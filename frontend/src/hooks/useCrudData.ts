@@ -34,6 +34,24 @@ export function useUpdateThirdParty() {
   });
 }
 
+export function useDeactivateThirdParty() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => thirdPartyService.deactivate(id),
+    onSuccess: () => { toast.success("Tercero desactivado"); qc.invalidateQueries({ queryKey: ["third-parties"] }); },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al desactivar")),
+  });
+}
+
+export function useReactivateThirdParty() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => thirdPartyService.reactivate(id),
+    onSuccess: () => { toast.success("Tercero reactivado"); qc.invalidateQueries({ queryKey: ["third-parties"] }); },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al reactivar")),
+  });
+}
+
 // --- Materials ---
 
 export function useCreateMaterial() {
