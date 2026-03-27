@@ -573,7 +573,8 @@ def list_movements(
             )
         ).all())
 
-        running_balance = Decimal("0")
+        running_balance = Decimal("0")       # stock total (incluye transit)
+        running_valued_qty = Decimal("0")    # stock con costo confirmado (sin transit)
         running_value = Decimal("0")
         running_avg_cost = Decimal("0")
 
@@ -590,18 +591,20 @@ def list_movements(
             )
 
             if is_transit:
-                # Sumar cantidad al balance pero NO al valor (no diluir costo)
+                # Balance total sube, pero stock valorizado NO (no diluir avg)
                 running_balance += qty
             elif qty > 0:  # Entrada con costo confirmado
                 running_value += qty * cost
                 running_balance += qty
-                if running_balance > 0:
-                    running_avg_cost = running_value / running_balance
-            else:  # Salida
+                running_valued_qty += qty
+                if running_valued_qty > 0:
+                    running_avg_cost = running_value / running_valued_qty
+            else:  # Salida (usa avg_cost actual, resta de stock valorizado)
                 exit_qty = abs(qty)
                 running_value -= exit_qty * running_avg_cost
                 running_balance += qty  # qty es negativo
-                if running_balance <= 0:
+                running_valued_qty += qty  # qty es negativo
+                if running_valued_qty <= 0:
                     running_value = Decimal("0")
                     # Mantener ultimo costo conocido
 
