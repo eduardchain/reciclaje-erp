@@ -79,6 +79,8 @@ export interface ProfitAndLossResponse {
   transformation_count: number;
   waste_loss: number;
   adjustment_net: number;
+  tp_adjustment_loss: number;
+  tp_adjustment_gain: number;
   total_gross_profit: number;
   operating_expenses: number;
   commissions_paid: number;

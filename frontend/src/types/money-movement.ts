@@ -25,7 +25,9 @@ export type MoneyMovementType =
   | "payment_to_generic"
   | "collection_from_generic"
   | "tp_transfer_out"
-  | "tp_transfer_in";
+  | "tp_transfer_in"
+  | "tp_adjustment_credit"
+  | "tp_adjustment_debit";
 
 export type MovementStatus = "confirmed" | "annulled";
 
@@ -236,6 +238,16 @@ export interface ThirdPartyTransferCreate {
   description: string;
   reference_number?: string | null;
   notes?: string | null;
+}
+
+export interface ThirdPartyAdjustmentCreate {
+  third_party_id: string;
+  amount: number;
+  adjustment_class: "loss" | "gain";
+  date: string;
+  description: string;
+  adjustment_reason?: string;
+  notes?: string;
 }
 
 export interface AnnulMovementRequest {

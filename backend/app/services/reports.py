@@ -116,6 +116,8 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "collection_from_generic": -1,   # Cobramos a generico: su balance baja
     "tp_transfer_out": -1,           # Transferencia entre terceros: source paga
     "tp_transfer_in": 1,             # Transferencia entre terceros: dest recibe
+    "tp_adjustment_credit": 1,       # Ajuste credito: saldo sube
+    "tp_adjustment_debit": -1,       # Ajuste debito: saldo baja
 }
 
 # Tipos de money_movement que representan inflows a cuentas
@@ -371,7 +373,32 @@ class ReportService:
             )
         ))
 
-        # 4. Service income + expenses by category + commissions
+        # 4. Ajustes de terceros (perdida/ganancia)
+        tp_adj_filters = [
+            MoneyMovement.organization_id == organization_id,
+            MoneyMovement.status == "confirmed",
+            MoneyMovement.movement_type.in_(["tp_adjustment_credit", "tp_adjustment_debit"]),
+        ]
+        if has_dates:
+            tp_adj_filters += [MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to]
+
+        tp_adj_rows = db.execute(
+            select(
+                MoneyMovement.adjustment_class,
+                func.coalesce(func.sum(MoneyMovement.amount), 0),
+            ).where(*tp_adj_filters)
+            .group_by(MoneyMovement.adjustment_class)
+        ).all()
+
+        tp_adj_loss = Decimal("0")
+        tp_adj_gain = Decimal("0")
+        for adj_class, total in tp_adj_rows:
+            if adj_class == "loss":
+                tp_adj_loss += Decimal(str(total))
+            elif adj_class == "gain":
+                tp_adj_gain += Decimal(str(total))
+
+        # 5. Service income + expenses by category + commissions
         mm_filters = [
             MoneyMovement.organization_id == organization_id,
             MoneyMovement.status == "confirmed",
@@ -421,7 +448,7 @@ class ReportService:
 
         # Calculos
         gross_profit_sales = sales_revenue - cogs
-        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit - waste_loss + adjustment_net
+        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
         return {
@@ -434,6 +461,8 @@ class ReportService:
             "transformation_count": transformation_count,
             "waste_loss": waste_loss,
             "adjustment_net": adjustment_net,
+            "tp_adjustment_loss": tp_adj_loss,
+            "tp_adjustment_gain": tp_adj_gain,
             "service_income": service_income,
             "operating_expenses": operating_expenses,
             "commissions_paid": commissions_paid,
@@ -469,6 +498,8 @@ class ReportService:
             transformation_count=r["transformation_count"],
             waste_loss=float(r["waste_loss"]),
             adjustment_net=float(r["adjustment_net"]),
+            tp_adjustment_loss=float(r["tp_adjustment_loss"]),
+            tp_adjustment_gain=float(r["tp_adjustment_gain"]),
             total_gross_profit=float(r["total_gross_profit"]),
             operating_expenses=float(r["operating_expenses"]),
             commissions_paid=float(r["commissions_paid"]),

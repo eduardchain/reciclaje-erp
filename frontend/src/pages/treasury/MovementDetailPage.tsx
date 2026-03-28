@@ -43,6 +43,8 @@ const typeLabels: Record<string, string> = {
   collection_from_generic: "Cobro Genérico",
   tp_transfer_out: "Cruce Terceros (Origen)",
   tp_transfer_in: "Cruce Terceros (Destino)",
+  tp_adjustment_credit: "Ajuste Saldo (Credito)",
+  tp_adjustment_debit: "Ajuste Saldo (Debito)",
 };
 
 const EDITABLE_EXPENSE_TYPES = ["expense", "expense_accrual", "provision_expense", "deferred_expense", "depreciation_expense"];

@@ -440,7 +440,27 @@ class TestAcidFullMonth:
             "amount": 1_000, "date": "2026-03-19T12:00:00", "description": "Cobro pendiente",
         })
 
-        # Op 34: Distribución de utilidades $50K al socio
+        # Op 34: Ajuste pérdida — anticipo proveedor local $50K irrecuperable
+        resp_adj_loss = client.post("/api/v1/money-movements/tp-adjustment-debit", json={
+            "third_party_id": str(s["proveedor_local"].id),
+            "amount": 50_000,
+            "adjustment_class": "loss",
+            "date": "2026-03-19T12:00:00",
+            "description": "Anticipo irrecuperable",
+        }, headers=h)
+        assert resp_adj_loss.status_code == 201
+
+        # Op 35: Ajuste ganancia — comisionista no reclamó $2,500
+        resp_adj_gain = client.post("/api/v1/money-movements/tp-adjustment-credit", json={
+            "third_party_id": str(s["comisionista"].id),
+            "amount": 2_500,
+            "adjustment_class": "gain",
+            "date": "2026-03-19T12:00:00",
+            "description": "Comision no reclamada",
+        }, headers=h)
+        assert resp_adj_gain.status_code == 201
+
+        # Op 36: Distribución de utilidades $50K al socio
         api_create_profit_distribution(client, h, {
             "date": "2026-03-19T12:00:00",
             "lines": [{"third_party_id": str(s["inversor"].id), "amount": 50_000}],
@@ -453,14 +473,14 @@ class TestAcidFullMonth:
         # --- Terceros: valores exactos ---
         # Inversor: -$5M(capital) + $100K(return) - $50K(distribucion) = -$4,950K
         assert_tp_balance(client, h, str(s["inversor"].id), -4_950_000)
-        assert_tp_balance(client, h, str(s["proveedor_local"].id), 50_000)  # anticipo
+        assert_tp_balance(client, h, str(s["proveedor_local"].id), 0)  # anticipo $50K ajustado como pérdida
         # Proveedor directo: compra cobre pagada + compra chatarra per_kg pagada = 0
         assert_tp_balance(client, h, str(s["proveedor_directo"].id), 0)
         # Cliente A: -$30K(anticipo) + venta cancelada (cobro no revertido) = cobro de venta cancelada incluido
         # Cliente E: DP cancelada ($0) + venta received_qty cobrada ($0)
         assert_tp_balance(client, h, str(s["cliente_e"].id), 0)
-        # Comisionista: -$3.2K(venta) - $2.5K(per_kg compra) + $3.2K(pago) = -$2,500
-        assert_tp_balance(client, h, str(s["comisionista"].id), -2_500)
+        # Comisionista: -$3.2K(venta) - $2.5K(per_kg compra) + $3.2K(pago) - $2.5K + $2.5K(adj gain) = 0
+        assert_tp_balance(client, h, str(s["comisionista"].id), 0)
         assert_tp_balance(client, h, str(s["liability_tp"].id), 0)
         assert_tp_balance(client, h, str(s["provision_tp"].id), -15_000)
         assert_tp_balance(client, h, str(s["generic_tp"].id), 1_000)
@@ -487,12 +507,17 @@ class TestAcidFullMonth:
         # Comisiones causadas: solo venta cobre $3.2K (DP cancelada, per_kg no genera accrual)
         assert pnl["commissions_paid"] == pytest.approx(3_200, abs=1)
 
+        # Ajustes de terceros presentes
+        assert pnl["tp_adjustment_loss"] == pytest.approx(50_000, abs=1)
+        assert pnl["tp_adjustment_gain"] == pytest.approx(2_500, abs=1)
+
         # net_profit formula cuadra
         expected_net = (
             pnl["sales_revenue"] - pnl["cost_of_goods_sold"]
             + pnl["double_entry_profit"] + pnl["service_income"]
             + pnl.get("transformation_profit", 0)
             - pnl["waste_loss"] + pnl["adjustment_net"]
+            + pnl["tp_adjustment_gain"] - pnl["tp_adjustment_loss"]
             - pnl["operating_expenses"] - pnl["commissions_paid"]
         )
         assert pnl["net_profit"] == pytest.approx(expected_net, abs=1), \
@@ -579,6 +604,8 @@ class TestAcidFullMonth:
             - pnl.get("waste_loss", 0)
             + pnl.get("adjustment_net", 0)
             + pnl.get("transformation_profit", 0)
+            + pnl.get("tp_adjustment_gain", 0)
+            - pnl.get("tp_adjustment_loss", 0)
             - expenses_without_un
         )
         assert delta == pytest.approx(expected_delta, abs=10), \

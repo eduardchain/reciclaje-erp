@@ -18,6 +18,7 @@ import type {
   GenericPaymentCreate,
   GenericCollectionCreate,
   ThirdPartyTransferCreate,
+  ThirdPartyAdjustmentCreate,
   AnnulMovementRequest,
   UpdateClassificationRequest,
 } from "@/types/money-movement";
@@ -127,6 +128,16 @@ export const moneyMovementService = {
 
   createTpTransfer: async (data: ThirdPartyTransferCreate): Promise<MoneyMovementResponse> => {
     const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/tp-transfer", data);
+    return response.data;
+  },
+
+  adjustTpCredit: async (data: ThirdPartyAdjustmentCreate): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/tp-adjustment-credit", data);
+    return response.data;
+  },
+
+  adjustTpDebit: async (data: ThirdPartyAdjustmentCreate): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.post<MoneyMovementResponse>("/api/v1/money-movements/tp-adjustment-debit", data);
     return response.data;
   },
 

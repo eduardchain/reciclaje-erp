@@ -77,8 +77,10 @@ VALID_MOVEMENT_TYPES = [
     "profit_distribution",      # Reparticion utilidades: NO cuenta, socio.balance(-), NO P&L
     "payment_to_generic",       # Pago a tercero generico: account(-), generic.balance(+)
     "collection_from_generic",  # Cobro a tercero generico: account(+), generic.balance(-)
-    "tp_transfer_out",          # Transferencia entre terceros (salida): NO cuenta, source.balance(+)
-    "tp_transfer_in",           # Transferencia entre terceros (entrada): NO cuenta, dest.balance(-)
+    "tp_transfer_out",          # Transferencia entre terceros (salida): NO cuenta, source.balance(-)
+    "tp_transfer_in",           # Transferencia entre terceros (entrada): NO cuenta, dest.balance(+)
+    "tp_adjustment_credit",     # Ajuste saldo tercero (credito): NO cuenta, tp.balance(+), P&L segun adjustment_class
+    "tp_adjustment_debit",      # Ajuste saldo tercero (debito): NO cuenta, tp.balance(-), P&L segun adjustment_class
 ]
 
 
@@ -254,6 +256,13 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
         JSONB,
         nullable=True,
         comment="UNs para prorrateo compartido (array de UUIDs)",
+    )
+
+    # Clasificacion P&L para ajustes de terceros ("loss" o "gain")
+    adjustment_class: Mapped[Optional[str]] = mapped_column(
+        String(10),
+        nullable=True,
+        comment="Clasificacion P&L para tp_adjustment: loss o gain",
     )
 
     is_active: Mapped[bool] = mapped_column(

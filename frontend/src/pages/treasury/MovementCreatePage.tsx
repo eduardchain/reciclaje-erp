@@ -11,12 +11,12 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { BusinessUnitAllocationSelector } from "@/components/shared/BusinessUnitAllocationSelector";
-import { useCreateMovement, useUploadEvidence, useCreateTpTransfer } from "@/hooks/useMoneyMovements";
+import { useCreateMovement, useUploadEvidence, useCreateTpTransfer, useCreateTpAdjustment } from "@/hooks/useMoneyMovements";
 import { usePayableSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, useLiabilities, useGenericThirdParties } from "@/hooks/useMasterData";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
-type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment" | "expense_accrual" | "liability_payment" | "payment_to_generic" | "collection_from_generic" | "tp_transfer";
+type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment" | "expense_accrual" | "liability_payment" | "payment_to_generic" | "collection_from_generic" | "tp_transfer" | "tp_adjustment";
 
 const typeLabels: Record<MovementType, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -37,6 +37,7 @@ const typeLabels: Record<MovementType, string> = {
   payment_to_generic: "Pago a Tercero Generico",
   collection_from_generic: "Cobro a Tercero Generico",
   tp_transfer: "Transferencia entre Terceros",
+  tp_adjustment: "Ajuste de Saldo",
 };
 
 // Tipos frontend-only que mapean a un tipo backend diferente
@@ -55,6 +56,7 @@ export default function MovementCreatePage() {
   const backendType = backendTypeMap[type] ?? type;
   const create = useCreateMovement(backendType);
   const createTpTransfer = useCreateTpTransfer();
+  const createTpAdjustment = useCreateTpAdjustment();
   const uploadEvidence = useUploadEvidence();
 
   const { data: payableSuppliersData } = usePayableSuppliers();
@@ -89,6 +91,8 @@ export default function MovementCreatePage() {
   const [referenceNumber, setReferenceNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [adjustmentClass, setAdjustmentClass] = useState<"loss" | "gain">("loss");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
   const [buAllocationType, setBuAllocationType] = useState<"direct" | "shared" | "general">("general");
   const [buDirectId, setBuDirectId] = useState("");
   const [buSharedIds, setBuSharedIds] = useState<string[]>([]);
@@ -105,6 +109,8 @@ export default function MovementCreatePage() {
     setReferenceNumber("");
     setNotes("");
     setEvidenceFile(null);
+    setAdjustmentClass("loss");
+    setAdjustmentReason("");
     setBuAllocationType("general");
     setBuDirectId("");
     setBuSharedIds([]);
@@ -198,7 +204,29 @@ export default function MovementCreatePage() {
     }
   };
 
+  // Tercero seleccionado para tp_adjustment
+  const selectedTpForAdjustment = type === "tp_adjustment" ? thirdParties.find((t) => t.id === thirdPartyId) : null;
+  const selectedTpBalance = selectedTpForAdjustment?.current_balance ?? 0;
+
   const handleSubmit = () => {
+    if (type === "tp_adjustment") {
+      if (!thirdPartyId || !description || amount <= 0) return;
+      const balanceSign: "negative" | "positive" = selectedTpBalance < 0 ? "negative" : "positive";
+      createTpAdjustment.mutate(
+        {
+          third_party_id: thirdPartyId,
+          amount,
+          adjustment_class: adjustmentClass,
+          date,
+          description,
+          adjustment_reason: adjustmentReason || undefined,
+          notes: notes || undefined,
+          balanceSign,
+        },
+        { onSuccess: () => navigate(ROUTES.TREASURY) },
+      );
+      return;
+    }
     if (type === "tp_transfer") {
       const tpPayload = {
         source_third_party_id: thirdPartyId,
@@ -265,13 +293,14 @@ export default function MovementCreatePage() {
   };
 
   const isTpTransfer = type === "tp_transfer";
+  const isTpAdjustment = type === "tp_adjustment";
   const needsThirdParty = ["payment_to_supplier", "collection_from_client", "capital_injection", "capital_return", "commission_payment", "advance_payment", "advance_collection", "expense_accrual", "liability_payment", "payment_to_generic", "collection_from_generic"].includes(type);
   const optionalThirdParty = type === "asset_payment";
   const needsProvision = type === "provision_deposit" || type === "provision_expense";
   const needsExpenseCategory = type === "expense" || type === "provision_expense" || type === "expense_accrual";
   const needsDestAccount = type === "transfer";
-  const needsAccount = type !== "transfer" && type !== "provision_expense" && type !== "expense_accrual" && !isTpTransfer;
-  const needsDescription = ["expense", "service_income", "transfer", "provision_expense", "asset_payment", "expense_accrual", "tp_transfer"].includes(type);
+  const needsAccount = type !== "transfer" && type !== "provision_expense" && type !== "expense_accrual" && !isTpTransfer && !isTpAdjustment;
+  const needsDescription = ["expense", "service_income", "transfer", "provision_expense", "asset_payment", "expense_accrual", "tp_transfer", "tp_adjustment"].includes(type);
 
   return (
     <div className="space-y-6">
@@ -339,6 +368,57 @@ export default function MovementCreatePage() {
                 <div>
                   <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero Destino *</Label>
                   <EntitySelect value={destThirdPartyId} onChange={setDestThirdPartyId} options={thirdParties.filter((t) => t.id !== thirdPartyId).map((t) => ({ id: t.id, label: t.name }))} placeholder="Seleccionar tercero destino..." />
+                </div>
+              </>
+            )}
+
+            {isTpAdjustment && (
+              <>
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero *</Label>
+                  <EntitySelect
+                    value={thirdPartyId}
+                    onChange={setThirdPartyId}
+                    options={thirdParties.filter((t) => t.current_balance !== 0).map((t) => ({ id: t.id, label: `${t.name} (Saldo: ${formatCurrency(t.current_balance)})` }))}
+                    placeholder="Seleccionar tercero..."
+                  />
+                  {selectedTpForAdjustment && (
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-xs text-slate-500">
+                        Saldo actual: <span className={selectedTpBalance >= 0 ? "text-emerald-600 font-medium" : "text-red-600 font-medium"}>{formatCurrency(selectedTpBalance)}</span>
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => { setAmount(Math.abs(selectedTpBalance)); setAdjustmentClass(selectedTpBalance > 0 ? "loss" : "gain"); }}
+                        className="text-xs text-sky-600 hover:text-sky-800 underline"
+                      >
+                        Llevar a cero
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Clasificacion *</Label>
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setAdjustmentClass("loss")}
+                      className={`px-4 py-2 rounded-md text-sm font-medium border transition-colors ${adjustmentClass === "loss" ? "bg-red-100 text-red-800 border-red-300" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+                    >
+                      Perdida
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdjustmentClass("gain")}
+                      className={`px-4 py-2 rounded-md text-sm font-medium border transition-colors ${adjustmentClass === "gain" ? "bg-emerald-100 text-emerald-800 border-emerald-300" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+                    >
+                      Ganancia
+                    </button>
+                  </div>
+                </div>
+                <div className="md:col-span-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Razon del Ajuste</Label>
+                  <Input value={adjustmentReason} onChange={(e) => setAdjustmentReason(e.target.value)} placeholder="Razon del ajuste (opcional)" />
                 </div>
               </>
             )}
@@ -458,10 +538,10 @@ export default function MovementCreatePage() {
           <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
-            disabled={create.isPending || createTpTransfer.isPending || amount <= 0 || !!isProvisionExpenseBlocked || (isTpTransfer && (!thirdPartyId || !destThirdPartyId || !description))}
+            disabled={create.isPending || createTpTransfer.isPending || createTpAdjustment.isPending || amount <= 0 || !!isProvisionExpenseBlocked || (isTpTransfer && (!thirdPartyId || !destThirdPartyId || !description)) || (isTpAdjustment && (!thirdPartyId || !description))}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
-            {(create.isPending || createTpTransfer.isPending) ? "Creando..." : "Crear Movimiento"}
+            {(create.isPending || createTpTransfer.isPending || createTpAdjustment.isPending) ? "Creando..." : "Crear Movimiento"}
           </Button>
         </div>
       </div>

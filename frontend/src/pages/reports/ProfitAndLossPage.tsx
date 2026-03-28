@@ -45,6 +45,12 @@ export default function ProfitAndLossPage() {
               {data.adjustment_net !== 0 && (
                 <div className="flex justify-between text-sm"><span>Ajustes de Inventario</span><span className={`font-medium ${data.adjustment_net >= 0 ? "text-emerald-700" : "text-red-700"}`}>{data.adjustment_net >= 0 ? "" : "-"}{formatCurrency(Math.abs(data.adjustment_net))}</span></div>
               )}
+              {data.tp_adjustment_gain > 0 && (
+                <div className="flex justify-between text-sm"><span>+ Ganancia Ajuste Terceros</span><span className="font-medium text-emerald-700">{formatCurrency(data.tp_adjustment_gain)}</span></div>
+              )}
+              {data.tp_adjustment_loss > 0 && (
+                <div className="flex justify-between text-sm"><span>- Perdida Ajuste Terceros</span><span className="font-medium text-red-600">-{formatCurrency(data.tp_adjustment_loss)}</span></div>
+              )}
               <Separator />
               <div className="flex justify-between font-medium"><span>Utilidad Bruta Total</span><span className={data.total_gross_profit >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.total_gross_profit)}</span></div>
             </div>

@@ -2779,3 +2779,261 @@ class TestThirdPartyTransfer:
 
         db_session.refresh(test_account)
         assert test_account.current_balance == initial_balance
+
+
+# ---------------------------------------------------------------------------
+# Tests: Ajuste de saldo de terceros (tp-adjustment-credit / tp-adjustment-debit)
+# ---------------------------------------------------------------------------
+
+class TestThirdPartyAdjustment:
+    """Tests para POST /api/v1/money-movements/tp-adjustment-credit y tp-adjustment-debit."""
+
+    def test_tp_adjustment_credit_to_zero(
+        self, client: TestClient, org_headers: dict,
+        test_supplier, db_session,
+    ):
+        """Ajuste credito lleva saldo negativo a cero — loss."""
+        test_supplier.current_balance = Decimal("-10000000.00")
+        db_session.commit()
+
+        resp = client.post(
+            "/api/v1/money-movements/tp-adjustment-credit",
+            json={
+                "third_party_id": str(test_supplier.id),
+                "amount": 10000000,
+                "adjustment_class": "loss",
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Ajuste credito a cero",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["movement_type"] == "tp_adjustment_credit"
+        assert data["adjustment_class"] == "loss"
+
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == Decimal("0.00")
+
+    def test_tp_adjustment_debit_to_zero(
+        self, client: TestClient, org_headers: dict,
+        test_customer, db_session,
+    ):
+        """Ajuste debito lleva saldo positivo a cero — gain."""
+        test_customer.current_balance = Decimal("5000000.00")
+        db_session.commit()
+
+        resp = client.post(
+            "/api/v1/money-movements/tp-adjustment-debit",
+            json={
+                "third_party_id": str(test_customer.id),
+                "amount": 5000000,
+                "adjustment_class": "gain",
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Ajuste debito a cero",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+
+        db_session.refresh(test_customer)
+        assert test_customer.current_balance == Decimal("0.00")
+
+    def test_tp_adjustment_partial(
+        self, client: TestClient, org_headers: dict,
+        test_supplier, db_session,
+    ):
+        """Ajuste parcial — no llega a cero."""
+        test_supplier.current_balance = Decimal("-500000.00")
+        db_session.commit()
+
+        resp = client.post(
+            "/api/v1/money-movements/tp-adjustment-credit",
+            json={
+                "third_party_id": str(test_supplier.id),
+                "amount": 300000,
+                "adjustment_class": "loss",
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Ajuste parcial",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == Decimal("-200000.00")
+
+    def test_tp_adjustment_amount_exceeds_balance(
+        self, client: TestClient, org_headers: dict,
+        test_supplier, db_session,
+    ):
+        """Monto mayor al saldo pendiente — debe rechazar."""
+        test_supplier.current_balance = Decimal("-100000.00")
+        db_session.commit()
+
+        resp = client.post(
+            "/api/v1/money-movements/tp-adjustment-credit",
+            json={
+                "third_party_id": str(test_supplier.id),
+                "amount": 200000,
+                "adjustment_class": "loss",
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Excede saldo",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+
+    def test_tp_adjustment_zero_balance(
+        self, client: TestClient, org_headers: dict,
+        test_supplier, db_session,
+    ):
+        """Tercero con saldo cero — debe rechazar."""
+        test_supplier.current_balance = Decimal("0.00")
+        db_session.commit()
+
+        resp = client.post(
+            "/api/v1/money-movements/tp-adjustment-credit",
+            json={
+                "third_party_id": str(test_supplier.id),
+                "amount": 1000,
+                "adjustment_class": "loss",
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Saldo en cero",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "cero" in resp.json()["detail"].lower()
+
+    def test_tp_adjustment_wrong_direction_credit(
+        self, client: TestClient, org_headers: dict,
+        test_supplier, db_session,
+    ):
+        """Credit en tercero con saldo positivo — debe rechazar."""
+        test_supplier.current_balance = Decimal("50000.00")
+        db_session.commit()
+
+        resp = client.post(
+            "/api/v1/money-movements/tp-adjustment-credit",
+            json={
+                "third_party_id": str(test_supplier.id),
+                "amount": 50000,
+                "adjustment_class": "loss",
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Direccion incorrecta",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "bito" in resp.json()["detail"].lower()  # "Use ajuste debito"
+
+    def test_tp_adjustment_wrong_direction_debit(
+        self, client: TestClient, org_headers: dict,
+        test_supplier, db_session,
+    ):
+        """Debit en tercero con saldo negativo — debe rechazar."""
+        test_supplier.current_balance = Decimal("-50000.00")
+        db_session.commit()
+
+        resp = client.post(
+            "/api/v1/money-movements/tp-adjustment-debit",
+            json={
+                "third_party_id": str(test_supplier.id),
+                "amount": 50000,
+                "adjustment_class": "loss",
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Direccion incorrecta",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "dito" in resp.json()["detail"].lower()  # "Use ajuste credito"
+
+    def test_tp_adjustment_annul_reverts(
+        self, client: TestClient, org_headers: dict,
+        test_supplier, db_session,
+    ):
+        """Anular ajuste revierte saldo del tercero."""
+        test_supplier.current_balance = Decimal("-1000000.00")
+        db_session.commit()
+
+        # Crear ajuste
+        resp = client.post(
+            "/api/v1/money-movements/tp-adjustment-credit",
+            json={
+                "third_party_id": str(test_supplier.id),
+                "amount": 1000000,
+                "adjustment_class": "loss",
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Ajuste para anular",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        movement_id = resp.json()["id"]
+
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == Decimal("0.00")
+
+        # Anular
+        annul_resp = client.post(
+            f"/api/v1/money-movements/{movement_id}/annul",
+            json={"reason": "Test"},
+            headers=org_headers,
+        )
+        assert annul_resp.status_code == 200
+        assert annul_resp.json()["status"] == "annulled"
+
+        db_session.refresh(test_supplier)
+        assert test_supplier.current_balance == Decimal("-1000000.00")
+
+    def test_tp_adjustment_pnl(
+        self, client: TestClient, org_headers: dict,
+        test_supplier, test_customer, db_session,
+    ):
+        """Ajustes aparecen en P&L como tp_adjustment_loss y tp_adjustment_gain."""
+        # Loss: proveedor con saldo negativo
+        test_supplier.current_balance = Decimal("-100000.00")
+        db_session.commit()
+
+        resp1 = client.post(
+            "/api/v1/money-movements/tp-adjustment-credit",
+            json={
+                "third_party_id": str(test_supplier.id),
+                "amount": 100000,
+                "adjustment_class": "loss",
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Perdida por ajuste",
+            },
+            headers=org_headers,
+        )
+        assert resp1.status_code == 201
+
+        # Gain: cliente con saldo positivo
+        test_customer.current_balance = Decimal("50000.00")
+        db_session.commit()
+
+        resp2 = client.post(
+            "/api/v1/money-movements/tp-adjustment-debit",
+            json={
+                "third_party_id": str(test_customer.id),
+                "amount": 50000,
+                "adjustment_class": "gain",
+                "date": "2026-03-20T12:00:00Z",
+                "description": "Ganancia por ajuste",
+            },
+            headers=org_headers,
+        )
+        assert resp2.status_code == 201
+
+        # Verificar P&L
+        pnl_resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+            headers=org_headers,
+        )
+        assert pnl_resp.status_code == 200
+        pnl = pnl_resp.json()
+        assert pnl["tp_adjustment_loss"] == 100000.0
+        assert pnl["tp_adjustment_gain"] == 50000.0

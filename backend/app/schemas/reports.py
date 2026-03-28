@@ -123,6 +123,10 @@ class ProfitAndLossResponse(BaseModel):
     # Ajustes de inventario (positivo=ganancia, negativo=perdida)
     adjustment_net: float = 0.0
 
+    # Ajustes de terceros
+    tp_adjustment_loss: float = 0.0
+    tp_adjustment_gain: float = 0.0
+
     # Utilidad bruta total
     total_gross_profit: float
 

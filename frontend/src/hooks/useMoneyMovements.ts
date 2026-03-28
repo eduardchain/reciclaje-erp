@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { moneyMovementService } from "@/services/moneyMovements";
 import { getApiErrorMessage } from "@/utils/formatters";
 import { invalidateAfterTreasury } from "@/utils/queryInvalidation";
-import type { AnnulMovementRequest, UpdateClassificationRequest, ThirdPartyTransferCreate } from "@/types/money-movement";
+import type { AnnulMovementRequest, UpdateClassificationRequest, ThirdPartyTransferCreate, ThirdPartyAdjustmentCreate } from "@/types/money-movement";
 
 interface MovementFilters {
   skip?: number;
@@ -79,6 +79,27 @@ export function useCreateTpTransfer() {
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al crear la transferencia entre terceros"));
+    },
+  });
+}
+
+export function useCreateTpAdjustment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ThirdPartyAdjustmentCreate & { balanceSign: "negative" | "positive" }) => {
+      const { balanceSign, ...payload } = data;
+      // balance < 0 → tp_adjustment_credit, balance > 0 → tp_adjustment_debit
+      if (balanceSign === "negative") {
+        return moneyMovementService.adjustTpCredit(payload);
+      }
+      return moneyMovementService.adjustTpDebit(payload);
+    },
+    onSuccess: () => {
+      invalidateAfterTreasury(queryClient);
+      toast.success("Ajuste de saldo registrado exitosamente");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al crear el ajuste de saldo"));
     },
   });
 }

@@ -18,7 +18,7 @@ Schemas especializados por tipo de operacion:
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, model_validator
@@ -249,13 +249,24 @@ class GenericCollectionCreate(BaseModel):
 
 
 class ThirdPartyTransferCreate(BaseModel):
-    """Transferencia entre terceros — NO cuenta, source.balance(+), dest.balance(-)."""
-    source_third_party_id: UUID = Field(..., description="Tercero que paga (se le abona)")
-    destination_third_party_id: UUID = Field(..., description="Tercero que recibe (se le cobra)")
+    """Transferencia entre terceros — NO cuenta, source.balance(-), dest.balance(+)."""
+    source_third_party_id: UUID = Field(..., description="Tercero que paga (balance baja)")
+    destination_third_party_id: UUID = Field(..., description="Tercero que recibe (balance sube)")
     amount: Decimal = Field(..., gt=0, description="Monto de la transferencia")
     date: BusinessDate = Field(..., description="Fecha de la transferencia")
     description: str = Field(..., min_length=1, max_length=500, description="Descripcion")
     reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+
+class ThirdPartyAdjustmentCreate(BaseModel):
+    """Ajuste de saldo de tercero — NO cuenta, clasificacion P&L por adjustment_class."""
+    third_party_id: UUID = Field(..., description="Tercero a ajustar")
+    amount: Decimal = Field(..., gt=0, description="Monto del ajuste (siempre positivo)")
+    adjustment_class: Literal["loss", "gain"] = Field(..., description="Clasificacion P&L: loss=gasto, gain=ingreso")
+    date: BusinessDate = Field(..., description="Fecha del ajuste")
+    description: str = Field(..., min_length=1, max_length=500, description="Descripcion del ajuste")
+    adjustment_reason: Optional[str] = Field(None, max_length=200, description="Motivo del ajuste")
     notes: Optional[str] = None
 
 
@@ -315,6 +326,9 @@ class MoneyMovementResponse(BaseModel):
     business_unit_name: Optional[str] = None
     applicable_business_unit_ids: Optional[list[UUID]] = None
     applicable_business_unit_names: Optional[list[str]] = None
+
+    # Ajuste de terceros
+    adjustment_class: Optional[str] = None
 
     # Detalles
     reference_number: Optional[str] = None

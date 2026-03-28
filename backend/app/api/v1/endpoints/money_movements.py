@@ -35,6 +35,7 @@ from app.schemas.money_movement import (
     GenericPaymentCreate,
     GenericCollectionCreate,
     ThirdPartyTransferCreate,
+    ThirdPartyAdjustmentCreate,
     AnnulMovementRequest,
     AnnulMovementResponse,
     UpdateClassificationRequest,
@@ -71,6 +72,8 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "collection_from_generic": -1,   # Cobramos a generico: su balance baja
     "tp_transfer_out": -1,           # Transferencia entre terceros: source paga (balance baja)
     "tp_transfer_in": 1,             # Transferencia entre terceros: dest recibe pago (se le abona)
+    "tp_adjustment_credit": 1,       # Ajuste credito: saldo sube (hacia cero desde negativo)
+    "tp_adjustment_debit": -1,       # Ajuste debito: saldo baja (hacia cero desde positivo)
 }
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -545,6 +548,46 @@ def create_tp_transfer(
     movement = money_movement.create_tp_transfer(
         db=db,
         data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded, db)
+
+
+@router.post(
+    "/tp-adjustment-credit",
+    response_model=MoneyMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_tp_adjustment_credit(
+    data: ThirdPartyAdjustmentCreate,
+    org_context: dict = Depends(require_permission("treasury.adjust_balances")),
+    db: Session = Depends(get_db),
+):
+    """Ajuste credito: saldo del tercero sube (tercero con saldo negativo hacia cero)."""
+    movement = money_movement.adjust_tp_credit(
+        db=db, data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    loaded = money_movement.get(db, movement.id, org_context["organization_id"])
+    return _to_response(loaded, db)
+
+
+@router.post(
+    "/tp-adjustment-debit",
+    response_model=MoneyMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_tp_adjustment_debit(
+    data: ThirdPartyAdjustmentCreate,
+    org_context: dict = Depends(require_permission("treasury.adjust_balances")),
+    db: Session = Depends(get_db),
+):
+    """Ajuste debito: saldo del tercero baja (tercero con saldo positivo hacia cero)."""
+    movement = money_movement.adjust_tp_debit(
+        db=db, data=data,
         organization_id=org_context["organization_id"],
         user_id=org_context["user_id"],
     )

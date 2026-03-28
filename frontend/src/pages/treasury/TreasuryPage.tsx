@@ -48,6 +48,8 @@ const typeLabels: Record<MoneyMovementType, string> = {
   collection_from_generic: "Cobro Genérico",
   tp_transfer_out: "Cruce Terceros (Origen)",
   tp_transfer_in: "Cruce Terceros (Destino)",
+  tp_adjustment_credit: "Ajuste Saldo (Credito)",
+  tp_adjustment_debit: "Ajuste Saldo (Debito)",
 };
 
 const typeColors: Record<string, string> = {
@@ -74,6 +76,8 @@ const typeColors: Record<string, string> = {
   collection_from_generic: "bg-teal-100 text-teal-800",
   tp_transfer_out: "bg-purple-100 text-purple-800",
   tp_transfer_in: "bg-purple-100 text-purple-800",
+  tp_adjustment_credit: "bg-orange-100 text-orange-800",
+  tp_adjustment_debit: "bg-orange-100 text-orange-800",
 };
 
 const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [

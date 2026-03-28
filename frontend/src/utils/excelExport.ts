@@ -265,6 +265,8 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   if (data.transformation_profit !== 0) rows.push(["Gan/Perd Transformaciones", fmt(data.transformation_profit)]);
   if (data.waste_loss > 0) rows.push(["Perdida por Merma", fmt(-data.waste_loss)]);
   if (data.adjustment_net !== 0) rows.push(["Ajustes de Inventario", fmt(data.adjustment_net)]);
+  if (data.tp_adjustment_gain > 0) rows.push(["+ Ganancia Ajuste Terceros", fmt(data.tp_adjustment_gain)]);
+  if (data.tp_adjustment_loss > 0) rows.push(["- Perdida Ajuste Terceros", fmt(-data.tp_adjustment_loss)]);
   rows.push(["Utilidad Bruta Total", fmt(data.total_gross_profit)]);
   rows.push([]);
   rows.push(["Gastos Operativos", fmt(data.operating_expenses)]);

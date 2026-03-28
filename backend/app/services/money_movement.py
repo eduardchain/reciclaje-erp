@@ -866,6 +866,72 @@ class CRUDMoneyMovement:
         db.refresh(movement_out)
         return movement_out
 
+    def adjust_tp_credit(
+        self,
+        db: Session,
+        data: "ThirdPartyAdjustmentCreate",
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """Ajuste credito: saldo sube (tercero con saldo negativo hacia cero)."""
+        tp = self._validate_third_party(db, data.third_party_id, organization_id)
+        if tp.current_balance >= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Use ajuste debito para terceros con saldo positivo",
+            )
+        if data.amount > abs(tp.current_balance):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Monto ({data.amount}) excede saldo pendiente ({abs(tp.current_balance)})",
+            )
+
+        movement = self._create_movement(
+            db=db, organization_id=organization_id,
+            movement_type="tp_adjustment_credit", amount=data.amount,
+            account_id=None, date=data.date, description=data.description,
+            third_party_id=data.third_party_id, notes=data.notes, user_id=user_id,
+        )
+        movement.adjustment_class = data.adjustment_class
+
+        tp.current_balance += data.amount
+        db.commit()
+        db.refresh(movement)
+        return movement
+
+    def adjust_tp_debit(
+        self,
+        db: Session,
+        data: "ThirdPartyAdjustmentCreate",
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """Ajuste debito: saldo baja (tercero con saldo positivo hacia cero)."""
+        tp = self._validate_third_party(db, data.third_party_id, organization_id)
+        if tp.current_balance <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Use ajuste credito para terceros con saldo negativo",
+            )
+        if data.amount > tp.current_balance:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Monto ({data.amount}) excede saldo pendiente ({tp.current_balance})",
+            )
+
+        movement = self._create_movement(
+            db=db, organization_id=organization_id,
+            movement_type="tp_adjustment_debit", amount=data.amount,
+            account_id=None, date=data.date, description=data.description,
+            third_party_id=data.third_party_id, notes=data.notes, user_id=user_id,
+        )
+        movement.adjustment_class = data.adjustment_class
+
+        tp.current_balance -= data.amount
+        db.commit()
+        db.refresh(movement)
+        return movement
+
     # ======================================================================
     # Anulacion
     # ======================================================================
@@ -1527,6 +1593,16 @@ class CRUDMoneyMovement:
             # Reversa: dest habia hecho +=, ahora -=
             if third_party:
                 third_party.current_balance -= amt
+
+        elif mt == "tp_adjustment_credit":
+            # Reversa: habia hecho +=, ahora -=
+            if third_party:
+                third_party.current_balance -= amt
+
+        elif mt == "tp_adjustment_debit":
+            # Reversa: habia hecho -=, ahora +=
+            if third_party:
+                third_party.current_balance += amt
 
     def _get_or_404(
         self,

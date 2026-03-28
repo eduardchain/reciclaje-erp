@@ -58,6 +58,8 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   collection_from_generic: "Cobro a Tercero Genérico",
   tp_transfer_out: "Cruce Terceros (Origen)",
   tp_transfer_in: "Cruce Terceros (Destino)",
+  tp_adjustment_credit: "Ajuste Saldo (Credito)",
+  tp_adjustment_debit: "Ajuste Saldo (Debito)",
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
