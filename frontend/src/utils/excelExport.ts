@@ -42,15 +42,15 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
     }
     for (const m of data.movements) {
       const concepto = m.vehicle_plate || m.invoice_number || m.description || "-";
-      const diffPeso = m.received_quantity && m.quantity && m.received_quantity !== m.quantity
-        ? m.received_quantity - m.quantity : null;
+      const diffPesoMoney = m.received_quantity && m.quantity && m.unit_price && m.received_quantity !== m.quantity
+        ? (m.received_quantity - m.quantity) * m.unit_price : null;
       rows.push([
         formatDate(m.date),
         concepto,
         m.is_line_item && m.material_code ? `${m.material_code} - ${m.material_name || ""}` : "",
         m.is_line_item && m.quantity ? m.quantity : "",
         m.is_line_item && m.unit_price ? formatCurrency(m.unit_price) : "",
-        diffPeso != null ? diffPeso : "",
+        diffPesoMoney != null ? formatCurrency(diffPesoMoney) : "",
         m.isDebit ? formatCurrency(m.amount) : "",
         !m.isDebit ? formatCurrency(m.amount) : "",
         m.balance_after != null ? formatCurrency(m.balance_after) : "",

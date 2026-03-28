@@ -338,9 +338,9 @@ export default function AccountStatementPage() {
                         {movements.map((m) => {
                           const isDebit = m.direction > 0;
                           const isAnnulled = m.status === "annulled" || m.status === "cancelled";
-                          const concepto = m.vehicle_plate || m.invoice_number || m.description;
+                          const concepto = m.vehicle_plate || m.invoice_number || (m.source_number ? `${m.event_type?.includes("purchase") ? "Compra" : m.event_type?.includes("sale") ? "Venta" : m.event_type?.includes("double") ? "DP" : ""} #${m.source_number}` : m.description) || m.description;
                           const hasWeightDiff = m.is_line_item && m.received_quantity != null && m.quantity != null && m.received_quantity !== m.quantity;
-                          const weightDiff = hasWeightDiff ? (m.received_quantity! - m.quantity!) : null;
+                          const weightDiffMoney = hasWeightDiff && m.unit_price ? (m.received_quantity! - m.quantity!) * m.unit_price : null;
 
                           // Show balance on last item of a group, or on non-grouped items
                           const showBalance = !m.parent_source_id
@@ -364,9 +364,9 @@ export default function AccountStatementPage() {
                                 {m.is_line_item && m.unit_price != null ? formatCurrency(m.unit_price) : ""}
                               </TableCell>
                               <TableCell className="text-right text-sm tabular-nums">
-                                {weightDiff != null ? (
-                                  <span className={weightDiff < 0 ? "text-rose-600" : "text-emerald-600"}>
-                                    {formatWeight(weightDiff)}
+                                {weightDiffMoney != null ? (
+                                  <span className={weightDiffMoney < 0 ? "text-rose-600" : "text-emerald-600"}>
+                                    {formatCurrency(weightDiffMoney)}
                                   </span>
                                 ) : ""}
                               </TableCell>
