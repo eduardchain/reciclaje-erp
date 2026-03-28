@@ -12,6 +12,7 @@ export interface AccountStatementExportData {
   totalDebit: number;
   totalCredit: number;
   openingBalance: number;
+  viewMode?: "financial" | "operations";
   movements: Array<{
     movement_number: string | number;
     date: string;
@@ -22,6 +23,15 @@ export interface AccountStatementExportData {
     status: string;
     balance_after: number | null;
     isDebit: boolean;
+    vehicle_plate?: string | null;
+    invoice_number?: string | null;
+    material_code?: string | null;
+    material_name?: string | null;
+    quantity?: number | null;
+    unit_price?: number | null;
+    received_quantity?: number | null;
+    is_line_item?: boolean;
+    parent_source_id?: string | null;
   }>;
 }
 
@@ -559,57 +569,91 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
   doc.text(formatCurrency(data.totalCredit), 60, y);
   y += 10;
 
-  // Tabla Header
-  const colX = { num: 14, date: 22, type: 44, desc: 84, debit: 148, credit: 172, balance: 196 };
-  doc.setFillColor(245, 245, 245);
-  doc.rect(14, y - 4, pageWidth - 28, 8, "F");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.text("#", colX.num, y);
-  doc.text("Fecha", colX.date, y);
-  doc.text("Tipo", colX.type, y);
-  doc.text("Descripcion", colX.desc, y);
-  doc.text("Debe", colX.debit, y, { align: "right" });
-  doc.text("Haber", colX.credit, y, { align: "right" });
-  doc.text("Saldo", pageWidth - 14, y, { align: "right" });
-  y += 7;
+  const isOps = data.viewMode === "operations";
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  if (isOps) {
+    // Vista Operaciones: Fecha, Concepto, Material, Peso, Precio, Debito, Credito, Saldo
+    const colO = { date: 14, concept: 36, material: 76, weight: 116, price: 140, debit: 162, credit: 186 };
+    doc.setFillColor(245, 245, 245);
+    doc.rect(14, y - 4, pageWidth - 28, 8, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.text("Fecha", colO.date, y);
+    doc.text("Concepto", colO.concept, y);
+    doc.text("Material", colO.material, y);
+    doc.text("Peso", colO.weight, y, { align: "right" });
+    doc.text("Precio", colO.price, y, { align: "right" });
+    doc.text("Debito", colO.debit, y, { align: "right" });
+    doc.text("Credito", colO.credit, y, { align: "right" });
+    doc.text("Saldo", pageWidth - 14, y, { align: "right" });
+    y += 7;
 
-  // Saldo de apertura
-  if (data.dateFrom) {
-    doc.setFont("helvetica", "italic");
-    doc.text("Saldo de apertura", colX.date, y);
     doc.setFont("helvetica", "normal");
-    doc.text(formatCurrency(data.openingBalance), pageWidth - 14, y, { align: "right" });
-    y += 6;
-  }
+    doc.setFontSize(7);
 
-  // Movimientos
-  for (const m of data.movements) {
-    if (y > 270) {
-      doc.addPage();
-      y = 20;
-    }
-    const isAnnulled = m.status === "annulled";
-    const typeText = isAnnulled ? `${m.typeLabel} (Anulado)` : m.typeLabel;
-
-    doc.text(String(m.movement_number), colX.num, y);
-    doc.text(formatDate(m.date), colX.date, y);
-    doc.text(typeText.substring(0, 22), colX.type, y);
-    doc.text((m.description || "-").substring(0, 30), colX.desc, y);
-
-    if (m.isDebit) {
-      doc.text(formatCurrency(m.amount), colX.debit, y, { align: "right" });
-    } else {
-      doc.text(formatCurrency(m.amount), colX.credit, y, { align: "right" });
+    if (data.dateFrom) {
+      doc.setFont("helvetica", "italic");
+      doc.text("Saldo de apertura", colO.date, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(formatCurrency(data.openingBalance), pageWidth - 14, y, { align: "right" });
+      y += 5;
     }
 
-    if (m.balance_after != null) {
-      doc.text(formatCurrency(m.balance_after), pageWidth - 14, y, { align: "right" });
+    for (const m of data.movements) {
+      if (y > 270) { doc.addPage(); y = 20; }
+      const concepto = m.vehicle_plate || m.invoice_number || m.description || "-";
+      doc.text(formatDate(m.date), colO.date, y);
+      doc.text(concepto.substring(0, 20), colO.concept, y);
+      if (m.is_line_item && m.material_code) {
+        doc.text(`${m.material_code}`.substring(0, 18), colO.material, y);
+        if (m.quantity) doc.text(formatWeight(m.quantity), colO.weight, y, { align: "right" });
+        if (m.unit_price) doc.text(formatCurrency(m.unit_price), colO.price, y, { align: "right" });
+      }
+      if (m.isDebit) doc.text(formatCurrency(m.amount), colO.debit, y, { align: "right" });
+      else doc.text(formatCurrency(m.amount), colO.credit, y, { align: "right" });
+      if (m.balance_after != null) doc.text(formatCurrency(m.balance_after), pageWidth - 14, y, { align: "right" });
+      y += 5;
     }
-    y += 5.5;
+  } else {
+    // Vista Financiera (original)
+    const colX = { num: 14, date: 22, type: 44, desc: 84, debit: 148, credit: 172, balance: 196 };
+    doc.setFillColor(245, 245, 245);
+    doc.rect(14, y - 4, pageWidth - 28, 8, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("#", colX.num, y);
+    doc.text("Fecha", colX.date, y);
+    doc.text("Tipo", colX.type, y);
+    doc.text("Descripcion", colX.desc, y);
+    doc.text("Debe", colX.debit, y, { align: "right" });
+    doc.text("Haber", colX.credit, y, { align: "right" });
+    doc.text("Saldo", pageWidth - 14, y, { align: "right" });
+    y += 7;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+
+    if (data.dateFrom) {
+      doc.setFont("helvetica", "italic");
+      doc.text("Saldo de apertura", colX.date, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(formatCurrency(data.openingBalance), pageWidth - 14, y, { align: "right" });
+      y += 6;
+    }
+
+    for (const m of data.movements) {
+      if (y > 270) { doc.addPage(); y = 20; }
+      const isAnnulled = m.status === "annulled";
+      const typeText = isAnnulled ? `${m.typeLabel} (Anulado)` : m.typeLabel;
+      doc.text(String(m.movement_number), colX.num, y);
+      doc.text(formatDate(m.date), colX.date, y);
+      doc.text(typeText.substring(0, 22), colX.type, y);
+      doc.text((m.description || "-").substring(0, 30), colX.desc, y);
+      if (m.isDebit) doc.text(formatCurrency(m.amount), colX.debit, y, { align: "right" });
+      else doc.text(formatCurrency(m.amount), colX.credit, y, { align: "right" });
+      if (m.balance_after != null) doc.text(formatCurrency(m.balance_after), pageWidth - 14, y, { align: "right" });
+      y += 5.5;
+    }
   }
 
   // Footer

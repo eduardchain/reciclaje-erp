@@ -113,7 +113,7 @@ export function useAccountMovements(accountId: string, filters: { date_from?: st
   });
 }
 
-export function useThirdPartyMovements(thirdPartyId: string, filters: { date_from?: string; date_to?: string } = {}) {
+export function useThirdPartyMovements(thirdPartyId: string, filters: { date_from?: string; date_to?: string; view?: string } = {}) {
   return useQuery({
     queryKey: ["money-movements", "third-party", thirdPartyId, filters],
     queryFn: () => moneyMovementService.getByThirdParty(thirdPartyId, filters),

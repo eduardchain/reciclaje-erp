@@ -13,7 +13,7 @@ import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useThirdPartyMovements } from "@/hooks/useMoneyMovements";
 import { useThirdParties } from "@/hooks/useMasterData";
-import { formatCurrency, formatDate } from "@/utils/formatters";
+import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { exportAccountStatementPDF } from "@/utils/pdfExport";
 import { exportAccountStatementExcel } from "@/utils/excelExport";
 import { ROUTES } from "@/utils/constants";
@@ -77,6 +77,15 @@ interface StatementItem {
   source: string;
   source_id: string;
   source_number: number | string | null;
+  vehicle_plate?: string | null;
+  invoice_number?: string | null;
+  material_code?: string | null;
+  material_name?: string | null;
+  quantity?: number | null;
+  unit_price?: number | null;
+  received_quantity?: number | null;
+  is_line_item?: boolean;
+  parent_source_id?: string | null;
 }
 
 export default function AccountStatementPage() {
@@ -87,6 +96,7 @@ export default function AccountStatementPage() {
   const [thirdPartyId, setThirdPartyId] = useState(initialThirdParty);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [viewMode, setViewMode] = useState<"financial" | "operations">("financial");
 
   const { data: thirdPartiesData } = useThirdParties(undefined, { staleTime: 0 });
   const thirdParties = thirdPartiesData?.items ?? [];
@@ -94,6 +104,7 @@ export default function AccountStatementPage() {
   const filters = {
     ...(dateFrom ? { date_from: dateFrom } : {}),
     ...(dateTo ? { date_to: dateTo } : {}),
+    ...(viewMode === "operations" ? { view: "operations" } : {}),
   };
 
   const { data, isLoading } = useThirdPartyMovements(thirdPartyId, filters);
@@ -121,6 +132,7 @@ export default function AccountStatementPage() {
     totalDebit,
     totalCredit,
     openingBalance,
+    viewMode: viewMode as "financial" | "operations",
     movements: movements.filter((m) => m.status !== "annulled" && m.status !== "cancelled").map((m) => ({
       movement_number: m.movement_number ?? "",
       date: m.date,
@@ -131,13 +143,26 @@ export default function AccountStatementPage() {
       status: m.status,
       balance_after: m.balance_after ?? null,
       isDebit: m.direction > 0,
+      vehicle_plate: m.vehicle_plate,
+      invoice_number: m.invoice_number,
+      material_code: m.material_code,
+      material_name: m.material_name,
+      quantity: m.quantity,
+      unit_price: m.unit_price,
+      received_quantity: m.received_quantity,
+      is_line_item: m.is_line_item,
+      parent_source_id: m.parent_source_id,
     })),
   });
 
   return (
     <div className="space-y-6">
       <PageHeader title="Estado de Cuenta" description="Movimientos y saldo corrido por tercero">
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <div className="flex gap-1 border rounded-md p-0.5">
+            <Button size="sm" variant={viewMode === "financial" ? "default" : "ghost"} onClick={() => setViewMode("financial")}>Financiero</Button>
+            <Button size="sm" variant={viewMode === "operations" ? "default" : "ghost"} onClick={() => setViewMode("operations")}>Operaciones</Button>
+          </div>
           <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData())}>
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
@@ -216,7 +241,7 @@ export default function AccountStatementPage() {
                 title="Sin movimientos"
                 description="No se encontraron movimientos para este tercero en el periodo seleccionado."
               />
-            ) : (
+            ) : viewMode === "financial" ? (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -269,6 +294,98 @@ export default function AccountStatementPage() {
                     })}
                   </TableBody>
                 </Table>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                {(() => {
+                  // Compute last-in-group set: for items with parent_source_id, only the last one shows balance
+                  const lastInGroup = new Map<string, string>();
+                  movements.forEach((m) => {
+                    if (m.parent_source_id) {
+                      lastInGroup.set(m.parent_source_id, m.id);
+                    }
+                  });
+                  const lastIds = new Set(lastInGroup.values());
+
+                  return (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Fecha</TableHead>
+                          <TableHead>Concepto</TableHead>
+                          <TableHead>Material</TableHead>
+                          <TableHead className="text-right">Peso</TableHead>
+                          <TableHead className="text-right">Precio</TableHead>
+                          <TableHead className="text-right">Dif Peso</TableHead>
+                          <TableHead className="text-right">Debito</TableHead>
+                          <TableHead className="text-right">Credito</TableHead>
+                          <TableHead className="text-right">Saldo</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {dateFrom && (
+                          <TableRow className="bg-slate-50">
+                            <TableCell colSpan={6} className="text-sm font-medium text-slate-600">
+                              Saldo de apertura
+                            </TableCell>
+                            <TableCell />
+                            <TableCell />
+                            <TableCell className="text-right">
+                              <MoneyDisplay amount={openingBalance} className="font-medium" />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {movements.map((m) => {
+                          const isDebit = m.direction > 0;
+                          const isAnnulled = m.status === "annulled" || m.status === "cancelled";
+                          const concepto = m.vehicle_plate || m.invoice_number || m.description;
+                          const hasWeightDiff = m.is_line_item && m.received_quantity != null && m.quantity != null && m.received_quantity !== m.quantity;
+                          const weightDiff = hasWeightDiff ? (m.received_quantity! - m.quantity!) : null;
+
+                          // Show balance on last item of a group, or on non-grouped items
+                          const showBalance = !m.parent_source_id
+                            ? m.balance_after != null
+                            : lastIds.has(m.id) && m.balance_after != null;
+
+                          return (
+                            <TableRow key={m.id} className={isAnnulled ? "opacity-50 bg-rose-50/50" : ""}>
+                              <TableCell className="text-sm">{formatDate(m.date)}</TableCell>
+                              <TableCell className={`text-sm max-w-[200px] truncate ${isAnnulled ? "line-through" : ""}`}>
+                                {concepto}
+                                {isAnnulled && <Badge variant="outline" className="ml-2 bg-rose-50 text-rose-600 text-[10px] py-0">Anulado</Badge>}
+                              </TableCell>
+                              <TableCell className="text-sm text-slate-600">
+                                {m.is_line_item && m.material_code ? `${m.material_code} - ${m.material_name ?? ""}` : ""}
+                              </TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">
+                                {m.is_line_item && m.quantity != null ? formatWeight(m.quantity) : ""}
+                              </TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">
+                                {m.is_line_item && m.unit_price != null ? formatCurrency(m.unit_price) : ""}
+                              </TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">
+                                {weightDiff != null ? (
+                                  <span className={weightDiff < 0 ? "text-rose-600" : "text-emerald-600"}>
+                                    {formatWeight(weightDiff)}
+                                  </span>
+                                ) : ""}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {isDebit ? <span className={`tabular-nums ${isAnnulled ? "text-rose-300 line-through" : "text-rose-600"}`}>{formatCurrency(m.amount)}</span> : null}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {!isDebit ? <span className={`tabular-nums ${isAnnulled ? "text-emerald-300 line-through" : "text-emerald-600"}`}>{formatCurrency(m.amount)}</span> : null}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {showBalance && <MoneyDisplay amount={m.balance_after!} className="text-sm" />}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  );
+                })()}
               </div>
             )}
           </CardContent>

@@ -33,40 +33,58 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
   rows.push([formatCurrency(data.currentBalance), formatCurrency(data.totalDebit), formatCurrency(data.totalCredit)]);
   rows.push([]);
 
-  // Tabla header
-  rows.push(["#", "Fecha", "Tipo", "Descripcion", "Debe", "Haber", "Saldo"]);
+  const isOps = data.viewMode === "operations";
 
-  // Saldo de apertura
-  if (data.dateFrom) {
-    rows.push(["", "", "Saldo de apertura", "", "", "", formatCurrency(data.openingBalance)]);
-  }
-
-  // Movimientos
-  for (const m of data.movements) {
-    const isAnnulled = m.status === "annulled";
-    const typeText = isAnnulled ? `${m.typeLabel} (Anulado)` : m.typeLabel;
-    rows.push([
-      m.movement_number,
-      formatDate(m.date),
-      typeText,
-      m.description || "-",
-      m.isDebit ? formatCurrency(m.amount) : "",
-      !m.isDebit ? formatCurrency(m.amount) : "",
-      m.balance_after != null ? formatCurrency(m.balance_after) : "",
-    ]);
+  if (isOps) {
+    rows.push(["Fecha", "Concepto", "Material", "Peso", "Precio", "Dif Peso", "Debito", "Credito", "Saldo"]);
+    if (data.dateFrom) {
+      rows.push(["", "Saldo de apertura", "", "", "", "", "", "", formatCurrency(data.openingBalance)]);
+    }
+    for (const m of data.movements) {
+      const concepto = m.vehicle_plate || m.invoice_number || m.description || "-";
+      const diffPeso = m.received_quantity && m.quantity && m.received_quantity !== m.quantity
+        ? m.received_quantity - m.quantity : null;
+      rows.push([
+        formatDate(m.date),
+        concepto,
+        m.is_line_item && m.material_code ? `${m.material_code} - ${m.material_name || ""}` : "",
+        m.is_line_item && m.quantity ? m.quantity : "",
+        m.is_line_item && m.unit_price ? formatCurrency(m.unit_price) : "",
+        diffPeso != null ? diffPeso : "",
+        m.isDebit ? formatCurrency(m.amount) : "",
+        !m.isDebit ? formatCurrency(m.amount) : "",
+        m.balance_after != null ? formatCurrency(m.balance_after) : "",
+      ]);
+    }
+  } else {
+    rows.push(["#", "Fecha", "Tipo", "Descripcion", "Debe", "Haber", "Saldo"]);
+    if (data.dateFrom) {
+      rows.push(["", "", "Saldo de apertura", "", "", "", formatCurrency(data.openingBalance)]);
+    }
+    for (const m of data.movements) {
+      const isAnnulled = m.status === "annulled";
+      const typeText = isAnnulled ? `${m.typeLabel} (Anulado)` : m.typeLabel;
+      rows.push([
+        m.movement_number,
+        formatDate(m.date),
+        typeText,
+        m.description || "-",
+        m.isDebit ? formatCurrency(m.amount) : "",
+        !m.isDebit ? formatCurrency(m.amount) : "",
+        m.balance_after != null ? formatCurrency(m.balance_after) : "",
+      ]);
+    }
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
 
   // Column widths
-  ws["!cols"] = [
-    { wch: 8 },   // #
-    { wch: 12 },  // Fecha
-    { wch: 28 },  // Tipo
-    { wch: 30 },  // Descripcion
-    { wch: 16 },  // Debe
-    { wch: 16 },  // Haber
-    { wch: 16 },  // Saldo
+  ws["!cols"] = isOps ? [
+    { wch: 12 }, { wch: 18 }, { wch: 25 }, { wch: 12 }, { wch: 14 },
+    { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
+  ] : [
+    { wch: 8 }, { wch: 12 }, { wch: 28 }, { wch: 30 },
+    { wch: 16 }, { wch: 16 }, { wch: 16 },
   ];
 
   const wb = XLSX.utils.book_new();
