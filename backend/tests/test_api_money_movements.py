@@ -3037,3 +3037,353 @@ class TestThirdPartyAdjustment:
         pnl = pnl_resp.json()
         assert pnl["tp_adjustment_loss"] == 100000.0
         assert pnl["tp_adjustment_gain"] == 50000.0
+
+
+# ---------------------------------------------------------------------------
+# Tests: Operations View (vista operaciones del estado de cuenta)
+# ---------------------------------------------------------------------------
+
+class TestOperationsView:
+    """Tests para GET /api/v1/money-movements/third-party/{id}?view=operations."""
+
+    # -- Fixtures locales --
+
+    @pytest.fixture
+    def ops_material_category(self, db_session, test_organization):
+        from app.models import MaterialCategory
+        cat = MaterialCategory(
+            id=uuid4(), name="Metals Ops",
+            organization_id=test_organization.id, is_active=True,
+        )
+        db_session.add(cat)
+        db_session.commit()
+        db_session.refresh(cat)
+        return cat
+
+    @pytest.fixture
+    def ops_business_unit(self, db_session, test_organization):
+        from app.models import BusinessUnit
+        bu = BusinessUnit(
+            id=uuid4(), name="Ops Unit",
+            organization_id=test_organization.id, is_active=True,
+        )
+        db_session.add(bu)
+        db_session.commit()
+        db_session.refresh(bu)
+        return bu
+
+    @pytest.fixture
+    def ops_warehouse(self, db_session, test_organization):
+        from app.models import Warehouse
+        wh = Warehouse(
+            id=uuid4(), name="Ops Warehouse", address="Ops St",
+            organization_id=test_organization.id, is_active=True,
+        )
+        db_session.add(wh)
+        db_session.commit()
+        db_session.refresh(wh)
+        return wh
+
+    @pytest.fixture
+    def ops_materials(self, db_session, test_organization, ops_material_category, ops_business_unit):
+        """Crear 3 materiales distintos."""
+        from app.models import Material
+        mats = []
+        for code, name in [("MAT-A", "Material A"), ("MAT-B", "Material B"), ("MAT-C", "Material C")]:
+            m = Material(
+                id=uuid4(), code=code, name=name, default_unit="kg",
+                current_stock=Decimal("0.0000"), current_average_cost=Decimal("0.0000"),
+                category_id=ops_material_category.id,
+                business_unit_id=ops_business_unit.id,
+                organization_id=test_organization.id, is_active=True,
+            )
+            db_session.add(m)
+            mats.append(m)
+        db_session.commit()
+        for m in mats:
+            db_session.refresh(m)
+        return mats
+
+    @pytest.fixture
+    def ops_material_with_stock(self, db_session, test_organization, ops_material_category, ops_business_unit, ops_warehouse):
+        """Material con stock suficiente para ventas."""
+        from app.models import Material
+        from app.models.inventory_movement import InventoryMovement
+        m = Material(
+            id=uuid4(), code="STOCK-01", name="Stock Material", default_unit="kg",
+            current_stock=Decimal("1000.0000"),
+            current_stock_liquidated=Decimal("1000.0000"),
+            current_stock_transit=Decimal("0.0000"),
+            current_average_cost=Decimal("50.00"),
+            category_id=ops_material_category.id,
+            business_unit_id=ops_business_unit.id,
+            organization_id=test_organization.id, is_active=True,
+        )
+        db_session.add(m)
+        db_session.flush()
+        seed = InventoryMovement(
+            id=uuid4(), organization_id=test_organization.id,
+            material_id=m.id, warehouse_id=ops_warehouse.id,
+            movement_type="adjustment", quantity=Decimal("1000.0000"),
+            unit_cost=Decimal("50.00"), reference_type="adjustment",
+            reference_id=uuid4(), date=datetime(2026, 1, 1, 12, 0, 0),
+            notes="Seed stock",
+        )
+        db_session.add(seed)
+        db_session.commit()
+        db_session.refresh(m)
+        return m
+
+    @pytest.fixture
+    def ops_supplier(self, db_session, test_organization):
+        tp = ThirdParty(
+            id=uuid4(), name="Ops Supplier",
+            current_balance=Decimal("0.00"),
+            organization_id=test_organization.id, is_active=True,
+        )
+        db_session.add(tp)
+        db_session.flush()
+        _assign_category(db_session, tp, "material_supplier", test_organization.id)
+        db_session.commit()
+        db_session.refresh(tp)
+        return tp
+
+    @pytest.fixture
+    def ops_customer(self, db_session, test_organization):
+        tp = ThirdParty(
+            id=uuid4(), name="Ops Customer",
+            current_balance=Decimal("0.00"),
+            organization_id=test_organization.id, is_active=True,
+        )
+        db_session.add(tp)
+        db_session.flush()
+        _assign_category(db_session, tp, "customer", test_organization.id)
+        db_session.commit()
+        db_session.refresh(tp)
+        return tp
+
+    # -- Tests --
+
+    def test_purchase_3_lines_operations_view(
+        self, client, org_headers, db_session,
+        ops_supplier, ops_materials, ops_warehouse,
+    ):
+        """Compra con 3 lineas: operations view retorna 3 items con is_line_item=True, mismo parent_source_id."""
+        lines = []
+        for mat in ops_materials:
+            lines.append({
+                "material_id": str(mat.id),
+                "quantity": 100.0,
+                "unit_price": 500.00,
+                "warehouse_id": str(ops_warehouse.id),
+            })
+        # Crear compra
+        resp = client.post("/api/v1/purchases", json={
+            "supplier_id": str(ops_supplier.id),
+            "date": "2026-03-15T12:00:00Z",
+            "lines": lines,
+            "auto_liquidate": True,
+        }, headers=org_headers)
+        assert resp.status_code == 201, resp.json()
+
+        # GET operations view
+        stmt_resp = client.get(
+            f"/api/v1/money-movements/third-party/{ops_supplier.id}",
+            params={"view": "operations", "date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert stmt_resp.status_code == 200
+        items = stmt_resp.json()["items"]
+
+        # Filtrar solo lineas de compra (excluir posibles comisiones)
+        purchase_lines = [i for i in items if i.get("is_line_item") is True]
+        assert len(purchase_lines) == 3
+
+        # Todos deben tener el mismo parent_source_id
+        parent_ids = {i["parent_source_id"] for i in purchase_lines}
+        assert len(parent_ids) == 1
+        assert None not in parent_ids
+
+        # Todos deben tener material_code poblado
+        for item in purchase_lines:
+            assert item["material_code"] is not None
+            assert item["material_code"] in ["MAT-A", "MAT-B", "MAT-C"]
+
+    def test_purchase_financial_view_single_item(
+        self, client, org_headers, db_session,
+        ops_supplier, ops_materials, ops_warehouse,
+    ):
+        """Sin view param: compra aparece como 1 solo item sin is_line_item."""
+        lines = []
+        for mat in ops_materials:
+            lines.append({
+                "material_id": str(mat.id),
+                "quantity": 100.0,
+                "unit_price": 500.00,
+                "warehouse_id": str(ops_warehouse.id),
+            })
+        resp = client.post("/api/v1/purchases", json={
+            "supplier_id": str(ops_supplier.id),
+            "date": "2026-03-15T12:00:00Z",
+            "lines": lines,
+            "auto_liquidate": True,
+        }, headers=org_headers)
+        assert resp.status_code == 201
+
+        # GET financial view (sin view param)
+        stmt_resp = client.get(
+            f"/api/v1/money-movements/third-party/{ops_supplier.id}",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert stmt_resp.status_code == 200
+        items = stmt_resp.json()["items"]
+
+        # Debe haber 1 solo item de compra (no desglosado)
+        purchase_items = [i for i in items if i.get("event_type") == "purchase_liquidation"]
+        assert len(purchase_items) == 1
+        assert "is_line_item" not in purchase_items[0]
+
+    def test_sale_received_quantity_in_operations(
+        self, client, org_headers, db_session,
+        ops_customer, ops_material_with_stock, ops_warehouse,
+    ):
+        """Venta con received_quantity distinta: operations view incluye received_quantity."""
+        # Crear venta (2-step)
+        resp = client.post("/api/v1/sales", json={
+            "customer_id": str(ops_customer.id),
+            "warehouse_id": str(ops_warehouse.id),
+            "date": "2026-03-16T12:00:00Z",
+            "lines": [{
+                "material_id": str(ops_material_with_stock.id),
+                "quantity": 200.0,
+                "unit_price": 80.00,
+            }],
+            "commissions": [],
+            "auto_liquidate": False,
+        }, headers=org_headers)
+        assert resp.status_code == 201, resp.json()
+        sale_id = resp.json()["id"]
+        line_id = resp.json()["lines"][0]["id"]
+
+        # Liquidar con received_quantity distinta
+        liq_resp = client.patch(
+            f"/api/v1/sales/{sale_id}/liquidate",
+            json={
+                "lines": [{
+                    "line_id": line_id,
+                    "unit_price": 80.00,
+                    "received_quantity": 195.0,
+                }],
+            },
+            headers=org_headers,
+        )
+        assert liq_resp.status_code == 200, liq_resp.json()
+        # Verify received_quantity was set
+        liq_data = liq_resp.json()
+        assert liq_data["lines"][0]["received_quantity"] == 195.0
+
+        stmt_resp = client.get(
+            f"/api/v1/money-movements/third-party/{ops_customer.id}",
+            params={"view": "operations", "date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert stmt_resp.status_code == 200
+        items = stmt_resp.json()["items"]
+
+        sale_lines = [i for i in items if i.get("is_line_item") is True]
+        assert len(sale_lines) >= 1
+        line = sale_lines[0]
+        assert line["received_quantity"] == 195.0
+        assert line["quantity"] == 200.0
+
+    def test_money_movement_in_operations_view(
+        self, client, org_headers, db_session,
+        test_account, test_supplier,
+    ):
+        """MoneyMovement puro: operations view retorna is_line_item=False, sin material."""
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "amount": 500000,
+            "account_id": str(test_account.id),
+            "date": "2026-03-17T12:00:00Z",
+            "description": "Pago parcial test ops",
+        }
+        resp = client.post(
+            "/api/v1/money-movements/supplier-payment",
+            json=payload, headers=org_headers,
+        )
+        assert resp.status_code == 201
+
+        stmt_resp = client.get(
+            f"/api/v1/money-movements/third-party/{test_supplier.id}",
+            params={"view": "operations", "date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert stmt_resp.status_code == 200
+        items = stmt_resp.json()["items"]
+
+        mm_items = [i for i in items if i.get("event_type") == "payment_to_supplier"]
+        assert len(mm_items) >= 1
+        mm = mm_items[0]
+        assert mm["is_line_item"] is False
+        assert mm["material_code"] is None
+        assert mm["material_name"] is None
+        assert mm["quantity"] is None
+
+    def test_double_entry_operations_view_supplier(
+        self, client, org_headers, db_session,
+        ops_supplier, ops_customer, ops_materials,
+    ):
+        """DP con 2 lineas: operations view para el proveedor retorna 2 items con purchase_unit_price."""
+        mat1, mat2 = ops_materials[0], ops_materials[1]
+        payload = {
+            "supplier_id": str(ops_supplier.id),
+            "customer_id": str(ops_customer.id),
+            "date": "2026-03-18",
+            "lines": [
+                {
+                    "material_id": str(mat1.id),
+                    "quantity": 500.0,
+                    "purchase_unit_price": 3000.00,
+                    "sale_unit_price": 4000.00,
+                },
+                {
+                    "material_id": str(mat2.id),
+                    "quantity": 300.0,
+                    "purchase_unit_price": 2000.00,
+                    "sale_unit_price": 2500.00,
+                },
+            ],
+            "commissions": [],
+        }
+        resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+        assert resp.status_code == 201, resp.json()
+        de_id = resp.json()["id"]
+
+        # Liquidar
+        liq_resp = client.patch(
+            f"/api/v1/double-entries/{de_id}/liquidate",
+            json={}, headers=org_headers,
+        )
+        assert liq_resp.status_code == 200
+
+        # GET operations view para el proveedor
+        stmt_resp = client.get(
+            f"/api/v1/money-movements/third-party/{ops_supplier.id}",
+            params={"view": "operations", "date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert stmt_resp.status_code == 200
+        items = stmt_resp.json()["items"]
+
+        de_lines = [i for i in items if i.get("is_line_item") is True and "double_entry" in i.get("event_type", "")]
+        assert len(de_lines) == 2
+
+        # Verificar que unit_price corresponde al purchase_unit_price
+        prices = sorted([i["unit_price"] for i in de_lines])
+        assert prices == [2000.0, 3000.0]
+
+        # Todos con mismo parent_source_id
+        parent_ids = {i["parent_source_id"] for i in de_lines}
+        assert len(parent_ids) == 1

@@ -152,6 +152,7 @@ export default function AccountStatementPage() {
       received_quantity: m.received_quantity,
       is_line_item: m.is_line_item,
       parent_source_id: m.parent_source_id,
+      source_number: m.source_number,
     })),
   });
 
@@ -338,7 +339,9 @@ export default function AccountStatementPage() {
                         {movements.map((m) => {
                           const isDebit = m.direction > 0;
                           const isAnnulled = m.status === "annulled" || m.status === "cancelled";
-                          const concepto = m.vehicle_plate || m.invoice_number || (m.source_number ? `${m.event_type?.includes("purchase") ? "Compra" : m.event_type?.includes("sale") ? "Venta" : m.event_type?.includes("double") ? "DP" : ""} #${m.source_number}` : m.description) || m.description;
+                          const concepto = m.is_line_item
+                            ? (m.vehicle_plate || m.invoice_number || `${m.event_type?.includes("purchase") ? "Compra" : m.event_type?.includes("sale") ? "Venta" : "DP"} #${m.source_number || ""}`)
+                            : (m.description || m.vehicle_plate || m.invoice_number || `#${m.source_number || ""}`);
                           const hasWeightDiff = m.is_line_item && m.received_quantity != null && m.quantity != null && m.received_quantity !== m.quantity;
                           const weightDiffMoney = hasWeightDiff && m.unit_price ? (m.received_quantity! - m.quantity!) * m.unit_price : null;
 

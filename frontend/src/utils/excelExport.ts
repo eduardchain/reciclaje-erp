@@ -40,10 +40,21 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
     if (data.dateFrom) {
       rows.push(["", "Saldo de apertura", "", "", "", "", "", "", formatCurrency(data.openingBalance)]);
     }
-    for (const m of data.movements) {
-      const concepto = m.vehicle_plate || m.invoice_number || m.description || "-";
+    // Build last-in-group set for balance display
+    const lastByGroup = new Map<string, number>();
+    data.movements.forEach((m, i) => {
+      if (m.parent_source_id) lastByGroup.set(m.parent_source_id, i);
+    });
+    data.movements.forEach((m, idx) => {
+      const concepto = m.is_line_item
+        ? (m.vehicle_plate || m.invoice_number || `${m.movement_type?.includes("purchase") ? "Compra" : m.movement_type?.includes("sale") ? "Venta" : "DP"} #${m.source_number || ""}`)
+        : (m.description || m.vehicle_plate || m.invoice_number || `#${m.source_number || ""}`);
       const diffPesoMoney = m.received_quantity && m.quantity && m.unit_price && m.received_quantity !== m.quantity
         ? (m.received_quantity - m.quantity) * m.unit_price : null;
+      // Show balance only on last item of group or non-grouped items
+      const showBalance = !m.parent_source_id
+        ? m.balance_after != null
+        : lastByGroup.get(m.parent_source_id) === idx && m.balance_after != null;
       rows.push([
         formatDate(m.date),
         concepto,
@@ -53,9 +64,9 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
         diffPesoMoney != null ? formatCurrency(diffPesoMoney) : "",
         m.isDebit ? formatCurrency(m.amount) : "",
         !m.isDebit ? formatCurrency(m.amount) : "",
-        m.balance_after != null ? formatCurrency(m.balance_after) : "",
+        showBalance ? formatCurrency(m.balance_after!) : "",
       ]);
-    }
+    });
   } else {
     rows.push(["#", "Fecha", "Tipo", "Descripcion", "Debe", "Haber", "Saldo"]);
     if (data.dateFrom) {

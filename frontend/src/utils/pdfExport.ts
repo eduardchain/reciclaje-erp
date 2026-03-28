@@ -32,6 +32,7 @@ export interface AccountStatementExportData {
     received_quantity?: number | null;
     is_line_item?: boolean;
     parent_source_id?: string | null;
+    source_number?: number | string | null;
   }>;
 }
 
@@ -572,8 +573,8 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
   const isOps = data.viewMode === "operations";
 
   if (isOps) {
-    // Vista Operaciones: Fecha, Concepto, Material, Peso, Precio, Debito, Credito, Saldo
-    const colO = { date: 14, concept: 36, material: 76, weight: 116, price: 140, debit: 162, credit: 186 };
+    // Vista Operaciones: Fecha, Concepto, Material, Peso, Precio, Dif $, Debito, Credito, Saldo
+    const colO = { date: 14, concept: 34, material: 72, weight: 108, price: 128, difPeso: 148, debit: 168, credit: 186 };
     doc.setFillColor(245, 245, 245);
     doc.rect(14, y - 4, pageWidth - 28, 8, "F");
     doc.setFont("helvetica", "bold");
@@ -583,6 +584,7 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
     doc.text("Material", colO.material, y);
     doc.text("Peso", colO.weight, y, { align: "right" });
     doc.text("Precio", colO.price, y, { align: "right" });
+    doc.text("Dif $", colO.difPeso, y, { align: "right" });
     doc.text("Debito", colO.debit, y, { align: "right" });
     doc.text("Credito", colO.credit, y, { align: "right" });
     doc.text("Saldo", pageWidth - 14, y, { align: "right" });
@@ -599,21 +601,36 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
       y += 5;
     }
 
-    for (const m of data.movements) {
+    // Build last-in-group set for balance display
+    const lastByGroup = new Map<string, number>();
+    data.movements.forEach((m, i) => {
+      if (m.parent_source_id) lastByGroup.set(m.parent_source_id, i);
+    });
+
+    data.movements.forEach((m, idx) => {
       if (y > 270) { doc.addPage(); y = 20; }
-      const concepto = m.vehicle_plate || m.invoice_number || m.description || "-";
+      const concepto = m.is_line_item
+        ? (m.vehicle_plate || m.invoice_number || `${m.movement_type?.includes("purchase") ? "Compra" : m.movement_type?.includes("sale") ? "Venta" : "DP"} #${m.source_number || ""}`)
+        : (m.description || m.vehicle_plate || m.invoice_number || `#${m.source_number || ""}`);
       doc.text(formatDate(m.date), colO.date, y);
-      doc.text(concepto.substring(0, 20), colO.concept, y);
+      doc.text(concepto.substring(0, 18), colO.concept, y);
       if (m.is_line_item && m.material_code) {
-        doc.text(`${m.material_code}`.substring(0, 18), colO.material, y);
+        doc.text(`${m.material_code}`.substring(0, 16), colO.material, y);
         if (m.quantity) doc.text(formatWeight(m.quantity), colO.weight, y, { align: "right" });
         if (m.unit_price) doc.text(formatCurrency(m.unit_price), colO.price, y, { align: "right" });
+        const diffPesoMoney = m.received_quantity && m.quantity && m.unit_price && m.received_quantity !== m.quantity
+          ? (m.received_quantity - m.quantity) * m.unit_price : null;
+        if (diffPesoMoney != null) doc.text(formatCurrency(diffPesoMoney), colO.difPeso, y, { align: "right" });
       }
       if (m.isDebit) doc.text(formatCurrency(m.amount), colO.debit, y, { align: "right" });
       else doc.text(formatCurrency(m.amount), colO.credit, y, { align: "right" });
-      if (m.balance_after != null) doc.text(formatCurrency(m.balance_after), pageWidth - 14, y, { align: "right" });
+      // Show balance only on last item of group or non-grouped items
+      const showBalance = !m.parent_source_id
+        ? m.balance_after != null
+        : lastByGroup.get(m.parent_source_id) === idx && m.balance_after != null;
+      if (showBalance) doc.text(formatCurrency(m.balance_after!), pageWidth - 14, y, { align: "right" });
       y += 5;
-    }
+    });
   } else {
     // Vista Financiera (original)
     const colX = { num: 14, date: 22, type: 44, desc: 84, debit: 148, credit: 172, balance: 196 };
