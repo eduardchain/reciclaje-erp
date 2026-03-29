@@ -3,11 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { ChevronRight, ChevronDown, Expand, Shrink, FileSpreadsheet, CheckCircle2 } from "lucide-react";
+import { ChevronRight, ChevronDown, Expand, Shrink, FileSpreadsheet, FileText, CheckCircle2 } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useBalanceDetailed } from "@/hooks/useReports";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { exportBalanceDetailedExcel } from "@/utils/excelExport";
+import { exportBalanceDetailedPDF } from "@/utils/pdfExport";
+import { useAuthStore } from "@/stores/authStore";
 import type { BalanceDetailedSection, BalanceDetailedItem, BalanceDetailedGroup } from "@/types/reports";
 
 const ASSET_SECTION_ORDER = [
@@ -58,6 +60,8 @@ function ItemDetail({ item, sectionKey }: { item: BalanceDetailedItem; sectionKe
 export default function BalanceDetailedPage() {
   const { data, isLoading } = useBalanceDetailed();
   const navigate = useNavigate();
+  const { organizationId, organizations } = useAuthStore();
+  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const allExpandableKeys = useMemo(() => {
@@ -193,6 +197,9 @@ export default function BalanceDetailedPage() {
               </Button>
               <Button variant="outline" size="sm" onClick={collapseAll}>
                 <Shrink className="w-4 h-4 mr-1" /> Colapsar
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => exportBalanceDetailedPDF(data, orgName)}>
+                <FileText className="w-4 h-4 mr-1" /> PDF
               </Button>
               <Button variant="outline" size="sm" onClick={() => exportBalanceDetailedExcel(data)}>
                 <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel

@@ -2,6 +2,7 @@ import { jsPDF } from "jspdf";
 import type { PurchaseResponse } from "@/types/purchase";
 import type { SaleResponse } from "@/types/sale";
 import type { DoubleEntryResponse } from "@/types/double-entry";
+import type { BalanceSheetResponse, BalanceDetailedResponse } from "@/types/reports";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 
 export interface AccountStatementExportData {
@@ -682,4 +683,310 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
 
   const safeName = data.thirdPartyName.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 30);
   doc.save(`estado_cuenta_${safeName}.pdf`);
+}
+
+export function exportBalanceSheetPDF(data: BalanceSheetResponse, orgName?: string) {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let y = 20;
+
+  // Header
+  doc.setFontSize(18);
+  doc.setFont("helvetica", "bold");
+  doc.text(orgName || "EcoBalance ERP", 14, y);
+  y += 8;
+
+  doc.setFontSize(14);
+  doc.text("Balance General", 14, y);
+  y += 8;
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Corte al: ${formatDate(data.as_of_date)}`, 14, y);
+  y += 6;
+
+  doc.setDrawColor(200);
+  doc.line(14, y, pageWidth - 14, y);
+  y += 10;
+
+  // ACTIVOS
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(30, 64, 175); // blue
+  doc.text("ACTIVOS", 14, y);
+  doc.setTextColor(0);
+  y += 8;
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+
+  const assetItems: [string, number][] = [
+    ["Caja y Bancos", data.assets.cash_and_bank],
+    ["Cuentas por Cobrar", data.assets.accounts_receivable],
+    ["Inventario", data.assets.inventory],
+    ["Anticipos", data.assets.advances],
+    ["CxC Inversionistas", data.assets.investor_receivable],
+    ["Gastos Prepagados", data.assets.prepaid_expenses],
+    ["Fondos de Provisión", data.assets.provision_funds],
+    ["Activos Fijos", data.assets.fixed_assets],
+  ];
+
+  for (const [label, value] of assetItems) {
+    if (value === 0) continue;
+    doc.text(label, 20, y);
+    doc.text(formatCurrency(value), pageWidth - 14, y, { align: "right" });
+    y += 6;
+  }
+
+  y += 2;
+  doc.setDrawColor(200);
+  doc.line(14, y - 3, pageWidth - 14, y - 3);
+  doc.setFont("helvetica", "bold");
+  doc.text("Total Activos", 20, y + 2);
+  doc.text(formatCurrency(data.total_assets), pageWidth - 14, y + 2, { align: "right" });
+  y += 14;
+
+  // PASIVOS
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(185, 28, 28); // red
+  doc.text("PASIVOS", 14, y);
+  doc.setTextColor(0);
+  y += 8;
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+
+  const liabilityItems: [string, number][] = [
+    ["Cuentas por Pagar", data.liabilities.accounts_payable],
+    ["Deuda Inversionistas", data.liabilities.investor_debt],
+    ["Pasivos", data.liabilities.liability_debt],
+    ["Proveedores Servicios", data.liabilities.service_provider_payable],
+    ["Anticipos de Clientes", data.liabilities.customer_advances],
+    ["Obligaciones Provisión", data.liabilities.provision_obligations],
+    ["Otros Pasivos", data.liabilities.generic_payable],
+  ];
+
+  for (const [label, value] of liabilityItems) {
+    if (value === 0) continue;
+    doc.text(label, 20, y);
+    doc.text(formatCurrency(value), pageWidth - 14, y, { align: "right" });
+    y += 6;
+  }
+
+  y += 2;
+  doc.setDrawColor(200);
+  doc.line(14, y - 3, pageWidth - 14, y - 3);
+  doc.setFont("helvetica", "bold");
+  doc.text("Total Pasivos", 20, y + 2);
+  doc.text(formatCurrency(data.total_liabilities), pageWidth - 14, y + 2, { align: "right" });
+  y += 14;
+
+  // PATRIMONIO
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(4, 120, 87); // emerald
+  doc.text("PATRIMONIO", 14, y);
+  doc.setTextColor(0);
+  y += 8;
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+
+  if (data.accumulated_profit !== 0 || data.distributed_profit !== 0) {
+    doc.text("Utilidad Acumulada", 20, y);
+    doc.text(formatCurrency(data.accumulated_profit), pageWidth - 14, y, { align: "right" });
+    y += 6;
+    doc.text("(-) Utilidades Distribuidas", 20, y);
+    doc.text(formatCurrency(data.distributed_profit), pageWidth - 14, y, { align: "right" });
+    y += 6;
+  }
+
+  y += 2;
+  doc.setDrawColor(200);
+  doc.line(14, y - 3, pageWidth - 14, y - 3);
+  doc.setFont("helvetica", "bold");
+  doc.text("Patrimonio Neto", 20, y + 2);
+  doc.text(formatCurrency(data.equity), pageWidth - 14, y + 2, { align: "right" });
+
+  // Footer
+  y += 14;
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(150);
+  doc.text(`Generado: ${new Date().toLocaleString("es-CO")}`, 14, y);
+  doc.setTextColor(0);
+
+  doc.save("balance_general.pdf");
+}
+
+export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?: string) {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let y = 20;
+
+  const ASSET_ORDER = [
+    "cash_and_bank", "inventory_liquidated",
+    "customers_receivable", "supplier_advances", "service_provider_advances",
+    "liability_advances", "investor_receivable",
+    "provision_funds", "prepaid_expenses", "generic_receivable", "fixed_assets",
+  ];
+
+  const LIABILITY_ORDER = [
+    "suppliers_payable", "service_provider_payable", "liability_debt",
+    "investors_partners", "investors_obligations",
+    "investors_legacy", "customer_advances", "provision_obligations",
+    "generic_payable",
+  ];
+
+  function fmtBal(value: number) {
+    if (value < 0) return `(${formatCurrency(Math.abs(value))})`;
+    return formatCurrency(value);
+  }
+
+  function checkPageBreak() {
+    if (y > 270) {
+      doc.addPage();
+      y = 20;
+    }
+  }
+
+  // Header
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text(orgName || "EcoBalance ERP", 14, y);
+  y += 7;
+
+  doc.setFontSize(13);
+  doc.text("Balance Detallado", 14, y);
+  y += 7;
+
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Corte al: ${formatDate(data.as_of_date)}`, 14, y);
+  y += 5;
+
+  doc.setDrawColor(200);
+  doc.line(14, y, pageWidth - 14, y);
+  y += 8;
+
+  function renderSections(
+    sections: Record<string, { label: string; total: number; items: Array<{ name: string; balance: number }>; groups?: Array<{ label: string; total: number; items: Array<{ name: string; balance: number }> }> | null }>,
+    order: string[],
+    titleColor: [number, number, number],
+    title: string,
+    totalValue: number,
+  ) {
+    // Main title
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...titleColor);
+    doc.text(title, 14, y);
+    doc.text(fmtBal(totalValue), pageWidth - 14, y, { align: "right" });
+    doc.setTextColor(0);
+    y += 7;
+
+    for (const key of order) {
+      const section = sections[key];
+      if (!section || section.total === 0) continue;
+
+      checkPageBreak();
+
+      // Section header
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.setFillColor(245, 245, 245);
+      doc.rect(14, y - 3.5, pageWidth - 28, 6, "F");
+      doc.text(section.label, 16, y);
+      doc.text(fmtBal(section.total), pageWidth - 16, y, { align: "right" });
+      y += 6;
+
+      // Items (grouped or flat)
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+
+      if (section.groups && section.groups.length > 0) {
+        for (const group of section.groups) {
+          checkPageBreak();
+          // Group header
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(7);
+          doc.text(`  ${group.label}`, 16, y);
+          doc.text(fmtBal(group.total), pageWidth - 16, y, { align: "right" });
+          y += 5;
+          doc.setFont("helvetica", "normal");
+
+          for (const item of group.items) {
+            checkPageBreak();
+            doc.text(`    ${item.name}`, 16, y);
+            doc.text(fmtBal(item.balance), pageWidth - 16, y, { align: "right" });
+            y += 4.5;
+          }
+        }
+      } else {
+        for (const item of section.items) {
+          checkPageBreak();
+          doc.text(`  ${item.name}`, 16, y);
+          doc.text(fmtBal(item.balance), pageWidth - 16, y, { align: "right" });
+          y += 4.5;
+        }
+      }
+
+      y += 2;
+    }
+
+    // Total line
+    checkPageBreak();
+    doc.setDrawColor(200);
+    doc.line(14, y - 1, pageWidth - 14, y - 1);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Total ${title}`, 16, y + 3);
+    doc.text(fmtBal(totalValue), pageWidth - 16, y + 3, { align: "right" });
+    y += 10;
+  }
+
+  // Activos
+  renderSections(data.assets, ASSET_ORDER, [30, 64, 175], "ACTIVOS", data.total_assets);
+
+  // Pasivos
+  renderSections(data.liabilities, LIABILITY_ORDER, [185, 28, 28], "PASIVOS", data.total_liabilities);
+
+  // Patrimonio
+  checkPageBreak();
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(4, 120, 87);
+  doc.text("PATRIMONIO", 14, y);
+  doc.setTextColor(0);
+  y += 7;
+
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+
+  if (data.accumulated_profit !== 0 || data.distributed_profit !== 0) {
+    doc.text("Utilidad Acumulada", 20, y);
+    doc.text(fmtBal(data.accumulated_profit), pageWidth - 16, y, { align: "right" });
+    y += 5;
+    doc.text("(-) Utilidades Distribuidas", 20, y);
+    doc.text(fmtBal(data.distributed_profit), pageWidth - 16, y, { align: "right" });
+    y += 5;
+  }
+
+  doc.setDrawColor(200);
+  doc.line(14, y - 1, pageWidth - 14, y - 1);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text("Patrimonio Neto", 20, y + 3);
+  doc.text(fmtBal(data.equity), pageWidth - 16, y + 3, { align: "right" });
+  y += 12;
+
+  // Footer
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(150);
+  doc.text(`Generado: ${new Date().toLocaleString("es-CO")}`, 14, y);
+  doc.setTextColor(0);
+
+  doc.save("balance_detallado.pdf");
 }

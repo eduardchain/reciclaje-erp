@@ -184,7 +184,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 759 tests (20 integration).
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 778 tests (20 integration).
 
 ### Database
 
@@ -268,7 +268,7 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 
 30. **Comision de compra (prorrateo al costo)**: `PurchaseCommission` tabla separada (reutiliza enum `commission_type`). A diferencia de ventas (comision→P&L via `commission_accrual`), en compras la comision se **prorratea al costo** del material: `adjusted_unit_cost = unit_price + (commission_prorate / quantity)`. Afecta `InventoryMovement.unit_cost` y costo promedio. NO crea MoneyMovement — solo actualiza `third_party.balance` del comisionista. Cancelacion revierte balance. UI en Create/Edit/Liquidate/Detail pages.
 
-31. **Balance Detallado sin inventario en tránsito**: Compras `registered` no crean CxP (solo liquidación lo hace), así que incluir transit como activo desbalancearía la ecuación. Se eliminó `inventory_transit` de activos. Secciones activo: cash, inventory_liquidated, customers_receivable, supplier_advances, service_provider_advances, liability_advances, investor_receivable, provision_funds, prepaid_expenses, generic_receivable, fixed_assets. Secciones pasivo: suppliers_payable, service_provider_payable, liability_debt, investors_partners, investors_obligations, investors_legacy, customer_advances, provision_obligations, generic_payable. Clasificación terceros: `_classify_third_party` usa prioridad por signo de balance + behavior_types. `investor_type`: `"socio"` → partners, `"obligacion_financiera"` → obligations, null → legacy.
+31. **Balance Detallado y General unificados**: Ambos reportes usan `_classify_third_party` para clasificar cada tercero en **una sola sección** por prioridad (evita doble conteo cuando un tercero tiene múltiples behavior_types). Balance General refactorizado: 12 queries SQL de terceros reemplazadas por 1 query + iteración con clasificación. Secciones activo: cash, inventory_liquidated, customers_receivable, supplier_advances, service_provider_advances, liability_advances, investor_receivable, provision_funds, prepaid_expenses, generic_receivable, fixed_assets. Secciones pasivo: suppliers_payable, service_provider_payable, liability_debt, investors_partners, investors_obligations, investors_legacy, customer_advances, provision_obligations, generic_payable. `investor_type`: `"socio"` → partners, `"obligacion_financiera"` → obligations, null → legacy.
 
 32. **Comisionista requiere service_provider**: Validación en `_process_commissions` (compras, ventas) y `_create_commission_records` (DPs): el recipient debe tener `behavior_type` `service_provider` via `has_behavior_type()`. Razón: comisiones generan balance negativo; sin behavior_type proveedor, `_classify_third_party` no lo ubica en pasivos. Frontend: selector de comisionistas filtrado a `payable-providers` (solo `service_provider`). Reglas de proveedor por contexto: DP supplier = `material_supplier` only. Fixed asset supplier = cualquiera excepto `provision`/`liability`. Purchase supplier = `material_supplier`. Sale customer = `customer`.
 

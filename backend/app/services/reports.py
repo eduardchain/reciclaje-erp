@@ -657,17 +657,6 @@ class ReportService:
             )
         ))
 
-        accounts_receivable = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("customer"),
-                    ThirdParty.current_balance > 0,
-                )
-            )
-        ))
-
         inventory = Decimal(str(
             db.scalar(
                 select(func.coalesce(
@@ -677,30 +666,6 @@ class ReportService:
                 .where(
                     Material.organization_id == organization_id,
                     Material.is_active == True,
-                )
-            )
-        ))
-
-        # Gastos prepagados (terceros system_entity con balance > 0, ej: gastos diferidos)
-        prepaid_expenses = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_system_entity == True,
-                    ThirdParty.current_balance > 0,
-                )
-            )
-        ))
-
-        # Fondos en provisiones (behavior_type='provision' con balance < 0 = fondos disponibles)
-        provision_funds = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("provision"),
-                    ThirdParty.current_balance < 0,
                 )
             )
         ))
@@ -716,116 +681,59 @@ class ReportService:
             )
         ))
 
-        # Anticipos a proveedores (material_supplier, service_provider, liability, generic con balance > 0)
-        advances = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("material_supplier", "service_provider", "liability", "generic"),
-                    ThirdParty.is_system_entity == False,
-                    ThirdParty.current_balance > 0,
-                )
+        # Clasificar terceros usando _classify_third_party (misma logica que Balance Detallado)
+        # Evita doble conteo de terceros con multiples behavior_types
+        all_tps = list(db.scalars(
+            select(ThirdParty).where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.is_active == True,
+                ThirdParty.current_balance != 0,
             )
-        ))
+        ).all())
+        tp_behaviors, tp_cat_names, _ = self._load_tp_behavior_map(db, organization_id)
 
-        # CxC Inversionistas (investor con balance > 0 = nos deben)
-        investor_receivable = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("investor"),
-                    ThirdParty.current_balance > 0,
-                )
-            )
-        ))
+        ASSET_SECTIONS = {
+            "customers_receivable", "supplier_advances", "service_provider_advances",
+            "liability_advances", "investor_receivable", "provision_funds",
+            "prepaid_expenses", "generic_receivable",
+        }
+        LIABILITY_SECTIONS = {
+            "suppliers_payable", "service_provider_payable", "liability_debt",
+            "investors_partners", "investors_obligations", "investors_legacy",
+            "customer_advances", "provision_obligations", "generic_payable",
+        }
+
+        from collections import defaultdict
+        tp_buckets: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        for tp in all_tps:
+            behaviors = tp_behaviors.get(tp.id, set())
+            cat_names = tp_cat_names.get(tp.id, set())
+            section = self._classify_third_party(tp, behaviors, cat_names)
+            balance = Decimal(str(tp.current_balance))
+            if section in ASSET_SECTIONS:
+                tp_buckets[section] += abs(balance) if section == "provision_funds" else balance
+            elif section in LIABILITY_SECTIONS:
+                tp_buckets[section] += abs(balance)
+
+        # Mapear secciones detalladas → secciones del Balance General
+        accounts_receivable = tp_buckets["customers_receivable"]
+        advances = (tp_buckets["supplier_advances"] + tp_buckets["service_provider_advances"]
+                    + tp_buckets["liability_advances"] + tp_buckets["generic_receivable"])
+        investor_receivable = tp_buckets["investor_receivable"]
+        prepaid_expenses = tp_buckets["prepaid_expenses"]
+        provision_funds = tp_buckets["provision_funds"]
 
         total_assets = (cash_and_bank + accounts_receivable + inventory + advances
                         + investor_receivable + prepaid_expenses + provision_funds + fixed_assets_value)
 
-        # Pasivos
-        accounts_payable = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("material_supplier"),
-                    ThirdParty.current_balance < 0,
-                )
-            )
-        ))
-
-        investor_debt = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("investor"),
-                    ThirdParty.current_balance < 0,
-                )
-            )
-        ))
-
-        # Pasivos (liability con balance < 0 = gastos causados pendientes)
-        liability_debt = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("liability"),
-                    ThirdParty.current_balance < 0,
-                )
-            )
-        ))
-
-        # Proveedores de servicios (service_provider con balance < 0)
-        service_provider_payable = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("service_provider"),
-                    ThirdParty.current_balance < 0,
-                )
-            )
-        ))
-
-        # Anticipos de clientes (customer con balance < 0 = le debemos)
-        customer_advances = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("customer"),
-                    ThirdParty.current_balance < 0,
-                )
-            )
-        ))
-
-        # Obligaciones de provisión (provision con balance > 0 = debemos reintegrar)
-        provision_obligations = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(ThirdParty.current_balance), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("provision"),
-                    ThirdParty.current_balance > 0,
-                )
-            )
-        ))
-
-        # Pasivos genéricos (generic con balance < 0)
-        generic_payable = Decimal(str(
-            db.scalar(
-                select(func.coalesce(func.sum(func.abs(ThirdParty.current_balance)), 0))
-                .where(
-                    ThirdParty.organization_id == organization_id,
-                    self._tp_has_behavior("generic"),
-                    ThirdParty.current_balance < 0,
-                )
-            )
-        ))
+        accounts_payable = tp_buckets["suppliers_payable"]
+        investor_debt = (tp_buckets["investors_partners"] + tp_buckets["investors_obligations"]
+                        + tp_buckets["investors_legacy"])
+        liability_debt = tp_buckets["liability_debt"]
+        service_provider_payable = tp_buckets["service_provider_payable"]
+        customer_advances = tp_buckets["customer_advances"]
+        provision_obligations = tp_buckets["provision_obligations"]
+        generic_payable = tp_buckets["generic_payable"]
 
         total_liabilities = accounts_payable + investor_debt + liability_debt + service_provider_payable + customer_advances + provision_obligations + generic_payable
         equity = total_assets - total_liabilities
