@@ -873,18 +873,8 @@ class CRUDMoneyMovement:
         organization_id: UUID,
         user_id: Optional[UUID] = None,
     ) -> MoneyMovement:
-        """Ajuste credito: saldo sube (tercero con saldo negativo hacia cero)."""
+        """Ajuste credito: saldo sube. Flexible — puede acercar o alejar de cero."""
         tp = self._validate_third_party(db, data.third_party_id, organization_id)
-        if tp.current_balance >= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Use ajuste debito para terceros con saldo positivo",
-            )
-        if data.amount > abs(tp.current_balance):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Monto ({data.amount}) excede saldo pendiente ({abs(tp.current_balance)})",
-            )
 
         movement = self._create_movement(
             db=db, organization_id=organization_id,
@@ -906,18 +896,8 @@ class CRUDMoneyMovement:
         organization_id: UUID,
         user_id: Optional[UUID] = None,
     ) -> MoneyMovement:
-        """Ajuste debito: saldo baja (tercero con saldo positivo hacia cero)."""
+        """Ajuste debito: saldo baja. Flexible — puede acercar o alejar de cero."""
         tp = self._validate_third_party(db, data.third_party_id, organization_id)
-        if tp.current_balance <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Use ajuste credito para terceros con saldo negativo",
-            )
-        if data.amount > tp.current_balance:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Monto ({data.amount}) excede saldo pendiente ({tp.current_balance})",
-            )
 
         movement = self._create_movement(
             db=db, organization_id=organization_id,

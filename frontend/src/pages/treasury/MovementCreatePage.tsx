@@ -92,6 +92,7 @@ export default function MovementCreatePage() {
   const [notes, setNotes] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [adjustmentClass, setAdjustmentClass] = useState<"loss" | "gain">("loss");
+  const [adjustDirection, setAdjustDirection] = useState<"reduce" | "increase">("reduce");
   const [adjustmentReason, setAdjustmentReason] = useState("");
   const [buAllocationType, setBuAllocationType] = useState<"direct" | "shared" | "general">("general");
   const [buDirectId, setBuDirectId] = useState("");
@@ -211,7 +212,16 @@ export default function MovementCreatePage() {
   const handleSubmit = () => {
     if (type === "tp_adjustment") {
       if (!thirdPartyId || !description || amount <= 0) return;
-      const balanceSign: "negative" | "positive" = selectedTpBalance < 0 ? "negative" : "positive";
+      // Determinar endpoint según dirección elegida + signo de saldo
+      // Reducir: acercar a cero → positivo=debit, negativo=credit, cero=no aplica
+      // Aumentar: alejar de cero → positivo=credit, negativo=debit, cero=credit(default)
+      let balanceSign: "negative" | "positive";
+      if (adjustDirection === "reduce") {
+        balanceSign = selectedTpBalance < 0 ? "negative" : "positive";
+      } else {
+        // Aumentar: invertir — positivo usa credit (sube más), negativo usa debit (baja más)
+        balanceSign = selectedTpBalance >= 0 ? "negative" : "positive";
+      }
       createTpAdjustment.mutate(
         {
           third_party_id: thirdPartyId,
@@ -378,27 +388,48 @@ export default function MovementCreatePage() {
                   <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero *</Label>
                   <EntitySelect
                     value={thirdPartyId}
-                    onChange={setThirdPartyId}
-                    options={thirdParties.filter((t) => t.current_balance !== 0).map((t) => ({ id: t.id, label: `${t.name} (Saldo: ${formatCurrency(t.current_balance)})` }))}
+                    onChange={(v) => { setThirdPartyId(v); setAdjustDirection(thirdParties.find((t) => t.id === v)?.current_balance === 0 ? "increase" : "reduce"); }}
+                    options={thirdParties.map((t) => ({ id: t.id, label: `${t.name} (Saldo: ${formatCurrency(t.current_balance)})` }))}
                     placeholder="Seleccionar tercero..."
                   />
                   {selectedTpForAdjustment && (
-                    <div className="flex items-center gap-2 mt-1">
-                      <p className="text-xs text-slate-500">
+                    <>
+                      <p className="text-xs text-slate-500 mt-1">
                         Saldo actual: <span className={selectedTpBalance >= 0 ? "text-emerald-600 font-medium" : "text-red-600 font-medium"}>{formatCurrency(selectedTpBalance)}</span>
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => { setAmount(Math.abs(selectedTpBalance)); setAdjustmentClass(selectedTpBalance > 0 ? "loss" : "gain"); }}
-                        className="text-xs text-sky-600 hover:text-sky-800 underline"
-                      >
-                        Llevar a cero
-                      </button>
-                    </div>
+                      <div className="flex gap-2 mt-2">
+                        {selectedTpBalance !== 0 && (
+                          <button type="button" onClick={() => setAdjustDirection("reduce")}
+                            className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${adjustDirection === "reduce" ? "bg-sky-100 text-sky-800 border-sky-300" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                            Reducir Saldo
+                          </button>
+                        )}
+                        <button type="button" onClick={() => setAdjustDirection("increase")}
+                          className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${adjustDirection === "increase" ? "bg-amber-100 text-amber-800 border-amber-300" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                          Aumentar Saldo
+                        </button>
+                      </div>
+                      {adjustDirection === "reduce" && selectedTpBalance !== 0 && (
+                        <button type="button"
+                          onClick={() => { setAmount(Math.abs(selectedTpBalance)); setAdjustmentClass(selectedTpBalance > 0 ? "loss" : "gain"); }}
+                          className="text-xs text-sky-600 hover:text-sky-800 underline mt-1">
+                          Llevar a cero
+                        </button>
+                      )}
+                      {selectedTpForAdjustment && amount > 0 && (
+                        <p className="text-xs text-slate-400 mt-1">
+                          Saldo después: <span className="font-medium">{formatCurrency(
+                            adjustDirection === "reduce"
+                              ? (selectedTpBalance > 0 ? selectedTpBalance - amount : selectedTpBalance + amount)
+                              : (selectedTpBalance >= 0 ? selectedTpBalance + amount : selectedTpBalance - amount)
+                          )}</span>
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
                 <div>
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Clasificacion *</Label>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Clasificacion P&L *</Label>
                   <div className="flex gap-2 mt-1">
                     <button
                       type="button"
