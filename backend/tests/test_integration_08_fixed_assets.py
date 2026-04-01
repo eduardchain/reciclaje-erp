@@ -108,7 +108,7 @@ class TestFixedAssetsStress:
         assert resp_b.json()["current_value"] == pytest.approx(57_000, abs=1)
 
         # P&L: operating_expenses = $13K (depreciation_expense × 2)
-        assert_pnl(client, h, date_from="2026-01-01", date_to="2026-03-31",
+        assert_pnl(client, h, date_from="2026-01-01", date_to="2027-12-31",
                    operating_expenses=13_000)
 
         # =================================================================
@@ -137,7 +137,7 @@ class TestFixedAssetsStress:
         # Dispose NO restaura la cuenta (a diferencia de cancel)
         # =================================================================
         pnl_before_dispose = client.get("/api/v1/reports/profit-and-loss",
-            params={"date_from": "2026-01-01", "date_to": "2026-03-31"}, headers=h).json()
+            params={"date_from": "2026-01-01", "date_to": "2027-12-31"}, headers=h).json()
         account_before_dispose = client.get(f"/api/v1/money-accounts/{s['account'].id}", headers=h).json()["current_balance"]
 
         resp_dispose = client.post(f"/api/v1/fixed-assets/{asset_b['id']}/dispose",
@@ -150,7 +150,7 @@ class TestFixedAssetsStress:
 
         # Dispose genera gasto adicional (depreciacion acelerada del remanente)
         pnl_after_dispose = client.get("/api/v1/reports/profit-and-loss",
-            params={"date_from": "2026-01-01", "date_to": "2026-03-31"}, headers=h).json()
+            params={"date_from": "2026-01-01", "date_to": "2027-12-31"}, headers=h).json()
         assert pnl_after_dispose["operating_expenses"] > pnl_before_dispose["operating_expenses"], \
             f"Dispose should increase P&L expenses: before={pnl_before_dispose['operating_expenses']}, after={pnl_after_dispose['operating_expenses']}"
         # La diferencia = cv_b (remanente que se deprecio aceleradamente)
@@ -212,7 +212,7 @@ class TestFixedAssetsStress:
         # Activo A cancelado → sus depreciaciones anuladas → no aparecen
         # =================================================================
         pnl_resp = client.get("/api/v1/reports/profit-and-loss",
-            params={"date_from": "2026-01-01", "date_to": "2026-03-31"}, headers=h)
+            params={"date_from": "2026-01-01", "date_to": "2027-12-31"}, headers=h)
         pnl = pnl_resp.json()
         # Solo depreciaciones de B deben quedar
         assert pnl["operating_expenses"] > 0, "Should have B's depreciation expenses"
@@ -229,4 +229,4 @@ class TestFixedAssetsStress:
         # =================================================================
         # ACID TEST
         # =================================================================
-        assert_pnl_equals_balance(client, h, date_from="2026-01-01", date_to="2026-03-31")
+        assert_pnl_equals_balance(client, h, date_from="2026-01-01", date_to="2027-12-31")

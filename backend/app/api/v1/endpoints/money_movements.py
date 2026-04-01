@@ -845,7 +845,11 @@ def get_by_third_party(
         # Normalizar transaction_date a date (DoubleEntry.date es Date, otros son DateTime)
         if isinstance(txn_date, datetime):
             txn_date = txn_date.date()
-        events.append((txn_date, sort_dt, sort_key, filter_dt or sort_dt, kwargs))
+        # Filtrar por fecha de negocio (no por timestamp servidor) para evitar
+        # que operaciones liquidadas en otra timezone caigan fuera del rango
+        if filter_dt is None:
+            filter_dt = datetime.combine(txn_date, dt_time(12, 0), tzinfo=tz.utc)
+        events.append((txn_date, sort_dt, sort_key, filter_dt, kwargs))
 
     # 1. MoneyMovements confirmados y anulados
     allowed = _get_allowed_accounts(db, org_context)

@@ -515,7 +515,7 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string, 
 }
 
 export function exportAccountStatementPDF(data: AccountStatementExportData, orgName?: string) {
-  const doc = new jsPDF();
+  const doc = new jsPDF({ orientation: "landscape" });
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 20;
 
@@ -575,7 +575,7 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
 
   if (isOps) {
     // Vista Operaciones: Fecha, Concepto, Material, Peso, Precio, Dif $, Debito, Credito, Saldo
-    const colO = { date: 14, concept: 34, material: 72, weight: 108, price: 128, difPeso: 148, debit: 168, credit: 186 };
+    const colO = { date: 14, concept: 36, material: 90, weight: 140, price: 165, difPeso: 195, debit: 225, credit: 252 };
     doc.setFillColor(245, 245, 245);
     doc.rect(14, y - 4, pageWidth - 28, 8, "F");
     doc.setFont("helvetica", "bold");
@@ -609,14 +609,14 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
     });
 
     data.movements.forEach((m, idx) => {
-      if (y > 270) { doc.addPage(); y = 20; }
+      if (y > 185) { doc.addPage(); y = 20; }
       const concepto = m.is_line_item
         ? (m.vehicle_plate || m.invoice_number || `${m.movement_type?.includes("purchase") ? "Compra" : m.movement_type?.includes("sale") ? "Venta" : "DP"} #${m.source_number || ""}`)
         : (m.description || m.vehicle_plate || m.invoice_number || `#${m.source_number || ""}`);
       doc.text(formatDate(m.date), colO.date, y);
-      doc.text(concepto.substring(0, 18), colO.concept, y);
+      doc.text(concepto.substring(0, 30), colO.concept, y);
       if (m.is_line_item && m.material_code) {
-        doc.text(`${m.material_code}`.substring(0, 16), colO.material, y);
+        doc.text(`${m.material_code}`.substring(0, 25), colO.material, y);
         if (m.quantity) doc.text(formatWeight(m.quantity), colO.weight, y, { align: "right" });
         if (m.unit_price) doc.text(formatCurrency(m.unit_price), colO.price, y, { align: "right" });
         const diffPesoMoney = m.received_quantity && m.quantity && m.unit_price && m.received_quantity !== m.quantity
@@ -633,8 +633,8 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
       y += 5;
     });
   } else {
-    // Vista Financiera (original)
-    const colX = { num: 14, date: 22, type: 44, desc: 84, debit: 148, credit: 172, balance: 196 };
+    // Vista Financiera (landscape)
+    const colX = { num: 14, date: 24, type: 48, desc: 100, debit: 210, credit: 240, balance: 270 };
     doc.setFillColor(245, 245, 245);
     doc.rect(14, y - 4, pageWidth - 28, 8, "F");
     doc.setFont("helvetica", "bold");
@@ -660,13 +660,13 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
     }
 
     for (const m of data.movements) {
-      if (y > 270) { doc.addPage(); y = 20; }
+      if (y > 185) { doc.addPage(); y = 20; }
       const isAnnulled = m.status === "annulled";
       const typeText = isAnnulled ? `${m.typeLabel} (Anulado)` : m.typeLabel;
       doc.text(String(m.movement_number), colX.num, y);
       doc.text(formatDate(m.date), colX.date, y);
-      doc.text(typeText.substring(0, 22), colX.type, y);
-      doc.text((m.description || "-").substring(0, 30), colX.desc, y);
+      doc.text(typeText.substring(0, 28), colX.type, y);
+      doc.text((m.description || "-").substring(0, 55), colX.desc, y);
       if (m.isDebit) doc.text(formatCurrency(m.amount), colX.debit, y, { align: "right" });
       else doc.text(formatCurrency(m.amount), colX.credit, y, { align: "right" });
       if (m.balance_after != null) doc.text(formatCurrency(m.balance_after), pageWidth - 14, y, { align: "right" });
