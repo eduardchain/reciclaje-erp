@@ -36,6 +36,7 @@ from app.schemas.money_movement import (
     GenericCollectionCreate,
     ThirdPartyTransferCreate,
     ThirdPartyAdjustmentCreate,
+    BatchExpenseCreate,
     AnnulMovementRequest,
     AnnulMovementResponse,
     UpdateClassificationRequest,
@@ -593,6 +594,25 @@ def create_tp_adjustment_debit(
     )
     loaded = money_movement.get(db, movement.id, org_context["organization_id"])
     return _to_response(loaded, db)
+
+
+@router.post("/batch-expenses", status_code=status.HTTP_201_CREATED)
+def create_batch_expenses(
+    data: BatchExpenseCreate,
+    org_context: dict = Depends(require_permission("treasury.create_movements")),
+    db: Session = Depends(get_db),
+):
+    """Crear multiples gastos en una sola transaccion (all-or-nothing)."""
+    movements = money_movement.create_batch_expenses(
+        db=db,
+        data=data,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    return {
+        "created": len(movements),
+        "movements": [{"id": str(m.id), "movement_number": m.movement_number} for m in movements],
+    }
 
 
 # ---------------------------------------------------------------------------

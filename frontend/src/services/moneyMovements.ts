@@ -171,6 +171,22 @@ export const moneyMovementService = {
     return `${apiClient.defaults.baseURL}/api/v1/money-movements/${id}/evidence`;
   },
 
+  batchExpenses: async (items: Array<{
+    amount: number;
+    expense_category_id: string;
+    account_id: string;
+    date: string;
+    description: string;
+    third_party_id?: string;
+    reference_number?: string;
+    notes?: string;
+    business_unit_id?: string;
+    applicable_business_unit_ids?: string[];
+  }>): Promise<{ created: number; movements: Array<{ id: string; movement_number: number }> }> => {
+    const response = await apiClient.post("/api/v1/money-movements/batch-expenses", { items });
+    return response.data;
+  },
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getByThirdParty: async (thirdPartyId: string, filters: { date_from?: string; date_to?: string; view?: string } = {}): Promise<{ items: any[]; opening_balance: number }> => {
     const response = await apiClient.get(`/api/v1/money-movements/third-party/${thirdPartyId}`, { params: filters });

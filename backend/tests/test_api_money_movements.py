@@ -3392,3 +3392,152 @@ class TestOperationsView:
         # Todos con mismo parent_source_id
         parent_ids = {i["parent_source_id"] for i in de_lines}
         assert len(parent_ids) == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: Batch Expenses
+# ---------------------------------------------------------------------------
+
+class TestBatchExpenses:
+    """Tests para POST /api/v1/money-movements/batch-expenses."""
+
+    URL = "/api/v1/money-movements/batch-expenses"
+
+    def _make_item(self, account_id, category_id, amount=50000, description="Test expense"):
+        return {
+            "amount": amount,
+            "expense_category_id": str(category_id),
+            "account_id": str(account_id),
+            "date": "2026-03-20T12:00:00Z",
+            "description": description,
+        }
+
+    def test_batch_3_valid(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_expense_category,
+    ):
+        """Crear 3 gastos validos — 201, created=3, IDs y movement_numbers unicos."""
+        items = [
+            self._make_item(test_account.id, test_expense_category.id, description=f"Gasto {i}")
+            for i in range(3)
+        ]
+        resp = client.post(self.URL, json={"items": items}, headers=org_headers)
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["created"] == 3
+        assert len(body["movements"]) == 3
+
+        ids = {m["id"] for m in body["movements"]}
+        assert len(ids) == 3  # todos unicos
+
+        numbers = {m["movement_number"] for m in body["movements"]}
+        assert len(numbers) == 3  # movement_numbers unicos
+
+    def test_batch_exceeds_limit(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_expense_category,
+    ):
+        """51 items excede max_length=50 — 422."""
+        items = [
+            self._make_item(test_account.id, test_expense_category.id, description=f"G{i}")
+            for i in range(51)
+        ]
+        resp = client.post(self.URL, json={"items": items}, headers=org_headers)
+        assert resp.status_code == 422
+
+    def test_batch_invalid_amount(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_expense_category, db_session,
+    ):
+        """Segundo item con amount=0 — 422. Ningun movimiento creado (all-or-nothing)."""
+        items = [
+            self._make_item(test_account.id, test_expense_category.id, amount=10000),
+            self._make_item(test_account.id, test_expense_category.id, amount=0),
+        ]
+        resp = client.post(self.URL, json={"items": items}, headers=org_headers)
+        assert resp.status_code == 422
+
+        # Verificar que NO se creo ningun movimiento
+        from app.models.money_movement import MoneyMovement
+        count = db_session.query(MoneyMovement).filter(
+            MoneyMovement.organization_id == test_account.organization_id,
+            MoneyMovement.movement_type == "expense",
+        ).count()
+        assert count == 0
+
+    def test_batch_invalid_category(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_expense_category,
+    ):
+        """Primer item con categoria inexistente — 422 con error en row 0."""
+        items = [
+            self._make_item(test_account.id, uuid4(), amount=10000),
+            self._make_item(test_account.id, test_expense_category.id, amount=10000),
+        ]
+        resp = client.post(self.URL, json={"items": items}, headers=org_headers)
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        errors = detail["errors"]
+        assert any(e["row"] == 0 and e["field"] == "expense_category_id" for e in errors)
+
+    def test_batch_account_balance(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_expense_category, db_session,
+    ):
+        """5 gastos × $10,000 descuenta $50,000 del saldo de la cuenta."""
+        initial_balance = test_account.current_balance
+        items = [
+            self._make_item(test_account.id, test_expense_category.id, amount=10000, description=f"G{i}")
+            for i in range(5)
+        ]
+        resp = client.post(self.URL, json={"items": items}, headers=org_headers)
+        assert resp.status_code == 201
+
+        db_session.refresh(test_account)
+        assert test_account.current_balance == initial_balance - Decimal("50000")
+
+    def test_batch_movement_type(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_expense_category,
+    ):
+        """Movimiento creado tiene movement_type='expense' y status='confirmed'."""
+        items = [self._make_item(test_account.id, test_expense_category.id)]
+        resp = client.post(self.URL, json={"items": items}, headers=org_headers)
+        assert resp.status_code == 201
+
+        mov_id = resp.json()["movements"][0]["id"]
+        detail_resp = client.get(f"/api/v1/money-movements/{mov_id}", headers=org_headers)
+        assert detail_resp.status_code == 200
+        data = detail_resp.json()
+        assert data["movement_type"] == "expense"
+        assert data["status"] == "confirmed"
+
+    def test_batch_with_business_unit(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_expense_category, db_session, test_organization,
+    ):
+        """Gasto con business_unit_id se persiste correctamente."""
+        from app.models.business_unit import BusinessUnit
+        bu = BusinessUnit(name="Chatarra Test", organization_id=test_organization.id)
+        db_session.add(bu)
+        db_session.commit()
+        db_session.refresh(bu)
+
+        item = self._make_item(test_account.id, test_expense_category.id)
+        item["business_unit_id"] = str(bu.id)
+        resp = client.post(self.URL, json={"items": [item]}, headers=org_headers)
+        assert resp.status_code == 201
+
+        mov_id = resp.json()["movements"][0]["id"]
+        detail_resp = client.get(f"/api/v1/money-movements/{mov_id}", headers=org_headers)
+        assert detail_resp.status_code == 200
+        assert detail_resp.json()["business_unit_id"] == str(bu.id)
+
+    def test_batch_permission_required(
+        self, client: TestClient,
+        test_account, test_expense_category,
+    ):
+        """Sin headers de autenticacion/org — 401 o 403."""
+        items = [self._make_item(test_account.id, test_expense_category.id)]
+        resp = client.post(self.URL, json={"items": items}, headers={})
+        assert resp.status_code in (401, 403)

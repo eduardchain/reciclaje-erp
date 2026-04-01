@@ -32,6 +32,7 @@ import {
   Shield,
   ShieldCheck,
   UserCog,
+  Sheet,
 } from "lucide-react";
 import { cn } from "@/utils";
 import { ROUTES } from "@/utils/constants";
@@ -108,6 +109,7 @@ const orgNavItems: NavItem[] = [
     children: [
       { name: "Dashboard", path: ROUTES.TREASURY_DASHBOARD, icon: <LayoutDashboard className="w-4 h-4" />, permission: "treasury.view_dashboard" },
       { name: "Movimientos", path: ROUTES.TREASURY, icon: <ArrowDownUp className="w-4 h-4" />, permission: "treasury.view_movements" },
+      { name: "Gastos Masivos", path: ROUTES.TREASURY_BATCH_EXPENSES, icon: <Sheet className="w-4 h-4" />, permission: "treasury.create_movements" },
       { name: "Terceros", path: ROUTES.TREASURY_ACCOUNT_STATEMENT, icon: <ListOrdered className="w-4 h-4" />, permission: "treasury.view_statements" },
       { name: "Cuentas", path: ROUTES.TREASURY_ACCOUNT_MOVEMENTS, icon: <CreditCard className="w-4 h-4" />, permission: "treasury.view_accounts" },
       { name: "Provisiones", path: ROUTES.TREASURY_PROVISIONS, icon: <Tag className="w-4 h-4" />, permission: "treasury.view_provisions" },

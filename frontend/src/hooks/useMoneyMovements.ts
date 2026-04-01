@@ -166,6 +166,21 @@ export function useUpdateClassification() {
   });
 }
 
+export function useCreateBatchExpenses() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (items: Parameters<typeof moneyMovementService.batchExpenses>[0]) =>
+      moneyMovementService.batchExpenses(items),
+    onSuccess: (data) => {
+      toast.success(`${data.created} gasto(s) registrados`);
+      invalidateAfterTreasury(qc);
+    },
+    onError: () => {
+      // Errors handled inline in the form
+    },
+  });
+}
+
 export function useAnnulMovement() {
   const queryClient = useQueryClient();
   return useMutation({

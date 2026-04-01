@@ -270,6 +270,33 @@ class ThirdPartyAdjustmentCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class BatchExpenseItem(BaseModel):
+    """Un gasto individual dentro del batch."""
+    amount: Decimal = Field(..., gt=0, description="Monto del gasto")
+    expense_category_id: UUID = Field(..., description="Categoria de gasto")
+    account_id: UUID = Field(..., description="Cuenta de dinero")
+    date: BusinessDate = Field(..., description="Fecha del gasto")
+    description: str = Field(..., min_length=1, max_length=500, description="Descripcion")
+    third_party_id: Optional[UUID] = None
+    reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+    business_unit_id: Optional[UUID] = None
+    applicable_business_unit_ids: Optional[list[UUID]] = None
+
+    @model_validator(mode="after")
+    def validate_bu_allocation(self):
+        if self.business_unit_id and self.applicable_business_unit_ids:
+            raise ValueError("Seleccione asignacion directa O compartida, no ambas")
+        if self.applicable_business_unit_ids is not None and len(self.applicable_business_unit_ids) == 0:
+            self.applicable_business_unit_ids = None
+        return self
+
+
+class BatchExpenseCreate(BaseModel):
+    """Batch de gastos — hasta 50 items en una transaccion."""
+    items: list[BatchExpenseItem] = Field(..., min_length=1, max_length=50)
+
+
 # ---------------------------------------------------------------------------
 # Schema de anulacion
 # ---------------------------------------------------------------------------

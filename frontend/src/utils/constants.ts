@@ -31,6 +31,7 @@ export const ROUTES = {
   TREASURY_FIXED_ASSETS: "/treasury/fixed-assets",
   TREASURY_FIXED_ASSETS_NEW: "/treasury/fixed-assets/new",
   TREASURY_PROFIT_DISTRIBUTION: "/treasury/profit-distribution",
+  TREASURY_BATCH_EXPENSES: "/treasury/batch-expenses",
 
   // Inventario
   INVENTORY: "/inventory",

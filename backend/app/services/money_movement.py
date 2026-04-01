@@ -215,6 +215,81 @@ class CRUDMoneyMovement:
         db.refresh(movement)
         return movement
 
+    def create_batch_expenses(
+        self,
+        db: Session,
+        data: "BatchExpenseCreate",
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> list[MoneyMovement]:
+        """
+        Crear multiples gastos en una sola transaccion (all-or-nothing).
+        Valida todos los items primero; si alguno falla, no crea ninguno.
+        """
+        errors = []
+        # Cache de validaciones para evitar queries repetidas
+        validated_accounts: dict[UUID, "MoneyAccount"] = {}
+        validated_categories: set[UUID] = set()
+
+        for idx, item in enumerate(data.items):
+            # Validar cuenta
+            try:
+                if item.account_id not in validated_accounts:
+                    acc = self._validate_account(db, item.account_id, organization_id)
+                    validated_accounts[item.account_id] = acc
+            except HTTPException as e:
+                errors.append({"row": idx, "field": "account_id", "message": str(e.detail)})
+
+            # Validar categoria
+            try:
+                if item.expense_category_id not in validated_categories:
+                    self._validate_expense_category(db, item.expense_category_id, organization_id)
+                    validated_categories.add(item.expense_category_id)
+            except HTTPException as e:
+                errors.append({"row": idx, "field": "expense_category_id", "message": str(e.detail)})
+
+            # Validar tercero opcional
+            if item.third_party_id:
+                try:
+                    self._validate_third_party(db, item.third_party_id, organization_id)
+                except HTTPException as e:
+                    errors.append({"row": idx, "field": "third_party_id", "message": str(e.detail)})
+
+        if errors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"message": f"Errores en {len(errors)} fila(s)", "errors": errors},
+            )
+
+        # Crear todos los movimientos
+        movements = []
+        for item in data.items:
+            movement = self._create_movement(
+                db=db,
+                organization_id=organization_id,
+                movement_type="expense",
+                amount=item.amount,
+                account_id=item.account_id,
+                date=item.date,
+                description=item.description,
+                expense_category_id=item.expense_category_id,
+                third_party_id=item.third_party_id,
+                reference_number=item.reference_number,
+                notes=item.notes,
+                user_id=user_id,
+                business_unit_id=item.business_unit_id,
+                applicable_business_unit_ids=[str(uid) for uid in item.applicable_business_unit_ids] if item.applicable_business_unit_ids else None,
+            )
+            # Aplicar efecto
+            account = validated_accounts[item.account_id]
+            account.current_balance -= item.amount
+            movements.append(movement)
+
+        db.commit()
+        for m in movements:
+            db.refresh(m)
+        return movements
+
     def create_service_income(
         self,
         db: Session,
