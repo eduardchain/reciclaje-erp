@@ -1058,7 +1058,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             if total_quantity is None:
                 from app.models.sale import SaleLine
                 total_quantity = db.scalar(
-                    select(func.coalesce(func.sum(SaleLine.quantity), 0))
+                    select(func.coalesce(func.sum(func.coalesce(SaleLine.received_quantity, SaleLine.quantity)), 0))
                     .where(SaleLine.sale_id == sale.id)
                 ) or Decimal("0")
             commission_amount = self._calculate_commission(
