@@ -220,31 +220,87 @@ def get_stock_consolidated(
     total_valuation = Decimal("0")
 
     if warehouse_id:
-        # Calcular stock por material desde InventoryMovement para bodega especifica
-        for m in materials:
-            stock_in_wh = db.scalar(
-                select(func.coalesce(func.sum(InventoryMovement.quantity), 0))
+        from app.models.sale import Sale, SaleLine
+
+        # Calcular stock total por material en esta bodega (batch)
+        material_ids = [m.id for m in materials]
+        total_by_mat: dict[UUID, Decimal] = {}
+        if material_ids:
+            rows = db.execute(
+                select(
+                    InventoryMovement.material_id,
+                    func.coalesce(func.sum(InventoryMovement.quantity), 0).label("total"),
+                )
                 .where(
                     InventoryMovement.organization_id == organization_id,
-                    InventoryMovement.material_id == m.id,
+                    InventoryMovement.material_id.in_(material_ids),
                     InventoryMovement.warehouse_id == warehouse_id,
                 )
-            ) or Decimal("0")
+                .group_by(InventoryMovement.material_id)
+            ).all()
+            for mid, total in rows:
+                total_by_mat[mid] = Decimal(str(total))
 
-            if stock_in_wh == 0 and active_only:
+        # Transito compras: movimientos purchase con unit_cost=0 (registradas, no liquidadas)
+        purchase_transit: dict[UUID, Decimal] = {}
+        if material_ids:
+            rows = db.execute(
+                select(
+                    InventoryMovement.material_id,
+                    func.coalesce(func.sum(InventoryMovement.quantity), 0).label("transit"),
+                )
+                .where(
+                    InventoryMovement.organization_id == organization_id,
+                    InventoryMovement.material_id.in_(material_ids),
+                    InventoryMovement.warehouse_id == warehouse_id,
+                    InventoryMovement.movement_type == "purchase",
+                    InventoryMovement.unit_cost == 0,
+                )
+                .group_by(InventoryMovement.material_id)
+            ).all()
+            for mid, transit in rows:
+                purchase_transit[mid] = Decimal(str(transit))
+
+        # Transito ventas: movimientos sale cuya venta aun esta en registered
+        sale_transit: dict[UUID, Decimal] = {}
+        if material_ids:
+            rows = db.execute(
+                select(
+                    InventoryMovement.material_id,
+                    func.coalesce(func.sum(InventoryMovement.quantity), 0).label("transit"),
+                )
+                .join(Sale, (Sale.id == InventoryMovement.reference_id) & (InventoryMovement.reference_type == "sale"))
+                .where(
+                    InventoryMovement.organization_id == organization_id,
+                    InventoryMovement.material_id.in_(material_ids),
+                    InventoryMovement.warehouse_id == warehouse_id,
+                    InventoryMovement.movement_type == "sale",
+                    Sale.status == "registered",
+                )
+                .group_by(InventoryMovement.material_id)
+            ).all()
+            for mid, transit in rows:
+                sale_transit[mid] = Decimal(str(transit))
+
+        for m in materials:
+            stock_total = total_by_mat.get(m.id, Decimal("0"))
+            transit = purchase_transit.get(m.id, Decimal("0")) + sale_transit.get(m.id, Decimal("0"))
+            stock_liq = stock_total - transit
+
+            if stock_total == 0 and active_only:
                 continue
 
-            value = float(stock_in_wh * m.current_average_cost)
-            total_valuation += stock_in_wh * m.current_average_cost
+            value = float(stock_liq * m.current_average_cost)
+            total_valuation += stock_liq * m.current_average_cost
 
             items.append(StockItem(
                 material_id=m.id,
                 material_code=m.code,
                 material_name=m.name,
                 default_unit=m.default_unit,
-                current_stock_liquidated=float(stock_in_wh),
-                current_stock_transit=0,
-                current_stock_total=float(stock_in_wh),
+                current_stock_liquidated=float(stock_liq),
+                current_stock_transit=float(transit),
+                current_stock_total=float(stock_total),
                 current_average_cost=float(m.current_average_cost),
                 total_value=value,
                 is_active=m.is_active,
