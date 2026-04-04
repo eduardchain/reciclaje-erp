@@ -5,6 +5,7 @@ import { MoneyInput } from "@/components/shared/MoneyInput";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2, Copy } from "lucide-react";
 import { useExpenseCategoriesFlat, useMoneyAccounts } from "@/hooks/useMasterData";
 import { useBusinessUnits } from "@/hooks/useCrudData";
@@ -57,6 +58,7 @@ export default function BatchExpensesPage() {
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
   const [defaultDate, setDefaultDate] = useState(today);
   const [defaultBusinessUnitId, setDefaultBusinessUnitId] = useState("");
+  const [rowsToAdd, setRowsToAdd] = useState("1");
 
   const defaults = useRef({ date: today, account_id: "", expense_category_id: "", business_unit_id: "" });
   defaults.current = { date: defaultDate, account_id: defaultAccountId, expense_category_id: defaultCategoryId, business_unit_id: defaultBusinessUnitId };
@@ -104,14 +106,20 @@ export default function BatchExpensesPage() {
     );
   }, []);
 
-  // Add row
-  const addRow = useCallback(() => {
+  // Add N rows
+  const addRows = useCallback((count: number) => {
     setRows((prev) => {
-      if (prev.length >= MAX_ROWS) {
+      const available = MAX_ROWS - prev.length;
+      if (available <= 0) {
         toast.error(`Maximo ${MAX_ROWS} filas`);
         return prev;
       }
-      return [...prev, makeEmptyRow(defaults.current)];
+      const toAdd = Math.min(count, available);
+      const newRows = Array.from({ length: toAdd }, () => makeEmptyRow(defaults.current));
+      if (toAdd < count) {
+        toast.warning(`Solo se agregaron ${toAdd} filas (limite: ${MAX_ROWS})`);
+      }
+      return [...prev, ...newRows];
     });
   }, []);
 
@@ -220,7 +228,6 @@ export default function BatchExpensesPage() {
               if (targetKey == null) continue;
               const idx = updated.findIndex((r) => r._key === targetKey);
               if (idx === -1) continue;
-              // Traducir mensajes de Pydantic a español
               const fieldLabels: Record<string, string> = {
                 expense_category_id: "Categoria",
                 account_id: "Cuenta",
@@ -254,7 +261,7 @@ export default function BatchExpensesPage() {
       const lastRow = rows[rows.length - 1];
       if (lastRow && lastRow._key === rowKey) {
         e.preventDefault();
-        addRow();
+        addRows(1);
       }
     }
   };
@@ -276,16 +283,16 @@ export default function BatchExpensesPage() {
       {/* Global defaults */}
       <div className="bg-white border rounded-lg p-4 mb-4">
         <h3 className="text-sm font-medium text-slate-700 mb-3">Valores por defecto</h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {/* Date */}
-          <div>
+          <div className="min-w-0">
             <label className="text-xs text-slate-500 mb-1 block">Fecha</label>
             <div className="flex gap-1">
               <Input
                 type="date"
                 value={defaultDate}
                 onChange={(e) => setDefaultDate(e.target.value)}
-                className="flex-1"
+                className="flex-1 min-w-0"
               />
               <Button
                 variant="ghost"
@@ -301,10 +308,10 @@ export default function BatchExpensesPage() {
           </div>
 
           {/* Category */}
-          <div>
+          <div className="min-w-0">
             <label className="text-xs text-slate-500 mb-1 block">Categoria</label>
             <div className="flex gap-1">
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <EntitySelect
                   value={defaultCategoryId}
                   onChange={setDefaultCategoryId}
@@ -327,10 +334,10 @@ export default function BatchExpensesPage() {
           </div>
 
           {/* Business Unit */}
-          <div>
+          <div className="min-w-0">
             <label className="text-xs text-slate-500 mb-1 block">Unidad de Negocio</label>
             <div className="flex gap-1">
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <EntitySelect
                   value={defaultBusinessUnitId}
                   onChange={setDefaultBusinessUnitId}
@@ -353,10 +360,10 @@ export default function BatchExpensesPage() {
           </div>
 
           {/* Account */}
-          <div>
+          <div className="min-w-0">
             <label className="text-xs text-slate-500 mb-1 block">Cuenta</label>
             <div className="flex gap-1">
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <EntitySelect
                   value={defaultAccountId}
                   onChange={setDefaultAccountId}
@@ -380,19 +387,46 @@ export default function BatchExpensesPage() {
         </div>
       </div>
 
+      {/* Add rows toolbar */}
+      <div className="flex items-center gap-2 mb-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs"
+          onClick={() => addRows(Number(rowsToAdd))}
+          disabled={rows.length >= MAX_ROWS}
+        >
+          <Plus className="w-3.5 h-3.5 mr-1" />
+          Agregar
+        </Button>
+        <Select value={rowsToAdd} onValueChange={setRowsToAdd}>
+          <SelectTrigger className="w-20 h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1">1 fila</SelectItem>
+            <SelectItem value="3">3 filas</SelectItem>
+            <SelectItem value="5">5 filas</SelectItem>
+            <SelectItem value="10">10 filas</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-slate-400 ml-auto">
+          {rows.length} / {MAX_ROWS} filas
+        </span>
+      </div>
+
       {/* Table */}
       <div className="bg-white border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-slate-50 text-slate-600">
               <th className="px-2 py-2 text-center w-8">#</th>
-              <th className="px-2 py-2 text-left w-32">Monto</th>
-              <th className="px-2 py-2 text-left w-36">Fecha</th>
+              <th className="px-2 py-2 text-left w-32">Fecha</th>
               <th className="px-2 py-2 text-left min-w-[180px]">Categoria</th>
-              <th className="px-2 py-2 text-left min-w-[140px]">UN</th>
-              <th className="px-2 py-2 text-left min-w-[160px]">Cuenta</th>
-              <th className="px-2 py-2 text-left min-w-[180px]">Descripcion</th>
-              <th className="px-2 py-2 text-left w-28">Ref</th>
+              <th className="px-2 py-2 text-left min-w-[120px]">UN</th>
+              <th className="px-2 py-2 text-left min-w-[140px]">Cuenta</th>
+              <th className="px-2 py-2 text-left" style={{ minWidth: 280 }}>Descripcion</th>
+              <th className="px-2 py-2 text-left w-32">Monto</th>
               <th className="px-2 py-2 text-center w-10"></th>
             </tr>
           </thead>
@@ -404,15 +438,6 @@ export default function BatchExpensesPage() {
                 onKeyDown={(e) => handleKeyDown(e, row._key)}
               >
                 <td className="px-2 py-1.5 text-center text-slate-400 text-xs">{idx + 1}</td>
-                <td className="px-2 py-1.5">
-                  <MoneyInput
-                    value={row.amount}
-                    onChange={(v) => updateRow(row._key, "amount", v)}
-                    placeholder="0"
-                    className={`h-8 ${inputCls(row, "amount")}`}
-                  />
-                  {errorMsg(row, "amount")}
-                </td>
                 <td className="px-2 py-1.5">
                   <Input
                     type="date"
@@ -465,12 +490,13 @@ export default function BatchExpensesPage() {
                   {errorMsg(row, "description")}
                 </td>
                 <td className="px-2 py-1.5">
-                  <Input
-                    value={row.reference_number}
-                    onChange={(e) => updateRow(row._key, "reference_number", e.target.value)}
-                    placeholder="Ref"
-                    className="h-8"
+                  <MoneyInput
+                    value={row.amount}
+                    onChange={(v) => updateRow(row._key, "amount", v)}
+                    placeholder="0"
+                    className={`h-8 ${inputCls(row, "amount")}`}
                   />
+                  {errorMsg(row, "amount")}
                 </td>
                 <td className="px-2 py-1.5 text-center">
                   <Button
@@ -488,22 +514,13 @@ export default function BatchExpensesPage() {
           </tbody>
           <tfoot>
             <tr className="border-t bg-slate-50">
-              <td colSpan={2} className="px-2 py-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-xs"
-                  onClick={addRow}
-                  disabled={rows.length >= MAX_ROWS}
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  Agregar fila
-                </Button>
+              <td colSpan={6} className="px-2 py-2 text-right font-semibold text-slate-700">
+                Total:
               </td>
-              <td colSpan={5} className="px-2 py-2 text-right font-semibold text-slate-700">
-                Total: {formatCurrency(total)}
+              <td className="px-2 py-2 font-semibold text-slate-700">
+                {formatCurrency(total)}
               </td>
-              <td colSpan={2}></td>
+              <td></td>
             </tr>
           </tfoot>
         </table>
