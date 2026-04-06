@@ -288,6 +288,8 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 
 40. **Transformation bloquea cancelacion de compra fuente**: `MaterialCostHistory` ahora registra `transformation_out` para el material fuente al transformar. Esto bloquea cancelar compras anteriores cuyo material ya fue transformado (protege integridad del costo promedio). `annul()` tambien verifica y revierte el historial del fuente. 4 source_types: `purchase_liquidation`, `adjustment_increase`, `transformation_in`, `transformation_out`.
 
+41. **Balance histórico por fecha de corte (as_of_date)**: `GET /reports/balance-sheet?as_of_date=YYYY-MM-DD` y `/balance-detailed?as_of_date=...` calculan un snapshot exacto a esa fecha. Sin parámetro = comportamiento actual (fast path). Implementación: 5 helpers históricos (`_get_account_balances_as_of`, `_get_tp_balances_as_of` con 5 fuentes, `_get_inventory_as_of`, `_get_fixed_assets_as_of`, `_get_distributed_profit_as_of`). `_active_at_cutoff()` incluye operaciones canceladas/anuladas post-corte. `MaterialCostHistory.transaction_date` (migración `e3f4g5h6i7j8`) guarda la fecha de negocio para costo promedio histórico exacto. `_calculate_profit` acepta `cutoff_dt` para P&L acumulado. Frontend: date picker compartido via `dateFilterStore.balanceAsOfDate` — persiste entre Balance General y Detallado.
+
 ### Inventory Module — UX Details
 
 - **StockPage**: Manual `<Table>` (no DataTable) con expandable rows por bodega. Filters: Category, Warehouse, Search. Acciones: Trasladar, Ver Movimientos, Ajustar Stock (navegan con `?material_id=`).
