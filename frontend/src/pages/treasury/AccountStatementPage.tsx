@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, FileText, Download } from "lucide-react";
+import { ArrowLeft, FileText, Download, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -97,6 +97,7 @@ export default function AccountStatementPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [viewMode, setViewMode] = useState<"financial" | "operations">("financial");
+  const [limit, setLimit] = useState<number | undefined>(undefined);
 
   const { data: thirdPartiesData } = useThirdParties(undefined, { staleTime: 0 });
   const thirdParties = thirdPartiesData?.items ?? [];
@@ -105,10 +106,13 @@ export default function AccountStatementPage() {
     ...(dateFrom ? { date_from: dateFrom } : {}),
     ...(dateTo ? { date_to: dateTo } : {}),
     ...(viewMode === "operations" ? { view: "operations" } : {}),
+    ...(limit !== undefined ? { limit } : {}),
   };
 
   const { data, isLoading } = useThirdPartyMovements(thirdPartyId, filters);
   const movements: StatementItem[] = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const isTruncated = total > movements.length;
   const openingBalance = data?.opening_balance ?? 0;
 
   // Calcular totales (excluir anulados/cancelados)
@@ -184,18 +188,18 @@ export default function AccountStatementPage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero *</Label>
               <EntitySelect
                 value={thirdPartyId}
-                onChange={setThirdPartyId}
+                onChange={(v) => { setThirdPartyId(v); setLimit(undefined); }}
                 options={thirdParties.map((t) => ({ id: t.id, label: t.name }))}
                 placeholder="Seleccionar tercero..."
               />
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Desde</Label>
-              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setLimit(undefined); }} />
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Hasta</Label>
-              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              <Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setLimit(undefined); }} />
             </div>
           </div>
         </CardContent>
@@ -235,6 +239,17 @@ export default function AccountStatementPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {isTruncated && (
+              <div className="flex items-center justify-between gap-3 mb-4 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>Mostrando {movements.length.toLocaleString("es-CO")} de {total.toLocaleString("es-CO")} movimientos. Ajusta el rango de fechas o usa exportar para verlos todos.</span>
+                </div>
+                <Button size="sm" variant="outline" className="shrink-0 border-amber-300 text-amber-800 hover:bg-amber-100" onClick={() => setLimit(5000)}>
+                  Ver todos
+                </Button>
+              </div>
+            )}
             {isLoading ? (
               <p className="text-sm text-slate-400 py-8 text-center">Cargando...</p>
             ) : movements.length === 0 ? (

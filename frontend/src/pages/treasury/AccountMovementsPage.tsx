@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, FileText, Download } from "lucide-react";
+import { ArrowLeft, FileText, Download, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -61,6 +61,7 @@ export default function AccountMovementsPage() {
   const [accountId, setAccountId] = useState(initialAccount);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [limit, setLimit] = useState<number | undefined>(undefined);
 
   const { data: accountsData } = useMoneyAccounts();
   const accounts = accountsData?.items ?? [];
@@ -68,10 +69,13 @@ export default function AccountMovementsPage() {
   const filters = {
     ...(dateFrom ? { date_from: dateFrom } : {}),
     ...(dateTo ? { date_to: dateTo } : {}),
+    ...(limit !== undefined ? { limit } : {}),
   };
 
   const { data, isLoading } = useAccountMovements(accountId, filters);
   const movements: AccountMovementItem[] = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const isTruncated = total > movements.length;
   const openingBalance = data?.opening_balance ?? null;
 
   const selectedAccount = accounts.find((a) => a.id === accountId);
@@ -132,18 +136,18 @@ export default function AccountMovementsPage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta *</Label>
               <EntitySelect
                 value={accountId}
-                onChange={setAccountId}
+                onChange={(v) => { setAccountId(v); setLimit(undefined); }}
                 options={accounts.map((a) => ({ id: a.id, label: a.name }))}
                 placeholder="Seleccionar cuenta..."
               />
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Desde</Label>
-              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setLimit(undefined); }} />
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Hasta</Label>
-              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              <Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setLimit(undefined); }} />
             </div>
           </div>
         </CardContent>
@@ -183,6 +187,17 @@ export default function AccountMovementsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {isTruncated && (
+              <div className="flex items-center justify-between gap-3 mb-4 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>Mostrando {movements.length.toLocaleString("es-CO")} de {total.toLocaleString("es-CO")} movimientos. Ajusta el rango de fechas o usa exportar para verlos todos.</span>
+                </div>
+                <Button size="sm" variant="outline" className="shrink-0 border-amber-300 text-amber-800 hover:bg-amber-100" onClick={() => setLimit(5000)}>
+                  Ver todos
+                </Button>
+              </div>
+            )}
             {isLoading ? (
               <p className="text-sm text-slate-400 py-8 text-center">Cargando...</p>
             ) : movements.length === 0 ? (

@@ -104,7 +104,7 @@ export function useCreateTpAdjustment() {
   });
 }
 
-export function useAccountMovements(accountId: string, filters: { date_from?: string; date_to?: string } = {}) {
+export function useAccountMovements(accountId: string, filters: { date_from?: string; date_to?: string; limit?: number } = {}) {
   return useQuery({
     queryKey: ["money-movements", "account", accountId, filters],
     queryFn: () => moneyMovementService.getByAccount(accountId, filters),
@@ -113,7 +113,7 @@ export function useAccountMovements(accountId: string, filters: { date_from?: st
   });
 }
 
-export function useThirdPartyMovements(thirdPartyId: string, filters: { date_from?: string; date_to?: string; view?: string } = {}) {
+export function useThirdPartyMovements(thirdPartyId: string, filters: { date_from?: string; date_to?: string; view?: string; limit?: number } = {}) {
   return useQuery({
     queryKey: ["money-movements", "third-party", thirdPartyId, filters],
     queryFn: () => moneyMovementService.getByThirdParty(thirdPartyId, filters),

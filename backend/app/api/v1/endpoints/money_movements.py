@@ -697,7 +697,7 @@ def get_by_number(
 def get_by_account(
     account_id: UUID,
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=5000),
     date_from: Optional[date] = Query(None, description="Fecha desde"),
     date_to: Optional[date] = Query(None, description="Fecha hasta"),
     org_context: dict = Depends(require_permission("treasury.view_accounts")),
@@ -787,7 +787,7 @@ def get_by_account(
 def get_by_third_party(
     third_party_id: UUID,
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=5000),
     date_from: Optional[date] = Query(None, description="Fecha desde"),
     date_to: Optional[date] = Query(None, description="Fecha hasta"),
     view: Optional[str] = Query(None, description="Vista: null=financiera, 'operations'=detalle comercial"),
