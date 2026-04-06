@@ -440,6 +440,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 source_type="purchase_liquidation",
                 source_id=purchase.id,
                 organization_id=organization_id,
+                transaction_date=purchase.date.date() if hasattr(purchase.date, "date") else purchase.date,
             )
 
             if line_commission > 0:

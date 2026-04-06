@@ -7,12 +7,12 @@ Registra cada cambio al current_average_cost para:
 
 Solo previous_cost se usa en reversal. previous_stock/new_stock son solo para auditoria.
 """
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String
+from sqlalchemy import DateTime, Date, ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, GUID
@@ -87,6 +87,13 @@ class MaterialCostHistory(Base, TimestampMixin):
         GUID(),
         nullable=False,
         comment="ID de la compra, ajuste o transformacion que causo el cambio",
+    )
+
+    # Fecha de negocio de la operacion (para costo promedio historico)
+    transaction_date: Mapped[Optional[date]] = mapped_column(
+        Date,
+        nullable=True,
+        comment="Fecha de negocio de la operacion (business date, no timestamp servidor)",
     )
 
     # Relationships

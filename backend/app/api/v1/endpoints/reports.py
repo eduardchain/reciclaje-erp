@@ -103,11 +103,15 @@ def get_cash_flow(
 
 @router.get("/balance-sheet", response_model=BalanceSheetResponse)
 def get_balance_sheet(
+    as_of_date: Optional[date] = Query(None, description="Fecha de corte historica (YYYY-MM-DD). Sin valor = snapshot actual."),
     org_context: dict = Depends(require_any_permission("reports.view", "reports.view_balance")),
     db: Session = Depends(get_db),
 ):
     """
-    Balance General (snapshot actual).
+    Balance General.
+
+    Sin as_of_date: snapshot actual.
+    Con as_of_date: fotografia historica a esa fecha.
 
     Activos = Efectivo + CxC + Inventario
     Pasivos = CxP + Deuda inversores
@@ -116,16 +120,21 @@ def get_balance_sheet(
     return report_service.get_balance_sheet(
         db=db,
         organization_id=org_context["organization_id"],
+        as_of_date=as_of_date,
     )
 
 
 @router.get("/balance-detailed", response_model=BalanceDetailedResponse)
 def get_balance_detailed(
+    as_of_date: Optional[date] = Query(None, description="Fecha de corte historica (YYYY-MM-DD). Sin valor = snapshot actual."),
     org_context: dict = Depends(require_any_permission("reports.view", "reports.view_balance")),
     db: Session = Depends(get_db),
 ):
     """
     Balance General Detallado (desglose por item individual).
+
+    Sin as_of_date: snapshot actual.
+    Con as_of_date: fotografia historica a esa fecha.
 
     Muestra cada cuenta, tercero, material y activo fijo que compone el balance.
     Activos - Pasivos - Patrimonio = 0.
@@ -133,6 +142,7 @@ def get_balance_detailed(
     return report_service.get_balance_detailed(
         db=db,
         organization_id=org_context["organization_id"],
+        as_of_date=as_of_date,
     )
 
 

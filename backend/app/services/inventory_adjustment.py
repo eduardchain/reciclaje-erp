@@ -115,6 +115,7 @@ class CRUDInventoryAdjustment:
             source_type="adjustment_increase",
             source_id=adjustment.id,
             organization_id=organization_id,
+            transaction_date=data.date.date() if hasattr(data.date, "date") else data.date,
         )
 
         # Crear InventoryMovement

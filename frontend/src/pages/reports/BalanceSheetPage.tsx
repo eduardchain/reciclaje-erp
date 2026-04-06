@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { CheckCircle2, AlertTriangle, FileSpreadsheet, FileText } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
@@ -8,9 +9,12 @@ import { formatCurrency, formatDate } from "@/utils/formatters";
 import { exportBalanceSheetExcel } from "@/utils/excelExport";
 import { exportBalanceSheetPDF } from "@/utils/pdfExport";
 import { useAuthStore } from "@/stores/authStore";
+import { useDateFilter } from "@/stores/dateFilterStore";
 
 export default function BalanceSheetPage() {
-  const { data, isLoading } = useBalanceSheet();
+  const today = new Date().toISOString().split("T")[0];
+  const { balanceAsOfDate: asOfDate, setBalanceAsOfDate: setAsOfDate } = useDateFilter();
+  const { data, isLoading } = useBalanceSheet(asOfDate || undefined);
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
 
@@ -22,7 +26,9 @@ export default function BalanceSheetPage() {
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Corte al: {formatDate(data.as_of_date)}</p>
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
+              <Input type="date" value={asOfDate} max={today} onChange={(e) => setAsOfDate(e.target.value)} className="w-40 h-8 text-xs" />
+              {asOfDate && <Button variant="ghost" size="sm" className="text-xs h-8" onClick={() => setAsOfDate("")}>Hoy</Button>}
               <Button variant="outline" size="sm" onClick={() => exportBalanceSheetPDF(data, orgName)}><FileText className="w-4 h-4 mr-1" /> PDF</Button>
               <Button variant="outline" size="sm" onClick={() => exportBalanceSheetExcel(data)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>
             </div>

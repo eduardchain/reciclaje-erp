@@ -211,6 +211,7 @@ class CRUDMaterialTransformation:
             source_type="transformation_out",
             source_id=transformation.id,
             organization_id=organization_id,
+            transaction_date=data.date.date(),
         )
 
         # Crear InventoryMovement de salida
@@ -255,6 +256,7 @@ class CRUDMaterialTransformation:
                 source_type="transformation_in",
                 source_id=transformation.id,
                 organization_id=organization_id,
+                transaction_date=data.date.date(),
             )
 
             # Crear InventoryMovement de entrada

@@ -7,6 +7,7 @@ afectaron el costo del mismo material.
 
 Solo previous_cost se usa en reversal. previous_stock/new_stock son auditoria.
 """
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -31,6 +32,7 @@ class MaterialCostHistoryService:
         source_type: str,
         source_id: UUID,
         organization_id: UUID,
+        transaction_date: Optional[date] = None,
     ) -> Optional[MaterialCostHistory]:
         """
         Registra un cambio de costo en el historial.
@@ -47,6 +49,7 @@ class MaterialCostHistoryService:
             new_stock=new_stock,
             source_type=source_type,
             source_id=source_id,
+            transaction_date=transaction_date,
         )
         db.add(history)
         return history

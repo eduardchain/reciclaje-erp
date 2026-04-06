@@ -30,10 +30,10 @@ export function useCashFlow(params: DateRange) {
   });
 }
 
-export function useBalanceSheet() {
+export function useBalanceSheet(asOfDate?: string) {
   return useQuery({
-    queryKey: ["reports", "balance-sheet"],
-    queryFn: () => reportsService.getBalanceSheet(),
+    queryKey: ["reports", "balance-sheet", asOfDate ?? "today"],
+    queryFn: () => reportsService.getBalanceSheet(asOfDate ? { as_of_date: asOfDate } : undefined),
   });
 }
 
@@ -76,10 +76,10 @@ export function useAuditBalances(enabled: boolean) {
   });
 }
 
-export function useBalanceDetailed() {
+export function useBalanceDetailed(asOfDate?: string) {
   return useQuery({
-    queryKey: ["reports", "balance-detailed"],
-    queryFn: () => reportsService.getBalanceDetailed(),
+    queryKey: ["reports", "balance-detailed", asOfDate ?? "today"],
+    queryFn: () => reportsService.getBalanceDetailed(asOfDate ? { as_of_date: asOfDate } : undefined),
   });
 }
 

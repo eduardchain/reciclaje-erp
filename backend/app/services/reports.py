@@ -9,19 +9,22 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, func, case, cast, Date, exists
+from sqlalchemy import select, func, case, cast, Date, exists, or_, and_
 from sqlalchemy.orm import Session
 
 from app.models.double_entry import DoubleEntry, DoubleEntryLine
 from app.models.expense_category import ExpenseCategory
 from app.models.material import Material, MaterialCategory
+from app.models.material_cost_history import MaterialCostHistory
 from app.models.money_account import MoneyAccount
 from app.models.money_movement import MoneyMovement
 from app.models.purchase import Purchase, PurchaseLine
+from app.models.purchase import PurchaseCommission
 from app.models.sale import Sale, SaleLine
 from app.models.third_party import ThirdParty
 from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
-from app.models.fixed_asset import FixedAsset
+from app.models.fixed_asset import FixedAsset, AssetDepreciation
+from app.models.inventory_movement import InventoryMovement
 from app.models.business_unit import BusinessUnit
 
 from app.models.sale import SaleCommission
@@ -239,8 +242,12 @@ class ReportService:
         organization_id: UUID,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
+        cutoff_dt: Optional[datetime] = None,
     ) -> dict:
         """Calcula componentes de P&L. Sin fechas = acumulado historico.
+
+        cutoff_dt: si se pasa, usa _active_at_cutoff para incluir operaciones
+        canceladas/anuladas despues del corte (snapshot historico).
 
         Retorna dict con: sales_revenue, sales_count, cogs, de_profit, de_count,
         transformation_profit, transformation_count, service_income,
@@ -254,7 +261,7 @@ class ReportService:
         # 1. Sales Revenue (ventas normales, excluye DE)
         sale_filters = [
             Sale.organization_id == organization_id,
-            Sale.status == "liquidated",
+            self._active_at_cutoff(Sale.status, Sale.cancelled_at, cutoff_dt),
             Sale.double_entry_id.is_(None),
         ]
         if has_dates:
@@ -272,7 +279,7 @@ class ReportService:
         # 2. COGS (metodo directo)
         cogs_filters = [
             Sale.organization_id == organization_id,
-            Sale.status == "liquidated",
+            self._active_at_cutoff(Sale.status, Sale.cancelled_at, cutoff_dt),
             Sale.double_entry_id.is_(None),
         ]
         if has_dates:
@@ -290,7 +297,7 @@ class ReportService:
         # 3. Double Entry Profit (via DoubleEntryLine)
         de_filters = [
             DoubleEntry.organization_id == organization_id,
-            DoubleEntry.status == "liquidated",
+            self._active_at_cutoff(DoubleEntry.status, DoubleEntry.cancelled_at, cutoff_dt),
         ]
         if has_dates:
             de_filters += [DoubleEntry.date >= date_from, DoubleEntry.date <= date_to]
@@ -318,7 +325,7 @@ class ReportService:
 
         trans_filters = [
             MaterialTransformation.organization_id == organization_id,
-            MaterialTransformation.status == "confirmed",
+            self._active_at_cutoff(MaterialTransformation.status, MaterialTransformation.annulled_at, cutoff_dt, "confirmed", "annulled"),
             MaterialTransformation.value_difference.isnot(None),
         ]
         if has_dates:
@@ -336,7 +343,7 @@ class ReportService:
         # 3.6 Perdida por merma en transformaciones
         waste_filters = [
             MaterialTransformation.organization_id == organization_id,
-            MaterialTransformation.status == "confirmed",
+            self._active_at_cutoff(MaterialTransformation.status, MaterialTransformation.annulled_at, cutoff_dt, "confirmed", "annulled"),
             MaterialTransformation.waste_value > 0,
         ]
         if has_dates:
@@ -354,7 +361,7 @@ class ReportService:
 
         adj_filters = [
             InventoryAdjustment.organization_id == organization_id,
-            InventoryAdjustment.status == "confirmed",
+            self._active_at_cutoff(InventoryAdjustment.status, InventoryAdjustment.annulled_at, cutoff_dt, "confirmed", "annulled"),
         ]
         if has_dates:
             adj_filters += [InventoryAdjustment.date >= dt_from, InventoryAdjustment.date < dt_to]
@@ -376,7 +383,7 @@ class ReportService:
         # 4. Ajustes de terceros (perdida/ganancia)
         tp_adj_filters = [
             MoneyMovement.organization_id == organization_id,
-            MoneyMovement.status == "confirmed",
+            self._active_at_cutoff(MoneyMovement.status, MoneyMovement.annulled_at, cutoff_dt, "confirmed", "annulled"),
             MoneyMovement.movement_type.in_(["tp_adjustment_credit", "tp_adjustment_debit"]),
         ]
         if has_dates:
@@ -401,7 +408,7 @@ class ReportService:
         # 5. Service income + expenses by category + commissions
         mm_filters = [
             MoneyMovement.organization_id == organization_id,
-            MoneyMovement.status == "confirmed",
+            self._active_at_cutoff(MoneyMovement.status, MoneyMovement.annulled_at, cutoff_dt, "confirmed", "annulled"),
             MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "commission_accrual", "service_income"]),
         ]
         if has_dates:
@@ -645,6 +652,16 @@ class ReportService:
         self,
         db: Session,
         organization_id: UUID,
+        as_of_date: Optional[date] = None,
+    ) -> BalanceSheetResponse:
+        if as_of_date is not None:
+            return self._get_balance_sheet_historical(db, organization_id, as_of_date)
+        return self._get_balance_sheet_current(db, organization_id)
+
+    def _get_balance_sheet_current(
+        self,
+        db: Session,
+        organization_id: UUID,
     ) -> BalanceSheetResponse:
         # Activos
         cash_and_bank = Decimal(str(
@@ -773,6 +790,126 @@ class ReportService:
             distributed_profit=float(distributed_profit),
         )
 
+    def _get_balance_sheet_historical(
+        self,
+        db: Session,
+        organization_id: UUID,
+        as_of_date: date,
+    ) -> BalanceSheetResponse:
+        """Balance Sheet calculado a una fecha de corte historica."""
+        cutoff_dt = datetime.combine(as_of_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+
+        # Activos: cuentas
+        account_balances = self._get_account_balances_as_of(db, organization_id, cutoff_dt)
+        cash_and_bank = sum(account_balances.values(), Decimal("0"))
+
+        # Activos: inventario
+        inventory_by_mat = self._get_inventory_as_of(db, organization_id, cutoff_dt)
+        inventory = sum((stock * avg_cost for stock, avg_cost in inventory_by_mat.values()), Decimal("0"))
+
+        # Activos fijos
+        fixed_assets_value = self._get_fixed_assets_as_of(db, organization_id, cutoff_dt)
+
+        # Terceros historicos
+        tp_balances = self._get_tp_balances_as_of(db, organization_id, cutoff_dt)
+
+        # Pre-cargar metadatos de terceros
+        tp_behaviors, tp_cat_names, _ = self._load_tp_behavior_map(db, organization_id)
+        tp_objs = {
+            tp.id: tp for tp in db.scalars(
+                select(ThirdParty).where(
+                    ThirdParty.organization_id == organization_id,
+                    ThirdParty.is_active == True,
+                )
+            ).all()
+        }
+
+        ASSET_SECTIONS = {
+            "customers_receivable", "supplier_advances", "service_provider_advances",
+            "liability_advances", "investor_receivable", "provision_funds",
+            "prepaid_expenses", "generic_receivable",
+        }
+        LIABILITY_SECTIONS = {
+            "suppliers_payable", "service_provider_payable", "liability_debt",
+            "investors_partners", "investors_obligations", "investors_legacy",
+            "customer_advances", "provision_obligations", "generic_payable",
+        }
+
+        from collections import defaultdict
+        tp_buckets: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        for tp_id, balance in tp_balances.items():
+            tp = tp_objs.get(tp_id)
+            if tp is None:
+                continue
+            behaviors = tp_behaviors.get(tp_id, set())
+            cat_names = tp_cat_names.get(tp_id, set())
+            section = self._classify_tp_by_balance(tp, balance, behaviors, cat_names)
+            if section in ASSET_SECTIONS:
+                tp_buckets[section] += abs(balance) if section == "provision_funds" else balance
+            elif section in LIABILITY_SECTIONS:
+                tp_buckets[section] += abs(balance)
+
+        accounts_receivable = tp_buckets["customers_receivable"]
+        advances = (tp_buckets["supplier_advances"] + tp_buckets["service_provider_advances"]
+                    + tp_buckets["liability_advances"] + tp_buckets["generic_receivable"])
+        investor_receivable = tp_buckets["investor_receivable"]
+        prepaid_expenses = tp_buckets["prepaid_expenses"]
+        provision_funds = tp_buckets["provision_funds"]
+
+        total_assets = (cash_and_bank + accounts_receivable + inventory + advances
+                        + investor_receivable + prepaid_expenses + provision_funds + fixed_assets_value)
+
+        accounts_payable = tp_buckets["suppliers_payable"]
+        investor_debt = (tp_buckets["investors_partners"] + tp_buckets["investors_obligations"]
+                        + tp_buckets["investors_legacy"])
+        liability_debt = tp_buckets["liability_debt"]
+        service_provider_payable = tp_buckets["service_provider_payable"]
+        customer_advances = tp_buckets["customer_advances"]
+        provision_obligations = tp_buckets["provision_obligations"]
+        generic_payable = tp_buckets["generic_payable"]
+
+        total_liabilities = (accounts_payable + investor_debt + liability_debt
+                             + service_provider_payable + customer_advances
+                             + provision_obligations + generic_payable)
+        equity = total_assets - total_liabilities
+
+        accumulated_profit = self._calculate_profit(
+            db, organization_id,
+            date_from=date(1970, 1, 1), date_to=as_of_date,
+            cutoff_dt=cutoff_dt,
+        )["net_profit"]
+        distributed_profit = self._get_distributed_profit_as_of(db, organization_id, cutoff_dt)
+
+        return BalanceSheetResponse(
+            as_of_date=as_of_date,
+            assets=BalanceSheetAssets(
+                cash_and_bank=float(cash_and_bank),
+                accounts_receivable=float(accounts_receivable),
+                inventory=float(inventory),
+                advances=float(advances),
+                investor_receivable=float(investor_receivable),
+                prepaid_expenses=float(prepaid_expenses),
+                provision_funds=float(provision_funds),
+                fixed_assets=float(fixed_assets_value),
+                total=float(total_assets),
+            ),
+            total_assets=float(total_assets),
+            liabilities=BalanceSheetLiabilities(
+                accounts_payable=float(accounts_payable),
+                investor_debt=float(investor_debt),
+                liability_debt=float(liability_debt),
+                service_provider_payable=float(service_provider_payable),
+                customer_advances=float(customer_advances),
+                provision_obligations=float(provision_obligations),
+                generic_payable=float(generic_payable),
+                total=float(total_liabilities),
+            ),
+            total_liabilities=float(total_liabilities),
+            equity=float(equity),
+            accumulated_profit=float(accumulated_profit),
+            distributed_profit=float(distributed_profit),
+        )
+
     # ------------------------------------------------------------------
     # Balance Detallado
     # ------------------------------------------------------------------
@@ -781,8 +918,11 @@ class ReportService:
         self,
         db: Session,
         organization_id: UUID,
+        as_of_date: Optional[date] = None,
     ) -> BalanceDetailedResponse:
         """Balance general desglosado por item individual."""
+        if as_of_date is not None:
+            return self._get_balance_detailed_historical(db, organization_id, as_of_date)
 
         def _section(
             label: str,
@@ -961,6 +1101,169 @@ class ReportService:
             ),
         )
 
+    def _get_balance_detailed_historical(
+        self,
+        db: Session,
+        organization_id: UUID,
+        as_of_date: date,
+    ) -> BalanceDetailedResponse:
+        """Balance Detallado calculado a una fecha de corte historica."""
+        cutoff_dt = datetime.combine(as_of_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+
+        # Pre-cargar metadatos de terceros
+        tp_behaviors, tp_cat_names, tp_cat_by_behavior = self._load_tp_behavior_map(db, organization_id)
+        tp_objs = {
+            tp.id: tp for tp in db.scalars(
+                select(ThirdParty).where(
+                    ThirdParty.organization_id == organization_id,
+                    ThirdParty.is_active == True,
+                )
+            ).all()
+        }
+
+        def _section(
+            label: str,
+            items: list[BalanceDetailedItem],
+            section_key: str | None = None,
+        ) -> BalanceDetailedSection:
+            total = sum(i.balance for i in items)
+            groups = None
+            if section_key:
+                groups = self._group_by_category(
+                    items, section_key, tp_cat_by_behavior, self.SECTION_BEHAVIORS,
+                )
+            return BalanceDetailedSection(
+                label=label, total=round(total, 2), items=items, groups=groups,
+            )
+
+        # 1. Cuentas de dinero
+        account_balances = self._get_account_balances_as_of(db, organization_id, cutoff_dt)
+        acc_objs = {a.id: a for a in db.scalars(
+            select(MoneyAccount).where(
+                MoneyAccount.organization_id == organization_id,
+                MoneyAccount.is_active == True,
+            )
+        ).all()}
+        cash_items = [
+            BalanceDetailedItem(
+                id=str(acc_id), name=acc_objs[acc_id].name,
+                balance=float(bal),
+                account_type=acc_objs[acc_id].account_type,
+            )
+            for acc_id, bal in account_balances.items()
+            if acc_id in acc_objs
+        ]
+
+        # 2. Inventario historico
+        inventory_by_mat = self._get_inventory_as_of(db, organization_id, cutoff_dt)
+        mat_objs = {m.id: m for m in db.scalars(
+            select(Material).where(
+                Material.organization_id == organization_id,
+                Material.is_active == True,
+            )
+        ).all()}
+        inv_liq_items = [
+            BalanceDetailedItem(
+                id=str(mat_id),
+                name=mat_objs[mat_id].name if mat_id in mat_objs else str(mat_id),
+                code=mat_objs[mat_id].code if mat_id in mat_objs else None,
+                stock=float(stock),
+                avg_cost=float(avg_cost),
+                balance=round(float(stock * avg_cost), 2),
+            )
+            for mat_id, (stock, avg_cost) in inventory_by_mat.items()
+        ]
+
+        # 3. Activos fijos historicos
+        fa_items = self._get_fixed_assets_detailed_as_of(db, organization_id, cutoff_dt)
+
+        # 4. Terceros historicos
+        tp_balances = self._get_tp_balances_as_of(db, organization_id, cutoff_dt)
+
+        tp_buckets: dict[str, list[BalanceDetailedItem]] = {
+            "customers_receivable": [], "supplier_advances": [],
+            "service_provider_advances": [], "liability_advances": [],
+            "investor_receivable": [], "provision_funds": [],
+            "prepaid_expenses": [], "generic_receivable": [],
+            "suppliers_payable": [], "service_provider_payable": [],
+            "liability_debt": [], "investors_partners": [],
+            "investors_obligations": [], "investors_legacy": [],
+            "customer_advances": [], "provision_obligations": [], "generic_payable": [],
+        }
+        for tp_id, balance in tp_balances.items():
+            tp = tp_objs.get(tp_id)
+            if tp is None:
+                continue
+            behaviors = tp_behaviors.get(tp_id, set())
+            cat_names = tp_cat_names.get(tp_id, set())
+            section = self._classify_tp_by_balance(tp, balance, behaviors, cat_names)
+            if section and section in tp_buckets:
+                tp_buckets[section].append(BalanceDetailedItem(
+                    id=str(tp_id), name=tp.name,
+                    balance=abs(float(balance)),
+                ))
+
+        assets: dict[str, BalanceDetailedSection] = {}
+        asset_sections = [
+            ("cash_and_bank", "Efectivo y Bancos", cash_items),
+            ("inventory_liquidated", "Inventario Liquidado", inv_liq_items),
+            ("customers_receivable", "CxC Clientes", tp_buckets["customers_receivable"]),
+            ("supplier_advances", "Anticipos a Proveedores Material", tp_buckets["supplier_advances"]),
+            ("service_provider_advances", "Anticipos a Proveedores Servicios", tp_buckets["service_provider_advances"]),
+            ("liability_advances", "Anticipos a Pasivos", tp_buckets["liability_advances"]),
+            ("investor_receivable", "CxC Inversionistas", tp_buckets["investor_receivable"]),
+            ("provision_funds", "Fondos en Provisiones", tp_buckets["provision_funds"]),
+            ("prepaid_expenses", "Gastos Prepagados", tp_buckets["prepaid_expenses"]),
+            ("generic_receivable", "Otras Cuentas por Cobrar", tp_buckets["generic_receivable"]),
+            ("fixed_assets", "Activos Fijos", fa_items),
+        ]
+        for key, label, items in asset_sections:
+            assets[key] = _section(label, items, section_key=key)
+
+        total_assets = round(sum(s.total for s in assets.values()), 2)
+
+        liabilities: dict[str, BalanceDetailedSection] = {}
+        liability_sections = [
+            ("suppliers_payable", "CxP Proveedores Material", tp_buckets["suppliers_payable"]),
+            ("service_provider_payable", "CxP Proveedores Servicios", tp_buckets["service_provider_payable"]),
+            ("liability_debt", "CxP Pasivos", tp_buckets["liability_debt"]),
+            ("investors_partners", "Socios", tp_buckets["investors_partners"]),
+            ("investors_obligations", "Obligaciones Financieras", tp_buckets["investors_obligations"]),
+            ("investors_legacy", "Inversionistas", tp_buckets["investors_legacy"]),
+            ("customer_advances", "Anticipos de Clientes", tp_buckets["customer_advances"]),
+            ("provision_obligations", "Obligaciones Provisiones", tp_buckets["provision_obligations"]),
+            ("generic_payable", "Otras Cuentas por Pagar", tp_buckets["generic_payable"]),
+        ]
+        for key, label, items in liability_sections:
+            liabilities[key] = _section(label, items, section_key=key)
+
+        total_liabilities = round(sum(s.total for s in liabilities.values()), 2)
+        equity = round(total_assets - total_liabilities, 2)
+        verification_result = round(total_assets - total_liabilities - equity, 2)
+
+        accumulated_profit = float(self._calculate_profit(
+            db, organization_id,
+            date_from=date(1970, 1, 1), date_to=as_of_date,
+            cutoff_dt=cutoff_dt,
+        )["net_profit"])
+        distributed_profit = float(self._get_distributed_profit_as_of(db, organization_id, cutoff_dt))
+
+        return BalanceDetailedResponse(
+            as_of_date=as_of_date,
+            assets=assets,
+            total_assets=total_assets,
+            liabilities=liabilities,
+            total_liabilities=total_liabilities,
+            equity=equity,
+            accumulated_profit=accumulated_profit,
+            distributed_profit=distributed_profit,
+            verification=BalanceDetailedVerification(
+                formula="Activos - Pasivos - Patrimonio",
+                result=verification_result,
+                is_balanced=verification_result == 0,
+            ),
+        )
+
     @staticmethod
     def _classify_third_party(
         tp: ThirdParty,
@@ -1069,6 +1372,440 @@ class ReportService:
             result.append(BalanceDetailedGroup(label=label, total=total, items=group_items))
         result.sort(key=lambda g: (g.label == "Sin Categoría", -g.total))
         return result
+
+    @staticmethod
+    def _active_at_cutoff(
+        status_col,
+        cancelled_col,
+        cutoff_dt: Optional[datetime],
+        active_status: str = "liquidated",
+        inactive_status: str = "cancelled",
+    ):
+        """Filtro universal para operaciones activas en una fecha de corte.
+
+        Sin cutoff_dt → filtro normal de estado activo.
+        Con cutoff_dt → incluye operaciones canceladas/anuladas DESPUES del corte
+        (estaban activas en la fecha de snapshot).
+        """
+        if cutoff_dt is None:
+            return status_col == active_status
+        return or_(
+            status_col == active_status,
+            and_(status_col == inactive_status, cancelled_col >= cutoff_dt),
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers de balance historico (as_of_date)
+    # ------------------------------------------------------------------
+
+    def _get_account_balances_as_of(
+        self,
+        db: Session,
+        organization_id: UUID,
+        cutoff_dt: datetime,
+    ) -> dict[UUID, Decimal]:
+        """Saldo de cada cuenta activa a la fecha de corte."""
+        accounts = db.scalars(
+            select(MoneyAccount).where(
+                MoneyAccount.organization_id == organization_id,
+                MoneyAccount.is_active == True,
+            )
+        ).all()
+
+        result: dict[UUID, Decimal] = {}
+        for acc in accounts:
+            delta = db.scalar(
+                select(func.coalesce(func.sum(
+                    case(
+                        *[
+                            (MoneyMovement.movement_type == mt, MoneyMovement.amount * direction)
+                            for mt, direction in ACCOUNT_BALANCE_DIRECTION.items()
+                        ],
+                        else_=Decimal("0"),
+                    )
+                ), Decimal("0")))
+                .where(
+                    MoneyMovement.account_id == acc.id,
+                    MoneyMovement.date < cutoff_dt,
+                    self._active_at_cutoff(
+                        MoneyMovement.status, MoneyMovement.annulled_at,
+                        cutoff_dt, "confirmed", "annulled",
+                    ),
+                )
+            ) or Decimal("0")
+            balance = Decimal(str(acc.initial_balance)) + Decimal(str(delta))
+            if balance != 0:
+                result[acc.id] = balance
+        return result
+
+    def _get_tp_balances_as_of(
+        self,
+        db: Session,
+        organization_id: UUID,
+        cutoff_dt: datetime,
+    ) -> dict[UUID, Decimal]:
+        """Saldo de cada tercero a la fecha de corte (5 fuentes)."""
+        from collections import defaultdict
+        balances: dict[UUID, Decimal] = defaultdict(Decimal)
+
+        # Base: initial_balance de cada tercero
+        tps = db.scalars(
+            select(ThirdParty).where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.is_active == True,
+            )
+        ).all()
+        for tp in tps:
+            balances[tp.id] += Decimal(str(tp.initial_balance))
+
+        # Fuente 1: MoneyMovements
+        mm_rows = db.execute(
+            select(
+                MoneyMovement.third_party_id,
+                MoneyMovement.movement_type,
+                func.sum(MoneyMovement.amount),
+            ).where(
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.third_party_id.isnot(None),
+                MoneyMovement.date < cutoff_dt,
+                self._active_at_cutoff(
+                    MoneyMovement.status, MoneyMovement.annulled_at,
+                    cutoff_dt, "confirmed", "annulled",
+                ),
+            ).group_by(MoneyMovement.third_party_id, MoneyMovement.movement_type)
+        ).all()
+
+        for tp_id, mt, total in mm_rows:
+            direction = THIRD_PARTY_BALANCE_DIRECTION.get(mt, 0)
+            if direction != 0:
+                balances[tp_id] += Decimal(str(total)) * direction
+
+        # Fuente 2: Compras liquidadas al corte (incluye DPs)
+        purchase_rows = db.execute(
+            select(
+                Purchase.supplier_id,
+                func.sum(Purchase.total_amount),
+            ).where(
+                Purchase.organization_id == organization_id,
+                Purchase.liquidated_at < cutoff_dt,
+                self._active_at_cutoff(
+                    Purchase.status, Purchase.cancelled_at, cutoff_dt,
+                ),
+            ).group_by(Purchase.supplier_id)
+        ).all()
+        for tp_id, total in purchase_rows:
+            balances[tp_id] -= Decimal(str(total))
+
+        # Fuente 3: Ventas liquidadas al corte (incluye DPs)
+        sale_rows = db.execute(
+            select(
+                Sale.customer_id,
+                func.sum(Sale.total_amount),
+            ).where(
+                Sale.organization_id == organization_id,
+                Sale.liquidated_at < cutoff_dt,
+                self._active_at_cutoff(
+                    Sale.status, Sale.cancelled_at, cutoff_dt,
+                ),
+            ).group_by(Sale.customer_id)
+        ).all()
+        for tp_id, total in sale_rows:
+            balances[tp_id] += Decimal(str(total))
+
+        # Fuente 4: Comisiones de compra
+        purchase_comm_rows = db.execute(
+            select(
+                PurchaseCommission.third_party_id,
+                func.sum(PurchaseCommission.commission_amount),
+            ).join(Purchase, PurchaseCommission.purchase_id == Purchase.id)
+            .where(
+                Purchase.organization_id == organization_id,
+                Purchase.liquidated_at < cutoff_dt,
+                self._active_at_cutoff(
+                    Purchase.status, Purchase.cancelled_at, cutoff_dt,
+                ),
+            ).group_by(PurchaseCommission.third_party_id)
+        ).all()
+        for tp_id, total in purchase_comm_rows:
+            balances[tp_id] -= Decimal(str(total))
+
+        # Fuente 5: Comisiones de venta standalone (sin double_entry_id en la venta)
+        # Excluir las que tienen commission_accrual MM activo al corte (evitar doble conteo)
+        accrual_sale_ids = db.scalars(
+            select(MoneyMovement.sale_id).where(
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.movement_type == "commission_accrual",
+                MoneyMovement.sale_id.isnot(None),
+                MoneyMovement.date < cutoff_dt,
+                self._active_at_cutoff(
+                    MoneyMovement.status, MoneyMovement.annulled_at,
+                    cutoff_dt, "confirmed", "annulled",
+                ),
+            )
+        ).all()
+        accrual_sale_ids_set = set(accrual_sale_ids)
+
+        sale_comm_rows = db.execute(
+            select(
+                SaleCommission.third_party_id,
+                func.sum(SaleCommission.commission_amount),
+            ).join(Sale, SaleCommission.sale_id == Sale.id)
+            .where(
+                Sale.organization_id == organization_id,
+                Sale.double_entry_id.is_(None),
+                Sale.liquidated_at < cutoff_dt,
+                self._active_at_cutoff(
+                    Sale.status, Sale.cancelled_at, cutoff_dt,
+                ),
+                ~SaleCommission.sale_id.in_(accrual_sale_ids_set) if accrual_sale_ids_set else True,
+            ).group_by(SaleCommission.third_party_id)
+        ).all()
+        for tp_id, total in sale_comm_rows:
+            balances[tp_id] -= Decimal(str(total))
+
+        return {k: v for k, v in balances.items() if v != 0}
+
+    def _get_inventory_as_of(
+        self,
+        db: Session,
+        organization_id: UUID,
+        cutoff_dt: datetime,
+    ) -> dict[UUID, tuple[Decimal, Decimal]]:
+        """Stock liquidado y costo promedio por material a la fecha de corte.
+
+        Returns dict[material_id, (stock, avg_cost)]
+        Excluye:
+        - Compras registradas (unit_cost=0, solo transito)
+        - Ventas no liquidadas al corte
+        """
+        cutoff_date = cutoff_dt.date()
+
+        # Movimientos de inventario hasta el corte
+        # Excluir compras en transito (unit_cost=0 + reference_type='purchase' sin venta liquidada)
+        # y ventas aun no liquidadas al corte
+        movement_rows = db.execute(
+            select(
+                InventoryMovement.material_id,
+                func.sum(InventoryMovement.quantity),
+            ).where(
+                InventoryMovement.organization_id == organization_id,
+                InventoryMovement.date < cutoff_dt,
+                # Excluir compras en transito (unit_cost = 0)
+                or_(
+                    InventoryMovement.movement_type != "purchase",
+                    InventoryMovement.unit_cost != 0,
+                ),
+                # Excluir ventas no liquidadas al corte
+                ~and_(
+                    InventoryMovement.movement_type == "sale",
+                    InventoryMovement.reference_type == "sale",
+                    exists(
+                        select(Sale.id).where(
+                            Sale.id == InventoryMovement.reference_id,
+                            ~self._active_at_cutoff(
+                                Sale.status, Sale.cancelled_at, cutoff_dt,
+                            ),
+                        )
+                    ),
+                ),
+            ).group_by(InventoryMovement.material_id)
+        ).all()
+
+        stock_by_mat: dict[UUID, Decimal] = {
+            mat_id: Decimal(str(qty))
+            for mat_id, qty in movement_rows
+            if qty and Decimal(str(qty)) != 0
+        }
+
+        # Costo promedio historico via MaterialCostHistory.transaction_date
+        # Ultimo registro con transaction_date <= corte
+        cost_by_mat: dict[UUID, Decimal] = {}
+        if stock_by_mat:
+            cost_rows = db.execute(
+                select(
+                    MaterialCostHistory.material_id,
+                    MaterialCostHistory.new_cost,
+                ).distinct(MaterialCostHistory.material_id)
+                .where(
+                    MaterialCostHistory.organization_id == organization_id,
+                    MaterialCostHistory.material_id.in_(list(stock_by_mat.keys())),
+                    MaterialCostHistory.transaction_date <= cutoff_date,
+                ).order_by(
+                    MaterialCostHistory.material_id,
+                    MaterialCostHistory.transaction_date.desc(),
+                    MaterialCostHistory.created_at.desc(),
+                )
+            ).all()
+            for mat_id, cost in cost_rows:
+                if mat_id not in cost_by_mat:
+                    cost_by_mat[mat_id] = Decimal(str(cost))
+
+            # Fallback: para materiales sin historial al corte, usar previous_cost del primer registro posterior
+            missing = [mid for mid in stock_by_mat if mid not in cost_by_mat]
+            if missing:
+                fallback_rows = db.execute(
+                    select(
+                        MaterialCostHistory.material_id,
+                        MaterialCostHistory.previous_cost,
+                    ).distinct(MaterialCostHistory.material_id)
+                    .where(
+                        MaterialCostHistory.organization_id == organization_id,
+                        MaterialCostHistory.material_id.in_(missing),
+                    ).order_by(
+                        MaterialCostHistory.material_id,
+                        MaterialCostHistory.transaction_date.asc(),
+                        MaterialCostHistory.created_at.asc(),
+                    )
+                ).all()
+                for mat_id, cost in fallback_rows:
+                    if mat_id not in cost_by_mat:
+                        cost_by_mat[mat_id] = Decimal(str(cost))
+
+        result: dict[UUID, tuple[Decimal, Decimal]] = {}
+        for mat_id, stock in stock_by_mat.items():
+            avg_cost = cost_by_mat.get(mat_id, Decimal("0"))
+            if stock != 0:
+                result[mat_id] = (stock, avg_cost)
+        return result
+
+    def _get_fixed_assets_as_of(
+        self,
+        db: Session,
+        organization_id: UUID,
+        cutoff_dt: datetime,
+    ) -> Decimal:
+        """Valor total de activos fijos a la fecha de corte."""
+        cutoff_date = (cutoff_dt - timedelta(days=1)).date()
+        assets = db.scalars(
+            select(FixedAsset).where(
+                FixedAsset.organization_id == organization_id,
+                FixedAsset.purchase_date <= cutoff_date,
+                FixedAsset.status.notin_(["disposed", "cancelled"]),
+            )
+        ).all()
+
+        total = Decimal("0")
+        for fa in assets:
+            # Ultima depreciacion aplicada antes del corte
+            last_dep = db.scalar(
+                select(AssetDepreciation.current_value_after)
+                .where(
+                    AssetDepreciation.fixed_asset_id == fa.id,
+                    AssetDepreciation.applied_at < cutoff_dt,
+                ).order_by(AssetDepreciation.applied_at.desc())
+                .limit(1)
+            )
+            value = Decimal(str(last_dep)) if last_dep is not None else Decimal(str(fa.purchase_value))
+            total += value
+        return total
+
+    def _get_fixed_assets_detailed_as_of(
+        self,
+        db: Session,
+        organization_id: UUID,
+        cutoff_dt: datetime,
+    ) -> list[BalanceDetailedItem]:
+        """Items de activos fijos para Balance Detallado historico."""
+        cutoff_date = (cutoff_dt - timedelta(days=1)).date()
+        assets = db.scalars(
+            select(FixedAsset).where(
+                FixedAsset.organization_id == organization_id,
+                FixedAsset.purchase_date <= cutoff_date,
+                FixedAsset.status.notin_(["disposed", "cancelled"]),
+            )
+        ).all()
+
+        items = []
+        for fa in assets:
+            last_dep = db.scalar(
+                select(AssetDepreciation.current_value_after)
+                .where(
+                    AssetDepreciation.fixed_asset_id == fa.id,
+                    AssetDepreciation.applied_at < cutoff_dt,
+                ).order_by(AssetDepreciation.applied_at.desc())
+                .limit(1)
+            )
+            current_value = Decimal(str(last_dep)) if last_dep is not None else Decimal(str(fa.purchase_value))
+            if current_value > 0:
+                # Depreciacion acumulada historica
+                acc_dep = Decimal(str(fa.purchase_value)) - current_value
+                items.append(BalanceDetailedItem(
+                    id=str(fa.id), name=fa.name,
+                    current_value=float(current_value),
+                    purchase_value=float(fa.purchase_value),
+                    accumulated_depreciation=float(acc_dep),
+                    balance=float(current_value),
+                ))
+        return items
+
+    def _get_distributed_profit_as_of(
+        self,
+        db: Session,
+        organization_id: UUID,
+        cutoff_dt: datetime,
+    ) -> Decimal:
+        """Total de utilidades distribuidas hasta la fecha de corte."""
+        val = db.scalar(
+            select(func.coalesce(func.sum(MoneyMovement.amount), 0))
+            .where(
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.movement_type == "profit_distribution",
+                MoneyMovement.date < cutoff_dt,
+                self._active_at_cutoff(
+                    MoneyMovement.status, MoneyMovement.annulled_at,
+                    cutoff_dt, "confirmed", "annulled",
+                ),
+            )
+        )
+        return Decimal(str(val))
+
+    @staticmethod
+    def _classify_tp_by_balance(
+        tp: ThirdParty,
+        balance: Decimal,
+        behavior_types: set[str],
+        category_names: set[str],
+    ) -> str | None:
+        """Como _classify_third_party pero usa balance externo (historico)."""
+        bal = float(balance)
+        if bal == 0:
+            return None
+        if tp.is_system_entity and bal > 0:
+            return "prepaid_expenses"
+        if "provision" in behavior_types:
+            return "provision_funds" if bal < 0 else "provision_obligations"
+        if bal > 0:
+            if "customer" in behavior_types:
+                return "customers_receivable"
+            if "investor" in behavior_types:
+                return "investor_receivable"
+            if "material_supplier" in behavior_types:
+                return "supplier_advances"
+            if "service_provider" in behavior_types:
+                return "service_provider_advances"
+            if "liability" in behavior_types:
+                return "liability_advances"
+            if "generic" in behavior_types:
+                return "generic_receivable"
+        else:
+            if "material_supplier" in behavior_types:
+                return "suppliers_payable"
+            if "service_provider" in behavior_types:
+                return "service_provider_payable"
+            if "liability" in behavior_types:
+                return "liability_debt"
+            if "investor" in behavior_types:
+                lowered = {n.lower() for n in category_names}
+                if any("socio" in n for n in lowered):
+                    return "investors_partners"
+                if any("obligaci" in n for n in lowered):
+                    return "investors_obligations"
+                return "investors_legacy"
+            if "customer" in behavior_types:
+                return "customer_advances"
+            if "generic" in behavior_types:
+                return "generic_payable"
+        return None
 
     # ------------------------------------------------------------------
     # Purchase Report

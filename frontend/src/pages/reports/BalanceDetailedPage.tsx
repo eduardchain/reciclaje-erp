@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { ChevronRight, ChevronDown, Expand, Shrink, FileSpreadsheet, FileText, CheckCircle2 } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
@@ -10,6 +11,7 @@ import { formatCurrency, formatDate } from "@/utils/formatters";
 import { exportBalanceDetailedExcel } from "@/utils/excelExport";
 import { exportBalanceDetailedPDF } from "@/utils/pdfExport";
 import { useAuthStore } from "@/stores/authStore";
+import { useDateFilter } from "@/stores/dateFilterStore";
 import type { BalanceDetailedSection, BalanceDetailedItem, BalanceDetailedGroup } from "@/types/reports";
 
 const ASSET_SECTION_ORDER = [
@@ -58,7 +60,9 @@ function ItemDetail({ item, sectionKey }: { item: BalanceDetailedItem; sectionKe
 }
 
 export default function BalanceDetailedPage() {
-  const { data, isLoading } = useBalanceDetailed();
+  const today = new Date().toISOString().split("T")[0];
+  const { balanceAsOfDate: asOfDate, setBalanceAsOfDate: setAsOfDate } = useDateFilter();
+  const { data, isLoading } = useBalanceDetailed(asOfDate || undefined);
   const navigate = useNavigate();
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
@@ -191,7 +195,9 @@ export default function BalanceDetailedPage() {
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
               Corte al: {formatDate(data.as_of_date)}
             </p>
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
+              <Input type="date" value={asOfDate} max={today} onChange={(e) => setAsOfDate(e.target.value)} className="w-40 h-8 text-xs" />
+              {asOfDate && <Button variant="ghost" size="sm" className="text-xs h-8" onClick={() => setAsOfDate("")}>Hoy</Button>}
               <Button variant="outline" size="sm" onClick={expandAll}>
                 <Expand className="w-4 h-4 mr-1" /> Expandir
               </Button>

@@ -16,6 +16,8 @@ interface DateFilterStore {
   dateTo: string;
   setDateFrom: (d: string) => void;
   setDateTo: (d: string) => void;
+  balanceAsOfDate: string;
+  setBalanceAsOfDate: (d: string) => void;
 }
 
 const defaults = getDefaultDates();
@@ -27,6 +29,8 @@ export const useDateFilter = create<DateFilterStore>()(
       dateTo: defaults.dateTo,
       setDateFrom: (d) => set({ dateFrom: d }),
       setDateTo: (d) => set({ dateTo: d }),
+      balanceAsOfDate: "",
+      setBalanceAsOfDate: (d) => set({ balanceAsOfDate: d }),
     }),
     { name: "date-filter" },
   ),

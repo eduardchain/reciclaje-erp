@@ -20,7 +20,8 @@ interface DateRange {
   date_to: string;
 }
 
-async function get<T>(url: string, params?: DateRange): Promise<T> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function get<T>(url: string, params?: any): Promise<T> {
   const response = await apiClient.get<T>(url, params ? { params } : undefined);
   return response.data;
 }
@@ -35,8 +36,8 @@ export const reportsService = {
   getCashFlow: (params: DateRange) =>
     get<CashFlowResponse>("/api/v1/reports/cash-flow", params),
 
-  getBalanceSheet: () =>
-    get<BalanceSheetResponse>("/api/v1/reports/balance-sheet"),
+  getBalanceSheet: (params?: { as_of_date?: string }) =>
+    get<BalanceSheetResponse>("/api/v1/reports/balance-sheet", params),
 
   getPurchaseReport: (params: DateRange) =>
     get<PurchaseReportResponse>("/api/v1/reports/purchases", params),
@@ -56,8 +57,8 @@ export const reportsService = {
   getAuditBalances: () =>
     get<AuditBalancesResponse>("/api/v1/reports/audit-balances"),
 
-  getBalanceDetailed: () =>
-    get<BalanceDetailedResponse>("/api/v1/reports/balance-detailed"),
+  getBalanceDetailed: (params?: { as_of_date?: string }) =>
+    get<BalanceDetailedResponse>("/api/v1/reports/balance-detailed", params),
 
   getProfitabilityByBU: (params: DateRange) =>
     get<ProfitabilityByBUResponse>("/api/v1/reports/profitability-by-business-unit", params),
