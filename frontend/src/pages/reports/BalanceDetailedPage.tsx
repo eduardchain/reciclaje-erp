@@ -60,7 +60,8 @@ function ItemDetail({ item, sectionKey }: { item: BalanceDetailedItem; sectionKe
 }
 
 export default function BalanceDetailedPage() {
-  const today = new Date().toISOString().split("T")[0];
+  const _now = new Date();
+  const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, "0")}-${String(_now.getDate()).padStart(2, "0")}`;
   const { balanceAsOfDate: asOfDate, setBalanceAsOfDate: setAsOfDate } = useDateFilter();
   const { data, isLoading } = useBalanceDetailed(asOfDate || undefined);
   const navigate = useNavigate();

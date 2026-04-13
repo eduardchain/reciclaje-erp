@@ -261,7 +261,7 @@ class ReportService:
         # 1. Sales Revenue (ventas normales, excluye DE)
         sale_filters = [
             Sale.organization_id == organization_id,
-            self._active_at_cutoff(Sale.status, Sale.cancelled_at, cutoff_dt),
+            self._active_at_cutoff(Sale.status),
             Sale.double_entry_id.is_(None),
         ]
         if has_dates:
@@ -279,7 +279,7 @@ class ReportService:
         # 2. COGS (metodo directo)
         cogs_filters = [
             Sale.organization_id == organization_id,
-            self._active_at_cutoff(Sale.status, Sale.cancelled_at, cutoff_dt),
+            self._active_at_cutoff(Sale.status),
             Sale.double_entry_id.is_(None),
         ]
         if has_dates:
@@ -297,7 +297,7 @@ class ReportService:
         # 3. Double Entry Profit (via DoubleEntryLine)
         de_filters = [
             DoubleEntry.organization_id == organization_id,
-            self._active_at_cutoff(DoubleEntry.status, DoubleEntry.cancelled_at, cutoff_dt),
+            self._active_at_cutoff(DoubleEntry.status),
         ]
         if has_dates:
             de_filters += [DoubleEntry.date >= date_from, DoubleEntry.date <= date_to]
@@ -325,7 +325,7 @@ class ReportService:
 
         trans_filters = [
             MaterialTransformation.organization_id == organization_id,
-            self._active_at_cutoff(MaterialTransformation.status, MaterialTransformation.annulled_at, cutoff_dt, "confirmed", "annulled"),
+            self._active_at_cutoff(MaterialTransformation.status, "confirmed"),
             MaterialTransformation.value_difference.isnot(None),
         ]
         if has_dates:
@@ -343,7 +343,7 @@ class ReportService:
         # 3.6 Perdida por merma en transformaciones
         waste_filters = [
             MaterialTransformation.organization_id == organization_id,
-            self._active_at_cutoff(MaterialTransformation.status, MaterialTransformation.annulled_at, cutoff_dt, "confirmed", "annulled"),
+            self._active_at_cutoff(MaterialTransformation.status, "confirmed"),
             MaterialTransformation.waste_value > 0,
         ]
         if has_dates:
@@ -361,7 +361,7 @@ class ReportService:
 
         adj_filters = [
             InventoryAdjustment.organization_id == organization_id,
-            self._active_at_cutoff(InventoryAdjustment.status, InventoryAdjustment.annulled_at, cutoff_dt, "confirmed", "annulled"),
+            self._active_at_cutoff(InventoryAdjustment.status, "confirmed"),
         ]
         if has_dates:
             adj_filters += [InventoryAdjustment.date >= dt_from, InventoryAdjustment.date < dt_to]
@@ -383,7 +383,7 @@ class ReportService:
         # 4. Ajustes de terceros (perdida/ganancia)
         tp_adj_filters = [
             MoneyMovement.organization_id == organization_id,
-            self._active_at_cutoff(MoneyMovement.status, MoneyMovement.annulled_at, cutoff_dt, "confirmed", "annulled"),
+            self._active_at_cutoff(MoneyMovement.status, "confirmed"),
             MoneyMovement.movement_type.in_(["tp_adjustment_credit", "tp_adjustment_debit"]),
         ]
         if has_dates:
@@ -408,7 +408,7 @@ class ReportService:
         # 5. Service income + expenses by category + commissions
         mm_filters = [
             MoneyMovement.organization_id == organization_id,
-            self._active_at_cutoff(MoneyMovement.status, MoneyMovement.annulled_at, cutoff_dt, "confirmed", "annulled"),
+            self._active_at_cutoff(MoneyMovement.status, "confirmed"),
             MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "commission_accrual", "service_income"]),
         ]
         if has_dates:
@@ -1374,25 +1374,9 @@ class ReportService:
         return result
 
     @staticmethod
-    def _active_at_cutoff(
-        status_col,
-        cancelled_col,
-        cutoff_dt: Optional[datetime],
-        active_status: str = "liquidated",
-        inactive_status: str = "cancelled",
-    ):
-        """Filtro universal para operaciones activas en una fecha de corte.
-
-        Sin cutoff_dt → filtro normal de estado activo.
-        Con cutoff_dt → incluye operaciones canceladas/anuladas DESPUES del corte
-        (estaban activas en la fecha de snapshot).
-        """
-        if cutoff_dt is None:
-            return status_col == active_status
-        return or_(
-            status_col == active_status,
-            and_(status_col == inactive_status, cancelled_col >= cutoff_dt),
-        )
+    def _active_at_cutoff(status_col, active_status: str = "liquidated"):
+        """Operaciones activas: excluye cualquier cancelacion/anulacion sin importar fecha."""
+        return status_col == active_status
 
     # ------------------------------------------------------------------
     # Helpers de balance historico (as_of_date)
@@ -1427,10 +1411,7 @@ class ReportService:
                 .where(
                     MoneyMovement.account_id == acc.id,
                     MoneyMovement.date < cutoff_dt,
-                    self._active_at_cutoff(
-                        MoneyMovement.status, MoneyMovement.annulled_at,
-                        cutoff_dt, "confirmed", "annulled",
-                    ),
+                    self._active_at_cutoff(MoneyMovement.status, "confirmed"),
                 )
             ) or Decimal("0")
             balance = Decimal(str(acc.initial_balance)) + Decimal(str(delta))
@@ -1468,10 +1449,7 @@ class ReportService:
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.third_party_id.isnot(None),
                 MoneyMovement.date < cutoff_dt,
-                self._active_at_cutoff(
-                    MoneyMovement.status, MoneyMovement.annulled_at,
-                    cutoff_dt, "confirmed", "annulled",
-                ),
+                self._active_at_cutoff(MoneyMovement.status, "confirmed"),
             ).group_by(MoneyMovement.third_party_id, MoneyMovement.movement_type)
         ).all()
 
@@ -1488,9 +1466,7 @@ class ReportService:
             ).where(
                 Purchase.organization_id == organization_id,
                 Purchase.liquidated_at < cutoff_dt,
-                self._active_at_cutoff(
-                    Purchase.status, Purchase.cancelled_at, cutoff_dt,
-                ),
+                self._active_at_cutoff(Purchase.status),
             ).group_by(Purchase.supplier_id)
         ).all()
         for tp_id, total in purchase_rows:
@@ -1504,9 +1480,7 @@ class ReportService:
             ).where(
                 Sale.organization_id == organization_id,
                 Sale.liquidated_at < cutoff_dt,
-                self._active_at_cutoff(
-                    Sale.status, Sale.cancelled_at, cutoff_dt,
-                ),
+                self._active_at_cutoff(Sale.status),
             ).group_by(Sale.customer_id)
         ).all()
         for tp_id, total in sale_rows:
@@ -1521,9 +1495,7 @@ class ReportService:
             .where(
                 Purchase.organization_id == organization_id,
                 Purchase.liquidated_at < cutoff_dt,
-                self._active_at_cutoff(
-                    Purchase.status, Purchase.cancelled_at, cutoff_dt,
-                ),
+                self._active_at_cutoff(Purchase.status),
             ).group_by(PurchaseCommission.third_party_id)
         ).all()
         for tp_id, total in purchase_comm_rows:
@@ -1537,10 +1509,7 @@ class ReportService:
                 MoneyMovement.movement_type == "commission_accrual",
                 MoneyMovement.sale_id.isnot(None),
                 MoneyMovement.date < cutoff_dt,
-                self._active_at_cutoff(
-                    MoneyMovement.status, MoneyMovement.annulled_at,
-                    cutoff_dt, "confirmed", "annulled",
-                ),
+                self._active_at_cutoff(MoneyMovement.status, "confirmed"),
             )
         ).all()
         accrual_sale_ids_set = set(accrual_sale_ids)
@@ -1554,9 +1523,7 @@ class ReportService:
                 Sale.organization_id == organization_id,
                 Sale.double_entry_id.is_(None),
                 Sale.liquidated_at < cutoff_dt,
-                self._active_at_cutoff(
-                    Sale.status, Sale.cancelled_at, cutoff_dt,
-                ),
+                self._active_at_cutoff(Sale.status),
                 ~SaleCommission.sale_id.in_(accrual_sale_ids_set) if accrual_sale_ids_set else True,
             ).group_by(SaleCommission.third_party_id)
         ).all()
@@ -1602,9 +1569,7 @@ class ReportService:
                     exists(
                         select(Sale.id).where(
                             Sale.id == InventoryMovement.reference_id,
-                            ~self._active_at_cutoff(
-                                Sale.status, Sale.cancelled_at, cutoff_dt,
-                            ),
+                            ~self._active_at_cutoff(Sale.status),
                         )
                     ),
                 ),
@@ -1751,10 +1716,7 @@ class ReportService:
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.movement_type == "profit_distribution",
                 MoneyMovement.date < cutoff_dt,
-                self._active_at_cutoff(
-                    MoneyMovement.status, MoneyMovement.annulled_at,
-                    cutoff_dt, "confirmed", "annulled",
-                ),
+                self._active_at_cutoff(MoneyMovement.status, "confirmed"),
             )
         )
         return Decimal(str(val))

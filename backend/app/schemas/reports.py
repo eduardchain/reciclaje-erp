@@ -8,7 +8,7 @@ from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +219,10 @@ class BalanceSheetResponse(BaseModel):
     accumulated_profit: float = 0.0
     distributed_profit: float = 0.0
 
+    @field_serializer("as_of_date")
+    def serialize_as_of_date(self, v: date, _info) -> str:
+        return f"{v.year:04d}-{v.month:02d}-{v.day:02d}T12:00:00Z"
+
 
 # ---------------------------------------------------------------------------
 # Balance Detallado (desglose por item)
@@ -267,6 +271,10 @@ class BalanceDetailedResponse(BaseModel):
     accumulated_profit: float = 0.0
     distributed_profit: float = 0.0
     equity_label: str = "Patrimonio (Capital + Utilidad Acumulada)"
+
+    @field_serializer("as_of_date")
+    def serialize_as_of_date(self, v: date, _info) -> str:
+        return f"{v.year:04d}-{v.month:02d}-{v.day:02d}T12:00:00Z"
     verification: BalanceDetailedVerification
 
 
