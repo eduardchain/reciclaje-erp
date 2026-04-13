@@ -214,6 +214,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         user_id: UUID = None,
         line_updates: Optional[List[DoubleEntryLiquidateLineUpdate]] = None,
         commissions_data: Optional[List[SaleCommissionCreate]] = None,
+        liquidation_date: Optional[datetime] = None,
     ) -> DoubleEntry:
         """
         Liquidar doble partida registrada: confirmar precios, actualizar balances, pagar comisiones.
@@ -235,6 +236,20 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"No se puede liquidar doble partida con estado '{double_entry.status}'. Debe estar 'registered'"
             )
+
+        if liquidation_date is not None:
+            doc_date = double_entry.date.date() if hasattr(double_entry.date, "date") else double_entry.date
+            liq_date = liquidation_date.date() if hasattr(liquidation_date, "date") else liquidation_date
+            if liq_date < doc_date:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="La fecha de liquidacion no puede ser anterior a la fecha del documento."
+                )
+            if liq_date > date.today():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="La fecha de liquidacion no puede ser futura."
+                )
 
         purchase = db.get(Purchase, double_entry.purchase_id)
         sale = db.get(Sale, double_entry.sale_id)
@@ -320,16 +335,17 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             print(f"  💼 Commission: {commission.concept} - ${commission.commission_amount}")
 
         # Step 6: Marcar como liquidated
+        liq_dt = liquidation_date or double_entry.date
         purchase.status = "liquidated"
-        purchase.liquidated_at = now_utc
+        purchase.liquidated_at = liq_dt
         purchase.liquidated_by = user_id
 
         sale.status = "liquidated"
-        sale.liquidated_at = now_utc
+        sale.liquidated_at = liq_dt
         sale.liquidated_by = user_id
 
         double_entry.status = "liquidated"
-        double_entry.liquidated_at = now_utc
+        double_entry.liquidated_at = liq_dt
         double_entry.liquidated_by = user_id
 
         db.commit()

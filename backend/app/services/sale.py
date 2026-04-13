@@ -12,7 +12,7 @@ Cancelacion:
 - registered: revierte stock solamente
 - liquidated: revierte stock + saldo cliente + comisiones pagadas
 """
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
@@ -281,6 +281,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         commissions_data: Optional[List] = None,
         immediate_collection: bool = False,
         collection_account_id: Optional[UUID] = None,
+        liquidation_date: Optional[datetime] = None,
     ) -> Sale:
         """
         Liquidar venta registrada: confirmar precios, actualizar saldo cliente, pagar comisiones.
@@ -314,6 +315,20 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"No se puede liquidar venta con estado '{sale.status}'. Debe estar 'registered'"
             )
+
+        if liquidation_date is not None:
+            doc_date = sale.date.date() if hasattr(sale.date, "date") else sale.date
+            liq_date = liquidation_date.date() if hasattr(liquidation_date, "date") else liquidation_date
+            if liq_date < doc_date:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="La fecha de liquidacion no puede ser anterior a la fecha del documento."
+                )
+            if liq_date > date.today():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="La fecha de liquidacion no puede ser futura."
+                )
 
         # Step 3: Si hay line_updates, actualizar precios y cantidad recibida
         if line_updates:
@@ -362,7 +377,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         # Step 5: Update sale status
         sale.status = "liquidated"
         sale.liquidated_by = user_id
-        sale.liquidated_at = datetime.now(timezone.utc)
+        sale.liquidated_at = liquidation_date or sale.date
 
         # Step 5b: Move stock from transit to liquidated (confirmar salida)
         stmt_lines = select(SaleLine).where(SaleLine.sale_id == sale.id)

@@ -8,7 +8,7 @@ Supports 1-step and 2-step purchase workflows:
 Liquidation confirms prices, moves stock transit->liquidated, updates avg cost and supplier balance.
 Payment to supplier is a separate operation via MoneyMovement (type='payment_to_supplier').
 """
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
@@ -310,6 +310,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         immediate_payment: bool = False,
         payment_account_id: Optional[UUID] = None,
         commissions_data: Optional[List] = None,
+        liquidation_date: Optional[datetime] = None,
     ) -> Purchase:
         """
         Liquidar compra registrada (cambiar status a 'liquidated').
@@ -356,6 +357,20 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Compra ya esta {purchase.status}. Solo se pueden liquidar compras registradas."
             )
+
+        if liquidation_date is not None:
+            doc_date = purchase.date.date() if hasattr(purchase.date, "date") else purchase.date
+            liq_date = liquidation_date.date() if hasattr(liquidation_date, "date") else liquidation_date
+            if liq_date < doc_date:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="La fecha de liquidacion no puede ser anterior a la fecha del documento."
+                )
+            if liq_date > date.today():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="La fecha de liquidacion no puede ser futura."
+                )
 
         # Step 2: Actualizar precios si se proporcionan line_updates
         if line_updates:
@@ -465,7 +480,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Step 9: Cambiar status
         purchase.status = "liquidated"
         purchase.liquidated_by = user_id
-        purchase.liquidated_at = datetime.now(timezone.utc)
+        purchase.liquidated_at = liquidation_date or purchase.date
 
         print(f"✅ Liquidated purchase #{purchase.purchase_number} for ${purchase.total_amount}")
 

@@ -561,6 +561,7 @@ async def liquidate_sale(
             commissions_data=liquidate_in.commissions,
             immediate_collection=liquidate_in.immediate_collection,
             collection_account_id=liquidate_in.collection_account_id,
+            liquidation_date=liquidate_in.liquidation_date,
         )
         
         db.commit()

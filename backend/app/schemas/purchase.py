@@ -217,6 +217,7 @@ class PurchaseLiquidateRequest(BaseModel):
     commissions: Optional[List[PurchaseCommissionCreate]] = Field(None, description="Comisiones (reemplazan las existentes)")
     immediate_payment: bool = Field(False, description="Crear pago inmediato al liquidar")
     payment_account_id: Optional[UUID] = Field(None, description="Cuenta para pago inmediato")
+    liquidation_date: Optional[BusinessDate] = Field(None, description="Fecha de liquidacion (default: fecha del documento)")
 
     @model_validator(mode="after")
     def validate_immediate_payment(self):

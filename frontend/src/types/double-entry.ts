@@ -63,6 +63,7 @@ export interface DoubleEntryLiquidateLineUpdate {
 export interface DoubleEntryLiquidateRequest {
   lines?: DoubleEntryLiquidateLineUpdate[] | null;
   commissions?: SaleCommissionCreate[] | null;
+  liquidation_date?: string;
 }
 
 export interface DoubleEntryResponse extends BaseEntity {

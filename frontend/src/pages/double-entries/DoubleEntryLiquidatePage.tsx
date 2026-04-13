@@ -52,6 +52,18 @@ export default function DoubleEntryLiquidatePage() {
 
   const [lines, setLines] = useState<LiquidationLine[]>([]);
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
+  const [liquidationDate, setLiquidationDate] = useState("");
+  const _todayNow = new Date();
+  const todayStr = `${_todayNow.getFullYear()}-${String(_todayNow.getMonth() + 1).padStart(2, "0")}-${String(_todayNow.getDate()).padStart(2, "0")}`;
+  const docDateStr = de ? (() => { const d = new Date(de.date); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })() : "";
+
+  // Inicializar fecha de liquidacion con la fecha del documento
+  useEffect(() => {
+    if (de && !liquidationDate) {
+      const d = new Date(de.date);
+      setLiquidationDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+    }
+  }, [de, liquidationDate]);
 
   // Inicializar desde DP cargada
   useEffect(() => {
@@ -130,6 +142,7 @@ export default function DoubleEntryLiquidatePage() {
           commissions: commissions
             .filter((c) => c.third_party_id && c.commission_value > 0)
             .map(({ _key, ...rest }) => rest),
+          ...(liquidationDate ? { liquidation_date: liquidationDate } : {}),
         },
       },
       { onSuccess: () => navigate(`/double-entries/${id}`) },
@@ -316,6 +329,26 @@ export default function DoubleEntryLiquidatePage() {
               </div>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      {/* Fecha de liquidacion */}
+      <Card className="shadow-sm">
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-4">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Liquidación</Label>
+              <p className="text-xs text-slate-500 mt-0.5">Por defecto usa la fecha del documento.</p>
+            </div>
+            <Input
+              type="date"
+              value={liquidationDate}
+              min={docDateStr}
+              max={todayStr}
+              onChange={(e) => setLiquidationDate(e.target.value)}
+              className="w-40 h-8 text-xs"
+            />
+          </div>
         </CardContent>
       </Card>
 

@@ -119,4 +119,5 @@ export interface SaleLiquidateRequest {
   commissions?: SaleCommissionCreate[];
   immediate_collection?: boolean;
   collection_account_id?: string;
+  liquidation_date?: string;
 }

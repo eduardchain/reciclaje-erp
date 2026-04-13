@@ -51,8 +51,20 @@ export default function PurchaseLiquidatePage() {
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
   const [immediatePayment, setImmediatePayment] = useState(false);
   const [paymentAccountId, setPaymentAccountId] = useState("");
+  const [liquidationDate, setLiquidationDate] = useState("");
   const { data: accountsData } = useMoneyAccounts();
   const accounts = accountsData?.items ?? (Array.isArray(accountsData) ? accountsData : []);
+  const _todayNow = new Date();
+  const todayStr = `${_todayNow.getFullYear()}-${String(_todayNow.getMonth() + 1).padStart(2, "0")}-${String(_todayNow.getDate()).padStart(2, "0")}`;
+  const docDateStr = purchase ? (() => { const d = new Date(purchase.date); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })() : "";
+
+  // Inicializar fecha de liquidacion con la fecha del documento
+  useEffect(() => {
+    if (purchase && !liquidationDate) {
+      const d = new Date(purchase.date);
+      setLiquidationDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+    }
+  }, [purchase, liquidationDate]);
 
   // Inicializar lineas y comisiones desde la compra cargada
   useEffect(() => {
@@ -146,6 +158,7 @@ export default function PurchaseLiquidatePage() {
           ...(immediatePayment && paymentAccountId
             ? { immediate_payment: true, payment_account_id: paymentAccountId }
             : {}),
+          ...(liquidationDate ? { liquidation_date: liquidationDate } : {}),
         },
       },
       {
@@ -386,6 +399,21 @@ export default function PurchaseLiquidatePage() {
       {/* Pago inmediato */}
       <Card className="shadow-sm">
         <CardContent className="pt-6 space-y-4">
+          <div className="flex items-center gap-4">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Liquidación</Label>
+              <p className="text-xs text-slate-500 mt-0.5">Por defecto usa la fecha del documento.</p>
+            </div>
+            <Input
+              type="date"
+              value={liquidationDate}
+              min={docDateStr}
+              max={todayStr}
+              onChange={(e) => setLiquidationDate(e.target.value)}
+              className="w-40 h-8 text-xs"
+            />
+          </div>
+          <div className="border-t border-slate-100" />
           <div className="flex items-center justify-between">
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Registrar pago inmediato</Label>

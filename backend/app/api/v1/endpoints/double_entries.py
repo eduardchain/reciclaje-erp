@@ -362,6 +362,7 @@ async def liquidate_double_entry(
             user_id=org_context["user_id"],
             line_updates=liquidate_request.lines,
             commissions_data=liquidate_request.commissions,
+            liquidation_date=liquidate_request.liquidation_date,
         )
 
         # Reload with eager loading

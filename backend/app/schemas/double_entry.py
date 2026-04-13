@@ -5,6 +5,7 @@ Soporta multiples materiales por operacion via DoubleEntryLine.
 Workflow de 2 pasos: registrar → liquidar.
 """
 from datetime import date as date_type, datetime, time, timezone
+from app.utils.dates import BusinessDate
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
@@ -102,6 +103,7 @@ class DoubleEntryLiquidateRequest(BaseModel):
     """Schema para liquidar doble partida (confirmar precios, aplicar efectos financieros)."""
     lines: Optional[List[DoubleEntryLiquidateLineUpdate]] = Field(None, description="Precios actualizados por linea")
     commissions: Optional[List[SaleCommissionCreate]] = Field(None, description="Comisiones (reemplazan las existentes)")
+    liquidation_date: Optional[BusinessDate] = Field(None, description="Fecha de liquidacion (default: fecha del documento)")
 
 
 class DoubleEntryFullUpdate(BaseModel):

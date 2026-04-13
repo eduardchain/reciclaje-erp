@@ -240,6 +240,7 @@ class SaleLiquidateRequest(BaseModel):
     commissions: Optional[List[SaleCommissionCreate]] = Field(None, description="Comisiones (reemplazan las existentes)")
     immediate_collection: bool = Field(False, description="Crear cobro inmediato al liquidar")
     collection_account_id: Optional[UUID] = Field(None, description="Cuenta para cobro inmediato")
+    liquidation_date: Optional[BusinessDate] = Field(None, description="Fecha de liquidacion (default: fecha del documento)")
 
     @model_validator(mode="after")
     def validate_immediate_collection(self):

@@ -546,6 +546,7 @@ async def liquidate_purchase(
             immediate_payment=liquidate_data.immediate_payment,
             payment_account_id=liquidate_data.payment_account_id,
             commissions_data=liquidate_data.commissions,
+            liquidation_date=liquidate_data.liquidation_date,
         )
         
         response_data = _enrich_purchase_response(purchase, db)

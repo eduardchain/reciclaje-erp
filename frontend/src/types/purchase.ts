@@ -111,4 +111,5 @@ export interface PurchaseLiquidateRequest {
   commissions?: PurchaseCommissionCreate[];
   immediate_payment?: boolean;
   payment_account_id?: string;
+  liquidation_date?: string;
 }
