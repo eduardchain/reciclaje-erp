@@ -489,16 +489,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     detail=f"Fondos insuficientes. Disponible: ${account.current_balance}, Requerido: ${purchase.total_amount}",
                 )
 
-            col_today = datetime.now(ZoneInfo("America/Bogota")).date()
-            today_dt = datetime.combine(col_today, time(12, 0), tzinfo=timezone.utc)
-
             mm_service._create_movement(
                 db=db,
                 organization_id=organization_id,
                 movement_type="payment_to_supplier",
                 amount=purchase.total_amount,
                 account_id=payment_account_id,
-                date=today_dt,
+                date=purchase.date,
                 description=f"Pago compra #{purchase.purchase_number}",
                 third_party_id=supplier.id,
                 purchase_id=purchase.id,

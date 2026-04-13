@@ -2446,7 +2446,7 @@ class ReportService:
             select(
                 Purchase.supplier_id,
                 ThirdParty.name,
-                func.coalesce(func.sum(Purchase.total_amount), 0),
+                func.coalesce(func.sum(PurchaseLine.unit_price * PurchaseLine.quantity), 0),
                 func.coalesce(func.sum(PurchaseLine.quantity), 0),
             )
             .select_from(Purchase)
@@ -2459,7 +2459,7 @@ class ReportService:
                 Purchase.date < dt_to,
             )
             .group_by(Purchase.supplier_id, ThirdParty.name)
-            .order_by(func.sum(Purchase.total_amount).desc())
+            .order_by(func.sum(PurchaseLine.unit_price * PurchaseLine.quantity).desc())
             .limit(5)
         ).all()
 
@@ -2474,7 +2474,7 @@ class ReportService:
             select(
                 Sale.customer_id,
                 ThirdParty.name,
-                func.coalesce(func.sum(Sale.total_amount), 0),
+                func.coalesce(func.sum(SaleLine.unit_price * SaleLine.quantity), 0),
                 func.coalesce(
                     func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity), 0
                 ),
@@ -2489,7 +2489,7 @@ class ReportService:
                 Sale.date < dt_to,
             )
             .group_by(Sale.customer_id, ThirdParty.name)
-            .order_by(func.sum(Sale.total_amount).desc())
+            .order_by(func.sum(SaleLine.unit_price * SaleLine.quantity).desc())
             .limit(5)
         ).all()
 

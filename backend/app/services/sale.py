@@ -395,16 +395,13 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     detail="Cuenta de cobro no encontrada",
                 )
 
-            col_today = datetime.now(ZoneInfo("America/Bogota")).date()
-            today_dt = datetime.combine(col_today, time(12, 0), tzinfo=timezone.utc)
-
             mm_service._create_movement(
                 db=db,
                 organization_id=organization_id,
                 movement_type="collection_from_client",
                 amount=sale.total_amount,
                 account_id=collection_account_id,
-                date=today_dt,
+                date=sale.date,
                 description=f"Cobro venta #{sale.sale_number}",
                 third_party_id=sale.customer_id,
                 sale_id=sale.id,
