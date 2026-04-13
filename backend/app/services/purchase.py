@@ -510,7 +510,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 movement_type="payment_to_supplier",
                 amount=purchase.total_amount,
                 account_id=payment_account_id,
-                date=purchase.date,
+                date=purchase.liquidated_at,
                 description=f"Pago compra #{purchase.purchase_number}",
                 third_party_id=supplier.id,
                 purchase_id=purchase.id,

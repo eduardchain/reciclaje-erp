@@ -416,7 +416,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 movement_type="collection_from_client",
                 amount=sale.total_amount,
                 account_id=collection_account_id,
-                date=sale.date,
+                date=sale.liquidated_at,
                 description=f"Cobro venta #{sale.sale_number}",
                 third_party_id=sale.customer_id,
                 sale_id=sale.id,
