@@ -493,13 +493,14 @@ class CRUDFixedAsset:
         financial_fields = ["purchase_value", "salvage_value", "depreciation_rate", "expense_category_id"]
         has_financial = any(getattr(data, f, None) is not None for f in financial_fields)
 
-        if has_financial and dep_count > 0:
+        has_accumulated = asset.accumulated_depreciation > 0
+        if has_financial and (dep_count > 0 or has_accumulated):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No se pueden modificar valores financieros después de aplicar depreciaciones. Solo se permite editar nombre, código y notas.",
             )
 
-        if dep_count == 0:
+        if dep_count == 0 and not has_accumulated:
             if data.expense_category_id is not None:
                 # Validar categoria
                 cat = db.execute(
@@ -518,7 +519,9 @@ class CRUDFixedAsset:
 
             if data.purchase_value is not None:
                 asset.purchase_value = data.purchase_value
-                asset.current_value = data.purchase_value
+                # Solo actualizar current_value si cambia el valor de compra
+                if data.purchase_value != asset.current_value:
+                    asset.current_value = data.purchase_value
 
             if data.salvage_value is not None:
                 asset.salvage_value = data.salvage_value
