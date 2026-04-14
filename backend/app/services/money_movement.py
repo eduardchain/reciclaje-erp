@@ -1181,6 +1181,7 @@ class CRUDMoneyMovement:
         date_to: Optional[datetime] = None,
         search: Optional[str] = None,
         allowed_account_ids: Optional[List[UUID]] = None,
+        created_by_filter: Optional[UUID] = None,
     ) -> tuple[List[MoneyMovement], int]:
         """Listar movimientos con filtros y paginacion."""
         query = select(MoneyMovement).where(
@@ -1192,6 +1193,12 @@ class CRUDMoneyMovement:
                 (MoneyMovement.account_id.in_(allowed_account_ids))
                 | (MoneyMovement.account_id.is_(None))
             )
+
+        # Filtro de visibilidad: sin permiso view_all, solo ver movimientos propios.
+        # Los movimientos con created_by=NULL son automáticos (comisiones, etc.)
+        # y solo se ven con permiso full.
+        if created_by_filter is not None:
+            query = query.where(MoneyMovement.created_by == created_by_filter)
         if movement_type:
             query = query.where(MoneyMovement.movement_type == movement_type)
         if status_filter:

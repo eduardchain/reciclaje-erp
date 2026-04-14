@@ -637,6 +637,12 @@ def list_money_movements(
     date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
     date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
     allowed = _get_allowed_accounts(db, org_context)
+
+    # Sin permiso view_all_movements: solo ver movimientos propios (created_by = user_id).
+    # Admin siempre ve todo.
+    can_view_all = org_context["is_admin"] or "treasury.view_all_movements" in org_context["user_permissions"]
+    created_by_filter = None if can_view_all else org_context["user_id"]
+
     movements, total = money_movement.get_multi(
         db=db,
         organization_id=org_context["organization_id"],
@@ -650,6 +656,7 @@ def list_money_movements(
         date_to=date_to_dt,
         search=search,
         allowed_account_ids=allowed,
+        created_by_filter=created_by_filter,
     )
     return {
         "items": [_to_response(m, db) for m in movements],

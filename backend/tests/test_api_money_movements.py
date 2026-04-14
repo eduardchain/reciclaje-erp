@@ -774,6 +774,139 @@ class TestListAndFilter:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Visibilidad por permiso view_all_movements
+# ---------------------------------------------------------------------------
+
+class TestViewAllMovementsPermission:
+    """Tests para el filtro de visibilidad según treasury.view_all_movements."""
+
+    def _make_restricted_headers(
+        self, db_session: Session,
+        test_organization, test_user2,
+    ) -> dict:
+        """Crea headers para test_user2 con rol custom que tiene view/create_movements
+        pero NO view_all_movements. Simula un usuario que solo ve sus propios movimientos."""
+        from app.models.user import OrganizationMember
+        from app.models.role import Role, RolePermission
+        from app.models.permission import Permission
+        from app.core.security import create_access_token
+        from uuid import uuid4
+
+        # Crear rol custom con treasury.view_movements + treasury.create_movements
+        # pero sin treasury.view_all_movements
+        custom_role = Role(
+            id=uuid4(),
+            name="treasury_own_only",
+            display_name="Solo mis movimientos",
+            organization_id=test_organization.id,
+            is_system_role=False,
+        )
+        db_session.add(custom_role)
+        db_session.flush()
+
+        perms = db_session.query(Permission).filter(
+            Permission.code.in_(["treasury.view_movements", "treasury.create_movements"])
+        ).all()
+        for perm in perms:
+            db_session.add(RolePermission(role_id=custom_role.id, permission_id=perm.id))
+
+        membership = OrganizationMember(
+            user_id=test_user2.id,
+            organization_id=test_organization.id,
+            role_id=custom_role.id,
+        )
+        db_session.add(membership)
+        db_session.commit()
+
+        token = create_access_token(data={"sub": str(test_user2.id)})
+        return {
+            "Authorization": f"Bearer {token}",
+            "X-Organization-ID": str(test_organization.id),
+        }
+
+    def test_admin_sees_all_movements(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_expense_category,
+    ):
+        """Admin ve todos los movimientos (propios y de otros)."""
+        client.post("/api/v1/money-movements/service-income", json={
+            "amount": 100000,
+            "account_id": str(test_account.id),
+            "description": "Ingreso admin",
+            "date": "2026-02-14T10:00:00Z",
+        }, headers=org_headers)
+
+        response = client.get("/api/v1/money-movements", headers=org_headers)
+        assert response.status_code == 200
+        assert response.json()["total"] == 1
+
+    def test_bascula_sees_only_own_movements(
+        self, client: TestClient, db_session: Session,
+        org_headers: dict, test_organization, test_user2,
+        test_account, test_expense_category,
+    ):
+        """Usuario con rol bascula solo ve sus propios movimientos."""
+        bascula_headers = self._make_restricted_headers(
+            db_session, test_organization, test_user2
+        )
+
+        # Admin crea un movimiento
+        client.post("/api/v1/money-movements/service-income", json={
+            "amount": 100000,
+            "account_id": str(test_account.id),
+            "description": "Ingreso del admin",
+            "date": "2026-02-14T10:00:00Z",
+        }, headers=org_headers)
+
+        # Bascula crea su propio movimiento
+        r2 = client.post("/api/v1/money-movements/service-income", json={
+            "amount": 50000,
+            "account_id": str(test_account.id),
+            "description": "Ingreso del bascula",
+            "date": "2026-02-14T11:00:00Z",
+        }, headers=bascula_headers)
+        assert r2.status_code == 201, f"Bascula no pudo crear movimiento: {r2.json()}"
+
+        # Admin ve ambos
+        resp_admin = client.get("/api/v1/money-movements", headers=org_headers)
+        assert resp_admin.json()["total"] == 2, f"Admin debería ver 2, ve: {resp_admin.json()['total']}. Items: {resp_admin.json()['items']}"
+
+        # Bascula solo ve el suyo
+        resp_bascula = client.get("/api/v1/money-movements", headers=bascula_headers)
+        assert resp_bascula.json()["total"] == 1
+        assert resp_bascula.json()["items"][0]["description"] == "Ingreso del bascula"
+
+    def test_bascula_sees_own_annulled_movement(
+        self, client: TestClient, db_session: Session,
+        org_headers: dict, test_organization, test_user2,
+        test_account,
+    ):
+        """Bascula ve su movimiento aunque esté anulado (created_by no cambia al anular)."""
+        bascula_headers = self._make_restricted_headers(
+            db_session, test_organization, test_user2
+        )
+
+        # Bascula crea movimiento
+        r = client.post("/api/v1/money-movements/service-income", json={
+            "amount": 50000,
+            "account_id": str(test_account.id),
+            "description": "Ingreso bascula a anular",
+            "date": "2026-02-14T10:00:00Z",
+        }, headers=bascula_headers)
+        mm_id = r.json()["id"]
+
+        # Admin anula el movimiento
+        client.post(f"/api/v1/money-movements/{mm_id}/annul", json={
+            "reason": "Error de prueba",
+        }, headers=org_headers)
+
+        # Bascula sigue viendo el movimiento (anulado, pero suyo)
+        resp = client.get("/api/v1/money-movements", headers=bascula_headers)
+        assert resp.json()["total"] == 1
+        assert resp.json()["items"][0]["status"] == "annulled"
+
+
+# ---------------------------------------------------------------------------
 # Tests: Consultas especiales
 # ---------------------------------------------------------------------------
 
