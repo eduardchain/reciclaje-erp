@@ -13,7 +13,6 @@ import { useDoubleEntry, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 import { exportDoubleEntryPDF } from "@/utils/pdfExport";
 import { useAuthStore } from "@/stores/authStore";
-import { ROUTES } from "@/utils/constants";
 import { usePermissions } from "@/hooks/usePermissions";
 
 const statusBorderMap: Record<string, string> = {

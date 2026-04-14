@@ -12,7 +12,6 @@ import { WarningsList } from "@/components/shared/WarningsList";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useAdjustment, useAnnulAdjustment } from "@/hooks/useInventory";
 import { formatCurrency, formatDate } from "@/utils/formatters";
-import { ROUTES } from "@/utils/constants";
 
 const typeLabels: Record<string, string> = {
   increase: "Aumento",

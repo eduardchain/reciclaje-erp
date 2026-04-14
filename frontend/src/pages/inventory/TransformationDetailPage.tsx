@@ -12,7 +12,6 @@ import { WarningsList } from "@/components/shared/WarningsList";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useTransformation, useAnnulTransformation } from "@/hooks/useInventory";
 import { formatCurrency, formatDate } from "@/utils/formatters";
-import { ROUTES } from "@/utils/constants";
 
 const statusBorderMap: Record<string, string> = {
   completed: "border-t-[3px] border-t-emerald-400",
