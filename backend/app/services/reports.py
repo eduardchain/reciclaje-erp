@@ -265,7 +265,7 @@ class ReportService:
             Sale.double_entry_id.is_(None),
         ]
         if has_dates:
-            sale_filters += [Sale.date >= dt_from, Sale.date < dt_to]
+            sale_filters += [Sale.liquidated_at >= dt_from, Sale.liquidated_at < dt_to]
 
         row = db.execute(
             select(
@@ -283,7 +283,7 @@ class ReportService:
             Sale.double_entry_id.is_(None),
         ]
         if has_dates:
-            cogs_filters += [Sale.date >= dt_from, Sale.date < dt_to]
+            cogs_filters += [Sale.liquidated_at >= dt_from, Sale.liquidated_at < dt_to]
 
         cogs_val = db.scalar(
             select(
@@ -300,7 +300,7 @@ class ReportService:
             self._active_at_cutoff(DoubleEntry.status),
         ]
         if has_dates:
-            de_filters += [DoubleEntry.date >= date_from, DoubleEntry.date <= date_to]
+            de_filters += [DoubleEntry.liquidated_at >= dt_from, DoubleEntry.liquidated_at < dt_to]
 
         de_row = db.execute(
             select(
@@ -1788,8 +1788,8 @@ class ReportService:
         base_filters = [
             Purchase.organization_id == organization_id,
             Purchase.status == "liquidated",
-            Purchase.date >= dt_from,
-            Purchase.date < dt_to,
+            Purchase.liquidated_at >= dt_from,
+            Purchase.liquidated_at < dt_to,
         ]
         if supplier_id:
             base_filters.append(Purchase.supplier_id == supplier_id)
@@ -1910,8 +1910,8 @@ class ReportService:
         base_filters = [
             Sale.organization_id == organization_id,
             Sale.status == "liquidated",
-            Sale.date >= dt_from,
-            Sale.date < dt_to,
+            Sale.liquidated_at >= dt_from,
+            Sale.liquidated_at < dt_to,
         ]
         if customer_id:
             base_filters.append(Sale.customer_id == customer_id)
@@ -2065,8 +2065,8 @@ class ReportService:
                 Sale.organization_id == organization_id,
                 Sale.status == "liquidated",
                 Sale.double_entry_id.is_(None),
-                Sale.date >= dt_from,
-                Sale.date < dt_to,
+                Sale.liquidated_at >= dt_from,
+                Sale.liquidated_at < dt_to,
             )
             .group_by(SaleLine.material_id, Material.code, Material.name, MaterialCategory.name)
         ).all()
@@ -2084,8 +2084,8 @@ class ReportService:
                 Purchase.organization_id == organization_id,
                 Purchase.status == "liquidated",
                 Purchase.double_entry_id.is_(None),
-                Purchase.date >= dt_from,
-                Purchase.date < dt_to,
+                Purchase.liquidated_at >= dt_from,
+                Purchase.liquidated_at < dt_to,
             )
             .group_by(PurchaseLine.material_id)
         ).all()
@@ -2109,8 +2109,8 @@ class ReportService:
             .where(
                 DoubleEntry.organization_id == organization_id,
                 DoubleEntry.status == "liquidated",
-                DoubleEntry.date >= date_from,
-                DoubleEntry.date <= date_to,
+                DoubleEntry.liquidated_at >= dt_from,
+                DoubleEntry.liquidated_at < dt_to,
             )
             .group_by(DoubleEntryLine.material_id)
         ).all()
@@ -2277,8 +2277,8 @@ class ReportService:
                     .where(
                         Sale.organization_id == organization_id,
                         Sale.status == "liquidated",
-                        Sale.date >= dt_f,
-                        Sale.date < dt_t,
+                        Sale.liquidated_at >= dt_f,
+                        Sale.liquidated_at < dt_t,
                     )
                 )
             ))
@@ -2290,13 +2290,13 @@ class ReportService:
                     .where(
                         Purchase.organization_id == organization_id,
                         Purchase.status == "liquidated",
-                        Purchase.date >= dt_f,
-                        Purchase.date < dt_t,
+                        Purchase.liquidated_at >= dt_f,
+                        Purchase.liquidated_at < dt_t,
                     )
                 )
             ))
 
-        def _period_gross_profit(dt_f, dt_t, d_from: date, d_to: date):
+        def _period_gross_profit(dt_f, dt_t):
             """Calcula profit de ventas normales + DE en periodo."""
             sale_profit = Decimal(str(
                 db.scalar(
@@ -2310,8 +2310,8 @@ class ReportService:
                         Sale.organization_id == organization_id,
                         Sale.status == "liquidated",
                         Sale.double_entry_id.is_(None),
-                        Sale.date >= dt_f,
-                        Sale.date < dt_t,
+                        Sale.liquidated_at >= dt_f,
+                        Sale.liquidated_at < dt_t,
                     )
                 )
             ))
@@ -2329,8 +2329,8 @@ class ReportService:
                     .where(
                         DoubleEntry.organization_id == organization_id,
                         DoubleEntry.status == "liquidated",
-                        DoubleEntry.date >= d_from,
-                        DoubleEntry.date <= d_to,
+                        DoubleEntry.liquidated_at >= dt_f,
+                        DoubleEntry.liquidated_at < dt_t,
                     )
                 )
             ))
@@ -2340,8 +2340,8 @@ class ReportService:
         prev_sales = _period_sales(prev_dt_from, prev_dt_to)
         cur_purchases = _period_purchases(dt_from, dt_to)
         prev_purchases = _period_purchases(prev_dt_from, prev_dt_to)
-        cur_profit = _period_gross_profit(dt_from, dt_to, date_from, date_to)
-        prev_profit = _period_gross_profit(prev_dt_from, prev_dt_to, prev_from, prev_to)
+        cur_profit = _period_gross_profit(dt_from, dt_to)
+        prev_profit = _period_gross_profit(prev_dt_from, prev_dt_to)
 
         # Point-in-time metrics (sin comparacion temporal)
         cash_balance = Decimal(str(
@@ -2426,8 +2426,8 @@ class ReportService:
             .where(
                 Sale.organization_id == organization_id,
                 Sale.status == "liquidated",
-                Sale.date >= dt_from,
-                Sale.date < dt_to,
+                Sale.liquidated_at >= dt_from,
+                Sale.liquidated_at < dt_to,
             )
             .group_by(SaleLine.material_id, Material.name)
             .order_by(func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity).desc())
@@ -2455,8 +2455,8 @@ class ReportService:
             .where(
                 Purchase.organization_id == organization_id,
                 Purchase.status == "liquidated",
-                Purchase.date >= dt_from,
-                Purchase.date < dt_to,
+                Purchase.liquidated_at >= dt_from,
+                Purchase.liquidated_at < dt_to,
             )
             .group_by(Purchase.supplier_id, ThirdParty.name)
             .order_by(func.sum(PurchaseLine.unit_price * PurchaseLine.quantity).desc())
@@ -2485,8 +2485,8 @@ class ReportService:
             .where(
                 Sale.organization_id == organization_id,
                 Sale.status == "liquidated",
-                Sale.date >= dt_from,
-                Sale.date < dt_to,
+                Sale.liquidated_at >= dt_from,
+                Sale.liquidated_at < dt_to,
             )
             .group_by(Sale.customer_id, ThirdParty.name)
             .order_by(func.sum(SaleLine.unit_price * SaleLine.quantity).desc())
@@ -2952,8 +2952,8 @@ class ReportService:
                 Purchase.organization_id == organization_id,
                 Purchase.status == "liquidated",
                 Purchase.double_entry_id.is_(None),
-                Purchase.date >= dt_from,
-                Purchase.date < dt_to,
+                Purchase.liquidated_at >= dt_from,
+                Purchase.liquidated_at < dt_to,
             )
             .group_by(Material.business_unit_id)
         ).all()
@@ -2980,8 +2980,8 @@ class ReportService:
                 Purchase.organization_id == organization_id,
                 Purchase.status == "liquidated",
                 Purchase.double_entry_id.is_(None),
-                Purchase.date >= dt_from,
-                Purchase.date < dt_to,
+                Purchase.liquidated_at >= dt_from,
+                Purchase.liquidated_at < dt_to,
             )
             .group_by(Material.business_unit_id)
         ).all()
@@ -3044,8 +3044,8 @@ class ReportService:
             Sale.organization_id == organization_id,
             Sale.status == "liquidated",
             Sale.double_entry_id.is_(None),
-            Sale.date >= dt_from,
-            Sale.date < dt_to,
+            Sale.liquidated_at >= dt_from,
+            Sale.liquidated_at < dt_to,
         ]
         sale_rows = db.execute(
             select(
@@ -3070,8 +3070,8 @@ class ReportService:
         de_filters = [
             DoubleEntry.organization_id == organization_id,
             DoubleEntry.status == "liquidated",
-            DoubleEntry.date >= dt_from,
-            DoubleEntry.date < dt_to,
+            DoubleEntry.liquidated_at >= dt_from,
+            DoubleEntry.liquidated_at < dt_to,
         ]
         de_rows = db.execute(
             select(

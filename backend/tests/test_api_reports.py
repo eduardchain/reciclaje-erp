@@ -155,6 +155,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         purchase_number=1, organization_id=org_id,
         supplier_id=proveedor1.id, date=now - timedelta(days=10),
         total_amount=Decimal("1600000"), status="liquidated",
+        liquidated_at=now - timedelta(days=10),
         payment_account_id=cuenta_efectivo.id,
     )
     db_session.add(compra1)
@@ -172,6 +173,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         purchase_number=2, organization_id=org_id,
         supplier_id=proveedor2.id, date=now - timedelta(days=5),
         total_amount=Decimal("600000"), status="liquidated",
+        liquidated_at=now - timedelta(days=5),
         payment_account_id=cuenta_efectivo.id,
     )
     db_session.add(compra2)
@@ -189,6 +191,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         purchase_number=3, organization_id=org_id,
         supplier_id=proveedor1.id, date=now - timedelta(days=3),
         total_amount=Decimal("850000"), status="liquidated",
+        liquidated_at=now - timedelta(days=3),
         payment_account_id=cuenta_banco.id,
     )
     db_session.add(compra3)
@@ -223,7 +226,8 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         sale_number=1, organization_id=org_id,
         customer_id=cliente1.id, warehouse_id=warehouse.id,
         date=now - timedelta(days=8), total_amount=Decimal("1050000"),
-        status="liquidated", payment_account_id=cuenta_efectivo.id,
+        status="liquidated", liquidated_at=now - timedelta(days=8),
+        payment_account_id=cuenta_efectivo.id,
     )
     db_session.add(venta1)
     db_session.flush()
@@ -239,7 +243,8 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         sale_number=2, organization_id=org_id,
         customer_id=cliente2.id, warehouse_id=warehouse.id,
         date=now - timedelta(days=6), total_amount=Decimal("480000"),
-        status="liquidated", payment_account_id=cuenta_banco.id,
+        status="liquidated", liquidated_at=now - timedelta(days=6),
+        payment_account_id=cuenta_banco.id,
     )
     db_session.add(venta2)
     db_session.flush()
@@ -255,7 +260,8 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         sale_number=3, organization_id=org_id,
         customer_id=cliente1.id, warehouse_id=warehouse.id,
         date=now - timedelta(days=2), total_amount=Decimal("550000"),
-        status="liquidated", payment_account_id=cuenta_efectivo.id,
+        status="liquidated", liquidated_at=now - timedelta(days=2),
+        payment_account_id=cuenta_efectivo.id,
     )
     db_session.add(venta3)
     db_session.flush()
@@ -305,6 +311,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         purchase_number=5, organization_id=org_id,
         supplier_id=proveedor1.id, date=now - timedelta(days=7),
         total_amount=Decimal("220000"), status="liquidated",
+        liquidated_at=now - timedelta(days=7),
     )
     db_session.add(de_purchase)
     db_session.flush()
@@ -313,7 +320,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         sale_number=5, organization_id=org_id,
         customer_id=cliente2.id, warehouse_id=None,
         date=now - timedelta(days=7), total_amount=Decimal("300000"),
-        status="liquidated",
+        status="liquidated", liquidated_at=now - timedelta(days=7),
     )
     db_session.add(de_sale)
     db_session.flush()
@@ -323,7 +330,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         date=(now - timedelta(days=7)).date(),
         supplier_id=proveedor1.id, customer_id=cliente2.id,
         purchase_id=de_purchase.id, sale_id=de_sale.id,
-        status="liquidated",
+        status="liquidated", liquidated_at=now - timedelta(days=7),
     )
     db_session.add(doble_partida)
     db_session.flush()
@@ -1548,6 +1555,7 @@ def bu_data(db_session: Session, test_organization, test_user):
     compra = Purchase(
         organization_id=org_id, purchase_number=900,
         supplier_id=supplier.id, date=now, status="liquidated",
+        liquidated_at=now,
         total_amount=Decimal("2200000"),
     )
     db_session.add(compra)
@@ -1568,6 +1576,7 @@ def bu_data(db_session: Session, test_organization, test_user):
     venta = Sale(
         organization_id=org_id, sale_number=900,
         customer_id=customer.id, date=now, status="liquidated",
+        liquidated_at=now,
         total_amount=Decimal("1200000"),
     )
     db_session.add(venta)
@@ -1844,6 +1853,7 @@ def bu_data_with_de_commission(db_session: Session, test_organization, test_user
     de_purchase = Purchase(
         organization_id=org_id, purchase_number=901,
         supplier_id=de_supplier.id, date=now, status="liquidated",
+        liquidated_at=now,
         total_amount=Decimal("5000000"),
     )
     db_session.add(de_purchase)
@@ -1852,6 +1862,7 @@ def bu_data_with_de_commission(db_session: Session, test_organization, test_user
     de_sale = Sale(
         organization_id=org_id, sale_number=901,
         customer_id=de_customer.id, date=now, status="liquidated",
+        liquidated_at=now,
         total_amount=Decimal("6500000"),
     )
     db_session.add(de_sale)
@@ -1862,7 +1873,7 @@ def bu_data_with_de_commission(db_session: Session, test_organization, test_user
         organization_id=org_id, double_entry_number=900,
         supplier_id=de_supplier.id, customer_id=de_customer.id,
         purchase_id=de_purchase.id, sale_id=de_sale.id,
-        date=now, status="liquidated",
+        date=now, status="liquidated", liquidated_at=now,
     )
     db_session.add(de)
     db_session.flush()
