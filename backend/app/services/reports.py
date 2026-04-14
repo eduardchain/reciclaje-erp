@@ -1605,7 +1605,7 @@ class ReportService:
                 if mat_id not in cost_by_mat:
                     cost_by_mat[mat_id] = Decimal(str(cost))
 
-            # Fallback: para materiales sin historial al corte, usar previous_cost del primer registro posterior
+            # Fallback 1: materiales sin historial al corte → previous_cost del primer registro posterior
             missing = [mid for mid in stock_by_mat if mid not in cost_by_mat]
             if missing:
                 fallback_rows = db.execute(
@@ -1626,6 +1626,31 @@ class ReportService:
                     if mat_id not in cost_by_mat:
                         cost_by_mat[mat_id] = Decimal(str(cost))
 
+            # Fallback 2: materiales sin ningun registro en MaterialCostHistory
+            # (ajustes legacy sin historial de costo) → unit_cost del último movimiento
+            # de compra/ajuste antes del corte. El costo está guardado en el movimiento.
+            missing2 = [mid for mid in stock_by_mat if mid not in cost_by_mat]
+            if missing2:
+                movement_cost_rows = db.execute(
+                    select(
+                        InventoryMovement.material_id,
+                        InventoryMovement.unit_cost,
+                    ).distinct(InventoryMovement.material_id)
+                    .where(
+                        InventoryMovement.organization_id == organization_id,
+                        InventoryMovement.material_id.in_(missing2),
+                        InventoryMovement.date < cutoff_dt,
+                        InventoryMovement.unit_cost > 0,
+                        InventoryMovement.movement_type.in_(["purchase", "adjustment"]),
+                    ).order_by(
+                        InventoryMovement.material_id,
+                        InventoryMovement.date.desc(),
+                    )
+                ).all()
+                for mat_id, cost in movement_cost_rows:
+                    if mat_id not in cost_by_mat:
+                        cost_by_mat[mat_id] = Decimal(str(cost))
+
         result: dict[UUID, tuple[Decimal, Decimal]] = {}
         for mat_id, stock in stock_by_mat.items():
             avg_cost = cost_by_mat.get(mat_id, Decimal("0"))
@@ -1633,14 +1658,53 @@ class ReportService:
                 result[mat_id] = (stock, avg_cost)
         return result
 
+    def _fa_value_at_cutoff(self, db: Session, fa, cutoff_period: str) -> Decimal:
+        """Valor de un activo fijo en un período de corte dado.
+
+        Lógica de 2 niveles:
+        1. Si existen depreciaciones aplicadas con period <= cutoff_period,
+           usar current_value_after del último período cubierto.
+        2. Si no hay registros al corte (activo cargado con depreciación acumulada
+           histórica pre-sistema), reconstruir el valor revirtiendo las depreciaciones
+           posteriores al corte: current_value + SUM(amount para period > cutoff_period).
+           Esto da el valor exacto que tenía el activo en el corte.
+        """
+        last_dep = db.scalar(
+            select(AssetDepreciation.current_value_after)
+            .where(
+                AssetDepreciation.fixed_asset_id == fa.id,
+                AssetDepreciation.is_active == True,
+                AssetDepreciation.period <= cutoff_period,
+            ).order_by(AssetDepreciation.period.desc())
+            .limit(1)
+        )
+        if last_dep is not None:
+            return Decimal(str(last_dep))
+
+        # Sin registros al corte: revertir depreciaciones posteriores
+        future_dep = db.scalar(
+            select(func.coalesce(func.sum(AssetDepreciation.amount), 0))
+            .where(
+                AssetDepreciation.fixed_asset_id == fa.id,
+                AssetDepreciation.is_active == True,
+                AssetDepreciation.period > cutoff_period,
+            )
+        )
+        return Decimal(str(fa.current_value)) + Decimal(str(future_dep))
+
     def _get_fixed_assets_as_of(
         self,
         db: Session,
         organization_id: UUID,
         cutoff_dt: datetime,
     ) -> Decimal:
-        """Valor total de activos fijos a la fecha de corte."""
+        """Valor total de activos fijos a la fecha de corte.
+
+        Usa AssetDepreciation.period ("YYYY-MM") como fecha contable,
+        no applied_at (cuándo el usuario clickó aplicar).
+        """
         cutoff_date = (cutoff_dt - timedelta(days=1)).date()
+        cutoff_period = cutoff_date.strftime("%Y-%m")
         assets = db.scalars(
             select(FixedAsset).where(
                 FixedAsset.organization_id == organization_id,
@@ -1649,20 +1713,10 @@ class ReportService:
             )
         ).all()
 
-        total = Decimal("0")
-        for fa in assets:
-            # Ultima depreciacion aplicada antes del corte
-            last_dep = db.scalar(
-                select(AssetDepreciation.current_value_after)
-                .where(
-                    AssetDepreciation.fixed_asset_id == fa.id,
-                    AssetDepreciation.applied_at < cutoff_dt,
-                ).order_by(AssetDepreciation.applied_at.desc())
-                .limit(1)
-            )
-            value = Decimal(str(last_dep)) if last_dep is not None else Decimal(str(fa.purchase_value))
-            total += value
-        return total
+        return sum(
+            (self._fa_value_at_cutoff(db, fa, cutoff_period) for fa in assets),
+            Decimal("0"),
+        )
 
     def _get_fixed_assets_detailed_as_of(
         self,
@@ -1672,6 +1726,7 @@ class ReportService:
     ) -> list[BalanceDetailedItem]:
         """Items de activos fijos para Balance Detallado historico."""
         cutoff_date = (cutoff_dt - timedelta(days=1)).date()
+        cutoff_period = cutoff_date.strftime("%Y-%m")
         assets = db.scalars(
             select(FixedAsset).where(
                 FixedAsset.organization_id == organization_id,
@@ -1682,17 +1737,9 @@ class ReportService:
 
         items = []
         for fa in assets:
-            last_dep = db.scalar(
-                select(AssetDepreciation.current_value_after)
-                .where(
-                    AssetDepreciation.fixed_asset_id == fa.id,
-                    AssetDepreciation.applied_at < cutoff_dt,
-                ).order_by(AssetDepreciation.applied_at.desc())
-                .limit(1)
-            )
-            current_value = Decimal(str(last_dep)) if last_dep is not None else Decimal(str(fa.purchase_value))
+            current_value = self._fa_value_at_cutoff(db, fa, cutoff_period)
             if current_value > 0:
-                # Depreciacion acumulada historica
+                # Depreciacion acumulada historica = diferencia vs purchase_value
                 acc_dep = Decimal(str(fa.purchase_value)) - current_value
                 items.append(BalanceDetailedItem(
                     id=str(fa.id), name=fa.name,
