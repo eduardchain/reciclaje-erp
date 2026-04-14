@@ -14,7 +14,6 @@ import { WarningsList } from "@/components/shared/WarningsList";
 import { useSale, useCancelSale } from "@/hooks/useSales";
 import { formatCurrency, formatDate, formatDateTime, formatWeight, formatPercentage } from "@/utils/formatters";
 import { useAuthStore } from "@/stores/authStore";
-import { ROUTES } from "@/utils/constants";
 import { exportSalePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
 

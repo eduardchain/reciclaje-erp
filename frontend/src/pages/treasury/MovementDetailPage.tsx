@@ -14,7 +14,6 @@ import { useMoneyMovement, useAnnulMovement, useUpdateClassification, useUploadE
 import { usePermissions } from "@/hooks/usePermissions";
 import { EditClassificationModal } from "@/components/treasury/EditClassificationModal";
 import { formatCurrency, formatDate } from "@/utils/formatters";
-import { ROUTES } from "@/utils/constants";
 import apiClient from "@/services/api";
 
 const typeLabels: Record<string, string> = {

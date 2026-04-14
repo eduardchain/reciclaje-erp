@@ -18,7 +18,6 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
-import { ROUTES } from "@/utils/constants";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
 

@@ -16,7 +16,6 @@ import { useThirdParties } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { exportAccountStatementPDF } from "@/utils/pdfExport";
 import { exportAccountStatementExcel } from "@/utils/excelExport";
-import { ROUTES } from "@/utils/constants";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   payment_to_supplier: "Pago a Proveedor",
