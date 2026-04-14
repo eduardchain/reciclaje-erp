@@ -92,6 +92,7 @@ export default function AccountStatementPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialThirdParty = searchParams.get("third_party_id") || "";
+  const returnTo = searchParams.get("returnTo") || "";
 
   const [thirdPartyId, setThirdPartyId] = useState(initialThirdParty);
   const [dateFrom, setDateFrom] = useState("");
@@ -174,7 +175,7 @@ export default function AccountStatementPage() {
           <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())}>
             <Download className="h-4 w-4 mr-2" />Excel
           </Button>
-          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
+          <Button variant="outline" onClick={() => navigate(returnTo || ROUTES.TREASURY)}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
         </div>

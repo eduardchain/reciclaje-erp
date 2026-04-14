@@ -81,7 +81,7 @@ function getColumns(
             <Button
               size="sm"
               variant="outline"
-              onClick={(e) => { e.stopPropagation(); navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${tp.id}`); }}
+              onClick={(e) => { e.stopPropagation(); navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${tp.id}&returnTo=/third-parties`); }}
             >
               <FileText className="h-3 w-3 mr-1" />Estado de Cuenta
             </Button>

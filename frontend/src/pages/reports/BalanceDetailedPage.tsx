@@ -38,7 +38,7 @@ function getItemLink(sectionKey: string, item: BalanceDetailedItem): string | nu
   if (sectionKey === "inventory_liquidated") return `/inventory/movements?material_id=${item.id}`;
   if (sectionKey === "fixed_assets") return `/treasury/fixed-assets`;
   // Terceros → estado de cuenta
-  return `/treasury/account-statement?third_party_id=${item.id}`;
+  return `/treasury/account-statement?third_party_id=${item.id}&returnTo=/reports/balance-detailed`;
 }
 
 function ItemDetail({ item, sectionKey }: { item: BalanceDetailedItem; sectionKey: string }) {

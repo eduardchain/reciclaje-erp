@@ -198,7 +198,7 @@ export default function TreasuryDashboardPage() {
               </TableHeader>
               <TableBody>
                 {data.provisions.map((p) => (
-                  <TableRow key={p.id} className="cursor-pointer hover:bg-slate-50" onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${p.id}`)}>
+                  <TableRow key={p.id} className="cursor-pointer hover:bg-slate-50" onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${p.id}&returnTo=/treasury/dashboard`)}>
                     <TableCell className="font-medium">{p.name}</TableCell>
                     <TableCell className="text-right">
                       <MoneyDisplay amount={p.available_funds} />

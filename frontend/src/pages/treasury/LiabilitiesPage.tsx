@@ -213,7 +213,7 @@ export default function LiabilitiesPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${tp.id}`)}
+                          onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${tp.id}&returnTo=/treasury/liabilities`)}
                         >
                           Estado de Cuenta
                         </Button>

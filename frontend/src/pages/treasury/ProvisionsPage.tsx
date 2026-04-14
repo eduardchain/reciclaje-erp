@@ -170,7 +170,7 @@ export default function ProvisionsPage() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${p.id}`)}
+                            onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${p.id}&returnTo=/treasury/provisions`)}
                           >
                             <FileText className="h-3 w-3 mr-1" />Estado Cuenta
                           </Button>
