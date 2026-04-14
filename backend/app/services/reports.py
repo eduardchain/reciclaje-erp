@@ -1562,9 +1562,11 @@ class ReportService:
                     InventoryMovement.movement_type != "purchase",
                     InventoryMovement.unit_cost != 0,
                 ),
-                # Excluir ventas no liquidadas al corte
+                # Excluir ventas no liquidadas al corte (original y reversal)
+                # Razón: sale_reversal de ventas canceladas (no liquidadas) quedaba incluido
+                # pero su original (-X) quedaba excluido, generando stock fantasma.
                 ~and_(
-                    InventoryMovement.movement_type == "sale",
+                    InventoryMovement.movement_type.in_(["sale", "sale_reversal"]),
                     InventoryMovement.reference_type == "sale",
                     exists(
                         select(Sale.id).where(
