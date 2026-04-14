@@ -39,9 +39,6 @@ export default function ScheduledExpensesPage() {
     <div className="space-y-6">
       <PageHeader title="Gastos Diferidos" description="Pagos grandes distribuidos en cuotas mensuales en P&L">
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
-            Volver a Tesoreria
-          </Button>
           {hasPermission("treasury.manage_expenses") && (
             <Button onClick={() => navigate(ROUTES.TREASURY_SCHEDULED_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
               <Plus className="h-4 w-4 mr-2" />Nuevo Gasto Diferido

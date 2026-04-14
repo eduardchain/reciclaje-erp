@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, Wallet, Hash, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -98,9 +98,10 @@ const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [
 
 export default function TreasuryPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission } = usePermissions();
   const [page, setPage] = useState(0);
-  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>(searchParams.get("tab") || "all");
   const [search, setSearch] = useState("");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
 
@@ -158,7 +159,7 @@ export default function TreasuryPage() {
         </div>
       )}
 
-      <Tabs value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0); }}>
+      <Tabs value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="all">Todos</TabsTrigger>
           <TabsTrigger value="payment_to_supplier">Pagos</TabsTrigger>

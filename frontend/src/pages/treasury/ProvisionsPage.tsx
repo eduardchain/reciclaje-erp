@@ -67,9 +67,6 @@ export default function ProvisionsPage() {
     <div className="space-y-6">
       <PageHeader title="Provisiones" description="Gestion de fondos provisionados">
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
-            Volver a Tesoreria
-          </Button>
           <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700" disabled={!provisionCategoryId} title={!provisionCategoryId ? "Configure categorias de Provision primero" : undefined}>
             <Plus className="h-4 w-4 mr-2" />Nueva Provision
           </Button>

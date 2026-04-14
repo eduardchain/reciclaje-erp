@@ -34,7 +34,7 @@ export default function TransformationDetailPage() {
     <div className="space-y-6">
       <PageHeader title={`Transformacion #${t.transformation_number}`} description={`${t.source_material_code} - ${t.source_material_name}`}>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY_TRANSFORMATIONS)}>
+          <Button variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
           {t.status === "confirmed" && (
@@ -140,7 +140,7 @@ export default function TransformationDetailPage() {
         onOpenChange={setShowAnnul}
         title="Anular Transformacion"
         description="Se revertiran todos los movimientos de stock."
-        onConfirm={() => annul.mutate({ id: t.id, data: { reason: annulReason } }, { onSuccess: () => navigate(ROUTES.INVENTORY_TRANSFORMATIONS) })}
+        onConfirm={() => annul.mutate({ id: t.id, data: { reason: annulReason } }, { onSuccess: () => navigate(-1) })}
         variant="destructive"
         loading={annul.isPending}
         disabled={annulReason.length < 1}

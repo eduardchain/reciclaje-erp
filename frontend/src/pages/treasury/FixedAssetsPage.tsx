@@ -43,9 +43,6 @@ export default function FixedAssetsPage() {
     <div className="space-y-6">
       <PageHeader title="Activos Fijos" description="Equipos y bienes con depreciacion mensual">
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
-            Volver a Tesoreria
-          </Button>
           {hasPermission("treasury.manage_fixed_assets") && (
             <Button variant="outline" onClick={() => setShowApplyPending(true)}>
               <Play className="h-4 w-4 mr-2" />Aplicar Depreciaciones

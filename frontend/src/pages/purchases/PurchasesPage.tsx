@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, ShoppingCart, Hash, Calculator, MoreHorizontal, Eye, Pencil, DollarSign, XCircle, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -182,10 +182,11 @@ export default function PurchasesPage() {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   const canViewPrices = hasPermission("purchases.view_prices");
+  const [searchParams, setSearchParams] = useSearchParams();
   const columns = useMemo(() => getColumns(canViewPrices), [canViewPrices]);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<string>("all");
+  const [status, setStatus] = useState<string>(searchParams.get("tab") || "all");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
 
   const { data, isLoading } = usePurchases({
@@ -257,7 +258,7 @@ export default function PurchasesPage() {
         </div>
       )}
 
-      <Tabs value={status} onValueChange={(v) => { setStatus(v); setPage(0); }}>
+      <Tabs value={status} onValueChange={(v) => { setStatus(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
         <TabsList>
           <TabsTrigger value="all">Todas</TabsTrigger>
           <TabsTrigger value="registered">Registradas</TabsTrigger>

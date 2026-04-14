@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, FileText, Power, PowerOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,7 @@ function getColumns(
   canDelete: boolean,
   onDeactivate: (tp: ThirdPartyResponse) => void,
   onReactivate: (tp: ThirdPartyResponse) => void,
+  roleFilter: string,
 ): ColumnDef<ThirdPartyResponse, unknown>[] {
   const cols: ColumnDef<ThirdPartyResponse, unknown>[] = [
     {
@@ -81,7 +82,7 @@ function getColumns(
             <Button
               size="sm"
               variant="outline"
-              onClick={(e) => { e.stopPropagation(); navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${tp.id}&returnTo=/third-parties`); }}
+              onClick={(e) => { e.stopPropagation(); navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${tp.id}&returnTo=${encodeURIComponent(`/third-parties?tab=${roleFilter}`)}`); }}
             >
               <FileText className="h-3 w-3 mr-1" />Estado de Cuenta
             </Button>
@@ -115,9 +116,10 @@ function getColumns(
 
 export default function ThirdPartiesPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission } = usePermissions();
   const [page, setPage] = useState(0);
-  const [roleFilter, setRoleFilter] = useState("all");
+  const [roleFilter, setRoleFilter] = useState(searchParams.get("tab") || "all");
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<ThirdPartyResponse | null>(null);
@@ -129,7 +131,7 @@ export default function ThirdPartiesPage() {
   const deactivateMutation = useDeactivateThirdParty();
   const reactivateMutation = useReactivateThirdParty();
 
-  const columns = getColumns(navigate, canViewBalance, canDelete, setDeactivateTarget, setReactivateTarget);
+  const columns = getColumns(navigate, canViewBalance, canDelete, setDeactivateTarget, setReactivateTarget, roleFilter);
 
   const { data, isLoading } = useThirdParties({
     search: search || undefined,
@@ -149,7 +151,7 @@ export default function ThirdPartiesPage() {
         )}
       </PageHeader>
 
-      <Tabs value={roleFilter} onValueChange={(v) => { setRoleFilter(v); setPage(0); }}>
+      <Tabs value={roleFilter} onValueChange={(v) => { setRoleFilter(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
         <TabsList>
           <TabsTrigger value="all">Todos</TabsTrigger>
           <TabsTrigger value="supplier">Proveedores</TabsTrigger>

@@ -133,9 +133,6 @@ export default function LiabilitiesPage() {
     <div className="space-y-6">
       <PageHeader title="Pasivos" description="Obligaciones laborales, prestaciones y otros pasivos">
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
-            Volver a Tesoreria
-          </Button>
           {hasPermission("treasury.create_movements") && (
             <Button onClick={() => setShowCreate(true)} className="bg-emerald-600 hover:bg-emerald-700" disabled={!liabilityCategoryId} title={!liabilityCategoryId ? "Configure categoria Pasivo primero" : undefined}>
               <Plus className="h-4 w-4 mr-2" />Nuevo Pasivo

@@ -78,7 +78,7 @@ export default function SaleDetailPage() {
           <Button variant="outline" onClick={() => exportSalePDF(sale, orgName, { showPrices: canViewPrices, showProfit: canViewProfit })}>
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
-          <Button variant="outline" onClick={() => navigate(ROUTES.SALES)}>
+          <Button variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
         </div>

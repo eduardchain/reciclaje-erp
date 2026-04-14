@@ -93,7 +93,7 @@ export default function PurchaseDetailPage() {
             <FileText className="h-4 w-4 mr-2" />
             PDF
           </Button>
-          <Button variant="outline" onClick={() => navigate(ROUTES.PURCHASES)}>
+          <Button variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Volver
           </Button>

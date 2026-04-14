@@ -315,7 +315,7 @@ export default function MovementCreatePage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Nuevo Movimiento" description="Registrar un movimiento de tesoreria">
-        <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
+        <Button variant="outline" onClick={() => navigate(-1)}>
           <ArrowLeft className="h-4 w-4 mr-2" />Volver
         </Button>
       </PageHeader>
@@ -566,7 +566,7 @@ export default function MovementCreatePage() {
 
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>Cancelar</Button>
+          <Button variant="outline" onClick={() => navigate(-1)}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
             disabled={create.isPending || createTpTransfer.isPending || createTpAdjustment.isPending || amount <= 0 || !!isProvisionExpenseBlocked || (isTpTransfer && (!thirdPartyId || !destThirdPartyId || !description)) || (isTpAdjustment && (!thirdPartyId || !description))}

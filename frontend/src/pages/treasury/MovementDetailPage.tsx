@@ -115,7 +115,7 @@ export default function MovementDetailPage() {
               <XCircle className="h-4 w-4 mr-2" />Anular
             </Button>
           )}
-          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
+          <Button variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
         </div>

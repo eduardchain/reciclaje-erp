@@ -41,7 +41,7 @@ export default function AdjustmentDetailPage() {
     <div className="space-y-6">
       <PageHeader title={`Ajuste #${adj.adjustment_number}`} description={typeLabels[adj.adjustment_type] ?? adj.adjustment_type}>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY_ADJUSTMENTS)}>
+          <Button variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
           {adj.status === "confirmed" && (
@@ -107,7 +107,7 @@ export default function AdjustmentDetailPage() {
         onOpenChange={setShowAnnul}
         title="Anular Ajuste"
         description="Esta accion revertira los cambios de stock."
-        onConfirm={() => annul.mutate({ id: adj.id, data: { reason: annulReason } }, { onSuccess: () => navigate(ROUTES.INVENTORY_ADJUSTMENTS) })}
+        onConfirm={() => annul.mutate({ id: adj.id, data: { reason: annulReason } }, { onSuccess: () => navigate(-1) })}
         variant="destructive"
         loading={annul.isPending}
         disabled={annulReason.length < 1}

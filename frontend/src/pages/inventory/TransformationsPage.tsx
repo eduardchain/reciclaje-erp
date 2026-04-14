@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, ArrowLeft, Calculator, Hash, Puzzle, MoreHorizontal, Eye, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -59,9 +59,10 @@ function ActionsCell({ transformation, onAnnul }: { transformation: MaterialTran
 
 export default function TransformationsPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission } = usePermissions();
   const [page, setPage] = useState(0);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState(searchParams.get("tab") || "all");
   const [search, setSearch] = useState("");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
   const [annulTarget, setAnnulTarget] = useState<MaterialTransformationResponse | null>(null);
@@ -152,7 +153,7 @@ export default function TransformationsPage() {
         </div>
       )}
 
-      <Tabs value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(0); }}>
+      <Tabs value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
         <TabsList>
           <TabsTrigger value="all">Todos</TabsTrigger>
           <TabsTrigger value="confirmed">Confirmados</TabsTrigger>
