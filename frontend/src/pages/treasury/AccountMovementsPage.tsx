@@ -57,6 +57,7 @@ export default function AccountMovementsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialAccount = searchParams.get("account_id") || "";
+  const returnTo = searchParams.get("returnTo") || "";
 
   const [accountId, setAccountId] = useState(initialAccount);
   const [dateFrom, setDateFrom] = useState("");
@@ -122,9 +123,11 @@ export default function AccountMovementsPage() {
           <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())}>
             <Download className="h-4 w-4 mr-2" />Excel
           </Button>
-          <Button variant="outline" onClick={() => navigate(ROUTES.TREASURY)}>
-            <ArrowLeft className="h-4 w-4 mr-2" />Volver
-          </Button>
+          {returnTo && (
+            <Button variant="outline" onClick={() => navigate(returnTo)}>
+              <ArrowLeft className="h-4 w-4 mr-2" />Volver
+            </Button>
+          )}
         </div>
       </PageHeader>
 

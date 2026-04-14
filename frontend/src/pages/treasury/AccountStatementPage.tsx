@@ -175,9 +175,11 @@ export default function AccountStatementPage() {
           <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())}>
             <Download className="h-4 w-4 mr-2" />Excel
           </Button>
-          <Button variant="outline" onClick={() => navigate(returnTo || ROUTES.TREASURY)}>
-            <ArrowLeft className="h-4 w-4 mr-2" />Volver
-          </Button>
+          {returnTo && (
+            <Button variant="outline" onClick={() => navigate(returnTo)}>
+              <ArrowLeft className="h-4 w-4 mr-2" />Volver
+            </Button>
+          )}
         </div>
       </PageHeader>
 

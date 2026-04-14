@@ -34,7 +34,7 @@ function fmtBalance(value: number) {
 }
 
 function getItemLink(sectionKey: string, item: BalanceDetailedItem): string | null {
-  if (sectionKey === "cash_and_bank") return `/treasury/account-movements?account_id=${item.id}`;
+  if (sectionKey === "cash_and_bank") return `/treasury/account-movements?account_id=${item.id}&returnTo=/reports/balance-detailed`;
   if (sectionKey === "inventory_liquidated") return `/inventory/movements?material_id=${item.id}`;
   if (sectionKey === "fixed_assets") return `/treasury/fixed-assets`;
   // Terceros → estado de cuenta
