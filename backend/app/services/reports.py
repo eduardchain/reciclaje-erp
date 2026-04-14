@@ -2907,6 +2907,24 @@ class ReportService:
         # 2e. Comisiones: capturadas via commission_accrual MoneyMovement en paso siguiente
         # (no contar SaleCommission directamente para evitar doble conteo)
 
+        # 2e2. Comisiones de compra (PurchaseCommission): no crean MoneyMovement,
+        # actualizan third_party.balance directamente al liquidar la compra.
+        # Solo compras liquidadas (canceladas revierten el saldo).
+        pc_rows = db.execute(
+            select(
+                PurchaseCommission.third_party_id,
+                func.coalesce(func.sum(PurchaseCommission.commission_amount), 0),
+            )
+            .join(Purchase, Purchase.id == PurchaseCommission.purchase_id)
+            .where(
+                Purchase.organization_id == organization_id,
+                Purchase.status == "liquidated",
+            )
+            .group_by(PurchaseCommission.third_party_id)
+        ).all()
+        for tp_id, total in pc_rows:
+            _add(tp_id, -Decimal(str(total)))  # commission_amount reduce el saldo (les debemos)
+
         # 2f. MoneyMovements confirmados con third_party_id
         mm_tp_rows = db.execute(
             select(

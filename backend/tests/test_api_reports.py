@@ -1146,14 +1146,22 @@ class TestAuditBalances:
         ))
         cliente.current_balance += Decimal("800000")
 
-        # Comision: $40,000 → comisionista.balance += 40000
+        # Comision: $40,000 → commission_accrual MM → comisionista.balance -= 40000
         comm = SaleCommission(
             sale_id=venta.id, third_party_id=comisionista.id,
             concept="Comision test", commission_type="fixed",
             commission_value=Decimal("40000"), commission_amount=Decimal("40000"),
         )
         db_session.add(comm)
-        comisionista.current_balance += Decimal("40000")
+        mm_comision = MoneyMovement(
+            movement_number=102, organization_id=org_id,
+            date=now - timedelta(days=3),
+            movement_type="commission_accrual", amount=Decimal("40000"),
+            account_id=None, third_party_id=comisionista.id,
+            description="Comision causada", status="confirmed",
+        )
+        db_session.add(mm_comision)
+        comisionista.current_balance -= Decimal("40000")  # commission_accrual: direction=-1
 
         # MoneyMovement: pago proveedor $300,000 → cuenta -= 300000, proveedor.balance += 300000
         mm_pago = MoneyMovement(
@@ -1217,7 +1225,8 @@ class TestAuditBalances:
         assert tp_map["Cliente Audit"]["calculated_balance"] == pytest.approx(300000, abs=1)
 
         assert tp_map["Comisionista Audit"]["status"] == "ok"
-        assert tp_map["Comisionista Audit"]["calculated_balance"] == pytest.approx(40000, abs=1)
+        # comisionista: commission_accrual direction=-1 → -40000 (les debemos la comision)
+        assert tp_map["Comisionista Audit"]["calculated_balance"] == pytest.approx(-40000, abs=1)
 
     def test_audit_balances_detects_mismatch(
         self, client: TestClient, org_headers: dict, audit_data: dict, db_session: Session,
