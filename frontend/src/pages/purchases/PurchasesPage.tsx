@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, ShoppingCart, Hash, Calculator, MoreHorizontal, Eye, Pencil, DollarSign, XCircle, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,11 +28,15 @@ import type { MetricCard } from "@/types/reports";
 import { useAuthStore } from "@/stores/authStore";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
+import { ThirdPartyLink } from "@/components/shared/EntityLink";
+import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { useState } from "react";
 
 const PAGE_SIZE = 20;
 
 function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [cancelOpen, setCancelOpen] = useState(false);
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
@@ -42,6 +46,8 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
   const canEdit = purchase.status === "registered" && !purchase.double_entry_id && hasPermission("purchases.edit");
   const canLiquidate = purchase.status === "registered" && !purchase.double_entry_id && hasPermission("purchases.liquidate");
   const canCancel = (purchase.status === "registered" || purchase.status === "liquidated") && !purchase.double_entry_id && hasPermission("purchases.cancel");
+
+  const currentUrl = location.pathname + location.search;
 
   return (
     <>
@@ -57,18 +63,18 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuItem onClick={() => navigate(`/purchases/${purchase.id}`)}>
+          <DropdownMenuItem onClick={() => { saveScroll(currentUrl); navigate(`/purchases/${purchase.id}`); }}>
             <Eye className="h-4 w-4 mr-2" />
             Ver detalle
           </DropdownMenuItem>
           {canEdit && (
-            <DropdownMenuItem onClick={() => navigate(`/purchases/${purchase.id}/edit`)}>
+            <DropdownMenuItem onClick={() => { saveScroll(currentUrl); navigate(`/purchases/${purchase.id}/edit`); }}>
               <Pencil className="h-4 w-4 mr-2" />
               Editar
             </DropdownMenuItem>
           )}
           {canLiquidate && (
-            <DropdownMenuItem onClick={() => navigate(`/purchases/${purchase.id}/liquidate`)}>
+            <DropdownMenuItem onClick={() => { saveScroll(currentUrl); navigate(`/purchases/${purchase.id}/liquidate`); }}>
               <DollarSign className="h-4 w-4 mr-2" />
               Liquidar
             </DropdownMenuItem>
@@ -131,6 +137,7 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
     {
       accessorKey: "supplier_name",
       header: "PROVEEDOR",
+      cell: ({ row }) => <ThirdPartyLink id={row.original.supplier_id}>{row.original.supplier_name}</ThirdPartyLink>,
     },
     {
       id: "items",
@@ -180,14 +187,27 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
 
 export default function PurchasesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { hasPermission } = usePermissions();
   const canViewPrices = hasPermission("purchases.view_prices");
   const [searchParams, setSearchParams] = useSearchParams();
   const columns = useMemo(() => getColumns(canViewPrices), [canViewPrices]);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<string>(searchParams.get("tab") || "all");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
+
+  const status = searchParams.get("tab") || "all";
+  const page = parseInt(searchParams.get("page") || "0", 10);
+  const search = searchParams.get("search") || "";
+
+  const setParam = (updates: Record<string, string | null>) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      Object.entries(updates).forEach(([k, v]) => {
+        if (v === null || v === "" || v === "0" || v === "all") next.delete(k);
+        else next.set(k, v);
+      });
+      return next;
+    }, { replace: true });
+  };
 
   const { data, isLoading } = usePurchases({
     skip: page * PAGE_SIZE,
@@ -197,6 +217,8 @@ export default function PurchasesPage() {
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
+
+  useScrollRestoration(!isLoading);
 
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
@@ -211,6 +233,8 @@ export default function PurchasesPage() {
       avg: { current_value: avg, previous_value: 0, change_percentage: null } as MetricCard,
     };
   }, [data]);
+
+  const currentUrl = location.pathname + location.search;
 
   return (
     <div className="space-y-4">
@@ -258,7 +282,7 @@ export default function PurchasesPage() {
         </div>
       )}
 
-      <Tabs value={status} onValueChange={(v) => { setStatus(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
+      <Tabs value={status} onValueChange={(v) => setParam({ tab: v, page: null, search: null })}>
         <TabsList>
           <TabsTrigger value="all">Todas</TabsTrigger>
           <TabsTrigger value="registered">Registradas</TabsTrigger>
@@ -275,14 +299,14 @@ export default function PurchasesPage() {
         pageIndex={page}
         pageSize={PAGE_SIZE}
         totalItems={data?.total}
-        onPageChange={setPage}
-        onRowClick={(row) => navigate(`/purchases/${row.id}`)}
+        onPageChange={(p) => setParam({ page: p === 0 ? null : String(p) })}
+        onRowClick={(row) => { saveScroll(currentUrl); navigate(`/purchases/${row.id}`); }}
         emptyTitle="Sin compras"
         emptyDescription="No se encontraron compras para los filtros seleccionados."
         exportFilename="ecobalance_compras"
         toolbar={
           <div className="flex items-center gap-3">
-            <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(0); }} placeholder="Buscar compra..." />
+            <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar compra..." />
             <DateRangePicker
               dateFrom={dateFrom}
               dateTo={dateTo}

@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, Wallet, Hash, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ import { ROUTES } from "@/utils/constants";
 import type { MoneyMovementResponse, MoneyMovementType } from "@/types/money-movement";
 import type { MetricCard } from "@/types/reports";
 import { usePermissions } from "@/hooks/usePermissions";
+import { ThirdPartyLink, AccountLink } from "@/components/shared/EntityLink";
+import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 
 const PAGE_SIZE = 20;
 
@@ -91,19 +93,32 @@ const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [
     </span>
   ) },
   { accessorKey: "amount", header: "Monto", enableSorting: true, cell: ({ row }) => <span className="font-medium tabular-nums">{formatCurrency(row.original.amount)}</span> },
-  { accessorKey: "account_name", header: "Cuenta" },
-  { accessorKey: "third_party_name", header: "Tercero", cell: ({ row }) => row.original.third_party_name ?? "-" },
+  { accessorKey: "account_name", header: "Cuenta", cell: ({ row }) => <AccountLink id={row.original.account_id}>{row.original.account_name ?? "-"}</AccountLink> },
+  { accessorKey: "third_party_name", header: "Tercero", cell: ({ row }) => <ThirdPartyLink id={row.original.third_party_id}>{row.original.third_party_name ?? "-"}</ThirdPartyLink> },
   { accessorKey: "status", header: "Estado", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
 ];
 
 export default function TreasuryPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission } = usePermissions();
-  const [page, setPage] = useState(0);
-  const [typeFilter, setTypeFilter] = useState<string>(searchParams.get("tab") || "all");
-  const [search, setSearch] = useState("");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
+
+  const typeFilter = searchParams.get("tab") || "all";
+  const page = parseInt(searchParams.get("page") || "0", 10);
+  const search = searchParams.get("search") || "";
+
+  const setParam = (updates: Record<string, string | null>) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      Object.entries(updates).forEach(([k, v]) => {
+        if (v === null || v === "" || v === "0" || v === "all") next.delete(k);
+        else next.set(k, v);
+      });
+      return next;
+    }, { replace: true });
+  };
 
   const { data, isLoading } = useMoneyMovements({
     skip: page * PAGE_SIZE,
@@ -112,6 +127,8 @@ export default function TreasuryPage() {
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
+
+  useScrollRestoration(!isLoading);
 
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
@@ -124,6 +141,8 @@ export default function TreasuryPage() {
       count: { current_value: count, previous_value: 0, change_percentage: null } as MetricCard,
     };
   }, [data]);
+
+  const currentUrl = location.pathname + location.search;
 
   return (
     <div className="space-y-4">
@@ -159,7 +178,7 @@ export default function TreasuryPage() {
         </div>
       )}
 
-      <Tabs value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
+      <Tabs value={typeFilter} onValueChange={(v) => setParam({ tab: v, page: null, search: null })}>
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="all">Todos</TabsTrigger>
           <TabsTrigger value="payment_to_supplier">Pagos</TabsTrigger>
@@ -177,15 +196,15 @@ export default function TreasuryPage() {
         pageCount={pageCount}
         pageIndex={page}
         pageSize={PAGE_SIZE}
-        onPageChange={setPage}
-        onRowClick={(row) => navigate(`/treasury/${row.id}`)}
+        onPageChange={(p) => setParam({ page: p === 0 ? null : String(p) })}
+        onRowClick={(row) => { saveScroll(currentUrl); navigate(`/treasury/${row.id}`); }}
         emptyTitle="Sin movimientos"
         emptyDescription="No se encontraron movimientos de tesoreria."
         exportFilename="ecobalance_movimientos-tesoreria"
         totalItems={data?.total}
         toolbar={
           <div className="flex items-center gap-3">
-            <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(0); }} placeholder="Buscar movimiento..." />
+            <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar movimiento..." />
             <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
           </div>
         }

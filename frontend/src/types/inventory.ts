@@ -198,6 +198,7 @@ export interface StockItem {
   material_id: string;
   material_code: string;
   material_name: string;
+  category_name: string | null;
   default_unit: string;
   current_stock_liquidated: number;
   current_stock_transit: number;
@@ -205,6 +206,7 @@ export interface StockItem {
   current_average_cost: number;
   total_value: number;
   is_active: boolean;
+  warehouse_ids: string[];
 }
 
 export interface StockConsolidatedResponse {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { ArrowLeft, FileText, Download, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,8 @@ import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { exportAccountStatementPDF } from "@/utils/pdfExport";
 import { exportAccountStatementExcel } from "@/utils/excelExport";
+import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { ThirdPartyLink } from "@/components/shared/EntityLink";
 
 const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -46,6 +48,7 @@ interface AccountMovementItem {
   movement_type: string;
   amount: string | number;
   description: string;
+  third_party_id: string | null;
   third_party_name: string | null;
   status: string;
   direction: number;
@@ -54,11 +57,24 @@ interface AccountMovementItem {
 
 export default function AccountMovementsPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const initialAccount = searchParams.get("account_id") || "";
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const returnTo = searchParams.get("returnTo") || "";
 
-  const [accountId, setAccountId] = useState(initialAccount);
+  // accountId lives in URL so it survives navigation to movement detail and back
+  const accountId = searchParams.get("account_id") || "";
+  const setAccountId = (id: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (id) next.set("account_id", id);
+      else next.delete("account_id");
+      next.delete("returnTo"); // clear returnTo when account changes
+      return next;
+    }, { replace: true });
+    setLimit(undefined);
+  };
+
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [limit, setLimit] = useState<number | undefined>(undefined);
@@ -74,6 +90,8 @@ export default function AccountMovementsPage() {
 
   const { data, isLoading } = useAccountMovements(accountId, filters);
   const movements: AccountMovementItem[] = data?.items ?? [];
+
+  useScrollRestoration(!isLoading);
   const total = data?.total ?? 0;
   const isTruncated = total > movements.length;
   const openingBalance = data?.opening_balance ?? null;
@@ -112,6 +130,12 @@ export default function AccountMovementsPage() {
     })),
   });
 
+  const handleRowClick = (id: string) => {
+    const currentUrl = location.pathname + location.search;
+    saveScroll(currentUrl);
+    navigate(`/treasury/${id}?returnTo=${encodeURIComponent(currentUrl)}`);
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader title="Movimientos de Cuenta" description="Historial de movimientos con saldo corrido por cuenta">
@@ -138,7 +162,7 @@ export default function AccountMovementsPage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta *</Label>
               <EntitySelect
                 value={accountId}
-                onChange={(v) => { setAccountId(v); setLimit(undefined); }}
+                onChange={setAccountId}
                 options={accounts.map((a) => ({ id: a.id, label: a.name }))}
                 placeholder="Seleccionar cuenta..."
               />
@@ -243,7 +267,7 @@ export default function AccountMovementsPage() {
                         <TableRow
                           key={m.id}
                           className={`cursor-pointer ${isAnnulled ? "opacity-50 bg-rose-50/50" : "hover:bg-slate-50"}`}
-                          onClick={() => navigate(`/treasury/${m.id}`)}
+                          onClick={() => handleRowClick(m.id)}
                         >
                           <TableCell className="text-xs text-slate-400">{m.movement_number}</TableCell>
                           <TableCell className="text-sm">{formatDate(m.date)}</TableCell>
@@ -260,7 +284,9 @@ export default function AccountMovementsPage() {
                           <TableCell className={`text-sm max-w-[200px] truncate ${isAnnulled ? "line-through" : ""}`}>
                             {m.description}
                           </TableCell>
-                          <TableCell className="text-sm text-slate-500">{m.third_party_name ?? "-"}</TableCell>
+                          <TableCell className="text-sm text-slate-500" onClick={(e) => e.stopPropagation()}>
+                            <ThirdPartyLink id={m.third_party_id}>{m.third_party_name ?? "-"}</ThirdPartyLink>
+                          </TableCell>
                           <TableCell className="text-right">
                             {isInflow ? (
                               <span className={`tabular-nums ${isAnnulled ? "text-emerald-300 line-through" : "text-emerald-600"}`}>

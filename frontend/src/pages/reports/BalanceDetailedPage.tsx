@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,9 +65,23 @@ export default function BalanceDetailedPage() {
   const { balanceAsOfDate: asOfDate, setBalanceAsOfDate: setAsOfDate } = useDateFilter();
   const { data, isLoading } = useBalanceDetailed(asOfDate || undefined);
   const navigate = useNavigate();
+  const location = useLocation();
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const expandedStorageKey = `expanded:${location.pathname}`;
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    try {
+      const saved = sessionStorage.getItem(expandedStorageKey);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem(expandedStorageKey, JSON.stringify([...expanded]));
+  }, [expanded]);
 
   const allExpandableKeys = useMemo(() => {
     if (!data) return [];

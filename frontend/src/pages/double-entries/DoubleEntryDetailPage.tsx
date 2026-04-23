@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { ArrowLeft, FileText, XCircle, Pencil, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { useDoubleEntry, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 import { exportDoubleEntryPDF } from "@/utils/pdfExport";
@@ -24,6 +26,7 @@ const statusBorderMap: Record<string, string> = {
 export default function DoubleEntryDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const handleBack = useReturnToBack();
   const { data: de, isLoading } = useDoubleEntry(id!);
   const cancel = useCancelDoubleEntry();
   const { hasPermission } = usePermissions();
@@ -59,7 +62,7 @@ export default function DoubleEntryDetailPage() {
               <XCircle className="h-4 w-4 mr-2" />Cancelar
             </Button>
           )}
-          <Button variant="outline" onClick={() => navigate(-1)}>
+          <Button variant="outline" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
         </div>
@@ -84,7 +87,7 @@ export default function DoubleEntryDetailPage() {
           <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold uppercase tracking-wider text-blue-700">Compra</CardTitle></CardHeader>
           <CardContent>
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</dt><dd>{de.supplier_name}</dd></div>
+              <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</dt><dd><ThirdPartyLink id={de.supplier_id}>{de.supplier_name}</ThirdPartyLink></dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold">{formatCurrency(de.total_purchase_cost)}</dd></div>
             </dl>
           </CardContent>
@@ -94,7 +97,7 @@ export default function DoubleEntryDetailPage() {
           <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Venta</CardTitle></CardHeader>
           <CardContent>
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</dt><dd>{de.customer_name}</dd></div>
+              <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</dt><dd><ThirdPartyLink id={de.customer_id}>{de.customer_name}</ThirdPartyLink></dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold">{formatCurrency(de.total_sale_amount)}</dd></div>
             </dl>
           </CardContent>

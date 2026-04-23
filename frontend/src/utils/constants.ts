@@ -78,4 +78,28 @@ export const ROUTES = {
   // Sistema (super admin)
   SYSTEM_ORGANIZATIONS: "/system/organizations",
   SYSTEM_USERS: "/system/users",
+
+  // Detail pages (antes hardcodeados en App.tsx)
+  PURCHASE_DETAIL: "/purchases/:id",
+  PURCHASE_EDIT: "/purchases/:id/edit",
+  PURCHASE_LIQUIDATE: "/purchases/:id/liquidate",
+  SALE_DETAIL: "/sales/:id",
+  SALE_EDIT: "/sales/:id/edit",
+  SALE_LIQUIDATE: "/sales/:id/liquidate",
+  DOUBLE_ENTRY_DETAIL: "/double-entries/:id",
+  DOUBLE_ENTRY_EDIT: "/double-entries/:id/edit",
+  DOUBLE_ENTRY_LIQUIDATE: "/double-entries/:id/liquidate",
+  TREASURY_MOVEMENT_DETAIL: "/treasury/:id",
+  TREASURY_FIXED_ASSET_DETAIL: "/treasury/fixed-assets/:id",
+  TREASURY_FIXED_ASSET_EDIT: "/treasury/fixed-assets/:id/edit",
+  TREASURY_SCHEDULED_DETAIL: "/treasury/scheduled-expenses/:id",
+  INVENTORY_ADJUSTMENT_DETAIL: "/inventory/adjustments/:id",
+  INVENTORY_TRANSFORMATION_DETAIL: "/inventory/transformations/:id",
 } as const;
+
+export function buildRoute(template: string, params: Record<string, string>): string {
+  return Object.entries(params).reduce(
+    (path, [key, value]) => path.replace(`:${key}`, value),
+    template
+  );
+}

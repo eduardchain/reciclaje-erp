@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, DollarSign, TrendingUp, Hash, MoreHorizontal, Eye, Pencil, XCircle, FileText, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,11 +28,14 @@ import type { MetricCard } from "@/types/reports";
 import { useAuthStore } from "@/stores/authStore";
 import { exportSalePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
+import { ThirdPartyLink } from "@/components/shared/EntityLink";
+import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 
 const PAGE_SIZE = 20;
 
 function ActionsCell({ sale }: { sale: SaleResponse }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -43,6 +46,8 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
   const canEdit = sale.status === "registered" && !sale.double_entry_id && hasPermission("sales.edit");
   const canLiquidate = sale.status === "registered" && !sale.double_entry_id && hasPermission("sales.liquidate");
   const canCancel = (sale.status === "registered" || sale.status === "liquidated") && !sale.double_entry_id && hasPermission("sales.cancel");
+
+  const currentUrl = location.pathname + location.search;
 
   return (
     <>
@@ -58,18 +63,18 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuItem onClick={() => navigate(`/sales/${sale.id}`)}>
+          <DropdownMenuItem onClick={() => { saveScroll(currentUrl); navigate(`/sales/${sale.id}`); }}>
             <Eye className="h-4 w-4 mr-2" />
             Ver detalle
           </DropdownMenuItem>
           {canEdit && (
-            <DropdownMenuItem onClick={() => navigate(`/sales/${sale.id}/edit`)}>
+            <DropdownMenuItem onClick={() => { saveScroll(currentUrl); navigate(`/sales/${sale.id}/edit`); }}>
               <Pencil className="h-4 w-4 mr-2" />
               Editar
             </DropdownMenuItem>
           )}
           {canLiquidate && (
-            <DropdownMenuItem onClick={() => navigate(`/sales/${sale.id}/liquidate`)}>
+            <DropdownMenuItem onClick={() => { saveScroll(currentUrl); navigate(`/sales/${sale.id}/liquidate`); }}>
               <DollarSign className="h-4 w-4 mr-2" />
               Liquidar
             </DropdownMenuItem>
@@ -128,6 +133,7 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean): ColumnDef<S
     {
       accessorKey: "customer_name",
       header: "CLIENTE",
+      cell: ({ row }) => <ThirdPartyLink id={row.original.customer_id}>{row.original.customer_name}</ThirdPartyLink>,
     },
     {
       id: "items",
@@ -208,15 +214,28 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean): ColumnDef<S
 
 export default function SalesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { hasPermission } = usePermissions();
   const canViewPrices = hasPermission("sales.view_prices");
   const canViewProfit = hasPermission("sales.view_profit");
   const [searchParams, setSearchParams] = useSearchParams();
   const columns = useMemo(() => getColumns(canViewPrices, canViewProfit), [canViewPrices, canViewProfit]);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<string>(searchParams.get("tab") || "all");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
+
+  const status = searchParams.get("tab") || "all";
+  const page = parseInt(searchParams.get("page") || "0", 10);
+  const search = searchParams.get("search") || "";
+
+  const setParam = (updates: Record<string, string | null>) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      Object.entries(updates).forEach(([k, v]) => {
+        if (v === null || v === "" || v === "0" || v === "all") next.delete(k);
+        else next.set(k, v);
+      });
+      return next;
+    }, { replace: true });
+  };
 
   const { data, isLoading } = useSales({
     skip: page * PAGE_SIZE,
@@ -226,6 +245,8 @@ export default function SalesPage() {
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
+
+  useScrollRestoration(!isLoading);
 
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
@@ -247,6 +268,8 @@ export default function SalesPage() {
       netMargin,
     };
   }, [data]);
+
+  const currentUrl = location.pathname + location.search;
 
   return (
     <div className="space-y-4">
@@ -306,7 +329,7 @@ export default function SalesPage() {
         </div>
       )}
 
-      <Tabs value={status} onValueChange={(v) => { setStatus(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
+      <Tabs value={status} onValueChange={(v) => setParam({ tab: v, page: null, search: null })}>
         <TabsList>
           <TabsTrigger value="all">Todas</TabsTrigger>
           <TabsTrigger value="registered">Registradas</TabsTrigger>
@@ -323,14 +346,14 @@ export default function SalesPage() {
         pageIndex={page}
         pageSize={PAGE_SIZE}
         totalItems={data?.total}
-        onPageChange={setPage}
-        onRowClick={(row) => navigate(`/sales/${row.id}`)}
+        onPageChange={(p) => setParam({ page: p === 0 ? null : String(p) })}
+        onRowClick={(row) => { saveScroll(currentUrl); navigate(`/sales/${row.id}`); }}
         emptyTitle="Sin ventas"
         emptyDescription="No se encontraron ventas para los filtros seleccionados."
         exportFilename="ecobalance_ventas"
         toolbar={
           <div className="flex items-center gap-3">
-            <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(0); }} placeholder="Buscar venta..." />
+            <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar venta..." />
             <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
           </div>
         }

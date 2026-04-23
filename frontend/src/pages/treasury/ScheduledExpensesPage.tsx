@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
+import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { Plus } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
@@ -28,12 +28,20 @@ const statusColors: Record<ScheduledExpenseStatus, string> = {
 
 export default function ScheduledExpensesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission } = usePermissions();
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  const statusFilter = searchParams.get("status") || "all";
+  const setStatusFilter = (v: string) => {
+    setSearchParams(v === "all" ? {} : { status: v }, { replace: true });
+  };
 
   const filters = statusFilter !== "all" ? { status: statusFilter } : {};
   const { data, isLoading } = useScheduledExpenses(filters);
   const items = data?.items ?? [];
+
+  useScrollRestoration(!isLoading);
 
   return (
     <div className="space-y-6">
@@ -91,7 +99,7 @@ export default function ScheduledExpensesPage() {
                   <TableRow
                     key={se.id}
                     className="cursor-pointer hover:bg-slate-50"
-                    onClick={() => navigate(`${ROUTES.TREASURY_SCHEDULED}/${se.id}`)}
+                    onClick={() => { saveScroll(location.pathname + location.search); navigate(`${ROUTES.TREASURY_SCHEDULED}/${se.id}`); }}
                   >
                     <TableCell className="font-medium">{se.name}</TableCell>
                     <TableCell className="text-sm text-slate-500">{se.source_account_name}</TableCell>

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
+
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, FileText, Power, PowerOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import ThirdPartyFormDialog from "./ThirdPartyFormDialog";
 import type { ThirdPartyResponse } from "@/types/third-party";
 import { ROUTES } from "@/utils/constants";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useScrollRestoration, saveScroll } from "@/hooks/useScrollRestoration";
 
 const PAGE_SIZE = 20;
 
@@ -48,7 +50,7 @@ function getColumns(
   canDelete: boolean,
   onDeactivate: (tp: ThirdPartyResponse) => void,
   onReactivate: (tp: ThirdPartyResponse) => void,
-  roleFilter: string,
+  currentUrl: string,
 ): ColumnDef<ThirdPartyResponse, unknown>[] {
   const cols: ColumnDef<ThirdPartyResponse, unknown>[] = [
     {
@@ -82,7 +84,7 @@ function getColumns(
             <Button
               size="sm"
               variant="outline"
-              onClick={(e) => { e.stopPropagation(); navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${tp.id}&returnTo=${encodeURIComponent(`/third-parties?tab=${roleFilter}`)}`); }}
+              onClick={(e) => { e.stopPropagation(); saveScroll(currentUrl); navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${tp.id}&returnTo=${encodeURIComponent(currentUrl)}`); }}
             >
               <FileText className="h-3 w-3 mr-1" />Estado de Cuenta
             </Button>
@@ -116,14 +118,28 @@ function getColumns(
 
 export default function ThirdPartiesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission } = usePermissions();
-  const [page, setPage] = useState(0);
-  const [roleFilter, setRoleFilter] = useState(searchParams.get("tab") || "all");
-  const [search, setSearch] = useState("");
+
+  const roleFilter = searchParams.get("tab") || "all";
+  const page = parseInt(searchParams.get("page") || "0", 10);
+  const search = searchParams.get("search") || "";
+  const showInactive = searchParams.get("inactive") === "1";
+
+  const setParam = (updates: Record<string, string | null>) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      Object.entries(updates).forEach(([k, v]) => {
+        if (v === null || v === "" || v === "0" || v === "all") next.delete(k);
+        else next.set(k, v);
+      });
+      return next;
+    }, { replace: true });
+  };
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<ThirdPartyResponse | null>(null);
-  const [showInactive, setShowInactive] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<ThirdPartyResponse | null>(null);
   const [reactivateTarget, setReactivateTarget] = useState<ThirdPartyResponse | null>(null);
   const canViewBalance = hasPermission("third_parties.view_balance");
@@ -131,13 +147,14 @@ export default function ThirdPartiesPage() {
   const deactivateMutation = useDeactivateThirdParty();
   const reactivateMutation = useReactivateThirdParty();
 
-  const columns = getColumns(navigate, canViewBalance, canDelete, setDeactivateTarget, setReactivateTarget, roleFilter);
+  const columns = getColumns(navigate, canViewBalance, canDelete, setDeactivateTarget, setReactivateTarget, location.pathname + location.search);
 
   const { data, isLoading } = useThirdParties({
     search: search || undefined,
     role: roleFilter === "all" ? undefined : roleFilter,
     is_active: showInactive ? undefined : true,
   });
+  useScrollRestoration(!isLoading);
 
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
@@ -151,7 +168,7 @@ export default function ThirdPartiesPage() {
         )}
       </PageHeader>
 
-      <Tabs value={roleFilter} onValueChange={(v) => { setRoleFilter(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
+      <Tabs value={roleFilter} onValueChange={(v) => setParam({ tab: v, page: null, search: null })}>
         <TabsList>
           <TabsTrigger value="all">Todos</TabsTrigger>
           <TabsTrigger value="supplier">Proveedores</TabsTrigger>
@@ -172,19 +189,19 @@ export default function ThirdPartiesPage() {
         pageIndex={page}
         pageSize={PAGE_SIZE}
         totalItems={data?.total}
-        onPageChange={setPage}
+        onPageChange={(p) => setParam({ page: p === 0 ? null : String(p) })}
         onRowClick={(row) => { setEditItem(row); setDialogOpen(true); }}
         emptyTitle="Sin terceros"
         emptyDescription="No se encontraron terceros."
         exportFilename="ecobalance_terceros"
         toolbar={
           <div className="flex items-center gap-4">
-            <SearchInput value={search} onChange={setSearch} placeholder="Buscar tercero..." />
+            <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar tercero..." />
             <div className="flex items-center gap-2">
               <Checkbox
                 id="show-inactive"
                 checked={showInactive}
-                onCheckedChange={(checked) => setShowInactive(checked === true)}
+                onCheckedChange={(checked) => setParam({ inactive: checked === true ? "1" : null, page: null })}
               />
               <label htmlFor="show-inactive" className="text-sm text-slate-600 cursor-pointer whitespace-nowrap">
                 Mostrar inactivos

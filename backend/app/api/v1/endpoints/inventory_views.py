@@ -16,7 +16,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_serializer
 from sqlalchemy import select, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import require_permission, require_any_permission, get_db
 from app.models.inventory_movement import InventoryMovement
@@ -35,6 +35,7 @@ class StockItem(BaseModel):
     material_id: UUID
     material_code: str
     material_name: str
+    category_name: Optional[str] = None
     default_unit: str
     current_stock_liquidated: float
     current_stock_transit: float
@@ -42,6 +43,7 @@ class StockItem(BaseModel):
     current_average_cost: float
     total_value: float  # stock_liquidated * avg_cost
     is_active: bool
+    warehouse_ids: list[str] = []
 
     model_config = {"from_attributes": True}
 
@@ -190,8 +192,6 @@ class ValuationResponse(BaseModel):
     response_model=StockConsolidatedResponse,
 )
 def get_stock_consolidated(
-    category_id: Optional[UUID] = Query(None, description="Filtrar por categoria"),
-    warehouse_id: Optional[UUID] = Query(None, description="Filtrar por bodega"),
     active_only: bool = Query(True, description="Solo materiales activos"),
     org_context: dict = Depends(require_permission("inventory.view")),
     db: Session = Depends(get_db),
@@ -200,18 +200,16 @@ def get_stock_consolidated(
     Vista consolidada de stock por material.
 
     Muestra stock liquidado, en transito, total, costo promedio y valorizacion.
-    Si se filtra por bodega, calcula stock desde InventoryMovement.
+    Filtros de categoria y bodega se aplican en el frontend (multiselect).
     """
     organization_id = org_context["organization_id"]
 
     query = select(Material).where(
         Material.organization_id == organization_id
-    )
+    ).options(selectinload(Material.category))
 
     if active_only:
         query = query.where(Material.is_active == True)
-    if category_id:
-        query = query.where(Material.category_id == category_id)
 
     query = query.order_by(Material.sort_order, Material.name)
     materials = list(db.scalars(query).all())
@@ -219,112 +217,46 @@ def get_stock_consolidated(
     items = []
     total_valuation = Decimal("0")
 
-    if warehouse_id:
-        from app.models.sale import Sale, SaleLine
+    # Batch query: warehouse_ids donde cada material tiene stock != 0
+    material_ids = [m.id for m in materials]
+    warehouse_ids_by_material: dict[UUID, list[str]] = {}
+    if material_ids:
+        wh_rows = db.execute(
+            select(
+                InventoryMovement.material_id,
+                InventoryMovement.warehouse_id,
+            )
+            .where(
+                InventoryMovement.organization_id == organization_id,
+                InventoryMovement.material_id.in_(material_ids),
+            )
+            .group_by(InventoryMovement.material_id, InventoryMovement.warehouse_id)
+            .having(func.sum(InventoryMovement.quantity) != 0)
+        ).all()
+        for mid, wid in wh_rows:
+            warehouse_ids_by_material.setdefault(mid, []).append(str(wid))
 
-        # Calcular stock total por material en esta bodega (batch)
-        material_ids = [m.id for m in materials]
-        total_by_mat: dict[UUID, Decimal] = {}
-        if material_ids:
-            rows = db.execute(
-                select(
-                    InventoryMovement.material_id,
-                    func.coalesce(func.sum(InventoryMovement.quantity), 0).label("total"),
-                )
-                .where(
-                    InventoryMovement.organization_id == organization_id,
-                    InventoryMovement.material_id.in_(material_ids),
-                    InventoryMovement.warehouse_id == warehouse_id,
-                )
-                .group_by(InventoryMovement.material_id)
-            ).all()
-            for mid, total in rows:
-                total_by_mat[mid] = Decimal(str(total))
+    for m in materials:
+        stock_liq = float(m.current_stock_liquidated)
+        stock_transit = float(m.current_stock_transit)
+        avg_cost = float(m.current_average_cost)
+        value = float(m.current_stock_liquidated * m.current_average_cost)
+        total_valuation += m.current_stock_liquidated * m.current_average_cost
 
-        # Transito compras: movimientos purchase con unit_cost=0 (registradas, no liquidadas)
-        purchase_transit: dict[UUID, Decimal] = {}
-        if material_ids:
-            rows = db.execute(
-                select(
-                    InventoryMovement.material_id,
-                    func.coalesce(func.sum(InventoryMovement.quantity), 0).label("transit"),
-                )
-                .where(
-                    InventoryMovement.organization_id == organization_id,
-                    InventoryMovement.material_id.in_(material_ids),
-                    InventoryMovement.warehouse_id == warehouse_id,
-                    InventoryMovement.movement_type == "purchase",
-                    InventoryMovement.unit_cost == 0,
-                )
-                .group_by(InventoryMovement.material_id)
-            ).all()
-            for mid, transit in rows:
-                purchase_transit[mid] = Decimal(str(transit))
-
-        # Transito ventas: movimientos sale cuya venta aun esta en registered
-        sale_transit: dict[UUID, Decimal] = {}
-        if material_ids:
-            rows = db.execute(
-                select(
-                    InventoryMovement.material_id,
-                    func.coalesce(func.sum(InventoryMovement.quantity), 0).label("transit"),
-                )
-                .join(Sale, (Sale.id == InventoryMovement.reference_id) & (InventoryMovement.reference_type == "sale"))
-                .where(
-                    InventoryMovement.organization_id == organization_id,
-                    InventoryMovement.material_id.in_(material_ids),
-                    InventoryMovement.warehouse_id == warehouse_id,
-                    InventoryMovement.movement_type == "sale",
-                    Sale.status == "registered",
-                )
-                .group_by(InventoryMovement.material_id)
-            ).all()
-            for mid, transit in rows:
-                sale_transit[mid] = Decimal(str(transit))
-
-        for m in materials:
-            stock_total = total_by_mat.get(m.id, Decimal("0"))
-            transit = purchase_transit.get(m.id, Decimal("0")) + sale_transit.get(m.id, Decimal("0"))
-            stock_liq = stock_total - transit
-
-            if stock_total == 0 and active_only:
-                continue
-
-            value = float(stock_liq * m.current_average_cost)
-            total_valuation += stock_liq * m.current_average_cost
-
-            items.append(StockItem(
-                material_id=m.id,
-                material_code=m.code,
-                material_name=m.name,
-                default_unit=m.default_unit,
-                current_stock_liquidated=float(stock_liq),
-                current_stock_transit=float(transit),
-                current_stock_total=float(stock_total),
-                current_average_cost=float(m.current_average_cost),
-                total_value=value,
-                is_active=m.is_active,
-            ))
-    else:
-        for m in materials:
-            stock_liq = float(m.current_stock_liquidated)
-            stock_transit = float(m.current_stock_transit)
-            avg_cost = float(m.current_average_cost)
-            value = float(m.current_stock_liquidated * m.current_average_cost)
-            total_valuation += m.current_stock_liquidated * m.current_average_cost
-
-            items.append(StockItem(
-                material_id=m.id,
-                material_code=m.code,
-                material_name=m.name,
-                default_unit=m.default_unit,
-                current_stock_liquidated=stock_liq,
-                current_stock_transit=stock_transit,
-                current_stock_total=stock_liq + stock_transit,
-                current_average_cost=avg_cost,
-                total_value=value,
-                is_active=m.is_active,
-            ))
+        items.append(StockItem(
+            material_id=m.id,
+            material_code=m.code,
+            material_name=m.name,
+            category_name=m.category.name if m.category else None,
+            default_unit=m.default_unit,
+            current_stock_liquidated=stock_liq,
+            current_stock_transit=stock_transit,
+            current_stock_total=stock_liq + stock_transit,
+            current_average_cost=avg_cost,
+            total_value=value,
+            is_active=m.is_active,
+            warehouse_ids=warehouse_ids_by_material.get(m.id, []),
+        ))
 
     return StockConsolidatedResponse(
         items=items,

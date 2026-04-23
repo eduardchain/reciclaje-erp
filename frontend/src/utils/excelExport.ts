@@ -12,6 +12,7 @@ import type {
   ProfitabilityByBUResponse,
   RealCostByMaterialResponse,
 } from "@/types/reports";
+import type { StockItem } from "@/types/inventory";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 
 export function exportAccountStatementExcel(data: AccountStatementExportData) {
@@ -481,6 +482,54 @@ export function exportMarginAnalysisExcel(data: MarginAnalysisResponse) {
   XLSX.writeFile(wb, `margenes_${data.period_from}_${data.period_to}.xlsx`);
 }
 
+
+export function exportStockExcel(items: StockItem[], canViewValues: boolean) {
+  const rows: (string | number)[][] = [];
+  rows.push(["Inventario - Stock Consolidado"]);
+  rows.push([`Generado: ${new Date().toLocaleDateString("es-CO")}`]);
+  rows.push([]);
+
+  const headers: string[] = ["Codigo", "Material", "Categoria", "Unidad", "Stock Liq.", "Stock Trans.", "Total"];
+  if (canViewValues) headers.push("Costo Prom.", "Valor Total");
+  rows.push(headers);
+
+  for (const item of items) {
+    const row: (string | number)[] = [
+      item.material_code,
+      item.material_name,
+      item.category_name ?? "",
+      item.default_unit,
+      item.current_stock_liquidated,
+      item.current_stock_transit,
+      item.current_stock_total,
+    ];
+    if (canViewValues) {
+      row.push(item.current_average_cost, item.total_value);
+    }
+    rows.push(row);
+  }
+
+  rows.push([]);
+  const totalsRow: (string | number)[] = [
+    "", "", "", "TOTAL",
+    items.reduce((s, i) => s + i.current_stock_liquidated, 0),
+    items.reduce((s, i) => s + i.current_stock_transit, 0),
+    items.reduce((s, i) => s + i.current_stock_total, 0),
+  ];
+  if (canViewValues) {
+    totalsRow.push("", items.reduce((s, i) => s + i.total_value, 0));
+  }
+  rows.push(totalsRow);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [
+    { wch: 12 }, { wch: 30 }, { wch: 20 }, { wch: 8 },
+    { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 },
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Stock");
+  XLSX.writeFile(wb, `inventario_stock_${new Date().toISOString().split("T")[0]}.xlsx`);
+}
 
 export function exportThirdPartyBalancesExcel(data: ThirdPartyBalancesResponse) {
   const fmt = (n: number) => formatCurrency(n);

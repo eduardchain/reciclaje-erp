@@ -17,7 +17,7 @@ import type {
 
 // --- Views ---
 
-export function useStock(params?: { category_id?: string; warehouse_id?: string; active_only?: boolean }) {
+export function useStock(params?: { active_only?: boolean }) {
   return useQuery({
     queryKey: ["inventory", "stock", params],
     queryFn: () => inventoryService.getStock(params),

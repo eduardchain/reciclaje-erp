@@ -13,6 +13,7 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { DataTable } from "@/components/shared/DataTable";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { KpiCard } from "@/components/shared/KpiCard";
+import { PurchaseLink, SaleLink, TransformationLink, AdjustmentLink } from "@/components/shared/EntityLink";
 import { useInventoryMovements } from "@/hooks/useInventory";
 import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate } from "@/utils/formatters";
@@ -134,11 +135,34 @@ export default function MovementHistoryPage() {
       );
     }
 
-    base.push({
-      accessorKey: "notes",
-      header: "Notas",
-      cell: ({ row }) => <span className="text-sm text-slate-500 truncate max-w-[200px] block">{row.original.notes ?? "-"}</span>,
-    });
+    base.push(
+      {
+        id: "referencia",
+        header: "Referencia",
+        cell: ({ row }) => {
+          const { movement_type, reference_id } = row.original;
+          if (!reference_id) return <span className="text-slate-400 text-sm">-</span>;
+          if (movement_type === "purchase" || movement_type === "purchase_reversal") {
+            return <PurchaseLink id={reference_id}>Ver compra</PurchaseLink>;
+          }
+          if (movement_type === "sale" || movement_type === "sale_reversal") {
+            return <SaleLink id={reference_id}>Ver venta</SaleLink>;
+          }
+          if (movement_type === "transformation") {
+            return <TransformationLink id={reference_id}>Ver transformación</TransformationLink>;
+          }
+          if (movement_type === "adjustment") {
+            return <AdjustmentLink id={reference_id}>Ver ajuste</AdjustmentLink>;
+          }
+          return <span className="text-slate-400 text-sm">-</span>;
+        },
+      },
+      {
+        accessorKey: "notes",
+        header: "Notas",
+        cell: ({ row }) => <span className="text-sm text-slate-500 truncate max-w-[200px] block">{row.original.notes ?? "-"}</span>,
+      },
+    );
 
     return base;
   }, [materialFilter, warehouseFilter]);

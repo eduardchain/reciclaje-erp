@@ -61,7 +61,7 @@ async function post<T>(url: string, data?: unknown): Promise<T> {
 
 export const inventoryService = {
   // --- Views ---
-  getStock: (params?: { category_id?: string; warehouse_id?: string; active_only?: boolean }) =>
+  getStock: (params?: { active_only?: boolean }) =>
     get<StockConsolidatedResponse>("/api/v1/inventory/stock", params),
 
   getStockDetail: (materialId: string) =>

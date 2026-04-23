@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { ArrowLeft, CreditCard, XCircle, Pencil, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { WarningsList } from "@/components/shared/WarningsList";
 import { useSale, useCancelSale } from "@/hooks/useSales";
 import { formatCurrency, formatDate, formatDateTime, formatWeight, formatPercentage } from "@/utils/formatters";
@@ -26,6 +28,7 @@ const statusBorderMap: Record<string, string> = {
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const handleBack = useReturnToBack();
   const { data: sale, isLoading } = useSale(id!);
   const { hasPermission } = usePermissions();
   const canViewPrices = hasPermission("sales.view_prices");
@@ -77,7 +80,7 @@ export default function SaleDetailPage() {
           <Button variant="outline" onClick={() => exportSalePDF(sale, orgName, { showPrices: canViewPrices, showProfit: canViewProfit })}>
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
-          <Button variant="outline" onClick={() => navigate(-1)}>
+          <Button variant="outline" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
         </div>
@@ -101,7 +104,7 @@ export default function SaleDetailPage() {
         <Card className="shadow-sm">
           <CardContent className="pt-6">
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</dt><dd>{sale.customer_name}</dd></div>
+              <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</dt><dd><ThirdPartyLink id={sale.customer_id}>{sale.customer_name}</ThirdPartyLink></dd></div>
               {sale.warehouse_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega</dt><dd>{sale.warehouse_name}</dd></div>}
               {sale.vehicle_plate && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa</dt><dd>{sale.vehicle_plate}</dd></div>}
               {sale.invoice_number && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Factura</dt><dd>{sale.invoice_number}</dd></div>}

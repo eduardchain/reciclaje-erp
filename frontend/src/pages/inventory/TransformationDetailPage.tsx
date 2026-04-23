@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,7 @@ const statusBorderMap: Record<string, string> = {
 
 export default function TransformationDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const handleBack = useReturnToBack();
   const { data: t, isLoading } = useTransformation(id!);
   const annul = useAnnulTransformation();
   const [showAnnul, setShowAnnul] = useState(false);
@@ -33,7 +34,7 @@ export default function TransformationDetailPage() {
     <div className="space-y-6">
       <PageHeader title={`Transformacion #${t.transformation_number}`} description={`${t.source_material_code} - ${t.source_material_name}`}>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(-1)}>
+          <Button variant="outline" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
           {t.status === "confirmed" && (
@@ -139,7 +140,7 @@ export default function TransformationDetailPage() {
         onOpenChange={setShowAnnul}
         title="Anular Transformacion"
         description="Se revertiran todos los movimientos de stock."
-        onConfirm={() => annul.mutate({ id: t.id, data: { reason: annulReason } }, { onSuccess: () => navigate(-1) })}
+        onConfirm={() => annul.mutate({ id: t.id, data: { reason: annulReason } }, { onSuccess: handleBack })}
         variant="destructive"
         loading={annul.isPending}
         disabled={annulReason.length < 1}

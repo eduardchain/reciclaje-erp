@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
+import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { Plus, Play } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
@@ -30,14 +31,22 @@ const statusColors: Record<string, string> = {
 
 export default function FixedAssetsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission } = usePermissions();
-  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [showApplyPending, setShowApplyPending] = useState(false);
   const applyPending = useApplyPendingDepreciations();
+
+  const statusFilter = searchParams.get("status") || "all";
+  const setStatusFilter = (v: string) => {
+    setSearchParams(v === "all" ? {} : { status: v }, { replace: true });
+  };
 
   const filters = statusFilter !== "all" ? { status: statusFilter } : {};
   const { data, isLoading } = useFixedAssets(filters);
   const items = data?.items ?? [];
+
+  useScrollRestoration(!isLoading);
 
   return (
     <div className="space-y-6">
@@ -100,7 +109,7 @@ export default function FixedAssetsPage() {
                   <TableRow
                     key={asset.id}
                     className="cursor-pointer hover:bg-slate-50"
-                    onClick={() => navigate(`${ROUTES.TREASURY_FIXED_ASSETS}/${asset.id}`)}
+                    onClick={() => { saveScroll(location.pathname + location.search); navigate(`${ROUTES.TREASURY_FIXED_ASSETS}/${asset.id}`); }}
                   >
                     <TableCell className="font-medium text-slate-500">{asset.asset_code || "—"}</TableCell>
                     <TableCell className="font-medium">{asset.name}</TableCell>

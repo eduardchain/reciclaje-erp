@@ -1,26 +1,123 @@
 import { useState, useMemo, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Package, DollarSign, Layers, ChevronRight, ArrowRightLeft, Loader2 } from "lucide-react";
+import { Package, DollarSign, Layers, Weight, ChevronRight, ArrowRightLeft, Loader2, ChevronsUpDown, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { SearchInput } from "@/components/shared/SearchInput";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { useStock, useStockDetail, useCreateTransfer } from "@/hooks/useInventory";
-import { useMaterialCategories } from "@/hooks/useCrudData";
 import { useWarehouses } from "@/hooks/useMasterData";
 import { formatCurrency } from "@/utils/formatters";
+import { exportStockExcel } from "@/utils/excelExport";
 import { cn } from "@/utils";
 import type { StockItem } from "@/types/inventory";
 import type { MetricCard } from "@/types/reports";
 import { usePermissions } from "@/hooks/usePermissions";
+
+// --- Multi-select filter ---
+
+interface MultiSelectOption {
+  value: string;
+  label: string;
+}
+
+function MultiSelectFilter({
+  options,
+  selected,
+  onChange,
+  placeholder,
+}: {
+  options: MultiSelectOption[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const toggle = (value: string) => {
+    const next = new Set(selected);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    onChange(next);
+  };
+
+  const visibleOptions = search
+    ? options.filter((o) => o.label.toLowerCase().includes(search.toLowerCase()))
+    : options;
+
+  const allVisibleSelected = visibleOptions.length > 0 && visibleOptions.every((o) => selected.has(o.value));
+
+  const toggleVisible = () => {
+    const next = new Set(selected);
+    if (allVisibleSelected) visibleOptions.forEach((o) => next.delete(o.value));
+    else visibleOptions.forEach((o) => next.add(o.value));
+    onChange(next);
+  };
+
+  const label =
+    selected.size === 0
+      ? placeholder
+      : selected.size === options.length
+      ? "Todos"
+      : `${selected.size} seleccionado${selected.size > 1 ? "s" : ""}`;
+
+  return (
+    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setSearch(""); }}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          className={cn("w-48 justify-between font-normal", selected.size > 0 && "border-blue-400 bg-blue-50 text-blue-700")}
+        >
+          <span className="truncate">{label}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-2" align="start">
+        <input
+          className="w-full mb-2 px-2 py-1 text-sm border rounded outline-none focus:ring-1 focus:ring-blue-400"
+          placeholder="Buscar..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+        />
+        <div className="space-y-1 max-h-56 overflow-y-auto">
+          <button
+            className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-slate-100"
+            onClick={toggleVisible}
+          >
+            <Checkbox checked={allVisibleSelected} />
+            <span className="font-medium">{search ? "Seleccionar visibles" : "Todos"}</span>
+          </button>
+          <div className="border-t my-1" />
+          {visibleOptions.length === 0 && (
+            <p className="text-xs text-slate-400 px-2 py-1">Sin resultados</p>
+          )}
+          {visibleOptions.map((opt) => (
+            <button
+              key={opt.value}
+              className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-slate-100"
+              onClick={() => toggle(opt.value)}
+            >
+              <Checkbox checked={selected.has(opt.value)} />
+              <span className="truncate">{opt.label}</span>
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // --- Modal de traslado entre bodegas ---
 
@@ -229,38 +326,64 @@ export default function StockPage() {
   const { hasPermission } = usePermissions();
   const canViewValues = hasPermission("inventory.view_values");
   const [expandedMaterial, setExpandedMaterial] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("");
-  const [warehouseFilter, setWarehouseFilter] = useState<string>("");
+  const [categoryFilters, setCategoryFilters] = useState<Set<string>>(new Set());
+  const [warehouseFilters, setWarehouseFilters] = useState<Set<string>>(new Set());
+  const [materialFilters, setMaterialFilters] = useState<Set<string>>(new Set());
   const [transferModal, setTransferModal] = useState<TransferModalState | null>(null);
 
-  const { data: categoriesData } = useMaterialCategories();
-  const categories = categoriesData?.items ?? categoriesData ?? [];
   const { data: warehousesData } = useWarehouses();
   const warehouses = warehousesData?.items ?? [];
 
-  const { data, isLoading } = useStock({
-    category_id: categoryFilter || undefined,
-    warehouse_id: warehouseFilter || undefined,
-  });
+  const { data, isLoading } = useStock();
+
+  // Derive filter options from loaded data
+  const categoryOptions = useMemo<MultiSelectOption[]>(() => {
+    if (!data?.items) return [];
+    const seen = new Map<string, string>();
+    for (const item of data.items) {
+      if (item.category_name) seen.set(item.category_name, item.category_name);
+    }
+    return Array.from(seen.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([v]) => ({ value: v, label: v }));
+  }, [data]);
+
+  const warehouseOptions = useMemo<MultiSelectOption[]>(
+    () => (warehouses as { id: string; name: string }[]).map((w) => ({ value: w.id, label: w.name })),
+    [warehouses],
+  );
+
+  const materialOptions = useMemo<MultiSelectOption[]>(() => {
+    if (!data?.items) return [];
+    return data.items.map((i) => ({ value: i.material_id, label: `${i.material_code} - ${i.material_name}` }));
+  }, [data]);
 
   const filteredItems = useMemo(() => {
-    if (!search || !data?.items) return data?.items ?? [];
-    const s = search.toLowerCase();
-    return data.items.filter(i => i.material_name.toLowerCase().includes(s) || i.material_code.toLowerCase().includes(s));
-  }, [data, search]);
+    if (!data?.items) return [];
+    return data.items.filter((item) => {
+      if (materialFilters.size > 0 && !materialFilters.has(item.material_id)) return false;
+      if (categoryFilters.size > 0) {
+        if (!item.category_name || !categoryFilters.has(item.category_name)) return false;
+      }
+      if (warehouseFilters.size > 0) {
+        if (!item.warehouse_ids.some((wid) => warehouseFilters.has(wid))) return false;
+      }
+      return true;
+    });
+  }, [data, materialFilters, categoryFilters, warehouseFilters]);
 
   const kpis = useMemo(() => {
-    const items = data?.items ?? [];
-    const count = items.length;
-    const totalValue = data?.total_valuation ?? 0;
-    const transitStock = items.reduce((sum, i) => sum + i.current_stock_transit, 0);
+    const count = filteredItems.length;
+    const totalValue = filteredItems.reduce((s, i) => s + i.total_value, 0);
+    const transitStock = filteredItems.reduce((s, i) => s + i.current_stock_transit, 0);
+    const totalStock = filteredItems.reduce((s, i) => s + i.current_stock_total, 0);
     return {
       count: { current_value: count, previous_value: 0, change_percentage: null } as MetricCard,
       value: { current_value: totalValue, previous_value: 0, change_percentage: null } as MetricCard,
       transit: { current_value: transitStock, previous_value: 0, change_percentage: null } as MetricCard,
+      totalStock: { current_value: totalStock, previous_value: 0, change_percentage: null } as MetricCard,
     };
-  }, [data]);
+  }, [data, filteredItems]);
 
   const toggleExpand = (materialId: string) => {
     setExpandedMaterial(expandedMaterial === materialId ? null : materialId);
@@ -276,10 +399,15 @@ export default function StockPage() {
     });
   };
 
+  const colSpan = canViewValues ? 9 : 7;
+
   return (
     <div className="space-y-4">
       <PageHeader title="Inventario" description="Vista consolidada de stock">
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => exportStockExcel(filteredItems, canViewValues)}>
+            <FileSpreadsheet className="h-4 w-4 mr-2" />Excel
+          </Button>
           <Button variant="outline" onClick={() => navigate("/inventory/movements")}>Movimientos</Button>
           <Button variant="outline" onClick={() => navigate("/inventory/adjustments")}>Ajustes</Button>
           <Button variant="outline" onClick={() => navigate("/inventory/transformations")}>Transformaciones</Button>
@@ -287,43 +415,49 @@ export default function StockPage() {
       </PageHeader>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard label="Materiales" metric={kpis.count} icon={<Package className="h-4 w-4" />} accentColor="violet" formatValue={(n) => String(n)} />
+          <KpiCard label="Stock Total" metric={kpis.totalStock} icon={<Weight className="h-4 w-4" />} accentColor="sky" formatValue={(n) => n.toFixed(2) + " kg"} />
           {canViewValues && <KpiCard label="Valor Inventario" metric={kpis.value} icon={<DollarSign className="h-4 w-4" />} accentColor="emerald" />}
           <KpiCard label="Stock en Transito" metric={kpis.transit} icon={<Layers className="h-4 w-4" />} accentColor="amber" formatValue={(n) => n.toFixed(2) + " kg"} />
         </div>
       )}
 
-      <div className="flex items-center gap-3">
-        <SearchInput value={search} onChange={setSearch} placeholder="Buscar material..." />
-        <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v === "all" ? "" : v)}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Todas las categorias" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas las categorias</SelectItem>
-            {(categories as { id: string; name: string }[]).map((c) => (
-              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={warehouseFilter} onValueChange={(v) => setWarehouseFilter(v === "all" ? "" : v)}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Todas las bodegas" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas las bodegas</SelectItem>
-            {(warehouses as { id: string; name: string }[]).map((w) => (
-              <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex items-center gap-3 flex-wrap">
+        <MultiSelectFilter
+          options={materialOptions}
+          selected={materialFilters}
+          onChange={setMaterialFilters}
+          placeholder="Material"
+        />
+        <MultiSelectFilter
+          options={categoryOptions}
+          selected={categoryFilters}
+          onChange={setCategoryFilters}
+          placeholder="Categoria"
+        />
+        <MultiSelectFilter
+          options={warehouseOptions}
+          selected={warehouseFilters}
+          onChange={setWarehouseFilters}
+          placeholder="Bodega"
+        />
+        {(materialFilters.size > 0 || categoryFilters.size > 0 || warehouseFilters.size > 0) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-slate-500"
+            onClick={() => { setMaterialFilters(new Set()); setCategoryFilters(new Set()); setWarehouseFilters(new Set()); }}
+          >
+            Limpiar filtros
+          </Button>
+        )}
       </div>
 
       <div className="rounded-md border">
@@ -344,13 +478,13 @@ export default function StockPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={canViewValues ? 9 : 7} className="h-24 text-center text-slate-500">
+                <TableCell colSpan={colSpan} className="h-24 text-center text-slate-500">
                   Cargando...
                 </TableCell>
               </TableRow>
             ) : filteredItems.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canViewValues ? 9 : 7} className="h-24 text-center text-slate-500">
+                <TableCell colSpan={colSpan} className="h-24 text-center text-slate-500">
                   Sin materiales con stock.
                 </TableCell>
               </TableRow>
@@ -368,7 +502,12 @@ export default function StockPage() {
                       )} />
                     </TableCell>
                     <TableCell className="font-medium">{item.material_code}</TableCell>
-                    <TableCell>{item.material_name}</TableCell>
+                    <TableCell>
+                      <div>{item.material_name}</div>
+                      {item.category_name && (
+                        <div className="text-xs text-slate-400">{item.category_name}</div>
+                      )}
+                    </TableCell>
                     <TableCell>{item.default_unit}</TableCell>
                     <TableCell className="text-right tabular-nums">{item.current_stock_liquidated.toFixed(2)}</TableCell>
                     <TableCell className="text-right">

@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { ArrowLeft, XCircle, Paperclip, Eye, Trash2, Upload, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ThirdPartyLink, PurchaseLink, SaleLink, AccountLink, MoneyMovementLink } from "@/components/shared/EntityLink";
 import { useMoneyMovement, useAnnulMovement, useUpdateClassification, useUploadEvidence, useDeleteEvidence } from "@/hooks/useMoneyMovements";
 import { usePermissions } from "@/hooks/usePermissions";
 import { EditClassificationModal } from "@/components/treasury/EditClassificationModal";
@@ -55,7 +57,7 @@ const statusBorderMap: Record<string, string> = {
 
 export default function MovementDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const handleBack = useReturnToBack();
   const { data: movement, isLoading } = useMoneyMovement(id!);
   const annul = useAnnulMovement();
   const updateClassification = useUpdateClassification();
@@ -114,7 +116,7 @@ export default function MovementDetailPage() {
               <XCircle className="h-4 w-4 mr-2" />Anular
             </Button>
           )}
-          <Button variant="outline" onClick={() => navigate(-1)}>
+          <Button variant="outline" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4 mr-2" />Volver
           </Button>
         </div>
@@ -136,8 +138,11 @@ export default function MovementDetailPage() {
         <Card className="shadow-sm">
           <CardContent className="pt-6">
             <dl className="space-y-3 text-sm">
-              <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta</dt><dd>{movement.account_name ?? "N/A (provision)"}</dd></div>
-              {movement.third_party_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero</dt><dd>{movement.third_party_name}</dd></div>}
+              <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuenta</dt><dd><AccountLink id={movement.account_id}>{movement.account_name ?? "N/A (provision)"}</AccountLink></dd></div>
+              {movement.third_party_name && <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero</dt><dd><ThirdPartyLink id={movement.third_party_id}>{movement.third_party_name}</ThirdPartyLink></dd></div>}
+              {movement.purchase_id && <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Compra vinculada</dt><dd><PurchaseLink id={movement.purchase_id}>Ver compra</PurchaseLink></dd></div>}
+              {movement.sale_id && <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Venta vinculada</dt><dd><SaleLink id={movement.sale_id}>Ver venta</SaleLink></dd></div>}
+              {movement.transfer_pair_id && <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Movimiento par</dt><dd><MoneyMovementLink id={movement.transfer_pair_id}>Ver par de transferencia</MoneyMovementLink></dd></div>}
               {movement.expense_category_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria</dt><dd>{movement.expense_category_name}</dd></div>}
               {EDITABLE_EXPENSE_TYPES.includes(movement.movement_type) && (
                 <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Unidad de Negocio</dt><dd>{movement.business_unit_name ? movement.business_unit_name : movement.applicable_business_unit_names?.length ? movement.applicable_business_unit_names.join(", ") : "General (todas)"}</dd></div>

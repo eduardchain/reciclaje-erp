@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, TrendingUp, Hash, Percent, MoreHorizontal, Eye, XCircle, FileText, Pencil, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,11 +28,13 @@ import { ROUTES } from "@/utils/constants";
 import type { DoubleEntryResponse } from "@/types/double-entry";
 import type { MetricCard } from "@/types/reports";
 import { usePermissions } from "@/hooks/usePermissions";
+import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 
 const PAGE_SIZE = 20;
 
 function ActionsCell({ de }: { de: DoubleEntryResponse }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [cancelOpen, setCancelOpen] = useState(false);
   const cancel = useCancelDoubleEntry();
   const { organizationId, organizations } = useAuthStore();
@@ -42,6 +44,8 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
   const canEdit = de.status === "registered" && hasPermission("double_entries.edit");
   const canLiquidate = de.status === "registered" && hasPermission("double_entries.liquidate");
   const canCancel = (de.status === "registered" || de.status === "liquidated") && hasPermission("double_entries.cancel");
+
+  const currentUrl = location.pathname + location.search;
 
   return (
     <>
@@ -57,18 +61,18 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuItem onClick={() => navigate(`/double-entries/${de.id}`)}>
+          <DropdownMenuItem onClick={() => { saveScroll(currentUrl); navigate(`/double-entries/${de.id}`); }}>
             <Eye className="h-4 w-4 mr-2" />
             Ver detalle
           </DropdownMenuItem>
           {canEdit && (
-            <DropdownMenuItem onClick={() => navigate(`/double-entries/${de.id}/edit`)}>
+            <DropdownMenuItem onClick={() => { saveScroll(currentUrl); navigate(`/double-entries/${de.id}/edit`); }}>
               <Pencil className="h-4 w-4 mr-2" />
               Editar
             </DropdownMenuItem>
           )}
           {canLiquidate && (
-            <DropdownMenuItem onClick={() => navigate(`/double-entries/${de.id}/liquidate`)}>
+            <DropdownMenuItem onClick={() => { saveScroll(currentUrl); navigate(`/double-entries/${de.id}/liquidate`); }}>
               <CheckCircle className="h-4 w-4 mr-2" />
               Liquidar
             </DropdownMenuItem>
@@ -135,15 +139,28 @@ function getColumns(canViewProfit: boolean): ColumnDef<DoubleEntryResponse, unkn
 
 export default function DoubleEntriesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { hasPermission } = usePermissions();
   const canViewValues = hasPermission("double_entries.view_values");
   const canViewProfit = hasPermission("double_entries.view_profit");
   const [searchParams, setSearchParams] = useSearchParams();
   const columns = useMemo(() => getColumns(canViewProfit), [canViewProfit]);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<string>(searchParams.get("tab") || "all");
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
+
+  const status = searchParams.get("tab") || "all";
+  const page = parseInt(searchParams.get("page") || "0", 10);
+  const search = searchParams.get("search") || "";
+
+  const setParam = (updates: Record<string, string | null>) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      Object.entries(updates).forEach(([k, v]) => {
+        if (v === null || v === "" || v === "0" || v === "all") next.delete(k);
+        else next.set(k, v);
+      });
+      return next;
+    }, { replace: true });
+  };
 
   const { data, isLoading } = useDoubleEntries({
     skip: page * PAGE_SIZE,
@@ -153,6 +170,8 @@ export default function DoubleEntriesPage() {
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
+
+  useScrollRestoration(!isLoading);
 
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
@@ -169,6 +188,8 @@ export default function DoubleEntriesPage() {
       margin: { current_value: avgMargin, previous_value: 0, change_percentage: null } as MetricCard,
     };
   }, [data]);
+
+  const currentUrl = location.pathname + location.search;
 
   return (
     <div className="space-y-4">
@@ -216,7 +237,7 @@ export default function DoubleEntriesPage() {
         </div>
       )}
 
-      <Tabs value={status} onValueChange={(v) => { setStatus(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
+      <Tabs value={status} onValueChange={(v) => setParam({ tab: v, page: null, search: null })}>
         <TabsList>
           <TabsTrigger value="all">Todas</TabsTrigger>
           <TabsTrigger value="registered">Registradas</TabsTrigger>
@@ -233,14 +254,14 @@ export default function DoubleEntriesPage() {
         pageIndex={page}
         pageSize={PAGE_SIZE}
         totalItems={data?.total}
-        onPageChange={setPage}
-        onRowClick={(row) => navigate(`/double-entries/${row.id}`)}
+        onPageChange={(p) => setParam({ page: p === 0 ? null : String(p) })}
+        onRowClick={(row) => { saveScroll(currentUrl); navigate(`/double-entries/${row.id}`); }}
         emptyTitle="Sin doble partidas"
         emptyDescription="No se encontraron operaciones pasa mano."
         exportFilename="ecobalance_doble-partidas"
         toolbar={
           <div className="flex items-center gap-3">
-            <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(0); }} placeholder="Buscar..." />
+            <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar..." />
             <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
           </div>
         }

@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { useReturnToBack } from "@/hooks/useReturnToBack";
+import { EntityLink } from "@/components/shared/EntityLink";
+import { ROUTES, buildRoute } from "@/utils/constants";
 import { ArrowLeft, FileText, Download, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,15 +88,48 @@ interface StatementItem {
   received_quantity?: number | null;
   is_line_item?: boolean;
   parent_source_id?: string | null;
+  parent_source_type?: string | null;
+}
+
+function resolveSourceLink(m: StatementItem): string | null {
+  const { source, source_id, event_type, parent_source_id, is_line_item } = m;
+
+  // Comisiones: no tienen detail page propio, usar parent_source_id
+  if (source === "purchase_commission" || event_type === "purchase_commission" || event_type === "purchase_commission_cancellation") {
+    return parent_source_id ? buildRoute(ROUTES.PURCHASE_DETAIL, { id: parent_source_id }) : null;
+  }
+  if (source === "commission" || event_type === "sale_commission" || event_type === "commission_accrual" || event_type === "commission_cancellation") {
+    return parent_source_id ? buildRoute(ROUTES.SALE_DETAIL, { id: parent_source_id }) : null;
+  }
+  if (event_type === "double_entry_commission" || event_type === "double_entry_commission_cancellation") {
+    return parent_source_id ? buildRoute(ROUTES.DOUBLE_ENTRY_DETAIL, { id: parent_source_id }) : null;
+  }
+
+  // Line items: source_id apunta a la línea, parent_source_id al documento padre
+  const docId = is_line_item && parent_source_id ? parent_source_id : source_id;
+
+  switch (source) {
+    case "purchase": return buildRoute(ROUTES.PURCHASE_DETAIL, { id: docId });
+    case "sale": return buildRoute(ROUTES.SALE_DETAIL, { id: docId });
+    case "double_entry": return buildRoute(ROUTES.DOUBLE_ENTRY_DETAIL, { id: docId });
+    case "money_movement": return buildRoute(ROUTES.TREASURY_MOVEMENT_DETAIL, { id: docId });
+    default: return null;
+  }
 }
 
 export default function AccountStatementPage() {
+  const handleBack = useReturnToBack();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const initialThirdParty = searchParams.get("third_party_id") || "";
-  const returnTo = searchParams.get("returnTo") || "";
+  const thirdPartyId = searchParams.get("third_party_id") || "";
+  const hasReturnTo = !!searchParams.get("returnTo");
 
-  const [thirdPartyId, setThirdPartyId] = useState(initialThirdParty);
+  const setThirdPartyId = (id: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (id) next.set("third_party_id", id);
+    else next.delete("third_party_id");
+    navigate(`?${next.toString()}`, { replace: true });
+  };
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [viewMode, setViewMode] = useState<"financial" | "operations">("financial");
@@ -174,8 +210,8 @@ export default function AccountStatementPage() {
           <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())}>
             <Download className="h-4 w-4 mr-2" />Excel
           </Button>
-          {returnTo && (
-            <Button variant="outline" onClick={() => navigate(returnTo)}>
+          {hasReturnTo && (
+            <Button variant="outline" onClick={handleBack}>
               <ArrowLeft className="h-4 w-4 mr-2" />Volver
             </Button>
           )}
@@ -297,7 +333,11 @@ export default function AccountStatementPage() {
                             <span className={isAnnulled ? "line-through" : ""}>{EVENT_TYPE_LABELS[m.event_type] || m.event_type}</span>
                             {isAnnulled && <Badge variant="outline" className="ml-2 bg-rose-50 text-rose-600 text-[10px] py-0">Anulado</Badge>}
                           </TableCell>
-                          <TableCell className={`text-sm max-w-[200px] truncate ${isAnnulled ? "line-through" : ""}`}>{m.description}</TableCell>
+                          <TableCell className={`text-sm max-w-[200px] truncate ${isAnnulled ? "line-through" : ""}`}>
+                            <EntityLink to={resolveSourceLink(m)} showIcon={false} className="hover:underline text-slate-900 hover:text-blue-600">
+                              {m.description}
+                            </EntityLink>
+                          </TableCell>
                           <TableCell className="text-right">
                             {isDebit ? <span className={`tabular-nums ${isAnnulled ? "text-rose-300 line-through" : "text-rose-600"}`}>{formatCurrency(m.amount)}</span> : null}
                           </TableCell>
@@ -371,7 +411,9 @@ export default function AccountStatementPage() {
                             <TableRow key={m.id} className={isAnnulled ? "opacity-50 bg-rose-50/50" : ""}>
                               <TableCell className="text-sm">{formatDate(m.date)}</TableCell>
                               <TableCell className={`text-sm max-w-[200px] truncate ${isAnnulled ? "line-through" : ""}`}>
-                                {concepto}
+                                <EntityLink to={resolveSourceLink(m)} showIcon={false} className="hover:underline text-slate-900 hover:text-blue-600">
+                                  {concepto}
+                                </EntityLink>
                                 {isAnnulled && <Badge variant="outline" className="ml-2 bg-rose-50 text-rose-600 text-[10px] py-0">Anulado</Badge>}
                               </TableCell>
                               <TableCell className="text-sm text-slate-600">

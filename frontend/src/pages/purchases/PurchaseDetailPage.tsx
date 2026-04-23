@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { ArrowLeft, CreditCard, XCircle, Pencil, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
@@ -30,6 +32,7 @@ const statusBorderMap: Record<string, string> = {
 export default function PurchaseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const handleBack = useReturnToBack();
   const { data: purchase, isLoading } = usePurchase(id!);
   const cancel = useCancelPurchase();
   const { hasPermission } = usePermissions();
@@ -92,7 +95,7 @@ export default function PurchaseDetailPage() {
             <FileText className="h-4 w-4 mr-2" />
             PDF
           </Button>
-          <Button variant="outline" onClick={() => navigate(-1)}>
+          <Button variant="outline" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Volver
           </Button>
@@ -125,9 +128,9 @@ export default function PurchaseDetailPage() {
         <Card className="shadow-sm">
           <CardContent className="pt-6">
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</dt>
-                <dd>{purchase.supplier_name}</dd>
+                <dd><ThirdPartyLink id={purchase.supplier_id}>{purchase.supplier_name}</ThirdPartyLink></dd>
               </div>
               {purchase.vehicle_plate && (
                 <div className="flex justify-between">

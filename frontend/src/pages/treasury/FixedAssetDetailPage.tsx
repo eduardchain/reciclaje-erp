@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Play, XCircle, ExternalLink, Pencil } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
+import { ArrowLeft, Play, XCircle, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useFixedAsset, useDepreciateAsset, useDisposeAsset, useCancelFixedAsset } from "@/hooks/useFixedAssets";
 import { formatCurrency } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
+import { MoneyMovementLink } from "@/components/shared/EntityLink";
 
 const statusLabels: Record<string, string> = {
   active: "Activo",
@@ -229,12 +230,7 @@ export default function FixedAssetDetailPage() {
                       {new Date(dep.applied_at).toLocaleDateString("es-CO")}
                     </TableCell>
                     <TableCell>
-                      <Link
-                        to={`/treasury/${dep.money_movement_id}`}
-                        className="text-emerald-600 hover:underline inline-flex items-center gap-1 text-sm"
-                      >
-                        Ver <ExternalLink className="h-3 w-3" />
-                      </Link>
+                      <MoneyMovementLink id={dep.money_movement_id}>Ver</MoneyMovementLink>
                     </TableCell>
                   </TableRow>
                 ))}
