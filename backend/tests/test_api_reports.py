@@ -1370,6 +1370,67 @@ class TestBalanceDetailed:
         # Balance sigue cuadrado
         assert data["verification"]["is_balanced"] is True
 
+    def test_bd_as_of_date_excludes_future_cost_changes(
+        self, client: TestClient, org_headers: dict, report_data: dict, db_session: Session,
+    ):
+        """as_of_date no debe incluir MaterialCostHistory con transaction_date posterior.
+
+        Regresion: cutoff_date = cutoff_dt.date() daba as_of_date+1 dia, incluyendo
+        cambios de costo de operaciones del dia siguiente. Ahora usa as_of_date.
+        """
+        from datetime import date
+        from app.models.material_cost_history import MaterialCostHistory
+        from app.models.inventory_movement import InventoryMovement
+
+        org_id = report_data["org_id"]
+        material = db_session.query(Material).filter_by(organization_id=org_id).first()
+        warehouse = db_session.query(Warehouse).filter_by(organization_id=org_id).first()
+
+        # Movimiento de inventario en T-5 con costo inicial 1000
+        base = datetime(2026, 1, 5, 12, 0, tzinfo=timezone.utc)
+        db_session.add(InventoryMovement(
+            organization_id=org_id, material_id=material.id, warehouse_id=warehouse.id,
+            movement_type="purchase", quantity=Decimal("100"), unit_cost=Decimal("1000"),
+            reference_type="purchase", reference_id=uuid4(),
+            date=base,
+        ))
+        # Cost history: costo inicial 1000 (transaction_date T-5)
+        db_session.add(MaterialCostHistory(
+            organization_id=org_id, material_id=material.id,
+            previous_cost=Decimal("0"), new_cost=Decimal("1000"),
+            previous_stock=Decimal("0"), new_stock=Decimal("100"),
+            source_type="purchase_liquidation", source_id=uuid4(),
+            transaction_date=date(2026, 1, 5),
+        ))
+        # Cost history posterior: costo cambia a 2000 con transaction_date T+0 (2026-01-10)
+        db_session.add(MaterialCostHistory(
+            organization_id=org_id, material_id=material.id,
+            previous_cost=Decimal("1000"), new_cost=Decimal("2000"),
+            previous_stock=Decimal("100"), new_stock=Decimal("100"),
+            source_type="purchase_liquidation", source_id=uuid4(),
+            transaction_date=date(2026, 1, 10),
+        ))
+        db_session.commit()
+
+        # Balance al 2026-01-09 NO debe incluir el cost change del 2026-01-10
+        resp = client.get(
+            "/api/v1/reports/balance-detailed?as_of_date=2026-01-09", headers=org_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()["assets"]["inventory_liquidated"]["items"]
+        target = next((i for i in items if i["id"] == str(material.id)), None)
+        assert target is not None
+        # Costo al 09 debe ser 1000, NO 2000 (que es del 10)
+        assert target["avg_cost"] == pytest.approx(1000, abs=0.01)
+
+        # Balance al 2026-01-10 SI debe incluir el cost change
+        resp2 = client.get(
+            "/api/v1/reports/balance-detailed?as_of_date=2026-01-10", headers=org_headers,
+        )
+        items2 = resp2.json()["assets"]["inventory_liquidated"]["items"]
+        target2 = next((i for i in items2 if i["id"] == str(material.id)), None)
+        assert target2["avg_cost"] == pytest.approx(2000, abs=0.01)
+
 
 # ---------------------------------------------------------------------------
 # Commission Supplier Category Validation Tests

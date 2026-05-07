@@ -1545,7 +1545,10 @@ class ReportService:
         - Compras registradas (unit_cost=0, solo transito)
         - Ventas no liquidadas al corte
         """
-        cutoff_date = cutoff_dt.date()
+        # cutoff_dt = as_of_date + 1 día (00:00 UTC del día siguiente).
+        # Para comparar con MaterialCostHistory.transaction_date (date),
+        # necesitamos as_of_date original, no cutoff_dt.date() que da as_of_date+1.
+        cutoff_date = (cutoff_dt - timedelta(days=1)).date()
 
         # Movimientos de inventario hasta el corte
         # Excluir compras en transito (unit_cost=0 + reference_type='purchase' sin venta liquidada)
