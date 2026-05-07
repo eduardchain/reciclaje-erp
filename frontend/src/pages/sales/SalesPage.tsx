@@ -21,6 +21,8 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useSales, useCancelSale } from "@/hooks/useSales";
+import { saleService } from "@/services/sales";
+import { toast } from "sonner";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { SaleResponse } from "@/types/sale";
@@ -271,6 +273,21 @@ export default function SalesPage() {
 
   const currentUrl = location.pathname + location.search;
 
+  const handleExportAll = async () => {
+    const all = await saleService.getAll({
+      skip: 0,
+      limit: 1000,
+      status: status === "all" ? undefined : status,
+      search: search || undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+    });
+    if (all.total > all.items.length) {
+      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
+    }
+    return all.items;
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader title="Ventas" description="Gestion de ventas de material">
@@ -351,6 +368,8 @@ export default function SalesPage() {
         emptyTitle="Sin ventas"
         emptyDescription="No se encontraron ventas para los filtros seleccionados."
         exportFilename="ecobalance_ventas"
+        onExportAll={handleExportAll}
+        currencyColumns={["total_amount", "total_profit"]}
         toolbar={
           <div className="flex items-center gap-3">
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar venta..." />

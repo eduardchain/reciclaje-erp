@@ -26,10 +26,13 @@ import {
   ArrowUp,
   ArrowDown,
   FileSpreadsheet,
+  Loader2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { toast } from "sonner";
 import { EmptyState } from "./EmptyState";
 import { useState } from "react";
+import { applyCurrencyFormat } from "@/utils/excelHelpers";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -44,29 +47,51 @@ interface DataTableProps<TData, TValue> {
   emptyTitle?: string;
   emptyDescription?: string;
   exportFilename?: string;
+  onExportAll?: () => Promise<TData[]>;
+  currencyColumns?: string[];
   toolbar?: React.ReactNode;
 }
 
-function exportToExcel<TData>(columns: ColumnDef<TData, unknown>[], data: TData[], filename: string) {
-  const headers = columns
-    .filter((col) => col.id !== "actions" && col.id !== "select")
-    .map((col) => {
-      if (typeof col.header === "string") return col.header;
-      return col.id || "";
-    });
+function exportToExcel<TData>(
+  columns: ColumnDef<TData, unknown>[],
+  data: TData[],
+  filename: string,
+  currencyColumns?: string[],
+) {
+  const exportableCols = columns.filter((col) => col.id !== "actions" && col.id !== "select");
+  const headers = exportableCols.map((col) => {
+    if (typeof col.header === "string") return col.header;
+    return col.id || "";
+  });
+
+  const colKeys = exportableCols.map(
+    (col) => (col as { accessorKey?: string }).accessorKey || col.id || "",
+  );
 
   const rows = data.map((row) =>
-    columns
-      .filter((col) => col.id !== "actions" && col.id !== "select")
-      .map((col) => {
-        const key = (col as { accessorKey?: string }).accessorKey || col.id || "";
-        const value = (row as Record<string, unknown>)[key];
-        if (value == null) return "";
-        return value;
-      })
+    colKeys.map((key) => {
+      const value = (row as Record<string, unknown>)[key];
+      if (value == null) return "";
+      // Backend serializa Decimal como string ("100000.00"). Convertir a número
+      // si parsea limpio, para que Excel los reconozca como numéricos.
+      if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value)) {
+        return Number(value);
+      }
+      return value;
+    }),
   );
 
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+  if (currencyColumns && currencyColumns.length > 0) {
+    const currencyColIdx = currencyColumns
+      .map((key) => colKeys.indexOf(key))
+      .filter((idx) => idx >= 0);
+    if (currencyColIdx.length > 0) {
+      applyCurrencyFormat(ws, currencyColIdx);
+    }
+  }
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Datos");
   XLSX.writeFile(wb, `${filename}.xlsx`);
@@ -85,9 +110,12 @@ export function DataTable<TData, TValue>({
   emptyTitle,
   emptyDescription,
   exportFilename,
+  onExportAll,
+  currencyColumns,
   toolbar,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [exporting, setExporting] = useState(false);
 
   const table = useReactTable({
     data,
@@ -103,11 +131,22 @@ export function DataTable<TData, TValue>({
     },
   });
 
-  const handleExport = useCallback(() => {
-    if (exportFilename) {
-      exportToExcel(columns as ColumnDef<TData, unknown>[], data, exportFilename);
+  const handleExport = useCallback(async () => {
+    if (!exportFilename) return;
+    if (onExportAll) {
+      setExporting(true);
+      try {
+        const all = await onExportAll();
+        exportToExcel(columns as ColumnDef<TData, unknown>[], all, exportFilename, currencyColumns);
+      } catch {
+        toast.error("Error al exportar");
+      } finally {
+        setExporting(false);
+      }
+    } else {
+      exportToExcel(columns as ColumnDef<TData, unknown>[], data, exportFilename, currencyColumns);
     }
-  }, [columns, data, exportFilename]);
+  }, [columns, data, exportFilename, onExportAll, currencyColumns]);
 
   if (loading) {
     return (
@@ -153,9 +192,14 @@ export function DataTable<TData, TValue>({
               variant="outline"
               size="sm"
               onClick={handleExport}
+              disabled={exporting}
               className="text-slate-600 shrink-0"
             >
-              <FileSpreadsheet className="h-4 w-4 mr-1.5" />
+              {exporting ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4 mr-1.5" />
+              )}
               Excel
             </Button>
           )}

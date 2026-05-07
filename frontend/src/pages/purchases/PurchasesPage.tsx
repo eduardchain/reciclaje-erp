@@ -21,6 +21,8 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { usePurchases, useCancelPurchase } from "@/hooks/usePurchases";
+import { purchaseService } from "@/services/purchases";
+import { toast } from "sonner";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { PurchaseResponse } from "@/types/purchase";
@@ -236,6 +238,21 @@ export default function PurchasesPage() {
 
   const currentUrl = location.pathname + location.search;
 
+  const handleExportAll = async () => {
+    const all = await purchaseService.getAll({
+      skip: 0,
+      limit: 1000,
+      status: status === "all" ? undefined : status,
+      search: search || undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+    });
+    if (all.total > all.items.length) {
+      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
+    }
+    return all.items;
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader title="Compras" description="Gestion de compras de material">
@@ -304,6 +321,8 @@ export default function PurchasesPage() {
         emptyTitle="Sin compras"
         emptyDescription="No se encontraron compras para los filtros seleccionados."
         exportFilename="ecobalance_compras"
+        onExportAll={handleExportAll}
+        currencyColumns={["total_amount"]}
         toolbar={
           <div className="flex items-center gap-3">
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar compra..." />

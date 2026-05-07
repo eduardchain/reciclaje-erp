@@ -1,8 +1,10 @@
 import { useMemo } from "react";
+import { toast } from "sonner";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, Wallet, Hash, Paperclip } from "lucide-react";
+import { moneyMovementService } from "@/services/moneyMovements";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -145,6 +147,21 @@ export default function TreasuryPage() {
 
   const currentUrl = location.pathname + location.search;
 
+  const handleExportAll = async () => {
+    const all = await moneyMovementService.getAll({
+      skip: 0,
+      limit: 10000,
+      movement_type: typeFilter === "all" ? undefined : typeFilter,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+      search: search || undefined,
+    });
+    if (all.total > all.items.length) {
+      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
+    }
+    return all.items;
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader title="Tesoreria" description="Movimientos de dinero">
@@ -202,6 +219,8 @@ export default function TreasuryPage() {
         emptyTitle="Sin movimientos"
         emptyDescription="No se encontraron movimientos de tesoreria."
         exportFilename="ecobalance_movimientos-tesoreria"
+        onExportAll={handleExportAll}
+        currencyColumns={["amount"]}
         totalItems={data?.total}
         toolbar={
           <div className="flex items-center gap-3">

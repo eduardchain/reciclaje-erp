@@ -1,8 +1,10 @@
 import { useState, useMemo, useEffect } from "react";
+import { toast } from "sonner";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { type ColumnDef } from "@tanstack/react-table";
 import { ArrowLeft, ArrowDownUp, TrendingUp, TrendingDown } from "lucide-react";
+import { inventoryService } from "@/services/inventory";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -167,6 +169,22 @@ export default function MovementHistoryPage() {
     return base;
   }, [materialFilter, warehouseFilter]);
 
+  const handleExportAll = async () => {
+    const all = await inventoryService.getMovements({
+      skip: 0,
+      limit: 1000,
+      movement_type: typeFilter === "all" ? undefined : typeFilter,
+      material_id: materialFilter || undefined,
+      warehouse_id: warehouseFilter || undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+    });
+    if (all.total > all.items.length) {
+      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
+    }
+    return all.items;
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader title="Movimientos de Inventario" description="Historial completo de entradas y salidas">
@@ -211,6 +229,8 @@ export default function MovementHistoryPage() {
         emptyTitle="Sin movimientos"
         emptyDescription="No se encontraron movimientos de inventario."
         exportFilename="ecobalance_movimientos-inventario"
+        onExportAll={handleExportAll}
+        currencyColumns={["unit_cost", "avg_cost_after"]}
         totalItems={data?.total}
         toolbar={
           <div className="flex flex-wrap items-center gap-3">

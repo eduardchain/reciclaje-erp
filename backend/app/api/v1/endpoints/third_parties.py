@@ -23,7 +23,7 @@ router = APIRouter()
 @router.get("", response_model=PaginatedResponse)
 def list_third_parties(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=500, description="Maximum records to return"),
+    limit: int = Query(100, ge=1, le=5000, description="Maximum records to return"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     search: Optional[str] = Query(None, description="Search in name, identification, and email"),
     role: Optional[str] = Query(None, description="Filter by role: supplier, customer, investor, provision"),

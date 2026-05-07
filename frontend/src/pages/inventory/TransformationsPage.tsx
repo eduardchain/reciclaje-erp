@@ -22,6 +22,8 @@ import { SearchInput } from "@/components/shared/SearchInput";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useTransformations, useAnnulTransformation } from "@/hooks/useInventory";
+import { inventoryService } from "@/services/inventory";
+import { toast } from "sonner";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { MaterialTransformationResponse } from "@/types/inventory";
@@ -90,6 +92,20 @@ export default function TransformationsPage() {
       waste: { current_value: totalWaste, previous_value: 0, change_percentage: null } as MetricCard,
     };
   }, [data]);
+
+  const handleExportAll = async () => {
+    const all = await inventoryService.getTransformations({
+      skip: 0,
+      limit: 1000,
+      status: statusFilter === "all" ? undefined : statusFilter,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+    });
+    if (all.total > all.items.length) {
+      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
+    }
+    return all.items;
+  };
 
   const columns: ColumnDef<MaterialTransformationResponse, unknown>[] = [
     { accessorKey: "transformation_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.transformation_number}</span> },
@@ -173,6 +189,8 @@ export default function TransformationsPage() {
         emptyTitle="Sin transformaciones"
         emptyDescription="No se encontraron transformaciones."
         exportFilename="ecobalance_transformaciones"
+        onExportAll={handleExportAll}
+        currencyColumns={["source_total_value"]}
         totalItems={data?.total}
         toolbar={
           <div className="flex items-center gap-3">

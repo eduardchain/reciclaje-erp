@@ -7,10 +7,12 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { useMaterials } from "@/hooks/useMasterData";
+import { materialService } from "@/services/materials";
 import { ROUTES } from "@/utils/constants";
 import MaterialFormDialog from "./MaterialFormDialog";
 import type { MaterialResponse } from "@/types/material";
 import { usePermissions } from "@/hooks/usePermissions";
+import { toast } from "sonner";
 
 const columns: ColumnDef<MaterialResponse, unknown>[] = [
   { accessorKey: "code", header: "Codigo", cell: ({ row }) => <span className="font-medium">{row.original.code}</span> },
@@ -29,6 +31,18 @@ export default function MaterialsPage() {
   const [editItem, setEditItem] = useState<MaterialResponse | null>(null);
 
   const { data, isLoading } = useMaterials(search || undefined);
+
+  const handleExportAll = async () => {
+    const all = await materialService.getAll({
+      skip: 0,
+      limit: 500,
+      search: search || undefined,
+    });
+    if (all.total > all.items.length) {
+      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
+    }
+    return all.items;
+  };
 
   return (
     <div className="space-y-4">
@@ -55,6 +69,7 @@ export default function MaterialsPage() {
         emptyTitle="Sin materiales"
         emptyDescription="No se encontraron materiales."
         exportFilename="ecobalance_materiales"
+        onExportAll={handleExportAll}
         toolbar={<SearchInput value={search} onChange={setSearch} placeholder="Buscar material..." />}
       />
 

@@ -622,7 +622,7 @@ def create_batch_expenses(
 @router.get("", response_model=dict)
 def list_money_movements(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=10000),
     movement_type: Optional[str] = Query(None, description="Filtrar por tipo de movimiento"),
     status_filter: Optional[str] = Query(None, alias="status", description="Filtrar por estado"),
     account_id: Optional[UUID] = Query(None, description="Filtrar por cuenta"),

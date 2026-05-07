@@ -14,6 +14,7 @@ import type {
 } from "@/types/reports";
 import type { StockItem } from "@/types/inventory";
 import { formatCurrency, formatDate } from "@/utils/formatters";
+import { applyCurrencyFormat } from "@/utils/excelHelpers";
 
 export function exportAccountStatementExcel(data: AccountStatementExportData) {
   const rows: (string | number | null)[][] = [];
@@ -31,7 +32,7 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
 
   // Resumen
   rows.push(["Saldo Actual", "Total Debe", "Total Haber"]);
-  rows.push([formatCurrency(data.currentBalance), formatCurrency(data.totalDebit), formatCurrency(data.totalCredit)]);
+  rows.push([data.currentBalance, data.totalDebit, data.totalCredit]);
   rows.push([]);
 
   const isOps = data.viewMode === "operations";
@@ -39,7 +40,7 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
   if (isOps) {
     rows.push(["Fecha", "Concepto", "Material", "Peso", "Precio", "Dif Peso", "Debito", "Credito", "Saldo"]);
     if (data.dateFrom) {
-      rows.push(["", "Saldo de apertura", "", "", "", "", "", "", formatCurrency(data.openingBalance)]);
+      rows.push(["", "Saldo de apertura", "", "", "", "", "", "", data.openingBalance]);
     }
     // Build last-in-group set for balance display
     const lastByGroup = new Map<string, number>();
@@ -61,17 +62,17 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
         concepto,
         m.is_line_item && m.material_code ? `${m.material_code} - ${m.material_name || ""}` : "",
         m.is_line_item && m.quantity ? m.quantity : "",
-        m.is_line_item && m.unit_price ? formatCurrency(m.unit_price) : "",
-        diffPesoMoney != null ? formatCurrency(diffPesoMoney) : "",
-        m.isDebit ? formatCurrency(m.amount) : "",
-        !m.isDebit ? formatCurrency(m.amount) : "",
-        showBalance ? formatCurrency(m.balance_after!) : "",
+        m.is_line_item && m.unit_price ? m.unit_price : "",
+        diffPesoMoney != null ? diffPesoMoney : "",
+        m.isDebit ? m.amount : "",
+        !m.isDebit ? m.amount : "",
+        showBalance ? m.balance_after! : "",
       ]);
     });
   } else {
     rows.push(["#", "Fecha", "Tipo", "Descripcion", "Debe", "Haber", "Saldo"]);
     if (data.dateFrom) {
-      rows.push(["", "", "Saldo de apertura", "", "", "", formatCurrency(data.openingBalance)]);
+      rows.push(["", "", "Saldo de apertura", "", "", "", data.openingBalance]);
     }
     for (const m of data.movements) {
       const isAnnulled = m.status === "annulled";
@@ -81,9 +82,9 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
         formatDate(m.date),
         typeText,
         m.description || "-",
-        m.isDebit ? formatCurrency(m.amount) : "",
-        !m.isDebit ? formatCurrency(m.amount) : "",
-        m.balance_after != null ? formatCurrency(m.balance_after) : "",
+        m.isDebit ? m.amount : "",
+        !m.isDebit ? m.amount : "",
+        m.balance_after != null ? m.balance_after : "",
       ]);
     }
   }
@@ -98,6 +99,15 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
     { wch: 8 }, { wch: 12 }, { wch: 28 }, { wch: 30 },
     { wch: 16 }, { wch: 16 }, { wch: 16 },
   ];
+
+  // Apply currency format
+  if (isOps) {
+    // Resumen row (cols 0,1,2) + Precio (4), Dif Peso (5), Debito (6), Credito (7), Saldo (8)
+    applyCurrencyFormat(ws, [0, 1, 2, 4, 5, 6, 7, 8]);
+  } else {
+    // Resumen (0,1,2) + Debe (4), Haber (5), Saldo (6)
+    applyCurrencyFormat(ws, [0, 1, 2, 4, 5, 6]);
+  }
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Estado de Cuenta");
@@ -121,10 +131,6 @@ const LIABILITY_ORDER = [
   "generic_payable",
 ];
 
-function fmtBal(v: number) {
-  return v < 0 ? `(${formatCurrency(Math.abs(v))})` : formatCurrency(v);
-}
-
 export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
   const rows: (string | number | null)[][] = [];
 
@@ -132,7 +138,7 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
   rows.push([]);
 
   // Activos
-  rows.push(["ACTIVOS", "", "", fmtBal(data.total_assets)]);
+  rows.push(["ACTIVOS", "", "", data.total_assets]);
   rows.push(["Seccion", "Detalle", "Nombre", "Valor"]);
 
   const pushItems = (items: typeof data.assets[string]["items"], defaultDetail?: (item: typeof items[0]) => string) => {
@@ -149,19 +155,19 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
       } else if (item.investor_type) {
         detail = item.investor_type;
       }
-      rows.push(["", detail, item.name, fmtBal(item.balance)]);
+      rows.push(["", detail, item.name, item.balance]);
     }
   };
 
   for (const key of ASSET_ORDER) {
     const section = data.assets[key];
     if (!section) continue;
-    rows.push([section.label, "", "", fmtBal(section.total)]);
+    rows.push([section.label, "", "", section.total]);
     if (section.groups && section.groups.length > 0) {
       for (const group of section.groups) {
-        rows.push(["", group.label, "", fmtBal(group.total)]);
+        rows.push(["", group.label, "", group.total]);
         for (const item of group.items) {
-          rows.push(["", "", item.name, fmtBal(item.balance)]);
+          rows.push(["", "", item.name, item.balance]);
         }
       }
     } else {
@@ -172,18 +178,18 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
   rows.push([]);
 
   // Pasivos
-  rows.push(["PASIVOS", "", "", fmtBal(data.total_liabilities)]);
+  rows.push(["PASIVOS", "", "", data.total_liabilities]);
   rows.push(["Seccion", "Detalle", "Nombre", "Valor"]);
 
   for (const key of LIABILITY_ORDER) {
     const section = data.liabilities[key];
     if (!section) continue;
-    rows.push([section.label, "", "", fmtBal(section.total)]);
+    rows.push([section.label, "", "", section.total]);
     if (section.groups && section.groups.length > 0) {
       for (const group of section.groups) {
-        rows.push(["", group.label, "", fmtBal(group.total)]);
+        rows.push(["", group.label, "", group.total]);
         for (const item of group.items) {
-          rows.push(["", "", item.name, fmtBal(item.balance)]);
+          rows.push(["", "", item.name, item.balance]);
         }
       }
     } else {
@@ -194,14 +200,17 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
   rows.push([]);
 
   // Patrimonio
-  rows.push(["PATRIMONIO", "", "", fmtBal(data.equity)]);
+  rows.push(["PATRIMONIO", "", "", data.equity]);
   rows.push([data.equity_label]);
 
   rows.push([]);
-  rows.push([`Verificacion: ${data.verification.formula} = ${fmtBal(data.verification.result)} ${data.verification.is_balanced ? "OK" : "ERROR"}`]);
+  rows.push([`Verificacion: ${data.verification.formula} = ${formatCurrency(data.verification.result)} ${data.verification.is_balanced ? "OK" : "ERROR"}`]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 30 }, { wch: 40 }, { wch: 30 }, { wch: 20 }];
+
+  // Valor column (3) is currency
+  applyCurrencyFormat(ws, [3]);
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Balance Detallado");
@@ -210,7 +219,6 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
 
 
 export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
-  const fmt = (n: number) => formatCurrency(n);
   const rows: (string | number | null)[][] = [];
 
   rows.push(["Rentabilidad por Unidad de Negocio"]);
@@ -223,15 +231,15 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
   // UNs
   for (const bu of data.business_units) {
     rows.push([
-      bu.business_unit_name, fmt(bu.purchases_total), `${bu.purchases_weight_pct.toFixed(1)}%`,
-      fmt(bu.sales_revenue), fmt(bu.sales_cogs),
-      fmt(bu.total_gross_profit), fmt(bu.direct_expenses), fmt(bu.shared_expenses),
-      fmt(bu.general_expenses), fmt(bu.sale_commissions), fmt(bu.net_profit),
+      bu.business_unit_name, bu.purchases_total, `${bu.purchases_weight_pct.toFixed(1)}%`,
+      bu.sales_revenue, bu.sales_cogs,
+      bu.total_gross_profit, bu.direct_expenses, bu.shared_expenses,
+      bu.general_expenses, bu.sale_commissions, bu.net_profit,
       `${bu.net_margin.toFixed(1)}%`,
     ]);
     // Desglose directos
     for (const d of bu.direct_expenses_detail) {
-      rows.push(["  " + d.category_name, "", "", "", fmt(d.amount), "", "", "", "", ""]);
+      rows.push(["  " + d.category_name, "", "", "", d.amount, "", "", "", "", ""]);
     }
   }
 
@@ -239,14 +247,17 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
   rows.push([]);
   const t = data.totals;
   rows.push([
-    "TOTAL", fmt(t.purchases_total), "100%",
-    fmt(t.sales_revenue), fmt(t.sales_cogs), fmt(t.total_gross_profit),
-    fmt(t.direct_expenses), fmt(t.shared_expenses), fmt(t.general_expenses),
-    fmt(t.sale_commissions), fmt(t.net_profit), `${t.net_margin.toFixed(1)}%`,
+    "TOTAL", t.purchases_total, "100%",
+    t.sales_revenue, t.sales_cogs, t.total_gross_profit,
+    t.direct_expenses, t.shared_expenses, t.general_expenses,
+    t.sale_commissions, t.net_profit, `${t.net_margin.toFixed(1)}%`,
   ]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
+
+  // Currency cols: 1, 3, 4, 5, 6, 7, 8, 9, 10
+  applyCurrencyFormat(ws, [1, 3, 4, 5, 6, 7, 8, 9, 10]);
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Rentabilidad UN");
@@ -255,7 +266,6 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
 
 
 export function exportRealCostMaterialExcel(data: RealCostByMaterialResponse) {
-  const fmt = (n: number) => formatCurrency(n);
   const rows: (string | number | null)[][] = [];
 
   rows.push(["Costo Real por Material"]);
@@ -263,16 +273,19 @@ export function exportRealCostMaterialExcel(data: RealCostByMaterialResponse) {
   rows.push([]);
 
   for (const bu of data.business_units) {
-    rows.push([bu.business_unit_name, `Gastos: ${fmt(bu.total_expenses)}`, `Kg: ${bu.kg_purchased.toLocaleString()}`, `Overhead: ${fmt(bu.overhead_rate)}/kg`]);
+    rows.push([bu.business_unit_name, `Gastos: ${formatCurrency(bu.total_expenses)}`, `Kg: ${bu.kg_purchased.toLocaleString()}`, `Overhead: ${formatCurrency(bu.overhead_rate)}/kg`]);
     rows.push(["Codigo", "Material", "Costo Promedio", "Overhead", "Costo Real"]);
     for (const m of bu.materials) {
-      rows.push([m.material_code, m.material_name, fmt(m.average_cost), fmt(m.overhead_rate), fmt(m.real_cost)]);
+      rows.push([m.material_code, m.material_name, m.average_cost, m.overhead_rate, m.real_cost]);
     }
     rows.push([]);
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 15 }, { wch: 25 }, { wch: 18 }, { wch: 15 }, { wch: 15 }];
+
+  // Currency cols: 2, 3, 4
+  applyCurrencyFormat(ws, [2, 3, 4]);
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Costo Real");
@@ -281,35 +294,38 @@ export function exportRealCostMaterialExcel(data: RealCostByMaterialResponse) {
 
 
 export function exportPnlExcel(data: ProfitAndLossResponse) {
-  const fmt = (n: number) => formatCurrency(n);
   const rows: (string | number)[][] = [];
   rows.push(["Estado de Resultados"]);
   rows.push([`Periodo: ${data.period_from} - ${data.period_to}`]);
   rows.push([]);
   rows.push(["Concepto", "Valor"]);
-  rows.push(["Ingresos por Ventas", fmt(data.sales_revenue)]);
-  rows.push(["Ingresos por Servicios", fmt(data.service_income)]);
-  rows.push(["Costo de Ventas (COGS)", fmt(data.cost_of_goods_sold)]);
-  rows.push(["Utilidad Bruta Ventas", fmt(data.gross_profit_sales)]);
-  rows.push(["Utilidad Pasa Mano", fmt(data.double_entry_profit)]);
-  if (data.transformation_profit !== 0) rows.push(["Gan/Perd Transformaciones", fmt(data.transformation_profit)]);
-  if (data.waste_loss > 0) rows.push(["Perdida por Merma", fmt(-data.waste_loss)]);
-  if (data.adjustment_net !== 0) rows.push(["Ajustes de Inventario", fmt(data.adjustment_net)]);
-  if (data.tp_adjustment_gain > 0) rows.push(["+ Ganancia Ajuste Terceros", fmt(data.tp_adjustment_gain)]);
-  if (data.tp_adjustment_loss > 0) rows.push(["- Perdida Ajuste Terceros", fmt(-data.tp_adjustment_loss)]);
-  rows.push(["Utilidad Bruta Total", fmt(data.total_gross_profit)]);
+  rows.push(["Ingresos por Ventas", data.sales_revenue]);
+  rows.push(["Ingresos por Servicios", data.service_income]);
+  rows.push(["Costo de Ventas (COGS)", data.cost_of_goods_sold]);
+  rows.push(["Utilidad Bruta Ventas", data.gross_profit_sales]);
+  rows.push(["Utilidad Pasa Mano", data.double_entry_profit]);
+  if (data.transformation_profit !== 0) rows.push(["Gan/Perd Transformaciones", data.transformation_profit]);
+  if (data.waste_loss > 0) rows.push(["Perdida por Merma", -data.waste_loss]);
+  if (data.adjustment_net !== 0) rows.push(["Ajustes de Inventario", data.adjustment_net]);
+  if (data.tp_adjustment_gain > 0) rows.push(["+ Ganancia Ajuste Terceros", data.tp_adjustment_gain]);
+  if (data.tp_adjustment_loss > 0) rows.push(["- Perdida Ajuste Terceros", -data.tp_adjustment_loss]);
+  rows.push(["Utilidad Bruta Total", data.total_gross_profit]);
   rows.push([]);
-  rows.push(["Gastos Operativos", fmt(data.operating_expenses)]);
+  rows.push(["Gastos Operativos", data.operating_expenses]);
   for (const cat of data.expenses_by_category) {
-    rows.push([`  ${cat.category_name}`, fmt(cat.total_amount)]);
+    rows.push([`  ${cat.category_name}`, cat.total_amount]);
   }
-  rows.push(["Comisiones Pagadas", fmt(data.commissions_paid)]);
+  rows.push(["Comisiones Pagadas", data.commissions_paid]);
   rows.push([]);
-  rows.push(["Utilidad Neta", fmt(data.net_profit)]);
+  rows.push(["Utilidad Neta", data.net_profit]);
   rows.push(["Margen Neto", `${(data.net_margin * 100).toFixed(1)}%`]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 35 }, { wch: 20 }];
+
+  // Valor column (1) is currency
+  applyCurrencyFormat(ws, [1]);
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "P&L");
   XLSX.writeFile(wb, `estado_resultados_${data.period_from}_${data.period_to}.xlsx`);
@@ -317,40 +333,41 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
 
 
 export function exportCashFlowExcel(data: CashFlowResponse) {
-  const fmt = (n: number) => formatCurrency(n);
   const rows: (string | number)[][] = [];
   rows.push(["Flujo de Caja"]);
   rows.push([`Periodo: ${data.period_from} - ${data.period_to}`]);
   rows.push([]);
-  rows.push(["Saldo Inicial", fmt(data.opening_balance)]);
+  rows.push(["Saldo Inicial", data.opening_balance]);
   rows.push([]);
   rows.push(["INGRESOS", ""]);
-  // sale_collections removido (phantom — ya capturado por collection_from_client)
-  rows.push(["Cobros a Clientes (Tesoreria)", fmt(data.inflows.customer_collections)]);
-  rows.push(["Ingresos por Servicios", fmt(data.inflows.service_income)]);
-  rows.push(["Aportes de Capital", fmt(data.inflows.capital_injections)]);
-  if (data.inflows.advance_collections > 0) rows.push(["Anticipos de Clientes", fmt(data.inflows.advance_collections)]);
-  if (data.inflows.generic_collections > 0) rows.push(["Cobros Genericos", fmt(data.inflows.generic_collections)]);
-  rows.push(["Total Ingresos", fmt(data.total_inflows)]);
+  rows.push(["Cobros a Clientes (Tesoreria)", data.inflows.customer_collections]);
+  rows.push(["Ingresos por Servicios", data.inflows.service_income]);
+  rows.push(["Aportes de Capital", data.inflows.capital_injections]);
+  if (data.inflows.advance_collections > 0) rows.push(["Anticipos de Clientes", data.inflows.advance_collections]);
+  if (data.inflows.generic_collections > 0) rows.push(["Cobros Genericos", data.inflows.generic_collections]);
+  rows.push(["Total Ingresos", data.total_inflows]);
   rows.push([]);
   rows.push(["EGRESOS", ""]);
-  // purchase_payments removido (phantom — ya capturado por payment_to_supplier)
-  rows.push(["Pagos a Proveedores (Tesoreria)", fmt(data.outflows.supplier_payments)]);
-  rows.push(["Gastos", fmt(data.outflows.expenses)]);
-  rows.push(["Comisiones", fmt(data.outflows.commission_payments)]);
-  rows.push(["Devolucion de Capital", fmt(data.outflows.capital_returns)]);
-  if (data.outflows.provision_deposits > 0) rows.push(["Depositos a Provisiones", fmt(data.outflows.provision_deposits)]);
-  if (data.outflows.deferred_fundings > 0) rows.push(["Gastos Diferidos", fmt(data.outflows.deferred_fundings)]);
-  if (data.outflows.advance_payments > 0) rows.push(["Anticipos a Proveedores", fmt(data.outflows.advance_payments)]);
-  if (data.outflows.asset_payments > 0) rows.push(["Activos Fijos", fmt(data.outflows.asset_payments)]);
-  if (data.outflows.generic_payments > 0) rows.push(["Pagos Genericos", fmt(data.outflows.generic_payments)]);
-  rows.push(["Total Egresos", fmt(data.total_outflows)]);
+  rows.push(["Pagos a Proveedores (Tesoreria)", data.outflows.supplier_payments]);
+  rows.push(["Gastos", data.outflows.expenses]);
+  rows.push(["Comisiones", data.outflows.commission_payments]);
+  rows.push(["Devolucion de Capital", data.outflows.capital_returns]);
+  if (data.outflows.provision_deposits > 0) rows.push(["Depositos a Provisiones", data.outflows.provision_deposits]);
+  if (data.outflows.deferred_fundings > 0) rows.push(["Gastos Diferidos", data.outflows.deferred_fundings]);
+  if (data.outflows.advance_payments > 0) rows.push(["Anticipos a Proveedores", data.outflows.advance_payments]);
+  if (data.outflows.asset_payments > 0) rows.push(["Activos Fijos", data.outflows.asset_payments]);
+  if (data.outflows.generic_payments > 0) rows.push(["Pagos Genericos", data.outflows.generic_payments]);
+  rows.push(["Total Egresos", data.total_outflows]);
   rows.push([]);
-  rows.push(["Flujo Neto", fmt(data.net_flow)]);
-  rows.push(["Saldo Final", fmt(data.closing_balance)]);
+  rows.push(["Flujo Neto", data.net_flow]);
+  rows.push(["Saldo Final", data.closing_balance]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 35 }, { wch: 20 }];
+
+  // Valor column (1) is currency
+  applyCurrencyFormat(ws, [1]);
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Flujo Caja");
   XLSX.writeFile(wb, `flujo_caja_${data.period_from}_${data.period_to}.xlsx`);
@@ -358,37 +375,40 @@ export function exportCashFlowExcel(data: CashFlowResponse) {
 
 
 export function exportBalanceSheetExcel(data: BalanceSheetResponse) {
-  const fmt = (n: number) => formatCurrency(n);
   const rows: (string | number)[][] = [];
   rows.push(["Balance General"]);
   rows.push([`Fecha: ${data.as_of_date}`]);
   rows.push([]);
   rows.push(["ACTIVOS", ""]);
-  rows.push(["Efectivo y Bancos", fmt(data.assets.cash_and_bank)]);
-  rows.push(["Cuentas por Cobrar", fmt(data.assets.accounts_receivable)]);
-  rows.push(["Inventario", fmt(data.assets.inventory)]);
-  rows.push(["Anticipos", fmt(data.assets.advances)]);
-  if (data.assets.investor_receivable > 0) rows.push(["CxC Inversionistas", fmt(data.assets.investor_receivable)]);
-  if (data.assets.prepaid_expenses > 0) rows.push(["Gastos Prepagados", fmt(data.assets.prepaid_expenses)]);
-  if (data.assets.provision_funds > 0) rows.push(["Fondos Provision", fmt(data.assets.provision_funds)]);
-  if (data.assets.fixed_assets > 0) rows.push(["Activos Fijos", fmt(data.assets.fixed_assets)]);
-  rows.push(["Total Activos", fmt(data.total_assets)]);
+  rows.push(["Efectivo y Bancos", data.assets.cash_and_bank]);
+  rows.push(["Cuentas por Cobrar", data.assets.accounts_receivable]);
+  rows.push(["Inventario", data.assets.inventory]);
+  rows.push(["Anticipos", data.assets.advances]);
+  if (data.assets.investor_receivable > 0) rows.push(["CxC Inversionistas", data.assets.investor_receivable]);
+  if (data.assets.prepaid_expenses > 0) rows.push(["Gastos Prepagados", data.assets.prepaid_expenses]);
+  if (data.assets.provision_funds > 0) rows.push(["Fondos Provision", data.assets.provision_funds]);
+  if (data.assets.fixed_assets > 0) rows.push(["Activos Fijos", data.assets.fixed_assets]);
+  rows.push(["Total Activos", data.total_assets]);
   rows.push([]);
   rows.push(["PASIVOS", ""]);
-  rows.push(["Cuentas por Pagar", fmt(data.liabilities.accounts_payable)]);
-  rows.push(["Deuda Inversionistas", fmt(data.liabilities.investor_debt)]);
-  if (data.liabilities.liability_debt > 0) rows.push(["Pasivos", fmt(data.liabilities.liability_debt)]);
-  if (data.liabilities.customer_advances > 0) rows.push(["Anticipos Clientes", fmt(data.liabilities.customer_advances)]);
-  if (data.liabilities.provision_obligations > 0) rows.push(["Obligaciones Provision", fmt(data.liabilities.provision_obligations)]);
-  rows.push(["Total Pasivos", fmt(data.total_liabilities)]);
+  rows.push(["Cuentas por Pagar", data.liabilities.accounts_payable]);
+  rows.push(["Deuda Inversionistas", data.liabilities.investor_debt]);
+  if (data.liabilities.liability_debt > 0) rows.push(["Pasivos", data.liabilities.liability_debt]);
+  if (data.liabilities.customer_advances > 0) rows.push(["Anticipos Clientes", data.liabilities.customer_advances]);
+  if (data.liabilities.provision_obligations > 0) rows.push(["Obligaciones Provision", data.liabilities.provision_obligations]);
+  rows.push(["Total Pasivos", data.total_liabilities]);
   rows.push([]);
   rows.push(["PATRIMONIO", ""]);
-  rows.push(["Patrimonio", fmt(data.equity)]);
-  rows.push(["Utilidad Acumulada", fmt(data.accumulated_profit)]);
-  rows.push(["Utilidad Distribuida", fmt(data.distributed_profit)]);
+  rows.push(["Patrimonio", data.equity]);
+  rows.push(["Utilidad Acumulada", data.accumulated_profit]);
+  rows.push(["Utilidad Distribuida", data.distributed_profit]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 30 }, { wch: 20 }];
+
+  // Valor column (1) is currency
+  applyCurrencyFormat(ws, [1]);
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Balance General");
   XLSX.writeFile(wb, `balance_general_${data.as_of_date}.xlsx`);
@@ -396,30 +416,33 @@ export function exportBalanceSheetExcel(data: BalanceSheetResponse) {
 
 
 export function exportPurchaseReportExcel(data: PurchaseReportResponse) {
-  const fmt = (n: number) => formatCurrency(n);
   const rows: (string | number)[][] = [];
   rows.push(["Reporte de Compras"]);
   rows.push([`Periodo: ${data.period_from} - ${data.period_to}`]);
   rows.push([]);
-  rows.push(["Total Compras", fmt(data.total_amount)]);
+  rows.push(["Total Compras", data.total_amount]);
   rows.push(["Operaciones", data.purchase_count]);
   rows.push(["Kg Totales", data.total_quantity]);
-  rows.push(["Promedio por Compra", fmt(data.average_per_purchase)]);
+  rows.push(["Promedio por Compra", data.average_per_purchase]);
   rows.push([]);
   rows.push(["POR PROVEEDOR", "", "", ""]);
   rows.push(["Proveedor", "Total", "Cantidad", "# Compras"]);
   for (const s of data.by_supplier) {
-    rows.push([s.supplier_name, fmt(s.total_amount), s.total_quantity, s.purchase_count]);
+    rows.push([s.supplier_name, s.total_amount, s.total_quantity, s.purchase_count]);
   }
   rows.push([]);
   rows.push(["POR MATERIAL", "", "", ""]);
   rows.push(["Material", "Total", "Cantidad", "Precio Promedio"]);
   for (const m of data.by_material) {
-    rows.push([`${m.material_code} - ${m.material_name}`, fmt(m.total_amount), m.total_quantity, fmt(m.average_unit_price)]);
+    rows.push([`${m.material_code} - ${m.material_name}`, m.total_amount, m.total_quantity, m.average_unit_price]);
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 30 }, { wch: 18 }, { wch: 15 }, { wch: 18 }];
+
+  // Currency cols: 1 (Total), 3 (Precio Promedio in by_material section)
+  applyCurrencyFormat(ws, [1, 3]);
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Compras");
   XLSX.writeFile(wb, `reporte_compras_${data.period_from}_${data.period_to}.xlsx`);
@@ -427,31 +450,36 @@ export function exportPurchaseReportExcel(data: PurchaseReportResponse) {
 
 
 export function exportSalesReportExcel(data: SalesReportResponse) {
-  const fmt = (n: number) => formatCurrency(n);
   const rows: (string | number)[][] = [];
   rows.push(["Reporte de Ventas"]);
   rows.push([`Periodo: ${data.period_from} - ${data.period_to}`]);
   rows.push([]);
-  rows.push(["Total Ventas", fmt(data.total_revenue)]);
-  rows.push(["Costo", fmt(data.total_cost)]);
-  rows.push(["Utilidad", fmt(data.total_profit)]);
+  rows.push(["Total Ventas", data.total_revenue]);
+  rows.push(["Costo", data.total_cost]);
+  rows.push(["Utilidad", data.total_profit]);
   rows.push(["Margen", `${data.overall_margin.toFixed(1)}%`]);
   rows.push(["Operaciones", data.sale_count]);
   rows.push([]);
   rows.push(["POR CLIENTE", "", "", "", ""]);
   rows.push(["Cliente", "Total", "Cantidad", "# Ventas", "Utilidad"]);
   for (const c of data.by_customer) {
-    rows.push([c.customer_name, fmt(c.total_amount), c.total_quantity, c.sale_count, fmt(c.total_profit)]);
+    rows.push([c.customer_name, c.total_amount, c.total_quantity, c.sale_count, c.total_profit]);
   }
   rows.push([]);
   rows.push(["POR MATERIAL", "", "", "", ""]);
   rows.push(["Material", "Ventas", "Costo", "Utilidad", "Margen"]);
   for (const m of data.by_material) {
-    rows.push([`${m.material_code} - ${m.material_name}`, fmt(m.total_amount), fmt(m.total_cost), fmt(m.total_profit), `${m.margin_percentage.toFixed(1)}%`]);
+    rows.push([`${m.material_code} - ${m.material_name}`, m.total_amount, m.total_cost, m.total_profit, `${m.margin_percentage.toFixed(1)}%`]);
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 30 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 12 }];
+
+  // Currency cols: 1, 2, 3, 4 — all numeric data cells; helper checks `typeof v === 'number'` so non-money numbers (count, qty) are also formatted as currency.
+  // To avoid that, only apply to cells we know are money: col 1 (Total/Ventas), col 4 (Utilidad in by_customer/Margen in by_material — last is %).
+  // Apply to col 1, 2, 3; col 4 is mixed (number Utilidad in by_customer, string % in by_material) — helper safely skips strings.
+  applyCurrencyFormat(ws, [1, 2, 3, 4]);
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Ventas");
   XLSX.writeFile(wb, `reporte_ventas_${data.period_from}_${data.period_to}.xlsx`);
@@ -459,7 +487,6 @@ export function exportSalesReportExcel(data: SalesReportResponse) {
 
 
 export function exportMarginAnalysisExcel(data: MarginAnalysisResponse) {
-  const fmt = (n: number) => formatCurrency(n);
   const rows: (string | number)[][] = [];
   rows.push(["Analisis de Margenes"]);
   rows.push([`Periodo: ${data.period_from} - ${data.period_to}`]);
@@ -469,14 +496,18 @@ export function exportMarginAnalysisExcel(data: MarginAnalysisResponse) {
   for (const m of data.materials) {
     rows.push([
       m.material_code, m.material_name, m.category_name || "-",
-      m.total_purchased_qty, fmt(m.total_purchased_amount), fmt(m.avg_purchase_price),
-      m.total_sold_qty, fmt(m.total_sold_revenue), fmt(m.avg_sale_price),
-      fmt(m.gross_profit), `${m.margin_percentage.toFixed(1)}%`,
+      m.total_purchased_qty, m.total_purchased_amount, m.avg_purchase_price,
+      m.total_sold_qty, m.total_sold_revenue, m.avg_sale_price,
+      m.gross_profit, `${m.margin_percentage.toFixed(1)}%`,
     ]);
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 10 }, { wch: 20 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
+
+  // Currency cols: 4 ($ Compra), 5 (Precio Compra), 7 ($ Venta), 8 (Precio Venta), 9 (Utilidad)
+  applyCurrencyFormat(ws, [4, 5, 7, 8, 9]);
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Margenes");
   XLSX.writeFile(wb, `margenes_${data.period_from}_${data.period_to}.xlsx`);
@@ -526,34 +557,43 @@ export function exportStockExcel(items: StockItem[], canViewValues: boolean) {
     { wch: 12 }, { wch: 30 }, { wch: 20 }, { wch: 8 },
     { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 },
   ];
+
+  // Currency cols (only when canViewValues): 7 (Costo Prom), 8 (Valor Total)
+  if (canViewValues) {
+    applyCurrencyFormat(ws, [7, 8]);
+  }
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Stock");
   XLSX.writeFile(wb, `inventario_stock_${new Date().toISOString().split("T")[0]}.xlsx`);
 }
 
 export function exportThirdPartyBalancesExcel(data: ThirdPartyBalancesResponse) {
-  const fmt = (n: number) => formatCurrency(n);
   const rows: (string | number)[][] = [];
   rows.push(["Saldos de Terceros"]);
   rows.push([]);
-  rows.push(["Total por Pagar", fmt(data.total_payable)]);
-  rows.push(["Total por Cobrar", fmt(data.total_receivable)]);
-  rows.push(["Posicion Neta", fmt(data.net_position)]);
+  rows.push(["Total por Pagar", data.total_payable]);
+  rows.push(["Total por Cobrar", data.total_receivable]);
+  rows.push(["Posicion Neta", data.net_position]);
   rows.push([]);
   rows.push(["PROVEEDORES (CxP)", ""]);
   rows.push(["Nombre", "Saldo"]);
   for (const s of data.suppliers) {
-    rows.push([s.name, fmt(s.balance)]);
+    rows.push([s.name, s.balance]);
   }
   rows.push([]);
   rows.push(["CLIENTES (CxC)", ""]);
   rows.push(["Nombre", "Saldo"]);
   for (const c of data.customers) {
-    rows.push([c.name, fmt(c.balance)]);
+    rows.push([c.name, c.balance]);
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 30 }, { wch: 18 }, { wch: 20 }];
+
+  // Saldo column (1) is currency
+  applyCurrencyFormat(ws, [1]);
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Saldos Terceros");
   XLSX.writeFile(wb, "saldos_terceros.xlsx");

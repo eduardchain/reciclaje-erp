@@ -14,6 +14,8 @@ import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useThirdParties } from "@/hooks/useMasterData";
 import { useDeactivateThirdParty, useReactivateThirdParty } from "@/hooks/useCrudData";
+import { thirdPartyService } from "@/services/thirdParties";
+import { toast } from "sonner";
 import ThirdPartyFormDialog from "./ThirdPartyFormDialog";
 import type { ThirdPartyResponse } from "@/types/third-party";
 import { ROUTES } from "@/utils/constants";
@@ -158,6 +160,20 @@ export default function ThirdPartiesPage() {
 
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
+  const handleExportAll = async () => {
+    const all = await thirdPartyService.getAll({
+      skip: 0,
+      limit: 5000,
+      search: search || undefined,
+      role: roleFilter === "all" ? undefined : roleFilter,
+      is_active: showInactive ? undefined : true,
+    });
+    if (all.total > all.items.length) {
+      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
+    }
+    return all.items;
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader title="Terceros" description="Proveedores, clientes, inversionistas y mas">
@@ -194,6 +210,8 @@ export default function ThirdPartiesPage() {
         emptyTitle="Sin terceros"
         emptyDescription="No se encontraron terceros."
         exportFilename="ecobalance_terceros"
+        onExportAll={handleExportAll}
+        currencyColumns={["current_balance"]}
         toolbar={
           <div className="flex items-center gap-4">
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar tercero..." />

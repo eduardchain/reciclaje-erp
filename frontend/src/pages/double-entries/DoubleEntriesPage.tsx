@@ -21,6 +21,8 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { useDoubleEntries, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
+import { doubleEntryService } from "@/services/doubleEntries";
+import { toast } from "sonner";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatPercentage } from "@/utils/formatters";
 import { exportDoubleEntryPDF } from "@/utils/pdfExport";
@@ -191,6 +193,21 @@ export default function DoubleEntriesPage() {
 
   const currentUrl = location.pathname + location.search;
 
+  const handleExportAll = async () => {
+    const all = await doubleEntryService.getAll({
+      skip: 0,
+      limit: 1000,
+      status: status === "all" ? undefined : status,
+      search: search || undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+    });
+    if (all.total > all.items.length) {
+      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
+    }
+    return all.items;
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader title="Doble Partida" description="Operaciones Pasa Mano (compra+venta simultanea)">
@@ -259,6 +276,8 @@ export default function DoubleEntriesPage() {
         emptyTitle="Sin doble partidas"
         emptyDescription="No se encontraron operaciones pasa mano."
         exportFilename="ecobalance_doble-partidas"
+        onExportAll={handleExportAll}
+        currencyColumns={["total_sale_amount", "profit"]}
         toolbar={
           <div className="flex items-center gap-3">
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar..." />
