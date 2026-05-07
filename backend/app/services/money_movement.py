@@ -1213,11 +1213,16 @@ class CRUDMoneyMovement:
             query = query.where(MoneyMovement.date < date_to)
         if search:
             search_term = f"%{search}%"
+            # Subqueries para terceros y cuentas que matchean el termino de busqueda
+            tp_subq = select(ThirdParty.id).where(ThirdParty.name.ilike(search_term))
+            acc_subq = select(MoneyAccount.id).where(MoneyAccount.name.ilike(search_term))
             query = query.where(
                 or_(
                     MoneyMovement.description.ilike(search_term),
                     MoneyMovement.reference_number.ilike(search_term),
                     cast(MoneyMovement.movement_number, String).ilike(search_term),
+                    MoneyMovement.third_party_id.in_(tp_subq),
+                    MoneyMovement.account_id.in_(acc_subq),
                 )
             )
 

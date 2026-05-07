@@ -13,6 +13,7 @@ interface MovementFilters {
   date_from?: string;
   date_to?: string;
   status?: string;
+  search?: string;
 }
 
 export function useMoneyMovements(filters: MovementFilters = {}) {

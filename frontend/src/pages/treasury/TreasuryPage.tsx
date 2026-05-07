@@ -126,6 +126,7 @@ export default function TreasuryPage() {
     movement_type: typeFilter === "all" ? undefined : typeFilter,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
+    search: search || undefined,
   });
 
   useScrollRestoration(!isLoading);
