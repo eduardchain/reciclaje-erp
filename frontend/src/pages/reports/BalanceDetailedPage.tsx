@@ -12,6 +12,7 @@ import { exportBalanceDetailedExcel } from "@/utils/excelExport";
 import { exportBalanceDetailedPDF } from "@/utils/pdfExport";
 import { useAuthStore } from "@/stores/authStore";
 import { useDateFilter } from "@/stores/dateFilterStore";
+import { useScrollRestoration, saveScroll } from "@/hooks/useScrollRestoration";
 import type { BalanceDetailedSection, BalanceDetailedItem, BalanceDetailedGroup } from "@/types/reports";
 
 const ASSET_SECTION_ORDER = [
@@ -69,6 +70,8 @@ export default function BalanceDetailedPage() {
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
 
+  useScrollRestoration(!isLoading);
+
   const expandedStorageKey = `expanded:${location.pathname}`;
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     try {
@@ -111,6 +114,7 @@ export default function BalanceDetailedPage() {
   const expandAll = () => setExpanded(new Set(allExpandableKeys));
   const collapseAll = () => setExpanded(new Set());
 
+  const currentUrl = location.pathname + location.search;
   const renderItems = (items: BalanceDetailedItem[], sectionKey: string) =>
     items.map((item) => {
       const link = getItemLink(sectionKey, item);
@@ -118,7 +122,11 @@ export default function BalanceDetailedPage() {
         <div
           key={item.id}
           className={`flex items-center justify-between py-1 px-2 rounded text-sm ${link ? "hover:bg-slate-100 cursor-pointer" : ""}`}
-          onClick={() => link && navigate(link)}
+          onClick={() => {
+            if (!link) return;
+            saveScroll(currentUrl);
+            navigate(link);
+          }}
         >
           <div className="flex flex-col">
             <span>{item.name}</span>
