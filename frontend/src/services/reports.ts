@@ -13,6 +13,9 @@ import type {
   AuditBalancesResponse,
   ProfitabilityByBUResponse,
   RealCostByMaterialResponse,
+  ExpensesReportResponse,
+  ExpensesGroupBy,
+  ExpenseDetailResponse,
 } from "@/types/reports";
 
 interface DateRange {
@@ -65,4 +68,24 @@ export const reportsService = {
 
   getRealCostByMaterial: (params: DateRange) =>
     get<RealCostByMaterialResponse>("/api/v1/reports/real-cost-by-material", params),
+
+  getExpensesReport: (params: {
+    date_from: string;
+    date_to: string;
+    group_by?: ExpensesGroupBy;
+    business_unit_id?: string[];
+    expense_category_id?: string[];
+  }) => get<ExpensesReportResponse>("/api/v1/reports/expenses", params),
+
+  getExpensesDetail: (params: {
+    date_from: string;
+    date_to: string;
+    business_unit_id?: string;
+    category_id?: string;
+    business_unit_ids?: string[];
+    category_ids?: string[];
+    business_unit_unassigned?: boolean;
+    category_uncategorized?: boolean;
+    include_child_categories?: boolean;
+  }) => get<ExpenseDetailResponse>("/api/v1/reports/expenses/detail", params),
 };

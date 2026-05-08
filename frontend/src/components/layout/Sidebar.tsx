@@ -33,6 +33,7 @@ import {
   ShieldCheck,
   UserCog,
   Sheet,
+  Receipt,
 } from "lucide-react";
 import { cn } from "@/utils";
 import { ROUTES } from "@/utils/constants";
@@ -148,6 +149,7 @@ const orgNavItems: NavItem[] = [
       { name: "Margenes", path: ROUTES.REPORTS_MARGINS, icon: <BarChart3 className="w-4 h-4" />, permission: "reports.view_margins" },
       { name: "Rentabilidad por UN", path: ROUTES.REPORTS_PROFITABILITY_BU, icon: <BarChart3 className="w-4 h-4" />, permission: "reports.view_pnl" },
       { name: "Costo Real Material", path: ROUTES.REPORTS_REAL_COST, icon: <Calculator className="w-4 h-4" />, permission: "reports.view_pnl" },
+      { name: "Gastos", path: ROUTES.REPORTS_EXPENSES, icon: <Receipt className="w-4 h-4" />, permission: "reports.view_expenses" },
       { name: "Saldos Terceros", path: ROUTES.REPORTS_BALANCES, icon: <Users className="w-4 h-4" />, permission: "reports.view_third_parties" },
     ],
   },

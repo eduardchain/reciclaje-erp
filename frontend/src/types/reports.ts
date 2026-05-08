@@ -475,3 +475,56 @@ export interface RealCostByMaterialResponse {
   period_to: string;
   business_units: BusinessUnitOverhead[];
 }
+
+// --- Reporte de Gastos (agrupacion flexible UN/Categoria) ---
+
+export type ExpensesGroupBy = "bu" | "category" | "bu_then_category" | "category_then_bu" | "none";
+
+export type ExpenseAllocationType = "direct" | "shared" | "general";
+
+export interface ExpenseGroupNode {
+  key: string;
+  label: string;
+  level: number;
+  business_unit_id: string | null;
+  category_id: string | null;
+  parent_category_id: string | null;
+  total: number;
+  has_shared_allocations: boolean;
+  children: ExpenseGroupNode[];
+}
+
+export interface ExpensesReportResponse {
+  period_from: string;
+  period_to: string;
+  group_by: ExpensesGroupBy;
+  total: number;
+  total_direct: number;
+  total_shared: number;
+  total_general: number;
+  movement_count: number;
+  groups: ExpenseGroupNode[];
+}
+
+export interface ExpenseDetailItem {
+  movement_id: string;
+  movement_number: number;
+  date: string;
+  amount: number;
+  allocated_amount: number;
+  allocation_type: ExpenseAllocationType;
+  description: string | null;
+  third_party_id: string | null;
+  third_party_name: string | null;
+  business_unit_id: string | null;
+  business_unit_name: string | null;
+  expense_category_id: string | null;
+  expense_category_name: string | null;
+  movement_type: string;
+}
+
+export interface ExpenseDetailResponse {
+  items: ExpenseDetailItem[];
+  total_allocated: number;
+  total_count: number;
+}

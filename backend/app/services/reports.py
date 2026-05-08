@@ -10,7 +10,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select, func, case, cast, Date, exists, or_, and_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.double_entry import DoubleEntry, DoubleEntryLine
 from app.models.expense_category import ExpenseCategory
@@ -75,6 +75,10 @@ from app.schemas.reports import (
     BusinessUnitOverhead,
     MaterialRealCost,
     RealCostByMaterialResponse,
+    ExpenseGroupNode,
+    ExpensesReportResponse,
+    ExpenseDetailItem,
+    ExpenseDetailResponse,
 )
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -3497,6 +3501,559 @@ class ReportService:
             period_from=date_from,
             period_to=date_to,
             business_units=result_bus,
+        )
+
+    # ==================================================================
+    # Reporte de Gastos (agrupacion flexible por UN/Categoria)
+    # ==================================================================
+
+    def _expand_categories_to_children(
+        self, db: Session, organization_id: UUID, category_ids: list[UUID],
+    ) -> set[UUID]:
+        """Expandir categoria padre a {padre} ∪ {hijas}.
+
+        Si una categoria tiene parent_id=NULL y otras categorias la referencian
+        como parent, se incluyen todas. Consistente con la jerarquia de 2 niveles.
+        """
+        if not category_ids:
+            return set()
+        result: set[UUID] = set(category_ids)
+        children = db.execute(
+            select(ExpenseCategory.id).where(
+                ExpenseCategory.organization_id == organization_id,
+                ExpenseCategory.parent_id.in_(category_ids),
+            )
+        ).all()
+        for (child_id,) in children:
+            result.add(child_id)
+        return result
+
+    def _compute_expense_allocations(
+        self, db: Session, organization_id: UUID, dt_from: datetime, dt_to: datetime,
+    ) -> tuple[list[dict], dict[str, str], dict[str, dict]]:
+        """Calcular alocaciones (mov_id, bu_id, cat_id, allocated_amount, allocation_type)
+        para todos los gastos del periodo, replicando la logica 3-tier de
+        get_profitability_by_business_unit.
+
+        Returns:
+            (allocations, bu_names, cat_info)
+            - allocations: lista de dicts con keys: movement_id, bu_id (str|None),
+              cat_id (UUID|None), parent_cat_id (UUID|None), cat_name (str),
+              amount (Decimal), allocation_type (direct|shared|general),
+              source_movement_id (UUID).
+            - bu_names: {bu_id_str: name} incluyendo "unassigned"
+            - cat_info: {cat_id_str: {"name", "parent_id", "is_direct_expense"}} y
+              key especial "none" para "Sin Categoría".
+        """
+        # 1. UNs activas
+        bus = db.execute(
+            select(BusinessUnit.id, BusinessUnit.name)
+            .where(
+                BusinessUnit.organization_id == organization_id,
+                BusinessUnit.is_active == True,
+            )
+            .order_by(BusinessUnit.name)
+        ).all()
+        bu_names: dict[str, str] = {str(bu.id): bu.name for bu in bus}
+        bu_names["unassigned"] = "Sin Asignar"
+
+        # 2. Compras por UN (base prorrateo)
+        purchases_by_bu = self._get_purchases_by_bu(db, organization_id, dt_from, dt_to)
+
+        # 3. Categorias (incluye parent_id para jerarquia)
+        cat_rows = db.execute(
+            select(
+                ExpenseCategory.id,
+                ExpenseCategory.name,
+                ExpenseCategory.parent_id,
+                ExpenseCategory.is_direct_expense,
+            ).where(ExpenseCategory.organization_id == organization_id)
+        ).all()
+        cat_info: dict[str, dict] = {}
+        for cat in cat_rows:
+            cat_info[str(cat.id)] = {
+                "name": cat.name,
+                "parent_id": str(cat.parent_id) if cat.parent_id else None,
+                "is_direct_expense": cat.is_direct_expense,
+            }
+        cat_info["none"] = {"name": "Sin Categoría", "parent_id": None, "is_direct_expense": False}
+
+        # 4. Movimientos de gasto del periodo
+        expense_filters = [
+            MoneyMovement.organization_id == organization_id,
+            MoneyMovement.status == "confirmed",
+            MoneyMovement.movement_type.in_(self.EXPENSE_MOVEMENT_TYPES),
+            MoneyMovement.date >= dt_from,
+            MoneyMovement.date < dt_to,
+        ]
+        rows = db.execute(
+            select(
+                MoneyMovement.id,
+                MoneyMovement.amount,
+                MoneyMovement.business_unit_id,
+                MoneyMovement.applicable_business_unit_ids,
+                MoneyMovement.expense_category_id,
+                ExpenseCategory.is_direct_expense,
+            )
+            .outerjoin(ExpenseCategory, MoneyMovement.expense_category_id == ExpenseCategory.id)
+            .where(*expense_filters)
+        ).all()
+
+        allocations: list[dict] = []
+        for row in rows:
+            amt = Decimal(str(row.amount))
+            bu_id_str = str(row.business_unit_id) if row.business_unit_id else None
+            applicable = row.applicable_business_unit_ids
+            cat_id_str = str(row.expense_category_id) if row.expense_category_id else "none"
+            cat_meta = cat_info.get(cat_id_str, cat_info["none"])
+            parent_cat_id = cat_meta["parent_id"]
+            cat_name = cat_meta["name"]
+
+            base = {
+                "movement_id": row.id,
+                "cat_id": cat_id_str,
+                "parent_cat_id": parent_cat_id,
+                "cat_name": cat_name,
+            }
+
+            if bu_id_str:
+                # DIRECTO: 100% a esta UN
+                key = bu_id_str if bu_id_str in bu_names else "unassigned"
+                allocations.append({
+                    **base,
+                    "bu_id": key,
+                    "allocated_amount": amt,
+                    "allocation_type": "direct",
+                })
+            elif applicable:
+                # COMPARTIDO: prorrateo entre UNs especificas
+                prorated = self._prorate_expense(amt, applicable, purchases_by_bu)
+                for k, v in prorated.items():
+                    allocations.append({
+                        **base,
+                        "bu_id": k,
+                        "allocated_amount": v,
+                        "allocation_type": "shared",
+                    })
+            else:
+                # GENERAL: ambos NULL.
+                # Edge case legacy: is_direct_expense=True + UN NULL -> "unassigned" directo
+                # (replica logica de get_profitability_by_business_unit:3216-3222)
+                if row.is_direct_expense:
+                    allocations.append({
+                        **base,
+                        "bu_id": "unassigned",
+                        "allocated_amount": amt,
+                        "allocation_type": "direct",
+                    })
+                else:
+                    prorated = self._prorate_expense(amt, None, purchases_by_bu)
+                    for k, v in prorated.items():
+                        allocations.append({
+                            **base,
+                            "bu_id": k,
+                            "allocated_amount": v,
+                            "allocation_type": "general",
+                        })
+
+        return allocations, bu_names, cat_info
+
+    def get_expenses_report(
+        self,
+        db: Session,
+        organization_id: UUID,
+        date_from: date,
+        date_to: date,
+        group_by: str = "bu_then_category",
+        business_unit_ids: Optional[list[UUID]] = None,
+        category_ids: Optional[list[UUID]] = None,
+    ) -> ExpensesReportResponse:
+        """Reporte de gastos con agrupacion flexible por UN/Categoria.
+
+        group_by: "bu" | "category" | "bu_then_category" | "category_then_bu"
+        """
+        dt_from, dt_to = self._date_range(date_from, date_to)
+
+        allocations, bu_names, cat_info = self._compute_expense_allocations(
+            db, organization_id, dt_from, dt_to
+        )
+
+        # Filtrar alocaciones segun UI (post-calculo de prorrateo)
+        bu_filter_set: Optional[set[str]] = None
+        if business_unit_ids:
+            bu_filter_set = {str(b) for b in business_unit_ids}
+
+        cat_filter_set: Optional[set[str]] = None
+        if category_ids:
+            expanded = self._expand_categories_to_children(
+                db, organization_id, category_ids
+            )
+            cat_filter_set = {str(c) for c in expanded}
+
+        if bu_filter_set or cat_filter_set:
+            allocations = [
+                a for a in allocations
+                if (bu_filter_set is None or a["bu_id"] in bu_filter_set)
+                and (cat_filter_set is None or a["cat_id"] in cat_filter_set)
+            ]
+
+        # Stats agregadas (sobre el set ya filtrado)
+        total_global = Decimal("0")
+        total_direct = Decimal("0")
+        total_shared = Decimal("0")
+        total_general = Decimal("0")
+        for a in allocations:
+            amt = a["allocated_amount"]
+            total_global += amt
+            atype = a["allocation_type"]
+            if atype == "direct":
+                total_direct += amt
+            elif atype == "shared":
+                total_shared += amt
+            elif atype == "general":
+                total_general += amt
+        movement_count = len({a["movement_id"] for a in allocations})
+
+        # Construir arbol segun group_by
+        groups = self._build_expense_tree(allocations, group_by, bu_names, cat_info)
+
+        return ExpensesReportResponse(
+            period_from=date_from,
+            period_to=date_to,
+            group_by=group_by,
+            total=float(total_global),
+            total_direct=float(total_direct),
+            total_shared=float(total_shared),
+            total_general=float(total_general),
+            movement_count=movement_count,
+            groups=groups,
+        )
+
+    def _build_expense_tree(
+        self,
+        allocations: list[dict],
+        group_by: str,
+        bu_names: dict[str, str],
+        cat_info: dict[str, dict],
+    ) -> list[ExpenseGroupNode]:
+        """Construir arbol jerarquico segun el modo de agrupacion."""
+
+        if group_by == "none":
+            return []
+
+        def cat_node_builder(allocs: list[dict], level: int) -> list[ExpenseGroupNode]:
+            """Construir nodos de categoria con jerarquia padre/hijo."""
+            # Indexar alocaciones por cat_id (hoja)
+            by_cat: dict[str, list[dict]] = {}
+            for a in allocs:
+                by_cat.setdefault(a["cat_id"], []).append(a)
+
+            # Agrupar por padre (cat con parent → hijo bajo padre; cat sin parent → top)
+            top_level: dict[str, dict] = {}
+            for cat_id, items in by_cat.items():
+                meta = cat_info.get(cat_id, cat_info["none"])
+                parent_id = meta["parent_id"]
+                if parent_id and parent_id in cat_info:
+                    parent_node = top_level.setdefault(parent_id, {
+                        "name": cat_info[parent_id]["name"],
+                        "children_by_cat": {},
+                        "direct_items": [],
+                    })
+                    parent_node["children_by_cat"][cat_id] = items
+                else:
+                    parent_node = top_level.setdefault(cat_id, {
+                        "name": meta["name"],
+                        "children_by_cat": {},
+                        "direct_items": [],
+                    })
+                    parent_node["direct_items"].extend(items)
+
+            result: list[ExpenseGroupNode] = []
+            for cat_id, info in top_level.items():
+                child_nodes: list[ExpenseGroupNode] = []
+                # Items directos del padre (si la cat se uso como hoja sin parent)
+                node_total = sum(
+                    (a["allocated_amount"] for a in info["direct_items"]),
+                    Decimal("0"),
+                )
+                node_has_shared = any(
+                    a["allocation_type"] != "direct" for a in info["direct_items"]
+                )
+                # Hijos
+                for child_cat_id, child_items in info["children_by_cat"].items():
+                    child_total = sum(
+                        (a["allocated_amount"] for a in child_items),
+                        Decimal("0"),
+                    )
+                    child_has_shared = any(
+                        a["allocation_type"] != "direct" for a in child_items
+                    )
+                    child_nodes.append(ExpenseGroupNode(
+                        key=f"cat:{child_cat_id}",
+                        label=cat_info[child_cat_id]["name"],
+                        level=level + 1,
+                        category_id=UUID(child_cat_id) if child_cat_id != "none" else None,
+                        parent_category_id=UUID(cat_id) if cat_id != "none" else None,
+                        total=float(child_total),
+                        has_shared_allocations=child_has_shared,
+                    ))
+                    node_total += child_total
+                    node_has_shared = node_has_shared or child_has_shared
+
+                child_nodes.sort(key=lambda n: -n.total)
+                result.append(ExpenseGroupNode(
+                    key=f"cat:{cat_id}",
+                    label=info["name"],
+                    level=level,
+                    category_id=UUID(cat_id) if cat_id != "none" else None,
+                    total=float(node_total),
+                    has_shared_allocations=node_has_shared,
+                    children=child_nodes,
+                ))
+            result.sort(key=lambda n: -n.total)
+            return result
+
+        if group_by == "bu":
+            by_bu: dict[str, list[dict]] = {}
+            for a in allocations:
+                by_bu.setdefault(a["bu_id"], []).append(a)
+            nodes: list[ExpenseGroupNode] = []
+            for bu_key, items in by_bu.items():
+                total = sum((a["allocated_amount"] for a in items), Decimal("0"))
+                has_shared = any(a["allocation_type"] != "direct" for a in items)
+                nodes.append(ExpenseGroupNode(
+                    key=f"bu:{bu_key}",
+                    label=bu_names.get(bu_key, "Sin Asignar"),
+                    level=0,
+                    business_unit_id=UUID(bu_key) if bu_key != "unassigned" else None,
+                    total=float(total),
+                    has_shared_allocations=has_shared,
+                ))
+            nodes.sort(key=lambda n: -n.total)
+            return nodes
+
+        if group_by == "category":
+            return cat_node_builder(allocations, level=0)
+
+        if group_by == "bu_then_category":
+            by_bu: dict[str, list[dict]] = {}
+            for a in allocations:
+                by_bu.setdefault(a["bu_id"], []).append(a)
+            nodes: list[ExpenseGroupNode] = []
+            for bu_key, items in by_bu.items():
+                total = sum((a["allocated_amount"] for a in items), Decimal("0"))
+                has_shared = any(a["allocation_type"] != "direct" for a in items)
+                cat_children = cat_node_builder(items, level=1)
+                nodes.append(ExpenseGroupNode(
+                    key=f"bu:{bu_key}",
+                    label=bu_names.get(bu_key, "Sin Asignar"),
+                    level=0,
+                    business_unit_id=UUID(bu_key) if bu_key != "unassigned" else None,
+                    total=float(total),
+                    has_shared_allocations=has_shared,
+                    children=cat_children,
+                ))
+            nodes.sort(key=lambda n: -n.total)
+            return nodes
+
+        if group_by == "category_then_bu":
+            # Primero arbol de categorias; dentro de cada categoria/subcategoria, sub-nodos por UN.
+            cat_nodes = cat_node_builder(allocations, level=0)
+
+            # Para cada nodo (top y children), reemplazar children por UN-breakdown
+            # Si el nodo top tiene children-categorias, agregamos children dentro de cada hijo
+            def add_bu_children(node: ExpenseGroupNode, items_for_node: list[dict], level: int):
+                by_bu_inner: dict[str, list[dict]] = {}
+                for a in items_for_node:
+                    by_bu_inner.setdefault(a["bu_id"], []).append(a)
+                bu_kids: list[ExpenseGroupNode] = []
+                for bu_key, items in by_bu_inner.items():
+                    t = sum((a["allocated_amount"] for a in items), Decimal("0"))
+                    hs = any(a["allocation_type"] != "direct" for a in items)
+                    bu_kids.append(ExpenseGroupNode(
+                        key=f"{node.key}|bu:{bu_key}",
+                        label=bu_names.get(bu_key, "Sin Asignar"),
+                        level=level + 1,
+                        business_unit_id=UUID(bu_key) if bu_key != "unassigned" else None,
+                        category_id=node.category_id,
+                        parent_category_id=node.parent_category_id,
+                        total=float(t),
+                        has_shared_allocations=hs,
+                    ))
+                bu_kids.sort(key=lambda n: -n.total)
+                return bu_kids
+
+            # Indexar items por (cat_top, cat_child)
+            by_top_and_child: dict[str, dict[str, list[dict]]] = {}
+            for a in allocations:
+                meta = cat_info.get(a["cat_id"], cat_info["none"])
+                if meta["parent_id"] and meta["parent_id"] in cat_info:
+                    top_id = meta["parent_id"]
+                    child_id = a["cat_id"]
+                else:
+                    top_id = a["cat_id"]
+                    child_id = "_self_"
+                by_top_and_child.setdefault(top_id, {}).setdefault(child_id, []).append(a)
+
+            for top_node in cat_nodes:
+                top_id = str(top_node.category_id) if top_node.category_id else "none"
+                if top_node.children:
+                    # Cada child es una categoria hija → agregar UN-breakdown dentro
+                    new_children: list[ExpenseGroupNode] = []
+                    for child_node in top_node.children:
+                        child_id = str(child_node.category_id) if child_node.category_id else "none"
+                        items = by_top_and_child.get(top_id, {}).get(child_id, [])
+                        child_node.children = add_bu_children(child_node, items, level=1)
+                        new_children.append(child_node)
+                    # Si el padre tiene tambien items directos (hojas sin sub-categoria),
+                    # agregarlos como un sub-nodo "Directo al padre" con desglose por UN
+                    self_items = by_top_and_child.get(top_id, {}).get("_self_", [])
+                    if self_items:
+                        self_total = sum(
+                            (a["allocated_amount"] for a in self_items), Decimal("0")
+                        )
+                        self_hs = any(a["allocation_type"] != "direct" for a in self_items)
+                        self_node = ExpenseGroupNode(
+                            key=f"cat:{top_id}|self",
+                            label=f"{top_node.label} (sin subcategoría)",
+                            level=1,
+                            category_id=top_node.category_id,
+                            total=float(self_total),
+                            has_shared_allocations=self_hs,
+                        )
+                        self_node.children = add_bu_children(self_node, self_items, level=1)
+                        new_children.append(self_node)
+                    new_children.sort(key=lambda n: -n.total)
+                    top_node.children = new_children
+                else:
+                    # Cat hoja sin hijos → desglose directo por UN
+                    items = [a for a in allocations if a["cat_id"] == top_id]
+                    top_node.children = add_bu_children(top_node, items, level=0)
+
+            return cat_nodes
+
+        raise ValueError(f"group_by invalido: {group_by}")
+
+    def get_expenses_detail(
+        self,
+        db: Session,
+        organization_id: UUID,
+        date_from: date,
+        date_to: date,
+        business_unit_id: Optional[UUID] = None,
+        category_id: Optional[UUID] = None,
+        business_unit_ids: Optional[list[UUID]] = None,
+        category_ids: Optional[list[UUID]] = None,
+        include_child_categories: bool = True,
+        business_unit_unassigned: bool = False,
+        category_uncategorized: bool = False,
+    ) -> ExpenseDetailResponse:
+        """Detalle de movimientos de gasto que componen un grupo del reporte.
+
+        Filtra alocaciones por UN/categoria y devuelve los movimientos con su
+        monto original y la porcion alocada al grupo. Acepta single (drill-down
+        de un grupo) o multi (modo "sin agrupar" con multi-select de la UI).
+        Para drill-down sobre "Sin Asignar"/"Sin Categoría" usar los flags.
+        """
+        dt_from, dt_to = self._date_range(date_from, date_to)
+
+        allocations, bu_names, cat_info = self._compute_expense_allocations(
+            db, organization_id, dt_from, dt_to
+        )
+
+        # Resolver filtro de categoria (multi tiene precedencia sobre single)
+        cat_filter: Optional[set[str]] = None
+        if category_uncategorized:
+            cat_filter = {"none"}
+        elif category_ids:
+            expanded = self._expand_categories_to_children(
+                db, organization_id, category_ids
+            )
+            cat_filter = {str(c) for c in expanded}
+        elif category_id:
+            if include_child_categories:
+                expanded = self._expand_categories_to_children(
+                    db, organization_id, [category_id]
+                )
+                cat_filter = {str(c) for c in expanded}
+            else:
+                cat_filter = {str(category_id)}
+
+        bu_filter_set: Optional[set[str]] = None
+        if business_unit_unassigned:
+            bu_filter_set = {"unassigned"}
+        elif business_unit_ids:
+            bu_filter_set = {str(b) for b in business_unit_ids}
+        elif business_unit_id:
+            bu_filter_set = {str(business_unit_id)}
+
+        # Filtrar alocaciones
+        filtered = []
+        for a in allocations:
+            if bu_filter_set is not None and a["bu_id"] not in bu_filter_set:
+                continue
+            if cat_filter is not None and a["cat_id"] not in cat_filter:
+                continue
+            filtered.append(a)
+
+        if not filtered:
+            return ExpenseDetailResponse(items=[], total_allocated=0.0, total_count=0)
+
+        # Cargar metadatos de los movimientos involucrados (eager)
+        mov_ids = list({a["movement_id"] for a in filtered})
+        movs = db.execute(
+            select(MoneyMovement)
+            .where(MoneyMovement.id.in_(mov_ids))
+            .options(
+                joinedload(MoneyMovement.third_party),
+                joinedload(MoneyMovement.business_unit),
+                joinedload(MoneyMovement.expense_category),
+            )
+        ).unique().scalars().all()
+        mov_by_id = {m.id: m for m in movs}
+
+        # Sumar allocated por movimiento (un mov puede tener varias alocaciones —
+        # ej. shared con 2 UNs y filtro de UN matchea solo 1)
+        items: list[ExpenseDetailItem] = []
+        total_alloc = Decimal("0")
+        per_mov_alloc: dict[UUID, Decimal] = {}
+        per_mov_type: dict[UUID, str] = {}
+        for a in filtered:
+            per_mov_alloc[a["movement_id"]] = (
+                per_mov_alloc.get(a["movement_id"], Decimal("0")) + a["allocated_amount"]
+            )
+            # Si tiene tipos mezclados, prevalece el primero (raro)
+            per_mov_type.setdefault(a["movement_id"], a["allocation_type"])
+
+        for mov_id, alloc in per_mov_alloc.items():
+            mov = mov_by_id.get(mov_id)
+            if not mov:
+                continue
+            items.append(ExpenseDetailItem(
+                movement_id=mov.id,
+                movement_number=mov.movement_number,
+                date=mov.date.date() if hasattr(mov.date, "date") else mov.date,
+                amount=float(mov.amount),
+                allocated_amount=float(alloc),
+                allocation_type=per_mov_type[mov_id],
+                description=mov.description,
+                third_party_id=mov.third_party_id,
+                third_party_name=mov.third_party.name if mov.third_party else None,
+                business_unit_id=mov.business_unit_id,
+                business_unit_name=mov.business_unit.name if mov.business_unit else None,
+                expense_category_id=mov.expense_category_id,
+                expense_category_name=mov.expense_category.name if mov.expense_category else None,
+                movement_type=mov.movement_type,
+            ))
+            total_alloc += alloc
+
+        # Ordenar por fecha desc
+        items.sort(key=lambda i: i.date, reverse=True)
+
+        return ExpenseDetailResponse(
+            items=items,
+            total_allocated=float(total_alloc),
+            total_count=len(items),
         )
 
 

@@ -4,7 +4,7 @@ Endpoints de reportes y dashboard.
 Todos los endpoints son GET (read-only), requieren autenticacion y contexto de organizacion.
 """
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -17,6 +17,8 @@ from app.schemas.reports import (
     BalanceSheetResponse,
     CashFlowResponse,
     DashboardResponse,
+    ExpenseDetailResponse,
+    ExpensesReportResponse,
     MarginAnalysisResponse,
     ProfitAndLossResponse,
     ProfitabilityByBUResponse,
@@ -284,6 +286,94 @@ def get_profitability_by_bu(
         organization_id=org_context["organization_id"],
         date_from=date_from,
         date_to=date_to,
+    )
+
+
+@router.get("/expenses", response_model=ExpensesReportResponse)
+def get_expenses_report(
+    date_from: date = Query(..., description="Fecha inicio del periodo"),
+    date_to: date = Query(..., description="Fecha fin del periodo"),
+    group_by: Literal["bu", "category", "bu_then_category", "category_then_bu", "none"] = Query(
+        "bu_then_category",
+        description="Modo de agrupacion del arbol de gastos. 'none' devuelve solo el resumen sin grupos.",
+    ),
+    business_unit_id: Optional[list[UUID]] = Query(None, description="Filtrar por una o mas UN"),
+    expense_category_id: Optional[list[UUID]] = Query(
+        None,
+        description="Filtrar por categoria(s) (padre expande a hijas)",
+    ),
+    org_context: dict = Depends(require_any_permission(
+        "reports.view", "reports.view_expenses", "reports.view_pnl",
+    )),
+    db: Session = Depends(get_db),
+):
+    """
+    Reporte de gastos del periodo agrupado por UN y/o Categoria.
+
+    Aplica logica 3-tier (directo / compartido / general) replicando
+    Rentabilidad por UN. Filtros se aplican despues del prorrateo
+    para preservar proporcionalidad. Categoria padre expande a hijas.
+    """
+    return report_service.get_expenses_report(
+        db=db,
+        organization_id=org_context["organization_id"],
+        date_from=date_from,
+        date_to=date_to,
+        group_by=group_by,
+        business_unit_ids=business_unit_id,
+        category_ids=expense_category_id,
+    )
+
+
+@router.get("/expenses/detail", response_model=ExpenseDetailResponse)
+def get_expenses_detail(
+    date_from: date = Query(..., description="Fecha inicio del periodo"),
+    date_to: date = Query(..., description="Fecha fin del periodo"),
+    business_unit_id: Optional[UUID] = Query(None, description="Filtrar por UN (un valor)"),
+    category_id: Optional[UUID] = Query(None, description="Filtrar por categoria (un valor)"),
+    business_unit_ids: Optional[list[UUID]] = Query(
+        None,
+        description="Filtrar por una o mas UN (alterna a business_unit_id, util para 'sin agrupar')",
+    ),
+    category_ids: Optional[list[UUID]] = Query(
+        None,
+        description="Filtrar por una o mas categorias (padre expande a hijas)",
+    ),
+    include_child_categories: bool = Query(
+        True,
+        description="Si category_id es padre, incluir gastos de categorias hijas",
+    ),
+    business_unit_unassigned: bool = Query(
+        False,
+        description="Filtrar al bucket 'Sin Asignar' (gastos sin UN)",
+    ),
+    category_uncategorized: bool = Query(
+        False,
+        description="Filtrar al bucket 'Sin Categoría'",
+    ),
+    org_context: dict = Depends(require_any_permission(
+        "reports.view", "reports.view_expenses", "reports.view_pnl",
+    )),
+    db: Session = Depends(get_db),
+):
+    """
+    Detalle de movimientos que componen un grupo del reporte de gastos.
+
+    Cada item tiene `allocated_amount` (porcion asignada al grupo, == amount
+    si directo) y `allocation_type` ('direct' | 'shared' | 'general').
+    """
+    return report_service.get_expenses_detail(
+        db=db,
+        organization_id=org_context["organization_id"],
+        date_from=date_from,
+        date_to=date_to,
+        business_unit_id=business_unit_id,
+        category_id=category_id,
+        business_unit_ids=business_unit_ids,
+        category_ids=category_ids,
+        include_child_categories=include_child_categories,
+        business_unit_unassigned=business_unit_unassigned,
+        category_uncategorized=category_uncategorized,
     )
 
 

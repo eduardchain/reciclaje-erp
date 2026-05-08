@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { reportsService } from "@/services/reports";
+import type { ExpensesGroupBy } from "@/types/reports";
 
 interface DateRange {
   date_from: string;
@@ -96,5 +97,37 @@ export function useRealCostByMaterial(params: DateRange) {
     queryKey: ["reports", "real-cost-material", params],
     queryFn: () => reportsService.getRealCostByMaterial(params),
     enabled: !!params.date_from && !!params.date_to,
+  });
+}
+
+interface ExpensesReportParams extends DateRange {
+  group_by?: ExpensesGroupBy;
+  business_unit_id?: string[];
+  expense_category_id?: string[];
+}
+
+export function useExpensesReport(params: ExpensesReportParams) {
+  return useQuery({
+    queryKey: ["reports", "expenses", params],
+    queryFn: () => reportsService.getExpensesReport(params),
+    enabled: !!params.date_from && !!params.date_to,
+  });
+}
+
+interface ExpensesDetailParams extends DateRange {
+  business_unit_id?: string;
+  category_id?: string;
+  business_unit_ids?: string[];
+  category_ids?: string[];
+  business_unit_unassigned?: boolean;
+  category_uncategorized?: boolean;
+  include_child_categories?: boolean;
+}
+
+export function useExpensesDetail(params: ExpensesDetailParams, enabled: boolean) {
+  return useQuery({
+    queryKey: ["reports", "expenses-detail", params],
+    queryFn: () => reportsService.getExpensesDetail(params),
+    enabled: enabled && !!params.date_from && !!params.date_to,
   });
 }

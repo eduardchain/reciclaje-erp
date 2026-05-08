@@ -578,3 +578,58 @@ class RealCostByMaterialResponse(BaseModel):
     period_from: date
     period_to: date
     business_units: list[BusinessUnitOverhead]
+
+
+# ---------------------------------------------------------------------------
+# Reporte de Gastos (agrupacion flexible por UN/Categoria)
+# ---------------------------------------------------------------------------
+
+class ExpenseGroupNode(BaseModel):
+    """Nodo del arbol de agrupacion del reporte de gastos."""
+    key: str
+    label: str
+    level: int
+    business_unit_id: Optional[UUID] = None
+    category_id: Optional[UUID] = None
+    parent_category_id: Optional[UUID] = None
+    total: float
+    has_shared_allocations: bool = False
+    children: list["ExpenseGroupNode"] = []
+
+
+class ExpensesReportResponse(BaseModel):
+    """Respuesta del reporte de gastos agrupado."""
+    period_from: date
+    period_to: date
+    group_by: str
+    total: float
+    total_direct: float
+    total_shared: float
+    total_general: float
+    movement_count: int
+    groups: list[ExpenseGroupNode]
+
+
+class ExpenseDetailItem(BaseModel):
+    """Movimiento de gasto en el drill-down del reporte."""
+    movement_id: UUID
+    movement_number: int
+    date: date
+    amount: float
+    allocated_amount: float
+    allocation_type: str
+    description: Optional[str] = None
+    third_party_id: Optional[UUID] = None
+    third_party_name: Optional[str] = None
+    business_unit_id: Optional[UUID] = None
+    business_unit_name: Optional[str] = None
+    expense_category_id: Optional[UUID] = None
+    expense_category_name: Optional[str] = None
+    movement_type: str
+
+
+class ExpenseDetailResponse(BaseModel):
+    """Detalle de movimientos para un grupo del reporte de gastos."""
+    items: list[ExpenseDetailItem]
+    total_allocated: float
+    total_count: int

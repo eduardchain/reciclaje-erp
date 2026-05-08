@@ -96,6 +96,7 @@ PERMISSIONS_CATALOG = [
     ("reports.view_sales", "Ver Reporte Ventas", "reports", "Permite ver reporte de ventas", 107),
     ("reports.view_margins", "Ver Margenes", "reports", "Permite ver analisis de margenes", 108),
     ("reports.view_third_parties", "Ver Saldos Terceros", "reports", "Permite ver saldos de terceros", 109),
+    ("reports.view_expenses", "Ver Reporte de Gastos", "reports", "Permite ver el reporte de gastos por UN/Categoria", 110),
 
     # Configuracion
     ("warehouses.view", "Ver Bodegas", "config", "Permite ver bodegas", 120),
@@ -150,6 +151,7 @@ SYSTEM_ROLES = {
             "treasury.view_accounts",
             "treasury.edit_classification",
             "treasury.adjust_balances",
+            "reports.view_expenses",
         ],
     },
     "planillador": {
@@ -186,6 +188,7 @@ SYSTEM_ROLES = {
             "reports.view_dashboard", "reports.view_pnl", "reports.view_cashflow",
             "reports.view_balance", "reports.view_purchases", "reports.view_sales",
             "reports.view_margins", "reports.view_third_parties",
+            "reports.view_expenses",
             "transformations.view",
         ],
     },

@@ -2256,3 +2256,432 @@ class TestPnLAdjustmentNet:
         )
         assert resp.status_code == 200
         assert resp.json()["adjustment_net"] == 0.0
+
+
+# ===========================================================================
+# Reporte de Gastos (agrupacion flexible UN/Categoria)
+# ===========================================================================
+
+
+@pytest.fixture
+def expenses_data(db_session: Session, test_organization, test_user):
+    """Dataset para tests del reporte de gastos.
+
+    Replica la estructura de bu_data, anade categoria padre/hijo y un
+    gasto legacy (is_direct_expense=True con UN NULL).
+    """
+    org_id = test_organization.id
+    now = datetime.now(tz=timezone.utc)
+
+    bu_cobre = BusinessUnit(name="UNCobre", organization_id=org_id, is_active=True)
+    bu_chatarra = BusinessUnit(name="UNChatarra", organization_id=org_id, is_active=True)
+    db_session.add_all([bu_cobre, bu_chatarra])
+    db_session.flush()
+
+    cat_metales = MaterialCategory(name="Metales E", organization_id=org_id, is_active=True)
+    db_session.add(cat_metales)
+    db_session.flush()
+
+    cat_servicios = ExpenseCategory(
+        name="Servicios", organization_id=org_id,
+        is_direct_expense=False, is_active=True,
+    )
+    db_session.add(cat_servicios)
+    db_session.flush()
+
+    cat_internet = ExpenseCategory(
+        name="Internet", organization_id=org_id,
+        parent_id=cat_servicios.id,
+        is_direct_expense=False, is_active=True,
+    )
+    cat_telefono = ExpenseCategory(
+        name="Telefono", organization_id=org_id,
+        parent_id=cat_servicios.id,
+        is_direct_expense=False, is_active=True,
+    )
+    cat_nomina = ExpenseCategory(
+        name="Nomina E", organization_id=org_id,
+        is_direct_expense=True, is_active=True,
+    )
+    db_session.add_all([cat_internet, cat_telefono, cat_nomina])
+    db_session.flush()
+
+    mat_cobre = Material(
+        code="CU-E", name="Cobre E", organization_id=org_id,
+        category_id=cat_metales.id, default_unit="kg",
+        business_unit_id=bu_cobre.id,
+        current_stock=Decimal("500"), current_stock_liquidated=Decimal("500"),
+        current_stock_transit=Decimal("0"), current_average_cost=Decimal("8000"),
+        is_active=True,
+    )
+    mat_chatarra = Material(
+        code="CH-E", name="Chatarra E", organization_id=org_id,
+        category_id=cat_metales.id, default_unit="kg",
+        business_unit_id=bu_chatarra.id,
+        current_stock=Decimal("1000"), current_stock_liquidated=Decimal("1000"),
+        current_stock_transit=Decimal("0"), current_average_cost=Decimal("1200"),
+        is_active=True,
+    )
+    db_session.add_all([mat_cobre, mat_chatarra])
+    db_session.flush()
+
+    wh = Warehouse(name="Bodega E", organization_id=org_id, is_active=True)
+    cuenta = MoneyAccount(
+        name="Caja E", account_type="cash", organization_id=org_id,
+        current_balance=Decimal("50000000"), is_active=True,
+    )
+    db_session.add_all([wh, cuenta])
+    db_session.flush()
+
+    supplier_cat = ThirdPartyCategory(
+        name="Prov Mat E", behavior_type="material_supplier", organization_id=org_id,
+    )
+    db_session.add(supplier_cat)
+    db_session.flush()
+    supplier = ThirdParty(
+        name="Prov E", organization_id=org_id, current_balance=Decimal("0"), is_active=True,
+    )
+    db_session.add(supplier)
+    db_session.flush()
+    db_session.add(ThirdPartyCategoryAssignment(
+        third_party_id=supplier.id, category_id=supplier_cat.id,
+    ))
+    db_session.flush()
+
+    # Compras: Cobre $1.6M, Chatarra $0.6M (base de prorrateo)
+    compra = Purchase(
+        organization_id=org_id, purchase_number=910,
+        supplier_id=supplier.id, date=now, status="liquidated",
+        liquidated_at=now, total_amount=Decimal("2200000"),
+    )
+    db_session.add(compra)
+    db_session.flush()
+    db_session.add(PurchaseLine(
+        purchase_id=compra.id, material_id=mat_cobre.id, warehouse_id=wh.id,
+        quantity=Decimal("200"), unit_price=Decimal("8000"), total_price=Decimal("1600000"),
+    ))
+    db_session.add(PurchaseLine(
+        purchase_id=compra.id, material_id=mat_chatarra.id, warehouse_id=wh.id,
+        quantity=Decimal("500"), unit_price=Decimal("1200"), total_price=Decimal("600000"),
+    ))
+    db_session.flush()
+
+    # Gastos del periodo:
+    # 1. DIRECTO Chatarra, cat=Internet (subcategoria) — $300K
+    g_directo = MoneyMovement(
+        organization_id=org_id, movement_number=910,
+        date=now, movement_type="expense", amount=Decimal("300000"),
+        account_id=cuenta.id, description="Internet planta Chatarra",
+        expense_category_id=cat_internet.id,
+        business_unit_id=bu_chatarra.id,
+        status="confirmed",
+    )
+    # 2. COMPARTIDO Cobre+Chatarra, cat=Telefono — $200K
+    g_compartido = MoneyMovement(
+        organization_id=org_id, movement_number=911,
+        date=now, movement_type="expense", amount=Decimal("200000"),
+        account_id=cuenta.id, description="Telefono prensa",
+        expense_category_id=cat_telefono.id,
+        applicable_business_unit_ids=[str(bu_cobre.id), str(bu_chatarra.id)],
+        status="confirmed",
+    )
+    # 3. GENERAL (todos NULL), cat padre Servicios — $1M
+    g_general = MoneyMovement(
+        organization_id=org_id, movement_number=912,
+        date=now, movement_type="expense", amount=Decimal("1000000"),
+        account_id=cuenta.id, description="Servicio general",
+        expense_category_id=cat_servicios.id,
+        status="confirmed",
+    )
+    # 4. LEGACY: is_direct_expense=True + UN NULL → unassigned directo — $400K
+    g_legacy = MoneyMovement(
+        organization_id=org_id, movement_number=913,
+        date=now, movement_type="expense", amount=Decimal("400000"),
+        account_id=cuenta.id, description="Nomina legacy sin UN",
+        expense_category_id=cat_nomina.id,
+        status="confirmed",
+    )
+    # 5. ANULADO — no debe contar
+    g_anulado = MoneyMovement(
+        organization_id=org_id, movement_number=914,
+        date=now, movement_type="expense", amount=Decimal("999999"),
+        account_id=cuenta.id, description="Anulado",
+        expense_category_id=cat_servicios.id,
+        business_unit_id=bu_cobre.id,
+        status="annulled",
+    )
+    db_session.add_all([g_directo, g_compartido, g_general, g_legacy, g_anulado])
+    db_session.commit()
+
+    return {
+        "bu_cobre": bu_cobre,
+        "bu_chatarra": bu_chatarra,
+        "cat_servicios": cat_servicios,
+        "cat_internet": cat_internet,
+        "cat_telefono": cat_telefono,
+        "cat_nomina": cat_nomina,
+        "g_directo": g_directo,
+        "g_compartido": g_compartido,
+        "g_general": g_general,
+        "g_legacy": g_legacy,
+        # 300K + 200K + 1M + 400K
+        "expected_total": Decimal("1900000"),
+    }
+
+
+class TestExpensesReport:
+
+    def test_endpoint_returns_200(self, client, org_headers, expenses_data):
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "groups" in data
+        assert "total" in data
+
+    def test_total_matches_pnl(self, client, org_headers, expenses_data):
+        """Suma global == operating_expenses del P&L."""
+        resp_exp = client.get(
+            "/api/v1/reports/expenses",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        resp_pnl = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        total_expenses = resp_exp.json()["total"]
+        operating_expenses = resp_pnl.json()["operating_expenses"]
+        assert abs(total_expenses - operating_expenses) < 1
+
+    def test_total_matches_profitability_bu_sum(self, client, org_headers, expenses_data):
+        """Suma global == Σ (directos + compartidos + generales) de Rentabilidad por UN."""
+        resp_exp = client.get(
+            "/api/v1/reports/expenses",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        resp_pbu = client.get(
+            "/api/v1/reports/profitability-by-business-unit",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        total_expenses = resp_exp.json()["total"]
+        bu_sum = sum(
+            bu["direct_expenses"] + bu["shared_expenses"] + bu["general_expenses"]
+            for bu in resp_pbu.json()["business_units"]
+        )
+        assert abs(total_expenses - bu_sum) < 1
+
+    def test_group_by_bu_shared_prorated(self, client, org_headers, expenses_data):
+        """Compartido $200K Cobre+Chatarra: 1.6/2.2 a Cobre, 0.6/2.2 a Chatarra."""
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={
+                "date_from": "2026-01-01", "date_to": "2026-12-31",
+                "group_by": "bu",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        groups = resp.json()["groups"]
+        # UN Cobre: 200K * 1.6/2.2 + 1M * 1.6/2.2 ≈ 872,727
+        # UN Chatarra: 300K + 200K * 0.6/2.2 + 1M * 0.6/2.2 ≈ 627,272
+        # Sin Asignar: 400K (legacy)
+        cobre = next(g for g in groups if g["label"] == "UNCobre")
+        chatarra = next(g for g in groups if g["label"] == "UNChatarra")
+        sin_asignar = next(g for g in groups if g["label"] == "Sin Asignar")
+        assert abs(cobre["total"] - 872727.27) < 1
+        assert abs(chatarra["total"] - 627272.73) < 1
+        assert abs(sin_asignar["total"] - 400000) < 1
+
+    def test_legacy_direct_unassigned_not_prorated(self, client, org_headers, expenses_data):
+        """is_direct_expense=True + UN NULL → unassigned directo (no prorrateado)."""
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={
+                "date_from": "2026-01-01", "date_to": "2026-12-31",
+                "group_by": "bu",
+            },
+            headers=org_headers,
+        )
+        groups = resp.json()["groups"]
+        sin_asignar = next(g for g in groups if g["label"] == "Sin Asignar")
+        assert sin_asignar["total"] == 400000.0
+        assert sin_asignar["has_shared_allocations"] is False
+
+    def test_filter_by_bu(self, client, org_headers, expenses_data):
+        """Filtrar por UN Cobre: solo aparece Cobre."""
+        bu_cobre_id = str(expenses_data["bu_cobre"].id)
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={
+                "date_from": "2026-01-01", "date_to": "2026-12-31",
+                "group_by": "bu",
+                "business_unit_id": [bu_cobre_id],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        groups = resp.json()["groups"]
+        assert len(groups) == 1
+        assert groups[0]["label"] == "UNCobre"
+
+    def test_filter_by_parent_category_includes_children(
+        self, client, org_headers, expenses_data,
+    ):
+        """Filtrar por categoria padre incluye gastos en hijas."""
+        cat_servicios_id = str(expenses_data["cat_servicios"].id)
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={
+                "date_from": "2026-01-01", "date_to": "2026-12-31",
+                "group_by": "category",
+                "expense_category_id": [cat_servicios_id],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        groups = resp.json()["groups"]
+        servicios = next(g for g in groups if g["label"] == "Servicios")
+        # Total = 300K (Internet) + 200K (Telefono) + 1M (directo padre) = 1.5M
+        assert abs(servicios["total"] - 1500000) < 1
+
+    def test_hierarchy_parent_aggregates_children(self, client, org_headers, expenses_data):
+        """Padre agrega montos de hijas en group_by=category."""
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={
+                "date_from": "2026-01-01", "date_to": "2026-12-31",
+                "group_by": "category",
+            },
+            headers=org_headers,
+        )
+        groups = resp.json()["groups"]
+        servicios = next(g for g in groups if g["label"] == "Servicios")
+        assert abs(servicios["total"] - 1500000) < 1
+        child_labels = {c["label"] for c in servicios["children"]}
+        assert "Internet" in child_labels
+        assert "Telefono" in child_labels
+
+    def test_excludes_annulled(self, client, org_headers, expenses_data):
+        """Gastos anulados no aparecen en el reporte."""
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert abs(resp.json()["total"] - float(expenses_data["expected_total"])) < 1
+
+    def test_summary_breakdown_sums_to_total(self, client, org_headers, expenses_data):
+        """total == total_direct + total_shared + total_general; movement_count == 4."""
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # Las 4 metricas deben existir
+        assert "total_direct" in data
+        assert "total_shared" in data
+        assert "total_general" in data
+        assert "movement_count" in data
+        # Suma cuadra con total
+        breakdown_sum = data["total_direct"] + data["total_shared"] + data["total_general"]
+        assert abs(data["total"] - breakdown_sum) < 1
+        # Conteo: 4 gastos no anulados (directo, compartido, general, legacy)
+        assert data["movement_count"] == 4
+        # Directo: 300K (chatarra) + 400K (legacy) = 700K
+        assert abs(data["total_direct"] - 700000) < 1
+        # Compartido: 200K (telefono entre cobre+chatarra)
+        assert abs(data["total_shared"] - 200000) < 1
+        # General: 1M (servicios padre)
+        assert abs(data["total_general"] - 1000000) < 1
+
+    def test_detail_unassigned_returns_legacy(self, client, org_headers, expenses_data):
+        """Detalle del bucket Sin Asignar: solo el movimiento legacy."""
+        resp = client.get(
+            "/api/v1/reports/expenses/detail",
+            params={
+                "date_from": "2026-01-01", "date_to": "2026-12-31",
+                "business_unit_unassigned": True,
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_count"] == 1
+        assert abs(data["total_allocated"] - 400000) < 1
+        assert data["items"][0]["allocation_type"] == "direct"
+        assert data["items"][0]["movement_id"] == str(expenses_data["g_legacy"].id)
+
+
+class TestExpensesReportRBAC:
+
+    def _make_user_with_role(
+        self, db_session, test_organization, role_name: str, email: str,
+    ):
+        from app.models.role import Role
+        from app.models.user import User, OrganizationMember
+
+        u = User(email=email, hashed_password="x", full_name=email, is_active=True)
+        db_session.add(u)
+        db_session.flush()
+        role = db_session.query(Role).filter(
+            Role.organization_id == test_organization.id,
+            Role.name == role_name,
+            Role.is_system_role == True,
+        ).first()
+        assert role is not None, f"Rol {role_name} no encontrado"
+        db_session.add(OrganizationMember(
+            user_id=u.id,
+            organization_id=test_organization.id,
+            role_id=role.id,
+        ))
+        db_session.commit()
+        return u
+
+    def test_viewer_can_access(
+        self, client, db_session, test_organization, expenses_data,
+    ):
+        """Rol viewer (con reports.view_expenses) puede acceder."""
+        from app.core.security import create_access_token
+
+        user = self._make_user_with_role(
+            db_session, test_organization, "viewer", "viewer-exp@test.com",
+        )
+        token = create_access_token(data={"sub": str(user.id)})
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Organization-ID": str(test_organization.id),
+            },
+        )
+        assert resp.status_code == 200
+
+    def test_planillador_denied(
+        self, client, db_session, test_organization, expenses_data,
+    ):
+        """Rol planillador (sin reports.view_expenses) recibe 403."""
+        from app.core.security import create_access_token
+
+        user = self._make_user_with_role(
+            db_session, test_organization, "planillador", "plan-exp@test.com",
+        )
+        token = create_access_token(data={"sub": str(user.id)})
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Organization-ID": str(test_organization.id),
+            },
+        )
+        assert resp.status_code == 403

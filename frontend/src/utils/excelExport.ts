@@ -11,6 +11,9 @@ import type {
   ThirdPartyBalancesResponse,
   ProfitabilityByBUResponse,
   RealCostByMaterialResponse,
+  ExpensesReportResponse,
+  ExpenseGroupNode,
+  ExpenseDetailResponse,
 } from "@/types/reports";
 import type { StockItem } from "@/types/inventory";
 import { formatCurrency, formatDate } from "@/utils/formatters";
@@ -262,6 +265,99 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Rentabilidad UN");
   XLSX.writeFile(wb, `rentabilidad_un_${data.period_from}_${data.period_to}.xlsx`);
+}
+
+
+export function exportExpensesReportExcel(data: ExpensesReportResponse) {
+  const rows: (string | number | null)[][] = [];
+
+  rows.push(["Reporte de Gastos"]);
+  rows.push([`Periodo: ${data.period_from} - ${data.period_to}`]);
+  rows.push([`Agrupacion: ${data.group_by}`]);
+  rows.push([]);
+  rows.push(["Total", data.total]);
+  rows.push(["Directos", data.total_direct]);
+  rows.push(["Compartidos", data.total_shared]);
+  rows.push(["Generales", data.total_general]);
+  rows.push(["Movimientos", data.movement_count]);
+  rows.push([]);
+  rows.push(["Grupo", "Total"]);
+
+  const flatten = (nodes: ExpenseGroupNode[], depth: number) => {
+    for (const n of nodes) {
+      const indent = "  ".repeat(depth);
+      rows.push([indent + n.label, n.total]);
+      if (n.children && n.children.length > 0) {
+        flatten(n.children, depth + 1);
+      }
+    }
+  };
+  flatten(data.groups, 0);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 45 }, { wch: 18 }];
+
+  applyCurrencyFormat(ws, [1]);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Gastos");
+  XLSX.writeFile(wb, `gastos_${data.period_from}_${data.period_to}.xlsx`);
+}
+
+
+export function exportExpensesFlatExcel(
+  data: ExpenseDetailResponse,
+  periodFrom: string,
+  periodTo: string,
+) {
+  const ALLOC_LABEL: Record<string, string> = {
+    direct: "Directo",
+    shared: "Compartido",
+    general: "General",
+  };
+  const rows: (string | number | null)[][] = [];
+
+  rows.push(["Reporte de Gastos - Detalle"]);
+  rows.push([`Periodo: ${periodFrom} - ${periodTo}`]);
+  rows.push([]);
+  rows.push(["Total movimientos", data.total_count]);
+  rows.push(["Total", data.total_allocated]);
+  rows.push([]);
+  rows.push(["Fecha", "#", "Tipo", "Tercero", "UN", "Categoria", "Descripcion", "Monto", "Asignacion"]);
+
+  for (const item of data.items) {
+    rows.push([
+      formatDate(item.date),
+      item.movement_number,
+      item.movement_type,
+      item.third_party_name ?? "—",
+      item.business_unit_name ?? "Sin Asignar",
+      item.expense_category_name ?? "Sin Categoria",
+      item.description ?? "",
+      item.amount,
+      ALLOC_LABEL[item.allocation_type] ?? item.allocation_type,
+    ]);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [
+    { wch: 12 }, // Fecha
+    { wch: 8 },  // #
+    { wch: 22 }, // Tipo
+    { wch: 28 }, // Tercero
+    { wch: 18 }, // UN
+    { wch: 24 }, // Categoria
+    { wch: 40 }, // Descripcion
+    { wch: 16 }, // Monto
+    { wch: 14 }, // Asignacion
+  ];
+
+  // Total cell + columna Monto
+  applyCurrencyFormat(ws, [7]);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Gastos detalle");
+  XLSX.writeFile(wb, `gastos_detalle_${periodFrom}_${periodTo}.xlsx`);
 }
 
 
