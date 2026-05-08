@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { reportsService } from "@/services/reports";
-import type { ExpensesGroupBy } from "@/types/reports";
+import type { ExpensesGroupBy, DpFilter } from "@/types/reports";
 
 interface DateRange {
   date_from: string;
@@ -38,7 +38,7 @@ export function useBalanceSheet(asOfDate?: string) {
   });
 }
 
-export function usePurchaseReport(params: DateRange) {
+export function usePurchaseReport(params: DateRange & { dp_filter?: DpFilter }) {
   return useQuery({
     queryKey: ["reports", "purchases", params],
     queryFn: () => reportsService.getPurchaseReport(params),
@@ -46,7 +46,7 @@ export function usePurchaseReport(params: DateRange) {
   });
 }
 
-export function useSalesReport(params: DateRange) {
+export function useSalesReport(params: DateRange & { dp_filter?: DpFilter }) {
   return useQuery({
     queryKey: ["reports", "sales", params],
     queryFn: () => reportsService.getSalesReport(params),

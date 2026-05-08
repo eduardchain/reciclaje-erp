@@ -154,6 +154,10 @@ def get_purchase_report(
     date_to: date = Query(..., description="Fecha fin del periodo"),
     supplier_id: Optional[UUID] = Query(None, description="Filtrar por proveedor"),
     material_id: Optional[UUID] = Query(None, description="Filtrar por material"),
+    dp_filter: Literal["all", "exclude", "only"] = Query(
+        "all",
+        description="Filtrar Pasa Mano: 'all' incluye todo, 'exclude' omite compras de DPs, 'only' solo compras de DPs",
+    ),
     org_context: dict = Depends(require_any_permission("reports.view", "reports.view_purchases")),
     db: Session = Depends(get_db),
 ):
@@ -167,6 +171,7 @@ def get_purchase_report(
         date_to=date_to,
         supplier_id=supplier_id,
         material_id=material_id,
+        dp_filter=dp_filter,
     )
 
 
@@ -176,6 +181,10 @@ def get_sales_report(
     date_to: date = Query(..., description="Fecha fin del periodo"),
     customer_id: Optional[UUID] = Query(None, description="Filtrar por cliente"),
     material_id: Optional[UUID] = Query(None, description="Filtrar por material"),
+    dp_filter: Literal["all", "exclude", "only"] = Query(
+        "all",
+        description="Filtrar Pasa Mano: 'all' incluye todo, 'exclude' omite ventas de DPs, 'only' solo ventas de DPs",
+    ),
     org_context: dict = Depends(require_any_permission("reports.view", "reports.view_sales")),
     db: Session = Depends(get_db),
 ):
@@ -189,6 +198,7 @@ def get_sales_report(
         date_to=date_to,
         customer_id=customer_id,
         material_id=material_id,
+        dp_filter=dp_filter,
     )
 
 

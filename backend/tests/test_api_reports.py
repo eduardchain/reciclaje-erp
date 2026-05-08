@@ -345,6 +345,20 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
     de_purchase.double_entry_id = doble_partida.id
     de_sale.double_entry_id = doble_partida.id
 
+    # PurchaseLine y SaleLine de la DE (en produccion el servicio de DP las crea)
+    de_purchase_line = PurchaseLine(
+        purchase_id=de_purchase.id, material_id=mat_hierro.id,
+        quantity=Decimal("200"), unit_price=Decimal("1100"),
+        total_price=Decimal("220000"),
+    )
+    db_session.add(de_purchase_line)
+    de_sale_line = SaleLine(
+        sale_id=de_sale.id, material_id=mat_hierro.id,
+        quantity=Decimal("200"), unit_price=Decimal("1500"),
+        total_price=Decimal("300000"), unit_cost=Decimal("1100"),
+    )
+    db_session.add(de_sale_line)
+
     # DE cancelada (no debe contar)
     de_purchase2 = Purchase(
         purchase_number=6, organization_id=org_id,
@@ -521,6 +535,9 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         "compra_registrada": compra4,
         # Sales (non-cancelled)
         "ventas_pagadas": [venta1, venta2, venta3],
+        # DP-linked (operacion Pasa Mano liquidada)
+        "de_purchase": de_purchase,
+        "de_sale": de_sale,
         # Expected values
         "expected_sales_revenue": expected_sales_revenue,
         "expected_cogs": expected_cogs,
@@ -783,6 +800,69 @@ class TestPurchaseReport:
         for s in data["by_supplier"]:
             assert s["supplier_name"] == "Proveedor Alfa"
 
+    def test_purchase_report_dp_filter_all(self, client: TestClient, org_headers: dict, report_data: dict):
+        """dp_filter='all' (default) incluye compras de Pasa Mano."""
+        response = client.get(
+            "/api/v1/reports/purchases",
+            params={
+                "date_from": str(report_data["date_from"]),
+                "date_to": str(report_data["date_to"]),
+                "dp_filter": "all",
+            },
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # 3 compras normales (compra1/2/3) + de_purchase = 4
+        assert data["purchase_count"] == 4
+
+    def test_purchase_report_dp_filter_exclude(self, client: TestClient, org_headers: dict, report_data: dict):
+        """dp_filter='exclude' omite la compra de Pasa Mano."""
+        response_all = client.get(
+            "/api/v1/reports/purchases",
+            params={"date_from": str(report_data["date_from"]), "date_to": str(report_data["date_to"])},
+            headers=org_headers,
+        )
+        response_excl = client.get(
+            "/api/v1/reports/purchases",
+            params={
+                "date_from": str(report_data["date_from"]),
+                "date_to": str(report_data["date_to"]),
+                "dp_filter": "exclude",
+            },
+            headers=org_headers,
+        )
+        all_data = response_all.json()
+        excl_data = response_excl.json()
+
+        # de_purchase aporta exactamente 220000 y 200kg, 1 conteo
+        assert excl_data["purchase_count"] == all_data["purchase_count"] - 1
+        assert excl_data["total_amount"] == pytest.approx(all_data["total_amount"] - 220000, abs=1)
+        assert excl_data["total_quantity"] == pytest.approx(all_data["total_quantity"] - 200, abs=1)
+
+    def test_purchase_report_dp_filter_only(self, client: TestClient, org_headers: dict, report_data: dict):
+        """dp_filter='only' devuelve solo la compra de Pasa Mano."""
+        response = client.get(
+            "/api/v1/reports/purchases",
+            params={
+                "date_from": str(report_data["date_from"]),
+                "date_to": str(report_data["date_to"]),
+                "dp_filter": "only",
+            },
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["purchase_count"] == 1
+        assert data["total_amount"] == pytest.approx(220000, abs=1)
+        assert data["total_quantity"] == pytest.approx(200, abs=1)
+        # Solo Proveedor Alfa (proveedor1)
+        assert len(data["by_supplier"]) == 1
+        assert data["by_supplier"][0]["supplier_name"] == "Proveedor Alfa"
+        # Solo Hierro
+        assert len(data["by_material"]) == 1
+        assert data["by_material"][0]["material_code"] == "FE"
+
 
 # ---------------------------------------------------------------------------
 # Sales Report Tests
@@ -837,6 +917,73 @@ class TestSalesReport:
         for m in data["by_material"]:
             assert m["total_profit"] >= 0
             assert m["margin_percentage"] >= 0
+
+    def test_sales_report_dp_filter_all(self, client: TestClient, org_headers: dict, report_data: dict):
+        """dp_filter='all' (default) incluye ventas de Pasa Mano."""
+        response = client.get(
+            "/api/v1/reports/sales",
+            params={
+                "date_from": str(report_data["date_from"]),
+                "date_to": str(report_data["date_to"]),
+                "dp_filter": "all",
+            },
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # 3 ventas normales (venta1/2/3) + de_sale = 4
+        assert data["sale_count"] == 4
+
+    def test_sales_report_dp_filter_exclude(self, client: TestClient, org_headers: dict, report_data: dict):
+        """dp_filter='exclude' omite la venta de Pasa Mano."""
+        response_all = client.get(
+            "/api/v1/reports/sales",
+            params={"date_from": str(report_data["date_from"]), "date_to": str(report_data["date_to"])},
+            headers=org_headers,
+        )
+        response_excl = client.get(
+            "/api/v1/reports/sales",
+            params={
+                "date_from": str(report_data["date_from"]),
+                "date_to": str(report_data["date_to"]),
+                "dp_filter": "exclude",
+            },
+            headers=org_headers,
+        )
+        all_data = response_all.json()
+        excl_data = response_excl.json()
+
+        # de_sale aporta 300000 revenue, 220000 cost, 80000 profit, 200kg
+        assert excl_data["sale_count"] == all_data["sale_count"] - 1
+        assert excl_data["total_revenue"] == pytest.approx(all_data["total_revenue"] - 300000, abs=1)
+        assert excl_data["total_cost"] == pytest.approx(all_data["total_cost"] - 220000, abs=1)
+        assert excl_data["total_profit"] == pytest.approx(all_data["total_profit"] - 80000, abs=1)
+        assert excl_data["total_quantity"] == pytest.approx(all_data["total_quantity"] - 200, abs=1)
+
+    def test_sales_report_dp_filter_only(self, client: TestClient, org_headers: dict, report_data: dict):
+        """dp_filter='only' devuelve solo la venta de Pasa Mano."""
+        response = client.get(
+            "/api/v1/reports/sales",
+            params={
+                "date_from": str(report_data["date_from"]),
+                "date_to": str(report_data["date_to"]),
+                "dp_filter": "only",
+            },
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["sale_count"] == 1
+        assert data["total_revenue"] == pytest.approx(300000, abs=1)
+        assert data["total_cost"] == pytest.approx(220000, abs=1)
+        assert data["total_profit"] == pytest.approx(80000, abs=1)
+        assert data["total_quantity"] == pytest.approx(200, abs=1)
+        # Solo Cliente Dos (cliente2)
+        assert len(data["by_customer"]) == 1
+        assert data["by_customer"][0]["customer_name"] == "Cliente Dos"
+        # Solo Hierro
+        assert len(data["by_material"]) == 1
+        assert data["by_material"][0]["material_code"] == "FE"
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,9 @@
+import { useSearchParams } from "react-router-dom";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { FileSpreadsheet } from "lucide-react";
@@ -8,16 +11,58 @@ import ReportsLayout from "./ReportsLayout";
 import { usePurchaseReport } from "@/hooks/useReports";
 import { formatCurrency } from "@/utils/formatters";
 import { exportPurchaseReportExcel } from "@/utils/excelExport";
+import type { DpFilter } from "@/types/reports";
+
+const DP_FILTER_OPTIONS: { value: DpFilter; label: string }[] = [
+  { value: "all", label: "Todas" },
+  { value: "exclude", label: "Sin Pasa Mano" },
+  { value: "only", label: "Solo Pasa Mano" },
+];
 
 export default function PurchaseReportPage() {
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
-  const { data, isLoading } = usePurchaseReport({ date_from: dateFrom, date_to: dateTo });
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const dpFilter = (searchParams.get("dp") as DpFilter | null) ?? "all";
+  const dpLabel = DP_FILTER_OPTIONS.find((o) => o.value === dpFilter)?.label ?? "Todas";
+
+  const setDpFilter = (v: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (v === "all") next.delete("dp");
+      else next.set("dp", v);
+      return next;
+    }, { replace: true });
+  };
+
+  const { data, isLoading } = usePurchaseReport({
+    date_from: dateFrom,
+    date_to: dateTo,
+    dp_filter: dpFilter,
+  });
 
   return (
     <ReportsLayout>
-      <div className="flex justify-end gap-2">
-        {data && <Button variant="outline" size="sm" onClick={() => exportPurchaseReportExcel(data)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>}
+      <div className="flex flex-wrap items-end justify-end gap-3">
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">Operaciones</Label>
+          <Select value={dpFilter} onValueChange={setDpFilter}>
+            <SelectTrigger className="w-44 h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DP_FILTER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
+        {data && (
+          <Button variant="outline" size="sm" onClick={() => exportPurchaseReportExcel(data, dpLabel)}>
+            <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
+          </Button>
+        )}
       </div>
 
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}

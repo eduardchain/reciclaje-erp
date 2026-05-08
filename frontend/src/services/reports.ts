@@ -16,6 +16,7 @@ import type {
   ExpensesReportResponse,
   ExpensesGroupBy,
   ExpenseDetailResponse,
+  DpFilter,
 } from "@/types/reports";
 
 interface DateRange {
@@ -42,10 +43,10 @@ export const reportsService = {
   getBalanceSheet: (params?: { as_of_date?: string }) =>
     get<BalanceSheetResponse>("/api/v1/reports/balance-sheet", params),
 
-  getPurchaseReport: (params: DateRange) =>
+  getPurchaseReport: (params: DateRange & { dp_filter?: DpFilter }) =>
     get<PurchaseReportResponse>("/api/v1/reports/purchases", params),
 
-  getSalesReport: (params: DateRange) =>
+  getSalesReport: (params: DateRange & { dp_filter?: DpFilter }) =>
     get<SalesReportResponse>("/api/v1/reports/sales", params),
 
   getMarginAnalysis: (params: DateRange) =>

@@ -1837,6 +1837,7 @@ class ReportService:
         date_to: date,
         supplier_id: Optional[UUID] = None,
         material_id: Optional[UUID] = None,
+        dp_filter: str = "all",
     ) -> PurchaseReportResponse:
         dt_from, dt_to = self._date_range(date_from, date_to)
 
@@ -1849,6 +1850,10 @@ class ReportService:
         ]
         if supplier_id:
             base_filters.append(Purchase.supplier_id == supplier_id)
+        if dp_filter == "exclude":
+            base_filters.append(Purchase.double_entry_id.is_(None))
+        elif dp_filter == "only":
+            base_filters.append(Purchase.double_entry_id.is_not(None))
 
         line_filters = list(base_filters)
         if material_id:
@@ -1960,6 +1965,7 @@ class ReportService:
         date_to: date,
         customer_id: Optional[UUID] = None,
         material_id: Optional[UUID] = None,
+        dp_filter: str = "all",
     ) -> SalesReportResponse:
         dt_from, dt_to = self._date_range(date_from, date_to)
 
@@ -1971,6 +1977,10 @@ class ReportService:
         ]
         if customer_id:
             base_filters.append(Sale.customer_id == customer_id)
+        if dp_filter == "exclude":
+            base_filters.append(Sale.double_entry_id.is_(None))
+        elif dp_filter == "only":
+            base_filters.append(Sale.double_entry_id.is_not(None))
 
         line_filters = list(base_filters)
         if material_id:

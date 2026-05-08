@@ -511,10 +511,11 @@ export function exportBalanceSheetExcel(data: BalanceSheetResponse) {
 }
 
 
-export function exportPurchaseReportExcel(data: PurchaseReportResponse) {
+export function exportPurchaseReportExcel(data: PurchaseReportResponse, dpFilterLabel: string = "Todas") {
   const rows: (string | number)[][] = [];
   rows.push(["Reporte de Compras"]);
   rows.push([`Periodo: ${data.period_from} - ${data.period_to}`]);
+  rows.push([`Operaciones: ${dpFilterLabel}`]);
   rows.push([]);
   rows.push(["Total Compras", data.total_amount]);
   rows.push(["Operaciones", data.purchase_count]);
@@ -545,10 +546,11 @@ export function exportPurchaseReportExcel(data: PurchaseReportResponse) {
 }
 
 
-export function exportSalesReportExcel(data: SalesReportResponse) {
+export function exportSalesReportExcel(data: SalesReportResponse, dpFilterLabel: string = "Todas") {
   const rows: (string | number)[][] = [];
   rows.push(["Reporte de Ventas"]);
   rows.push([`Periodo: ${data.period_from} - ${data.period_to}`]);
+  rows.push([`Operaciones: ${dpFilterLabel}`]);
   rows.push([]);
   rows.push(["Total Ventas", data.total_revenue]);
   rows.push(["Costo", data.total_cost]);

@@ -211,6 +211,9 @@ export interface BalanceDetailedResponse {
   verification: BalanceDetailedVerification;
 }
 
+// --- DP filter (Pasa Mano) ---
+export type DpFilter = "all" | "exclude" | "only";
+
 // --- Purchase Report ---
 
 export interface DailyTrendItem {
