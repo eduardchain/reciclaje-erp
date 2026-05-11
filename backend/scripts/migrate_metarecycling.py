@@ -309,14 +309,13 @@ def ensure_org_and_admin(
     if st != 200:
         print(f"  ERROR listando orgs: {st} - {resp}")
         return None
-    existing = next((o for o in resp if o.get("name", "").lower() == org_name.lower()), None)
+    # Ignorar orgs inactivas (residuos de --reset-org previos); el slug se autogenera
+    # con sufijo cuando hace falta, asi que podemos crear una nueva con el mismo name.
+    existing = next(
+        (o for o in resp if o.get("name", "").lower() == org_name.lower() and o.get("is_active")),
+        None,
+    )
     if existing:
-        if not existing.get("is_active"):
-            print(
-                f"  ERROR: org '{org_name}' existe pero esta INACTIVA. "
-                f"Use --reset-org para reactivar/recrear, o cambie --org-name."
-            )
-            return None
         print(
             f"  ORG '{org_name}' ya existe (id={existing['id']}, "
             f"miembros={existing.get('member_count', 0)}). Reusando."
@@ -342,7 +341,7 @@ def ensure_org_and_admin(
 # ---------------------------------------------------------------------------
 
 def fill_existing(api: APIClient, path: str, mapping: dict, key_field: str = "name"):
-    st, resp = api.get(path, {"limit": 1000})
+    st, resp = api.get(path, {"limit": 500})
     if st != 200:
         return
     items = resp.get("items", resp) if isinstance(resp, dict) else resp
@@ -768,7 +767,7 @@ def seed_inventory(
             "date": fecha,
             "reason": INVENTORY_REASON,
         }
-        st, resp = api.post("/api/v1/inventory-adjustments/increase/", payload)
+        st, resp = api.post("/api/v1/inventory/adjustments/increase", payload)
         if st in (200, 201):
             stats.created += 1
         else:

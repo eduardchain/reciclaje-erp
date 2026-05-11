@@ -2299,12 +2299,12 @@ class TestPnLWasteLoss:
 class TestPnLAdjustmentNet:
     """Verificar que adjustment_net aparece en P&L para ajustes de inventario."""
 
-    def _make_adjustment(self, db_session, org_id, adj_type, quantity, unit_cost, status="confirmed"):
+    def _make_adjustment(self, db_session, org_id, adj_type, quantity, unit_cost, status="confirmed", reason="Test adjustment"):
         from app.models.inventory_adjustment import InventoryAdjustment
         from app.models.warehouse import Warehouse
         adj = InventoryAdjustment(
             organization_id=org_id,
-            adjustment_number=abs(hash(f"{adj_type}{quantity}")) % 90000 + 10000,
+            adjustment_number=abs(hash(f"{adj_type}{quantity}{reason}")) % 90000 + 10000,
             date=datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
             adjustment_type=adj_type,
             material_id=self._mat_id,
@@ -2314,7 +2314,7 @@ class TestPnLAdjustmentNet:
             new_stock=Decimal("100") + Decimal(str(quantity)),
             unit_cost=Decimal(str(unit_cost)),
             total_value=abs(Decimal(str(quantity)) * Decimal(str(unit_cost))),
-            reason="Test adjustment",
+            reason=reason,
             status=status,
         )
         db_session.add(adj)
@@ -2403,6 +2403,35 @@ class TestPnLAdjustmentNet:
         )
         assert resp.status_code == 200
         assert resp.json()["adjustment_net"] == 0.0
+
+    def test_pnl_migration_seed_excluded(self, client: TestClient, org_headers: dict, db_session: Session, test_organization):
+        """Seeds del script de migracion (reason 'Carga inicial migracion %') no cuentan en P&L.
+
+        El script siembra stock via adjustment_increase para que MaterialCostHistory
+        quede sembrado, pero ese inventario representa patrimonio inicial (absorbido
+        en los saldos de los socios), no una ganancia operativa. Se excluye por reason.
+        """
+        self._setup_material(db_session, test_organization.id)
+        # Seed de migracion: NO debe contar
+        self._make_adjustment(
+            db_session, test_organization.id, "increase", 100, 5000,
+            reason="Carga inicial migracion MetaRecycling",
+        )  # total_value = 500000
+        # Ajuste operativo real: SI cuenta
+        self._make_adjustment(
+            db_session, test_organization.id, "increase", 10, 5000,
+            reason="Hallazgo en bodega",
+        )  # total_value = 50000
+        db_session.commit()
+
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        # Solo cuenta el operativo (50000), no el seed (500000)
+        assert resp.json()["adjustment_net"] == 50000.0
 
 
 # ===========================================================================

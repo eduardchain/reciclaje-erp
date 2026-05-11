@@ -13,7 +13,7 @@ Procedimiento para migrar la organizacion **MetaRecycling** (cliente actualmente
 
 Cuentas excluidas:
 - `Utilidades [Socio]` (Lovable) → NO migran. Su saldo se funde con `initial_balance` del inversionista en EcoBalance.
-- `Credito Bancolombia` (Lovable) → NO migra como `MoneyAccount`. Se carga como Tercero con categoria `Pasivo` e `initial_balance = -84_384_600`.
+- `Credito Bancolombia` (Lovable) → NO migra como `MoneyAccount`. Se carga como Tercero con categoria `Obligaciones Financieras` (declarada en `CategoriaTerceros` con `tipo_comportamiento=inversionista`) e `initial_balance = -84_384_600`. El Balance Detallado lo ubica en la seccion `Obligaciones Financieras` dentro de Inversionistas (no en Pasivos), por convencion con otras orgs (RDLC). La clasificacion la hace `_classify_third_party` por nombre de categoria (substring "obligaci").
 
 ## Archivos
 
@@ -97,9 +97,9 @@ Tolerar centavos de redondeo en datos importados:
 
 Login como Salomon Chain en EcoBalance dev:
 
-- `Reportes / Balance Detallado`: verificar `Activos = Pasivos + Patrimonio` (verification.is_balanced=true).
+- `Reportes / Balance Detallado`: verificar `Activos = Pasivos + Patrimonio` (verification.is_balanced=true). Credito Bancolombia aparece bajo `Obligaciones Financieras` dentro de Inversionistas.
 - `Maestros / Materiales`: cantidad y unidades de negocio correctas.
-- `Maestros / Terceros`: 8 tabs con conteos correctos, Credito Bancolombia en tab Pasivos.
+- `Maestros / Terceros`: 8 tabs con conteos correctos, Credito Bancolombia en tab Inversionistas (categoria Obligaciones Financieras).
 - `Inventario / Stock`: por material coincide con Lovable.
 - `Tesoreria / Cuentas`: cuentas con sus saldos.
 - Crear una compra de prueba: descuenta stock, actualiza balance proveedor, genera inventory_movement.

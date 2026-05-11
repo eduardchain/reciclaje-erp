@@ -366,6 +366,11 @@ class ReportService:
         adj_filters = [
             InventoryAdjustment.organization_id == organization_id,
             self._active_at_cutoff(InventoryAdjustment.status, "confirmed"),
+            # Excluir seeds de migracion: estos ajustes representan inventario inicial
+            # absorbido por el patrimonio de los socios (ya reflejado en sus saldos),
+            # no una ganancia operativa. El script de migracion usa el prefix
+            # "Carga inicial migracion" en el reason para marcarlos.
+            ~func.coalesce(InventoryAdjustment.reason, "").ilike("Carga inicial migracion%"),
         ]
         if has_dates:
             adj_filters += [InventoryAdjustment.date >= dt_from, InventoryAdjustment.date < dt_to]

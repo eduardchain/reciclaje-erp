@@ -184,7 +184,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 801 tests (20 integration).
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 802 tests (20 integration).
 
 ### Database
 
@@ -262,7 +262,7 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
     - `invalidateAfterInventoryChange`: inventory + materials
     - Role CRUD: roles + permissions (si afecta rol del usuario actual)
 
-28. **Scripts utilitarios**: `scripts/seed_test_data.py --clear` (solo maestros: materiales, categorias, bodegas, cuentas con saldo $0. NO crea terceros ni movimientos — flujo manual). `scripts/load_initial_data.py` (carga maestros desde Excel, 8 hojas, resolucion FKs por nombre, `--dry-run`). `scripts/migrate_metarecycling.py` + `scripts/generate_migration_template.py` + `data/migration_metarecycling_template.xlsx` (migracion one-shot Lovable → EcoBalance: crea org via `/system/organizations`, carga 9 hojas, siembra stock via `inventory-adjustments/increase/`, fixed assets con `historical_load=True` cuando proveedor y cuenta vacios; `--dry-run` valida Excel offline sin login; `--apply` requiere superuser; verificacion automatica con tolerancia configurable; `--reset-org` para reset pre go-live). Ver `scripts/MIGRATION_METARECYCLING.md`.
+28. **Scripts utilitarios**: `scripts/seed_test_data.py --clear` (solo maestros: materiales, categorias, bodegas, cuentas con saldo $0. NO crea terceros ni movimientos — flujo manual). `scripts/load_initial_data.py` (carga maestros desde Excel, 8 hojas, resolucion FKs por nombre, `--dry-run`). `scripts/migrate_metarecycling.py` + `scripts/generate_migration_template.py` + `data/migration_metarecycling_template.xlsx` (migracion one-shot Lovable → EcoBalance: crea org via `/system/organizations`, carga 9 hojas, siembra stock via `POST /inventory/adjustments/increase` con `reason="Carga inicial migracion <Org>"` — este reason es el marcador que excluye los seeds del `adjustment_net` en `_calculate_profit` para que no inflen la Utilidad Acumulada: el inventario inicial es patrimonio absorbido por los socios, no ganancia operativa; fixed assets con `historical_load=True` cuando proveedor y cuenta vacios; `--dry-run` valida Excel offline sin login; `--apply` requiere superuser; verificacion automatica con tolerancia configurable; `--reset-org` para reset pre go-live). Si el corte tiene operaciones del dia que no estan en el snapshot de Lovable (ej: arriendo del 11 de mayo), correr con `--balance-tolerance` alto y registrar el movimiento via UI inmediatamente despues del `--apply`. Ver `scripts/MIGRATION_METARECYCLING.md`.
 
 29. **Super Admin + Multi-Org**: `is_superuser=True` bypasses membership en `get_required_org_context()` / `get_optional_org_context()` (sintetiza admin context con todos los permisos). `/system/` endpoints (6) protegidos con `get_current_superuser`. Frontend: `organizationId="system"` sentinel — API interceptor no envia `X-Organization-ID`, `usePermissions` retorna admin full, sidebar muestra solo seccion SISTEMA, ProtectedRoute permite pasar sin org. Header dropdown: multi-org selector + opcion "Sistema" para superusers. `queryClient.clear()` al cambiar org. Soft delete de org: `is_active=False` + desactivar usuarios huerfanos.
 
