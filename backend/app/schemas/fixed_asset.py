@@ -27,6 +27,12 @@ class FixedAssetCreate(BaseModel):
     # Asignacion a Unidad de Negocio (hereda a depreciation_expense)
     business_unit_id: Optional[UUID] = None
     applicable_business_unit_ids: Optional[list[UUID]] = None
+    # Carga historica: activos pre-sistema con depreciacion ya causada en otro ERP.
+    # Si historical_load=True: no se valida fuente de pago, no se crea MoneyMovement,
+    # no se mueven balances. La firma se infiere por accumulated_depreciation>0 +
+    # purchase_movement_id IS NULL (no se persiste el flag).
+    accumulated_depreciation: Decimal = Field(Decimal("0"), ge=0)
+    historical_load: bool = False
 
     @model_validator(mode="after")
     def validate_values(self):
@@ -36,11 +42,25 @@ class FixedAssetCreate(BaseModel):
             raise ValueError(
                 "La fecha de inicio de depreciación no puede ser anterior a la fecha de compra"
             )
-        has_account = self.source_account_id is not None
-        has_supplier = self.supplier_id is not None
-        if has_account == has_supplier:
+        # Carga historica: NO se requiere fuente de pago.
+        # Compra real: XOR entre cuenta y proveedor.
+        if not self.historical_load:
+            has_account = self.source_account_id is not None
+            has_supplier = self.supplier_id is not None
+            if has_account == has_supplier:
+                raise ValueError(
+                    "Debe especificar exactamente una fuente: cuenta de pago O proveedor a crédito"
+                )
+        else:
+            if self.source_account_id is not None or self.supplier_id is not None:
+                raise ValueError(
+                    "Carga historica no acepta source_account_id ni supplier_id: el activo ya fue pagado en el sistema anterior"
+                )
+        # Validar depreciacion acumulada no exceda lo depreciable
+        depreciable = self.purchase_value - self.salvage_value
+        if self.accumulated_depreciation > depreciable:
             raise ValueError(
-                "Debe especificar exactamente una fuente: cuenta de pago O proveedor a crédito"
+                f"La depreciación acumulada ({self.accumulated_depreciation}) no puede superar el valor depreciable ({depreciable})"
             )
         if self.business_unit_id and self.applicable_business_unit_ids:
             raise ValueError("Seleccione asignacion directa O compartida, no ambas")

@@ -293,6 +293,148 @@ class TestFixedAssetCreate:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Carga historica (activos pre-sistema migrados desde otro ERP)
+# ---------------------------------------------------------------------------
+
+class TestFixedAssetHistoricalLoad:
+    """
+    Activos fijos cargados con depreciación acumulada de un sistema anterior.
+    El pago ya ocurrió en el sistema origen — no debe generar MoneyMovement
+    ni mover balances aquí.
+    """
+
+    def test_historical_load_skips_xor_and_accepts_no_source(
+        self, client: TestClient, org_headers, fa_category
+    ):
+        """historical_load=True permite crear sin source_account_id ni supplier_id."""
+        payload = {
+            "name": "Camion FORD CARGO",
+            "purchase_date": "2025-07-09",
+            "purchase_value": 57000000,
+            "salvage_value": 0,
+            "depreciation_rate": 1.6667,  # ~60 meses vida util
+            "depreciation_start_date": "2025-07-09",
+            "expense_category_id": str(fa_category.id),
+            "accumulated_depreciation": 9500000,  # ya depreciado parcialmente
+            "historical_load": True,
+        }
+        resp = client.post(BASE_URL + "/", json=payload, headers=org_headers)
+        assert resp.status_code == 201, resp.text
+        data = resp.json()
+        # current_value = purchase_value - accumulated_depreciation
+        assert data["current_value"] == 47500000.0
+        assert data["accumulated_depreciation"] == 9500000.0
+        # Sin movimiento de compra: ya pago en sistema origen
+        assert data["purchase_movement_id"] is None
+        assert data["third_party_id"] is None
+
+    def test_historical_load_does_not_create_movement_or_move_balances(
+        self,
+        client: TestClient,
+        org_headers,
+        fa_category,
+        fa_account,
+        fa_supplier,
+        db_session,
+    ):
+        """Carga historica: no MoneyMovement, no cambio de balances de cuenta/proveedor."""
+        initial_account_balance = float(fa_account.current_balance)
+        initial_supplier_balance = float(fa_supplier.current_balance)
+
+        payload = {
+            "name": "Iman de neodimio",
+            "purchase_date": "2025-09-17",
+            "purchase_value": 1487500,
+            "depreciation_rate": 2.7778,  # ~36 meses
+            "depreciation_start_date": "2025-09-17",
+            "expense_category_id": str(fa_category.id),
+            "accumulated_depreciation": 991666,
+            "historical_load": True,
+        }
+        resp = client.post(BASE_URL + "/", json=payload, headers=org_headers)
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["purchase_movement_id"] is None
+
+        # Balances no se mueven
+        db_session.refresh(fa_account)
+        assert float(fa_account.current_balance) == initial_account_balance
+        db_session.refresh(fa_supplier)
+        assert float(fa_supplier.current_balance) == initial_supplier_balance
+
+    def test_historical_load_rejects_source_account_or_supplier(
+        self, client: TestClient, org_headers, fa_category, fa_account, fa_supplier
+    ):
+        """historical_load=True no acepta source_account_id ni supplier_id (el pago ya pasó)."""
+        base = {
+            "name": "Inválido",
+            "purchase_date": "2025-07-09",
+            "purchase_value": 1000000,
+            "depreciation_rate": 5.0,
+            "depreciation_start_date": "2025-07-09",
+            "expense_category_id": str(fa_category.id),
+            "accumulated_depreciation": 0,
+            "historical_load": True,
+        }
+        # Con cuenta
+        resp = client.post(
+            BASE_URL + "/",
+            json={**base, "source_account_id": str(fa_account.id)},
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        # Con proveedor
+        resp = client.post(
+            BASE_URL + "/",
+            json={**base, "supplier_id": str(fa_supplier.id)},
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_rejects_accumulated_depreciation_over_depreciable(
+        self, client: TestClient, org_headers, fa_category
+    ):
+        """accumulated_depreciation > (purchase_value - salvage_value) debe fallar 422."""
+        payload = {
+            "name": "Activo Sobredepreciado",
+            "purchase_date": "2025-01-01",
+            "purchase_value": 1000000,
+            "salvage_value": 100000,  # depreciable = 900k
+            "depreciation_rate": 5.0,
+            "depreciation_start_date": "2025-01-01",
+            "expense_category_id": str(fa_category.id),
+            "accumulated_depreciation": 950000,  # > 900k
+            "historical_load": True,
+        }
+        resp = client.post(BASE_URL + "/", json=payload, headers=org_headers)
+        assert resp.status_code == 422
+
+    def test_balance_sheet_reflects_historical_current_value(
+        self, client: TestClient, org_headers, fa_category
+    ):
+        """
+        Balance Sheet refleja current_value = purchase_value - accumulated_depreciation
+        para activos cargados historicamente (sin AssetDepreciation records).
+        """
+        payload = {
+            "name": "Polipasto histórico",
+            "purchase_date": "2025-02-19",
+            "purchase_value": 1100000,
+            "depreciation_rate": 0.83,  # ~120 meses
+            "depreciation_start_date": "2025-02-19",
+            "expense_category_id": str(fa_category.id),
+            "accumulated_depreciation": 300000,
+            "historical_load": True,
+        }
+        resp = client.post(BASE_URL + "/", json=payload, headers=org_headers)
+        assert resp.status_code == 201, resp.text
+
+        bs_resp = client.get("/api/v1/reports/balance-sheet", headers=org_headers)
+        assert bs_resp.status_code == 200
+        # current_value = 1.1M - 300k = 800k
+        assert bs_resp.json()["assets"]["fixed_assets"] == 800000.0
+
+
+# ---------------------------------------------------------------------------
 # Tests: Depreciacion
 # ---------------------------------------------------------------------------
 
