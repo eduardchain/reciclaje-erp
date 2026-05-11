@@ -62,29 +62,31 @@ class CRUDFixedAsset:
                 detail="Categoría de gasto no encontrada",
             )
 
-        # 2. Validar fuente de pago
+        # 2. Validar fuente de pago (solo si NO es carga historica)
+        is_historical = getattr(data, "historical_load", False)
         account = None
         supplier = None
 
-        if data.source_account_id:
-            account = mm_service._validate_account(
-                db, data.source_account_id, organization_id,
-                require_funds=data.purchase_value,
-            )
-        else:
-            from app.services.third_party import third_party as tp_service
-            supplier = db.execute(
-                select(ThirdParty).where(
-                    ThirdParty.id == data.supplier_id,
-                    ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_active == True,
+        if not is_historical:
+            if data.source_account_id:
+                account = mm_service._validate_account(
+                    db, data.source_account_id, organization_id,
+                    require_funds=data.purchase_value,
                 )
-            ).scalar_one_or_none()
-            if not supplier or not tp_service.has_behavior_type(db, supplier.id, ["material_supplier", "service_provider", "customer", "investor", "generic"]):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Proveedor no encontrado",
-                )
+            else:
+                from app.services.third_party import third_party as tp_service
+                supplier = db.execute(
+                    select(ThirdParty).where(
+                        ThirdParty.id == data.supplier_id,
+                        ThirdParty.organization_id == organization_id,
+                        ThirdParty.is_active == True,
+                    )
+                ).scalar_one_or_none()
+                if not supplier or not tp_service.has_behavior_type(db, supplier.id, ["material_supplier", "service_provider", "customer", "investor", "generic"]):
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Proveedor no encontrado",
+                    )
 
         # 3. Calcular depreciacion
         monthly_depreciation = (
@@ -100,6 +102,7 @@ class CRUDFixedAsset:
             applicable_bu_ids = [str(uid) for uid in data.applicable_business_unit_ids]
 
         # 4. Crear activo
+        accumulated = getattr(data, "accumulated_depreciation", Decimal("0")) or Decimal("0")
         asset = FixedAsset(
             organization_id=organization_id,
             name=data.name,
@@ -109,13 +112,13 @@ class CRUDFixedAsset:
             depreciation_start_date=data.depreciation_start_date,
             purchase_value=data.purchase_value,
             salvage_value=data.salvage_value,
-            current_value=data.purchase_value,
-            accumulated_depreciation=Decimal("0"),
+            current_value=data.purchase_value - accumulated,
+            accumulated_depreciation=accumulated,
             depreciation_rate=data.depreciation_rate,
             monthly_depreciation=monthly_depreciation,
             useful_life_months=useful_life,
             expense_category_id=data.expense_category_id,
-            third_party_id=data.supplier_id,
+            third_party_id=data.supplier_id if not is_historical else None,
             business_unit_id=getattr(data, 'business_unit_id', None),
             applicable_business_unit_ids=applicable_bu_ids,
             status="active",
@@ -124,39 +127,40 @@ class CRUDFixedAsset:
         db.add(asset)
         db.flush()
 
-        # 5. Crear movimiento según fuente
-        movement_date = datetime.combine(
-            data.purchase_date, time(12, 0), tzinfo=timezone.utc
-        )
-
-        if account:
-            movement = mm_service._create_movement(
-                db=db,
-                organization_id=organization_id,
-                movement_type="asset_payment",
-                amount=data.purchase_value,
-                account_id=data.source_account_id,
-                date=movement_date,
-                description=f"Compra activo: {data.name}",
-                user_id=user_id,
-                third_party_id=None,
+        # 5. Crear movimiento según fuente (skip para carga historica)
+        if not is_historical:
+            movement_date = datetime.combine(
+                data.purchase_date, time(12, 0), tzinfo=timezone.utc
             )
-            account.current_balance -= data.purchase_value
-        else:
-            movement = mm_service._create_movement(
-                db=db,
-                organization_id=organization_id,
-                movement_type="asset_purchase",
-                amount=data.purchase_value,
-                account_id=None,
-                date=movement_date,
-                description=f"Compra activo a crédito: {data.name}",
-                user_id=user_id,
-                third_party_id=data.supplier_id,
-            )
-            supplier.current_balance -= data.purchase_value
 
-        asset.purchase_movement_id = movement.id
+            if account:
+                movement = mm_service._create_movement(
+                    db=db,
+                    organization_id=organization_id,
+                    movement_type="asset_payment",
+                    amount=data.purchase_value,
+                    account_id=data.source_account_id,
+                    date=movement_date,
+                    description=f"Compra activo: {data.name}",
+                    user_id=user_id,
+                    third_party_id=None,
+                )
+                account.current_balance -= data.purchase_value
+            else:
+                movement = mm_service._create_movement(
+                    db=db,
+                    organization_id=organization_id,
+                    movement_type="asset_purchase",
+                    amount=data.purchase_value,
+                    account_id=None,
+                    date=movement_date,
+                    description=f"Compra activo a crédito: {data.name}",
+                    user_id=user_id,
+                    third_party_id=data.supplier_id,
+                )
+                supplier.current_balance -= data.purchase_value
+
+            asset.purchase_movement_id = movement.id
 
         db.commit()
         db.refresh(asset)
