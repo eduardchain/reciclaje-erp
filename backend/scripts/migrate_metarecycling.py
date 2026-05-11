@@ -20,11 +20,11 @@ Uso:
     # Aplicar:
     ./venv/bin/python scripts/migrate_metarecycling.py [...] --apply
 
-Hojas del Excel (8):
+Hojas del Excel (9; MapeoUN es read-only, las otras 8 escriben):
   1. CategoriaMateriales    nombre, descripcion
   2. CategoriaGastos        nombre, padre, es_directo
   3. CategoriaTerceros      nombre, tipo_comportamiento, padre   (opcional; las 7 default ya vienen)
-  4. MapeoUN                categoria_material, unidad_negocio_default, notas
+  4. MapeoUN                categoria_material, unidad_negocio_default, notas   (no escribe; orienta Materiales)
   5. Materiales             codigo, nombre, categoria, unidad_negocio (override opcional), unidad, descripcion
   6. Terceros               nombre, identificacion, email, telefono, direccion, categorias (CSV), saldo_inicial
   7. Cuentas                nombre, tipo (cash/bank/digital), saldo_inicial, numero_cuenta?, banco?

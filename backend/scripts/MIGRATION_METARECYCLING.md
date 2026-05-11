@@ -19,7 +19,7 @@ Cuentas excluidas:
 
 - `backend/scripts/migrate_metarecycling.py` — script principal.
 - `backend/scripts/generate_migration_template.py` — regenera el template Excel.
-- `data/migration_metarecycling_template.xlsx` — template con 8 hojas, cabeceras y filas de ejemplo (amarillas). Entregable a la AI de Lovable para que llene los datos reales.
+- `data/migration_metarecycling_template.xlsx` — template con 9 hojas (8 que escriben + `MapeoUN` que solo orienta `Materiales`), cabeceras y filas de ejemplo (amarillas). Entregable a la AI de Lovable para que llene los datos reales.
 
 ## Pre-requisitos
 
@@ -160,7 +160,7 @@ Fases:
 
 ## Estructura del Excel
 
-8 hojas (la 7 `MapeoUN` no se carga, solo orienta `Materiales`):
+9 hojas (la 4 `MapeoUN` no se carga, solo orienta `Materiales`):
 
 1. **CategoriaMateriales** — `nombre`, `descripcion`
 2. **CategoriaGastos** — `nombre`, `padre` (vacio = raiz), `es_directo` (SI/NO, solo en raiz)
@@ -222,7 +222,7 @@ Es comportamiento aceptado — el go-live es el punto cero contable de EcoBalanc
 El Excel maestro lo arma la **AI de Lovable** (no a mano):
 
 1. Daniel entrega el template `migration_metarecycling_template.xlsx` a la AI de Lovable.
-2. La AI consulta Supabase y llena las 8 hojas + entrega el Excel completo.
+2. La AI consulta Supabase y llena las 9 hojas + entrega el Excel completo.
 3. Daniel/cliente revisa hojas criticas.
 4. Daniel corre `--dry-run` en dev local. Ajusta Excel si hace falta. `--apply`.
 
