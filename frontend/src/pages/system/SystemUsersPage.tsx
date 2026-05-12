@@ -76,9 +76,10 @@ export default function SystemUsersPage() {
       )
     : [];
 
-  // Filtrar usuarios por org si hay filtro activo
+  // Filtrar usuarios por org si hay filtro activo.
+  // Superusers tienen Acceso Global → aparecen en TODAS las orgs aunque no tengan membership.
   const filteredUsers = filterOrgId
-    ? users?.filter((u) => u.memberships.some((m) => m.organization_id === filterOrgId))
+    ? users?.filter((u) => u.is_superuser || u.memberships.some((m) => m.organization_id === filterOrgId))
     : users;
 
   return (

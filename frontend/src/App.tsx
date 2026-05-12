@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import Layout from "@/components/layout/Layout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { PermissionGate } from "@/components/auth/PermissionGate";
+import { SuperuserGate } from "@/components/auth/SuperuserGate";
 import Dashboard from "@/pages/Dashboard";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/NotFound";
@@ -182,8 +183,8 @@ function App() {
               <Route path="/admin/roles/:id" element={<P permission="admin.manage_roles"><RoleEditPage /></P>} />
               <Route path={ROUTES.ADMIN_USERS} element={<P permission="admin.manage_users"><UsersPage /></P>} />
               {/* Sistema (super admin) */}
-              <Route path={ROUTES.SYSTEM_ORGANIZATIONS} element={<SystemOrganizationsPage />} />
-              <Route path={ROUTES.SYSTEM_USERS} element={<SystemUsersPage />} />
+              <Route path={ROUTES.SYSTEM_ORGANIZATIONS} element={<SuperuserGate><SystemOrganizationsPage /></SuperuserGate>} />
+              <Route path={ROUTES.SYSTEM_USERS} element={<SuperuserGate><SystemUsersPage /></SuperuserGate>} />
             </Route>
           </Route>
 
