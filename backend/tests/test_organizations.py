@@ -645,3 +645,68 @@ class TestGetOrganizationMembers:
         )
 
         assert response.status_code == 404
+
+
+class TestSuperuserBypassOrgMembership:
+    """Superuser puede gestionar miembros de cualquier org sin ser miembro.
+
+    Fix para bug: endpoints de organizations.py usaban get_user_role_in_org()
+    sin bypass de superuser, bloqueando admins globales.
+    """
+
+    @staticmethod
+    def _make_superuser(db_session, email="super@test.com"):
+        from app.core.security import get_password_hash
+        from app.models.user import User
+        from app.core.security import create_access_token
+        u = User(
+            email=email,
+            hashed_password=get_password_hash("x"),
+            full_name="Super",
+            is_active=True,
+            is_superuser=True,
+        )
+        db_session.add(u)
+        db_session.commit()
+        db_session.refresh(u)
+        token = create_access_token(data={"sub": str(u.id)})
+        return u, {"Authorization": f"Bearer {token}"}
+
+    def test_superuser_can_get_org_he_is_not_member_of(
+        self, client: TestClient, db_session: Session, test_organization: Organization,
+    ):
+        _, headers = self._make_superuser(db_session)
+        r = client.get(f"/api/v1/organizations/{test_organization.id}", headers=headers)
+        assert r.status_code == 200
+        assert r.json()["member_role"] == "superadmin"
+
+    def test_superuser_can_list_members_without_being_member(
+        self, client: TestClient, db_session: Session, test_organization: Organization,
+    ):
+        _, headers = self._make_superuser(db_session)
+        r = client.get(f"/api/v1/organizations/{test_organization.id}/members", headers=headers)
+        assert r.status_code == 200
+
+    def test_superuser_can_create_user_in_org_without_being_member(
+        self, client: TestClient, db_session: Session, test_organization: Organization,
+    ):
+        _, headers = self._make_superuser(db_session)
+        viewer_role_id = _get_role_id(db_session, test_organization.id, "viewer")
+        r = client.post(
+            f"/api/v1/organizations/{test_organization.id}/members/create-user",
+            headers=headers,
+            json={"email": "newby@example.com", "full_name": "Newby", "role_id": str(viewer_role_id)},
+        )
+        assert r.status_code == 201
+        assert r.json()["user_email"] == "newby@example.com"
+        assert r.json()["role_name"] == "viewer"
+
+    def test_superuser_cannot_access_inactive_org(
+        self, client: TestClient, db_session: Session, test_organization: Organization,
+    ):
+        # Desactivar la org
+        test_organization.is_active = False
+        db_session.commit()
+        _, headers = self._make_superuser(db_session)
+        r = client.get(f"/api/v1/organizations/{test_organization.id}", headers=headers)
+        assert r.status_code == 404

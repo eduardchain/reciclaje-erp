@@ -31,8 +31,29 @@ from app.services.organization import (
 from app.services.user import get_user_by_email, get_user_by_id, create_user, reset_password, delete_user
 from app.schemas.user import UserCreate
 from app.models.user import User
+from app.models.organization import Organization
+from sqlalchemy import select
 
 router = APIRouter()
+
+
+def _get_role_info(db: Session, organization_id: UUID, user: User) -> dict | None:
+    """Como get_user_role_in_org pero con bypass de superuser.
+
+    Si el usuario es superuser y la org existe (activa), retorna admin synthetic
+    para que los endpoints de gestion de miembros funcionen como si fuera admin.
+    """
+    if user.is_superuser:
+        exists = db.execute(
+            select(Organization.id).where(
+                Organization.id == organization_id,
+                Organization.is_active == True,  # noqa: E712
+            )
+        ).scalar()
+        if not exists:
+            return None
+        return {"role_id": None, "role_name": "superadmin", "is_admin": True}
+    return get_user_role_in_org(db, organization_id, user.id)
 
 
 @router.get(
@@ -105,8 +126,16 @@ def get_organization_by_id(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> OrganizationResponse:
-    """Get organization details. User must be a member."""
-    organization = get_organization(db, organization_id, current_user.id)
+    """Get organization details. User must be a member (superuser bypass)."""
+    if current_user.is_superuser:
+        organization = db.execute(
+            select(Organization).where(
+                Organization.id == organization_id,
+                Organization.is_active == True,  # noqa: E712
+            )
+        ).scalar_one_or_none()
+    else:
+        organization = get_organization(db, organization_id, current_user.id)
 
     if not organization:
         raise HTTPException(
@@ -114,7 +143,7 @@ def get_organization_by_id(
             detail="Organizacion no encontrada o no eres miembro",
         )
 
-    role_info = get_user_role_in_org(db, organization_id, current_user.id)
+    role_info = _get_role_info(db, organization_id, current_user)
 
     org_dict = OrganizationResponse.model_validate(organization).model_dump()
     org_dict["member_role"] = role_info["role_name"] if role_info else None
@@ -134,7 +163,7 @@ def update_organization_details(
     db: Session = Depends(get_db),
 ) -> OrganizationResponse:
     """Update organization details. Only admins can update."""
-    role_info = get_user_role_in_org(db, organization_id, current_user.id)
+    role_info = _get_role_info(db, organization_id, current_user)
 
     if not role_info:
         raise HTTPException(
@@ -180,7 +209,7 @@ def list_organization_members(
     db: Session = Depends(get_db),
 ) -> list[OrganizationMemberResponse]:
     """Get all members of an organization with their details."""
-    role_info = get_user_role_in_org(db, organization_id, current_user.id)
+    role_info = _get_role_info(db, organization_id, current_user)
 
     if not role_info:
         raise HTTPException(
@@ -226,7 +255,7 @@ def create_user_with_membership(
     db: Session = Depends(get_db),
 ) -> OrganizationMemberResponse:
     """Crear usuario nuevo con contraseña default y agregarlo a la org."""
-    role_info = get_user_role_in_org(db, organization_id, current_user.id)
+    role_info = _get_role_info(db, organization_id, current_user)
 
     if not role_info:
         raise HTTPException(
@@ -292,7 +321,7 @@ def add_organization_member(
     db: Session = Depends(get_db),
 ) -> OrganizationMemberResponse:
     """Add a user to the organization. Only admins can add members."""
-    role_info = get_user_role_in_org(db, organization_id, current_user.id)
+    role_info = _get_role_info(db, organization_id, current_user)
 
     if not role_info:
         raise HTTPException(
@@ -346,7 +375,7 @@ def update_organization_member_role(
     db: Session = Depends(get_db),
 ) -> OrganizationMemberResponse:
     """Update a member's role. Only admins can update roles."""
-    current_role_info = get_user_role_in_org(db, organization_id, current_user.id)
+    current_role_info = _get_role_info(db, organization_id, current_user)
 
     if not current_role_info:
         raise HTTPException(
@@ -405,7 +434,7 @@ def reset_member_password(
     db: Session = Depends(get_db),
 ) -> dict:
     """Resetear contraseña de un miembro a '123456'. Solo admins."""
-    current_role_info = get_user_role_in_org(db, organization_id, current_user.id)
+    current_role_info = _get_role_info(db, organization_id, current_user)
 
     if not current_role_info:
         raise HTTPException(
@@ -457,7 +486,7 @@ def remove_organization_member(
     db: Session = Depends(get_db),
 ) -> None:
     """Remover miembro. Si solo pertenece a esta org, eliminar usuario completo."""
-    current_role_info = get_user_role_in_org(db, organization_id, current_user.id)
+    current_role_info = _get_role_info(db, organization_id, current_user)
 
     if not current_role_info:
         raise HTTPException(
@@ -511,7 +540,7 @@ def leave_organization(
     db: Session = Depends(get_db),
 ) -> None:
     """Current user leaves the organization. Cannot leave if last admin."""
-    role_info = get_user_role_in_org(db, organization_id, current_user.id)
+    role_info = _get_role_info(db, organization_id, current_user)
 
     if not role_info:
         raise HTTPException(
@@ -542,7 +571,7 @@ def update_account_assignments(
     db: Session = Depends(get_db),
 ) -> list[str]:
     """Actualizar cuentas asignadas a un usuario. Solo admins."""
-    current_role_info = get_user_role_in_org(db, organization_id, current_user.id)
+    current_role_info = _get_role_info(db, organization_id, current_user)
 
     if not current_role_info:
         raise HTTPException(
