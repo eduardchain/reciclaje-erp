@@ -56,7 +56,7 @@ SHEETS = [
             ["Proveedor Local", "proveedor_material", ""],
             ["Obligaciones Financieras", "inversionista", ""],
         ],
-        "OPCIONAL: las 7 default ya vienen con la org (Pasivo, Inversionista, etc). Solo agregar extras aqui. "
+        "OPCIONAL: las 7 default ya vienen con la org (Pasivo, Socios, etc). Solo agregar extras aqui. "
         "tipo_comportamiento: proveedor_material | proveedor_servicios | cliente | inversionista | generico | provision | pasivo. "
         "Convencion: creditos bancarios/leasings van como 'Obligaciones Financieras' (inversionista) — el reporte los distingue por nombre.",
     ),
@@ -94,7 +94,7 @@ SHEETS = [
         [
             ["Proveedor Ejemplo SAS", "900123456", "info@ejemplo.com", "3001234567", "Cra 1 #2-3", "Proveedor Material", -150000],
             ["Cliente Ejemplo Ltda", "800987654", "", "3009876543", "", "Cliente", 450000],
-            ["Eduardo Chain", "", "", "", "", "Inversionista", -262534500],
+            ["Eduardo Chain", "", "", "", "", "Socios", -262534500],
             ["Credito Bancolombia", "", "", "", "", "Obligaciones Financieras", -84384600],
         ],
         "categorias: CSV de nombres (ej: 'Proveedor Material,Cliente' para alguien que es ambos). "

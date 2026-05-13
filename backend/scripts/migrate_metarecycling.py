@@ -88,7 +88,7 @@ DEFAULT_TP_CATEGORIES = [
     "Proveedor Material",
     "Proveedor Servicios",
     "Cliente",
-    "Inversionista",
+    "Socios",
     "Genérico",
     "Provisión",
     "Pasivo",

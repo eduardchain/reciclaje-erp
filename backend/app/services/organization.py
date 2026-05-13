@@ -99,7 +99,7 @@ def create_organization(
         ("Proveedor Material", "material_supplier"),
         ("Proveedor Servicios", "service_provider"),
         ("Cliente", "customer"),
-        ("Inversionista", "investor"),
+        ("Socios", "investor"),
         ("Genérico", "generic"),
         ("Provisión", "provision"),
         ("Pasivo", "liability"),
