@@ -7,7 +7,7 @@ from datetime import date
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permission, require_any_permission, get_db
@@ -20,6 +20,7 @@ from app.schemas.reports import (
     ExpenseDetailResponse,
     ExpensesReportResponse,
     MarginAnalysisResponse,
+    ProfitAndLossMonthlyResponse,
     ProfitAndLossResponse,
     ProfitabilityByBUResponse,
     PurchaseReportResponse,
@@ -79,6 +80,40 @@ def get_profit_and_loss(
         organization_id=org_context["organization_id"],
         date_from=date_from,
         date_to=date_to,
+    )
+
+
+@router.get("/profit-and-loss/monthly", response_model=ProfitAndLossMonthlyResponse)
+def get_profit_and_loss_monthly(
+    date_from: date = Query(..., description="Fecha inicio del rango"),
+    date_to: date = Query(..., description="Fecha fin del rango"),
+    cutoff_day: int = Query(1, ge=1, le=28, description="Dia de inicio del mes contable (1=mes calendario)"),
+    org_context: dict = Depends(require_any_permission("reports.view", "reports.view_pnl")),
+    db: Session = Depends(get_db),
+):
+    """
+    P&L Mensual: una columna por mes contable derivado de cutoff_day.
+
+    Permite comparar mes a mes dentro de un rango libre y auditar outliers.
+    Cap defensivo de 24 meses contables (~168 SQL queries) — rangos mayores
+    devuelven 422 para proteger el endpoint.
+
+    `totals` corresponde al rango exacto [date_from, date_to], NO a la suma
+    aritmetica de las columnas (los meses contables pueden extenderse mas alla).
+    """
+    # Cap defensivo antes del loop pesado.
+    months = report_service._split_into_accounting_months(date_from, date_to, cutoff_day)
+    if len(months) > 24:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Rango demasiado amplio: {len(months)} meses (max 24). Reduzca date_from/date_to.",
+        )
+    return report_service.get_profit_and_loss_monthly(
+        db=db,
+        organization_id=org_context["organization_id"],
+        date_from=date_from,
+        date_to=date_to,
+        cutoff_day=cutoff_day,
     )
 
 

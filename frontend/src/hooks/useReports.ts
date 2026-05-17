@@ -23,6 +23,14 @@ export function useProfitAndLoss(params: DateRange) {
   });
 }
 
+export function useProfitAndLossMonthly(params: DateRange & { cutoff_day?: number }) {
+  return useQuery({
+    queryKey: ["reports", "profit-and-loss-monthly", params],
+    queryFn: () => reportsService.getProfitAndLossMonthly(params),
+    enabled: !!params.date_from && !!params.date_to,
+  });
+}
+
 export function useCashFlow(params: DateRange) {
   return useQuery({
     queryKey: ["reports", "cash-flow", params],

@@ -2,6 +2,7 @@ import apiClient from "./api";
 import type {
   DashboardResponse,
   ProfitAndLossResponse,
+  ProfitAndLossMonthlyResponse,
   CashFlowResponse,
   BalanceSheetResponse,
   BalanceDetailedResponse,
@@ -36,6 +37,9 @@ export const reportsService = {
 
   getProfitAndLoss: (params: DateRange) =>
     get<ProfitAndLossResponse>("/api/v1/reports/profit-and-loss", params),
+
+  getProfitAndLossMonthly: (params: DateRange & { cutoff_day?: number }) =>
+    get<ProfitAndLossMonthlyResponse>("/api/v1/reports/profit-and-loss/monthly", params),
 
   getCashFlow: (params: DateRange) =>
     get<CashFlowResponse>("/api/v1/reports/cash-flow", params),

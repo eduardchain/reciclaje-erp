@@ -91,6 +91,23 @@ export interface ProfitAndLossResponse {
   expenses_by_category: ExpenseCategoryBreakdown[];
 }
 
+// --- P&L Mensual (decision #50) ---
+
+export interface ProfitAndLossMonthlyPeriod extends ProfitAndLossResponse {
+  /** Label legible derivado de cutoff_day: "Mar 2026" o "4 Mar – 3 Abr 2026". */
+  label: string;
+}
+
+export interface ProfitAndLossMonthlyResponse {
+  cutoff_day: number;
+  range_from: string;
+  range_to: string;
+  periods: ProfitAndLossMonthlyPeriod[];
+  /** Totales del rango exacto (NO la suma aritmetica de periods cuando hay
+   * recorte parcial de meses contables). Paridad con tab "Periodo". */
+  totals: ProfitAndLossResponse;
+}
+
 // --- Cash Flow ---
 
 export interface CashFlowInflows {

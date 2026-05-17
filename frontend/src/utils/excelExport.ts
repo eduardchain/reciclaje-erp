@@ -3,6 +3,7 @@ import type { AccountStatementExportData } from "@/utils/pdfExport";
 import type {
   BalanceDetailedResponse,
   ProfitAndLossResponse,
+  ProfitAndLossMonthlyResponse,
   CashFlowResponse,
   BalanceSheetResponse,
   PurchaseReportResponse,
@@ -425,6 +426,107 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "P&L");
   XLSX.writeFile(wb, `estado_resultados_${data.period_from}_${data.period_to}.xlsx`);
+}
+
+
+export function exportPnlMonthlyExcel(
+  data: ProfitAndLossMonthlyResponse,
+  _rows: unknown[] = [],
+) {
+  // Decision #50: filas = lineas P&L, columnas = meses + Total. Numeros como
+  // number (sumables en Excel) con currency format aplicado.
+  const periodLabels = data.periods.map((p) => p.label);
+  const header = ["Linea", ...periodLabels, "Total"];
+
+  const rows: (string | number)[][] = [];
+  rows.push(["Estado de Resultados — Mensual"]);
+  rows.push([`Rango: ${data.range_from} – ${data.range_to}`]);
+  rows.push([`Cutoff day: ${data.cutoff_day}`]);
+  rows.push([]);
+  rows.push(header);
+
+  const pushRow = (label: string, getter: (p: { [k: string]: number }) => number, opts: { prefix?: "-"; bold?: boolean; indent?: boolean } = {}) => {
+    const sign = opts.prefix === "-" ? -1 : 1;
+    const cells: (string | number)[] = [opts.indent ? `  ${label}` : label];
+    for (const p of data.periods) cells.push(sign * getter(p as unknown as Record<string, number>));
+    cells.push(sign * getter(data.totals as unknown as Record<string, number>));
+    rows.push(cells);
+  };
+
+  pushRow("Ingresos por Ventas", (p) => p.sales_revenue);
+  pushRow("Ingresos por Servicios", (p) => p.service_income);
+  pushRow("Costo de Ventas (COGS)", (p) => p.cost_of_goods_sold, { prefix: "-" });
+  pushRow("Utilidad Bruta Ventas", (p) => p.gross_profit_sales, { bold: true });
+  pushRow("Utilidad Pasa Mano", (p) => p.double_entry_profit);
+
+  if (data.periods.some((p) => Math.abs(p.transformation_profit) > 0.01) || Math.abs(data.totals.transformation_profit) > 0.01) {
+    pushRow("Ganancia/Perdida Transformaciones", (p) => p.transformation_profit);
+  }
+  if (data.periods.some((p) => p.waste_loss > 0) || data.totals.waste_loss > 0) {
+    pushRow("Perdida por Merma", (p) => p.waste_loss, { prefix: "-" });
+  }
+  if (data.periods.some((p) => Math.abs(p.adjustment_net) > 0.01) || Math.abs(data.totals.adjustment_net) > 0.01) {
+    pushRow("Ajustes de Inventario", (p) => p.adjustment_net);
+  }
+  if (data.periods.some((p) => p.tp_adjustment_gain > 0) || data.totals.tp_adjustment_gain > 0) {
+    pushRow("+ Ganancia Ajuste Terceros", (p) => p.tp_adjustment_gain);
+  }
+  if (data.periods.some((p) => p.tp_adjustment_loss > 0) || data.totals.tp_adjustment_loss > 0) {
+    pushRow("- Perdida Ajuste Terceros", (p) => p.tp_adjustment_loss, { prefix: "-" });
+  }
+
+  pushRow("Utilidad Bruta Total", (p) => p.total_gross_profit, { bold: true });
+
+  // Gastos por source_type
+  const sumExpensesBySource = (period: { expenses_by_category?: { source_type: string; total_amount: number }[] }) => {
+    const out: Record<string, number> = {};
+    for (const c of period.expenses_by_category || []) {
+      out[c.source_type] = (out[c.source_type] || 0) + c.total_amount;
+    }
+    return out;
+  };
+  const sourceLabels: Record<string, string> = {
+    expense: "Gastos Directos",
+    provision_expense: "Gastos desde Provisiones",
+    expense_accrual: "Gastos Causados (Pasivos)",
+    deferred_expense: "Gastos Diferidos",
+    depreciation_expense: "Depreciación de Activos",
+  };
+  const order = ["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense"];
+  const bySourceByPeriod = data.periods.map(sumExpensesBySource);
+  const bySourceTotal = sumExpensesBySource(data.totals);
+  for (const s of order) {
+    const anyPositive = bySourceByPeriod.some((m) => (m[s] || 0) > 0) || (bySourceTotal[s] || 0) > 0;
+    if (!anyPositive) continue;
+    const cells: (string | number)[] = [`  ${sourceLabels[s]}`];
+    for (let i = 0; i < data.periods.length; i++) cells.push(-(bySourceByPeriod[i][s] || 0));
+    cells.push(-(bySourceTotal[s] || 0));
+    rows.push(cells);
+  }
+
+  pushRow("Total Gastos Operacionales", (p) => p.operating_expenses, { prefix: "-", bold: true });
+  pushRow("Comisiones de Ventas", (p) => p.commissions_paid_sales, { prefix: "-", indent: true });
+  pushRow("Comisiones de Pasa Mano", (p) => p.commissions_paid_dp, { prefix: "-", indent: true });
+  pushRow("Total Comisiones", (p) => p.commissions_paid, { prefix: "-", bold: true });
+  pushRow("Utilidad Neta", (p) => p.net_profit, { bold: true });
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const labelWidth = 36;
+  const periodWidth = 18;
+  ws["!cols"] = [
+    { wch: labelWidth },
+    ...periodLabels.map(() => ({ wch: periodWidth })),
+    { wch: periodWidth },
+  ];
+
+  // Currency format en todas las columnas de valores (1..N+1).
+  const valueCols: number[] = [];
+  for (let i = 1; i <= data.periods.length + 1; i++) valueCols.push(i);
+  applyCurrencyFormat(ws, valueCols);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "P&L Mensual");
+  XLSX.writeFile(wb, `estado_resultados_mensual_${data.range_from}_${data.range_to}.xlsx`);
 }
 
 

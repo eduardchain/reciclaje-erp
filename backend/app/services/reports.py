@@ -50,6 +50,8 @@ from app.schemas.reports import (
     MaterialMargin,
     MaterialProfitSummary,
     MetricCard,
+    ProfitAndLossMonthlyPeriod,
+    ProfitAndLossMonthlyResponse,
     ProfitAndLossResponse,
     ProvisionSummary,
     PurchaseByMaterial,
@@ -522,6 +524,121 @@ class ReportService:
             "total_gross_profit": total_gross_profit,
             "net_profit": net_profit,
         }
+
+    # ------------------------------------------------------------------
+    # P&L Mensual — helper de split por meses contables (decision #50)
+    # ------------------------------------------------------------------
+
+    _SPANISH_MONTHS = [
+        "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+        "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+    ]
+
+    @classmethod
+    def _split_into_accounting_months(
+        cls,
+        date_from: date,
+        date_to: date,
+        cutoff_day: int,
+    ) -> list[tuple[date, date, str]]:
+        """Genera lista de (period_from, period_to, label) de meses contables que
+        intersectan [date_from, date_to].
+
+        - `cutoff_day=1` produce meses calendario (label "Mar 2026").
+        - `cutoff_day>1` produce meses con borde personalizado: empiezan el dia
+          `cutoff_day` y terminan el dia `cutoff_day - 1` del mes siguiente
+          (label "4 Mar – 3 Abr" o "4 Dic 2025 – 3 Ene 2026" cuando cruza año).
+        - Limita `cutoff_day` a [1, 28] para evitar dias invalidos en febrero.
+
+        Incluye TODO mes contable que intersecte el rango (no snap a bordes).
+        """
+        if not (1 <= cutoff_day <= 28):
+            raise ValueError(f"cutoff_day fuera de rango: {cutoff_day} (debe ser 1-28)")
+        if date_from > date_to:
+            raise ValueError(f"date_from > date_to: {date_from} > {date_to}")
+
+        cross_year = date_from.year != date_to.year
+
+        def _add_month(year: int, month: int) -> tuple[int, int]:
+            return (year + 1, 1) if month == 12 else (year, month + 1)
+
+        # Primer mes contable: el que contiene date_from.
+        if date_from.day >= cutoff_day:
+            start_year, start_month = date_from.year, date_from.month
+        else:
+            # Empezo antes del cutoff -> el mes contable arranco el mes anterior.
+            if date_from.month == 1:
+                start_year, start_month = date_from.year - 1, 12
+            else:
+                start_year, start_month = date_from.year, date_from.month - 1
+
+        results: list[tuple[date, date, str]] = []
+        cur_year, cur_month = start_year, start_month
+        # Cap para evitar loops infinitos (no deberia pasar dado le=24 en endpoint).
+        for _ in range(60):
+            period_from = date(cur_year, cur_month, cutoff_day)
+            next_year, next_month = _add_month(cur_year, cur_month)
+            if cutoff_day == 1:
+                # Mes calendario: termina ultimo dia del mes (=> cutoff_day-1 del siguiente
+                # daria dia 0; usamos next_month_first - 1 day en su lugar).
+                period_to = date(next_year, next_month, 1) - timedelta(days=1)
+                label = f"{cls._SPANISH_MONTHS[cur_month - 1]} {cur_year}"
+            else:
+                period_to = date(next_year, next_month, cutoff_day) - timedelta(days=1)
+                if cross_year or cur_year != next_year:
+                    label = (
+                        f"{cutoff_day} {cls._SPANISH_MONTHS[cur_month - 1]} {cur_year} – "
+                        f"{cutoff_day - 1} {cls._SPANISH_MONTHS[next_month - 1]} {next_year}"
+                    )
+                else:
+                    label = (
+                        f"{cutoff_day} {cls._SPANISH_MONTHS[cur_month - 1]} – "
+                        f"{cutoff_day - 1} {cls._SPANISH_MONTHS[next_month - 1]} {cur_year}"
+                    )
+
+            results.append((period_from, period_to, label))
+
+            # Si este mes ya contiene date_to, terminamos.
+            if period_to >= date_to:
+                break
+            cur_year, cur_month = next_year, next_month
+
+        return results
+
+    def get_profit_and_loss_monthly(
+        self,
+        db: Session,
+        organization_id: UUID,
+        date_from: date,
+        date_to: date,
+        cutoff_day: int = 1,
+    ) -> ProfitAndLossMonthlyResponse:
+        """P&L mensual: una columna por mes contable derivado de cutoff_day.
+
+        `totals` corresponde al rango exacto [date_from, date_to], NO a la suma
+        aritmetica de las columnas — los meses contables pueden extenderse
+        mas alla del rango y la suma de columnas estaria sobrestimada.
+
+        Performance: cada mes invoca `get_profit_and_loss` (~7 queries SQL).
+        Con 12 meses ~ 84 queries < 2s; con 24 meses ~168 queries < 4s.
+        Mas alla → el endpoint rechaza con 422.
+        """
+        months = self._split_into_accounting_months(date_from, date_to, cutoff_day)
+        periods: list[ProfitAndLossMonthlyPeriod] = []
+        for period_from, period_to, label in months:
+            period_pnl = self.get_profit_and_loss(db, organization_id, period_from, period_to)
+            periods.append(ProfitAndLossMonthlyPeriod(
+                **period_pnl.model_dump(),
+                label=label,
+            ))
+        totals = self.get_profit_and_loss(db, organization_id, date_from, date_to)
+        return ProfitAndLossMonthlyResponse(
+            cutoff_day=cutoff_day,
+            range_from=date_from,
+            range_to=date_to,
+            periods=periods,
+            totals=totals,
+        )
 
     def get_profit_and_loss(
         self,

@@ -145,6 +145,31 @@ class ProfitAndLossResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# P&L Mensual (Section 18.1.b — decision #50)
+# ---------------------------------------------------------------------------
+
+
+class ProfitAndLossMonthlyPeriod(ProfitAndLossResponse):
+    """Una columna mensual del P&L Mensual. Extiende ProfitAndLossResponse
+    agregando un label legible derivado de cutoff_day ("Mar 2026" o "4 Mar – 3 Abr")."""
+    label: str
+
+
+class ProfitAndLossMonthlyResponse(BaseModel):
+    """Respuesta del P&L Mensual: una columna por mes contable + totales del rango.
+
+    `totals` NO es la suma aritmetica de `periods` cuando el rango parcial recorta
+    meses contables — se calcula directamente sobre [range_from, range_to] para
+    paridad con el tab "Periodo" del mismo rango.
+    """
+    cutoff_day: int
+    range_from: date
+    range_to: date
+    periods: list[ProfitAndLossMonthlyPeriod]
+    totals: ProfitAndLossResponse
+
+
+# ---------------------------------------------------------------------------
 # Cash Flow - Flujo de Caja (Section 18.2)
 # ---------------------------------------------------------------------------
 
