@@ -77,20 +77,41 @@ export function BusinessUnitAllocationSelector({
       )}
 
       {allocationType === "shared" && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-3 border rounded-md bg-slate-50">
-          {businessUnits.map((bu) => (
-            <div key={bu.id} className="flex items-center space-x-2">
-              <Checkbox
-                id={`bu-${bu.id}`}
-                checked={applicableBusinessUnitIds.includes(bu.id)}
-                onCheckedChange={() => toggleBU(bu.id)}
-              />
-              <label htmlFor={`bu-${bu.id}`} className="text-sm cursor-pointer">{bu.name}</label>
+        <div className="space-y-2 p-3 border rounded-md bg-slate-50">
+          {businessUnits.length > 0 && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() =>
+                  setApplicableBusinessUnitIds(
+                    applicableBusinessUnitIds.length === businessUnits.length
+                      ? []
+                      : businessUnits.map((bu) => bu.id)
+                  )
+                }
+                className="text-xs text-emerald-700 hover:text-emerald-800 underline"
+              >
+                {applicableBusinessUnitIds.length === businessUnits.length
+                  ? "Deseleccionar todas"
+                  : "Seleccionar todas"}
+              </button>
             </div>
-          ))}
-          {businessUnits.length === 0 && (
-            <p className="text-xs text-slate-400 col-span-full">No hay unidades de negocio activas</p>
           )}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            {businessUnits.map((bu) => (
+              <div key={bu.id} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`bu-${bu.id}`}
+                  checked={applicableBusinessUnitIds.includes(bu.id)}
+                  onCheckedChange={() => toggleBU(bu.id)}
+                />
+                <label htmlFor={`bu-${bu.id}`} className="text-sm cursor-pointer">{bu.name}</label>
+              </div>
+            ))}
+            {businessUnits.length === 0 && (
+              <p className="text-xs text-slate-400 col-span-full">No hay unidades de negocio activas</p>
+            )}
+          </div>
         </div>
       )}
     </div>
