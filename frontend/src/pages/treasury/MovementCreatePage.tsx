@@ -268,20 +268,25 @@ export default function MovementCreatePage() {
     });
   };
 
+  const tpOption = (t: { id: string; name: string; current_balance: number }) => ({
+    id: t.id,
+    label: `${t.name} (${formatCurrency(t.current_balance)})`,
+  });
+
   const getThirdPartyOptions = () => {
     switch (type) {
       case "payment_to_supplier":
-      case "advance_payment": return payableSuppliers.map((s) => ({ id: s.id, label: s.name }));
-      case "liability_payment": return liabilities.map((l) => ({ id: l.id, label: l.name }));
+      case "advance_payment": return payableSuppliers.map(tpOption);
+      case "liability_payment": return liabilities.map(tpOption);
       case "collection_from_client":
-      case "advance_collection": return customers.map((c) => ({ id: c.id, label: c.name }));
+      case "advance_collection": return customers.map(tpOption);
       case "capital_injection":
-      case "capital_return": return investors.map((i) => ({ id: i.id, label: i.name }));
-      case "commission_payment": return thirdParties.map((t) => ({ id: t.id, label: t.name }));
-      case "expense_accrual": return liabilities.map((l) => ({ id: l.id, label: l.name }));
+      case "capital_return": return investors.map(tpOption);
+      case "commission_payment": return thirdParties.map(tpOption);
+      case "expense_accrual": return liabilities.map(tpOption);
       case "payment_to_generic":
-      case "collection_from_generic": return generics.map((g) => ({ id: g.id, label: g.name }));
-      default: return thirdParties.map((t) => ({ id: t.id, label: t.name }));
+      case "collection_from_generic": return generics.map(tpOption);
+      default: return thirdParties.map(tpOption);
     }
   };
 
@@ -373,11 +378,11 @@ export default function MovementCreatePage() {
               <>
                 <div>
                   <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero Origen *</Label>
-                  <EntitySelect value={thirdPartyId} onChange={setThirdPartyId} options={thirdParties.map((t) => ({ id: t.id, label: t.name }))} placeholder="Seleccionar tercero origen..." />
+                  <EntitySelect value={thirdPartyId} onChange={setThirdPartyId} options={thirdParties.map(tpOption)} placeholder="Seleccionar tercero origen..." />
                 </div>
                 <div>
                   <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero Destino *</Label>
-                  <EntitySelect value={destThirdPartyId} onChange={setDestThirdPartyId} options={thirdParties.filter((t) => t.id !== thirdPartyId).map((t) => ({ id: t.id, label: t.name }))} placeholder="Seleccionar tercero destino..." />
+                  <EntitySelect value={destThirdPartyId} onChange={setDestThirdPartyId} options={thirdParties.filter((t) => t.id !== thirdPartyId).map(tpOption)} placeholder="Seleccionar tercero destino..." />
                 </div>
               </>
             )}
