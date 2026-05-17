@@ -51,8 +51,16 @@ export function MoneyInput({
 
   const handleBlur = () => {
     setFocused(false);
-    const parsed = parseFloat(displayValue.replace(/\./g, "").replace(",", ".")) || 0;
-    const final = min !== undefined && parsed < min ? min : parsed;
+    // Aceptar tanto "1.5" (US) como "1,5" (CO) como decimal cuando decimals > 0.
+    // El regex de handleChange ya garantiza un solo separador, asi que basta con
+    // normalizar coma a punto. Para decimals=0 (montos), el separador se ignora.
+    const normalized = decimals > 0
+      ? displayValue.replace(",", ".")
+      : displayValue.replace(/[.,]/g, "");
+    const parsed = parseFloat(normalized) || 0;
+    const factor = Math.pow(10, decimals);
+    const rounded = Math.round(parsed * factor) / factor;
+    const final = min !== undefined && rounded < min ? min : rounded;
     onChange(final);
   };
 
@@ -68,7 +76,7 @@ export function MoneyInput({
     <Input
       ref={inputRef}
       type="text"
-      inputMode="numeric"
+      inputMode={decimals > 0 ? "decimal" : "numeric"}
       value={displayValue}
       onChange={handleChange}
       onFocus={handleFocus}
