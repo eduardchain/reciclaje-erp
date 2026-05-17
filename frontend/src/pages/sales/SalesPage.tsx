@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, DollarSign, TrendingUp, Hash, MoreHorizontal, Eye, Pencil, XCircle, FileText, Scale } from "lucide-react";
+import { Plus, DollarSign, TrendingUp, TrendingDown, Hash, MoreHorizontal, Eye, Pencil, XCircle, FileText, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -114,7 +114,7 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
   );
 }
 
-function getColumns(canViewPrices: boolean, canViewProfit: boolean): ColumnDef<SaleResponse, unknown>[] {
+function getColumns(canViewPrices: boolean, canViewProfit: boolean, showCogs: boolean): ColumnDef<SaleResponse, unknown>[] {
   return [
     {
       accessorKey: "sale_number",
@@ -161,6 +161,17 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean): ColumnDef<S
             {row.original.total_amount_difference != null && Math.abs(row.original.total_amount_difference) > 0.01 && (
               <Scale className={`inline-block ml-1 h-3.5 w-3.5 ${row.original.total_amount_difference > 0 ? "text-emerald-500" : "text-red-500"}`} />
             )}
+          </span>
+        ),
+      } as ColumnDef<SaleResponse, unknown>,
+    ] : []),
+    ...(showCogs && canViewProfit ? [
+      {
+        id: "cogs",
+        header: "COSTO (COGS)",
+        cell: ({ row }: { row: { original: SaleResponse } }) => (
+          <span className="font-medium tabular-nums text-slate-700">
+            {formatCurrency(row.original.total_amount - row.original.total_profit)}
           </span>
         ),
       } as ColumnDef<SaleResponse, unknown>,
@@ -221,12 +232,16 @@ export default function SalesPage() {
   const canViewPrices = hasPermission("sales.view_prices");
   const canViewProfit = hasPermission("sales.view_profit");
   const [searchParams, setSearchParams] = useSearchParams();
-  const columns = useMemo(() => getColumns(canViewPrices, canViewProfit), [canViewPrices, canViewProfit]);
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
 
   const status = searchParams.get("tab") || "all";
   const page = parseInt(searchParams.get("page") || "0", 10);
   const search = searchParams.get("search") || "";
+  const dpFilter = (searchParams.get("dp") as "all" | "exclude" | "only" | null) || "all";
+  const dateField = (searchParams.get("date_field") as "date" | "liquidated_at" | null) || "date";
+
+  const showCogs = dpFilter === "exclude" && dateField === "liquidated_at";
+  const columns = useMemo(() => getColumns(canViewPrices, canViewProfit, showCogs), [canViewPrices, canViewProfit, showCogs]);
 
   const setParam = (updates: Record<string, string | null>) => {
     setSearchParams((prev) => {
@@ -246,6 +261,8 @@ export default function SalesPage() {
     search: search || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
+    dp_filter: dpFilter === "all" ? undefined : dpFilter,
+    date_field: dateField === "date" ? undefined : dateField,
   });
 
   useScrollRestoration(!isLoading);
@@ -253,21 +270,26 @@ export default function SalesPage() {
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
   const kpis = useMemo(() => {
-    const items = data?.items ?? [];
-    const totalAmount = items.reduce((sum, s) => sum + s.total_amount, 0);
-    const totalProfit = items.reduce((sum, s) => sum + s.total_profit, 0);
-    const totalCommissions = items.reduce((sum, s) => sum + s.commissions.reduce((cs, c) => cs + c.commission_amount, 0), 0);
+    // Totales sobre TODO el set filtrado (no solo la pagina actual) — necesario
+    // para que coincidan con el P&L cuando hay paginacion.
+    const totalAmount = data?.total_amount_sum ?? 0;
+    const totalProfit = data?.total_profit_sum ?? 0;
+    const totalCommissions = data?.total_commissions_sum ?? 0;
+    const cogs = totalAmount - totalProfit;
     const netProfit = totalProfit - totalCommissions;
     const count = data?.total ?? 0;
     const margin = totalAmount > 0 ? (totalProfit / totalAmount) * 100 : 0;
     const netMargin = totalAmount > 0 ? (netProfit / totalAmount) * 100 : 0;
+    const cogsRatio = totalAmount > 0 ? (cogs / totalAmount) * 100 : 0;
     return {
       total: { current_value: totalAmount, previous_value: 0, change_percentage: null } as MetricCard,
+      cogs: { current_value: cogs, previous_value: 0, change_percentage: null } as MetricCard,
       profit: { current_value: totalProfit, previous_value: 0, change_percentage: null } as MetricCard,
       netProfit: { current_value: netProfit, previous_value: 0, change_percentage: null } as MetricCard,
       count: { current_value: count, previous_value: 0, change_percentage: null } as MetricCard,
       margin,
       netMargin,
+      cogsRatio,
     };
   }, [data]);
 
@@ -281,6 +303,8 @@ export default function SalesPage() {
       search: search || undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
+      dp_filter: dpFilter === "all" ? undefined : dpFilter,
+      date_field: dateField === "date" ? undefined : dateField,
     });
     if (all.total > all.items.length) {
       toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
@@ -300,51 +324,71 @@ export default function SalesPage() {
       </PageHeader>
 
       {/* KPI Cards */}
-      {isLoading ? (
-        <div className={`grid grid-cols-1 md:grid-cols-${canViewPrices ? (canViewProfit ? 4 : 2) : 1} gap-4`}>
-          {Array.from({ length: canViewPrices ? (canViewProfit ? 4 : 2) : 1 }).map((_, i) => (
-            <Skeleton key={i} className="h-28 rounded-lg" />
-          ))}
-        </div>
-      ) : (
-        <div className={`grid grid-cols-1 md:grid-cols-${canViewPrices ? (canViewProfit ? 4 : 2) : 1} gap-4`}>
-          {canViewPrices && (
+      {(() => {
+        // Total Ventas + COGS + Utilidad Bruta + Utilidad Neta + Operaciones = 5 cuando precios+profit visibles
+        const cardCount = canViewPrices ? (canViewProfit ? 5 : 2) : 1;
+        const gridClass =
+          cardCount === 5
+            ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4"
+            : cardCount === 2
+              ? "grid grid-cols-1 md:grid-cols-2 gap-4"
+              : "grid grid-cols-1 gap-4";
+        return isLoading ? (
+          <div className={gridClass}>
+            {Array.from({ length: cardCount }).map((_, i) => (
+              <Skeleton key={i} className="h-28 rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <div className={gridClass}>
+            {canViewPrices && (
+              <KpiCard
+                label="Total Ventas"
+                metric={kpis.total}
+                icon={<DollarSign className="h-4 w-4" />}
+                accentColor="emerald"
+              />
+            )}
+            {canViewProfit && (
+              <KpiCard
+                label="Costo de Ventas (COGS)"
+                metric={kpis.cogs}
+                icon={<TrendingDown className="h-4 w-4" />}
+                accentColor="rose"
+                secondaryLabel="% sobre ventas"
+                secondaryValue={formatPercentage(kpis.cogsRatio)}
+              />
+            )}
+            {canViewProfit && (
+              <KpiCard
+                label="Utilidad Bruta"
+                metric={kpis.profit}
+                icon={<TrendingUp className="h-4 w-4" />}
+                accentColor="violet"
+                secondaryLabel="Margen"
+                secondaryValue={formatPercentage(kpis.margin)}
+              />
+            )}
+            {canViewProfit && (
+              <KpiCard
+                label="Utilidad Neta"
+                metric={kpis.netProfit}
+                icon={<TrendingUp className="h-4 w-4" />}
+                accentColor="amber"
+                secondaryLabel="Margen Neto"
+                secondaryValue={formatPercentage(kpis.netMargin)}
+              />
+            )}
             <KpiCard
-              label="Total Ventas"
-              metric={kpis.total}
-              icon={<DollarSign className="h-4 w-4" />}
-              accentColor="emerald"
+              label="Operaciones"
+              metric={kpis.count}
+              icon={<Hash className="h-4 w-4" />}
+              accentColor="sky"
+              formatValue={(n) => String(n)}
             />
-          )}
-          {canViewProfit && (
-            <KpiCard
-              label="Utilidad Bruta"
-              metric={kpis.profit}
-              icon={<TrendingUp className="h-4 w-4" />}
-              accentColor="violet"
-              secondaryLabel="Margen"
-              secondaryValue={formatPercentage(kpis.margin)}
-            />
-          )}
-          {canViewProfit && (
-            <KpiCard
-              label="Utilidad Neta"
-              metric={kpis.netProfit}
-              icon={<TrendingUp className="h-4 w-4" />}
-              accentColor="amber"
-              secondaryLabel="Margen Neto"
-              secondaryValue={formatPercentage(kpis.netMargin)}
-            />
-          )}
-          <KpiCard
-            label="Operaciones"
-            metric={kpis.count}
-            icon={<Hash className="h-4 w-4" />}
-            accentColor="sky"
-            formatValue={(n) => String(n)}
-          />
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       <Tabs value={status} onValueChange={(v) => setParam({ tab: v, page: null, search: null })}>
         <TabsList>
@@ -354,6 +398,30 @@ export default function SalesPage() {
           <TabsTrigger value="cancelled">Canceladas</TabsTrigger>
         </TabsList>
       </Tabs>
+
+      {/* Filtros activos del drill-down de P&L */}
+      {(dpFilter !== "all" || dateField !== "date") && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {dpFilter === "exclude" && (
+            <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs px-2 py-1 rounded border border-amber-200">
+              Sin Pasa Mano
+              <button onClick={() => setParam({ dp: null })} className="hover:bg-amber-100 rounded px-1">×</button>
+            </span>
+          )}
+          {dpFilter === "only" && (
+            <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-xs px-2 py-1 rounded border border-emerald-200">
+              Solo Pasa Mano
+              <button onClick={() => setParam({ dp: null })} className="hover:bg-emerald-100 rounded px-1">×</button>
+            </span>
+          )}
+          {dateField === "liquidated_at" && (
+            <span className="inline-flex items-center gap-1 bg-sky-50 text-sky-700 text-xs px-2 py-1 rounded border border-sky-200">
+              Por fecha de liquidación
+              <button onClick={() => setParam({ date_field: null })} className="hover:bg-sky-100 rounded px-1">×</button>
+            </span>
+          )}
+        </div>
+      )}
 
       <DataTable
         columns={columns}

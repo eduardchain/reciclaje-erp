@@ -659,9 +659,20 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         customer_id: Optional[UUID] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
-        search: Optional[str] = None
-    ) -> tuple[List[DoubleEntry], int]:
-        """Get multiple double_entries con filtros y paginacion."""
+        search: Optional[str] = None,
+        date_field: str = "date",
+    ) -> tuple[List[DoubleEntry], int, Decimal, Decimal, Decimal]:
+        """Get multiple double_entries con filtros y paginacion.
+
+        date_field: "date" | "liquidated_at" — campo de fecha contra el cual se aplican
+        date_from/date_to. Usar liquidated_at para paridad con P&L (decision #42).
+
+        Returns:
+            Tuple of (double_entries, total_count, purchase_cost_sum, sale_amount_sum, profit_sum).
+            Las sumas cubren TODO el set filtrado, no solo la pagina retornada —
+            necesarias para que las KPIs en el listado coincidan con el P&L
+            cuando hay paginacion.
+        """
         query = db.query(DoubleEntry).filter(
             DoubleEntry.organization_id == organization_id
         )
@@ -682,11 +693,13 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         if customer_id:
             query = query.filter(DoubleEntry.customer_id == customer_id)
 
+        date_col = DoubleEntry.liquidated_at if date_field == "liquidated_at" else DoubleEntry.date
+
         if date_from:
-            query = query.filter(DoubleEntry.date >= date_from)
+            query = query.filter(date_col >= date_from)
 
         if date_to:
-            query = query.filter(DoubleEntry.date < date_to)
+            query = query.filter(date_col < date_to)
 
         if search:
             query = query.filter(
@@ -699,11 +712,27 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
 
         total = query.count()
 
+        # Aggregates sobre el set filtrado completo (antes de paginar) — paridad con P&L
+        # Profit por linea = (sale_unit_price - purchase_unit_price) * quantity
+        de_ids_subq = query.with_entities(DoubleEntry.id).subquery()
+        agg_row = (
+            db.query(
+                func.coalesce(func.sum(DoubleEntryLine.purchase_unit_price * DoubleEntryLine.quantity), 0),
+                func.coalesce(func.sum(DoubleEntryLine.sale_unit_price * DoubleEntryLine.quantity), 0),
+                func.coalesce(func.sum((DoubleEntryLine.sale_unit_price - DoubleEntryLine.purchase_unit_price) * DoubleEntryLine.quantity), 0),
+            )
+            .filter(DoubleEntryLine.double_entry_id.in_(select(de_ids_subq)))
+            .one()
+        )
+        purchase_sum = Decimal(str(agg_row[0] or 0))
+        sale_sum = Decimal(str(agg_row[1] or 0))
+        profit_sum = Decimal(str(agg_row[2] or 0))
+
         double_entries = query.options(
             *self._eager_options()
         ).order_by(DoubleEntry.date.desc()).offset(skip).limit(limit).all()
 
-        return double_entries, total
+        return double_entries, total, purchase_sum, sale_sum, profit_sum
 
     def update(
         self,

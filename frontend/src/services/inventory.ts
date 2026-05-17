@@ -27,6 +27,7 @@ interface AdjustmentFilters {
   status?: string;
   date_from?: string;
   date_to?: string;
+  exclude_migration_seeds?: boolean;
 }
 
 interface TransformationFilters {

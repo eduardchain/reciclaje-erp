@@ -250,8 +250,17 @@ class SaleLiquidateRequest(BaseModel):
 
 
 class PaginatedSaleResponse(BaseModel):
-    """Paginated response for sale lists."""
+    """Paginated response for sale lists.
+
+    Los totales agregados (`total_amount_sum`, `total_profit_sum`,
+    `total_commissions_sum`) cubren TODO el set filtrado, no solo la pagina
+    actual — necesarios para que las KPIs en el listado coincidan con el P&L
+    cuando hay paginacion.
+    """
     items: List[SaleResponse]
     total: int
     skip: int
     limit: int
+    total_amount_sum: float = 0.0
+    total_profit_sum: float = 0.0
+    total_commissions_sum: float = 0.0

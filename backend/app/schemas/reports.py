@@ -133,6 +133,8 @@ class ProfitAndLossResponse(BaseModel):
     # Gastos operacionales
     operating_expenses: float
     commissions_paid: float
+    commissions_paid_sales: float = 0.0
+    commissions_paid_dp: float = 0.0
 
     # Utilidad neta
     net_profit: float

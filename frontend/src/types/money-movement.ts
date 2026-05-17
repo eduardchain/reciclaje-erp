@@ -1,4 +1,4 @@
-import type { BaseEntity } from "./common";
+import type { BaseEntity, PaginatedResponse } from "./common";
 
 export type MoneyMovementType =
   | "payment_to_supplier"
@@ -262,4 +262,12 @@ export interface UpdateClassificationRequest {
 
 export interface MoneyMovementWithBalance extends MoneyMovementResponse {
   balance_after: number | null;
+}
+
+/**
+ * Listado paginado de movimientos con total agregado sobre el set filtrado.
+ * Necesario para que las KPIs coincidan con el P&L cuando hay paginacion.
+ */
+export interface PaginatedMoneyMovementResponse extends PaginatedResponse<MoneyMovementResponse> {
+  total_amount_sum: number;
 }

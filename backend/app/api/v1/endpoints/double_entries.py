@@ -176,11 +176,12 @@ async def list_double_entries(
     date_from: Optional[date] = Query(None, description="Filter by date from (inclusive)"),
     date_to: Optional[date] = Query(None, description="Filter by date to (inclusive)"),
     search: Optional[str] = Query(None, description="Search in number, names, notes, invoice"),
+    date_field: str = Query("date", pattern="^(date|liquidated_at)$", description="Campo de fecha: date (default) o liquidated_at (paridad con P&L)"),
 ) -> PaginatedDoubleEntryResponse:
     """Listar doble partidas con filtros."""
     date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
     date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
-    double_entries, total = double_entry_service.get_multi(
+    double_entries, total, purchase_sum, sale_sum, profit_sum = double_entry_service.get_multi(
         db=db,
         organization_id=org_context["organization_id"],
         skip=skip,
@@ -192,6 +193,7 @@ async def list_double_entries(
         date_from=date_from_dt,
         date_to=date_to_dt,
         search=search,
+        date_field=date_field,
     )
 
     items = [
@@ -204,6 +206,9 @@ async def list_double_entries(
         total=total,
         skip=skip,
         limit=limit,
+        total_purchase_cost_sum=float(purchase_sum),
+        total_sale_amount_sum=float(sale_sum),
+        total_profit_sum=float(profit_sum),
     )
 
 

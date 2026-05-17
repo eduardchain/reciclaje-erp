@@ -1,4 +1,4 @@
-import type { BaseEntity } from "./common";
+import type { BaseEntity, PaginatedResponse } from "./common";
 
 export type SaleStatus = "registered" | "liquidated" | "cancelled";
 
@@ -120,4 +120,14 @@ export interface SaleLiquidateRequest {
   immediate_collection?: boolean;
   collection_account_id?: string;
   liquidation_date?: string;
+}
+
+/**
+ * Listado paginado de ventas con totales agregados sobre el set filtrado completo.
+ * Necesario para que las KPIs coincidan con el P&L cuando hay paginacion.
+ */
+export interface PaginatedSaleResponse extends PaginatedResponse<SaleResponse> {
+  total_amount_sum: number;
+  total_profit_sum: number;
+  total_commissions_sum: number;
 }

@@ -86,12 +86,15 @@ export default function AdjustmentsPage() {
   const [annulReason, setAnnulReason] = useState("");
   const annulMutation = useAnnulAdjustment();
 
+  const excludeMigration = searchParams.get("exclude_migration") === "true";
+
   const { data, isLoading } = useAdjustments({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
     status: statusFilter === "all" ? undefined : statusFilter,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
+    exclude_migration_seeds: excludeMigration || undefined,
   });
 
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
@@ -115,6 +118,7 @@ export default function AdjustmentsPage() {
       status: statusFilter === "all" ? undefined : statusFilter,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
+      exclude_migration_seeds: excludeMigration || undefined,
     });
     if (all.total > all.items.length) {
       toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
@@ -184,13 +188,37 @@ export default function AdjustmentsPage() {
         </div>
       )}
 
-      <Tabs value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
+      <Tabs value={statusFilter} onValueChange={(v) => {
+        setStatusFilter(v);
+        setPage(0);
+        // Preservar exclude_migration al cambiar tab
+        const next: Record<string, string> = {};
+        if (v !== "all") next.tab = v;
+        if (excludeMigration) next.exclude_migration = "true";
+        setSearchParams(next, { replace: true });
+      }}>
         <TabsList>
           <TabsTrigger value="all">Todos</TabsTrigger>
           <TabsTrigger value="confirmed">Confirmados</TabsTrigger>
           <TabsTrigger value="annulled">Anulados</TabsTrigger>
         </TabsList>
       </Tabs>
+
+      {excludeMigration && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs px-2 py-1 rounded border border-amber-200">
+            Sin seeds de migración
+            <button
+              onClick={() => {
+                const next: Record<string, string> = {};
+                if (statusFilter !== "all") next.tab = statusFilter;
+                setSearchParams(next, { replace: true });
+              }}
+              className="hover:bg-amber-100 rounded px-1"
+            >×</button>
+          </span>
+        </div>
+      )}
 
       <DataTable
         columns={columns}

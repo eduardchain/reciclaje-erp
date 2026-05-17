@@ -113,7 +113,14 @@ export default function TransformationsPage() {
     { accessorKey: "source_material_name", header: "Material Origen", cell: ({ row }) => `${row.original.source_material_code ?? ""} - ${row.original.source_material_name ?? ""}` },
     { accessorKey: "source_quantity", header: "Cantidad", enableSorting: true, cell: ({ row }) => <span className="tabular-nums">{row.original.source_quantity.toFixed(2)}</span> },
     { accessorKey: "waste_quantity", header: "Merma", cell: ({ row }) => <span className="tabular-nums text-orange-600">{row.original.waste_quantity.toFixed(2)}</span> },
+    { accessorKey: "waste_value", header: "Pérdida Merma", enableSorting: true, cell: ({ row }) => row.original.waste_value > 0 ? <span className="tabular-nums text-red-600">{formatCurrency(row.original.waste_value)}</span> : <span className="text-slate-300">-</span> },
     { accessorKey: "source_total_value", header: "Valor", enableSorting: true, cell: ({ row }) => formatCurrency(row.original.source_total_value) },
+    { accessorKey: "value_difference", header: "Ganancia/Pérdida", enableSorting: true, cell: ({ row }) => {
+        const vd = row.original.value_difference;
+        if (vd == null || Math.abs(vd) < 0.01) return <span className="text-slate-300">-</span>;
+        return <span className={`tabular-nums font-medium ${vd > 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(vd)}</span>;
+      },
+    },
     { accessorKey: "lines", header: "Destinos", cell: ({ row }) => <span>{row.original.lines.length} material(es)</span> },
     { accessorKey: "status", header: "Estado", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
     {
@@ -190,7 +197,7 @@ export default function TransformationsPage() {
         emptyDescription="No se encontraron transformaciones."
         exportFilename="ecobalance_transformaciones"
         onExportAll={handleExportAll}
-        currencyColumns={["source_total_value"]}
+        currencyColumns={["source_total_value", "waste_value", "value_difference"]}
         totalItems={data?.total}
         toolbar={
           <div className="flex items-center gap-3">

@@ -71,6 +71,7 @@ export function useAdjustments(filters: {
   status?: string;
   date_from?: string;
   date_to?: string;
+  exclude_migration_seeds?: boolean;
 }) {
   return useQuery({
     queryKey: ["inventory", "adjustments", "list", filters],

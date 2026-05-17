@@ -1200,8 +1200,23 @@ class CRUDMoneyMovement:
         search: Optional[str] = None,
         allowed_account_ids: Optional[List[UUID]] = None,
         created_by_filter: Optional[UUID] = None,
-    ) -> tuple[List[MoneyMovement], int]:
-        """Listar movimientos con filtros y paginacion."""
+        adjustment_class: Optional[str] = None,
+        commission_source: Optional[str] = None,
+    ) -> tuple[List[MoneyMovement], int, Decimal]:
+        """Listar movimientos con filtros y paginacion.
+
+        movement_type acepta valor único o CSV (`type1,type2`) → IN clause.
+        adjustment_class: "gain" | "loss" — filtra movimientos tp_adjustment_* por clase P&L.
+        commission_source: "sale" | "double_entry" — filtra commission_accrual por origen:
+          - "sale": comisiones de ventas regulares (Sale.double_entry_id IS NULL o sale_id NULL)
+          - "double_entry": comisiones de DPs (Sale.double_entry_id IS NOT NULL)
+          Replica el split del P&L "Comisiones Pagadas".
+
+        Returns:
+            Tuple of (movements, total_count, total_amount_sum).
+            total_amount_sum cubre TODO el set filtrado, no solo la pagina retornada —
+            necesario para que las KPIs en el listado coincidan con el P&L cuando hay paginacion.
+        """
         query = select(MoneyMovement).where(
             MoneyMovement.organization_id == organization_id
         )
@@ -1218,9 +1233,30 @@ class CRUDMoneyMovement:
         if created_by_filter is not None:
             query = query.where(MoneyMovement.created_by == created_by_filter)
         if movement_type:
-            query = query.where(MoneyMovement.movement_type == movement_type)
+            # Soporta CSV: "tp_adjustment_credit,tp_adjustment_debit"
+            if "," in movement_type:
+                types = [t.strip() for t in movement_type.split(",") if t.strip()]
+                query = query.where(MoneyMovement.movement_type.in_(types))
+            else:
+                query = query.where(MoneyMovement.movement_type == movement_type)
         if status_filter:
             query = query.where(MoneyMovement.status == status_filter)
+        if adjustment_class:
+            query = query.where(MoneyMovement.adjustment_class == adjustment_class)
+        if commission_source:
+            # Split commission_accrual segun el Sale linkeado tenga o no double_entry_id.
+            # Defensivo: sale_id NULL cuenta como "sale" (orfanas no esperadas).
+            if commission_source == "double_entry":
+                dp_sale_ids = select(Sale.id).where(Sale.double_entry_id.is_not(None))
+                query = query.where(MoneyMovement.sale_id.in_(dp_sale_ids))
+            else:  # "sale"
+                non_dp_sale_ids = select(Sale.id).where(Sale.double_entry_id.is_(None))
+                query = query.where(
+                    or_(
+                        MoneyMovement.sale_id.is_(None),
+                        MoneyMovement.sale_id.in_(non_dp_sale_ids),
+                    )
+                )
         if account_id:
             query = query.where(MoneyMovement.account_id == account_id)
         if third_party_id:
@@ -1244,9 +1280,12 @@ class CRUDMoneyMovement:
                 )
             )
 
-        # Total count
-        count_query = select(func.count()).select_from(query.subquery())
-        total = db.scalar(count_query)
+        # Total count + suma de amount sobre el set filtrado completo (antes de paginar)
+        subq = query.subquery()
+        total = db.scalar(select(func.count()).select_from(subq))
+        amount_sum = db.scalar(
+            select(func.coalesce(func.sum(subq.c.amount), 0))
+        ) or Decimal("0")
 
         # Aplicar orden y paginacion
         query = (
@@ -1261,7 +1300,7 @@ class CRUDMoneyMovement:
         )
 
         movements = list(db.scalars(query).unique().all())
-        return movements, total
+        return movements, total, Decimal(str(amount_sum))
 
     def get_by_account(
         self,
@@ -1270,7 +1309,7 @@ class CRUDMoneyMovement:
         organization_id: UUID,
         skip: int = 0,
         limit: int = 100,
-    ) -> tuple[List[MoneyMovement], int]:
+    ) -> tuple[List[MoneyMovement], int, Decimal]:
         """Movimientos de una cuenta especifica."""
         return self.get_multi(
             db=db,
@@ -1287,7 +1326,7 @@ class CRUDMoneyMovement:
         organization_id: UUID,
         skip: int = 0,
         limit: int = 100,
-    ) -> tuple[List[MoneyMovement], int]:
+    ) -> tuple[List[MoneyMovement], int, Decimal]:
         """Movimientos de un tercero especifico."""
         return self.get_multi(
             db=db,

@@ -4,8 +4,8 @@ import type {
   DoubleEntryCreate,
   DoubleEntryFullUpdate,
   DoubleEntryLiquidateRequest,
+  PaginatedDoubleEntryResponse,
 } from "@/types/double-entry";
-import type { PaginatedResponse } from "@/types/common";
 
 interface DoubleEntryFilters {
   skip?: number;
@@ -14,11 +14,12 @@ interface DoubleEntryFilters {
   search?: string;
   date_from?: string;
   date_to?: string;
+  date_field?: "date" | "liquidated_at";
 }
 
 export const doubleEntryService = {
-  getAll: async (filters: DoubleEntryFilters = {}): Promise<PaginatedResponse<DoubleEntryResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<DoubleEntryResponse>>("/api/v1/double-entries", { params: filters });
+  getAll: async (filters: DoubleEntryFilters = {}): Promise<PaginatedDoubleEntryResponse> => {
+    const response = await apiClient.get<PaginatedDoubleEntryResponse>("/api/v1/double-entries", { params: filters });
     return response.data;
   },
 

@@ -863,6 +863,62 @@ class TestDoubleEntryAPI:
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
 
+    def test_list_double_entries_by_liquidated_at(
+        self,
+        client,
+        org_headers,
+        test_supplier,
+        test_customer,
+        test_material,
+        db_session,
+    ):
+        """date_field=liquidated_at filtra por fecha de liquidacion (paridad con P&L decision #42)."""
+        from app.models.double_entry import DoubleEntry
+        from sqlalchemy import update as sa_update
+
+        # Crear DP con date=2026-02-28
+        payload = _create_payload(
+            test_supplier.id, test_customer.id, test_material.id,
+            date="2026-02-28", invoice_number="INV-FEB",
+        )
+        resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+        assert resp.status_code == 201
+        de_id = resp.json()["id"]
+
+        # Liquidarla
+        liq = client.patch(f"/api/v1/double-entries/{de_id}/liquidate", json={}, headers=org_headers)
+        assert liq.status_code == 200
+
+        # Forzar liquidated_at = 2026-03-03 directo en DB
+        db_session.execute(
+            sa_update(DoubleEntry)
+            .where(DoubleEntry.id == de_id)
+            .values(liquidated_at=datetime(2026, 3, 3, 12, 0))
+        )
+        db_session.commit()
+
+        # date_field=date con marzo → NO aparece
+        r1 = client.get(
+            "/api/v1/double-entries?date_from=2026-03-01&date_to=2026-03-31&date_field=date",
+            headers=org_headers,
+        )
+        assert r1.status_code == 200
+        assert r1.json()["total"] == 0
+
+        # date_field=liquidated_at con marzo → SI aparece
+        r2 = client.get(
+            "/api/v1/double-entries?date_from=2026-03-01&date_to=2026-03-31&date_field=liquidated_at",
+            headers=org_headers,
+        )
+        assert r2.status_code == 200
+        assert r2.json()["total"] == 1
+        assert r2.json()["items"][0]["id"] == de_id
+
+    def test_list_double_entries_date_field_invalid(self, client, org_headers):
+        """date_field invalido → 422."""
+        resp = client.get("/api/v1/double-entries?date_field=foo", headers=org_headers)
+        assert resp.status_code == 422
+
 
 class TestDoubleEntryPerKgCommission:
     """Comision por kilo en doble partida."""

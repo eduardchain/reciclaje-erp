@@ -110,6 +110,9 @@ export default function TreasuryPage() {
   const typeFilter = searchParams.get("tab") || "all";
   const page = parseInt(searchParams.get("page") || "0", 10);
   const search = searchParams.get("search") || "";
+  const statusFromUrl = searchParams.get("status") || undefined;
+  const adjustmentClassFromUrl = searchParams.get("adjustment_class") as "gain" | "loss" | null;
+  const commissionSourceFromUrl = searchParams.get("commission_source") as "sale" | "double_entry" | null;
 
   const setParam = (updates: Record<string, string | null>) => {
     setSearchParams((prev) => {
@@ -122,13 +125,23 @@ export default function TreasuryPage() {
     }, { replace: true });
   };
 
+  // Tab compuesto `tp_adjustment` mapea a CSV de tipos
+  const movementTypeQuery = typeFilter === "all"
+    ? undefined
+    : typeFilter === "tp_adjustment"
+      ? "tp_adjustment_credit,tp_adjustment_debit"
+      : typeFilter;
+
   const { data, isLoading } = useMoneyMovements({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
-    movement_type: typeFilter === "all" ? undefined : typeFilter,
+    movement_type: movementTypeQuery,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
     search: search || undefined,
+    status: statusFromUrl,
+    adjustment_class: adjustmentClassFromUrl || undefined,
+    commission_source: commissionSourceFromUrl || undefined,
   });
 
   useScrollRestoration(!isLoading);
@@ -136,8 +149,8 @@ export default function TreasuryPage() {
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
   const kpis = useMemo(() => {
-    const items = data?.items ?? [];
-    const totalAmount = items.reduce((sum, m) => sum + Number(m.amount), 0);
+    // Suma sobre TODO el set filtrado (no solo la pagina actual) — paridad con P&L.
+    const totalAmount = data?.total_amount_sum ?? 0;
     const count = data?.total ?? 0;
     return {
       total: { current_value: totalAmount, previous_value: 0, change_percentage: null } as MetricCard,
@@ -151,10 +164,13 @@ export default function TreasuryPage() {
     const all = await moneyMovementService.getAll({
       skip: 0,
       limit: 10000,
-      movement_type: typeFilter === "all" ? undefined : typeFilter,
+      movement_type: movementTypeQuery,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
       search: search || undefined,
+      status: statusFromUrl,
+      adjustment_class: adjustmentClassFromUrl || undefined,
+      commission_source: commissionSourceFromUrl || undefined,
     });
     if (all.total > all.items.length) {
       toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
@@ -196,16 +212,59 @@ export default function TreasuryPage() {
         </div>
       )}
 
-      <Tabs value={typeFilter} onValueChange={(v) => setParam({ tab: v, page: null, search: null })}>
+      <Tabs value={typeFilter} onValueChange={(v) => setParam({ tab: v, page: null, search: null, status: null, adjustment_class: null, commission_source: null })}>
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="all">Todos</TabsTrigger>
           <TabsTrigger value="payment_to_supplier">Pagos</TabsTrigger>
           <TabsTrigger value="collection_from_client">Cobros</TabsTrigger>
           <TabsTrigger value="expense">Gastos</TabsTrigger>
           <TabsTrigger value="transfer_out">Transf.</TabsTrigger>
-          <TabsTrigger value="provision_deposit">Provisiones</TabsTrigger>
+          <TabsTrigger value="provision_deposit">Dep. Provisiones</TabsTrigger>
+          <TabsTrigger value="service_income">Ing. Servicios</TabsTrigger>
+          <TabsTrigger value="provision_expense">Gasto Provisión</TabsTrigger>
+          <TabsTrigger value="expense_accrual">Causaciones</TabsTrigger>
+          <TabsTrigger value="deferred_expense">Diferidos</TabsTrigger>
+          <TabsTrigger value="depreciation_expense">Depreciación</TabsTrigger>
+          <TabsTrigger value="commission_accrual">Comisiones</TabsTrigger>
+          <TabsTrigger value="tp_adjustment">Aj. Terceros</TabsTrigger>
         </TabsList>
       </Tabs>
+
+      {/* Filtros activos del drill-down de P&L */}
+      {(statusFromUrl || adjustmentClassFromUrl || commissionSourceFromUrl) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {statusFromUrl && (
+            <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-xs px-2 py-1 rounded border border-emerald-200">
+              Estado: {statusFromUrl === "confirmed" ? "Confirmados" : statusFromUrl}
+              <button onClick={() => setParam({ status: null })} className="hover:bg-emerald-100 rounded px-1">×</button>
+            </span>
+          )}
+          {adjustmentClassFromUrl === "gain" && (
+            <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-xs px-2 py-1 rounded border border-emerald-200">
+              Ganancia
+              <button onClick={() => setParam({ adjustment_class: null })} className="hover:bg-emerald-100 rounded px-1">×</button>
+            </span>
+          )}
+          {adjustmentClassFromUrl === "loss" && (
+            <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 text-xs px-2 py-1 rounded border border-red-200">
+              Pérdida
+              <button onClick={() => setParam({ adjustment_class: null })} className="hover:bg-red-100 rounded px-1">×</button>
+            </span>
+          )}
+          {commissionSourceFromUrl === "sale" && (
+            <span className="inline-flex items-center gap-1 bg-violet-50 text-violet-700 text-xs px-2 py-1 rounded border border-violet-200">
+              Origen: Ventas
+              <button onClick={() => setParam({ commission_source: null })} className="hover:bg-violet-100 rounded px-1">×</button>
+            </span>
+          )}
+          {commissionSourceFromUrl === "double_entry" && (
+            <span className="inline-flex items-center gap-1 bg-violet-50 text-violet-700 text-xs px-2 py-1 rounded border border-violet-200">
+              Origen: Pasa Mano
+              <button onClick={() => setParam({ commission_source: null })} className="hover:bg-violet-100 rounded px-1">×</button>
+            </span>
+          )}
+        </div>
+      )}
 
       <DataTable
         columns={columns}

@@ -14,6 +14,8 @@ interface MovementFilters {
   date_to?: string;
   status?: string;
   search?: string;
+  adjustment_class?: "gain" | "loss";
+  commission_source?: "sale" | "double_entry";
 }
 
 export function useMoneyMovements(filters: MovementFilters = {}) {

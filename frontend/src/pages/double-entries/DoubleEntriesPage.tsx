@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, TrendingUp, Hash, Percent, MoreHorizontal, Eye, XCircle, FileText, Pencil, CheckCircle } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, DollarSign, Hash, Percent, MoreHorizontal, Eye, XCircle, FileText, Pencil, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -152,6 +152,7 @@ export default function DoubleEntriesPage() {
   const status = searchParams.get("tab") || "all";
   const page = parseInt(searchParams.get("page") || "0", 10);
   const search = searchParams.get("search") || "";
+  const dateField = (searchParams.get("date_field") as "date" | "liquidated_at" | null) || "date";
 
   const setParam = (updates: Record<string, string | null>) => {
     setSearchParams((prev) => {
@@ -171,6 +172,7 @@ export default function DoubleEntriesPage() {
     search: search || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
+    date_field: dateField === "date" ? undefined : dateField,
   });
 
   useScrollRestoration(!isLoading);
@@ -178,16 +180,19 @@ export default function DoubleEntriesPage() {
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
   const kpis = useMemo(() => {
-    const items = data?.items ?? [];
-    const totalProfit = items.reduce((sum, d) => sum + d.profit, 0);
+    // Totales sobre TODO el set filtrado (no solo la pagina actual) — paridad con P&L.
+    const totalPurchase = data?.total_purchase_cost_sum ?? 0;
+    const totalSale = data?.total_sale_amount_sum ?? 0;
+    const totalProfit = data?.total_profit_sum ?? 0;
     const count = data?.total ?? 0;
-    const avgMargin = items.length > 0
-      ? items.reduce((sum, d) => sum + d.profit_margin, 0) / items.length
-      : 0;
+    // Margen ponderado = profit / sale * 100 (mas preciso que promedio simple de margenes).
+    const margin = totalSale > 0 ? (totalProfit / totalSale) * 100 : 0;
     return {
+      purchase: { current_value: totalPurchase, previous_value: 0, change_percentage: null } as MetricCard,
+      sale: { current_value: totalSale, previous_value: 0, change_percentage: null } as MetricCard,
       profit: { current_value: totalProfit, previous_value: 0, change_percentage: null } as MetricCard,
       count: { current_value: count, previous_value: 0, change_percentage: null } as MetricCard,
-      margin: { current_value: avgMargin, previous_value: 0, change_percentage: null } as MetricCard,
+      margin: { current_value: margin, previous_value: 0, change_percentage: null } as MetricCard,
     };
   }, [data]);
 
@@ -201,6 +206,7 @@ export default function DoubleEntriesPage() {
       search: search || undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
+      date_field: dateField === "date" ? undefined : dateField,
     });
     if (all.total > all.items.length) {
       toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
@@ -219,40 +225,68 @@ export default function DoubleEntriesPage() {
       </PageHeader>
 
       {/* KPI Cards */}
-      {isLoading ? (
-        <div className={`grid grid-cols-1 ${canViewProfit ? "md:grid-cols-3" : "md:grid-cols-1"} gap-4`}>
-          {Array.from({ length: canViewProfit ? 3 : 1 }).map((_, i) => (
-            <Skeleton key={i} className="h-28 rounded-lg" />
-          ))}
-        </div>
-      ) : (
-        <div className={`grid grid-cols-1 ${canViewValues ? "md:grid-cols-3" : "md:grid-cols-1"} gap-4`}>
-          {canViewProfit && (
+      {(() => {
+        // Total Ventas + Costo Compras + Utilidad + Margen + Operaciones
+        const cards: number = (canViewValues ? 2 : 0) + (canViewProfit ? 2 : 0) + 1;
+        const gridClass =
+          cards >= 5
+            ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4"
+            : cards >= 3
+              ? "grid grid-cols-1 md:grid-cols-3 gap-4"
+              : cards === 2
+                ? "grid grid-cols-1 md:grid-cols-2 gap-4"
+                : "grid grid-cols-1 gap-4";
+        return isLoading ? (
+          <div className={gridClass}>
+            {Array.from({ length: cards }).map((_, i) => (
+              <Skeleton key={i} className="h-28 rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <div className={gridClass}>
+            {canViewValues && (
+              <KpiCard
+                label="Total Ventas"
+                metric={kpis.sale}
+                icon={<DollarSign className="h-4 w-4" />}
+                accentColor="emerald"
+              />
+            )}
+            {canViewValues && (
+              <KpiCard
+                label="Costo Compras"
+                metric={kpis.purchase}
+                icon={<TrendingDown className="h-4 w-4" />}
+                accentColor="rose"
+              />
+            )}
+            {canViewProfit && (
+              <KpiCard
+                label="Utilidad Pasa Mano"
+                metric={kpis.profit}
+                icon={<TrendingUp className="h-4 w-4" />}
+                accentColor="violet"
+              />
+            )}
+            {canViewProfit && (
+              <KpiCard
+                label="Margen"
+                metric={kpis.margin}
+                icon={<Percent className="h-4 w-4" />}
+                accentColor="amber"
+                formatValue={formatPercentage}
+              />
+            )}
             <KpiCard
-              label="Utilidad Total"
-              metric={kpis.profit}
-              icon={<TrendingUp className="h-4 w-4" />}
-              accentColor="emerald"
+              label="Operaciones"
+              metric={kpis.count}
+              icon={<Hash className="h-4 w-4" />}
+              accentColor="sky"
+              formatValue={(n) => String(n)}
             />
-          )}
-          <KpiCard
-            label="Operaciones"
-            metric={kpis.count}
-            icon={<Hash className="h-4 w-4" />}
-            accentColor="sky"
-            formatValue={(n) => String(n)}
-          />
-          {canViewProfit && (
-            <KpiCard
-              label="Margen Promedio"
-              metric={kpis.margin}
-              icon={<Percent className="h-4 w-4" />}
-              accentColor="violet"
-              formatValue={formatPercentage}
-            />
-          )}
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       <Tabs value={status} onValueChange={(v) => setParam({ tab: v, page: null, search: null })}>
         <TabsList>
@@ -262,6 +296,15 @@ export default function DoubleEntriesPage() {
           <TabsTrigger value="cancelled">Canceladas</TabsTrigger>
         </TabsList>
       </Tabs>
+
+      {dateField === "liquidated_at" && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1 bg-sky-50 text-sky-700 text-xs px-2 py-1 rounded border border-sky-200">
+            Por fecha de liquidación
+            <button onClick={() => setParam({ date_field: null })} className="hover:bg-sky-100 rounded px-1">×</button>
+          </span>
+        </div>
+      )}
 
       <DataTable
         columns={columns}

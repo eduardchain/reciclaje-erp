@@ -623,13 +623,15 @@ def create_batch_expenses(
 def list_money_movements(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=10000),
-    movement_type: Optional[str] = Query(None, description="Filtrar por tipo de movimiento"),
+    movement_type: Optional[str] = Query(None, description="Filtrar por tipo de movimiento (acepta CSV: 'type1,type2')"),
     status_filter: Optional[str] = Query(None, alias="status", description="Filtrar por estado"),
     account_id: Optional[UUID] = Query(None, description="Filtrar por cuenta"),
     third_party_id: Optional[UUID] = Query(None, description="Filtrar por tercero"),
     date_from: Optional[date] = Query(None, description="Fecha desde"),
     date_to: Optional[date] = Query(None, description="Fecha hasta"),
     search: Optional[str] = Query(None, description="Buscar en descripcion o referencia"),
+    adjustment_class: Optional[str] = Query(None, pattern="^(gain|loss)$", description="Filtra tp_adjustment por clase P&L: gain o loss"),
+    commission_source: Optional[str] = Query(None, pattern="^(sale|double_entry)$", description="Filtra commission_accrual por origen: sale (venta regular) o double_entry (Pasa Mano)"),
     org_context: dict = Depends(require_permission("treasury.view_movements")),
     db: Session = Depends(get_db),
 ):
@@ -643,7 +645,7 @@ def list_money_movements(
     can_view_all = org_context["is_admin"] or "treasury.view_all_movements" in org_context["user_permissions"]
     created_by_filter = None if can_view_all else org_context["user_id"]
 
-    movements, total = money_movement.get_multi(
+    movements, total, amount_sum = money_movement.get_multi(
         db=db,
         organization_id=org_context["organization_id"],
         skip=skip,
@@ -657,12 +659,15 @@ def list_money_movements(
         search=search,
         allowed_account_ids=allowed,
         created_by_filter=created_by_filter,
+        adjustment_class=adjustment_class,
+        commission_source=commission_source,
     )
     return {
         "items": [_to_response(m, db) for m in movements],
         "total": total,
         "skip": skip,
         "limit": limit,
+        "total_amount_sum": float(amount_sum),
     }
 
 

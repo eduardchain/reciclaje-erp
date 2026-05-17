@@ -1,6 +1,5 @@
 import apiClient from "./api";
-import type { SaleResponse, SaleCreate, SaleFullUpdate, SaleLiquidateRequest } from "@/types/sale";
-import type { PaginatedResponse } from "@/types/common";
+import type { SaleResponse, SaleCreate, SaleFullUpdate, SaleLiquidateRequest, PaginatedSaleResponse } from "@/types/sale";
 
 interface SaleFilters {
   skip?: number;
@@ -10,11 +9,13 @@ interface SaleFilters {
   date_from?: string;
   date_to?: string;
   search?: string;
+  dp_filter?: "all" | "exclude" | "only";
+  date_field?: "date" | "liquidated_at";
 }
 
 export const saleService = {
-  getAll: async (filters: SaleFilters = {}): Promise<PaginatedResponse<SaleResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<SaleResponse>>("/api/v1/sales", { params: filters });
+  getAll: async (filters: SaleFilters = {}): Promise<PaginatedSaleResponse> => {
+    const response = await apiClient.get<PaginatedSaleResponse>("/api/v1/sales", { params: filters });
     return response.data;
   },
 

@@ -893,46 +893,48 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         warehouse_id: Optional[UUID] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
-        search: Optional[str] = None
-    ) -> tuple[List[Sale], int]:
+        search: Optional[str] = None,
+        dp_filter: str = "all",
+        date_field: str = "date",
+    ) -> tuple[List[Sale], int, Decimal, Decimal, Decimal]:
         """
         Get multiple sales with filtering and pagination.
-        
-        Args:
-            db: Database session
-            organization_id: Organization UUID
-            skip: Number of records to skip
-            limit: Maximum records to return
-            status: Filter by status
-            customer_id: Filter by customer
-            warehouse_id: Filter by warehouse
-            date_from: Filter sales on or after this date
-            date_to: Filter sales on or before this date
-            search: Search in sale_number, customer name, notes, vehicle_plate, invoice_number
-        
+
         Returns:
-            Tuple of (sales, total_count)
+            Tuple of (sales, total_count, total_amount_sum, total_profit_sum, total_commissions_sum).
+            Las sumas cubren TODO el set filtrado, no solo la pagina retornada —
+            necesarias para que las KPIs en el listado coincidan con el P&L
+            cuando hay paginacion.
         """
         from sqlalchemy import or_, cast, String
-        
+
         # Base query
         query = select(Sale).where(Sale.organization_id == organization_id)
-        
+
         # Apply filters
         if status:
             query = query.where(Sale.status == status)
-        
+
         if customer_id:
             query = query.where(Sale.customer_id == customer_id)
-        
+
         if warehouse_id:
             query = query.where(Sale.warehouse_id == warehouse_id)
-        
+
+        # Campo de fecha intercambiable (default 'date' = comportamiento previo)
+        date_col = Sale.liquidated_at if date_field == "liquidated_at" else Sale.date
+
         if date_from:
-            query = query.where(Sale.date >= date_from)
-        
+            query = query.where(date_col >= date_from)
+
         if date_to:
-            query = query.where(Sale.date < date_to)
+            query = query.where(date_col < date_to)
+
+        # Filtro Pasa Mano (paridad con P&L que excluye DPs)
+        if dp_filter == "exclude":
+            query = query.where(Sale.double_entry_id.is_(None))
+        elif dp_filter == "only":
+            query = query.where(Sale.double_entry_id.is_not(None))
         
         if search:
             # Search in: sale_number (as text), customer name, notes, vehicle_plate, invoice_number
@@ -946,10 +948,23 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 )
             )
         
-        # Get total count before pagination
-        count_query = select(func.count()).select_from(query.subquery())
-        total = db.scalar(count_query)
-        
+        # Get total count + aggregates BEFORE pagination (sobre el set filtrado completo)
+        subq = query.subquery()
+        total = db.scalar(select(func.count()).select_from(subq)) or 0
+        amount_sum = db.scalar(select(func.coalesce(func.sum(subq.c.total_amount), 0))) or Decimal("0")
+        # Profit: SaleLine.total_price - (SaleLine.unit_cost * SaleLine.quantity) — mismo calculo que calculate_profit()
+        profit_sum = db.scalar(
+            select(func.coalesce(
+                func.sum(SaleLine.total_price - (SaleLine.unit_cost * SaleLine.quantity)),
+                0,
+            )).where(SaleLine.sale_id.in_(select(subq.c.id)))
+        ) or Decimal("0")
+        # Comisiones: sumar SaleCommission.commission_amount sobre las ventas del set filtrado
+        commissions_sum = db.scalar(
+            select(func.coalesce(func.sum(SaleCommission.commission_amount), 0))
+            .where(SaleCommission.sale_id.in_(select(subq.c.id)))
+        ) or Decimal("0")
+
         # Apply pagination and eager loading
         query = (
             query
@@ -964,10 +979,10 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             .offset(skip)
             .limit(limit)
         )
-        
+
         sales = list(db.scalars(query).unique().all())
-        
-        return sales, total
+
+        return sales, total, Decimal(str(amount_sum)), Decimal(str(profit_sum)), Decimal(str(commissions_sum))
     
     def get(
         self,

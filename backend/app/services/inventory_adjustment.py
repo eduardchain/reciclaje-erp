@@ -558,8 +558,13 @@ class CRUDInventoryAdjustment:
         status_filter: Optional[str] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        exclude_migration_seeds: bool = False,
     ) -> tuple[List[InventoryAdjustment], int]:
-        """Listar ajustes con filtros y paginacion."""
+        """Listar ajustes con filtros y paginacion.
+
+        exclude_migration_seeds: si True, excluye ajustes con reason ILIKE 'Carga inicial migracion%'
+        (paridad con _calculate_profit, decision #28).
+        """
         query = select(InventoryAdjustment).where(
             InventoryAdjustment.organization_id == organization_id
         )
@@ -574,6 +579,10 @@ class CRUDInventoryAdjustment:
             query = query.where(InventoryAdjustment.date >= date_from)
         if date_to:
             query = query.where(InventoryAdjustment.date < date_to)
+        if exclude_migration_seeds:
+            query = query.where(
+                ~InventoryAdjustment.reason.ilike("Carga inicial migracion%")
+            )
 
         count_query = select(func.count()).select_from(query.subquery())
         total = db.scalar(count_query)

@@ -12,6 +12,7 @@ interface DoubleEntryFilters {
   search?: string;
   date_from?: string;
   date_to?: string;
+  date_field?: "date" | "liquidated_at";
 }
 
 export function useDoubleEntries(filters: DoubleEntryFilters = {}) {

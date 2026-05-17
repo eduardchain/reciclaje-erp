@@ -527,12 +527,158 @@ class TestListSales:
         """Test filtering sales by status."""
         # Act
         response = client.get("/api/v1/sales?status=registered", headers=org_headers)
-        
+
         # Assert
         assert response.status_code == 200
         data = response.json()
         assert len(data["items"]) == 1
         assert data["items"][0]["status"] == "registered"
+
+    def test_list_sales_dp_filter_exclude(
+        self,
+        client,
+        org_headers,
+        db_session,
+        test_organization,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+    ):
+        """dp_filter=exclude oculta ventas asociadas a Doble Partida."""
+        from app.schemas.sale import SaleCreate, SaleLineCreate
+        from app.services.sale import crud_sale
+        from sqlalchemy import text as sql_text
+        from uuid import uuid4
+
+        # Crear 2 ventas; a la segunda le forzamos double_entry_id (bypass FK)
+        sale1 = crud_sale.create(
+            db=db_session,
+            obj_in=SaleCreate(
+                customer_id=test_customer.id,
+                warehouse_id=test_warehouse.id,
+                date=datetime(2026, 3, 1, 12, 0),
+                lines=[SaleLineCreate(material_id=test_material_with_stock.id, quantity=Decimal("5"), unit_price=Decimal("50"))],
+                commissions=[],
+                auto_liquidate=False,
+            ),
+            organization_id=test_organization.id,
+        )
+        sale2 = crud_sale.create(
+            db=db_session,
+            obj_in=SaleCreate(
+                customer_id=test_customer.id,
+                warehouse_id=test_warehouse.id,
+                date=datetime(2026, 3, 2, 12, 0),
+                lines=[SaleLineCreate(material_id=test_material_with_stock.id, quantity=Decimal("5"), unit_price=Decimal("50"))],
+                commissions=[],
+                auto_liquidate=False,
+            ),
+            organization_id=test_organization.id,
+        )
+        db_session.commit()
+
+        # Bypass FK para asignar double_entry_id a sale2
+        db_session.execute(sql_text("SET session_replication_role = replica"))
+        db_session.execute(
+            sql_text("UPDATE sales SET double_entry_id = :de_id WHERE id = :sale_id"),
+            {"de_id": str(uuid4()), "sale_id": str(sale2.id)},
+        )
+        db_session.commit()
+        db_session.execute(sql_text("SET session_replication_role = DEFAULT"))
+
+        # all
+        r_all = client.get("/api/v1/sales?dp_filter=all", headers=org_headers)
+        assert r_all.status_code == 200
+        assert r_all.json()["total"] == 2
+
+        # exclude
+        r_excl = client.get("/api/v1/sales?dp_filter=exclude", headers=org_headers)
+        assert r_excl.status_code == 200
+        assert r_excl.json()["total"] == 1
+        assert r_excl.json()["items"][0]["sale_number"] == sale1.sale_number
+
+        # only
+        r_only = client.get("/api/v1/sales?dp_filter=only", headers=org_headers)
+        assert r_only.status_code == 200
+        assert r_only.json()["total"] == 1
+        assert r_only.json()["items"][0]["sale_number"] == sale2.sale_number
+
+    def test_list_sales_dp_filter_invalid(self, client, org_headers):
+        """dp_filter con valor invalido → 422."""
+        response = client.get("/api/v1/sales?dp_filter=foo", headers=org_headers)
+        assert response.status_code == 422
+
+    def test_list_sales_by_liquidated_at(
+        self,
+        client,
+        org_headers,
+        db_session,
+        test_organization,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+        test_money_account,
+    ):
+        """date_field=liquidated_at filtra por fecha de liquidacion, no de documento.
+
+        Una venta registrada en febrero y liquidada en marzo NO aparece con date_field=date&date_from=marzo,
+        pero SI aparece con date_field=liquidated_at&date_from=marzo. Paridad con _calculate_profit (decision #42).
+        """
+        from app.schemas.sale import SaleCreate, SaleLineCreate
+        from app.services.sale import crud_sale
+
+        sale = crud_sale.create(
+            db=db_session,
+            obj_in=SaleCreate(
+                customer_id=test_customer.id,
+                warehouse_id=test_warehouse.id,
+                date=datetime(2026, 2, 28, 12, 0),
+                lines=[SaleLineCreate(material_id=test_material_with_stock.id, quantity=Decimal("5"), unit_price=Decimal("50"))],
+                commissions=[],
+                auto_liquidate=False,
+            ),
+            organization_id=test_organization.id,
+        )
+        db_session.commit()
+
+        # Liquidar con fecha 3 de marzo
+        crud_sale.liquidate(
+            db=db_session,
+            sale_id=sale.id,
+            organization_id=test_organization.id,
+            liquidation_date=datetime(2026, 3, 3, 12, 0),
+        )
+        db_session.commit()
+
+        # date_field=date con marzo → NO aparece
+        r1 = client.get(
+            "/api/v1/sales?date_from=2026-03-01&date_to=2026-03-31&date_field=date",
+            headers=org_headers,
+        )
+        assert r1.status_code == 200
+        assert r1.json()["total"] == 0
+
+        # date_field=liquidated_at con marzo → SI aparece
+        r2 = client.get(
+            "/api/v1/sales?date_from=2026-03-01&date_to=2026-03-31&date_field=liquidated_at",
+            headers=org_headers,
+        )
+        assert r2.status_code == 200
+        assert r2.json()["total"] == 1
+        assert r2.json()["items"][0]["sale_number"] == sale.sale_number
+
+        # date_field=date con febrero → SI aparece (default behavior)
+        r3 = client.get(
+            "/api/v1/sales?date_from=2026-02-01&date_to=2026-02-28&date_field=date",
+            headers=org_headers,
+        )
+        assert r3.status_code == 200
+        assert r3.json()["total"] == 1
+
+    def test_list_sales_date_field_invalid(self, client, org_headers):
+        """date_field con valor invalido → 422."""
+        response = client.get("/api/v1/sales?date_field=foo", headers=org_headers)
+        assert response.status_code == 422
 
 
 class TestGetSale:

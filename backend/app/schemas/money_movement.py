@@ -399,8 +399,13 @@ class MoneyMovementSummary(BaseModel):
 
 
 class PaginatedMoneyMovementResponse(BaseModel):
-    """Respuesta paginada de movimientos de dinero."""
+    """Respuesta paginada de movimientos de dinero.
+
+    `total_amount_sum` cubre TODO el set filtrado (no solo la pagina actual)
+    — necesario para que las KPIs coincidan con el P&L cuando hay paginacion.
+    """
     items: list[MoneyMovementResponse]
     total: int
     skip: int
     limit: int
+    total_amount_sum: float = 0.0

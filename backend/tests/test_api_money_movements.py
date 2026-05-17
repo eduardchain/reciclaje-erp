@@ -772,6 +772,92 @@ class TestListAndFilter:
         assert data["total"] == 3
         assert len(data["items"]) == 1
 
+    def test_list_multi_movement_type_csv(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier, test_customer,
+    ):
+        """movement_type acepta CSV → IN clause."""
+        client.post("/api/v1/money-movements/supplier-payment", json={
+            "supplier_id": str(test_supplier.id),
+            "amount": 100000,
+            "account_id": str(test_account.id),
+            "date": "2026-02-14T10:00:00Z",
+        }, headers=org_headers)
+        client.post("/api/v1/money-movements/customer-collection", json={
+            "customer_id": str(test_customer.id),
+            "amount": 200000,
+            "account_id": str(test_account.id),
+            "date": "2026-02-14T11:00:00Z",
+        }, headers=org_headers)
+        client.post("/api/v1/money-movements/service-income", json={
+            "amount": 50000,
+            "account_id": str(test_account.id),
+            "description": "x",
+            "date": "2026-02-14T12:00:00Z",
+        }, headers=org_headers)
+
+        # CSV con 2 tipos → 2 movimientos
+        resp = client.get(
+            "/api/v1/money-movements?movement_type=payment_to_supplier,collection_from_client",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 2
+        types = {item["movement_type"] for item in resp.json()["items"]}
+        assert types == {"payment_to_supplier", "collection_from_client"}
+
+    def test_list_by_adjustment_class(
+        self, client: TestClient, org_headers: dict,
+        test_supplier, test_customer,
+    ):
+        """Filtrar tp_adjustments por adjustment_class=gain|loss."""
+        # tp_adjustment_credit con clase gain (saldo proveedor negativo, saldo sube → reduce deuda nuestra → gain)
+        client.post("/api/v1/money-movements/tp-adjustment-credit", json={
+            "third_party_id": str(test_supplier.id),
+            "amount": 50000,
+            "adjustment_class": "gain",
+            "date": "2026-02-14T10:00:00Z",
+            "description": "Ajuste gain",
+        }, headers=org_headers)
+        # tp_adjustment_debit con clase loss
+        client.post("/api/v1/money-movements/tp-adjustment-debit", json={
+            "third_party_id": str(test_customer.id),
+            "amount": 30000,
+            "adjustment_class": "loss",
+            "date": "2026-02-14T11:00:00Z",
+            "description": "Ajuste loss",
+        }, headers=org_headers)
+
+        # Solo gain
+        r_gain = client.get(
+            "/api/v1/money-movements?movement_type=tp_adjustment_credit,tp_adjustment_debit&adjustment_class=gain",
+            headers=org_headers,
+        )
+        assert r_gain.status_code == 200
+        assert r_gain.json()["total"] == 1
+        assert r_gain.json()["items"][0]["adjustment_class"] == "gain"
+
+        # Solo loss
+        r_loss = client.get(
+            "/api/v1/money-movements?movement_type=tp_adjustment_credit,tp_adjustment_debit&adjustment_class=loss",
+            headers=org_headers,
+        )
+        assert r_loss.status_code == 200
+        assert r_loss.json()["total"] == 1
+        assert r_loss.json()["items"][0]["adjustment_class"] == "loss"
+
+        # Sin filtro adjustment_class → ambos
+        r_all = client.get(
+            "/api/v1/money-movements?movement_type=tp_adjustment_credit,tp_adjustment_debit",
+            headers=org_headers,
+        )
+        assert r_all.json()["total"] == 2
+
+    def test_list_adjustment_class_invalid(self, client: TestClient, org_headers: dict):
+        """adjustment_class invalido → 422."""
+        resp = client.get("/api/v1/money-movements?adjustment_class=foo", headers=org_headers)
+        assert resp.status_code == 422
+
 
 # ---------------------------------------------------------------------------
 # Tests: Visibilidad por permiso view_all_movements

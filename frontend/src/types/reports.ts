@@ -84,6 +84,8 @@ export interface ProfitAndLossResponse {
   total_gross_profit: number;
   operating_expenses: number;
   commissions_paid: number;
+  commissions_paid_sales: number;
+  commissions_paid_dp: number;
   net_profit: number;
   net_margin: number;
   expenses_by_category: ExpenseCategoryBreakdown[];

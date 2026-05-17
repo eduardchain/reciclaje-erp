@@ -640,3 +640,52 @@ class TestListAndGet:
         data_dec = resp_dec.json()
         assert data_dec["total"] == 1
         assert data_dec["items"][0]["adjustment_type"] == "decrease"
+
+    def test_list_adjustments_exclude_migration_seeds(
+        self, client, org_headers, test_material, test_warehouse
+    ):
+        """exclude_migration_seeds=true excluye ajustes con reason 'Carga inicial migracion%'.
+
+        Paridad con _calculate_profit que excluye seeds del adjustment_net (decision #28).
+        """
+        # Ajuste normal
+        client.post(
+            f"{BASE_URL}/increase",
+            json={
+                "material_id": str(test_material.id),
+                "warehouse_id": str(test_warehouse.id),
+                "quantity": 10.0,
+                "unit_cost": 30.0,
+                "date": "2026-02-14T10:00:00Z",
+                "reason": "Ajuste operacional",
+            },
+            headers=org_headers,
+        )
+        # Ajuste con marker de migracion
+        client.post(
+            f"{BASE_URL}/increase",
+            json={
+                "material_id": str(test_material.id),
+                "warehouse_id": str(test_warehouse.id),
+                "quantity": 100.0,
+                "unit_cost": 30.0,
+                "date": "2026-02-14T11:00:00Z",
+                "reason": "Carga inicial migracion TestOrg",
+            },
+            headers=org_headers,
+        )
+
+        # Sin filtro → ambos
+        r_all = client.get(BASE_URL, headers=org_headers)
+        assert r_all.status_code == 200
+        assert r_all.json()["total"] == 2
+
+        # Con exclude_migration_seeds=true → solo el operacional
+        r_excl = client.get(
+            BASE_URL,
+            params={"exclude_migration_seeds": "true"},
+            headers=org_headers,
+        )
+        assert r_excl.status_code == 200
+        assert r_excl.json()["total"] == 1
+        assert "Carga inicial migracion" not in r_excl.json()["items"][0]["reason"]

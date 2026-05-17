@@ -187,8 +187,15 @@ class DoubleEntryResponse(BaseModel):
 
 
 class PaginatedDoubleEntryResponse(BaseModel):
-    """Paginated response for double-entry lists."""
+    """Paginated response for double-entry lists.
+
+    Los totales agregados cubren TODO el set filtrado (no solo la pagina actual)
+    — necesarios para que las KPIs coincidan con el P&L cuando hay paginacion.
+    """
     items: List[DoubleEntryResponse]
     total: int
     skip: int
     limit: int
+    total_purchase_cost_sum: float = 0.0
+    total_sale_amount_sum: float = 0.0
+    total_profit_sum: float = 0.0

@@ -215,6 +215,8 @@ async def list_sales(
     date_from: Optional[date] = Query(None, description="Filter sales on or after this date"),
     date_to: Optional[date] = Query(None, description="Filter sales on or before this date"),
     search: Optional[str] = Query(None, description="Search in sale number, customer name, notes, vehicle_plate, invoice_number"),
+    dp_filter: str = Query("all", pattern="^(all|exclude|only)$", description="Filtro Pasa Mano: all (default), exclude (sin DPs), only (solo DPs)"),
+    date_field: str = Query("date", pattern="^(date|liquidated_at)$", description="Campo de fecha: date (default) o liquidated_at (paridad con P&L)"),
     db: Session = Depends(get_db),
     org_context: dict = Depends(require_permission("sales.view")),
 ) -> PaginatedSaleResponse:
@@ -223,8 +225,8 @@ async def list_sales(
         # Exclusive upper bound para cubrir todas las horas del dia en cualquier timezone
         date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
         date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
-        
-        sales, total = crud_sale.get_multi(
+
+        sales, total, amount_sum, profit_sum, commissions_sum = crud_sale.get_multi(
             db=db,
             organization_id=org_context["organization_id"],
             skip=skip,
@@ -235,16 +237,21 @@ async def list_sales(
             date_from=date_from_dt,
             date_to=date_to_dt,
             search=search,
+            dp_filter=dp_filter,
+            date_field=date_field,
         )
-        
+
         # Enrich each sale with joined data
         items = [SaleResponse(**_enrich_sale_response(s, db=db)) for s in sales]
-        
+
         return PaginatedSaleResponse(
             items=items,
             total=total,
             skip=skip,
             limit=limit,
+            total_amount_sum=float(amount_sum),
+            total_profit_sum=float(profit_sum),
+            total_commissions_sum=float(commissions_sum),
         )
     
     except Exception as e:
@@ -274,21 +281,24 @@ async def list_pending_sales(
 ) -> PaginatedSaleResponse:
     """List sales pending liquidation (status='registered')."""
     try:
-        sales, total = crud_sale.get_multi(
+        sales, total, amount_sum, profit_sum, commissions_sum = crud_sale.get_multi(
             db=db,
             organization_id=org_context["organization_id"],
             skip=skip,
             limit=limit,
             status="registered",
         )
-        
+
         items = [SaleResponse(**_enrich_sale_response(s, db=db)) for s in sales]
-        
+
         return PaginatedSaleResponse(
             items=items,
             total=total,
             skip=skip,
             limit=limit,
+            total_amount_sum=float(amount_sum),
+            total_profit_sum=float(profit_sum),
+            total_commissions_sum=float(commissions_sum),
         )
     
     except Exception as e:
@@ -349,21 +359,24 @@ async def list_sales_by_customer(
 ) -> PaginatedSaleResponse:
     """List sales by customer."""
     try:
-        sales, total = crud_sale.get_multi(
+        sales, total, amount_sum, profit_sum, commissions_sum = crud_sale.get_multi(
             db=db,
             organization_id=org_context["organization_id"],
             skip=skip,
             limit=limit,
             customer_id=customer_id,
         )
-        
+
         items = [SaleResponse(**_enrich_sale_response(s, db=db)) for s in sales]
-        
+
         return PaginatedSaleResponse(
             items=items,
             total=total,
             skip=skip,
             limit=limit,
+            total_amount_sum=float(amount_sum),
+            total_profit_sum=float(profit_sum),
+            total_commissions_sum=float(commissions_sum),
         )
     
     except Exception as e:

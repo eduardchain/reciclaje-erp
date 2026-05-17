@@ -13,6 +13,8 @@ interface SaleFilters {
   date_from?: string;
   date_to?: string;
   search?: string;
+  dp_filter?: "all" | "exclude" | "only";
+  date_field?: "date" | "liquidated_at";
 }
 
 export function useSales(filters: SaleFilters = {}) {

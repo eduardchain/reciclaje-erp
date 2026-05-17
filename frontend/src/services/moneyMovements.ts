@@ -21,8 +21,8 @@ import type {
   ThirdPartyAdjustmentCreate,
   AnnulMovementRequest,
   UpdateClassificationRequest,
+  PaginatedMoneyMovementResponse,
 } from "@/types/money-movement";
-import type { PaginatedResponse } from "@/types/common";
 
 interface MovementFilters {
   skip?: number;
@@ -34,11 +34,13 @@ interface MovementFilters {
   date_to?: string;
   status?: string;
   search?: string;
+  adjustment_class?: "gain" | "loss";
+  commission_source?: "sale" | "double_entry";
 }
 
 export const moneyMovementService = {
-  getAll: async (filters: MovementFilters = {}): Promise<PaginatedResponse<MoneyMovementResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<MoneyMovementResponse>>("/api/v1/money-movements", { params: filters });
+  getAll: async (filters: MovementFilters = {}): Promise<PaginatedMoneyMovementResponse> => {
+    const response = await apiClient.get<PaginatedMoneyMovementResponse>("/api/v1/money-movements", { params: filters });
     return response.data;
   },
 

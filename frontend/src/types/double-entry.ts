@@ -1,4 +1,4 @@
-import type { BaseEntity } from "./common";
+import type { BaseEntity, PaginatedResponse } from "./common";
 import type { SaleCommissionCreate, SaleCommissionResponse } from "./sale";
 
 export type DoubleEntryStatus = "registered" | "liquidated" | "cancelled";
@@ -64,6 +64,16 @@ export interface DoubleEntryLiquidateRequest {
   lines?: DoubleEntryLiquidateLineUpdate[] | null;
   commissions?: SaleCommissionCreate[] | null;
   liquidation_date?: string;
+}
+
+/**
+ * Listado paginado de doble partidas con totales agregados sobre el set filtrado.
+ * Necesario para que las KPIs coincidan con el P&L cuando hay paginacion.
+ */
+export interface PaginatedDoubleEntryResponse extends PaginatedResponse<DoubleEntryResponse> {
+  total_purchase_cost_sum: number;
+  total_sale_amount_sum: number;
+  total_profit_sum: number;
 }
 
 export interface DoubleEntryResponse extends BaseEntity {

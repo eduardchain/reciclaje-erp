@@ -414,11 +414,11 @@ class ReportService:
             elif adj_class == "gain":
                 tp_adj_gain += Decimal(str(total))
 
-        # 5. Service income + expenses by category + commissions
+        # 5. Service income + expenses by category (sin commission_accrual — se calcula aparte abajo)
         mm_filters = [
             MoneyMovement.organization_id == organization_id,
             self._active_at_cutoff(MoneyMovement.status, "confirmed"),
-            MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "commission_accrual", "service_income"]),
+            MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "service_income"]),
         ]
         if has_dates:
             mm_filters += [MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to]
@@ -443,7 +443,6 @@ class ReportService:
 
         service_income = Decimal("0")
         operating_expenses = Decimal("0")
-        commissions_paid = Decimal("0")
         expenses_by_cat: list[ExpenseCategoryBreakdown] = []
 
         for mt, cat_id, cat_name, is_direct, total in mm_rows:
@@ -459,8 +458,42 @@ class ReportService:
                     total_amount=float(total_dec),
                     source_type=mt,
                 ))
-            elif mt == "commission_accrual":
-                commissions_paid += total_dec
+
+        # Comisiones causadas (commission_accrual) — split por origen:
+        # - Sale.double_entry_id IS NULL → comision de venta regular
+        # - Sale.double_entry_id IS NOT NULL → comision de doble partida
+        # - sale_id IS NULL (orfana, defensivo) → cuenta como venta regular
+        comm_filters = [
+            MoneyMovement.organization_id == organization_id,
+            self._active_at_cutoff(MoneyMovement.status, "confirmed"),
+            MoneyMovement.movement_type == "commission_accrual",
+        ]
+        if has_dates:
+            comm_filters += [MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to]
+
+        comm_rows = db.execute(
+            select(
+                case(
+                    (Sale.double_entry_id.is_not(None), "double_entry"),
+                    else_="sale",
+                ).label("source"),
+                func.coalesce(func.sum(MoneyMovement.amount), 0),
+            )
+            .select_from(MoneyMovement)
+            .outerjoin(Sale, MoneyMovement.sale_id == Sale.id)
+            .where(*comm_filters)
+            .group_by("source")
+        ).all()
+
+        commissions_paid_sales = Decimal("0")
+        commissions_paid_dp = Decimal("0")
+        for source, total in comm_rows:
+            total_dec = Decimal(str(total))
+            if source == "double_entry":
+                commissions_paid_dp += total_dec
+            else:
+                commissions_paid_sales += total_dec
+        commissions_paid = commissions_paid_sales + commissions_paid_dp
 
         # Calculos
         gross_profit_sales = sales_revenue - cogs
@@ -482,6 +515,8 @@ class ReportService:
             "service_income": service_income,
             "operating_expenses": operating_expenses,
             "commissions_paid": commissions_paid,
+            "commissions_paid_sales": commissions_paid_sales,
+            "commissions_paid_dp": commissions_paid_dp,
             "expenses_by_cat": expenses_by_cat,
             "gross_profit_sales": gross_profit_sales,
             "total_gross_profit": total_gross_profit,
@@ -519,6 +554,8 @@ class ReportService:
             total_gross_profit=float(r["total_gross_profit"]),
             operating_expenses=float(r["operating_expenses"]),
             commissions_paid=float(r["commissions_paid"]),
+            commissions_paid_sales=float(r["commissions_paid_sales"]),
+            commissions_paid_dp=float(r["commissions_paid_dp"]),
             net_profit=float(r["net_profit"]),
             net_margin=self._safe_pct(r["net_profit"], margin_base) if margin_base else 0.0,
             expenses_by_category=r["expenses_by_cat"],
