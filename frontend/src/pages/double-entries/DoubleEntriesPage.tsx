@@ -154,6 +154,13 @@ export default function DoubleEntriesPage() {
   const search = searchParams.get("search") || "";
   const dateField = (searchParams.get("date_field") as "date" | "liquidated_at" | null) || "date";
 
+  // URL date params override Zustand (decision #50). Lectura directa por render.
+  const urlDateFrom = searchParams.get("date_from");
+  const urlDateTo = searchParams.get("date_to");
+  const effectiveDateFrom = urlDateFrom || dateFrom;
+  const effectiveDateTo = urlDateTo || dateTo;
+  const hasUrlDateOverride = Boolean(urlDateFrom || urlDateTo);
+
   const setParam = (updates: Record<string, string | null>) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -165,13 +172,19 @@ export default function DoubleEntriesPage() {
     }, { replace: true });
   };
 
+  const clearDateOverride = () => {
+    if (hasUrlDateOverride) setParam({ date_from: null, date_to: null });
+  };
+  const handleDateFromChange = (v: string) => { setDateFrom(v); clearDateOverride(); };
+  const handleDateToChange = (v: string) => { setDateTo(v); clearDateOverride(); };
+
   const { data, isLoading } = useDoubleEntries({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
     status: status === "all" ? undefined : status,
     search: search || undefined,
-    date_from: dateFrom || undefined,
-    date_to: dateTo || undefined,
+    date_from: effectiveDateFrom || undefined,
+    date_to: effectiveDateTo || undefined,
     date_field: dateField === "date" ? undefined : dateField,
   });
 
@@ -204,8 +217,8 @@ export default function DoubleEntriesPage() {
       limit: 1000,
       status: status === "all" ? undefined : status,
       search: search || undefined,
-      date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
+      date_from: effectiveDateFrom || undefined,
+      date_to: effectiveDateTo || undefined,
       date_field: dateField === "date" ? undefined : dateField,
     });
     if (all.total > all.items.length) {
@@ -297,12 +310,20 @@ export default function DoubleEntriesPage() {
         </TabsList>
       </Tabs>
 
-      {dateField === "liquidated_at" && (
+      {(dateField === "liquidated_at" || hasUrlDateOverride) && (
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1 bg-sky-50 text-sky-700 text-xs px-2 py-1 rounded border border-sky-200">
-            Por fecha de liquidación
-            <button onClick={() => setParam({ date_field: null })} className="hover:bg-sky-100 rounded px-1">×</button>
-          </span>
+          {hasUrlDateOverride && (
+            <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-1 rounded border border-indigo-200">
+              Rango: {formatDate(effectiveDateFrom)} – {formatDate(effectiveDateTo)}
+              <button onClick={clearDateOverride} className="hover:bg-indigo-100 rounded px-1" aria-label="Limpiar override de fechas">×</button>
+            </span>
+          )}
+          {dateField === "liquidated_at" && (
+            <span className="inline-flex items-center gap-1 bg-sky-50 text-sky-700 text-xs px-2 py-1 rounded border border-sky-200">
+              Por fecha de liquidación
+              <button onClick={() => setParam({ date_field: null })} className="hover:bg-sky-100 rounded px-1">×</button>
+            </span>
+          )}
         </div>
       )}
 
@@ -324,7 +345,7 @@ export default function DoubleEntriesPage() {
         toolbar={
           <div className="flex items-center gap-3">
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar..." />
-            <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
+            <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
           </div>
         }
       />

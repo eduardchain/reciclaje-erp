@@ -71,12 +71,32 @@ export default function TransformationsPage() {
   const [annulReason, setAnnulReason] = useState("");
   const annulMutation = useAnnulTransformation();
 
+  // URL date params override Zustand (decision #50). Lectura directa por render —
+  // NO useState (que solo inicializa una vez al montar y no reacciona a la URL).
+  const urlDateFrom = searchParams.get("date_from");
+  const urlDateTo = searchParams.get("date_to");
+  const effectiveDateFrom = urlDateFrom || dateFrom;
+  const effectiveDateTo = urlDateTo || dateTo;
+  const hasUrlDateOverride = Boolean(urlDateFrom || urlDateTo);
+
+  const clearDateOverride = () => {
+    if (!hasUrlDateOverride) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("date_from");
+      next.delete("date_to");
+      return next;
+    }, { replace: true });
+  };
+  const handleDateFromChange = (v: string) => { setDateFrom(v); clearDateOverride(); };
+  const handleDateToChange = (v: string) => { setDateTo(v); clearDateOverride(); };
+
   const { data, isLoading } = useTransformations({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
     status: statusFilter === "all" ? undefined : statusFilter,
-    date_from: dateFrom || undefined,
-    date_to: dateTo || undefined,
+    date_from: effectiveDateFrom || undefined,
+    date_to: effectiveDateTo || undefined,
   });
 
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
@@ -98,8 +118,8 @@ export default function TransformationsPage() {
       skip: 0,
       limit: 1000,
       status: statusFilter === "all" ? undefined : statusFilter,
-      date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
+      date_from: effectiveDateFrom || undefined,
+      date_to: effectiveDateTo || undefined,
     });
     if (all.total > all.items.length) {
       toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
@@ -176,13 +196,32 @@ export default function TransformationsPage() {
         </div>
       )}
 
-      <Tabs value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(0); setSearchParams(v === "all" ? {} : { tab: v }, { replace: true }); }}>
+      <Tabs value={statusFilter} onValueChange={(v) => {
+        setStatusFilter(v);
+        setPage(0);
+        // Preservar URL params existentes (date_from/date_to/etc).
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          if (v === "all") next.delete("tab");
+          else next.set("tab", v);
+          return next;
+        }, { replace: true });
+      }}>
         <TabsList>
           <TabsTrigger value="all">Todos</TabsTrigger>
           <TabsTrigger value="confirmed">Confirmados</TabsTrigger>
           <TabsTrigger value="annulled">Anulados</TabsTrigger>
         </TabsList>
       </Tabs>
+
+      {hasUrlDateOverride && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-1 rounded border border-indigo-200">
+            Rango: {formatDate(effectiveDateFrom)} – {formatDate(effectiveDateTo)}
+            <button onClick={clearDateOverride} className="hover:bg-indigo-100 rounded px-1" aria-label="Limpiar override de fechas">×</button>
+          </span>
+        </div>
+      )}
 
       <DataTable
         columns={columns}
@@ -202,7 +241,7 @@ export default function TransformationsPage() {
         toolbar={
           <div className="flex items-center gap-3">
             <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(0); }} placeholder="Buscar transformacion..." />
-            <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
+            <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
           </div>
         }
       />

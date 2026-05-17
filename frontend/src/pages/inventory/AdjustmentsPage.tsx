@@ -88,12 +88,32 @@ export default function AdjustmentsPage() {
 
   const excludeMigration = searchParams.get("exclude_migration") === "true";
 
+  // URL date params override Zustand (decision #50). Lectura directa por render —
+  // NO useState (que solo inicializa una vez al montar y no reacciona a la URL).
+  const urlDateFrom = searchParams.get("date_from");
+  const urlDateTo = searchParams.get("date_to");
+  const effectiveDateFrom = urlDateFrom || dateFrom;
+  const effectiveDateTo = urlDateTo || dateTo;
+  const hasUrlDateOverride = Boolean(urlDateFrom || urlDateTo);
+
+  const clearDateOverride = () => {
+    if (!hasUrlDateOverride) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("date_from");
+      next.delete("date_to");
+      return next;
+    }, { replace: true });
+  };
+  const handleDateFromChange = (v: string) => { setDateFrom(v); clearDateOverride(); };
+  const handleDateToChange = (v: string) => { setDateTo(v); clearDateOverride(); };
+
   const { data, isLoading } = useAdjustments({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
     status: statusFilter === "all" ? undefined : statusFilter,
-    date_from: dateFrom || undefined,
-    date_to: dateTo || undefined,
+    date_from: effectiveDateFrom || undefined,
+    date_to: effectiveDateTo || undefined,
     exclude_migration_seeds: excludeMigration || undefined,
   });
 
@@ -116,8 +136,8 @@ export default function AdjustmentsPage() {
       skip: 0,
       limit: 1000,
       status: statusFilter === "all" ? undefined : statusFilter,
-      date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
+      date_from: effectiveDateFrom || undefined,
+      date_to: effectiveDateTo || undefined,
       exclude_migration_seeds: excludeMigration || undefined,
     });
     if (all.total > all.items.length) {
@@ -191,11 +211,13 @@ export default function AdjustmentsPage() {
       <Tabs value={statusFilter} onValueChange={(v) => {
         setStatusFilter(v);
         setPage(0);
-        // Preservar exclude_migration al cambiar tab
-        const next: Record<string, string> = {};
-        if (v !== "all") next.tab = v;
-        if (excludeMigration) next.exclude_migration = "true";
-        setSearchParams(next, { replace: true });
+        // Preservar URL params existentes (date_from/date_to/exclude_migration/etc).
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          if (v === "all") next.delete("tab");
+          else next.set("tab", v);
+          return next;
+        }, { replace: true });
       }}>
         <TabsList>
           <TabsTrigger value="all">Todos</TabsTrigger>
@@ -204,19 +226,29 @@ export default function AdjustmentsPage() {
         </TabsList>
       </Tabs>
 
-      {excludeMigration && (
+      {(excludeMigration || hasUrlDateOverride) && (
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs px-2 py-1 rounded border border-amber-200">
-            Sin seeds de migración
-            <button
-              onClick={() => {
-                const next: Record<string, string> = {};
-                if (statusFilter !== "all") next.tab = statusFilter;
-                setSearchParams(next, { replace: true });
-              }}
-              className="hover:bg-amber-100 rounded px-1"
-            >×</button>
-          </span>
+          {hasUrlDateOverride && (
+            <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-1 rounded border border-indigo-200">
+              Rango: {formatDate(effectiveDateFrom)} – {formatDate(effectiveDateTo)}
+              <button onClick={clearDateOverride} className="hover:bg-indigo-100 rounded px-1" aria-label="Limpiar override de fechas">×</button>
+            </span>
+          )}
+          {excludeMigration && (
+            <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs px-2 py-1 rounded border border-amber-200">
+              Sin seeds de migración
+              <button
+                onClick={() => {
+                  setSearchParams((prev) => {
+                    const next = new URLSearchParams(prev);
+                    next.delete("exclude_migration");
+                    return next;
+                  }, { replace: true });
+                }}
+                className="hover:bg-amber-100 rounded px-1"
+              >×</button>
+            </span>
+          )}
         </div>
       )}
 
@@ -238,7 +270,7 @@ export default function AdjustmentsPage() {
         toolbar={
           <div className="flex items-center gap-3">
             <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(0); }} placeholder="Buscar ajuste..." />
-            <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
+            <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
           </div>
         }
       />

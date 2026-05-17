@@ -114,6 +114,13 @@ export default function TreasuryPage() {
   const adjustmentClassFromUrl = searchParams.get("adjustment_class") as "gain" | "loss" | null;
   const commissionSourceFromUrl = searchParams.get("commission_source") as "sale" | "double_entry" | null;
 
+  // URL date params override Zustand (decision #50). Lectura directa por render.
+  const urlDateFrom = searchParams.get("date_from");
+  const urlDateTo = searchParams.get("date_to");
+  const effectiveDateFrom = urlDateFrom || dateFrom;
+  const effectiveDateTo = urlDateTo || dateTo;
+  const hasUrlDateOverride = Boolean(urlDateFrom || urlDateTo);
+
   const setParam = (updates: Record<string, string | null>) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -124,6 +131,12 @@ export default function TreasuryPage() {
       return next;
     }, { replace: true });
   };
+
+  const clearDateOverride = () => {
+    if (hasUrlDateOverride) setParam({ date_from: null, date_to: null });
+  };
+  const handleDateFromChange = (v: string) => { setDateFrom(v); clearDateOverride(); };
+  const handleDateToChange = (v: string) => { setDateTo(v); clearDateOverride(); };
 
   // Tab compuesto `tp_adjustment` mapea a CSV de tipos
   const movementTypeQuery = typeFilter === "all"
@@ -136,8 +149,8 @@ export default function TreasuryPage() {
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
     movement_type: movementTypeQuery,
-    date_from: dateFrom || undefined,
-    date_to: dateTo || undefined,
+    date_from: effectiveDateFrom || undefined,
+    date_to: effectiveDateTo || undefined,
     search: search || undefined,
     status: statusFromUrl,
     adjustment_class: adjustmentClassFromUrl || undefined,
@@ -165,8 +178,8 @@ export default function TreasuryPage() {
       skip: 0,
       limit: 10000,
       movement_type: movementTypeQuery,
-      date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
+      date_from: effectiveDateFrom || undefined,
+      date_to: effectiveDateTo || undefined,
       search: search || undefined,
       status: statusFromUrl,
       adjustment_class: adjustmentClassFromUrl || undefined,
@@ -231,8 +244,14 @@ export default function TreasuryPage() {
       </Tabs>
 
       {/* Filtros activos del drill-down de P&L */}
-      {(statusFromUrl || adjustmentClassFromUrl || commissionSourceFromUrl) && (
+      {(statusFromUrl || adjustmentClassFromUrl || commissionSourceFromUrl || hasUrlDateOverride) && (
         <div className="flex items-center gap-2 flex-wrap">
+          {hasUrlDateOverride && (
+            <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-1 rounded border border-indigo-200">
+              Rango: {formatDate(effectiveDateFrom)} – {formatDate(effectiveDateTo)}
+              <button onClick={clearDateOverride} className="hover:bg-indigo-100 rounded px-1" aria-label="Limpiar override de fechas">×</button>
+            </span>
+          )}
           {statusFromUrl && (
             <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-xs px-2 py-1 rounded border border-emerald-200">
               Estado: {statusFromUrl === "confirmed" ? "Confirmados" : statusFromUrl}
@@ -284,7 +303,7 @@ export default function TreasuryPage() {
         toolbar={
           <div className="flex items-center gap-3">
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar movimiento..." />
-            <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
+            <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
           </div>
         }
       />

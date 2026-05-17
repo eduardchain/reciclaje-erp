@@ -234,6 +234,15 @@ export default function SalesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
 
+  // URL date params override Zustand (decision #50): permite drill-down con bounds
+  // mes-especificos sin contaminar el filtro global de fecha. Lectura directa en
+  // cada render (NO useState) para reaccionar a cambios de URL.
+  const urlDateFrom = searchParams.get("date_from");
+  const urlDateTo = searchParams.get("date_to");
+  const effectiveDateFrom = urlDateFrom || dateFrom;
+  const effectiveDateTo = urlDateTo || dateTo;
+  const hasUrlDateOverride = Boolean(urlDateFrom || urlDateTo);
+
   const status = searchParams.get("tab") || "all";
   const page = parseInt(searchParams.get("page") || "0", 10);
   const search = searchParams.get("search") || "";
@@ -254,13 +263,21 @@ export default function SalesPage() {
     }, { replace: true });
   };
 
+  // Al cambiar el picker manualmente o limpiar el badge, drop ambos URL params
+  // para que Zustand vuelva a ser unica fuente de verdad.
+  const clearDateOverride = () => {
+    if (hasUrlDateOverride) setParam({ date_from: null, date_to: null });
+  };
+  const handleDateFromChange = (v: string) => { setDateFrom(v); clearDateOverride(); };
+  const handleDateToChange = (v: string) => { setDateTo(v); clearDateOverride(); };
+
   const { data, isLoading } = useSales({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
     status: status === "all" ? undefined : status,
     search: search || undefined,
-    date_from: dateFrom || undefined,
-    date_to: dateTo || undefined,
+    date_from: effectiveDateFrom || undefined,
+    date_to: effectiveDateTo || undefined,
     dp_filter: dpFilter === "all" ? undefined : dpFilter,
     date_field: dateField === "date" ? undefined : dateField,
   });
@@ -301,8 +318,8 @@ export default function SalesPage() {
       limit: 1000,
       status: status === "all" ? undefined : status,
       search: search || undefined,
-      date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
+      date_from: effectiveDateFrom || undefined,
+      date_to: effectiveDateTo || undefined,
       dp_filter: dpFilter === "all" ? undefined : dpFilter,
       date_field: dateField === "date" ? undefined : dateField,
     });
@@ -400,8 +417,14 @@ export default function SalesPage() {
       </Tabs>
 
       {/* Filtros activos del drill-down de P&L */}
-      {(dpFilter !== "all" || dateField !== "date") && (
+      {(dpFilter !== "all" || dateField !== "date" || hasUrlDateOverride) && (
         <div className="flex items-center gap-2 flex-wrap">
+          {hasUrlDateOverride && (
+            <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-1 rounded border border-indigo-200">
+              Rango: {formatDate(effectiveDateFrom)} – {formatDate(effectiveDateTo)}
+              <button onClick={clearDateOverride} className="hover:bg-indigo-100 rounded px-1" aria-label="Limpiar override de fechas">×</button>
+            </span>
+          )}
           {dpFilter === "exclude" && (
             <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs px-2 py-1 rounded border border-amber-200">
               Sin Pasa Mano
@@ -441,7 +464,7 @@ export default function SalesPage() {
         toolbar={
           <div className="flex items-center gap-3">
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar venta..." />
-            <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
+            <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
           </div>
         }
       />
