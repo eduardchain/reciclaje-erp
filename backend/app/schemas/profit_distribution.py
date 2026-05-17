@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.utils.dates import BusinessDate
 
@@ -54,9 +54,17 @@ class ProfitDistributionResponse(BaseModel):
     notes: Optional[str] = None
     created_by: Optional[UUID] = None
     created_at: datetime
+    status: str = "confirmed"
+    annulled_reason: Optional[str] = None
+    annulled_at: Optional[datetime] = None
+    annulled_by: Optional[UUID] = None
     lines: list[ProfitDistributionLineResponse]
 
     model_config = {"from_attributes": True}
+
+
+class ProfitDistributionAnnul(BaseModel):
+    reason: str = Field(..., min_length=1)
 
 
 # ---------------------------------------------------------------------------

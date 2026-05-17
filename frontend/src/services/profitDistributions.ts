@@ -24,4 +24,9 @@ export const profitDistributionService = {
     apiClient
       .get("/api/v1/profit-distributions/", { params })
       .then((r) => r.data),
+
+  annul: (id: string, reason: string): Promise<ProfitDistributionResponse> =>
+    apiClient
+      .post(`/api/v1/profit-distributions/${id}/annul`, { reason })
+      .then((r) => r.data),
 };

@@ -26,6 +26,10 @@ export interface ProfitDistributionResponse {
   notes?: string;
   created_by?: string;
   created_at: string;
+  status: "confirmed" | "annulled";
+  annulled_reason?: string;
+  annulled_at?: string;
+  annulled_by?: string;
   lines: ProfitDistributionLineResponse[];
 }
 

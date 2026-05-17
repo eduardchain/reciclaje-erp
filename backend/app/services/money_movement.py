@@ -1056,6 +1056,24 @@ class CRUDMoneyMovement:
                     f"No se podran registrar gastos hasta depositar fondos."
                 )
 
+        # Cascada: si era un MM de profit_distribution y la distribucion ya no
+        # tiene ningun MM activo, marcarla tambien como anulada.
+        if movement.movement_type == "profit_distribution":
+            from app.models.profit_distribution import ProfitDistributionLine
+            line = db.execute(
+                select(ProfitDistributionLine).where(
+                    ProfitDistributionLine.money_movement_id == movement.id
+                )
+            ).scalar_one_or_none()
+            if line is not None:
+                from app.services.profit_distribution import profit_distribution_service
+                profit_distribution_service._maybe_mark_distribution_annulled(
+                    db=db,
+                    distribution_id=line.distribution_id,
+                    reason=reason,
+                    user_id=user_id,
+                )
+
         db.commit()
         db.refresh(movement)
         return movement, warnings

@@ -43,3 +43,22 @@ export function useCreateDistribution() {
     },
   });
 }
+
+export function useAnnulDistribution() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      profitDistributionService.annul(id, reason),
+    onSuccess: () => {
+      toast.success("Repartición anulada");
+      queryClient.invalidateQueries({ queryKey: ["profit-distributions"] });
+      invalidateAfterTreasury(queryClient);
+    },
+    onError: (error: any) => {
+      toast.error(
+        error.response?.data?.detail || "Error al anular repartición"
+      );
+    },
+  });
+}

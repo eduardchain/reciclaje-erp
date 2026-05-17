@@ -475,3 +475,125 @@ class TestAccountStatement:
         profit_items = [i for i in items if i.get("event_type") == "profit_distribution"]
         assert len(profit_items) == 1
         assert profit_items[0]["amount"] == 10000000
+
+
+# ---------------------------------------------------------------------------
+# Tests: Anulacion de distribucion
+# ---------------------------------------------------------------------------
+
+class TestAnnulDistribution:
+    def _create(self, client, headers, partner, amount=10000000):
+        payload = {
+            "date": "2026-03-15",
+            "lines": [{"third_party_id": str(partner.id), "amount": amount}],
+        }
+        resp = client.post("/api/v1/profit-distributions/", json=payload, headers=headers)
+        assert resp.status_code == 201
+        return resp.json()
+
+    def test_annul_reverts_partner_balance(
+        self, client: TestClient, org_headers, db_session, partner_a, liquidated_sale,
+    ):
+        """Anular una reparticion debe revertir el saldo del socio."""
+        dist = self._create(client, org_headers, partner_a, amount=8000000)
+
+        db_session.expire_all()
+        db_session.refresh(partner_a)
+        assert float(partner_a.current_balance) == -8000000
+
+        resp = client.post(
+            f"/api/v1/profit-distributions/{dist['id']}/annul",
+            json={"reason": "Error de monto"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "annulled"
+        assert body["annulled_reason"] == "Error de monto"
+        assert body["annulled_at"] is not None
+
+        db_session.expire_all()
+        db_session.refresh(partner_a)
+        assert float(partner_a.current_balance) == 0
+
+    def test_annul_excluded_from_distributed_profit(
+        self, client: TestClient, org_headers, partner_a, liquidated_sale,
+    ):
+        """Una distribucion anulada no cuenta en distributed_profit."""
+        dist = self._create(client, org_headers, partner_a, amount=12000000)
+
+        before = client.get("/api/v1/profit-distributions/available", headers=org_headers).json()
+        assert before["distributed_profit"] == 12000000
+
+        client.post(
+            f"/api/v1/profit-distributions/{dist['id']}/annul",
+            json={"reason": "test"},
+            headers=org_headers,
+        )
+
+        after = client.get("/api/v1/profit-distributions/available", headers=org_headers).json()
+        assert after["distributed_profit"] == 0
+        assert after["available_profit"] == before["accumulated_profit"]
+
+    def test_annul_already_annulled_returns_400(
+        self, client: TestClient, org_headers, partner_a, liquidated_sale,
+    ):
+        """Anular una distribucion ya anulada → 400."""
+        dist = self._create(client, org_headers, partner_a)
+        client.post(
+            f"/api/v1/profit-distributions/{dist['id']}/annul",
+            json={"reason": "test"},
+            headers=org_headers,
+        )
+        resp = client.post(
+            f"/api/v1/profit-distributions/{dist['id']}/annul",
+            json={"reason": "otro intento"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+
+    def test_annul_nonexistent_returns_404(
+        self, client: TestClient, org_headers,
+    ):
+        resp = client.post(
+            f"/api/v1/profit-distributions/{uuid4()}/annul",
+            json={"reason": "test"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 404
+
+    def test_annul_appears_in_history_as_annulled(
+        self, client: TestClient, org_headers, partner_a, liquidated_sale,
+    ):
+        """La distribucion anulada sigue en el historial pero con status='annulled'."""
+        dist = self._create(client, org_headers, partner_a)
+        client.post(
+            f"/api/v1/profit-distributions/{dist['id']}/annul",
+            json={"reason": "test"},
+            headers=org_headers,
+        )
+        resp = client.get("/api/v1/profit-distributions/", headers=org_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["status"] == "annulled"
+
+    def test_annul_individual_mm_cascades_to_distribution(
+        self, client: TestClient, org_headers, db_session, partner_a, liquidated_sale,
+    ):
+        """Anular el unico MM de una distribucion → marca la distribucion como anulada (auto)."""
+        dist = self._create(client, org_headers, partner_a, amount=6000000)
+        mm_id = dist["lines"][0]["money_movement_id"]
+
+        # Anular el MM directamente
+        resp = client.post(
+            f"/api/v1/money-movements/{mm_id}/annul",
+            json={"reason": "Anulando MM aislado"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+
+        # La distribucion debe quedar anulada por la cascada inbound
+        listing = client.get("/api/v1/profit-distributions/", headers=org_headers).json()
+        assert listing["items"][0]["status"] == "annulled"
+        assert "Auto-anulada" in listing["items"][0]["annulled_reason"]

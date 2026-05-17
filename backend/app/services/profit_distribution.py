@@ -1,4 +1,5 @@
 """Servicio para repartición de utilidades a socios."""
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -7,6 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, exists
 from sqlalchemy.orm import Session, joinedload
 
+from app.models.money_movement import MoneyMovement
 from app.models.profit_distribution import ProfitDistribution, ProfitDistributionLine
 from app.models.third_party import ThirdParty
 from app.services.money_movement import money_movement
@@ -36,12 +38,15 @@ class ProfitDistributionService:
         return r["net_profit"]
 
     def calculate_distributed_profit(self, db: Session, organization_id: UUID) -> Decimal:
-        """Total de utilidades ya distribuidas."""
+        """Total de utilidades ya distribuidas (solo distribuciones confirmadas)."""
         val = db.scalar(
             select(func.coalesce(func.sum(ProfitDistributionLine.amount), 0))
             .select_from(ProfitDistributionLine)
             .join(ProfitDistribution, ProfitDistributionLine.distribution_id == ProfitDistribution.id)
-            .where(ProfitDistribution.organization_id == organization_id)
+            .where(
+                ProfitDistribution.organization_id == organization_id,
+                ProfitDistribution.status == "confirmed",
+            )
         )
         return Decimal(str(val))
 
@@ -191,6 +196,107 @@ class ProfitDistributionService:
         return self._to_response(distribution)
 
     # ------------------------------------------------------------------
+    # Anular distribucion
+    # ------------------------------------------------------------------
+
+    def annul(
+        self,
+        db: Session,
+        distribution_id: UUID,
+        reason: str,
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+    ) -> ProfitDistributionResponse:
+        """Anular una distribucion completa: cascade a sus MoneyMovements activos."""
+        distribution = db.execute(
+            select(ProfitDistribution)
+            .options(joinedload(ProfitDistribution.lines))
+            .where(
+                ProfitDistribution.id == distribution_id,
+                ProfitDistribution.organization_id == organization_id,
+            )
+        ).unique().scalar_one_or_none()
+
+        if not distribution:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reparticion no encontrada",
+            )
+
+        if distribution.status == "annulled":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La reparticion ya esta anulada",
+            )
+
+        # Anular cada MoneyMovement activo asociado (cascada)
+        for line in distribution.lines:
+            if line.money_movement_id is None:
+                continue
+            mm = db.get(MoneyMovement, line.money_movement_id)
+            if mm and mm.status == "confirmed":
+                money_movement.annul(
+                    db=db,
+                    movement_id=mm.id,
+                    reason=reason,
+                    organization_id=organization_id,
+                    user_id=user_id,
+                )
+
+        # Marcar la distribucion como anulada
+        distribution.status = "annulled"
+        distribution.annulled_reason = reason
+        distribution.annulled_at = datetime.now(timezone.utc)
+        distribution.annulled_by = user_id
+
+        db.commit()
+
+        distribution = db.execute(
+            select(ProfitDistribution)
+            .options(
+                joinedload(ProfitDistribution.lines).joinedload(ProfitDistributionLine.third_party)
+            )
+            .where(ProfitDistribution.id == distribution.id)
+        ).unique().scalar_one()
+
+        return self._to_response(distribution)
+
+    def _maybe_mark_distribution_annulled(
+        self,
+        db: Session,
+        distribution_id: UUID,
+        reason: str,
+        user_id: Optional[UUID] = None,
+    ) -> None:
+        """Si una distribucion ya no tiene ningun MoneyMovement activo, marcarla como anulada.
+
+        Llamado desde money_movement.annul() cuando se anula un MM individual tipo
+        profit_distribution, para evitar que la distribucion siga apareciendo como
+        confirmada en el historial cuando todos sus MMs ya estan anulados.
+        """
+        distribution = db.execute(
+            select(ProfitDistribution)
+            .options(joinedload(ProfitDistribution.lines))
+            .where(ProfitDistribution.id == distribution_id)
+        ).unique().scalar_one_or_none()
+
+        if not distribution or distribution.status != "confirmed":
+            return
+
+        # Verificar si queda algun MM activo
+        for line in distribution.lines:
+            if line.money_movement_id is None:
+                continue
+            mm = db.get(MoneyMovement, line.money_movement_id)
+            if mm and mm.status == "confirmed":
+                return  # todavia hay actividad → no marcar
+
+        distribution.status = "annulled"
+        distribution.annulled_reason = f"Auto-anulada (MM individual anulado): {reason}"
+        distribution.annulled_at = datetime.now(timezone.utc)
+        distribution.annulled_by = user_id
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
@@ -221,6 +327,10 @@ class ProfitDistributionService:
             notes=d.notes,
             created_by=d.created_by,
             created_at=d.created_at,
+            status=d.status,
+            annulled_reason=d.annulled_reason,
+            annulled_at=d.annulled_at,
+            annulled_by=d.annulled_by,
             lines=[
                 ProfitDistributionLineResponse(
                     id=line.id,

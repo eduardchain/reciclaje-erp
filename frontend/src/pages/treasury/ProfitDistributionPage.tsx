@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
-import { TrendingUp, TrendingDown, DollarSign } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -16,6 +17,7 @@ import {
   usePartners,
   useCreateDistribution,
   useProfitDistributions,
+  useAnnulDistribution,
 } from "@/hooks/useProfitDistributions";
 import { formatCurrency, formatDate, toLocalDatetimeInput } from "@/utils/formatters";
 
@@ -24,11 +26,14 @@ export default function ProfitDistributionPage() {
   const { data: partners, isLoading: loadingPartners } = usePartners();
   const { data: history, isLoading: loadingHistory } = useProfitDistributions({ limit: 50 });
   const createMutation = useCreateDistribution();
+  const annulMutation = useAnnulDistribution();
 
   const [date, setDate] = useState(toLocalDatetimeInput().slice(0, 10));
   const [notes, setNotes] = useState("");
   const [amounts, setAmounts] = useState<Record<string, number>>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [annulTargetId, setAnnulTargetId] = useState<string | null>(null);
+  const [annulReason, setAnnulReason] = useState("");
 
   const totalToDistribute = useMemo(
     () => Object.values(amounts).reduce((sum, v) => sum + (v || 0), 0),
@@ -56,6 +61,19 @@ export default function ProfitDistributionPage() {
           setAmounts({});
           setNotes("");
           setConfirmOpen(false);
+        },
+      }
+    );
+  };
+
+  const handleAnnulConfirm = () => {
+    if (!annulTargetId || !annulReason.trim()) return;
+    annulMutation.mutate(
+      { id: annulTargetId, reason: annulReason.trim() },
+      {
+        onSuccess: () => {
+          setAnnulTargetId(null);
+          setAnnulReason("");
         },
       }
     );
@@ -246,30 +264,62 @@ export default function ProfitDistributionPage() {
                   <TableHead className="text-center"># Socios</TableHead>
                   <TableHead>Detalle</TableHead>
                   <TableHead>Notas</TableHead>
+                  <TableHead className="text-center">Estado</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {history.items.map((dist) => (
-                  <TableRow key={dist.id}>
-                    <TableCell>{formatDate(dist.date)}</TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatCurrency(dist.total_amount)}
-                    </TableCell>
-                    <TableCell className="text-center">{dist.lines.length}</TableCell>
-                    <TableCell>
-                      <div className="text-xs text-slate-500 space-y-0.5">
-                        {dist.lines.map((line) => (
-                          <div key={line.id}>
-                            {line.third_party_name}: {formatCurrency(line.amount)}
-                          </div>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm text-slate-500">
-                      {dist.notes || "—"}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {history.items.map((dist) => {
+                  const annulled = dist.status === "annulled";
+                  return (
+                    <TableRow key={dist.id} className={annulled ? "opacity-60" : ""}>
+                      <TableCell>{formatDate(dist.date)}</TableCell>
+                      <TableCell className={`text-right font-medium ${annulled ? "line-through text-slate-400" : ""}`}>
+                        {formatCurrency(dist.total_amount)}
+                      </TableCell>
+                      <TableCell className="text-center">{dist.lines.length}</TableCell>
+                      <TableCell>
+                        <div className="text-xs text-slate-500 space-y-0.5">
+                          {dist.lines.map((line) => (
+                            <div key={line.id}>
+                              {line.third_party_name}: {formatCurrency(line.amount)}
+                            </div>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm text-slate-500">
+                        {dist.notes || "—"}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {annulled ? (
+                          <Badge variant="secondary" className="bg-rose-100 text-rose-700" title={dist.annulled_reason ?? undefined}>
+                            Anulada
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
+                            Confirmada
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {!annulled && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                            onClick={() => {
+                              setAnnulTargetId(dist.id);
+                              setAnnulReason("");
+                            }}
+                          >
+                            <XCircle className="h-3.5 w-3.5 mr-1" />
+                            Anular
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           ) : (
@@ -284,11 +334,37 @@ export default function ProfitDistributionPage() {
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="Confirmar Repartición"
-        description={`Se distribuirán ${formatCurrency(totalToDistribute)} entre los socios seleccionados. Esta operación no se puede reversar automáticamente.`}
+        description={`Se distribuirán ${formatCurrency(totalToDistribute)} entre los socios seleccionados.`}
         onConfirm={handleConfirm}
         confirmLabel="Confirmar"
         variant="default"
       />
+
+      <ConfirmDialog
+        open={!!annulTargetId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAnnulTargetId(null);
+            setAnnulReason("");
+          }
+        }}
+        title="Anular Repartición"
+        description="Se revertirán los saldos de los socios afectados y se anularán los movimientos asociados. Esta acción no se puede deshacer."
+        confirmLabel="Anular"
+        variant="destructive"
+        onConfirm={handleAnnulConfirm}
+        loading={annulMutation.isPending}
+        disabled={!annulReason.trim()}
+      >
+        <div className="py-2">
+          <Label>Razón de anulación *</Label>
+          <Input
+            value={annulReason}
+            onChange={(e) => setAnnulReason(e.target.value)}
+            placeholder="Ej: Error en monto, distribución duplicada..."
+          />
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

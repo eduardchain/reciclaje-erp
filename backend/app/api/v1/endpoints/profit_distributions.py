@@ -1,4 +1,6 @@
 """Endpoints para repartición de utilidades a socios."""
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -6,6 +8,7 @@ from app.api.deps import get_db, require_permission
 from app.schemas.profit_distribution import (
     AvailableProfitResponse,
     PartnerResponse,
+    ProfitDistributionAnnul,
     ProfitDistributionCreate,
     ProfitDistributionResponse,
 )
@@ -64,4 +67,21 @@ def list_distributions(
         organization_id=org_context["organization_id"],
         skip=skip,
         limit=limit,
+    )
+
+
+@router.post("/{distribution_id}/annul", response_model=ProfitDistributionResponse)
+def annul_distribution(
+    distribution_id: UUID,
+    data: ProfitDistributionAnnul,
+    org_context: dict = Depends(require_permission("treasury.manage_distributions")),
+    db: Session = Depends(get_db),
+):
+    """Anular una reparticion completa. Cascada anulando los MoneyMovements asociados."""
+    return profit_distribution_service.annul(
+        db=db,
+        distribution_id=distribution_id,
+        reason=data.reason,
+        organization_id=org_context["organization_id"],
+        user_id=org_context.get("user_id"),
     )

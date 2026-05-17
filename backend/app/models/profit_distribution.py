@@ -36,6 +36,14 @@ class ProfitDistribution(Base, OrganizationMixin, TimestampMixin):
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
 
+    # Anulacion: status 'confirmed' (default) | 'annulled'
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="confirmed")
+    annulled_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    annulled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    annulled_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
     # Relaciones
     lines: Mapped[List["ProfitDistributionLine"]] = relationship(
         "ProfitDistributionLine",
