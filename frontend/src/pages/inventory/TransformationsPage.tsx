@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, ArrowLeft, Calculator, Hash, Puzzle, MoreHorizontal, Eye, XCircle } from "lucide-react";
+import { Plus, ArrowLeft, Calculator, Hash, Puzzle, MoreHorizontal, Eye, XCircle, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -99,6 +99,16 @@ export default function TransformationsPage() {
     date_to: effectiveDateTo || undefined,
   });
 
+  // Fetch separado para KPI "Utilidad/Perdida": SIEMPRE confirmed (mismo filtro
+  // que el P&L), independiente del tab activo. Limit alto para sumar todo el rango.
+  const { data: confirmedData } = useTransformations({
+    skip: 0,
+    limit: 1000,
+    status: "confirmed",
+    date_from: effectiveDateFrom || undefined,
+    date_to: effectiveDateTo || undefined,
+  });
+
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
   const kpis = useMemo(() => {
@@ -106,12 +116,17 @@ export default function TransformationsPage() {
     const totalValue = items.reduce((sum, t) => sum + t.source_total_value, 0);
     const count = data?.total ?? 0;
     const totalWaste = items.reduce((sum, t) => sum + t.waste_quantity, 0);
+    const confirmed = confirmedData?.items ?? [];
+    const profitLoss = confirmed.reduce((sum, t) => sum + (t.value_difference ?? 0), 0);
+    const wasteValue = confirmed.reduce((sum, t) => sum + (t.waste_value ?? 0), 0);
     return {
       total: { current_value: totalValue, previous_value: 0, change_percentage: null } as MetricCard,
       count: { current_value: count, previous_value: 0, change_percentage: null } as MetricCard,
       waste: { current_value: totalWaste, previous_value: 0, change_percentage: null } as MetricCard,
+      profitLoss: { current_value: profitLoss, previous_value: 0, change_percentage: null } as MetricCard,
+      wasteValue: { current_value: wasteValue, previous_value: 0, change_percentage: null } as MetricCard,
     };
-  }, [data]);
+  }, [data, confirmedData]);
 
   const handleExportAll = async () => {
     const all = await inventoryService.getTransformations({
@@ -166,13 +181,13 @@ export default function TransformationsPage() {
       </PageHeader>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-[120px] rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <KpiCard
             label="Valor Transformado"
             metric={kpis.total}
@@ -192,6 +207,18 @@ export default function TransformationsPage() {
             icon={<Puzzle className="h-4 w-4" />}
             accentColor="amber"
             formatValue={(n) => n.toFixed(2) + " kg"}
+          />
+          <KpiCard
+            label="Perdida por Merma (Confirmadas)"
+            metric={kpis.wasteValue}
+            icon={<Puzzle className="h-4 w-4" />}
+            accentColor="rose"
+          />
+          <KpiCard
+            label="Utilidad/Perdida (Confirmadas)"
+            metric={kpis.profitLoss}
+            icon={<TrendingUp className="h-4 w-4" />}
+            accentColor={kpis.profitLoss.current_value >= 0 ? "emerald" : "rose"}
           />
         </div>
       )}

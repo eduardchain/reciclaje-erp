@@ -1,5 +1,6 @@
 import { useSearchParams } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useDateFilter } from "@/stores/dateFilterStore";
 import ReportsLayout from "./ReportsLayout";
 import ProfitAndLossPeriodView from "./ProfitAndLossPeriodView";
 import ProfitAndLossMonthlyView from "./ProfitAndLossMonthlyView";
@@ -9,18 +10,23 @@ type PnlView = (typeof VALID_VIEWS)[number];
 
 export default function ProfitAndLossPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { pnlView, setPnlView } = useDateFilter();
   const rawView = searchParams.get("view");
-  // Fallback silencioso a "period" si valor invalido (decision #50).
-  const view: PnlView = (VALID_VIEWS as readonly string[]).includes(rawView ?? "")
+  // Source of truth: URL > store > "period". Persistir en store al cambiar para
+  // que al volver desde sidebar (sin params) se restaure el ultimo tab usado.
+  const validUrlView = (VALID_VIEWS as readonly string[]).includes(rawView ?? "")
     ? (rawView as PnlView)
-    : "period";
+    : null;
+  const view: PnlView = validUrlView ?? pnlView;
 
   const setView = (v: string) => {
+    const next: PnlView = (VALID_VIEWS as readonly string[]).includes(v) ? (v as PnlView) : "period";
+    setPnlView(next);
     setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (v === "period") next.delete("view");
-      else next.set("view", v);
-      return next;
+      const params = new URLSearchParams(prev);
+      if (next === "period") params.delete("view");
+      else params.set("view", next);
+      return params;
     }, { replace: true });
   };
 

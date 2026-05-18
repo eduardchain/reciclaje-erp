@@ -92,10 +92,14 @@ function withDateRange(base: string, period_from: string, period_to: string): st
 
 export default function ProfitAndLossMonthlyView() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
+  const { dateFrom, dateTo, setDateFrom, setDateTo, pnlCutoffDay, setPnlCutoffDay } = useDateFilter();
 
-  const cutoffParam = parseInt(searchParams.get("cutoff_day") || "1", 10);
-  const cutoffDay = isNaN(cutoffParam) || cutoffParam < 1 || cutoffParam > 28 ? 1 : cutoffParam;
+  // Source of truth: URL > store > 1. Al cambiar persistir en ambos para que al
+  // volver desde sidebar (sin params) se restaure el ultimo cutoff usado.
+  const urlCutoff = searchParams.get("cutoff_day");
+  const cutoffFromUrl = urlCutoff != null ? parseInt(urlCutoff, 10) : NaN;
+  const validUrlCutoff = !isNaN(cutoffFromUrl) && cutoffFromUrl >= 1 && cutoffFromUrl <= 28 ? cutoffFromUrl : null;
+  const cutoffDay = validUrlCutoff ?? pnlCutoffDay;
   const [cutoffInput, setCutoffInput] = useState(String(cutoffDay));
 
   // Sincroniza input local cuando cambia URL externamente.
@@ -111,6 +115,7 @@ export default function ProfitAndLossMonthlyView() {
 
   const commitCutoffDay = (v: number) => {
     const clamped = Math.max(1, Math.min(28, v));
+    setPnlCutoffDay(clamped);
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       if (clamped === 1) next.delete("cutoff_day");
