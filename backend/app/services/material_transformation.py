@@ -38,6 +38,18 @@ class CRUDMaterialTransformation:
     y agrega stock a los materiales destino con costos distribuidos.
     """
 
+    # Allowlist de columnas ordenables — SQL injection prevenida.
+    SORTABLE_COLUMNS = {
+        "transformation_number",
+        "date",
+        "source_quantity",
+        "source_total_value",
+        "waste_value",
+        "value_difference",
+        "created_at",
+    }
+    DEFAULT_SORT_COLUMN = "date"
+
     # ======================================================================
     # Metodos publicos
     # ======================================================================
@@ -475,6 +487,8 @@ class CRUDMaterialTransformation:
         status_filter: Optional[str] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        sort_by: Optional[str] = None,
+        sort_dir: str = "desc",
     ) -> tuple[List[MaterialTransformation], int]:
         """Listar transformaciones con filtros y paginacion."""
         query = select(MaterialTransformation).where(
@@ -493,6 +507,12 @@ class CRUDMaterialTransformation:
         count_query = select(func.count()).select_from(query.subquery())
         total = db.scalar(count_query)
 
+        # Sort con allowlist + tiebreaker estable id ASC.
+        col_name = sort_by if (sort_by and sort_by in self.SORTABLE_COLUMNS) else self.DEFAULT_SORT_COLUMN
+        sort_column = getattr(MaterialTransformation, col_name)
+        direction = "asc" if str(sort_dir).lower() == "asc" else "desc"
+        order_clause = sort_column.desc() if direction == "desc" else sort_column.asc()
+
         query = (
             query.options(
                 joinedload(MaterialTransformation.source_material),
@@ -502,7 +522,7 @@ class CRUDMaterialTransformation:
                 joinedload(MaterialTransformation.lines)
                 .joinedload(MaterialTransformationLine.destination_warehouse),
             )
-            .order_by(MaterialTransformation.date.desc(), MaterialTransformation.transformation_number.desc())
+            .order_by(order_clause, MaterialTransformation.transformation_number.desc(), MaterialTransformation.id.asc())
             .offset(skip)
             .limit(limit)
         )

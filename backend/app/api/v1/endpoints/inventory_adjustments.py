@@ -215,6 +215,8 @@ def list_adjustments(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     exclude_migration_seeds: bool = Query(False, description="Si true, excluye seeds de migracion (paridad con P&L)"),
+    sort_by: Optional[str] = Query(None, description="Columna a ordenar (allowlist en service, fallback silencioso a 'date')"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$", description="Direccion: asc | desc"),
     org_context: dict = Depends(require_any_permission("inventory.view", "inventory.view_adjustments")),
     db: Session = Depends(get_db),
 ):
@@ -232,6 +234,8 @@ def list_adjustments(
         date_from=date_from_dt,
         date_to=date_to_dt,
         exclude_migration_seeds=exclude_migration_seeds,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
 
     items = [InventoryAdjustmentResponse(**_to_response(a)) for a in adjustments]

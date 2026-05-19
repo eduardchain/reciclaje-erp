@@ -11,11 +11,16 @@ interface SaleFilters {
   search?: string;
   dp_filter?: "all" | "exclude" | "only";
   date_field?: "date" | "liquidated_at";
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export const saleService = {
   getAll: async (filters: SaleFilters = {}): Promise<PaginatedSaleResponse> => {
-    const response = await apiClient.get<PaginatedSaleResponse>("/api/v1/sales", { params: filters });
+    const params: Record<string, unknown> = { ...filters };
+    if (!params.sort_by) delete params.sort_by;
+    if (!params.sort_dir) delete params.sort_dir;
+    const response = await apiClient.get<PaginatedSaleResponse>("/api/v1/sales", { params });
     return response.data;
   },
 

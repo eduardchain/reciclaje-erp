@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { Plus, FileText, Power, PowerOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -128,6 +128,9 @@ export default function ThirdPartiesPage() {
   const page = parseInt(searchParams.get("page") || "0", 10);
   const search = searchParams.get("search") || "";
   const showInactive = searchParams.get("inactive") === "1";
+  const sortField = searchParams.get("sort") || "";
+  const sortDesc = searchParams.get("dir") !== "asc";
+  const sorting: SortingState = sortField ? [{ id: sortField, desc: sortDesc }] : [];
 
   const setParam = (updates: Record<string, string | null>) => {
     setSearchParams((prev) => {
@@ -138,6 +141,13 @@ export default function ThirdPartiesPage() {
       });
       return next;
     }, { replace: true });
+  };
+
+  const onSortingChange = (next: SortingState) => {
+    setParam({
+      sort: next.length > 0 ? next[0].id : null,
+      dir: next.length > 0 ? (next[0].desc ? null : "asc") : null,
+    });
   };
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -152,9 +162,13 @@ export default function ThirdPartiesPage() {
   const columns = getColumns(navigate, canViewBalance, canDelete, setDeactivateTarget, setReactivateTarget, location.pathname + location.search);
 
   const { data, isLoading } = useThirdParties({
+    skip: page * PAGE_SIZE,
+    limit: PAGE_SIZE,
     search: search || undefined,
     role: roleFilter === "all" ? undefined : roleFilter,
     is_active: showInactive ? undefined : true,
+    sort_by: sortField || undefined,
+    sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
   });
   useScrollRestoration(!isLoading);
 
@@ -207,6 +221,8 @@ export default function ThirdPartiesPage() {
         totalItems={data?.total}
         onPageChange={(p) => setParam({ page: p === 0 ? null : String(p) })}
         onRowClick={(row) => { setEditItem(row); setDialogOpen(true); }}
+        sorting={sorting}
+        onSortingChange={onSortingChange}
         emptyTitle="Sin terceros"
         emptyDescription="No se encontraron terceros."
         exportFilename="ecobalance_terceros"

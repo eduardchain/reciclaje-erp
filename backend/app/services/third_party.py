@@ -26,6 +26,9 @@ from app.services.base import CRUDBase, Select, PaginatedResponse
 class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
     """CRUD operations for ThirdParty with custom methods."""
 
+    SORTABLE_COLUMNS = {"name", "current_balance", "identification_number", "created_at"}
+    DEFAULT_SORT_COLUMN = "name"
+
     def _apply_search_filter(self, query: Select, search: str) -> Select:
         """Apply search filter to name, identification_number, and email."""
         search_term = f"%{search}%"
@@ -155,11 +158,10 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         count_query = select(func.count()).select_from(query.subquery())
         total = db.execute(count_query).scalar_one()
 
-        sort_column = getattr(self.model, sort_by, self.model.name)
-        if sort_order.lower() == "desc":
-            query = query.order_by(sort_column.desc())
-        else:
-            query = query.order_by(sort_column.asc())
+        sort_column, sort_dir = self._resolve_sort_column(sort_by, sort_order)
+        order_clause = sort_column.desc() if sort_dir == "desc" else sort_column.asc()
+        # Tiebreaker estable: id ASC para paginacion consistente cuando hay ties.
+        query = query.order_by(order_clause, self.model.id.asc())
 
         # Eager load category_assignments + category + parent para serializar
         query = query.options(

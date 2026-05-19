@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { Plus, TrendingUp, TrendingDown, DollarSign, Hash, Percent, MoreHorizontal, Eye, XCircle, FileText, Pencil, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -121,9 +121,9 @@ function getColumns(canViewProfit: boolean): ColumnDef<DoubleEntryResponse, unkn
     { accessorKey: "date", header: "FECHA", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
     { accessorKey: "customer_name", header: "CLIENTE" },
     { accessorKey: "materials_summary", header: "DETALLE", cell: ({ row }) => <span className="text-xs text-slate-600">{row.original.materials_summary}</span> },
-    { accessorKey: "total_sale_amount", header: "TOTAL", enableSorting: true, cell: ({ row }) => <span className="font-medium tabular-nums">{formatCurrency(row.original.total_sale_amount)}</span> },
+    { accessorKey: "total_sale_amount", header: "TOTAL", cell: ({ row }) => <span className="font-medium tabular-nums">{formatCurrency(row.original.total_sale_amount)}</span> },
     ...(canViewProfit ? [
-      { accessorKey: "profit", header: "UTILIDAD BRUTA", enableSorting: true, cell: ({ row }: { row: { original: DoubleEntryResponse } }) => <span className={`font-medium tabular-nums ${row.original.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(row.original.profit)}</span> } as ColumnDef<DoubleEntryResponse, unknown>,
+      { accessorKey: "profit", header: "UTILIDAD BRUTA", cell: ({ row }: { row: { original: DoubleEntryResponse } }) => <span className={`font-medium tabular-nums ${row.original.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(row.original.profit)}</span> } as ColumnDef<DoubleEntryResponse, unknown>,
       { id: "commissions", header: "COMISIONES", cell: ({ row }: { row: { original: DoubleEntryResponse } }) => {
           const total = row.original.commissions.reduce((sum, c) => sum + c.commission_amount, 0);
           return total > 0 ? <span className="text-xs tabular-nums">{formatCurrency(total)}</span> : <span className="text-slate-300">-</span>;
@@ -153,6 +153,9 @@ export default function DoubleEntriesPage() {
   const page = parseInt(searchParams.get("page") || "0", 10);
   const search = searchParams.get("search") || "";
   const dateField = (searchParams.get("date_field") as "date" | "liquidated_at" | null) || "date";
+  const sortField = searchParams.get("sort") || "";
+  const sortDesc = searchParams.get("dir") !== "asc";
+  const sorting: SortingState = sortField ? [{ id: sortField, desc: sortDesc }] : [];
 
   // URL date params override Zustand (decision #50). Lectura directa por render.
   const urlDateFrom = searchParams.get("date_from");
@@ -172,6 +175,13 @@ export default function DoubleEntriesPage() {
     }, { replace: true });
   };
 
+  const onSortingChange = (next: SortingState) => {
+    setParam({
+      sort: next.length > 0 ? next[0].id : null,
+      dir: next.length > 0 ? (next[0].desc ? null : "asc") : null,
+    });
+  };
+
   const clearDateOverride = () => {
     if (hasUrlDateOverride) setParam({ date_from: null, date_to: null });
   };
@@ -186,6 +196,8 @@ export default function DoubleEntriesPage() {
     date_from: effectiveDateFrom || undefined,
     date_to: effectiveDateTo || undefined,
     date_field: dateField === "date" ? undefined : dateField,
+    sort_by: sortField || undefined,
+    sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
   });
 
   useScrollRestoration(!isLoading);
@@ -337,6 +349,8 @@ export default function DoubleEntriesPage() {
         totalItems={data?.total}
         onPageChange={(p) => setParam({ page: p === 0 ? null : String(p) })}
         onRowClick={(row) => { saveScroll(currentUrl); navigate(`/double-entries/${row.id}`); }}
+        sorting={sorting}
+        onSortingChange={onSortingChange}
         emptyTitle="Sin doble partidas"
         emptyDescription="No se encontraron operaciones pasa mano."
         exportFilename="ecobalance_doble-partidas"

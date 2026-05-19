@@ -722,6 +722,64 @@ class TestListAndGet:
         assert annulled_data["total"] == 1
         assert annulled_data["items"][0]["status"] == "annulled"
 
+    def test_list_sort_by_source_quantity_desc(
+        self,
+        client,
+        org_headers,
+        source_material,
+        test_warehouse,
+        dest_copper,
+        dest_iron,
+        dest_aluminum,
+    ):
+        """Sort server-side por source_quantity desc — mayor cantidad primero."""
+        # Default payload: source=500 (lines 200+180+100 + waste 20)
+        p1 = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+        )
+        # Variant: source=300 (lines 120+108+60 + waste 12)
+        p2 = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+            source_quantity=300.0, waste_quantity=12.0,
+            copper_qty=120.0, iron_qty=108.0, aluminum_qty=60.0,
+        )
+        resp1 = client.post(BASE_URL, json=p1, headers=org_headers)
+        assert resp1.status_code == 201
+        resp2 = client.post(BASE_URL, json=p2, headers=org_headers)
+        assert resp2.status_code == 201
+
+        list_resp = client.get(
+            f"{BASE_URL}?sort_by=source_quantity&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert list_resp.status_code == 200
+        items = list_resp.json()["items"]
+        qtys = [float(it["source_quantity"]) for it in items]
+        assert all(qtys[i] >= qtys[i + 1] for i in range(len(qtys) - 1))
+
+    def test_list_sort_by_invalid_column_falls_back(
+        self,
+        client,
+        org_headers,
+        source_material,
+        test_warehouse,
+        dest_copper,
+        dest_iron,
+        dest_aluminum,
+    ):
+        """sort_by invalido => fallback silencioso al default (no 422)."""
+        payload = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+        )
+        client.post(BASE_URL, json=payload, headers=org_headers)
+
+        resp = client.get(
+            f"{BASE_URL}?sort_by=__hack__&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["total"] >= 1
+
 
 # ---------------------------------------------------------------------------
 # Tests: value_difference en todos los metodos

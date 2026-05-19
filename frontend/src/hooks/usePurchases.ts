@@ -13,6 +13,8 @@ interface PurchaseFilters {
   date_from?: string;
   date_to?: string;
   search?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export function usePurchases(filters: PurchaseFilters = {}) {

@@ -177,6 +177,8 @@ async def list_double_entries(
     date_to: Optional[date] = Query(None, description="Filter by date to (inclusive)"),
     search: Optional[str] = Query(None, description="Search in number, names, notes, invoice"),
     date_field: str = Query("date", pattern="^(date|liquidated_at)$", description="Campo de fecha: date (default) o liquidated_at (paridad con P&L)"),
+    sort_by: Optional[str] = Query(None, description="Columna a ordenar (allowlist en service, fallback silencioso a 'date')"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$", description="Direccion: asc | desc"),
 ) -> PaginatedDoubleEntryResponse:
     """Listar doble partidas con filtros."""
     date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
@@ -194,6 +196,8 @@ async def list_double_entries(
         date_to=date_to_dt,
         search=search,
         date_field=date_field,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
 
     items = [

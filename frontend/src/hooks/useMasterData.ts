@@ -27,10 +27,23 @@ export function useCustomers(search?: string) {
   });
 }
 
-export function useThirdParties(filters?: { search?: string; role?: string; is_active?: boolean }, options?: { staleTime?: number }) {
+export function useThirdParties(
+  filters?: {
+    search?: string;
+    role?: string;
+    is_active?: boolean;
+    skip?: number;
+    limit?: number;
+    sort_by?: string;
+    sort_dir?: "asc" | "desc";
+  },
+  options?: { staleTime?: number }
+) {
+  // skip/limit/sort_by/sort_dir son opcionales — dropdowns que solo pasan
+  // search/role siguen funcionando con limit=500 por default (sin cambio).
   return useQuery({
     queryKey: ["third-parties", "list", filters],
-    queryFn: () => thirdPartyService.getAll({ ...filters, limit: 500 }),
+    queryFn: () => thirdPartyService.getAll({ limit: 500, ...filters }),
     ...options,
   });
 }

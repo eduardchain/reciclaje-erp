@@ -27,8 +27,8 @@ def list_third_parties(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     search: Optional[str] = Query(None, description="Search in name, identification, and email"),
     role: Optional[str] = Query(None, description="Filter by role: supplier, customer, investor, provision"),
-    sort_by: str = Query("name", description="Field to sort by"),
-    sort_order: str = Query("asc", regex="^(asc|desc)$", description="Sort order"),
+    sort_by: Optional[str] = Query(None, description="Columna a ordenar (allowlist en service)"),
+    sort_dir: str = Query("asc", regex="^(asc|desc)$", description="Direccion: asc | desc"),
     org_context: tuple = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db)
 ):
@@ -39,8 +39,8 @@ def list_third_parties(
     - `is_active`: Show only active/inactive third parties
     - `search`: Search by name, identification, or email
     - `role`: Filter by role (supplier, customer, investor, provision)
-    - `sort_by`: Field name to sort by (e.g., "name", "identification")
-    - `sort_order`: Sort direction ("asc" or "desc")
+    - `sort_by`: Field name to sort by (validado contra allowlist en service, fallback silencioso a 'name')
+    - `sort_dir`: Sort direction ("asc" or "desc")
     """
     org_id = org_context["organization_id"]
 
@@ -53,7 +53,7 @@ def list_third_parties(
         search=search,
         role=role,
         sort_by=sort_by,
-        sort_order=sort_order
+        sort_order=sort_dir,
     )
 
 

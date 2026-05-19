@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { Plus, DollarSign, TrendingUp, TrendingDown, Hash, MoreHorizontal, Eye, Pencil, XCircle, FileText, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -180,7 +180,6 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean, showCogs: bo
       {
         accessorKey: "total_profit",
         header: "UTILIDAD BRUTA",
-        enableSorting: true,
         cell: ({ row }: { row: { original: SaleResponse } }) => (
           <span className={`font-medium tabular-nums ${row.original.total_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
             {formatCurrency(row.original.total_profit)}
@@ -248,6 +247,9 @@ export default function SalesPage() {
   const search = searchParams.get("search") || "";
   const dpFilter = (searchParams.get("dp") as "all" | "exclude" | "only" | null) || "all";
   const dateField = (searchParams.get("date_field") as "date" | "liquidated_at" | null) || "date";
+  const sortField = searchParams.get("sort") || "";
+  const sortDesc = searchParams.get("dir") !== "asc";
+  const sorting: SortingState = sortField ? [{ id: sortField, desc: sortDesc }] : [];
 
   const showCogs = dpFilter === "exclude" && dateField === "liquidated_at";
   const columns = useMemo(() => getColumns(canViewPrices, canViewProfit, showCogs), [canViewPrices, canViewProfit, showCogs]);
@@ -261,6 +263,13 @@ export default function SalesPage() {
       });
       return next;
     }, { replace: true });
+  };
+
+  const onSortingChange = (next: SortingState) => {
+    setParam({
+      sort: next.length > 0 ? next[0].id : null,
+      dir: next.length > 0 ? (next[0].desc ? null : "asc") : null,
+    });
   };
 
   // Al cambiar el picker manualmente o limpiar el badge, drop ambos URL params
@@ -280,6 +289,8 @@ export default function SalesPage() {
     date_to: effectiveDateTo || undefined,
     dp_filter: dpFilter === "all" ? undefined : dpFilter,
     date_field: dateField === "date" ? undefined : dateField,
+    sort_by: sortField || undefined,
+    sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
   });
 
   useScrollRestoration(!isLoading);
@@ -456,6 +467,8 @@ export default function SalesPage() {
         totalItems={data?.total}
         onPageChange={(p) => setParam({ page: p === 0 ? null : String(p) })}
         onRowClick={(row) => { saveScroll(currentUrl); navigate(`/sales/${row.id}`); }}
+        sorting={sorting}
+        onSortingChange={onSortingChange}
         emptyTitle="Sin ventas"
         emptyDescription="No se encontraron ventas para los filtros seleccionados."
         exportFilename="ecobalance_ventas"

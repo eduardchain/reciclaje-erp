@@ -689,3 +689,53 @@ class TestListAndGet:
         assert r_excl.status_code == 200
         assert r_excl.json()["total"] == 1
         assert "Carga inicial migracion" not in r_excl.json()["items"][0]["reason"]
+
+    def test_list_sort_by_total_value_desc(
+        self, client, org_headers, test_material, test_warehouse
+    ):
+        """Sort server-side por total_value desc — primera fila = mayor valor."""
+        for qty, cost in [(5.0, 10.0), (20.0, 50.0), (10.0, 30.0)]:
+            client.post(
+                f"{BASE_URL}/increase",
+                json={
+                    "material_id": str(test_material.id),
+                    "warehouse_id": str(test_warehouse.id),
+                    "quantity": qty,
+                    "unit_cost": cost,
+                    "date": "2026-02-14T10:00:00Z",
+                    "reason": "Sort test",
+                },
+                headers=org_headers,
+            )
+
+        resp = client.get(
+            f"{BASE_URL}?sort_by=total_value&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        values = [float(it["total_value"]) for it in resp.json()["items"]]
+        assert all(values[i] >= values[i + 1] for i in range(len(values) - 1))
+
+    def test_list_sort_by_invalid_column_falls_back(
+        self, client, org_headers, test_material, test_warehouse
+    ):
+        """sort_by invalido => fallback silencioso al default (no 422)."""
+        client.post(
+            f"{BASE_URL}/increase",
+            json={
+                "material_id": str(test_material.id),
+                "warehouse_id": str(test_warehouse.id),
+                "quantity": 5.0,
+                "unit_cost": 10.0,
+                "date": "2026-02-14T10:00:00Z",
+                "reason": "Fallback test",
+            },
+            headers=org_headers,
+        )
+
+        resp = client.get(
+            f"{BASE_URL}?sort_by=__hack__&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["total"] >= 1

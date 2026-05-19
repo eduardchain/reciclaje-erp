@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { Plus, ArrowLeft, Calculator, Hash, Puzzle, MoreHorizontal, Eye, XCircle, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -91,12 +91,33 @@ export default function TransformationsPage() {
   const handleDateFromChange = (v: string) => { setDateFrom(v); clearDateOverride(); };
   const handleDateToChange = (v: string) => { setDateTo(v); clearDateOverride(); };
 
+  const sortField = searchParams.get("sort") || "";
+  const sortDesc = searchParams.get("dir") !== "asc";
+  const sorting: SortingState = sortField ? [{ id: sortField, desc: sortDesc }] : [];
+
+  const onSortingChange = (next: SortingState) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (next.length === 0) {
+        params.delete("sort");
+        params.delete("dir");
+      } else {
+        params.set("sort", next[0].id);
+        if (next[0].desc) params.delete("dir");
+        else params.set("dir", "asc");
+      }
+      return params;
+    }, { replace: true });
+  };
+
   const { data, isLoading } = useTransformations({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
     status: statusFilter === "all" ? undefined : statusFilter,
     date_from: effectiveDateFrom || undefined,
     date_to: effectiveDateTo || undefined,
+    sort_by: sortField || undefined,
+    sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
   });
 
   // Fetch separado para KPI "Utilidad/Perdida": SIEMPRE confirmed (mismo filtro
@@ -259,6 +280,8 @@ export default function TransformationsPage() {
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
         onRowClick={(row) => navigate(`/inventory/transformations/${row.id}`)}
+        sorting={sorting}
+        onSortingChange={onSortingChange}
         emptyTitle="Sin transformaciones"
         emptyDescription="No se encontraron transformaciones."
         exportFilename="ecobalance_transformaciones"

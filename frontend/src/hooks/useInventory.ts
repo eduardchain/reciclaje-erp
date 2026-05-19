@@ -72,6 +72,8 @@ export function useAdjustments(filters: {
   date_from?: string;
   date_to?: string;
   exclude_migration_seeds?: boolean;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }) {
   return useQuery({
     queryKey: ["inventory", "adjustments", "list", filters],
@@ -147,6 +149,8 @@ export function useTransformations(filters: {
   status?: string;
   date_from?: string;
   date_to?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }) {
   return useQuery({
     queryKey: ["inventory", "transformations", "list", filters],

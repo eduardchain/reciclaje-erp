@@ -919,6 +919,31 @@ class TestDoubleEntryAPI:
         resp = client.get("/api/v1/double-entries?date_field=foo", headers=org_headers)
         assert resp.status_code == 422
 
+    def test_list_sort_by_date_asc(
+        self, client, org_headers, registered_de, liquidated_de,
+    ):
+        """Sort server-side por date asc — primera fila = mas antigua."""
+        resp = client.get(
+            "/api/v1/double-entries?sort_by=date&sort_dir=asc",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) >= 2
+        dates = [it["date"] for it in items]
+        assert dates == sorted(dates)
+
+    def test_list_sort_by_invalid_column_falls_back(
+        self, client, org_headers, registered_de,
+    ):
+        """sort_by invalido => fallback silencioso al default (no 422)."""
+        resp = client.get(
+            "/api/v1/double-entries?sort_by=__hack__&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["total"] >= 1
+
 
 class TestDoubleEntryPerKgCommission:
     """Comision por kilo en doble partida."""

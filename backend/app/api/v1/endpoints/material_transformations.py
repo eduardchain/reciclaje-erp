@@ -113,6 +113,8 @@ def list_transformations(
     status: Optional[str] = Query(None, alias="status"),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
+    sort_by: Optional[str] = Query(None, description="Columna a ordenar (allowlist en service, fallback silencioso a 'date')"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$", description="Direccion: asc | desc"),
     org_context: dict = Depends(require_permission("transformations.view")),
     db: Session = Depends(get_db),
 ):
@@ -128,6 +130,8 @@ def list_transformations(
         status_filter=status,
         date_from=date_from_dt,
         date_to=date_to_dt,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
 
     items = [MaterialTransformationResponse(**_to_response(t)) for t in transformations]

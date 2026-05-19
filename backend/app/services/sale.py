@@ -38,6 +38,16 @@ from app.services.base import CRUDBase
 class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
     """CRUD operations for Sale with inventory, financial, and commission logic."""
 
+    SORTABLE_COLUMNS = {
+        "sale_number",
+        "date",
+        "total_amount",
+        "status",
+        "liquidated_at",
+        "created_at",
+    }
+    DEFAULT_SORT_COLUMN = "date"
+
     def _get_last_known_cost(self, db: Session, material_id: UUID, organization_id: UUID) -> Decimal:
         """Busca el ultimo costo conocido desde MaterialCostHistory cuando avg_cost = 0."""
         last = db.query(MaterialCostHistory.new_cost).filter(
@@ -896,6 +906,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         search: Optional[str] = None,
         dp_filter: str = "all",
         date_field: str = "date",
+        sort_by: Optional[str] = None,
+        sort_dir: str = "desc",
     ) -> tuple[List[Sale], int, Decimal, Decimal, Decimal]:
         """
         Get multiple sales with filtering and pagination.
@@ -965,6 +977,10 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             .where(SaleCommission.sale_id.in_(select(subq.c.id)))
         ) or Decimal("0")
 
+        # Sort con allowlist + tiebreaker estable id ASC
+        sort_column, direction = self._resolve_sort_column(sort_by, sort_dir)
+        order_clause = sort_column.desc() if direction == "desc" else sort_column.asc()
+
         # Apply pagination and eager loading
         query = (
             query
@@ -975,7 +991,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 joinedload(Sale.warehouse),
                 joinedload(Sale.payment_account),
             )
-            .order_by(Sale.date.desc(), Sale.sale_number.desc())
+            .order_by(order_clause, Sale.sale_number.desc(), Sale.id.asc())
             .offset(skip)
             .limit(limit)
         )

@@ -548,12 +548,58 @@ class TestListPurchases:
             params={"skip": 0, "limit": 10},
             headers=org_headers,
         )
-        
+
         # Assert
         assert response.status_code == 200
         data = response.json()
         assert data["skip"] == 0
         assert data["limit"] == 10
+
+    def test_list_sort_by_total_amount_desc(
+        self,
+        client,
+        org_headers,
+        db_session,
+        test_organization,
+        test_supplier,
+    ):
+        """Server-side sort por total_amount desc — primera fila = mayor monto."""
+        for i, amount in enumerate([Decimal("100.00"), Decimal("500.00"), Decimal("250.00")]):
+            p = Purchase(
+                id=uuid4(),
+                organization_id=test_organization.id,
+                purchase_number=900 + i,
+                supplier_id=test_supplier.id,
+                date=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+                total_amount=amount,
+                status="registered",
+            )
+            db_session.add(p)
+        db_session.commit()
+
+        response = client.get(
+            "/api/v1/purchases?sort_by=total_amount&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        items = response.json()["items"]
+        amounts = [float(it["total_amount"]) for it in items]
+        # Lista desc: cada elemento >= siguiente
+        assert all(amounts[i] >= amounts[i + 1] for i in range(len(amounts) - 1))
+
+    def test_list_sort_by_invalid_column_falls_back(
+        self,
+        client,
+        org_headers,
+        test_purchase,
+    ):
+        """sort_by invalido => fallback silencioso al default (no 422)."""
+        response = client.get(
+            "/api/v1/purchases?sort_by=__hack__&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["total"] >= 1
 
 
 class TestListPendingPurchases:

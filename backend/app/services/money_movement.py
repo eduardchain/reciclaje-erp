@@ -64,6 +64,18 @@ class CRUDMoneyMovement:
     La anulacion revierte todos los efectos en saldos.
     """
 
+    # Allowlist de columnas ordenables — SQL injection prevenida.
+    # Esta clase no hereda de CRUDBase, asi que mantiene su propio set.
+    SORTABLE_COLUMNS = {
+        "movement_number",
+        "date",
+        "amount",
+        "movement_type",
+        "status",
+        "created_at",
+    }
+    DEFAULT_SORT_COLUMN = "date"
+
     # ======================================================================
     # Metodos publicos — uno por tipo de operacion
     # ======================================================================
@@ -1202,6 +1214,8 @@ class CRUDMoneyMovement:
         created_by_filter: Optional[UUID] = None,
         adjustment_class: Optional[str] = None,
         commission_source: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_dir: str = "desc",
     ) -> tuple[List[MoneyMovement], int, Decimal]:
         """Listar movimientos con filtros y paginacion.
 
@@ -1287,6 +1301,12 @@ class CRUDMoneyMovement:
             select(func.coalesce(func.sum(subq.c.amount), 0))
         ) or Decimal("0")
 
+        # Sort con allowlist + tiebreaker estable id ASC (fallback silencioso a date desc).
+        col_name = sort_by if (sort_by and sort_by in self.SORTABLE_COLUMNS) else self.DEFAULT_SORT_COLUMN
+        sort_column = getattr(MoneyMovement, col_name)
+        direction = "asc" if str(sort_dir).lower() == "asc" else "desc"
+        order_clause = sort_column.desc() if direction == "desc" else sort_column.asc()
+
         # Aplicar orden y paginacion
         query = (
             query.options(
@@ -1294,7 +1314,7 @@ class CRUDMoneyMovement:
                 joinedload(MoneyMovement.third_party),
                 joinedload(MoneyMovement.expense_category),
             )
-            .order_by(MoneyMovement.date.desc(), MoneyMovement.movement_number.desc())
+            .order_by(order_clause, MoneyMovement.movement_number.desc(), MoneyMovement.id.asc())
             .offset(skip)
             .limit(limit)
         )

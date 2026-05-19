@@ -15,6 +15,8 @@ interface SaleFilters {
   search?: string;
   dp_filter?: "all" | "exclude" | "only";
   date_field?: "date" | "liquidated_at";
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export function useSales(filters: SaleFilters = {}) {

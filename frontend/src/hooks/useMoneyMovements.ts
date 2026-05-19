@@ -16,6 +16,8 @@ interface MovementFilters {
   search?: string;
   adjustment_class?: "gain" | "loss";
   commission_source?: "sale" | "double_entry";
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export function useMoneyMovements(filters: MovementFilters = {}) {

@@ -33,6 +33,15 @@ from app.services.money_movement import money_movement as mm_service
 class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate]):
     """CRUD operations for DoubleEntry with business logic."""
 
+    SORTABLE_COLUMNS = {
+        "double_entry_number",
+        "date",
+        "status",
+        "liquidated_at",
+        "created_at",
+    }
+    DEFAULT_SORT_COLUMN = "date"
+
     def _eager_options(self):
         """Opciones de eager loading comunes para todas las queries."""
         return [
@@ -661,6 +670,8 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         date_to: Optional[date] = None,
         search: Optional[str] = None,
         date_field: str = "date",
+        sort_by: Optional[str] = None,
+        sort_dir: str = "desc",
     ) -> tuple[List[DoubleEntry], int, Decimal, Decimal, Decimal]:
         """Get multiple double_entries con filtros y paginacion.
 
@@ -728,9 +739,13 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         sale_sum = Decimal(str(agg_row[1] or 0))
         profit_sum = Decimal(str(agg_row[2] or 0))
 
+        # Sort con allowlist + tiebreaker estable id ASC
+        sort_column, direction = self._resolve_sort_column(sort_by, sort_dir)
+        order_clause = sort_column.desc() if direction == "desc" else sort_column.asc()
+
         double_entries = query.options(
             *self._eager_options()
-        ).order_by(DoubleEntry.date.desc()).offset(skip).limit(limit).all()
+        ).order_by(order_clause, DoubleEntry.id.asc()).offset(skip).limit(limit).all()
 
         return double_entries, total, purchase_sum, sale_sum, profit_sum
 

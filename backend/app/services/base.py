@@ -121,7 +121,35 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
                 detail=detail
             )
         return obj
-    
+
+    # Allowlist de columnas ordenables. Cada subclase la define para sort
+    # server-side seguro (previene SQL injection via column name arbitrario).
+    # Si esta vacia (default), CRUDBase usa el fallback de created_at.
+    SORTABLE_COLUMNS: set[str] = set()
+    DEFAULT_SORT_COLUMN: str = "created_at"
+
+    def _resolve_sort_column(self, sort_by: Optional[str], sort_dir: str):
+        """Retorna (column, direction) validados contra el modelo.
+
+        - Si la subclase define SORTABLE_COLUMNS (non-empty), `sort_by` debe estar
+          en ese set para ser aceptada; de lo contrario fallback silencioso a
+          DEFAULT_SORT_COLUMN. Fallback silencioso (no 422) para no romper
+          deep-links viejos si una columna se renombra en el futuro.
+        - Si SORTABLE_COLUMNS esta vacia (subclase legacy sin allowlist), se
+          acepta cualquier nombre de columna que exista en el modelo (compat).
+        - sort_dir invalido => 'desc'.
+        """
+        if self.SORTABLE_COLUMNS:
+            col_name = sort_by if (sort_by and sort_by in self.SORTABLE_COLUMNS) else self.DEFAULT_SORT_COLUMN
+        else:
+            # Legacy: sin allowlist, aceptar cualquier columna que exista en el modelo
+            col_name = sort_by or self.DEFAULT_SORT_COLUMN
+        column = getattr(self.model, col_name, None)
+        if column is None:
+            column = self.model.created_at
+        direction = "asc" if str(sort_dir).lower() == "asc" else "desc"
+        return column, direction
+
     def get_multi(
         self,
         db: Session,
@@ -164,12 +192,11 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         count_query = select(func.count()).select_from(query.subquery())
         total = db.execute(count_query).scalar_one()
         
-        # Apply sorting
-        sort_column = getattr(self.model, sort_by, self.model.created_at)
-        if sort_order.lower() == "desc":
-            query = query.order_by(sort_column.desc())
-        else:
-            query = query.order_by(sort_column.asc())
+        # Apply sorting (con allowlist si la subclase la define)
+        sort_column, sort_dir = self._resolve_sort_column(sort_by, sort_order)
+        order_clause = sort_column.desc() if sort_dir == "desc" else sort_column.asc()
+        # Tiebreaker estable para paginacion consistente cuando hay ties
+        query = query.order_by(order_clause, self.model.id.asc())
         
         # Apply pagination
         query = query.offset(skip).limit(limit)

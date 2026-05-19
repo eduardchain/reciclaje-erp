@@ -8,11 +8,19 @@ interface ThirdPartyFilters {
   search?: string;
   role?: string;
   is_active?: boolean;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export const thirdPartyService = {
   getAll: async (filters: ThirdPartyFilters = {}): Promise<PaginatedResponse<ThirdPartyResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties", { params: filters });
+    // Omitir sort_by/sort_dir si son undefined para no contaminar el queryKey
+    // ni mandar params vacios. Axios serializa undefined como omision, pero ser
+    // explicitos evita que se serialice "sort_by=" cuando alguien pasa "".
+    const params: Record<string, unknown> = { ...filters };
+    if (!params.sort_by) delete params.sort_by;
+    if (!params.sort_dir) delete params.sort_dir;
+    const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties", { params });
     return response.data;
   },
 

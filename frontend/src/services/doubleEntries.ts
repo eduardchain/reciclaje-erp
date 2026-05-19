@@ -15,11 +15,16 @@ interface DoubleEntryFilters {
   date_from?: string;
   date_to?: string;
   date_field?: "date" | "liquidated_at";
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export const doubleEntryService = {
   getAll: async (filters: DoubleEntryFilters = {}): Promise<PaginatedDoubleEntryResponse> => {
-    const response = await apiClient.get<PaginatedDoubleEntryResponse>("/api/v1/double-entries", { params: filters });
+    const params: Record<string, unknown> = { ...filters };
+    if (!params.sort_by) delete params.sort_by;
+    if (!params.sort_dir) delete params.sort_dir;
+    const response = await apiClient.get<PaginatedDoubleEntryResponse>("/api/v1/double-entries", { params });
     return response.data;
   },
 

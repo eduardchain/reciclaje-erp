@@ -217,6 +217,8 @@ async def list_sales(
     search: Optional[str] = Query(None, description="Search in sale number, customer name, notes, vehicle_plate, invoice_number"),
     dp_filter: str = Query("all", pattern="^(all|exclude|only)$", description="Filtro Pasa Mano: all (default), exclude (sin DPs), only (solo DPs)"),
     date_field: str = Query("date", pattern="^(date|liquidated_at)$", description="Campo de fecha: date (default) o liquidated_at (paridad con P&L)"),
+    sort_by: Optional[str] = Query(None, description="Columna a ordenar (allowlist en service, fallback silencioso a 'date')"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$", description="Direccion: asc | desc"),
     db: Session = Depends(get_db),
     org_context: dict = Depends(require_permission("sales.view")),
 ) -> PaginatedSaleResponse:
@@ -239,6 +241,8 @@ async def list_sales(
             search=search,
             dp_filter=dp_filter,
             date_field=date_field,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
         )
 
         # Enrich each sale with joined data

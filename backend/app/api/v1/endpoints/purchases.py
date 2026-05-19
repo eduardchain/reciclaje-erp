@@ -239,6 +239,8 @@ async def list_purchases(
     date_from: Optional[date] = Query(None, description="Filter purchases on or after this date"),
     date_to: Optional[date] = Query(None, description="Filter purchases on or before this date"),
     search: Optional[str] = Query(None, description="Search in purchase number, supplier name, notes"),
+    sort_by: Optional[str] = Query(None, description="Columna a ordenar (allowlist en service, fallback silencioso a 'date')"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$", description="Direccion: asc | desc"),
     db: Session = Depends(get_db),
     org_context: dict = Depends(require_permission("purchases.view")),
 ) -> PaginatedPurchaseResponse:
@@ -257,7 +259,7 @@ async def list_purchases(
             date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc)
         else:
             date_to_dt = None
-        
+
         purchases, total = purchase_service.get_multi(
             db=db,
             organization_id=org_context["organization_id"],
@@ -268,6 +270,8 @@ async def list_purchases(
             date_from=date_from_dt,
             date_to=date_to_dt,
             search=search,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
         )
         
         # Enrich each purchase with joined data

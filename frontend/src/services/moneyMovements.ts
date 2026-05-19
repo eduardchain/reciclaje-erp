@@ -36,11 +36,16 @@ interface MovementFilters {
   search?: string;
   adjustment_class?: "gain" | "loss";
   commission_source?: "sale" | "double_entry";
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export const moneyMovementService = {
   getAll: async (filters: MovementFilters = {}): Promise<PaginatedMoneyMovementResponse> => {
-    const response = await apiClient.get<PaginatedMoneyMovementResponse>("/api/v1/money-movements", { params: filters });
+    const params: Record<string, unknown> = { ...filters };
+    if (!params.sort_by) delete params.sort_by;
+    if (!params.sort_dir) delete params.sort_dir;
+    const response = await apiClient.get<PaginatedMoneyMovementResponse>("/api/v1/money-movements", { params });
     return response.data;
   },
 

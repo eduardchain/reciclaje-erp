@@ -680,6 +680,53 @@ class TestListSales:
         response = client.get("/api/v1/sales?date_field=foo", headers=org_headers)
         assert response.status_code == 422
 
+    def test_list_sort_by_total_amount_desc(
+        self,
+        client,
+        org_headers,
+        db_session,
+        test_organization,
+        test_customer,
+        test_warehouse,
+    ):
+        """Server-side sort por total_amount desc — mayor a menor en toda la pagina."""
+        from datetime import timezone
+        for i, amount in enumerate([Decimal("200.00"), Decimal("800.00"), Decimal("400.00")]):
+            s = Sale(
+                id=uuid4(),
+                organization_id=test_organization.id,
+                sale_number=900 + i,
+                customer_id=test_customer.id,
+                warehouse_id=test_warehouse.id,
+                date=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+                total_amount=amount,
+                status="registered",
+            )
+            db_session.add(s)
+        db_session.commit()
+
+        response = client.get(
+            "/api/v1/sales?sort_by=total_amount&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        amounts = [float(it["total_amount"]) for it in response.json()["items"]]
+        assert all(amounts[i] >= amounts[i + 1] for i in range(len(amounts) - 1))
+
+    def test_list_sort_by_invalid_column_falls_back(
+        self,
+        client,
+        org_headers,
+        test_sale,
+    ):
+        """sort_by invalido => fallback silencioso al default (no 422)."""
+        response = client.get(
+            "/api/v1/sales?sort_by=__hack__&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["total"] >= 1
+
 
 class TestGetSale:
     """Tests for GET /api/v1/sales/{id}"""

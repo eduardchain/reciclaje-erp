@@ -858,6 +858,46 @@ class TestListAndFilter:
         resp = client.get("/api/v1/money-movements?adjustment_class=foo", headers=org_headers)
         assert resp.status_code == 422
 
+    def test_list_sort_by_amount_desc(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_expense_category,
+    ):
+        """Sort server-side por amount desc — primera fila = mayor monto."""
+        for amount in [50000, 200000, 100000]:
+            client.post("/api/v1/money-movements/service-income", json={
+                "amount": amount,
+                "account_id": str(test_account.id),
+                "description": f"Ingreso ${amount}",
+                "date": "2026-02-14T10:00:00Z",
+            }, headers=org_headers)
+
+        resp = client.get(
+            "/api/v1/money-movements?sort_by=amount&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        amounts = [float(it["amount"]) for it in resp.json()["items"]]
+        assert all(amounts[i] >= amounts[i + 1] for i in range(len(amounts) - 1))
+
+    def test_list_sort_by_invalid_column_falls_back(
+        self, client: TestClient, org_headers: dict,
+        test_account, test_supplier,
+    ):
+        """sort_by invalido => fallback silencioso al default (no 422)."""
+        client.post("/api/v1/money-movements/supplier-payment", json={
+            "supplier_id": str(test_supplier.id),
+            "amount": 100000,
+            "account_id": str(test_account.id),
+            "date": "2026-02-14T10:00:00Z",
+        }, headers=org_headers)
+
+        resp = client.get(
+            "/api/v1/money-movements?sort_by=__hack__&sort_dir=desc",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["total"] >= 1
+
 
 # ---------------------------------------------------------------------------
 # Tests: Visibilidad por permiso view_all_movements

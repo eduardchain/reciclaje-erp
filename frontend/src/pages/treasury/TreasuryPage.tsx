@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { toast } from "sonner";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { Plus, Wallet, Hash, Paperclip } from "lucide-react";
 import { moneyMovementService } from "@/services/moneyMovements";
 import { Button } from "@/components/ui/button";
@@ -113,6 +113,9 @@ export default function TreasuryPage() {
   const statusFromUrl = searchParams.get("status") || undefined;
   const adjustmentClassFromUrl = searchParams.get("adjustment_class") as "gain" | "loss" | null;
   const commissionSourceFromUrl = searchParams.get("commission_source") as "sale" | "double_entry" | null;
+  const sortField = searchParams.get("sort") || "";
+  const sortDesc = searchParams.get("dir") !== "asc";
+  const sorting: SortingState = sortField ? [{ id: sortField, desc: sortDesc }] : [];
 
   // URL date params override Zustand (decision #50). Lectura directa por render.
   const urlDateFrom = searchParams.get("date_from");
@@ -138,6 +141,13 @@ export default function TreasuryPage() {
   const handleDateFromChange = (v: string) => { setDateFrom(v); clearDateOverride(); };
   const handleDateToChange = (v: string) => { setDateTo(v); clearDateOverride(); };
 
+  const onSortingChange = (next: SortingState) => {
+    setParam({
+      sort: next.length > 0 ? next[0].id : null,
+      dir: next.length > 0 ? (next[0].desc ? null : "asc") : null,
+    });
+  };
+
   // Tab compuesto `tp_adjustment` mapea a CSV de tipos
   const movementTypeQuery = typeFilter === "all"
     ? undefined
@@ -155,6 +165,8 @@ export default function TreasuryPage() {
     status: statusFromUrl,
     adjustment_class: adjustmentClassFromUrl || undefined,
     commission_source: commissionSourceFromUrl || undefined,
+    sort_by: sortField || undefined,
+    sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
   });
 
   useScrollRestoration(!isLoading);
@@ -294,6 +306,8 @@ export default function TreasuryPage() {
         pageSize={PAGE_SIZE}
         onPageChange={(p) => setParam({ page: p === 0 ? null : String(p) })}
         onRowClick={(row) => { saveScroll(currentUrl); navigate(`/treasury/${row.id}`); }}
+        sorting={sorting}
+        onSortingChange={onSortingChange}
         emptyTitle="Sin movimientos"
         emptyDescription="No se encontraron movimientos de tesoreria."
         exportFilename="ecobalance_movimientos-tesoreria"

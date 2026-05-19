@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { Plus, ShoppingCart, Hash, Calculator, MoreHorizontal, Eye, Pencil, DollarSign, XCircle, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -199,6 +199,9 @@ export default function PurchasesPage() {
   const status = searchParams.get("tab") || "all";
   const page = parseInt(searchParams.get("page") || "0", 10);
   const search = searchParams.get("search") || "";
+  const sortField = searchParams.get("sort") || "";
+  const sortDesc = searchParams.get("dir") !== "asc";
+  const sorting: SortingState = sortField ? [{ id: sortField, desc: sortDesc }] : [];
 
   const setParam = (updates: Record<string, string | null>) => {
     setSearchParams((prev) => {
@@ -211,6 +214,13 @@ export default function PurchasesPage() {
     }, { replace: true });
   };
 
+  const onSortingChange = (next: SortingState) => {
+    setParam({
+      sort: next.length > 0 ? next[0].id : null,
+      dir: next.length > 0 ? (next[0].desc ? null : "asc") : null,
+    });
+  };
+
   const { data, isLoading } = usePurchases({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
@@ -218,6 +228,8 @@ export default function PurchasesPage() {
     search: search || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
+    sort_by: sortField || undefined,
+    sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
   });
 
   useScrollRestoration(!isLoading);
@@ -318,6 +330,8 @@ export default function PurchasesPage() {
         totalItems={data?.total}
         onPageChange={(p) => setParam({ page: p === 0 ? null : String(p) })}
         onRowClick={(row) => { saveScroll(currentUrl); navigate(`/purchases/${row.id}`); }}
+        sorting={sorting}
+        onSortingChange={onSortingChange}
         emptyTitle="Sin compras"
         emptyDescription="No se encontraron compras para los filtros seleccionados."
         exportFilename="ecobalance_compras"

@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { Plus, ArrowLeft, Calculator, Hash, ClipboardCheck, MoreHorizontal, Eye, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -87,6 +87,9 @@ export default function AdjustmentsPage() {
   const annulMutation = useAnnulAdjustment();
 
   const excludeMigration = searchParams.get("exclude_migration") === "true";
+  const sortField = searchParams.get("sort") || "";
+  const sortDesc = searchParams.get("dir") !== "asc";
+  const sorting: SortingState = sortField ? [{ id: sortField, desc: sortDesc }] : [];
 
   // URL date params override Zustand (decision #50). Lectura directa por render —
   // NO useState (que solo inicializa una vez al montar y no reacciona a la URL).
@@ -108,6 +111,21 @@ export default function AdjustmentsPage() {
   const handleDateFromChange = (v: string) => { setDateFrom(v); clearDateOverride(); };
   const handleDateToChange = (v: string) => { setDateTo(v); clearDateOverride(); };
 
+  const onSortingChange = (next: SortingState) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (next.length === 0) {
+        params.delete("sort");
+        params.delete("dir");
+      } else {
+        params.set("sort", next[0].id);
+        if (next[0].desc) params.delete("dir");
+        else params.set("dir", "asc");
+      }
+      return params;
+    }, { replace: true });
+  };
+
   const { data, isLoading } = useAdjustments({
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
@@ -115,6 +133,8 @@ export default function AdjustmentsPage() {
     date_from: effectiveDateFrom || undefined,
     date_to: effectiveDateTo || undefined,
     exclude_migration_seeds: excludeMigration || undefined,
+    sort_by: sortField || undefined,
+    sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
   });
 
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
@@ -261,6 +281,8 @@ export default function AdjustmentsPage() {
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
         onRowClick={(row) => navigate(`/inventory/adjustments/${row.id}`)}
+        sorting={sorting}
+        onSortingChange={onSortingChange}
         emptyTitle="Sin ajustes"
         emptyDescription="No se encontraron ajustes de inventario."
         exportFilename="ecobalance_ajustes-inventario"

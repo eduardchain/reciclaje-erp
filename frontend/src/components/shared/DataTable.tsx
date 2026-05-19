@@ -50,6 +50,11 @@ interface DataTableProps<TData, TValue> {
   onExportAll?: () => Promise<TData[]>;
   currencyColumns?: string[];
   toolbar?: React.ReactNode;
+  /** Controlled sorting state. Si se pasa junto con `onSortingChange`, el orden
+   * lo controla el padre (util para persistir en URL/store). Si no, se maneja
+   * internamente con useState. */
+  sorting?: SortingState;
+  onSortingChange?: (sorting: SortingState) => void;
 }
 
 function exportToExcel<TData>(
@@ -113,16 +118,27 @@ export function DataTable<TData, TValue>({
   onExportAll,
   currencyColumns,
   toolbar,
+  sorting: externalSorting,
+  onSortingChange: externalOnSortingChange,
 }: DataTableProps<TData, TValue>) {
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [internalSorting, setInternalSorting] = useState<SortingState>([]);
+  const sorting = externalSorting ?? internalSorting;
   const [exporting, setExporting] = useState(false);
 
+  // Server-side sort cuando el padre pasa onSortingChange controlado. Sin esto,
+  // DataTable ordena solo la pagina visible (client-side, comportamiento previo).
+  const useManualSorting = externalOnSortingChange != null;
   const table = useReactTable({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    onSortingChange: setSorting,
+    getSortedRowModel: useManualSorting ? undefined : getSortedRowModel(),
+    manualSorting: useManualSorting,
+    onSortingChange: (updater) => {
+      const next = typeof updater === "function" ? updater(sorting) : updater;
+      if (externalOnSortingChange) externalOnSortingChange(next);
+      else setInternalSorting(next);
+    },
     manualPagination: true,
     pageCount,
     state: {

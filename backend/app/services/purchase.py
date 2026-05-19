@@ -33,6 +33,16 @@ from app.services.money_movement import money_movement as mm_service
 class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
     """CRUD operations for Purchase with inventory and financial logic."""
 
+    SORTABLE_COLUMNS = {
+        "purchase_number",
+        "date",
+        "total_amount",
+        "status",
+        "liquidated_at",
+        "created_at",
+    }
+    DEFAULT_SORT_COLUMN = "date"
+
     def check_duplicate(
         self,
         db: Session,
@@ -948,34 +958,36 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         supplier_id: Optional[UUID] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_dir: str = "desc",
     ) -> tuple[List[Purchase], int]:
         """
-        Get multiple purchases with filtering and pagination.
-        
-        Returns:
-            Tuple of (purchases, total_count)
+        Get multiple purchases with filtering, sorting, and pagination.
+
+        sort_by se valida contra SORTABLE_COLUMNS (fallback silencioso a 'date').
+        sort_dir 'asc' o 'desc' (default 'desc'). Tiebreaker estable: id ASC.
         """
         from sqlalchemy import or_, cast, String
-        
+
         # Base query
         query = db.query(Purchase).filter(
             Purchase.organization_id == organization_id
         )
-        
+
         # Apply filters
         if status:
             query = query.filter(Purchase.status == status)
-        
+
         if supplier_id:
             query = query.filter(Purchase.supplier_id == supplier_id)
-        
+
         if date_from:
             query = query.filter(Purchase.date >= date_from)
-        
+
         if date_to:
             query = query.filter(Purchase.date < date_to)
-        
+
         if search:
             # Search in: purchase_number (as text), supplier name, notes
             query = query.join(Purchase.supplier).filter(
@@ -985,18 +997,22 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     Purchase.notes.ilike(f"%{search}%")
                 )
             )
-        
+
         # Get total count before pagination
         total = query.count()
-        
+
+        # Sort con allowlist + tiebreaker estable id ASC
+        sort_column, direction = self._resolve_sort_column(sort_by, sort_dir)
+        order_clause = sort_column.desc() if direction == "desc" else sort_column.asc()
+
         # Apply pagination and eager loading
         purchases = query.options(
             joinedload(Purchase.lines).joinedload(PurchaseLine.material),
             joinedload(Purchase.lines).joinedload(PurchaseLine.warehouse),
             joinedload(Purchase.supplier),
             joinedload(Purchase.payment_account),
-        ).order_by(Purchase.date.desc(), Purchase.purchase_number.desc()).offset(skip).limit(limit).all()
-        
+        ).order_by(order_clause, Purchase.purchase_number.desc(), Purchase.id.asc()).offset(skip).limit(limit).all()
+
         return purchases, total
     
     def get_by_number(

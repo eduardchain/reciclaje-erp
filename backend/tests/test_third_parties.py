@@ -331,6 +331,59 @@ class TestListThirdParties:
         assert str(org2_tp.id) in tp_ids
         assert str(test_supplier.id) not in tp_ids
 
+    def test_list_sort_by_current_balance_desc(self, client, org_headers, db_session, test_organization):
+        """Sort server-side por current_balance desc — primera fila debe ser el saldo mas alto."""
+        from decimal import Decimal
+        balances = [Decimal("100.00"), Decimal("300.00"), Decimal("200.00")]
+        for i, bal in enumerate(balances):
+            db_session.add(ThirdParty(
+                id=uuid4(),
+                name=f"Sort-TP-{i}",
+                identification_number=f"SORT-{i}",
+                organization_id=test_organization.id,
+                current_balance=bal,
+                is_active=True,
+            ))
+        db_session.commit()
+
+        response = client.get(
+            "/api/v1/third-parties?sort_by=current_balance&sort_dir=desc&search=Sort-TP",
+            headers=org_headers,
+        )
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert len(items) == 3
+        # Mayor a menor: 300, 200, 100
+        assert float(items[0]["current_balance"]) == 300.0
+        assert float(items[1]["current_balance"]) == 200.0
+        assert float(items[2]["current_balance"]) == 100.0
+
+    def test_list_sort_by_invalid_column_falls_back(self, client, org_headers, db_session, test_organization):
+        """sort_by invalido cae silenciosamente a la columna default ('name') — NO 422.
+
+        sort_dir SI se respeta cuando es valido (solo la columna invalida hace fallback).
+        """
+        for i, name in enumerate(["Charlie", "Alpha", "Bravo"]):
+            db_session.add(ThirdParty(
+                id=uuid4(),
+                name=name,
+                identification_number=f"FB-{i}",
+                organization_id=test_organization.id,
+                is_active=True,
+            ))
+        db_session.commit()
+
+        # sort_by invalido + sort_dir=asc → ordena por 'name' asc
+        response = client.get(
+            "/api/v1/third-parties?sort_by=__hack__&sort_dir=asc",
+            headers=org_headers,
+        )
+        # Fallback silencioso: 200 OK (no 422)
+        assert response.status_code == 200
+        items = response.json()["items"]
+        names = [it["name"] for it in items if it["name"] in {"Alpha", "Bravo", "Charlie"}]
+        assert names == ["Alpha", "Bravo", "Charlie"]
+
 
 class TestGetSuppliers:
     """Tests for GET /api/v1/third-parties/suppliers"""

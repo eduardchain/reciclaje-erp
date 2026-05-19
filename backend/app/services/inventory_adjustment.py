@@ -46,6 +46,17 @@ class CRUDInventoryAdjustment:
     Crea un InventoryMovement como audit trail.
     """
 
+    # Allowlist de columnas ordenables — SQL injection prevenida.
+    SORTABLE_COLUMNS = {
+        "adjustment_number",
+        "date",
+        "adjustment_type",
+        "quantity",
+        "total_value",
+        "created_at",
+    }
+    DEFAULT_SORT_COLUMN = "date"
+
     # ======================================================================
     # Metodos publicos — uno por tipo de ajuste
     # ======================================================================
@@ -559,6 +570,8 @@ class CRUDInventoryAdjustment:
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
         exclude_migration_seeds: bool = False,
+        sort_by: Optional[str] = None,
+        sort_dir: str = "desc",
     ) -> tuple[List[InventoryAdjustment], int]:
         """Listar ajustes con filtros y paginacion.
 
@@ -587,12 +600,18 @@ class CRUDInventoryAdjustment:
         count_query = select(func.count()).select_from(query.subquery())
         total = db.scalar(count_query)
 
+        # Sort con allowlist + tiebreaker estable id ASC.
+        col_name = sort_by if (sort_by and sort_by in self.SORTABLE_COLUMNS) else self.DEFAULT_SORT_COLUMN
+        sort_column = getattr(InventoryAdjustment, col_name)
+        direction = "asc" if str(sort_dir).lower() == "asc" else "desc"
+        order_clause = sort_column.desc() if direction == "desc" else sort_column.asc()
+
         query = (
             query.options(
                 joinedload(InventoryAdjustment.material),
                 joinedload(InventoryAdjustment.warehouse),
             )
-            .order_by(InventoryAdjustment.date.desc(), InventoryAdjustment.adjustment_number.desc())
+            .order_by(order_clause, InventoryAdjustment.adjustment_number.desc(), InventoryAdjustment.id.asc())
             .offset(skip)
             .limit(limit)
         )

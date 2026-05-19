@@ -15,11 +15,16 @@ interface PurchaseFilters {
   date_from?: string;
   date_to?: string;
   search?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export const purchaseService = {
   getAll: async (filters: PurchaseFilters = {}): Promise<PaginatedResponse<PurchaseResponse>> => {
-    const response = await apiClient.get<PaginatedResponse<PurchaseResponse>>("/api/v1/purchases", { params: filters });
+    const params: Record<string, unknown> = { ...filters };
+    if (!params.sort_by) delete params.sort_by;
+    if (!params.sort_dir) delete params.sort_dir;
+    const response = await apiClient.get<PaginatedResponse<PurchaseResponse>>("/api/v1/purchases", { params });
     return response.data;
   },
 

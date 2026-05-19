@@ -28,6 +28,8 @@ interface AdjustmentFilters {
   date_from?: string;
   date_to?: string;
   exclude_migration_seeds?: boolean;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 interface TransformationFilters {
@@ -37,6 +39,8 @@ interface TransformationFilters {
   status?: string;
   date_from?: string;
   date_to?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 interface MovementFilters {

@@ -13,6 +13,8 @@ interface DoubleEntryFilters {
   date_from?: string;
   date_to?: string;
   date_field?: "date" | "liquidated_at";
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export function useDoubleEntries(filters: DoubleEntryFilters = {}) {
