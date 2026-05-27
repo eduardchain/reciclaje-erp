@@ -38,6 +38,36 @@ Excepciones: cambios puramente cosmeticos en frontend (CSS, labels, reordenar UI
 
 ---
 
+## REGLA OBLIGATORIA: Responsive mobile-first en toda feature nueva
+
+**Toda pagina, formulario, tabla, modal o componente nuevo DEBE ser usable en 390px (iPhone 12+) ademas de desktop.** Mobile no es opcional ni "fase futura" — se construye al mismo tiempo que la version desktop. Verificar en DevTools mobile mode antes de marcar la tarea como completada.
+
+**Patrones ya establecidos (reutilizar, no reinventar):**
+
+- **Hook `useIsMobile()`** ([frontend/src/hooks/useMediaQuery.ts](frontend/src/hooks/useMediaQuery.ts)) — `boolean`, true bajo `md=768px`. Solo para logica imperativa; 95% de los casos se resuelven con clases Tailwind responsive.
+- **Tablas con >4 columnas en mobile**:
+  - Opcion A (preferida para listados de operaciones/movimientos): dual render `<div className="hidden md:block">` (Table desktop) + `<div className="md:hidden space-y-2">` (cards mobile), o `<DataTable renderMobileCard={(row) => ...} />`.
+  - Opcion B (reportes anchos, tablas con sticky col): overflow wrapper `<div className="overflow-x-auto -mx-3 sm:mx-0"><Table className="min-w-[Npx]">`.
+  - Cards mobile ya implementadas: `<OperationListCard>` (purchases/sales/double-entries) y `<MovementListCard>` (treasury). Reutilizar antes de crear nuevas.
+- **Formularios multi-linea**: `<FormLineGrid>` ([frontend/src/components/shared/FormLineGrid.tsx](frontend/src/components/shared/FormLineGrid.tsx)) — `grid-cols-1` mobile, `md:grid-cols-12` desktop. Hijos anotados con `md:col-span-N`.
+- **Filtros**: `flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center`. DateRangePicker / Select / Input: `w-full sm:w-auto` (o `sm:w-40`).
+- **Grids de KPIs / info cards**: `grid-cols-1 sm:grid-cols-2 md:grid-cols-4`. **NUNCA** `grid-cols-2 md:grid-cols-4` — aprieta en 390px.
+- **Dialogs shadcn**: el base ya incluye `w-[calc(100vw-1.5rem)] max-w-lg sm:w-full`. No agregar `max-w-md` que rompe el ajuste mobile. Internos: `grid-cols-1 sm:grid-cols-2` en vez de `grid-cols-2`.
+- **Sticky bottom (Guardar/Cancelar en formularios)**: `sticky bottom-0 bg-white border-t -mx-3 px-3 md:-mx-6 md:px-6 pb-[max(1rem,env(safe-area-inset-bottom))]` + botones `w-full sm:w-auto`.
+- **dt/dd en detail pages**: para valores largos (nombres, descripciones, materiales) usar `flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-3`. Para valores cortos (badges, montos, fechas, status) `flex justify-between gap-3` es correcto.
+- **PageHeader**: `flex-col sm:flex-row` con botones de accion `flex-wrap`.
+- **Inputs numericos**: `MoneyInput` ya tiene `inputMode={decimals > 0 ? "decimal" : "numeric"}` — abre teclado correcto en iOS. Reutilizar siempre que sea cantidad/precio/monto.
+- **Tabs**: si son >4, envolver en `<div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">` + `<TabsList className="inline-flex w-max sm:w-auto sm:flex-wrap">`.
+- **Sticky cells en tablas anchas**: SIEMPRE con `bg-white` (o color de fila pares) — sticky transparente muestra el contenido detras al scrollear.
+- **`id="main-scroll"` y `bg-slate-50/80` en `<main>` de Layout**: NO tocar — `useScrollRestoration` los necesita.
+
+**Verificacion obligatoria antes de marcar tarea completada:**
+1. DevTools mobile mode (iPhone 12, 390x844): sin overflow horizontal, hamburger funciona, formularios completables, tablas legibles (cards o scroll), botones primarios accesibles.
+2. Desktop 1280px: comparar contra mismo componente antes del cambio — cero regresion visual.
+3. Rotacion portrait↔landscape (si aplica): drawer/modals no quedan colgados.
+
+---
+
 ## Guia para mantener CLAUDE.md
 
 Al terminar una sesion donde se implemento funcionalidad nueva o se tomo una decision arquitectonica:
