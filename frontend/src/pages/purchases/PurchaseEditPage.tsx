@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
+import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
+import { cn } from "@/utils";
 import { usePurchase, useUpdatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, usePayableProviders, useMaterials, useWarehouses } from "@/hooks/useMasterData";
@@ -293,12 +295,15 @@ export default function PurchaseEditPage() {
         </CardHeader>
         <CardContent className="space-y-0">
           {lines.map((line, idx) => (
-            <div
+            <FormLineGrid
               key={line._key}
-              className={`grid grid-cols-12 gap-2 items-end pb-8 mb-3 relative ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
+              isFirst={idx === 0}
+              isLast={idx === lines.length - 1}
+              onDelete={() => removeLine(line._key)}
+              disableDelete={lines.length === 1}
             >
-              <div className="col-span-3">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material *</Label>}
+              <div className="md:col-span-3">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Material *</Label>
                 <EntitySelect
                   value={line.material_id}
                   onChange={(v) => handleMaterialChange(line._key, v)}
@@ -306,8 +311,8 @@ export default function PurchaseEditPage() {
                   placeholder="Material..."
                 />
               </div>
-              <div className="col-span-3">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega</Label>}
+              <div className="md:col-span-3">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Bodega</Label>
                 <EntitySelect
                   value={line.warehouse_id ?? ""}
                   onChange={(v) => updateLine(line._key, "warehouse_id", v || null)}
@@ -315,8 +320,8 @@ export default function PurchaseEditPage() {
                   placeholder="Bodega..."
                 />
               </div>
-              <div className="col-span-2">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg) *</Label>}
+              <div className="md:col-span-2">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad (kg) *</Label>
                 <MoneyInput
                   value={line.quantity}
                   onChange={(v) => updateLine(line._key, "quantity", v)}
@@ -324,8 +329,8 @@ export default function PurchaseEditPage() {
                   placeholder="0,00"
                 />
               </div>
-              <div className={linesCostData ? "col-span-1 relative" : "col-span-2 relative"}>
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit. *</Label>}
+              <div className={cn("relative", linesCostData ? "md:col-span-1" : "md:col-span-2")}>
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Precio Unit. *</Label>
                 <MoneyInput
                   value={line.unit_price}
                   onChange={(v) => updateLine(line._key, "unit_price", v)}
@@ -339,32 +344,20 @@ export default function PurchaseEditPage() {
                 </div>
               </div>
               {linesCostData && (
-              <div className="col-span-1 text-right">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Unit*</Label>}
-                <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums text-emerald-600">
+              <div className="md:col-span-1 md:text-right flex md:block items-center justify-between">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Costo Unit*</Label>
+                <p className="md:h-10 flex items-center md:justify-end text-sm font-medium tabular-nums text-emerald-600">
                   {formatCurrency(linesCostData.find(c => c.materialId === line.material_id)?.unitCost ?? line.unit_price)}
                 </p>
               </div>
               )}
-              <div className="col-span-1 text-right">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}
-                <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">
+              <div className="md:col-span-1 md:text-right flex md:block items-center justify-between">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Total</Label>
+                <p className="md:h-10 flex items-center md:justify-end text-sm font-medium tabular-nums">
                   {formatCurrency(line.quantity * line.unit_price)}
                 </p>
               </div>
-              <div className="col-span-1">
-                {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeLine(line._key)}
-                  disabled={lines.length === 1}
-                  className="text-red-500 hover:text-red-700"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+            </FormLineGrid>
           ))}
 
           {linesCostData && (
@@ -389,17 +382,22 @@ export default function PurchaseEditPage() {
         {commissions.length > 0 && (
           <CardContent className="space-y-0">
             {commissions.map((comm, idx) => (
-              <div key={comm._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < commissions.length - 1 ? "border-b border-slate-100" : ""}`}>
-                <div className="col-span-3">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comisionista *</Label>}
+              <FormLineGrid
+                key={comm._key}
+                isFirst={idx === 0}
+                isLast={idx === commissions.length - 1}
+                onDelete={() => setCommissions((p) => p.filter((c) => c._key !== comm._key))}
+              >
+                <div className="md:col-span-3">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Comisionista *</Label>
                   <EntitySelect value={comm.third_party_id} onChange={(v) => updateCommission(comm._key, "third_party_id", v)} options={payableProviders.map((tp) => ({ id: tp.id, label: tp.name }))} placeholder="Comisionista..." />
                 </div>
-                <div className="col-span-3">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto *</Label>}
+                <div className="md:col-span-3">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Concepto *</Label>
                   <Input value={comm.concept} onChange={(e) => updateCommission(comm._key, "concept", e.target.value)} placeholder="Concepto..." />
                 </div>
-                <div className="col-span-2">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</Label>}
+                <div className="md:col-span-2">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Tipo</Label>
                   <Select value={comm.commission_type} onValueChange={(v) => updateCommission(comm._key, "commission_type", v)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -409,13 +407,13 @@ export default function PurchaseEditPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="col-span-2">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor *</Label>}
+                <div className="md:col-span-2">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Valor *</Label>
                   <Input type="number" min={0} step="0.01" value={comm.commission_value || ""} onChange={(e) => updateCommission(comm._key, "commission_value", parseFloat(e.target.value) || 0)} placeholder={comm.commission_type === "percentage" ? "%" : comm.commission_type === "per_kg" ? "$/kg" : "$"} />
                 </div>
-                <div className="col-span-1 text-right">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Monto</Label>}
-                  <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">
+                <div className="md:col-span-1 md:text-right flex md:block items-center justify-between">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Monto</Label>
+                  <p className="md:h-10 flex items-center md:justify-end text-sm font-medium tabular-nums">
                     {comm.commission_type === "percentage"
                       ? formatCurrency((total * comm.commission_value) / 100)
                       : comm.commission_type === "per_kg"
@@ -423,11 +421,7 @@ export default function PurchaseEditPage() {
                       : formatCurrency(comm.commission_value)}
                   </p>
                 </div>
-                <div className="col-span-1">
-                  {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
-                  <Button variant="ghost" size="sm" onClick={() => setCommissions((p) => p.filter((c) => c._key !== comm._key))} className="text-red-500 hover:text-red-700"><Trash2 className="h-4 w-4" /></Button>
-                </div>
-              </div>
+              </FormLineGrid>
             ))}
           </CardContent>
         )}
@@ -460,15 +454,15 @@ export default function PurchaseEditPage() {
       </Card>
 
       {/* Acciones */}
-      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(`/purchases/${id}`)}>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-3 px-3 md:-mx-6 md:px-6 mt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(`/purchases/${id}`)} className="w-full sm:w-auto">
             Cancelar
           </Button>
           <Button
             onClick={handleSubmit}
             disabled={!canSubmit || updatePurchase.isPending}
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"
           >
             {updatePurchase.isPending ? "Guardando..." : "Guardar Cambios"}
           </Button>

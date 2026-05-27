@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, CreditCard, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, CreditCard, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,8 @@ import { Switch } from "@/components/ui/switch";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
+import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
+import { cn } from "@/utils";
 import { useSale, useLiquidateSale } from "@/hooks/useSales";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useMaterials, usePayableProviders, useMoneyAccounts } from "@/hooks/useMasterData";
@@ -266,25 +268,26 @@ export default function SaleLiquidatePage() {
             const lineTotal = line.received_quantity * line.unit_price;
             const lineProfit = lineTotal - line.unit_cost * line.quantity;
             return (
-              <div
+              <FormLineGrid
                 key={line.line_id}
-                className={`grid grid-cols-12 gap-2 items-end pb-8 mb-3 relative ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
+                isFirst={idx === 0}
+                isLast={idx === lines.length - 1}
               >
-                <div className="col-span-2">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</Label>}
-                  <p className="h-10 flex items-center text-sm">
+                <div className="md:col-span-2">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Material</Label>
+                  <p className="md:h-10 flex items-center text-sm">
                     <span className="font-medium">{line.material_name}</span>
                     <span className="text-slate-400 ml-1 text-xs">{line.material_code}</span>
                   </p>
                 </div>
-                <div className="col-span-1">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Despachado</Label>}
-                  <p className="h-10 flex items-center text-sm tabular-nums">
+                <div className="md:col-span-1 flex md:block items-center justify-between">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Despachado</Label>
+                  <p className="md:h-10 flex items-center text-sm tabular-nums">
                     {formatWeight(line.quantity)}
                   </p>
                 </div>
-                <div className="col-span-2">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Recibido (kg)</Label>}
+                <div className="md:col-span-2">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Recibido (kg)</Label>
                   <MoneyInput
                     value={line.received_quantity}
                     onChange={(v) => updateReceivedQuantity(line.line_id, v)}
@@ -292,9 +295,9 @@ export default function SaleLiquidatePage() {
                     placeholder="0"
                   />
                 </div>
-                <div className="col-span-1">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Dif.</Label>}
-                  <div className="h-10 flex items-center text-sm tabular-nums">
+                <div className="md:col-span-1 flex md:block items-center justify-between">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Dif.</Label>
+                  <div className="md:h-10 flex items-center text-sm tabular-nums">
                     {Math.abs(lineDiff) < 0.001 ? (
                       <span className="text-slate-400">&mdash;</span>
                     ) : (
@@ -307,8 +310,8 @@ export default function SaleLiquidatePage() {
                     )}
                   </div>
                 </div>
-                <div className="col-span-2 relative">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio/kg *</Label>}
+                <div className="md:col-span-2 relative">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Precio/kg *</Label>
                   <MoneyInput
                     value={line.unit_price}
                     onChange={(v) => updatePrice(line.line_id, v)}
@@ -325,21 +328,21 @@ export default function SaleLiquidatePage() {
                     )}
                   </div>
                 </div>
-                <div className="col-span-2 text-right">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</Label>}
-                  <p className="h-10 flex items-center justify-end text-sm font-medium tabular-nums">
+                <div className="md:col-span-2 md:text-right flex md:block items-center justify-between">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Total</Label>
+                  <p className="md:h-10 flex items-center md:justify-end text-sm font-medium tabular-nums">
                     {formatCurrency(lineTotal)}
                   </p>
                 </div>
                 {canViewProfit && (
-                <div className="col-span-2 text-right">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Util. Bruta</Label>}
-                  <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                <div className="md:col-span-2 md:text-right flex md:block items-center justify-between">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Util. Bruta</Label>
+                  <p className={`md:h-10 flex items-center md:justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                     {formatCurrency(lineProfit)}
                   </p>
                 </div>
                 )}
-              </div>
+              </FormLineGrid>
             );
           })}
 
@@ -378,9 +381,14 @@ export default function SaleLiquidatePage() {
             <p className="text-sm text-slate-400 text-center py-2">Sin comisiones</p>
           )}
           {commissions.map((comm, idx) => (
-            <div key={comm._key} className={`grid grid-cols-12 gap-2 items-end pb-3 ${idx < commissions.length - 1 ? "border-b border-slate-100" : ""}`}>
-              <div className="col-span-3">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comisionista</Label>}
+            <FormLineGrid
+              key={comm._key}
+              isFirst={idx === 0}
+              isLast={idx === commissions.length - 1}
+              onDelete={() => removeCommission(comm._key)}
+            >
+              <div className="md:col-span-3">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Comisionista</Label>
                 <EntitySelect
                   value={comm.third_party_id}
                   onChange={(v) => updateCommission(comm._key, "third_party_id", v)}
@@ -388,16 +396,16 @@ export default function SaleLiquidatePage() {
                   placeholder="Proveedor..."
                 />
               </div>
-              <div className="col-span-3">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto</Label>}
+              <div className="md:col-span-3">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Concepto</Label>
                 <Input
                   value={comm.concept}
                   onChange={(e) => updateCommission(comm._key, "concept", e.target.value)}
                   placeholder="Concepto"
                 />
               </div>
-              <div className="col-span-2">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</Label>}
+              <div className="md:col-span-2">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Tipo</Label>
                 <Select
                   value={comm.commission_type}
                   onValueChange={(v) => updateCommission(comm._key, "commission_type", v)}
@@ -410,8 +418,8 @@ export default function SaleLiquidatePage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="col-span-1">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor</Label>}
+              <div className="md:col-span-1">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Valor</Label>
                 <Input
                   type="number"
                   min={0}
@@ -420,19 +428,13 @@ export default function SaleLiquidatePage() {
                   onChange={(e) => updateCommission(comm._key, "commission_value", parseFloat(e.target.value) || 0)}
                 />
               </div>
-              <div className="col-span-2 text-right">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Monto</Label>}
-                <p className="h-10 flex items-center justify-end text-sm tabular-nums">
+              <div className="md:col-span-2 md:text-right flex md:block items-center justify-between">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Monto</Label>
+                <p className="md:h-10 flex items-center md:justify-end text-sm tabular-nums">
                   {formatCurrency(commissionAmounts[idx] ?? 0)}
                 </p>
               </div>
-              <div className="col-span-1 flex justify-end">
-                {idx === 0 && <Label className="text-xs invisible">X</Label>}
-                <Button type="button" variant="ghost" size="icon" onClick={() => removeCommission(comm._key)}>
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                </Button>
-              </div>
-            </div>
+            </FormLineGrid>
           ))}
         </CardContent>
       </Card>
@@ -489,8 +491,8 @@ export default function SaleLiquidatePage() {
       {/* Cobro inmediato */}
       <Card className="shadow-sm">
         <CardContent className="pt-6 space-y-4">
-          <div className="flex items-center gap-4">
-            <div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+            <div className="flex-1">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Liquidación</Label>
               <p className="text-xs text-slate-500 mt-0.5">Por defecto usa la fecha del documento.</p>
             </div>
@@ -500,11 +502,11 @@ export default function SaleLiquidatePage() {
               min={docDateStr}
               max={todayStr}
               onChange={(e) => setLiquidationDate(e.target.value)}
-              className="w-40 h-8 text-xs"
+              className="w-full sm:w-40 h-9 sm:h-8 text-xs"
             />
           </div>
           <div className="border-t border-slate-100" />
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Registrar cobro inmediato</Label>
               <p className="text-xs text-slate-500 mt-1">Registra el cobro al cliente automaticamente al liquidar.</p>
@@ -526,15 +528,15 @@ export default function SaleLiquidatePage() {
       </Card>
 
       {/* Acciones */}
-      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(`/sales/${id}`)}>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-3 px-3 md:-mx-6 md:px-6 mt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(`/sales/${id}`)} className="w-full sm:w-auto">
             Cancelar
           </Button>
           <Button
             onClick={handleSubmit}
             disabled={!canSubmit || liquidate.isPending}
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"
           >
             <CreditCard className="h-4 w-4 mr-2" />
             {liquidate.isPending ? "Liquidando..." : "Confirmar Liquidacion"}

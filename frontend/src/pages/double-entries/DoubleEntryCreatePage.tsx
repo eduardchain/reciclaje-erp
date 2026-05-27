@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
+import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { useCreateDoubleEntry } from "@/hooks/useDoubleEntries";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, usePayableProviders, useCustomers, useMaterials } from "@/hooks/useMasterData";
@@ -18,6 +19,7 @@ import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import { usePermissions } from "@/hooks/usePermissions";
+import { cn } from "@/utils";
 import type { DoubleEntryLineCreate } from "@/types/double-entry";
 import type { SaleCommissionCreate } from "@/types/sale";
 
@@ -172,8 +174,8 @@ export default function DoubleEntryCreatePage() {
           <Button variant="outline" size="sm" onClick={() => setLines((p) => [...p, createEmptyLine()])}><Plus className="h-4 w-4 mr-1" />Agregar Linea</Button>
         </CardHeader>
         <CardContent className="space-y-0">
-          {/* Header */}
-          <div className="grid grid-cols-12 gap-2 pb-2 border-b border-slate-200 mb-2">
+          {/* Header (desktop only) */}
+          <div className="hidden md:grid grid-cols-12 gap-2 pb-2 border-b border-slate-200 mb-2">
             <div className="col-span-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Material</div>
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg)</div>
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">P. Compra</div>
@@ -182,14 +184,21 @@ export default function DoubleEntryCreatePage() {
             <div className="col-span-1" />
           </div>
 
-          {lines.map((line) => {
+          {lines.map((line, idx) => {
             const lineProfit = (line.sale_unit_price - line.purchase_unit_price) * line.quantity;
             const used = usedMaterialIds(line._key);
             const availableMaterials = materials.filter((m) => !used.includes(m.id));
+            const isLast = idx === lines.length - 1;
 
             return (
-              <div key={line._key} className="grid grid-cols-12 gap-2 items-start py-2 pb-8 relative border-b border-slate-100 last:border-0">
-                <div className="col-span-3">
+              <FormLineGrid
+                key={line._key}
+                isLast={isLast}
+                isFirst={idx === 0}
+                onDelete={lines.length > 1 ? () => removeLine(line._key) : undefined}
+              >
+                <div className="md:col-span-3">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Material</Label>
                   <EntitySelect
                     value={line.material_id}
                     onChange={(v) => handleLineMaterialChange(line._key, v)}
@@ -197,50 +206,54 @@ export default function DoubleEntryCreatePage() {
                     placeholder="Material..."
                   />
                 </div>
-                <div className="col-span-2">
+                <div className="md:col-span-2">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad (kg)</Label>
                   <MoneyInput value={line.quantity} onChange={(v) => updateLine(line._key, "quantity", v)} decimals={2} />
                 </div>
-                <div className="col-span-2 relative">
+                <div className="md:col-span-2 relative">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>P. Compra</Label>
                   <MoneyInput value={line.purchase_unit_price} onChange={(v) => updateLine(line._key, "purchase_unit_price", v)} />
                   <div className="absolute left-0 w-max" style={{ top: "100%" }}>
                     <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "purchase")} onApply={(p) => updateLine(line._key, "purchase_unit_price", p)} />
                   </div>
                 </div>
-                <div className="col-span-2 relative">
+                <div className="md:col-span-2 relative">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>P. Venta</Label>
                   <MoneyInput value={line.sale_unit_price} onChange={(v) => updateLine(line._key, "sale_unit_price", v)} />
                   <div className="absolute left-0 w-max" style={{ top: "100%" }}>
                     <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "sale_unit_price", p)} />
                   </div>
                 </div>
                 {canViewProfit && (
-                  <div className="col-span-2 text-right pt-2">
+                  <div className="md:col-span-2 md:text-right md:pt-2 flex md:block items-center justify-between">
+                    <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500 md:hidden", lineLabelClass(idx))}>Ganancia</Label>
                     <span className={`font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
                       {formatCurrency(lineProfit)}
                     </span>
                   </div>
                 )}
-                <div className="col-span-1 text-center pt-1">
-                  {lines.length > 1 && (
-                    <Button variant="ghost" size="sm" onClick={() => removeLine(line._key)} className="text-red-500 h-8 w-8 p-0">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
+              </FormLineGrid>
             );
           })}
 
           {/* Totales */}
-          <div className="grid grid-cols-12 gap-2 pt-3 mt-2 border-t border-slate-300">
-            <div className="col-span-5 text-right text-sm font-semibold text-slate-600">Totales:</div>
-            <div className="col-span-2 text-sm font-bold">{formatCurrency(totalPurchase)}</div>
-            <div className="col-span-2 text-sm font-bold">{formatCurrency(totalSale)}</div>
-            <div className="col-span-2 text-right">
+          <div className="grid grid-cols-2 md:grid-cols-12 gap-2 pt-3 mt-2 border-t border-slate-300">
+            <div className="col-span-2 md:col-span-5 md:text-right text-sm font-semibold text-slate-600">Totales:</div>
+            <div className="md:col-span-2">
+              <div className="md:hidden text-[11px] font-semibold uppercase tracking-wider text-slate-500">P. Compra</div>
+              <div className="text-sm font-bold">{formatCurrency(totalPurchase)}</div>
+            </div>
+            <div className="md:col-span-2">
+              <div className="md:hidden text-[11px] font-semibold uppercase tracking-wider text-slate-500">P. Venta</div>
+              <div className="text-sm font-bold">{formatCurrency(totalSale)}</div>
+            </div>
+            <div className="md:col-span-2 md:text-right">
+              <div className="md:hidden text-[11px] font-semibold uppercase tracking-wider text-slate-500">Ganancia</div>
               <span className={`text-sm font-bold ${totalSale - totalPurchase >= 0 ? "text-emerald-700" : "text-red-700"}`}>
                 {formatCurrency(totalSale - totalPurchase)}
               </span>
             </div>
-            <div className="col-span-1" />
+            <div className="hidden md:block md:col-span-1" />
           </div>
         </CardContent>
       </Card>
@@ -254,28 +267,29 @@ export default function DoubleEntryCreatePage() {
         {commissions.length > 0 && (
           <CardContent className="space-y-0">
             {commissions.map((comm, idx) => (
-              <div key={comm._key} className={`grid grid-cols-12 gap-2 items-end pb-3 mb-3 ${idx < commissions.length - 1 ? "border-b border-slate-100" : ""}`}>
-                <div className="col-span-3">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comisionista</Label>}
+              <FormLineGrid
+                key={comm._key}
+                isLast={idx === commissions.length - 1}
+                isFirst={idx === 0}
+                onDelete={() => setCommissions((p) => p.filter((c) => c._key !== comm._key))}
+              >
+                <div className="md:col-span-3">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Comisionista</Label>
                   <EntitySelect value={comm.third_party_id} onChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, third_party_id: v } : c))} options={payableProviders.map((t) => ({ id: t.id, label: t.name }))} placeholder="Comisionista..." />
                 </div>
-                <div className="col-span-3">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto</Label>}
+                <div className="md:col-span-3">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Concepto</Label>
                   <Input value={comm.concept} onChange={(e) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, concept: e.target.value } : c))} />
                 </div>
-                <div className="col-span-2">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</Label>}
+                <div className="md:col-span-2">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Tipo</Label>
                   <Select value={comm.commission_type} onValueChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, commission_type: v as "percentage" | "fixed" | "per_kg" } : c))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">Porcentaje</SelectItem><SelectItem value="fixed">Fijo</SelectItem><SelectItem value="per_kg">Por Kilo</SelectItem></SelectContent></Select>
                 </div>
-                <div className="col-span-2">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor</Label>}
+                <div className="md:col-span-3">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Valor</Label>
                   <Input type="number" min={0} value={comm.commission_value || ""} onChange={(e) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, commission_value: parseFloat(e.target.value) || 0 } : c))} />
                 </div>
-                <div className="col-span-1">
-                  {idx === 0 && <Label className="text-xs">&nbsp;</Label>}
-                  <Button variant="ghost" size="sm" onClick={() => setCommissions((p) => p.filter((c) => c._key !== comm._key))} className="text-red-500"><Trash2 className="h-4 w-4" /></Button>
-                </div>
-              </div>
+              </FormLineGrid>
             ))}
           </CardContent>
         )}
@@ -285,13 +299,13 @@ export default function DoubleEntryCreatePage() {
       {canViewProfit && (
         <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
           <CardContent className="pt-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
               <div className="space-y-1 text-sm">
                 <div>Compra: <span className="font-medium">{formatCurrency(totalPurchase)}</span></div>
                 <div>Venta: <span className="font-medium">{formatCurrency(totalSale)}</span></div>
                 {totalCommissions > 0 && <div>Comisiones: <span className="font-medium text-red-600">-{formatCurrency(totalCommissions)}</span></div>}
               </div>
-              <div className="text-right">
+              <div className="sm:text-right">
                 <p className="text-sm text-slate-500">Utilidad estimada</p>
                 <p className={`text-3xl font-bold ${profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(profit)}</p>
               </div>
@@ -304,8 +318,8 @@ export default function DoubleEntryCreatePage() {
       {canLiquidate && (
         <Card className="shadow-sm">
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidar inmediatamente</Label>
                 <p className="text-xs text-slate-500 mt-1">Confirma precios y aplica efectos financieros (saldos, comisiones).</p>
               </div>
@@ -315,10 +329,10 @@ export default function DoubleEntryCreatePage() {
         </Card>
       )}
 
-      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.DOUBLE_ENTRIES)}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-emerald-600 hover:bg-emerald-700">{create.isPending ? "Creando..." : autoLiquidate ? "Crear y Liquidar" : "Crear Doble Partida"}</Button>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-3 px-3 md:-mx-6 md:px-6 mt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(ROUTES.DOUBLE_ENTRIES)} className="w-full sm:w-auto">Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto">{create.isPending ? "Creando..." : autoLiquidate ? "Crear y Liquidar" : "Crear Doble Partida"}</Button>
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,10 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
+import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { useCreateTransformation } from "@/hooks/useInventory";
 import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
+import { cn } from "@/utils";
 
 interface LineForm {
   _key: number;
@@ -114,50 +116,50 @@ export default function TransformationCreatePage() {
 
       {/* Destinos */}
       <Card className="shadow-sm">
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Materiales Destino</CardTitle>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
             <Select value={costDistribution} onValueChange={(v) => setCostDistribution(v as "average_cost" | "proportional_weight" | "manual")}>
-              <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full sm:w-[220px]"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="average_cost">Costo Promedio Movil</SelectItem>
                 <SelectItem value="proportional_weight">Proporcional (peso)</SelectItem>
                 <SelectItem value="manual">Manual</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm" onClick={() => setLines((p) => [...p, createEmptyLine()])}>
+            <Button variant="outline" size="sm" onClick={() => setLines((p) => [...p, createEmptyLine()])} className="w-full sm:w-auto">
               <Plus className="h-4 w-4 mr-1" />Agregar
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-0">
           {lines.map((line, idx) => (
-            <div key={line._key} className={`grid grid-cols-12 gap-2 items-end ${idx < lines.length - 1 ? "border-b border-slate-100" : ""} pb-3 mb-3`}>
-              <div className="col-span-3">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</Label>}
+            <FormLineGrid
+              key={line._key}
+              isLast={idx === lines.length - 1}
+              isFirst={idx === 0}
+              onDelete={() => setLines((p) => p.filter((l) => l._key !== line._key))}
+              disableDelete={lines.length <= 1}
+            >
+              <div className="md:col-span-3">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Material</Label>
                 <EntitySelect value={line.destination_material_id} onChange={(v) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, destination_material_id: v } : l))} options={materialOptions} placeholder="Material..." />
               </div>
-              <div className="col-span-3">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega</Label>}
+              <div className="md:col-span-3">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Bodega</Label>
                 <EntitySelect value={line.destination_warehouse_id} onChange={(v) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, destination_warehouse_id: v } : l))} options={warehouseOptions} placeholder="Bodega..." />
               </div>
-              <div className="col-span-2">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad</Label>}
+              <div className={costDistribution === "manual" ? "md:col-span-2" : "md:col-span-5"}>
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad</Label>
                 <MoneyInput value={line.quantity} onChange={(v) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, quantity: v } : l))} decimals={2} />
               </div>
               {costDistribution === "manual" && (
-                <div className="col-span-2">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Unit.</Label>}
+                <div className="md:col-span-3">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Costo Unit.</Label>
                   <MoneyInput value={line.unit_cost ?? 0} onChange={(v) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, unit_cost: v } : l))} />
                 </div>
               )}
-              <div className={costDistribution === "manual" ? "col-span-2" : "col-span-4"}>
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">&nbsp;</Label>}
-                <Button variant="ghost" size="sm" onClick={() => setLines((p) => p.filter((l) => l._key !== line._key))} className="text-red-500" disabled={lines.length <= 1}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+            </FormLineGrid>
           ))}
         </CardContent>
       </Card>
@@ -201,10 +203,10 @@ export default function TransformationCreatePage() {
         </CardContent>
       </Card>
 
-      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY_TRANSFORMATIONS)}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-emerald-600 hover:bg-emerald-700">
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-3 px-3 md:-mx-6 md:px-6 mt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(ROUTES.INVENTORY_TRANSFORMATIONS)} className="w-full sm:w-auto">Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit || create.isPending} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto">
             {create.isPending ? "Creando..." : "Crear Transformacion"}
           </Button>
         </div>

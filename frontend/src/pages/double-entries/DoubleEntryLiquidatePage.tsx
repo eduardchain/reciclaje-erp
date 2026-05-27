@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,11 +11,13 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { PriceSuggestion } from "@/components/shared/PriceSuggestion";
 import { MoneyInput } from "@/components/shared/MoneyInput";
+import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { useDoubleEntry, useLiquidateDoubleEntry } from "@/hooks/useDoubleEntries";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { usePayableProviders } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { usePermissions } from "@/hooks/usePermissions";
+import { cn } from "@/utils";
 import type { SaleCommissionCreate } from "@/types/sale";
 
 interface LiquidationLine {
@@ -199,24 +201,22 @@ export default function DoubleEntryLiquidatePage() {
         <CardContent className="space-y-0">
           {lines.map((line, idx) => {
             const lineProfit = (line.sale_unit_price - line.purchase_unit_price) * line.quantity;
+            const isLast = idx === lines.length - 1;
             return (
-              <div
-                key={line.line_id}
-                className={`grid grid-cols-12 gap-2 items-end pb-8 mb-3 relative ${idx < lines.length - 1 ? "border-b border-slate-100" : ""}`}
-              >
-                <div className="col-span-2">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</Label>}
-                  <p className="h-10 flex items-center text-sm">
+              <FormLineGrid key={line.line_id} isLast={isLast} isFirst={idx === 0}>
+                <div className="md:col-span-2">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Material</Label>
+                  <p className="md:h-10 flex items-center text-sm">
                     <span className="font-medium">{line.material_name}</span>
                     <span className="text-slate-400 ml-1 text-xs">{line.material_code}</span>
                   </p>
                 </div>
-                <div className="col-span-1">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad</Label>}
-                  <p className="h-10 flex items-center text-sm tabular-nums">{formatWeight(line.quantity)}</p>
+                <div className="md:col-span-1 flex md:block items-center justify-between">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500 md:hidden", lineLabelClass(idx))}>Cantidad</Label>
+                  <p className="md:h-10 md:flex md:items-center text-sm tabular-nums">{formatWeight(line.quantity)}</p>
                 </div>
-                <div className="col-span-2 relative">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">P. Compra *</Label>}
+                <div className="md:col-span-2 relative">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>P. Compra *</Label>
                   <MoneyInput
                     value={line.purchase_unit_price}
                     onChange={(v) => updateLine(line.line_id, "purchase_unit_price", v)}
@@ -230,8 +230,8 @@ export default function DoubleEntryLiquidatePage() {
                     />
                   </div>
                 </div>
-                <div className="col-span-2 relative">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">P. Venta *</Label>}
+                <div className="md:col-span-2 relative">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>P. Venta *</Label>
                   <MoneyInput
                     value={line.sale_unit_price}
                     onChange={(v) => updateLine(line.line_id, "sale_unit_price", v)}
@@ -245,21 +245,21 @@ export default function DoubleEntryLiquidatePage() {
                     />
                   </div>
                 </div>
-                <div className="col-span-2 text-right">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Compra</Label>}
-                  <p className="h-10 flex items-center justify-end text-sm tabular-nums">{formatCurrency(line.quantity * line.purchase_unit_price)}</p>
+                <div className="md:col-span-2 md:text-right flex md:block items-center justify-between">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500 md:hidden", lineLabelClass(idx))}>Total Compra</Label>
+                  <p className="md:h-10 md:flex md:items-center md:justify-end text-sm tabular-nums">{formatCurrency(line.quantity * line.purchase_unit_price)}</p>
                 </div>
-                <div className="col-span-1 text-right">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Venta</Label>}
-                  <p className="h-10 flex items-center justify-end text-sm tabular-nums">{formatCurrency(line.quantity * line.sale_unit_price)}</p>
+                <div className="md:col-span-1 md:text-right flex md:block items-center justify-between">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500 md:hidden", lineLabelClass(idx))}>Total Venta</Label>
+                  <p className="md:h-10 md:flex md:items-center md:justify-end text-sm tabular-nums">{formatCurrency(line.quantity * line.sale_unit_price)}</p>
                 </div>
-                {canViewProfit && <div className="col-span-2 text-right">
-                  {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ganancia</Label>}
-                  <p className={`h-10 flex items-center justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                {canViewProfit && <div className="md:col-span-2 md:text-right flex md:block items-center justify-between">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500 md:hidden", lineLabelClass(idx))}>Ganancia</Label>
+                  <p className={`md:h-10 md:flex md:items-center md:justify-end text-sm font-medium tabular-nums ${lineProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                     {formatCurrency(lineProfit)}
                   </p>
                 </div>}
-              </div>
+              </FormLineGrid>
             );
           })}
         </CardContent>
@@ -278,9 +278,14 @@ export default function DoubleEntryLiquidatePage() {
             <p className="text-sm text-slate-400 text-center py-2">Sin comisiones</p>
           )}
           {commissions.map((comm, idx) => (
-            <div key={comm._key} className={`grid grid-cols-12 gap-2 items-end pb-3 ${idx < commissions.length - 1 ? "border-b border-slate-100" : ""}`}>
-              <div className="col-span-3">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Comisionista</Label>}
+            <FormLineGrid
+              key={comm._key}
+              isLast={idx === commissions.length - 1}
+              isFirst={idx === 0}
+              onDelete={() => removeCommission(comm._key)}
+            >
+              <div className="md:col-span-3">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Comisionista</Label>
                 <EntitySelect
                   value={comm.third_party_id}
                   onChange={(v) => updateCommission(comm._key, "third_party_id", v)}
@@ -288,16 +293,16 @@ export default function DoubleEntryLiquidatePage() {
                   placeholder="Seleccionar..."
                 />
               </div>
-              <div className="col-span-3">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto</Label>}
+              <div className="md:col-span-3">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Concepto</Label>
                 <Input
                   value={comm.concept}
                   onChange={(e) => updateCommission(comm._key, "concept", e.target.value)}
                   placeholder="Concepto"
                 />
               </div>
-              <div className="col-span-2">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</Label>}
+              <div className="md:col-span-2">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Tipo</Label>
                 <Select value={comm.commission_type} onValueChange={(v) => updateCommission(comm._key, "commission_type", v)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -307,8 +312,8 @@ export default function DoubleEntryLiquidatePage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="col-span-1">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor</Label>}
+              <div className="md:col-span-1">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Valor</Label>
                 <Input
                   type="number"
                   min={0}
@@ -317,17 +322,11 @@ export default function DoubleEntryLiquidatePage() {
                   onChange={(e) => updateCommission(comm._key, "commission_value", parseFloat(e.target.value) || 0)}
                 />
               </div>
-              <div className="col-span-2 text-right">
-                {idx === 0 && <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Monto</Label>}
-                <p className="h-10 flex items-center justify-end text-sm tabular-nums">{formatCurrency(commissionAmounts[idx] ?? 0)}</p>
+              <div className="md:col-span-2 md:text-right flex md:block items-center justify-between">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500 md:hidden", lineLabelClass(idx))}>Monto</Label>
+                <p className="md:h-10 md:flex md:items-center md:justify-end text-sm tabular-nums">{formatCurrency(commissionAmounts[idx] ?? 0)}</p>
               </div>
-              <div className="col-span-1 flex justify-end">
-                {idx === 0 && <Label className="text-xs invisible">X</Label>}
-                <Button type="button" variant="ghost" size="icon" onClick={() => removeCommission(comm._key)}>
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                </Button>
-              </div>
-            </div>
+            </FormLineGrid>
           ))}
         </CardContent>
       </Card>
@@ -335,7 +334,7 @@ export default function DoubleEntryLiquidatePage() {
       {/* Fecha de liquidacion */}
       <Card className="shadow-sm">
         <CardContent className="pt-6">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Liquidación</Label>
               <p className="text-xs text-slate-500 mt-0.5">Por defecto usa la fecha del documento.</p>
@@ -346,7 +345,7 @@ export default function DoubleEntryLiquidatePage() {
               min={docDateStr}
               max={todayStr}
               onChange={(e) => setLiquidationDate(e.target.value)}
-              className="w-40 h-8 text-xs"
+              className="w-full sm:w-40 h-9 sm:h-8 text-sm sm:text-xs"
             />
           </div>
         </CardContent>
@@ -355,7 +354,7 @@ export default function DoubleEntryLiquidatePage() {
       {/* Resumen Financiero */}
       <Card className="border-2 border-emerald-200 bg-emerald-50 shadow-sm">
         <CardContent className="pt-6">
-          <div className="max-w-sm ml-auto space-y-2">
+          <div className="w-full sm:max-w-sm sm:ml-auto space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-slate-600">Total Compra</span>
               <span className="tabular-nums">{formatCurrency(totalPurchase)}</span>
@@ -391,13 +390,13 @@ export default function DoubleEntryLiquidatePage() {
       </Card>
 
       {/* Acciones */}
-      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(`/double-entries/${id}`)}>Cancelar</Button>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-3 px-3 md:-mx-6 md:px-6 mt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(`/double-entries/${id}`)} className="w-full sm:w-auto">Cancelar</Button>
           <Button
             onClick={handleSubmit}
             disabled={!canSubmit || liquidate.isPending}
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"
           >
             <CheckCircle className="h-4 w-4 mr-2" />
             {liquidate.isPending ? "Liquidando..." : "Confirmar Liquidacion"}
