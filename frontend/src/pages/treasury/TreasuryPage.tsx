@@ -23,7 +23,20 @@ import type { MoneyMovementResponse, MoneyMovementType } from "@/types/money-mov
 import type { MetricCard } from "@/types/reports";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ThirdPartyLink, AccountLink } from "@/components/shared/EntityLink";
+import { MovementListCard } from "@/components/shared/MovementListCard";
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
+
+// Tipos que representan entrada de dinero/credito (verde). El resto se considera salida (rojo).
+const INFLOW_TYPES = new Set<MoneyMovementType>([
+  "collection_from_client",
+  "service_income",
+  "capital_injection",
+  "advance_collection",
+  "transfer_in",
+  "collection_from_generic",
+  "tp_transfer_in",
+  "tp_adjustment_credit",
+]);
 
 const PAGE_SIZE = 20;
 
@@ -317,6 +330,18 @@ export default function TreasuryPage() {
         onExportAll={handleExportAll}
         currencyColumns={["amount"]}
         totalItems={data?.total}
+        renderMobileCard={(m) => (
+          <MovementListCard
+            date={m.date}
+            typeLabel={typeLabels[m.movement_type] ?? m.movement_type}
+            movementNumber={m.movement_number}
+            amount={m.amount}
+            isInflow={INFLOW_TYPES.has(m.movement_type)}
+            description={m.description}
+            thirdPartyName={m.third_party_name ?? (m.account_name ?? undefined)}
+            annulled={m.status === "annulled"}
+          />
+        )}
         toolbar={
           <ResponsiveFilterBar>
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar movimiento..." />

@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { MovementListCard } from "@/components/shared/MovementListCard";
 import { useAccountMovements } from "@/hooks/useMoneyMovements";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate } from "@/utils/formatters";
@@ -232,84 +233,116 @@ export default function AccountMovementsPage() {
                 description="No se encontraron movimientos para esta cuenta en el periodo seleccionado."
               />
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12">#</TableHead>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Descripcion</TableHead>
-                      <TableHead>Tercero</TableHead>
-                      <TableHead className="text-right">Entrada</TableHead>
-                      <TableHead className="text-right">Salida</TableHead>
-                      <TableHead className="text-right">Saldo</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dateFrom && openingBalance != null && (
-                      <TableRow className="bg-slate-50">
-                        <TableCell colSpan={5} className="text-sm font-medium text-slate-600">
-                          Saldo de apertura
-                        </TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-right">
-                          <MoneyDisplay amount={openingBalance} className="font-medium" />
-                        </TableCell>
+              <>
+                {/* Desktop: tabla */}
+                <div className="hidden md:block overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">#</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Descripcion</TableHead>
+                        <TableHead>Tercero</TableHead>
+                        <TableHead className="text-right">Entrada</TableHead>
+                        <TableHead className="text-right">Salida</TableHead>
+                        <TableHead className="text-right">Saldo</TableHead>
                       </TableRow>
-                    )}
-                    {movements.map((m) => {
-                      const isInflow = m.direction > 0;
-                      const isAnnulled = m.status === "annulled";
-                      const amount = Number(m.amount);
-                      return (
-                        <TableRow
-                          key={m.id}
-                          className={`cursor-pointer ${isAnnulled ? "opacity-50 bg-rose-50/50" : "hover:bg-slate-50"}`}
-                          onClick={() => handleRowClick(m.id)}
-                        >
-                          <TableCell className="text-xs text-slate-400">{m.movement_number}</TableCell>
-                          <TableCell className="text-sm">{formatDate(m.date)}</TableCell>
-                          <TableCell className="text-sm">
-                            <span className={isAnnulled ? "line-through" : ""}>
-                              {MOVEMENT_TYPE_LABELS[m.movement_type] || m.movement_type}
-                            </span>
-                            {isAnnulled && (
-                              <Badge variant="outline" className="ml-2 bg-rose-50 text-rose-600 text-[10px] py-0">
-                                Anulado
-                              </Badge>
-                            )}
+                    </TableHeader>
+                    <TableBody>
+                      {dateFrom && openingBalance != null && (
+                        <TableRow className="bg-slate-50">
+                          <TableCell colSpan={5} className="text-sm font-medium text-slate-600">
+                            Saldo de apertura
                           </TableCell>
-                          <TableCell className={`text-sm max-w-[200px] truncate ${isAnnulled ? "line-through" : ""}`}>
-                            {m.description}
-                          </TableCell>
-                          <TableCell className="text-sm text-slate-500" onClick={(e) => e.stopPropagation()}>
-                            <ThirdPartyLink id={m.third_party_id}>{m.third_party_name ?? "-"}</ThirdPartyLink>
-                          </TableCell>
+                          <TableCell />
+                          <TableCell />
                           <TableCell className="text-right">
-                            {isInflow ? (
-                              <span className={`tabular-nums ${isAnnulled ? "text-emerald-300 line-through" : "text-emerald-600"}`}>
-                                {formatCurrency(amount)}
-                              </span>
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {!isInflow ? (
-                              <span className={`tabular-nums ${isAnnulled ? "text-rose-300 line-through" : "text-rose-600"}`}>
-                                {formatCurrency(amount)}
-                              </span>
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <MoneyDisplay amount={m.balance_after} className="text-sm" />
+                            <MoneyDisplay amount={openingBalance} className="font-medium" />
                           </TableCell>
                         </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+                      )}
+                      {movements.map((m) => {
+                        const isInflow = m.direction > 0;
+                        const isAnnulled = m.status === "annulled";
+                        const amount = Number(m.amount);
+                        return (
+                          <TableRow
+                            key={m.id}
+                            className={`cursor-pointer ${isAnnulled ? "opacity-50 bg-rose-50/50" : "hover:bg-slate-50"}`}
+                            onClick={() => handleRowClick(m.id)}
+                          >
+                            <TableCell className="text-xs text-slate-400">{m.movement_number}</TableCell>
+                            <TableCell className="text-sm">{formatDate(m.date)}</TableCell>
+                            <TableCell className="text-sm">
+                              <span className={isAnnulled ? "line-through" : ""}>
+                                {MOVEMENT_TYPE_LABELS[m.movement_type] || m.movement_type}
+                              </span>
+                              {isAnnulled && (
+                                <Badge variant="outline" className="ml-2 bg-rose-50 text-rose-600 text-[10px] py-0">
+                                  Anulado
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className={`text-sm max-w-[200px] truncate ${isAnnulled ? "line-through" : ""}`}>
+                              {m.description}
+                            </TableCell>
+                            <TableCell className="text-sm text-slate-500" onClick={(e) => e.stopPropagation()}>
+                              <ThirdPartyLink id={m.third_party_id}>{m.third_party_name ?? "-"}</ThirdPartyLink>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {isInflow ? (
+                                <span className={`tabular-nums ${isAnnulled ? "text-emerald-300 line-through" : "text-emerald-600"}`}>
+                                  {formatCurrency(amount)}
+                                </span>
+                              ) : null}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {!isInflow ? (
+                                <span className={`tabular-nums ${isAnnulled ? "text-rose-300 line-through" : "text-rose-600"}`}>
+                                  {formatCurrency(amount)}
+                                </span>
+                              ) : null}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <MoneyDisplay amount={m.balance_after} className="text-sm" />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Mobile: cards */}
+                <div className="md:hidden space-y-2">
+                  {dateFrom && openingBalance != null && (
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 flex items-center justify-between text-sm">
+                      <span className="font-medium text-slate-600">Saldo de apertura</span>
+                      <MoneyDisplay amount={openingBalance} className="font-medium" />
+                    </div>
+                  )}
+                  {movements.map((m) => {
+                    const isInflow = m.direction > 0;
+                    const isAnnulled = m.status === "annulled";
+                    return (
+                      <MovementListCard
+                        key={m.id}
+                        date={m.date}
+                        typeLabel={MOVEMENT_TYPE_LABELS[m.movement_type] || m.movement_type}
+                        movementNumber={m.movement_number}
+                        amount={Number(m.amount)}
+                        isInflow={isInflow}
+                        description={m.description}
+                        thirdPartyName={m.third_party_name ?? undefined}
+                        balanceAfter={m.balance_after}
+                        annulled={isAnnulled}
+                        onClick={() => handleRowClick(m.id)}
+                      />
+                    );
+                  })}
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { MovementListCard } from "@/components/shared/MovementListCard";
 import { useThirdPartyMovements } from "@/hooks/useMoneyMovements";
 import { useThirdParties } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
@@ -296,7 +297,36 @@ export default function AccountStatementPage() {
                 description="No se encontraron movimientos para este tercero en el periodo seleccionado."
               />
             ) : viewMode === "financial" ? (
-              <div className="overflow-x-auto">
+              <>
+                {/* Mobile cards */}
+                <div className="md:hidden space-y-2">
+                  {dateFrom && (
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 flex items-center justify-between text-sm">
+                      <span className="font-medium text-slate-600">Saldo de apertura</span>
+                      <MoneyDisplay amount={openingBalance} className="font-medium" />
+                    </div>
+                  )}
+                  {movements.map((m) => {
+                    const isDebit = m.direction > 0;
+                    const isAnnulled = m.status === "annulled" || m.status === "cancelled";
+                    return (
+                      <MovementListCard
+                        key={m.id}
+                        date={m.date}
+                        typeLabel={EVENT_TYPE_LABELS[m.event_type] || m.event_type}
+                        movementNumber={m.movement_number ?? undefined}
+                        amount={m.amount}
+                        isInflow={!isDebit}
+                        description={m.description}
+                        balanceAfter={m.balance_after ?? undefined}
+                        annulled={isAnnulled}
+                      />
+                    );
+                  })}
+                </div>
+
+                {/* Desktop table */}
+                <div className="hidden md:block overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -352,9 +382,10 @@ export default function AccountStatementPage() {
                     })}
                   </TableBody>
                 </Table>
-              </div>
+                </div>
+              </>
             ) : (
-              <div className="overflow-x-auto">
+              <>
                 {(() => {
                   // Compute last-in-group set: for items with parent_source_id, only the last one shows balance
                   const lastInGroup = new Map<string, string>();
@@ -366,6 +397,53 @@ export default function AccountStatementPage() {
                   const lastIds = new Set(lastInGroup.values());
 
                   return (
+                    <>
+                    {/* Mobile cards */}
+                    <div className="md:hidden space-y-2">
+                      {dateFrom && (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 flex items-center justify-between text-sm">
+                          <span className="font-medium text-slate-600">Saldo de apertura</span>
+                          <MoneyDisplay amount={openingBalance} className="font-medium" />
+                        </div>
+                      )}
+                      {movements.map((m) => {
+                        const isDebit = m.direction > 0;
+                        const isAnnulled = m.status === "annulled" || m.status === "cancelled";
+                        const concepto = m.is_line_item
+                          ? (m.vehicle_plate || m.invoice_number || `${m.event_type?.includes("purchase") ? "Compra" : m.event_type?.includes("sale") ? "Venta" : "DP"} #${m.source_number || ""}`)
+                          : (m.description || m.vehicle_plate || m.invoice_number || `#${m.source_number || ""}`);
+                        const hasWeightDiff = m.is_line_item && m.received_quantity != null && m.quantity != null && m.received_quantity !== m.quantity;
+                        const weightDiffMoney = hasWeightDiff && m.unit_price ? (m.received_quantity! - m.quantity!) * m.unit_price : null;
+                        const showBalance = !m.parent_source_id ? m.balance_after != null : lastIds.has(m.id) && m.balance_after != null;
+                        const extras = m.is_line_item && (m.material_code || m.quantity != null || m.unit_price != null) ? (
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+                            {m.material_code && <span><span className="text-slate-400">Material:</span> {m.material_code}</span>}
+                            {m.quantity != null && <span><span className="text-slate-400">Peso:</span> {formatWeight(m.quantity)}</span>}
+                            {m.unit_price != null && <span><span className="text-slate-400">Precio:</span> {formatCurrency(m.unit_price)}</span>}
+                            {weightDiffMoney != null && (
+                              <span className={weightDiffMoney < 0 ? "text-rose-600" : "text-emerald-600"}>
+                                <span className="text-slate-400">Dif:</span> {formatCurrency(weightDiffMoney)}
+                              </span>
+                            )}
+                          </div>
+                        ) : null;
+                        return (
+                          <MovementListCard
+                            key={m.id}
+                            date={m.date}
+                            typeLabel={concepto}
+                            amount={m.amount}
+                            isInflow={!isDebit}
+                            balanceAfter={showBalance ? m.balance_after! : undefined}
+                            annulled={isAnnulled}
+                            extras={extras}
+                          />
+                        );
+                      })}
+                    </div>
+
+                    {/* Desktop table */}
+                    <div className="hidden md:block overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -446,9 +524,11 @@ export default function AccountStatementPage() {
                         })}
                       </TableBody>
                     </Table>
+                    </div>
+                    </>
                   );
                 })()}
-              </div>
+              </>
             )}
           </CardContent>
         </Card>

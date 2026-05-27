@@ -15,6 +15,7 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { DataTable } from "@/components/shared/DataTable";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { KpiCard } from "@/components/shared/KpiCard";
+import { MovementListCard } from "@/components/shared/MovementListCard";
 import { PurchaseLink, SaleLink, TransformationLink, AdjustmentLink } from "@/components/shared/EntityLink";
 import { useInventoryMovements } from "@/hooks/useInventory";
 import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
@@ -232,6 +233,35 @@ export default function MovementHistoryPage() {
         onExportAll={handleExportAll}
         currencyColumns={["unit_cost", "avg_cost_after"]}
         totalItems={data?.total}
+        renderMobileCard={(m) => {
+          const isInflow = m.quantity > 0;
+          const navigateToSource = () => {
+            if (!m.reference_id) return;
+            if (m.movement_type === "purchase" || m.movement_type === "purchase_reversal") navigate(`/purchases/${m.reference_id}`);
+            else if (m.movement_type === "sale" || m.movement_type === "sale_reversal") navigate(`/sales/${m.reference_id}`);
+            else if (m.movement_type === "transformation") navigate(`/inventory/transformations/${m.reference_id}`);
+            else if (m.movement_type === "adjustment") navigate(`/inventory/adjustments/${m.reference_id}`);
+          };
+          const extras = (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+              <span><span className="text-slate-400">Cant:</span> <span className={`tabular-nums font-medium ${isInflow ? "text-emerald-700" : "text-red-700"}`}>{isInflow ? "+" : ""}{m.quantity.toFixed(2)}</span></span>
+              {m.warehouse_name && <span><span className="text-slate-400">Bodega:</span> {m.warehouse_name}</span>}
+              {m.unit_cost > 0 && <span><span className="text-slate-400">Costo:</span> {formatCurrency(m.unit_cost)}</span>}
+              {materialFilter && m.balance_after !== null && <span><span className="text-slate-400">Balance:</span> <span className={m.balance_after < 0 ? "text-red-600" : ""}>{m.balance_after.toFixed(2)}</span></span>}
+            </div>
+          );
+          return (
+            <MovementListCard
+              date={m.date}
+              typeLabel={typeLabels[m.movement_type] ?? m.movement_type}
+              amount={Math.abs(m.quantity * m.unit_cost)}
+              isInflow={isInflow}
+              description={`${m.material_code} - ${m.material_name}`}
+              extras={extras}
+              onClick={m.reference_id ? navigateToSource : undefined}
+            />
+          );
+        }}
         toolbar={
           <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
             <div className="w-full sm:w-52">

@@ -57,6 +57,10 @@ interface DataTableProps<TData, TValue> {
    * internamente con useState. */
   sorting?: SortingState;
   onSortingChange?: (sorting: SortingState) => void;
+  /** Si se pasa, en mobile (<md) renderiza una lista de cards en vez de la tabla.
+   * Desktop sigue mostrando la tabla normal. Backwards-compatible: si se omite,
+   * mobile usa scroll horizontal en la tabla. */
+  renderMobileCard?: (row: TData) => React.ReactNode;
 }
 
 function exportToExcel<TData>(
@@ -122,6 +126,7 @@ export function DataTable<TData, TValue>({
   toolbar,
   sorting: externalSorting,
   onSortingChange: externalOnSortingChange,
+  renderMobileCard,
 }: DataTableProps<TData, TValue>) {
   const [internalSorting, setInternalSorting] = useState<SortingState>([]);
   const sorting = externalSorting ?? internalSorting;
@@ -244,8 +249,29 @@ export function DataTable<TData, TValue>({
         </div>
       )}
 
-      {/* Table */}
-      <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm overflow-x-auto">
+      {/* Mobile card list */}
+      {renderMobileCard && (
+        <div className="md:hidden space-y-2">
+          {table.getRowModel().rows?.length ? (
+            table.getRowModel().rows.map((row) => (
+              <div
+                key={row.id}
+                onClick={() => onRowClick?.(row.original)}
+                className={onRowClick ? "cursor-pointer active:opacity-80 transition-opacity" : ""}
+              >
+                {renderMobileCard(row.original)}
+              </div>
+            ))
+          ) : (
+            <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm p-6 text-center">
+              <EmptyState title={emptyTitle} description={emptyDescription} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Table (desktop only when renderMobileCard set, always otherwise) */}
+      <div className={`rounded-lg border border-slate-200/80 bg-white shadow-sm overflow-x-auto ${renderMobileCard ? "hidden md:block" : ""}`}>
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
