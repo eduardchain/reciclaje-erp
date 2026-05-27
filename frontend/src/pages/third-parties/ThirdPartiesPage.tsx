@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { SearchInput } from "@/components/shared/SearchInput";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useThirdParties } from "@/hooks/useMasterData";
@@ -66,9 +67,9 @@ function getColumns(
         </div>
       ),
     },
-    { accessorKey: "identification_number", header: "Identificacion", cell: ({ row }) => <span className={!row.original.is_active ? "opacity-50" : ""}>{row.original.identification_number ?? "-"}</span> },
-    { accessorKey: "categories", header: "Categorias", cell: ({ row }) => <div className={!row.original.is_active ? "opacity-50" : ""}><CategoryBadges tp={row.original} /></div> },
-    { accessorKey: "phone", header: "Telefono", cell: ({ row }) => <span className={!row.original.is_active ? "opacity-50" : ""}>{row.original.phone ?? "-"}</span> },
+    { accessorKey: "identification_number", header: "Identificacion", meta: { hideOnMobile: true }, cell: ({ row }) => <span className={!row.original.is_active ? "opacity-50" : ""}>{row.original.identification_number ?? "-"}</span> },
+    { accessorKey: "categories", header: "Categorias", meta: { hideOnMobile: true }, cell: ({ row }) => <div className={!row.original.is_active ? "opacity-50" : ""}><CategoryBadges tp={row.original} /></div> },
+    { accessorKey: "phone", header: "Telefono", meta: { hideOnMobile: true }, cell: ({ row }) => <span className={!row.original.is_active ? "opacity-50" : ""}>{row.original.phone ?? "-"}</span> },
   ];
   if (canViewBalance) {
     cols.push(
@@ -159,7 +160,11 @@ export default function ThirdPartiesPage() {
   const deactivateMutation = useDeactivateThirdParty();
   const reactivateMutation = useReactivateThirdParty();
 
-  const columns = getColumns(navigate, canViewBalance, canDelete, setDeactivateTarget, setReactivateTarget, location.pathname + location.search);
+  const currentUrl = location.pathname + location.search;
+  const columns = useMemo(
+    () => getColumns(navigate, canViewBalance, canDelete, setDeactivateTarget, setReactivateTarget, currentUrl),
+    [navigate, canViewBalance, canDelete, currentUrl],
+  );
 
   const { data, isLoading } = useThirdParties({
     skip: page * PAGE_SIZE,
@@ -199,16 +204,18 @@ export default function ThirdPartiesPage() {
       </PageHeader>
 
       <Tabs value={roleFilter} onValueChange={(v) => setParam({ tab: v, page: null, search: null })}>
-        <TabsList>
-          <TabsTrigger value="all">Todos</TabsTrigger>
-          <TabsTrigger value="supplier">Proveedores</TabsTrigger>
-          <TabsTrigger value="service_provider">Servicios</TabsTrigger>
-          <TabsTrigger value="customer">Clientes</TabsTrigger>
-          <TabsTrigger value="investor">Inversionistas</TabsTrigger>
-          <TabsTrigger value="liability">Pasivos</TabsTrigger>
-          <TabsTrigger value="provision">Provisiones</TabsTrigger>
-          <TabsTrigger value="generic">Genericos</TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+          <TabsList className="inline-flex w-max sm:w-auto">
+            <TabsTrigger value="all">Todos</TabsTrigger>
+            <TabsTrigger value="supplier">Proveedores</TabsTrigger>
+            <TabsTrigger value="service_provider">Servicios</TabsTrigger>
+            <TabsTrigger value="customer">Clientes</TabsTrigger>
+            <TabsTrigger value="investor">Inversionistas</TabsTrigger>
+            <TabsTrigger value="liability">Pasivos</TabsTrigger>
+            <TabsTrigger value="provision">Provisiones</TabsTrigger>
+            <TabsTrigger value="generic">Genericos</TabsTrigger>
+          </TabsList>
+        </div>
       </Tabs>
 
       <DataTable
@@ -229,7 +236,7 @@ export default function ThirdPartiesPage() {
         onExportAll={handleExportAll}
         currencyColumns={["current_balance"]}
         toolbar={
-          <div className="flex items-center gap-4">
+          <ResponsiveFilterBar>
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar tercero..." />
             <div className="flex items-center gap-2">
               <Checkbox
@@ -241,7 +248,7 @@ export default function ThirdPartiesPage() {
                 Mostrar inactivos
               </label>
             </div>
-          </div>
+          </ResponsiveFilterBar>
         }
       />
 

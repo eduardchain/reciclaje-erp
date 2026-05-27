@@ -31,13 +31,13 @@ export function SearchInput({
   }, [local, debounceMs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="relative">
+    <div className="relative w-full sm:w-64">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
       <Input
         value={local}
         onChange={(e) => setLocal(e.target.value)}
         placeholder={placeholder}
-        className="pl-9 w-64"
+        className="pl-9 w-full"
       />
     </div>
   );

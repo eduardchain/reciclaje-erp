@@ -1,12 +1,14 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   type ColumnDef,
   type SortingState,
+  type VisibilityState,
   flexRender,
   getCoreRowModel,
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
+import { useIsMobile } from "@/hooks/useMediaQuery";
 import {
   Table,
   TableBody,
@@ -125,6 +127,24 @@ export function DataTable<TData, TValue>({
   const sorting = externalSorting ?? internalSorting;
   const [exporting, setExporting] = useState(false);
 
+  // Visibilidad de columnas: en mobile esconde columnas marcadas con
+  // meta.hideOnMobile. NUNCA marcar la columna `id: "actions"` con este flag.
+  const isMobile = useIsMobile();
+  const derivedVisibility = useMemo<VisibilityState>(() => {
+    const v: VisibilityState = {};
+    columns.forEach((col) => {
+      const meta = col.meta;
+      const id = (col as { id?: string; accessorKey?: string }).id
+        ?? (col as { accessorKey?: string }).accessorKey;
+      if (meta?.hideOnMobile && id) v[id] = !isMobile;
+    });
+    return v;
+  }, [columns, isMobile]);
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(derivedVisibility);
+  useEffect(() => {
+    setColumnVisibility(derivedVisibility);
+  }, [derivedVisibility]);
+
   // Server-side sort cuando el padre pasa onSortingChange controlado. Sin esto,
   // DataTable ordena solo la pagina visible (client-side, comportamiento previo).
   const useManualSorting = externalOnSortingChange != null;
@@ -139,11 +159,13 @@ export function DataTable<TData, TValue>({
       if (externalOnSortingChange) externalOnSortingChange(next);
       else setInternalSorting(next);
     },
+    onColumnVisibilityChange: setColumnVisibility,
     manualPagination: true,
     pageCount,
     state: {
       pagination: { pageIndex, pageSize },
       sorting,
+      columnVisibility,
     },
   });
 
@@ -166,7 +188,7 @@ export function DataTable<TData, TValue>({
 
   if (loading) {
     return (
-      <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
@@ -201,15 +223,15 @@ export function DataTable<TData, TValue>({
     <div className="space-y-3">
       {/* Toolbar */}
       {(toolbar || exportFilename) && (
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex-1">{toolbar}</div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex-1 min-w-0">{toolbar}</div>
           {exportFilename && (
             <Button
               variant="outline"
               size="sm"
               onClick={handleExport}
               disabled={exporting}
-              className="text-slate-600 shrink-0"
+              className="text-slate-600 shrink-0 w-full sm:w-auto"
             >
               {exporting ? (
                 <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
@@ -223,7 +245,7 @@ export function DataTable<TData, TValue>({
       )}
 
       {/* Table */}
-      <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm overflow-x-auto">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -291,17 +313,17 @@ export function DataTable<TData, TValue>({
 
       {/* Pagination */}
       {onPageChange && pageCount > 1 && (
-        <div className="flex items-center justify-between text-sm">
-          <p className="text-slate-500 tabular-nums">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm">
+          <p className="text-slate-500 tabular-nums text-center sm:text-left">
             Mostrando {showFrom}-{showTo} de {total} registros
           </p>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-center sm:justify-end gap-1">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => onPageChange(0)}
               disabled={pageIndex === 0}
-              className="h-8 w-8 p-0 text-slate-500"
+              className="h-9 w-9 sm:h-8 sm:w-8 p-0 text-slate-500"
             >
               <ChevronsLeft className="h-4 w-4" />
             </Button>
@@ -310,7 +332,7 @@ export function DataTable<TData, TValue>({
               size="sm"
               onClick={() => onPageChange(pageIndex - 1)}
               disabled={pageIndex === 0}
-              className="h-8 w-8 p-0 text-slate-500"
+              className="h-9 w-9 sm:h-8 sm:w-8 p-0 text-slate-500"
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -322,7 +344,7 @@ export function DataTable<TData, TValue>({
               size="sm"
               onClick={() => onPageChange(pageIndex + 1)}
               disabled={pageIndex >= pageCount - 1}
-              className="h-8 w-8 p-0 text-slate-500"
+              className="h-9 w-9 sm:h-8 sm:w-8 p-0 text-slate-500"
             >
               <ChevronRight className="h-4 w-4" />
             </Button>
@@ -331,7 +353,7 @@ export function DataTable<TData, TValue>({
               size="sm"
               onClick={() => onPageChange(pageCount - 1)}
               disabled={pageIndex >= pageCount - 1}
-              className="h-8 w-8 p-0 text-slate-500"
+              className="h-9 w-9 sm:h-8 sm:w-8 p-0 text-slate-500"
             >
               <ChevronsRight className="h-4 w-4" />
             </Button>

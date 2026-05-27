@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -128,6 +129,7 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
     {
       accessorKey: "invoice_number",
       header: "FACTURA",
+      meta: { hideOnMobile: true },
       cell: ({ row }) => row.original.invoice_number || "—",
     },
     {
@@ -144,6 +146,7 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
     {
       id: "items",
       header: "DETALLE",
+      meta: { hideOnMobile: true },
       cell: ({ row }) => (
         <div className="space-y-0.5">
           {row.original.lines.map((line) => (
@@ -165,6 +168,7 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
     {
       id: "double_entry",
       header: "D.P.",
+      meta: { hideOnMobile: true },
       cell: ({ row }) =>
         row.original.double_entry_id ? (
           <span className="bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded font-medium">
@@ -338,7 +342,7 @@ export default function PurchasesPage() {
         onExportAll={handleExportAll}
         currencyColumns={["total_amount"]}
         toolbar={
-          <div className="flex items-center gap-3">
+          <ResponsiveFilterBar>
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar compra..." />
             <DateRangePicker
               dateFrom={dateFrom}
@@ -346,7 +350,7 @@ export default function PurchasesPage() {
               onDateFromChange={setDateFrom}
               onDateToChange={setDateTo}
             />
-          </div>
+          </ResponsiveFilterBar>
         }
       />
     </div>

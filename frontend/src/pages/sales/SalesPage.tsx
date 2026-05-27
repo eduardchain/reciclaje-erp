@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -124,6 +125,7 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean, showCogs: bo
     {
       accessorKey: "invoice_number",
       header: "FACTURA",
+      meta: { hideOnMobile: true },
       cell: ({ row }) => row.original.invoice_number || "—",
     },
     {
@@ -140,6 +142,7 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean, showCogs: bo
     {
       id: "items",
       header: "DETALLE",
+      meta: { hideOnMobile: true },
       cell: ({ row }) => (
         <div className="space-y-0.5">
           {row.original.lines.map((line) => (
@@ -169,6 +172,7 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean, showCogs: bo
       {
         id: "cogs",
         header: "COSTO (COGS)",
+        meta: { hideOnMobile: true },
         cell: ({ row }: { row: { original: SaleResponse } }) => (
           <span className="font-medium tabular-nums text-slate-700">
             {formatCurrency(row.original.total_amount - row.original.total_profit)}
@@ -189,6 +193,7 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean, showCogs: bo
       {
         id: "commissions",
         header: "COMISIONES",
+        meta: { hideOnMobile: true },
         cell: ({ row }: { row: { original: SaleResponse } }) => {
           const total = row.original.commissions.reduce((sum, c) => sum + c.commission_amount, 0);
           return total > 0 ? (
@@ -202,6 +207,7 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean, showCogs: bo
     {
       id: "double_entry",
       header: "D.P.",
+      meta: { hideOnMobile: true },
       cell: ({ row }) =>
         row.original.double_entry_id ? (
           <span className="bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded font-medium">
@@ -475,10 +481,10 @@ export default function SalesPage() {
         onExportAll={handleExportAll}
         currencyColumns={["total_amount", "total_profit"]}
         toolbar={
-          <div className="flex items-center gap-3">
+          <ResponsiveFilterBar>
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar venta..." />
             <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
-          </div>
+          </ResponsiveFilterBar>
         }
       />
     </div>

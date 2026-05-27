@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -88,16 +89,16 @@ const columns: ColumnDef<MoneyMovementResponse, unknown>[] = [
   { accessorKey: "movement_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.movement_number}</span> },
   { accessorKey: "date", header: "Fecha", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
   { accessorKey: "movement_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.movement_type] ?? ""}>{typeLabels[row.original.movement_type] ?? row.original.movement_type}</Badge> },
-  { accessorKey: "description", header: "Descripcion", cell: ({ row }) => (
+  { accessorKey: "description", header: "Descripcion", meta: { hideOnMobile: true }, cell: ({ row }) => (
     <span className="flex items-center gap-1.5">
       {row.original.description}
       {row.original.evidence_url && <Paperclip className="h-3.5 w-3.5 text-slate-400 shrink-0" />}
     </span>
   ) },
   { accessorKey: "amount", header: "Monto", enableSorting: true, cell: ({ row }) => <span className="font-medium tabular-nums">{formatCurrency(row.original.amount)}</span> },
-  { accessorKey: "account_name", header: "Cuenta", cell: ({ row }) => <AccountLink id={row.original.account_id}>{row.original.account_name ?? "-"}</AccountLink> },
-  { accessorKey: "third_party_name", header: "Tercero", cell: ({ row }) => <ThirdPartyLink id={row.original.third_party_id}>{row.original.third_party_name ?? "-"}</ThirdPartyLink> },
-  { accessorKey: "status", header: "Estado", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+  { accessorKey: "account_name", header: "Cuenta", meta: { hideOnMobile: true }, cell: ({ row }) => <AccountLink id={row.original.account_id}>{row.original.account_name ?? "-"}</AccountLink> },
+  { accessorKey: "third_party_name", header: "Tercero", meta: { hideOnMobile: true }, cell: ({ row }) => <ThirdPartyLink id={row.original.third_party_id}>{row.original.third_party_name ?? "-"}</ThirdPartyLink> },
+  { accessorKey: "status", header: "Estado", meta: { hideOnMobile: true }, cell: ({ row }) => <StatusBadge status={row.original.status} /> },
 ];
 
 export default function TreasuryPage() {
@@ -238,21 +239,23 @@ export default function TreasuryPage() {
       )}
 
       <Tabs value={typeFilter} onValueChange={(v) => setParam({ tab: v, page: null, search: null, status: null, adjustment_class: null, commission_source: null })}>
-        <TabsList className="flex-wrap h-auto">
-          <TabsTrigger value="all">Todos</TabsTrigger>
-          <TabsTrigger value="payment_to_supplier">Pagos</TabsTrigger>
-          <TabsTrigger value="collection_from_client">Cobros</TabsTrigger>
-          <TabsTrigger value="expense">Gastos</TabsTrigger>
-          <TabsTrigger value="transfer_out">Transf.</TabsTrigger>
-          <TabsTrigger value="provision_deposit">Dep. Provisiones</TabsTrigger>
-          <TabsTrigger value="service_income">Ing. Servicios</TabsTrigger>
-          <TabsTrigger value="provision_expense">Gasto Provisión</TabsTrigger>
-          <TabsTrigger value="expense_accrual">Causaciones</TabsTrigger>
-          <TabsTrigger value="deferred_expense">Diferidos</TabsTrigger>
-          <TabsTrigger value="depreciation_expense">Depreciación</TabsTrigger>
-          <TabsTrigger value="commission_accrual">Comisiones</TabsTrigger>
-          <TabsTrigger value="tp_adjustment">Aj. Terceros</TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+          <TabsList className="inline-flex w-max sm:flex sm:w-auto sm:flex-wrap sm:h-auto">
+            <TabsTrigger value="all">Todos</TabsTrigger>
+            <TabsTrigger value="payment_to_supplier">Pagos</TabsTrigger>
+            <TabsTrigger value="collection_from_client">Cobros</TabsTrigger>
+            <TabsTrigger value="expense">Gastos</TabsTrigger>
+            <TabsTrigger value="transfer_out">Transf.</TabsTrigger>
+            <TabsTrigger value="provision_deposit">Dep. Provisiones</TabsTrigger>
+            <TabsTrigger value="service_income">Ing. Servicios</TabsTrigger>
+            <TabsTrigger value="provision_expense">Gasto Provisión</TabsTrigger>
+            <TabsTrigger value="expense_accrual">Causaciones</TabsTrigger>
+            <TabsTrigger value="deferred_expense">Diferidos</TabsTrigger>
+            <TabsTrigger value="depreciation_expense">Depreciación</TabsTrigger>
+            <TabsTrigger value="commission_accrual">Comisiones</TabsTrigger>
+            <TabsTrigger value="tp_adjustment">Aj. Terceros</TabsTrigger>
+          </TabsList>
+        </div>
       </Tabs>
 
       {/* Filtros activos del drill-down de P&L */}
@@ -315,10 +318,10 @@ export default function TreasuryPage() {
         currencyColumns={["amount"]}
         totalItems={data?.total}
         toolbar={
-          <div className="flex items-center gap-3">
+          <ResponsiveFilterBar>
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar movimiento..." />
             <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
-          </div>
+          </ResponsiveFilterBar>
         }
       />
     </div>
