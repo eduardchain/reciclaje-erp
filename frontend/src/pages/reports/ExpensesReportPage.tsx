@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { ChevronDown, ChevronRight, FileSpreadsheet, ListFilter, ExternalLink, Expand, Shrink } from "lucide-react";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import ReportsLayout from "./ReportsLayout";
 import { useExpensesReport, useExpensesDetail } from "@/hooks/useReports";
 import { useBusinessUnits } from "@/hooks/useCrudData";
@@ -280,19 +281,19 @@ function ExpenseDetailSheet({
               <span className="text-slate-300">·</span>
               <span>Total asignado: <span className="font-semibold tabular-nums">{formatCurrency(data.total_allocated)}</span></span>
             </div>
-            <div className="border rounded">
-              <table className="w-full text-sm">
+            <div className="border rounded overflow-x-auto">
+              <table className="w-full text-sm min-w-[640px]">
                 <thead className="bg-slate-50 text-xs text-slate-500 uppercase sticky top-0">
                   <tr>
-                    <th className="py-2 px-2 text-left">Fecha</th>
-                    <th className="py-2 px-2 text-left">#</th>
-                    <th className="py-2 px-2 text-left">Tipo</th>
-                    <th className="py-2 px-2 text-left">Tercero</th>
-                    <th className="py-2 px-2 text-left">Categoría</th>
-                    <th className="py-2 px-2 text-left">Descripción</th>
-                    <th className="py-2 px-2 text-right">Monto Original</th>
-                    <th className="py-2 px-2 text-right">Asignado</th>
-                    <th className="py-2 px-2 text-center">Asig.</th>
+                    <th className="py-2 px-2 text-left whitespace-nowrap">Fecha</th>
+                    <th className="py-2 px-2 text-left whitespace-nowrap">#</th>
+                    <th className="py-2 px-2 text-left whitespace-nowrap">Tipo</th>
+                    <th className="py-2 px-2 text-left whitespace-nowrap">Tercero</th>
+                    <th className="py-2 px-2 text-left whitespace-nowrap">Categoría</th>
+                    <th className="py-2 px-2 text-left whitespace-nowrap">Descripción</th>
+                    <th className="py-2 px-2 text-right whitespace-nowrap">Monto Original</th>
+                    <th className="py-2 px-2 text-right whitespace-nowrap">Asignado</th>
+                    <th className="py-2 px-2 text-center whitespace-nowrap">Asig.</th>
                     <th className="py-2 px-2 text-center" />
                   </tr>
                 </thead>
@@ -518,7 +519,7 @@ export default function ExpensesReportPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <ResponsiveFilterBar>
                 <DateRangePicker
                   dateFrom={dateFrom}
                   dateTo={dateTo}
@@ -527,16 +528,16 @@ export default function ExpensesReportPage() {
                 />
                 {groupBy !== "none" && hasExpandableNodes && (
                   <>
-                    <Button variant="outline" size="sm" onClick={expandAll}>
+                    <Button variant="outline" size="sm" onClick={expandAll} className="w-full sm:w-auto">
                       <Expand className="w-4 h-4 mr-1" /> Expandir
                     </Button>
-                    <Button variant="outline" size="sm" onClick={collapseAll}>
+                    <Button variant="outline" size="sm" onClick={collapseAll} className="w-full sm:w-auto">
                       <Shrink className="w-4 h-4 mr-1" /> Colapsar
                     </Button>
                   </>
                 )}
                 {data && groupBy !== "none" && (
-                  <Button variant="outline" size="sm" onClick={() => exportExpensesReportExcel(data)}>
+                  <Button variant="outline" size="sm" onClick={() => exportExpensesReportExcel(data)} className="w-full sm:w-auto">
                     <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
                   </Button>
                 )}
@@ -545,11 +546,12 @@ export default function ExpensesReportPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => exportExpensesFlatExcel(flatData, dateFrom, dateTo)}
+                    className="w-full sm:w-auto"
                   >
                     <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
                   </Button>
                 )}
-              </div>
+              </ResponsiveFilterBar>
             </div>
           </CardContent>
         </Card>
@@ -567,12 +569,12 @@ export default function ExpensesReportPage() {
 
         {!flatEnabled && data && data.groups.length > 0 && (
           <Card className="shadow-sm">
-            <CardContent className="p-0">
-              <table className="w-full text-sm">
+            <CardContent className="p-0 overflow-x-auto">
+              <table className="w-full text-sm min-w-[400px]">
                 <thead>
                   <tr className="border-b bg-slate-50 text-xs text-slate-500 uppercase tracking-wider">
                     <th className="py-2 px-3 text-left">Grupo</th>
-                    <th className="py-2 px-3 text-right">Total</th>
+                    <th className="py-2 px-3 text-right whitespace-nowrap">Total</th>
                     <th className="py-2 px-2 w-8" />
                   </tr>
                 </thead>
@@ -607,18 +609,18 @@ export default function ExpensesReportPage() {
                 <span>Total: <span className="font-semibold tabular-nums text-slate-700">{formatCurrency(flatData.total_allocated)}</span></span>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm min-w-[720px]">
                   <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider">
                     <tr className="border-b">
                       <th className="py-2 px-2 text-left whitespace-nowrap">Fecha</th>
-                      <th className="py-2 px-2 text-left">#</th>
-                      <th className="py-2 px-2 text-left">Tipo</th>
-                      <th className="py-2 px-2 text-left">Tercero</th>
-                      <th className="py-2 px-2 text-left">UN</th>
-                      <th className="py-2 px-2 text-left">Categoría</th>
-                      <th className="py-2 px-2 text-left">Descripción</th>
-                      <th className="py-2 px-2 text-right">Monto</th>
-                      <th className="py-2 px-2 text-center">Asig.</th>
+                      <th className="py-2 px-2 text-left whitespace-nowrap">#</th>
+                      <th className="py-2 px-2 text-left whitespace-nowrap">Tipo</th>
+                      <th className="py-2 px-2 text-left whitespace-nowrap">Tercero</th>
+                      <th className="py-2 px-2 text-left whitespace-nowrap">UN</th>
+                      <th className="py-2 px-2 text-left whitespace-nowrap">Categoría</th>
+                      <th className="py-2 px-2 text-left whitespace-nowrap">Descripción</th>
+                      <th className="py-2 px-2 text-right whitespace-nowrap">Monto</th>
+                      <th className="py-2 px-2 text-center whitespace-nowrap">Asig.</th>
                       <th className="py-2 px-2 text-center w-10" />
                     </tr>
                   </thead>

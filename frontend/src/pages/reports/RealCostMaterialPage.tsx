@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { Button } from "@/components/ui/button";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { ChevronDown, ChevronRight, FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useRealCostByMaterial } from "@/hooks/useReports";
@@ -31,14 +32,15 @@ function BUSection({ bu }: { bu: BusinessUnitOverhead }) {
       </button>
 
       {expanded && (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[560px]">
           <thead>
             <tr className="border-b text-xs text-slate-500 uppercase tracking-wider">
-              <th className="py-2 px-4 text-left">Codigo</th>
-              <th className="py-2 px-4 text-left">Material</th>
-              <th className="py-2 px-4 text-right">Costo Promedio</th>
-              <th className="py-2 px-4 text-right">Overhead</th>
-              <th className="py-2 px-4 text-right">Costo Real</th>
+              <th className="py-2 px-4 text-left whitespace-nowrap">Codigo</th>
+              <th className="py-2 px-4 text-left whitespace-nowrap">Material</th>
+              <th className="py-2 px-4 text-right whitespace-nowrap">Costo Promedio</th>
+              <th className="py-2 px-4 text-right whitespace-nowrap">Overhead</th>
+              <th className="py-2 px-4 text-right whitespace-nowrap">Costo Real</th>
             </tr>
           </thead>
           <tbody>
@@ -56,6 +58,7 @@ function BUSection({ bu }: { bu: BusinessUnitOverhead }) {
             )}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
@@ -67,16 +70,16 @@ export default function RealCostMaterialPage() {
 
   return (
     <ReportsLayout>
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <h2 className="text-lg font-semibold">Costo Real por Material</h2>
-        <div className="flex items-center gap-2">
+        <ResponsiveFilterBar>
           {data && (
-            <Button variant="outline" size="sm" onClick={() => exportRealCostMaterialExcel(data)}>
+            <Button variant="outline" size="sm" onClick={() => exportRealCostMaterialExcel(data)} className="w-full sm:w-auto">
               <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
             </Button>
           )}
           <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
-        </div>
+        </ResponsiveFilterBar>
       </div>
 
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}

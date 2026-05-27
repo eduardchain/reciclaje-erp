@@ -31,11 +31,13 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
       <PageHeader title="Reportes" description="Reportes financieros y operacionales" />
 
       <Tabs value={location.pathname} onValueChange={(v) => navigate(v)}>
-        <TabsList className="flex-wrap h-auto">
-          {visibleTabs.map((t) => (
-            <TabsTrigger key={t.value} value={t.value}>{t.label}</TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+          <TabsList className="inline-flex w-max sm:flex sm:w-auto sm:flex-wrap sm:h-auto">
+            {visibleTabs.map((t) => (
+              <TabsTrigger key={t.value} value={t.value}>{t.label}</TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
       </Tabs>
 
       {children}

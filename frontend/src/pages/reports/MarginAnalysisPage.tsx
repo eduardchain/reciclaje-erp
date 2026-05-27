@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useMarginAnalysis } from "@/hooks/useReports";
@@ -15,10 +16,10 @@ export default function MarginAnalysisPage() {
 
   return (
     <ReportsLayout>
-      <div className="flex justify-end gap-2">
-        {data && <Button variant="outline" size="sm" onClick={() => exportMarginAnalysisExcel(data)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>}
+      <ResponsiveFilterBar className="sm:justify-end">
+        {data && <Button variant="outline" size="sm" onClick={() => exportMarginAnalysisExcel(data)} className="w-full sm:w-auto"><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>}
         <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
-      </div>
+      </ResponsiveFilterBar>
 
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}
 

@@ -213,8 +213,8 @@ export default function ProfitAndLossMonthlyView() {
 
   return (
     <>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex items-end gap-3">
+      <div className="flex flex-col md:flex-row md:flex-wrap md:items-end md:justify-between gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3">
           <div className="space-y-1">
             <Label htmlFor="cutoff_day" className="text-xs text-slate-600">Día inicio del mes</Label>
             <Input
@@ -238,14 +238,14 @@ export default function ProfitAndLossMonthlyView() {
               className="w-20"
             />
           </div>
-          <span className="text-xs text-slate-500 pb-2 max-w-sm">
+          <span className="text-xs text-slate-500 sm:pb-2 max-w-sm">
             1 = mes calendario. Valores 2-28 producen meses contables personalizados
             (ej. cutoff=4 → "4 Mar – 3 Abr").
           </span>
         </div>
-        <div className="flex items-end gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-end gap-2">
           {data && (
-            <Button variant="outline" size="sm" onClick={() => exportPnlMonthlyExcel(data, rows)}>
+            <Button variant="outline" size="sm" onClick={() => exportPnlMonthlyExcel(data, rows)} className="w-full sm:w-auto">
               <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
             </Button>
           )}
@@ -272,11 +272,11 @@ export default function ProfitAndLossMonthlyView() {
             </p>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto -mx-3 sm:mx-0">
+              <table className="w-full text-sm min-w-[640px]">
                 <thead>
                   <tr className="border-b">
-                    <th className="sticky left-0 bg-white z-10 text-left py-2 px-3 font-medium text-slate-600 min-w-[260px]">Linea</th>
+                    <th className="sticky left-0 bg-white z-10 text-left py-2 px-3 font-medium text-slate-600 min-w-[200px]">Linea</th>
                     {data.periods.map((p, i) => (
                       <th key={i} className="text-right py-2 px-3 font-medium text-slate-600 whitespace-nowrap">{p.label}</th>
                     ))}

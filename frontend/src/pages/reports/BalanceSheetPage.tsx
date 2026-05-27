@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { CheckCircle2, AlertTriangle, FileSpreadsheet, FileText } from "lucide-react";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import ReportsLayout from "./ReportsLayout";
 import { useBalanceSheet } from "@/hooks/useReports";
 import { formatCurrency, formatDate } from "@/utils/formatters";
@@ -25,14 +26,14 @@ export default function BalanceSheetPage() {
 
       {data && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Corte al: {formatDate(data.as_of_date)}</p>
-            <div className="flex gap-2 items-center">
-              <Input type="date" value={asOfDate} max={today} onChange={(e) => setAsOfDate(e.target.value)} className="w-40 h-8 text-xs" />
-              {asOfDate && <Button variant="ghost" size="sm" className="text-xs h-8" onClick={() => setAsOfDate("")}>Hoy</Button>}
-              <Button variant="outline" size="sm" onClick={() => exportBalanceSheetPDF(data, orgName)}><FileText className="w-4 h-4 mr-1" /> PDF</Button>
-              <Button variant="outline" size="sm" onClick={() => exportBalanceSheetExcel(data)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>
-            </div>
+            <ResponsiveFilterBar className="sm:items-center">
+              <Input type="date" value={asOfDate} max={today} onChange={(e) => setAsOfDate(e.target.value)} className="w-full sm:w-40 h-8 text-xs" />
+              {asOfDate && <Button variant="ghost" size="sm" className="text-xs h-8 w-full sm:w-auto" onClick={() => setAsOfDate("")}>Hoy</Button>}
+              <Button variant="outline" size="sm" onClick={() => exportBalanceSheetPDF(data, orgName)} className="w-full sm:w-auto"><FileText className="w-4 h-4 mr-1" /> PDF</Button>
+              <Button variant="outline" size="sm" onClick={() => exportBalanceSheetExcel(data)} className="w-full sm:w-auto"><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>
+            </ResponsiveFilterBar>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

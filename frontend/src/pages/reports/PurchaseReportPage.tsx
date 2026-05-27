@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { usePurchaseReport } from "@/hooks/useReports";
@@ -43,11 +44,11 @@ export default function PurchaseReportPage() {
 
   return (
     <ReportsLayout>
-      <div className="flex flex-wrap items-end justify-end gap-3">
-        <div className="flex flex-col gap-1">
+      <ResponsiveFilterBar className="sm:justify-end sm:items-end">
+        <div className="flex flex-col gap-1 w-full sm:w-auto">
           <Label className="text-xs text-slate-500">Operaciones</Label>
           <Select value={dpFilter} onValueChange={setDpFilter}>
-            <SelectTrigger className="w-44 h-9">
+            <SelectTrigger className="w-full sm:w-44 h-9">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -59,11 +60,11 @@ export default function PurchaseReportPage() {
         </div>
         <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
         {data && (
-          <Button variant="outline" size="sm" onClick={() => exportPurchaseReportExcel(data, dpLabel)}>
+          <Button variant="outline" size="sm" onClick={() => exportPurchaseReportExcel(data, dpLabel)} className="w-full sm:w-auto">
             <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
           </Button>
         )}
-      </div>
+      </ResponsiveFilterBar>
 
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}
 

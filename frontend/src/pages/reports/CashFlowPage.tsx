@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useCashFlow } from "@/hooks/useReports";
@@ -15,10 +16,10 @@ export default function CashFlowPage() {
 
   return (
     <ReportsLayout>
-      <div className="flex justify-end gap-2">
-        {data && <Button variant="outline" size="sm" onClick={() => exportCashFlowExcel(data)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>}
+      <ResponsiveFilterBar className="sm:justify-end">
+        {data && <Button variant="outline" size="sm" onClick={() => exportCashFlowExcel(data)} className="w-full sm:w-auto"><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>}
         <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
-      </div>
+      </ResponsiveFilterBar>
 
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}
 

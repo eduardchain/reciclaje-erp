@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { ChevronDown, ChevronRight, FileSpreadsheet } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useProfitabilityByBU } from "@/hooks/useReports";
@@ -69,16 +70,16 @@ export default function ProfitabilityBUPage() {
 
   return (
     <ReportsLayout>
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <h2 className="text-lg font-semibold">Rentabilidad por Unidad de Negocio</h2>
-        <div className="flex items-center gap-2">
+        <ResponsiveFilterBar>
           {data && (
-            <Button variant="outline" size="sm" onClick={() => exportProfitabilityBUExcel(data)}>
+            <Button variant="outline" size="sm" onClick={() => exportProfitabilityBUExcel(data)} className="w-full sm:w-auto">
               <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
             </Button>
           )}
           <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
-        </div>
+        </ResponsiveFilterBar>
       </div>
 
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}
@@ -86,21 +87,21 @@ export default function ProfitabilityBUPage() {
       {data && (
         <Card className="shadow-sm overflow-x-auto">
           <CardContent className="p-0">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr className="border-b bg-slate-50 text-xs text-slate-500 uppercase tracking-wider">
-                  <th className="py-2 px-3 text-left">Unidad de Negocio</th>
-                  <th className="py-2 px-3 text-right">Compras</th>
-                  <th className="py-2 px-3 text-right">Peso %</th>
-                  <th className="py-2 px-3 text-right">Ventas</th>
-                  <th className="py-2 px-3 text-right">COGS</th>
-                  <th className="py-2 px-3 text-right">Ut. Bruta</th>
-                  <th className="py-2 px-3 text-right">G. Directos</th>
-                  <th className="py-2 px-3 text-right">G. Compartidos</th>
-                  <th className="py-2 px-3 text-right">G. Generales</th>
-                  <th className="py-2 px-3 text-right">Comisiones</th>
-                  <th className="py-2 px-3 text-right">Ut. Neta</th>
-                  <th className="py-2 px-3 text-right">Margen</th>
+                  <th className="py-2 px-3 text-left whitespace-nowrap">Unidad de Negocio</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">Compras</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">Peso %</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">Ventas</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">COGS</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">Ut. Bruta</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">G. Directos</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">G. Compartidos</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">G. Generales</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">Comisiones</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">Ut. Neta</th>
+                  <th className="py-2 px-3 text-right whitespace-nowrap">Margen</th>
                 </tr>
               </thead>
               <tbody>
