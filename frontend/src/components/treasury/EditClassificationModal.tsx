@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -95,10 +95,10 @@ export function EditClassificationModal({ open, onOpenChange, movement, onSave, 
           />
         </div>
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Cancelar</Button>
-          <Button onClick={handleSave} disabled={!canSave || loading}>{loading ? "Guardando..." : "Guardar"}</Button>
-        </div>
+        <DialogFooter className="gap-2 pt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading} className="w-full sm:w-auto">Cancelar</Button>
+          <Button onClick={handleSave} disabled={!canSave || loading} className="w-full sm:w-auto">{loading ? "Guardando..." : "Guardar"}</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -98,14 +98,14 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{editItem ? "Editar Tercero" : "Nuevo Tercero"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Identificacion</Label><Input value={identification} onChange={(e) => setIdentification(e.target.value)} /></div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Telefono</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
           </div>

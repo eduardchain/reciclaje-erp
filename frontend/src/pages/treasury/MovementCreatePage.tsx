@@ -569,13 +569,13 @@ export default function MovementCreatePage() {
         </CardContent>
       </Card>
 
-      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(-1)}>Cancelar</Button>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-3 px-3 md:-mx-6 md:px-6 mt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(-1)} className="w-full sm:w-auto">Cancelar</Button>
           <Button
             onClick={handleSubmit}
             disabled={create.isPending || createTpTransfer.isPending || createTpAdjustment.isPending || amount <= 0 || !!isProvisionExpenseBlocked || (isTpTransfer && (!thirdPartyId || !destThirdPartyId || !description)) || (isTpAdjustment && (!thirdPartyId || !description))}
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"
           >
             {(create.isPending || createTpTransfer.isPending || createTpAdjustment.isPending) ? "Creando..." : "Crear Movimiento"}
           </Button>
