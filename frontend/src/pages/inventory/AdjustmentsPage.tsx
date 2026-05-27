@@ -18,6 +18,7 @@ import {
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { OperationListCard } from "@/components/shared/OperationListCard";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { KpiCard } from "@/components/shared/KpiCard";
@@ -289,8 +290,31 @@ export default function AdjustmentsPage() {
         onExportAll={handleExportAll}
         currencyColumns={["total_value"]}
         totalItems={data?.total}
+        renderMobileCard={(adj) => (
+          <OperationListCard
+            operationNumber={adj.adjustment_number}
+            date={adj.date}
+            partyLabel="Material"
+            partyName={`${adj.material_code ?? ""} - ${adj.material_name ?? ""}`}
+            total={adj.total_value}
+            statusBadge={
+              <Badge variant="outline" className={`text-[10px] ${typeColors[adj.adjustment_type] ?? ""}`}>
+                {typeLabels[adj.adjustment_type] ?? adj.adjustment_type}
+              </Badge>
+            }
+            cancelled={adj.status === "annulled"}
+            actions={<ActionsCell adjustment={adj} onAnnul={(a) => { setAnnulTarget(a); setAnnulReason(""); }} />}
+            extras={
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                {adj.warehouse_name && <span><span className="text-slate-400">Bodega:</span> {adj.warehouse_name}</span>}
+                <span><span className="text-slate-400">Cant:</span> <span className="tabular-nums">{adj.quantity.toFixed(2)}</span></span>
+                <StatusBadge status={adj.status} />
+              </div>
+            }
+          />
+        )}
         toolbar={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
             <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(0); }} placeholder="Buscar ajuste..." />
             <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
           </div>

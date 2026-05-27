@@ -107,6 +107,19 @@ export default function TransitPage() {
             onRowClick={(row) => navigate(`/purchases/${row.purchase_id}`)}
             emptyTitle="Sin compras pendientes"
             emptyDescription="No hay compras en estado registrado."
+            renderMobileCard={(p) => (
+              <div className="rounded-md border bg-white p-3 shadow-sm">
+                <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                  <span className="font-semibold text-slate-700">#{p.purchase_number}</span>
+                  <span>{formatDate(p.date)}</span>
+                </div>
+                <div className="mt-1 text-sm font-medium truncate">{p.supplier_name}</div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-600 truncate">{p.material_code} - {p.material_name}</span>
+                  <span className="tabular-nums font-medium shrink-0">{p.quantity.toFixed(2)} kg</span>
+                </div>
+              </div>
+            )}
           />
         </CardContent>
       </Card>
@@ -130,6 +143,19 @@ export default function TransitPage() {
             onRowClick={(row) => navigate(`/sales/${row.sale_id}`)}
             emptyTitle="Sin ventas pendientes"
             emptyDescription="No hay ventas en estado registrado."
+            renderMobileCard={(s) => (
+              <div className="rounded-md border bg-white p-3 shadow-sm">
+                <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                  <span className="font-semibold text-slate-700">#{s.sale_number}</span>
+                  <span>{formatDate(s.date)}</span>
+                </div>
+                <div className="mt-1 text-sm font-medium truncate">{s.customer_name}</div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-600 truncate">{s.material_code} - {s.material_name}</span>
+                  <span className="tabular-nums font-medium shrink-0">{s.quantity.toFixed(2)} kg</span>
+                </div>
+              </div>
+            )}
           />
         </CardContent>
       </Card>

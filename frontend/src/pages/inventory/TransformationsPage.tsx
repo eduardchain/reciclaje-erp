@@ -17,6 +17,7 @@ import {
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { OperationListCard } from "@/components/shared/OperationListCard";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { KpiCard } from "@/components/shared/KpiCard";
@@ -288,8 +289,42 @@ export default function TransformationsPage() {
         onExportAll={handleExportAll}
         currencyColumns={["source_total_value", "waste_value", "value_difference"]}
         totalItems={data?.total}
+        renderMobileCard={(t) => {
+          const vd = t.value_difference;
+          return (
+            <OperationListCard
+              operationNumber={t.transformation_number}
+              date={t.date}
+              partyLabel="Origen"
+              partyName={`${t.source_material_code ?? ""} - ${t.source_material_name ?? ""}`}
+              total={t.source_total_value}
+              statusBadge={<StatusBadge status={t.status} />}
+              cancelled={t.status === "annulled"}
+              actions={<ActionsCell transformation={t} onAnnul={(tr) => { setAnnulTarget(tr); setAnnulReason(""); }} />}
+              description={`${t.source_quantity.toFixed(2)} → ${t.lines.length} destino(s)`}
+              extras={
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                  {t.waste_quantity > 0 && (
+                    <span><span className="text-slate-400">Merma:</span> <span className="tabular-nums text-orange-600">{t.waste_quantity.toFixed(2)}</span></span>
+                  )}
+                  {t.waste_value > 0 && (
+                    <span><span className="text-slate-400">Perdida:</span> <span className="tabular-nums text-red-600">{formatCurrency(t.waste_value)}</span></span>
+                  )}
+                  {vd != null && Math.abs(vd) >= 0.01 && (
+                    <span>
+                      <span className="text-slate-400">Util:</span>{" "}
+                      <span className={`tabular-nums font-medium ${vd > 0 ? "text-emerald-700" : "text-red-700"}`}>
+                        {formatCurrency(vd)}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              }
+            />
+          );
+        }}
         toolbar={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
             <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(0); }} placeholder="Buscar transformacion..." />
             <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
           </div>

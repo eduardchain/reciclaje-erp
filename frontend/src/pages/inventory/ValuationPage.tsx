@@ -70,6 +70,24 @@ export default function ValuationPage() {
         emptyTitle="Sin materiales"
         emptyDescription="No hay materiales con stock para valorizar."
         exportFilename="ecobalance_valorizacion-inventario"
+        renderMobileCard={(item) => (
+          <div className="rounded-md border bg-white p-3 shadow-sm">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-sm truncate">{item.material_name}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{item.material_code}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-semibold tabular-nums text-sm">{formatCurrency(item.total_value)}</div>
+                <div className="text-xs text-slate-500">Valor</div>
+              </div>
+            </div>
+            <div className="mt-2 flex items-center gap-3 text-xs">
+              <span><span className="text-slate-400">Stock:</span> <span className="tabular-nums">{item.current_stock_liquidated.toFixed(2)} {item.default_unit}</span></span>
+              <span><span className="text-slate-400">Costo:</span> <span className="tabular-nums">{formatCurrency(item.current_average_cost)}</span></span>
+            </div>
+          </div>
+        )}
         toolbar={<SearchInput value={search} onChange={setSearch} placeholder="Buscar material..." />}
       />
     </div>

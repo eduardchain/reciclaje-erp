@@ -217,7 +217,7 @@ function WarehouseTransferModal({
   );
 }
 
-function WarehouseBreakdownRow({
+function WarehouseBreakdownContent({
   materialId,
   materialName,
   defaultUnit,
@@ -234,88 +234,93 @@ function WarehouseBreakdownRow({
 
   if (isLoading) {
     return (
-      <TableRow className="bg-slate-50/50">
-        <TableCell colSpan={9} className="py-4">
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Cargando desglose...
-          </div>
-        </TableCell>
-      </TableRow>
+      <div className="flex items-center gap-2 text-sm text-slate-500 py-4 px-3">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Cargando desglose...
+      </div>
     );
   }
 
   if (!data || data.warehouses.length === 0) {
-    return (
-      <TableRow className="bg-slate-50/50">
-        <TableCell colSpan={9} className="py-4 text-sm text-slate-500">
-          Sin movimientos en bodegas
-        </TableCell>
-      </TableRow>
-    );
+    return <div className="py-4 px-3 text-sm text-slate-500">Sin movimientos en bodegas</div>;
   }
 
   return (
-    <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
-      <TableCell colSpan={9} className="py-3 px-6">
-        <div className="text-xs font-medium text-slate-500 uppercase mb-2">
-          Desglose por Bodega — {materialName}
-        </div>
-        <div className="bg-white rounded border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-slate-50">
-                <th className="text-left py-2 px-3 font-medium">Bodega</th>
-                <th className="text-right py-2 px-3 font-medium">Stock</th>
-                <th className="text-right py-2 px-3 font-medium">Acciones</th>
+    <div className="py-3 px-3 md:px-6">
+      <div className="text-xs font-medium text-slate-500 uppercase mb-2">
+        Desglose por Bodega — {materialName}
+      </div>
+      <div className="bg-white rounded border overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-slate-50">
+              <th className="text-left py-2 px-3 font-medium">Bodega</th>
+              <th className="text-right py-2 px-3 font-medium">Stock</th>
+              <th className="text-right py-2 px-3 font-medium">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.warehouses.map((w) => (
+              <tr key={w.warehouse_id} className="border-b last:border-0">
+                <td className="py-2 px-3">{w.warehouse_name}</td>
+                <td className="py-2 px-3 text-right tabular-nums">
+                  {w.stock.toFixed(2)} {defaultUnit}
+                </td>
+                <td className="py-2 px-3 text-right">
+                  {hasPermission("inventory.transfer") && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTransfer(materialId, w.warehouse_id, w.warehouse_name);
+                      }}
+                      disabled={w.stock <= 0}
+                    >
+                      <ArrowRightLeft className="h-3 w-3 mr-1" />
+                      Trasladar
+                    </Button>
+                  )}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {data.warehouses.map((w) => (
-                <tr key={w.warehouse_id} className="border-b last:border-0">
-                  <td className="py-2 px-3">{w.warehouse_name}</td>
-                  <td className="py-2 px-3 text-right tabular-nums">
-                    {w.stock.toFixed(2)} {defaultUnit}
-                  </td>
-                  <td className="py-2 px-3 text-right">
-                    {hasPermission("inventory.transfer") && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onTransfer(materialId, w.warehouse_id, w.warehouse_name);
-                        }}
-                        disabled={w.stock <= 0}
-                      >
-                        <ArrowRightLeft className="h-3 w-3 mr-1" />
-                        Trasladar
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex gap-2 mt-3">
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-col sm:flex-row gap-2 mt-3">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full sm:w-auto"
+          onClick={() => navigate(`/inventory/movements?material_id=${materialId}`)}
+        >
+          Ver Movimientos
+        </Button>
+        {hasPermission("inventory.adjust") && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate(`/inventory/movements?material_id=${materialId}`)}
+            className="w-full sm:w-auto"
+            onClick={() => navigate(`/inventory/adjustments/new?material_id=${materialId}`)}
           >
-            Ver Movimientos
+            Ajustar Stock
           </Button>
-          {hasPermission("inventory.adjust") && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate(`/inventory/adjustments/new?material_id=${materialId}`)}
-            >
-              Ajustar Stock
-            </Button>
-          )}
-        </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WarehouseBreakdownRow(props: {
+  materialId: string;
+  materialName: string;
+  defaultUnit: string;
+  onTransfer: (materialId: string, warehouseId: string, warehouseName: string) => void;
+}) {
+  return (
+    <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
+      <TableCell colSpan={9} className="p-0">
+        <WarehouseBreakdownContent {...props} />
       </TableCell>
     </TableRow>
   );
@@ -460,7 +465,68 @@ export default function StockPage() {
         )}
       </div>
 
-      <div className="rounded-md border -mx-3 sm:mx-0 sm:rounded-md">
+      {/* Mobile: cards */}
+      <div className="md:hidden space-y-2">
+        {isLoading ? (
+          <div className="text-center text-slate-500 py-6 text-sm">Cargando...</div>
+        ) : filteredItems.length === 0 ? (
+          <div className="text-center text-slate-500 py-6 text-sm">Sin materiales con stock.</div>
+        ) : (
+          filteredItems.map((item: StockItem) => {
+            const isExpanded = expandedMaterial === item.material_id;
+            return (
+              <div key={`m-${item.material_id}`} className="rounded-md border bg-white shadow-sm overflow-hidden">
+                <div
+                  className="p-3 cursor-pointer active:bg-slate-50"
+                  onClick={() => toggleExpand(item.material_id)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <ChevronRight className={cn(
+                          "h-4 w-4 transition-transform text-slate-400 shrink-0",
+                          isExpanded && "rotate-90"
+                        )} />
+                        <span className="font-medium text-sm truncate">{item.material_name}</span>
+                      </div>
+                      <div className="ml-5 text-xs text-slate-500">
+                        {item.material_code}
+                        {item.category_name && <span className="text-slate-400"> · {item.category_name}</span>}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-semibold tabular-nums text-sm">{item.current_stock_total.toFixed(2)} {item.default_unit}</div>
+                      {canViewValues && <div className="text-xs text-slate-500 tabular-nums">{formatCurrency(item.total_value)}</div>}
+                    </div>
+                  </div>
+                  <div className="ml-5 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <span><span className="text-slate-400">Liq:</span> <span className="tabular-nums">{item.current_stock_liquidated.toFixed(2)}</span></span>
+                    {item.current_stock_transit !== 0 && (
+                      <Badge variant="outline" className={`text-[10px] py-0 ${item.current_stock_transit > 0 ? "bg-yellow-50 text-yellow-700" : "bg-red-50 text-red-700"}`}>
+                        Trans: {item.current_stock_transit.toFixed(2)}
+                      </Badge>
+                    )}
+                    {canViewValues && <span><span className="text-slate-400">Costo:</span> <span className="tabular-nums">{formatCurrency(item.current_average_cost)}</span></span>}
+                  </div>
+                </div>
+                {isExpanded && (
+                  <div className="border-t border-slate-100 bg-slate-50/50">
+                    <WarehouseBreakdownContent
+                      materialId={item.material_id}
+                      materialName={item.material_name}
+                      defaultUnit={item.default_unit}
+                      onTransfer={handleOpenTransfer}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Desktop: tabla */}
+      <div className="hidden md:block rounded-md border">
         <Table className="min-w-[720px]">
           <TableHeader>
             <TableRow>
