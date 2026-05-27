@@ -87,58 +87,102 @@ export default function RolesPage() {
           ))}
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-200/80 overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Rol</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Identificador</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-center">Permisos</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-center">Usuarios</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {roles?.map((role) => (
-                <TableRow
-                  key={role.id}
-                  className="cursor-pointer hover:bg-slate-50"
-                  onClick={() => navigate(`/admin/roles/${role.id}`)}
-                >
-                  <TableCell>
+        <>
+          {/* Desktop: tabla */}
+          <div className="hidden md:block rounded-lg border border-slate-200/80 overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Rol</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Identificador</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-center">Permisos</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-center">Usuarios</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {roles?.map((role) => (
+                  <TableRow
+                    key={role.id}
+                    className="cursor-pointer hover:bg-slate-50"
+                    onClick={() => navigate(`/admin/roles/${role.id}`)}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4 text-slate-400" />
+                        <span className="font-medium">{role.display_name}</span>
+                        {role.is_system_role && (
+                          <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-[10px]">Sistema</Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <code className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{role.name}</code>
+                    </TableCell>
+                    <TableCell className="text-center tabular-nums">{role.permission_count}</TableCell>
+                    <TableCell className="text-center tabular-nums">{role.member_count}</TableCell>
+                    <TableCell className="text-right">
+                      {!role.is_system_role && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDelete(role);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Mobile: cards */}
+          <div className="md:hidden space-y-2">
+            {roles?.map((role) => (
+              <div
+                key={role.id}
+                className="rounded-md border bg-white p-3 shadow-sm cursor-pointer active:bg-slate-50"
+                onClick={() => navigate(`/admin/roles/${role.id}`)}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <ShieldCheck className="h-4 w-4 text-slate-400" />
-                      <span className="font-medium">{role.display_name}</span>
+                      <ShieldCheck className="h-4 w-4 text-slate-400 shrink-0" />
+                      <span className="font-medium truncate">{role.display_name}</span>
                       {role.is_system_role && (
-                        <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-[10px]">Sistema</Badge>
+                        <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-[10px] shrink-0">Sistema</Badge>
                       )}
                     </div>
-                  </TableCell>
-                  <TableCell>
-                    <code className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{role.name}</code>
-                  </TableCell>
-                  <TableCell className="text-center tabular-nums">{role.permission_count}</TableCell>
-                  <TableCell className="text-center tabular-nums">{role.member_count}</TableCell>
-                  <TableCell className="text-right">
-                    {!role.is_system_role && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openDelete(role);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+                    <code className="mt-1 inline-block text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{role.name}</code>
+                  </div>
+                  {!role.is_system_role && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-red-500 shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDelete(role);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+                <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
+                  <span><span className="text-slate-400">Permisos:</span> <span className="tabular-nums font-medium text-slate-700">{role.permission_count}</span></span>
+                  <span><span className="text-slate-400">Usuarios:</span> <span className="tabular-nums font-medium text-slate-700">{role.member_count}</span></span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Dialog: Crear Rol */}

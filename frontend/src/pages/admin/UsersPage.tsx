@@ -164,64 +164,116 @@ export default function UsersPage() {
           ))}
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-200/80 overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Nombre</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Email</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Rol</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Desde</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {members?.map((member) => (
-                <TableRow key={member.id}>
-                  <TableCell className="font-medium">{member.user_full_name ?? "-"}</TableCell>
-                  <TableCell className="text-slate-600">{member.user_email ?? "-"}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="secondary"
-                      className={roleBadgeColors[member.role_name ?? ""] ?? "bg-slate-100 text-slate-600"}
-                    >
-                      {member.role_display_name ?? member.role_name ?? "-"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-slate-500">{formatDate(member.joined_at)}</TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openEdit(member)}>
-                          <UserCog className="h-4 w-4 mr-2" />
-                          Configurar Usuario
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setResetTarget(member)}>
-                          <KeyRound className="h-4 w-4 mr-2" />
-                          Resetear Contraseña
-                        </DropdownMenuItem>
-                        {member.user_id !== currentUserId && (
-                          <DropdownMenuItem
-                            onClick={() => setDeleteTarget(member)}
-                            className="text-red-600 focus:text-red-600"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Eliminar
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
+        <>
+          {/* Desktop: tabla */}
+          <div className="hidden md:block rounded-lg border border-slate-200/80 overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Nombre</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Email</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Rol</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Desde</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Acciones</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {members?.map((member) => (
+                  <TableRow key={member.id}>
+                    <TableCell className="font-medium">{member.user_full_name ?? "-"}</TableCell>
+                    <TableCell className="text-slate-600">{member.user_email ?? "-"}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="secondary"
+                        className={roleBadgeColors[member.role_name ?? ""] ?? "bg-slate-100 text-slate-600"}
+                      >
+                        {member.role_display_name ?? member.role_name ?? "-"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-slate-500">{formatDate(member.joined_at)}</TableCell>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openEdit(member)}>
+                            <UserCog className="h-4 w-4 mr-2" />
+                            Configurar Usuario
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setResetTarget(member)}>
+                            <KeyRound className="h-4 w-4 mr-2" />
+                            Resetear Contraseña
+                          </DropdownMenuItem>
+                          {member.user_id !== currentUserId && (
+                            <DropdownMenuItem
+                              onClick={() => setDeleteTarget(member)}
+                              className="text-red-600 focus:text-red-600"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Eliminar
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Mobile: cards */}
+          <div className="md:hidden space-y-2">
+            {members?.map((member) => (
+              <div key={member.id} className="rounded-md border bg-white p-3 shadow-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium truncate">{member.user_full_name ?? "-"}</div>
+                    <div className="text-xs text-slate-500 truncate">{member.user_email ?? "-"}</div>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => openEdit(member)}>
+                        <UserCog className="h-4 w-4 mr-2" />
+                        Configurar Usuario
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setResetTarget(member)}>
+                        <KeyRound className="h-4 w-4 mr-2" />
+                        Resetear Contraseña
+                      </DropdownMenuItem>
+                      {member.user_id !== currentUserId && (
+                        <DropdownMenuItem
+                          onClick={() => setDeleteTarget(member)}
+                          className="text-red-600 focus:text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Eliminar
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+                  <Badge
+                    variant="secondary"
+                    className={roleBadgeColors[member.role_name ?? ""] ?? "bg-slate-100 text-slate-600"}
+                  >
+                    {member.role_display_name ?? member.role_name ?? "-"}
+                  </Badge>
+                  <span className="text-slate-500">Desde {formatDate(member.joined_at)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Dialog: Configurar Usuario (Rol + Cuentas) */}

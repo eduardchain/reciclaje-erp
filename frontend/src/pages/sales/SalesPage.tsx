@@ -21,6 +21,7 @@ import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { OperationListCard } from "@/components/shared/OperationListCard";
 import { useSales, useCancelSale } from "@/hooks/useSales";
 import { saleService } from "@/services/sales";
 import { toast } from "sonner";
@@ -480,6 +481,33 @@ export default function SalesPage() {
         exportFilename="ecobalance_ventas"
         onExportAll={handleExportAll}
         currencyColumns={["total_amount", "total_profit"]}
+        renderMobileCard={(s) => (
+          <OperationListCard
+            operationNumber={s.sale_number}
+            date={s.date}
+            invoiceNumber={s.invoice_number}
+            partyLabel="Cliente"
+            partyName={s.customer_name}
+            total={canViewPrices ? s.total_amount : undefined}
+            statusBadge={<StatusBadge status={s.status} />}
+            cancelled={s.status === "cancelled"}
+            actions={<ActionsCell sale={s} />}
+            description={s.lines.length > 0 ? s.lines.map((l) => `${l.material_code} ${formatWeight(l.quantity)}`).join(" · ") : undefined}
+            extras={
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                {canViewProfit && (
+                  <span>
+                    <span className="text-slate-400">Util:</span>{" "}
+                    <span className={`tabular-nums font-medium ${s.total_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                      {formatCurrency(s.total_profit)}
+                    </span>
+                  </span>
+                )}
+                {s.double_entry_id && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium">Pasa Mano</span>}
+              </div>
+            }
+          />
+        )}
         toolbar={
           <ResponsiveFilterBar>
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar venta..." />

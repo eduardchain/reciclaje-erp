@@ -20,6 +20,7 @@ import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { KpiCard } from "@/components/shared/KpiCard";
+import { OperationListCard } from "@/components/shared/OperationListCard";
 import { useDoubleEntries, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
 import { doubleEntryService } from "@/services/doubleEntries";
 import { toast } from "sonner";
@@ -357,6 +358,41 @@ export default function DoubleEntriesPage() {
         exportFilename="ecobalance_doble-partidas"
         onExportAll={handleExportAll}
         currencyColumns={["total_sale_amount", "profit"]}
+        renderMobileCard={(de) => {
+          const totalCommissions = de.commissions.reduce((sum, c) => sum + c.commission_amount, 0);
+          return (
+            <OperationListCard
+              operationNumber={de.double_entry_number}
+              date={de.date}
+              invoiceNumber={de.invoice_number}
+              partyLabel="Cliente"
+              partyName={de.customer_name}
+              total={de.total_sale_amount}
+              statusBadge={<StatusBadge status={de.status} />}
+              cancelled={de.status === "cancelled"}
+              actions={<ActionsCell de={de} />}
+              description={de.materials_summary}
+              extras={
+                canViewProfit ? (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                    <span>
+                      <span className="text-slate-400">Util:</span>{" "}
+                      <span className={`tabular-nums font-medium ${de.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                        {formatCurrency(de.profit)}
+                      </span>
+                    </span>
+                    {totalCommissions > 0 && (
+                      <span>
+                        <span className="text-slate-400">Com:</span>{" "}
+                        <span className="tabular-nums">{formatCurrency(totalCommissions)}</span>
+                      </span>
+                    )}
+                  </div>
+                ) : undefined
+              }
+            />
+          );
+        }}
         toolbar={
           <div className="flex items-center gap-3">
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar..." />

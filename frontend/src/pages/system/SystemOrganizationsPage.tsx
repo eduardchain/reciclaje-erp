@@ -128,7 +128,8 @@ export default function SystemOrganizationsPage() {
           ))}
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-200/80 overflow-hidden">
+        <>
+        <div className="hidden md:block rounded-lg border border-slate-200/80 overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
@@ -215,6 +216,66 @@ export default function SystemOrganizationsPage() {
             </TableBody>
           </Table>
         </div>
+
+        {/* Mobile: cards */}
+        <div className="md:hidden space-y-2">
+          {orgs?.map((org) => (
+            <div key={org.id} className={`rounded-md border bg-white p-3 shadow-sm ${!org.is_active ? "opacity-60" : ""}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <button
+                    onClick={() => navigate(`/system/users?org=${org.id}&org_name=${encodeURIComponent(org.name)}`)}
+                    className="flex items-center gap-2 hover:text-emerald-600 transition-colors"
+                  >
+                    <Building2 className="h-4 w-4 text-slate-400 shrink-0" />
+                    <span className="font-medium hover:underline truncate">{org.name}</span>
+                  </button>
+                  <code className="mt-1 inline-block text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{org.slug}</code>
+                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => openEdit(org)}>
+                      <Pencil className="h-4 w-4 mr-2" />
+                      Editar
+                    </DropdownMenuItem>
+                    {org.is_active && (
+                      <DropdownMenuItem
+                        onClick={() => setDeactivateTarget(org)}
+                        className="text-red-600 focus:text-red-600"
+                      >
+                        <Power className="h-4 w-4 mr-2" />
+                        Desactivar
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant="secondary" className={planBadgeColors[org.subscription_plan] ?? "bg-slate-100 text-slate-600"}>
+                  {org.subscription_plan}
+                </Badge>
+                <Badge variant="secondary" className={org.is_active ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}>
+                  {org.is_active ? "Activa" : "Inactiva"}
+                </Badge>
+                <button
+                  onClick={() => navigate(`/system/users?org=${org.id}&org_name=${encodeURIComponent(org.name)}`)}
+                  className="inline-flex items-center gap-1 text-slate-600 hover:text-emerald-600 hover:underline"
+                >
+                  <Users className="h-3 w-3" />
+                  <span className="tabular-nums">{org.member_count}/{org.max_users}</span>
+                </button>
+                <span className="text-slate-500">· Creada {formatDate(org.created_at)}</span>
+              </div>
+            </div>
+          ))}
+          {orgs?.length === 0 && <div className="text-center text-slate-400 py-8">No hay organizaciones</div>}
+        </div>
+        </>
       )}
 
       {/* Dialog: Crear Organizacion */}

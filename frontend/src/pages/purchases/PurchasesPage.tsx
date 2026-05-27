@@ -21,6 +21,7 @@ import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { OperationListCard } from "@/components/shared/OperationListCard";
 import { usePurchases, useCancelPurchase } from "@/hooks/usePurchases";
 import { purchaseService } from "@/services/purchases";
 import { toast } from "sonner";
@@ -341,6 +342,21 @@ export default function PurchasesPage() {
         exportFilename="ecobalance_compras"
         onExportAll={handleExportAll}
         currencyColumns={["total_amount"]}
+        renderMobileCard={(p) => (
+          <OperationListCard
+            operationNumber={p.purchase_number}
+            date={p.date}
+            invoiceNumber={p.invoice_number}
+            partyLabel="Proveedor"
+            partyName={p.supplier_name}
+            total={canViewPrices ? p.total_amount : undefined}
+            statusBadge={<StatusBadge status={p.status} />}
+            cancelled={p.status === "cancelled"}
+            actions={<ActionsCell purchase={p} />}
+            description={p.lines.length > 0 ? p.lines.map((l) => `${l.material_code} ${formatWeight(l.quantity)}`).join(" · ") : undefined}
+            extras={p.double_entry_id ? <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium">Pasa Mano</span> : undefined}
+          />
+        )}
         toolbar={
           <ResponsiveFilterBar>
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar compra..." />
