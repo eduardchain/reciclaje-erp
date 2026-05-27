@@ -87,7 +87,7 @@ export default function DoubleEntryDetailPage() {
           <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold uppercase tracking-wider text-blue-700">Compra</CardTitle></CardHeader>
           <CardContent>
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</dt><dd><ThirdPartyLink id={de.supplier_id}>{de.supplier_name}</ThirdPartyLink></dd></div>
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-0.5 sm:gap-3"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</dt><dd><ThirdPartyLink id={de.supplier_id}>{de.supplier_name}</ThirdPartyLink></dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold">{formatCurrency(de.total_purchase_cost)}</dd></div>
             </dl>
           </CardContent>
@@ -97,7 +97,7 @@ export default function DoubleEntryDetailPage() {
           <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Venta</CardTitle></CardHeader>
           <CardContent>
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</dt><dd><ThirdPartyLink id={de.customer_id}>{de.customer_name}</ThirdPartyLink></dd></div>
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-0.5 sm:gap-3"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</dt><dd><ThirdPartyLink id={de.customer_id}>{de.customer_name}</ThirdPartyLink></dd></div>
               <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</dt><dd className="font-bold">{formatCurrency(de.total_sale_amount)}</dd></div>
             </dl>
           </CardContent>

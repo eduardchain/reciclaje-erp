@@ -141,7 +141,7 @@ export default function LiabilitiesPage() {
         </div>
       </PageHeader>
 
-      <div className="flex gap-3 items-center">
+      <div className="flex flex-col sm:flex-row sm:gap-3 sm:items-center gap-2">
         <SearchInput value={search} onChange={setSearch} placeholder="Buscar pasivo..." />
         <div className="flex items-center gap-2">
           <Checkbox
@@ -167,7 +167,8 @@ export default function LiabilitiesPage() {
               />
             </div>
           ) : (
-            <Table>
+            <>
+            <Table className="hidden md:table">
               <TableHeader>
                 <TableRow>
                   <TableHead>Nombre</TableHead>
@@ -240,6 +241,47 @@ export default function LiabilitiesPage() {
                 ))}
               </TableBody>
             </Table>
+
+            {/* Mobile: cards */}
+            <div className="md:hidden space-y-2 p-3">
+              {items.map((tp) => (
+                <div key={tp.id} className={`rounded-md border bg-white p-3 shadow-sm ${!tp.is_active ? "opacity-60" : ""}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1 flex items-center gap-2">
+                      <span className="font-medium truncate">{tp.name}</span>
+                      {!tp.is_active && <Badge variant="secondary" className="text-[10px] shrink-0">Inactivo</Badge>}
+                    </div>
+                    <MoneyDisplay amount={tp.current_balance} className="text-sm shrink-0" />
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-1.5">
+                    {hasPermission("treasury.create_movements") && tp.is_active && (
+                      <Button variant="outline" size="sm" className="w-full" onClick={() => openAccrue(tp.id, tp.name)}>
+                        <Receipt className="h-3.5 w-3.5 mr-1" />Causar
+                      </Button>
+                    )}
+                    {hasPermission("treasury.create_movements") && tp.is_active && (
+                      <Button variant="outline" size="sm" className="w-full" onClick={() => navigate(`${ROUTES.TREASURY_NEW}?type=liability_payment&third_party_id=${tp.id}`)}>
+                        Pagar
+                      </Button>
+                    )}
+                    <Button variant="outline" size="sm" className="w-full" onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${tp.id}&returnTo=/treasury/liabilities`)}>
+                      Estado
+                    </Button>
+                    {canDelete && tp.is_active && (
+                      <Button variant="outline" size="sm" className="w-full text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => setDeactivateTarget(tp)}>
+                        <PowerOff className="h-3 w-3 mr-1" />Desactivar
+                      </Button>
+                    )}
+                    {canDelete && !tp.is_active && (
+                      <Button variant="outline" size="sm" className="w-full text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" onClick={() => setReactivateTarget(tp)}>
+                        <Power className="h-3 w-3 mr-1" />Reactivar
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            </>
           )}
         </CardContent>
       </Card>

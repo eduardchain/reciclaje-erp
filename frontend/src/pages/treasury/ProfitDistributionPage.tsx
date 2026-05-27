@@ -190,7 +190,7 @@ export default function ProfitDistributionPage() {
               <Skeleton className="h-10 w-full" />
             </div>
           ) : partners && partners.length > 0 ? (
-            <Table>
+            <Table className="min-w-[560px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Socio</TableHead>

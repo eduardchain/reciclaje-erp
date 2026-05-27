@@ -80,8 +80,8 @@ export default function TransformationDetailPage() {
       <Card className="shadow-sm">
         <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Materiales Destino</CardTitle></CardHeader>
         <CardContent>
-          <div className="rounded-lg border border-slate-200/80 overflow-hidden">
-            <Table>
+          <div className="rounded-lg border border-slate-200/80 overflow-x-auto">
+            <Table className="min-w-[560px]">
               <TableHeader>
                 <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Material</TableHead>

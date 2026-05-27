@@ -92,7 +92,8 @@ export default function FixedAssetsPage() {
               />
             </div>
           ) : (
-            <Table>
+            <>
+            <Table className="hidden md:table">
               <TableHeader>
                 <TableRow>
                   <TableHead>Codigo</TableHead>
@@ -138,6 +139,47 @@ export default function FixedAssetsPage() {
                 ))}
               </TableBody>
             </Table>
+
+            {/* Mobile: cards */}
+            <div className="md:hidden space-y-2 p-3">
+              {items.map((asset) => (
+                <div
+                  key={asset.id}
+                  className="rounded-md border bg-white p-3 shadow-sm cursor-pointer active:bg-slate-50"
+                  onClick={() => { saveScroll(location.pathname + location.search); navigate(`${ROUTES.TREASURY_FIXED_ASSETS}/${asset.id}`); }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">{asset.name}</div>
+                      {asset.asset_code && <div className="text-xs text-slate-500 mt-0.5">Cod: {asset.asset_code}</div>}
+                    </div>
+                    <Badge variant="secondary" className={`text-[10px] shrink-0 ${statusColors[asset.status]}`}>
+                      {statusLabels[asset.status]}
+                    </Badge>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <div className="text-slate-400 uppercase tracking-wider text-[10px]">Valor Actual</div>
+                      <div className="font-medium tabular-nums">{formatCurrency(asset.current_value)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400 uppercase tracking-wider text-[10px]">Deprec. Acum.</div>
+                      <div className="tabular-nums">{formatCurrency(asset.accumulated_depreciation)}</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="flex-1 bg-slate-100 rounded-full h-2">
+                      <div
+                        className="bg-emerald-500 h-2 rounded-full transition-all"
+                        style={{ width: `${Math.min(asset.depreciation_progress, 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-slate-500 tabular-nums shrink-0">{asset.depreciation_progress.toFixed(0)}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            </>
           )}
         </CardContent>
       </Card>

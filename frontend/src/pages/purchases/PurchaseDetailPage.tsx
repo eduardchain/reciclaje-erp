@@ -127,10 +127,10 @@ export default function PurchaseDetailPage() {
 
         <Card className="shadow-sm">
           <CardContent className="pt-6">
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between items-center">
+            <dl className="space-y-3 text-sm">
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-0.5 sm:gap-3">
                 <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</dt>
-                <dd><ThirdPartyLink id={purchase.supplier_id}>{purchase.supplier_name}</ThirdPartyLink></dd>
+                <dd className="truncate"><ThirdPartyLink id={purchase.supplier_id}>{purchase.supplier_name}</ThirdPartyLink></dd>
               </div>
               {purchase.vehicle_plate && (
                 <div className="flex justify-between">
@@ -174,8 +174,8 @@ export default function PurchaseDetailPage() {
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Lineas de Compra</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="rounded-lg border border-slate-200/80 overflow-hidden">
-            <Table>
+          <div className="rounded-lg border border-slate-200/80 overflow-x-auto">
+            <Table className="min-w-[640px]">
               <TableHeader>
                 <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Material</TableHead>
@@ -220,8 +220,8 @@ export default function PurchaseDetailPage() {
             <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="rounded-lg border border-slate-200/80 overflow-hidden">
-              <Table>
+            <div className="rounded-lg border border-slate-200/80 overflow-x-auto">
+              <Table className="min-w-[560px]">
                 <TableHeader>
                   <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Comisionista</TableHead>

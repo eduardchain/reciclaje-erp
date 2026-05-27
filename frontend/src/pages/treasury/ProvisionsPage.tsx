@@ -111,7 +111,9 @@ export default function ProvisionsPage() {
               description="Crea una provision para apartar fondos."
             />
           ) : (
-            <Table>
+            <>
+            {/* Desktop: tabla */}
+            <Table className="hidden md:table">
               <TableHeader>
                 <TableRow>
                   <TableHead>Nombre</TableHead>
@@ -198,6 +200,89 @@ export default function ProvisionsPage() {
                 })}
               </TableBody>
             </Table>
+
+            {/* Mobile: cards */}
+            <div className="md:hidden space-y-2">
+              {provisions.map((p) => {
+                const funds = p.current_balance < 0 ? Math.abs(p.current_balance) : 0;
+                return (
+                  <div key={p.id} className={`rounded-md border bg-white p-3 shadow-sm ${!p.is_active ? "opacity-60" : ""}`}>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium truncate flex-1">{p.name}</span>
+                      {!p.is_active && <Badge variant="secondary" className="text-[10px] shrink-0">Inactivo</Badge>}
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <div className="text-slate-400 uppercase tracking-wider text-[10px]">Disponibles</div>
+                        <MoneyDisplay amount={funds} className="text-sm" />
+                      </div>
+                      <div>
+                        <div className="text-slate-400 uppercase tracking-wider text-[10px]">Saldo</div>
+                        <MoneyDisplay amount={p.current_balance} className="text-sm" />
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-1.5">
+                      {p.is_active && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => navigate(`${ROUTES.TREASURY_NEW}?type=provision_deposit&provision_id=${p.id}`)}
+                        >
+                          <Plus className="h-3 w-3 mr-1" />Depositar
+                        </Button>
+                      )}
+                      {p.is_active && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full"
+                          disabled={p.current_balance >= 0}
+                          onClick={() => {
+                            if (p.current_balance >= 0) {
+                              toast.error(`La provision "${p.name}" esta en sobregiro. Deposite fondos antes de registrar un gasto.`);
+                              return;
+                            }
+                            navigate(`${ROUTES.TREASURY_NEW}?type=provision_expense&provision_id=${p.id}`);
+                          }}
+                        >
+                          <Receipt className="h-3 w-3 mr-1" />Gasto
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${p.id}&returnTo=/treasury/provisions`)}
+                      >
+                        <FileText className="h-3 w-3 mr-1" />Estado
+                      </Button>
+                      {canDelete && p.is_active && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => setDeactivateTarget(p)}
+                        >
+                          <PowerOff className="h-3 w-3 mr-1" />Desactivar
+                        </Button>
+                      )}
+                      {canDelete && !p.is_active && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                          onClick={() => setReactivateTarget(p)}
+                        >
+                          <Power className="h-3 w-3 mr-1" />Reactivar
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            </>
           )}
         </CardContent>
       </Card>

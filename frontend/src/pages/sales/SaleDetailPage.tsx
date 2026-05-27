@@ -104,7 +104,7 @@ export default function SaleDetailPage() {
         <Card className="shadow-sm">
           <CardContent className="pt-6">
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between items-center"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</dt><dd><ThirdPartyLink id={sale.customer_id}>{sale.customer_name}</ThirdPartyLink></dd></div>
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-0.5 sm:gap-3"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</dt><dd><ThirdPartyLink id={sale.customer_id}>{sale.customer_name}</ThirdPartyLink></dd></div>
               {sale.warehouse_name && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega</dt><dd>{sale.warehouse_name}</dd></div>}
               {sale.vehicle_plate && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa</dt><dd>{sale.vehicle_plate}</dd></div>}
               {sale.invoice_number && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Factura</dt><dd>{sale.invoice_number}</dd></div>}
@@ -126,8 +126,8 @@ export default function SaleDetailPage() {
       <Card className="shadow-sm">
         <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Lineas de Venta</CardTitle></CardHeader>
         <CardContent>
-          <div className="rounded-lg border border-slate-200/80 overflow-hidden">
-            <Table>
+          <div className="rounded-lg border border-slate-200/80 overflow-x-auto">
+            <Table className="min-w-[640px]">
               <TableHeader>
                 <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Material</TableHead>
@@ -209,8 +209,8 @@ export default function SaleDetailPage() {
         <Card className="shadow-sm">
           <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones</CardTitle></CardHeader>
           <CardContent>
-            <div className="rounded-lg border border-slate-200/80 overflow-hidden">
-              <Table>
+            <div className="rounded-lg border border-slate-200/80 overflow-x-auto">
+              <Table className="min-w-[560px]">
                 <TableHeader>
                   <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Comisionista</TableHead>
