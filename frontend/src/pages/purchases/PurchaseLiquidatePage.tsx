@@ -199,7 +199,7 @@ export default function PurchaseLiquidatePage() {
       {/* Info resumida */}
       <Card className="shadow-sm border-t-[3px] border-t-amber-400">
         <CardContent className="pt-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</span>
               <p className="font-medium">{purchase.supplier_name}</p>

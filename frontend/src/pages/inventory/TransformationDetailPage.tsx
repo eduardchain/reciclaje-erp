@@ -48,12 +48,12 @@ export default function TransformationDetailPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="shadow-sm">
           <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Origen</CardTitle></CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</span><span>{t.source_material_code} - {t.source_material_name}</span></div>
-            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega</span><span>{t.source_warehouse_name}</span></div>
-            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad</span><span className="font-medium tabular-nums">{t.source_quantity.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Unit.</span><span>{formatCurrency(t.source_unit_cost)}</span></div>
-            <div className="flex justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor Total</span><span className="font-bold">{formatCurrency(t.source_total_value)}</span></div>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material</span><span className="sm:text-right">{t.source_material_code} - {t.source_material_name}</span></div>
+            <div className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega</span><span className="sm:text-right">{t.source_warehouse_name}</span></div>
+            <div className="flex justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad</span><span className="font-medium tabular-nums">{t.source_quantity.toFixed(2)}</span></div>
+            <div className="flex justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Costo Unit.</span><span className="tabular-nums">{formatCurrency(t.source_unit_cost)}</span></div>
+            <div className="flex justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valor Total</span><span className="font-bold tabular-nums">{formatCurrency(t.source_total_value)}</span></div>
           </CardContent>
         </Card>
 

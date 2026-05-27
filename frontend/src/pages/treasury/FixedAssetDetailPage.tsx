@@ -206,7 +206,8 @@ export default function FixedAssetDetailPage() {
           {(!asset.depreciations || asset.depreciations.length === 0) ? (
             <p className="text-sm text-slate-400 text-center py-4">Sin depreciaciones aplicadas aun</p>
           ) : (
-            <Table>
+            <div className="overflow-x-auto -mx-3 sm:mx-0">
+            <Table className="min-w-[720px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>#</TableHead>
@@ -236,6 +237,7 @@ export default function FixedAssetDetailPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
