@@ -116,18 +116,19 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
 
 function getColumns(canViewProfit: boolean): ColumnDef<DoubleEntryResponse, unknown>[] {
   return [
-    { accessorKey: "double_entry_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.double_entry_number}</span> },
-    { accessorKey: "invoice_number", header: "FACTURA", cell: ({ row }) => row.original.invoice_number || "—" },
+    { accessorKey: "double_entry_number", header: "#", cell: ({ row }) => <span className="font-medium">#{row.original.double_entry_number}</span>, meta: { hideOnMobile: true } },
+    { accessorKey: "invoice_number", header: "FACTURA", cell: ({ row }) => row.original.invoice_number || "—", meta: { hideOnMobile: true } },
     { accessorKey: "date", header: "FECHA", enableSorting: true, cell: ({ row }) => formatDate(row.original.date) },
     { accessorKey: "customer_name", header: "CLIENTE" },
-    { accessorKey: "materials_summary", header: "DETALLE", cell: ({ row }) => <span className="text-xs text-slate-600">{row.original.materials_summary}</span> },
+    { accessorKey: "materials_summary", header: "DETALLE", cell: ({ row }) => <span className="text-xs text-slate-600">{row.original.materials_summary}</span>, meta: { hideOnMobile: true } },
     { accessorKey: "total_sale_amount", header: "TOTAL", cell: ({ row }) => <span className="font-medium tabular-nums">{formatCurrency(row.original.total_sale_amount)}</span> },
     ...(canViewProfit ? [
-      { accessorKey: "profit", header: "UTILIDAD BRUTA", cell: ({ row }: { row: { original: DoubleEntryResponse } }) => <span className={`font-medium tabular-nums ${row.original.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(row.original.profit)}</span> } as ColumnDef<DoubleEntryResponse, unknown>,
+      { accessorKey: "profit", header: "UTILIDAD BRUTA", cell: ({ row }: { row: { original: DoubleEntryResponse } }) => <span className={`font-medium tabular-nums ${row.original.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(row.original.profit)}</span>, meta: { hideOnMobile: true } } as ColumnDef<DoubleEntryResponse, unknown>,
       { id: "commissions", header: "COMISIONES", cell: ({ row }: { row: { original: DoubleEntryResponse } }) => {
           const total = row.original.commissions.reduce((sum, c) => sum + c.commission_amount, 0);
           return total > 0 ? <span className="text-xs tabular-nums">{formatCurrency(total)}</span> : <span className="text-slate-300">-</span>;
         },
+        meta: { hideOnMobile: true },
       } as ColumnDef<DoubleEntryResponse, unknown>,
     ] : []),
     { accessorKey: "status", header: "ESTADO", cell: ({ row }) => <StatusBadge status={row.original.status} /> },

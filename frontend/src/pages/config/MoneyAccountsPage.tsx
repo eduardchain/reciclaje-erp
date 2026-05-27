@@ -26,8 +26,8 @@ const typeColors: Record<MoneyAccountType, string> = { cash: "bg-emerald-100 tex
 const getColumns = (onViewMovements: (id: string) => void): ColumnDef<MoneyAccountResponse, unknown>[] => [
   { accessorKey: "name", header: "Nombre", cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
   { accessorKey: "account_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.account_type]}>{typeLabels[row.original.account_type]}</Badge> },
-  { accessorKey: "bank_name", header: "Banco", cell: ({ row }) => row.original.bank_name ?? "-" },
-  { accessorKey: "account_number", header: "Numero", cell: ({ row }) => row.original.account_number ?? "-" },
+  { accessorKey: "bank_name", header: "Banco", cell: ({ row }) => row.original.bank_name ?? "-", meta: { hideOnMobile: true } },
+  { accessorKey: "account_number", header: "Numero", cell: ({ row }) => row.original.account_number ?? "-", meta: { hideOnMobile: true } },
   { accessorKey: "current_balance", header: "Saldo", enableSorting: true, cell: ({ row }) => <span className="font-medium">{formatCurrency(row.original.current_balance)}</span> },
   { id: "actions", header: "", cell: ({ row }) => (
     <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); onViewMovements(row.original.id); }}>
@@ -73,17 +73,19 @@ export default function MoneyAccountsPage() {
 
   return (
     <ConfigLayout>
-      <div className="flex justify-between items-center">
-        <Tabs value={typeFilter} onValueChange={setTypeFilter}>
-          <TabsList>
-            <TabsTrigger value="all">Todas</TabsTrigger>
-            <TabsTrigger value="cash">Efectivo</TabsTrigger>
-            <TabsTrigger value="bank">Banco</TabsTrigger>
-            <TabsTrigger value="digital">Digital</TabsTrigger>
-          </TabsList>
-        </Tabs>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+        <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+          <Tabs value={typeFilter} onValueChange={setTypeFilter}>
+            <TabsList className="inline-flex w-max">
+              <TabsTrigger value="all">Todas</TabsTrigger>
+              <TabsTrigger value="cash">Efectivo</TabsTrigger>
+              <TabsTrigger value="bank">Banco</TabsTrigger>
+              <TabsTrigger value="digital">Digital</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
         {hasPermission("treasury.manage_accounts") && (
-          <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Cuenta</Button>
+          <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"><Plus className="h-4 w-4 mr-2" />Nueva Cuenta</Button>
         )}
       </div>
 

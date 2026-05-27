@@ -71,18 +71,18 @@ export default function CashFlowPage() {
 
           <Card className="md:col-span-2 border-2 border-blue-200 bg-blue-50 shadow-sm">
             <CardContent className="pt-6">
-              <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Inicial</p>
-                  <p className="text-xl font-bold">{formatCurrency(data.opening_balance)}</p>
+                  <p className="text-lg sm:text-xl font-bold tabular-nums">{formatCurrency(data.opening_balance)}</p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Flujo Neto</p>
-                  <p className={`text-xl font-bold ${data.net_flow >= 0 ? "text-emerald-700" : "text-red-700"}`}>{data.net_flow >= 0 ? "+" : ""}{formatCurrency(data.net_flow)}</p>
+                  <p className={`text-lg sm:text-xl font-bold tabular-nums ${data.net_flow >= 0 ? "text-emerald-700" : "text-red-700"}`}>{data.net_flow >= 0 ? "+" : ""}{formatCurrency(data.net_flow)}</p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Final</p>
-                  <p className="text-xl font-bold">{formatCurrency(data.closing_balance)}</p>
+                  <p className="text-lg sm:text-xl font-bold tabular-nums">{formatCurrency(data.closing_balance)}</p>
                 </div>
               </div>
             </CardContent>

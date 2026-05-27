@@ -77,7 +77,7 @@ function MultiSelectFilter({
         <Button
           variant="outline"
           role="combobox"
-          className={cn("w-48 justify-between font-normal", selected.size > 0 && "border-blue-400 bg-blue-50 text-blue-700")}
+          className={cn("w-full sm:w-48 justify-between font-normal", selected.size > 0 && "border-blue-400 bg-blue-50 text-blue-700")}
         >
           <span className="truncate">{label}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -404,13 +404,13 @@ export default function StockPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Inventario" description="Vista consolidada de stock">
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => exportStockExcel(filteredItems, canViewValues)}>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => exportStockExcel(filteredItems, canViewValues)} className="flex-1 sm:flex-none">
             <FileSpreadsheet className="h-4 w-4 mr-2" />Excel
           </Button>
-          <Button variant="outline" onClick={() => navigate("/inventory/movements")}>Movimientos</Button>
-          <Button variant="outline" onClick={() => navigate("/inventory/adjustments")}>Ajustes</Button>
-          <Button variant="outline" onClick={() => navigate("/inventory/transformations")}>Transformaciones</Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/inventory/movements")} className="flex-1 sm:flex-none">Movimientos</Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/inventory/adjustments")} className="flex-1 sm:flex-none">Ajustes</Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/inventory/transformations")} className="flex-1 sm:flex-none">Transformaciones</Button>
         </div>
       </PageHeader>
 
@@ -460,8 +460,8 @@ export default function StockPage() {
         )}
       </div>
 
-      <div className="rounded-md border">
-        <Table>
+      <div className="rounded-md border -mx-3 sm:mx-0 sm:rounded-md">
+        <Table className="min-w-[720px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
