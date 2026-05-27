@@ -256,7 +256,7 @@ export default function ProfitDistributionPage() {
               <Skeleton className="h-10 w-full" />
             </div>
           ) : history && history.items.length > 0 ? (
-            <Table>
+            <Table className="min-w-[640px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Fecha</TableHead>

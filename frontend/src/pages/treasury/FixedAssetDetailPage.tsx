@@ -112,7 +112,7 @@ export default function FixedAssetDetailPage() {
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Informacion</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
               <span className="text-slate-400">Estado</span>
               <div className="mt-1">

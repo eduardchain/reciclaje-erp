@@ -352,11 +352,11 @@ export default function SaleLiquidatePage() {
       {/* Alerta de diferencia de báscula */}
       {hasDifference && (
         <div className={`p-4 rounded-lg border ${totalAmountDifference > 0 ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"}`}>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-3">
             <span className="font-medium text-sm">
               {totalAmountDifference > 0 ? "Ganancia" : "Perdida"} por diferencia de bascula:
             </span>
-            <span className={`text-lg font-bold ${totalAmountDifference > 0 ? "text-emerald-600" : "text-red-600"}`}>
+            <span className={`text-lg font-bold tabular-nums ${totalAmountDifference > 0 ? "text-emerald-600" : "text-red-600"}`}>
               {totalAmountDifference > 0 ? "+" : ""}{formatCurrency(totalAmountDifference)}
             </span>
           </div>

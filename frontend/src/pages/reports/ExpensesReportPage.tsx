@@ -483,7 +483,7 @@ export default function ExpensesReportPage() {
                 <div className="flex flex-col gap-1">
                   <Label className="text-xs text-slate-500">Agrupar por</Label>
                   <Select value={groupBy} onValueChange={(v) => setParam({ group_by: v })}>
-                    <SelectTrigger className="w-48 h-9">
+                    <SelectTrigger className="w-full sm:w-48 h-9">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
