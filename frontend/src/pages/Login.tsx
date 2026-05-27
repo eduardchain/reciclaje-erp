@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,8 +9,13 @@ import { getApiErrorMessage } from "@/utils/formatters";
 import EcoBalanceLogo from "@/components/EcoBalanceLogo";
 
 export default function Login() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [searchParams] = useSearchParams();
+  const prefillEmail = searchParams.get("email") ?? "";
+  const prefillPassword = searchParams.get("password") ?? "";
+  const isPrefilled = Boolean(prefillEmail && prefillPassword);
+
+  const [email, setEmail] = useState(prefillEmail);
+  const [password, setPassword] = useState(prefillPassword);
   const [loginError, setLoginError] = useState("");
   const login = useLogin();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -41,6 +46,13 @@ export default function Login() {
             Iniciar sesion en el sistema
           </p>
         </div>
+
+        {isPrefilled && (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <strong className="block mb-1">Credenciales del demo prellenadas</strong>
+            Solo haz clic en <em>Iniciar sesion</em> para entrar al ambiente de prueba.
+          </div>
+        )}
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
