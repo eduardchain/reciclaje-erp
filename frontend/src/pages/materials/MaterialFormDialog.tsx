@@ -60,12 +60,12 @@ export default function MaterialFormDialog({ open, onOpenChange, editItem }: Pro
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{editItem ? "Editar Material" : "Nuevo Material"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Codigo *</Label><Input value={code} onChange={(e) => setCode(e.target.value)} /></div>
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Unidad *</Label><Input value={defaultUnit} onChange={(e) => setDefaultUnit(e.target.value)} /></div>
           </div>
@@ -74,9 +74,9 @@ export default function MaterialFormDialog({ open, onOpenChange, editItem }: Pro
           <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Categoria *</Label><EntitySelect value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ id: c.id, label: c.name }))} placeholder="Seleccionar..." /></div>
           <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Unidad de Negocio *</Label><EntitySelect value={businessUnitId} onChange={setBusinessUnitId} options={businessUnits.map((b) => ({ id: b.id, label: b.name }))} placeholder="Seleccionar..." /></div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit || isPending} className="bg-emerald-600 hover:bg-emerald-700">
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit || isPending} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto">
             {isPending ? "Guardando..." : editItem ? "Actualizar" : "Crear"}
           </Button>
         </DialogFooter>

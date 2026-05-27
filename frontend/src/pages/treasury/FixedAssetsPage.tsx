@@ -51,23 +51,23 @@ export default function FixedAssetsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Activos Fijos" description="Equipos y bienes con depreciacion mensual">
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           {hasPermission("treasury.manage_fixed_assets") && (
-            <Button variant="outline" onClick={() => setShowApplyPending(true)}>
+            <Button variant="outline" onClick={() => setShowApplyPending(true)} className="w-full sm:w-auto">
               <Play className="h-4 w-4 mr-2" />Aplicar Depreciaciones
             </Button>
           )}
           {hasPermission("treasury.manage_fixed_assets") && (
-            <Button onClick={() => navigate(ROUTES.TREASURY_FIXED_ASSETS_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={() => navigate(ROUTES.TREASURY_FIXED_ASSETS_NEW)} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto">
               <Plus className="h-4 w-4 mr-2" />Nuevo Activo
             </Button>
           )}
         </div>
       </PageHeader>
 
-      <div className="flex gap-3 items-center">
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-48">
+          <SelectTrigger className="w-full sm:w-48">
             <SelectValue placeholder="Filtrar por estado" />
           </SelectTrigger>
           <SelectContent>

@@ -233,8 +233,8 @@ export default function MovementHistoryPage() {
         currencyColumns={["unit_cost", "avg_cost_after"]}
         totalItems={data?.total}
         toolbar={
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="w-52">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+            <div className="w-full sm:w-52">
               <EntitySelect
                 value={materialFilter}
                 onChange={(v) => { setMaterialFilter(v); setPage(0); }}
@@ -243,7 +243,7 @@ export default function MovementHistoryPage() {
               />
             </div>
             <Select value={warehouseFilter} onValueChange={(v) => { setWarehouseFilter(v === "all" ? "" : v); setPage(0); }}>
-              <SelectTrigger className="w-48">
+              <SelectTrigger className="w-full sm:w-48">
                 <SelectValue placeholder="Todas las bodegas" />
               </SelectTrigger>
               <SelectContent>

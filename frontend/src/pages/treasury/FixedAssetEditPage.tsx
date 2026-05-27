@@ -158,7 +158,7 @@ export default function FixedAssetEditPage() {
                     Ingresar vida util (meses)
                   </label>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {depInputMode === "rate" ? (
                     <div>
                       <Input type="number" min={0.01} max={100} step={0.01} value={depreciationRate || ""} onChange={(e) => setDepreciationRate(parseFloat(e.target.value) || 0)} placeholder="Ej: 2.78" />
@@ -226,13 +226,13 @@ export default function FixedAssetEditPage() {
         </Card>
       )}
 
-      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-6 px-6 mt-6">
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(`/treasury/fixed-assets/${asset.id}`)}>Cancelar</Button>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-3 px-3 md:-mx-6 md:px-6 mt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+          <Button variant="outline" onClick={() => navigate(`/treasury/fixed-assets/${asset.id}`)} className="w-full sm:w-auto">Cancelar</Button>
           <Button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"
           >
             {update.isPending ? "Guardando..." : "Guardar Cambios"}
           </Button>

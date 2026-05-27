@@ -199,19 +199,19 @@ export default function AccountStatementPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Estado de Cuenta" description="Movimientos y saldo corrido por tercero">
-        <div className="flex gap-2 items-center">
-          <div className="flex gap-1 border rounded-md p-0.5">
-            <Button size="sm" variant={viewMode === "financial" ? "default" : "ghost"} onClick={() => setViewMode("financial")}>Financiero</Button>
-            <Button size="sm" variant={viewMode === "operations" ? "default" : "ghost"} onClick={() => setViewMode("operations")}>Operaciones</Button>
+        <div className="flex flex-wrap gap-2 items-center">
+          <div className="flex gap-1 border rounded-md p-0.5 w-full sm:w-auto">
+            <Button size="sm" variant={viewMode === "financial" ? "default" : "ghost"} onClick={() => setViewMode("financial")} className="flex-1 sm:flex-none">Financiero</Button>
+            <Button size="sm" variant={viewMode === "operations" ? "default" : "ghost"} onClick={() => setViewMode("operations")} className="flex-1 sm:flex-none">Operaciones</Button>
           </div>
-          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData())}>
+          <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData())} className="flex-1 sm:flex-none">
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
-          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())}>
+          <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())} className="flex-1 sm:flex-none">
             <Download className="h-4 w-4 mr-2" />Excel
           </Button>
           {hasReturnTo && (
-            <Button variant="outline" onClick={handleBack}>
+            <Button size="sm" variant="outline" onClick={handleBack} className="flex-1 sm:flex-none">
               <ArrowLeft className="h-4 w-4 mr-2" />Volver
             </Button>
           )}

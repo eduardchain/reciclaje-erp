@@ -277,7 +277,7 @@ export default function PriceListsPage() {
 
       {/* Modal Historial */}
       <Dialog open={!!historyMaterialId} onOpenChange={(open) => !open && setHistoryMaterialId(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Historial de Precios</DialogTitle>
             <p className="text-sm text-slate-500">{historyMaterialName}</p>
@@ -285,8 +285,8 @@ export default function PriceListsPage() {
           {historyLoading ? (
             <div className="text-center py-4 text-slate-400">Cargando...</div>
           ) : (
-            <div className="max-h-80 overflow-y-auto">
-              <Table>
+            <div className="max-h-80 overflow-y-auto overflow-x-auto">
+              <Table className="min-w-[560px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Fecha</TableHead>

@@ -48,16 +48,16 @@ export default function ScheduledExpensesPage() {
       <PageHeader title="Gastos Diferidos" description="Pagos grandes distribuidos en cuotas mensuales en P&L">
         <div className="flex gap-2">
           {hasPermission("treasury.manage_expenses") && (
-            <Button onClick={() => navigate(ROUTES.TREASURY_SCHEDULED_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={() => navigate(ROUTES.TREASURY_SCHEDULED_NEW)} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto">
               <Plus className="h-4 w-4 mr-2" />Nuevo Gasto Diferido
             </Button>
           )}
         </div>
       </PageHeader>
 
-      <div className="flex gap-3 items-center">
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-48">
+          <SelectTrigger className="w-full sm:w-48">
             <SelectValue placeholder="Filtrar por estado" />
           </SelectTrigger>
           <SelectContent>
