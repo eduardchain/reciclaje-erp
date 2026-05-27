@@ -1,0 +1,1092 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EcoBalance · ERP para empresas de reciclaje</title>
+<meta name="description" content="Sistema de gestión para compradores y vendedores de material reciclable. Inventario, tesorería y reportes financieros en tiempo real." />
+
+<!-- Open Graph / social -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="EcoBalance · ERP para empresas de reciclaje" />
+<meta property="og:description" content="Sistema de gestión para compradores y vendedores de material reciclable. Inventario, tesorería y reportes financieros en tiempo real." />
+<meta property="og:url" content="https://ecobalance.cc" />
+<meta property="og:image" content="https://ecobalance.cc/og-image.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="EcoBalance · ERP para empresas de reciclaje" />
+<meta name="twitter:description" content="Sistema de gestión para compradores y vendedores de material reciclable." />
+<meta name="twitter:image" content="https://ecobalance.cc/og-image.png" />
+<link rel="canonical" href="https://ecobalance.cc" />
+
+<!-- Inter font (Google Fonts) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<!-- Favicon (SVG inline, sin pedidos adicionales) -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 240'%3E%3Cdefs%3E%3ClinearGradient id='g1' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%232bb673'/%3E%3Cstop offset='100%25' stop-color='%231f8f5f'/%3E%3C/linearGradient%3E%3ClinearGradient id='g2' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%233ecf8e'/%3E%3Cstop offset='100%25' stop-color='%232bb673'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpolygon points='40,170 100,140 160,170 100,200' fill='%236fd3a7' opacity='0.6'/%3E%3Cpolygon points='35,150 100,120 165,150 100,180' fill='%2339b87c' opacity='0.7'/%3E%3Cpolygon points='30,130 100,100 170,130 100,160' fill='url(%23g2)'/%3E%3Cpath d='M100 25 C140 70,130 115,100 125 C70 115,60 70,100 25 Z' fill='url(%23g1)'/%3E%3Cpolygon points='98,60 102,60 101,125 99,125' fill='%23d8f3dc'/%3E%3C/svg%3E" />
+
+<!-- Schema.org -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "EcoBalance",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web",
+  "description": "Sistema de gestión para empresas de reciclaje. Inventario, tesorería y reportes financieros en tiempo real.",
+  "url": "https://ecobalance.cc",
+  "offers": { "@type": "Offer", "availability": "https://schema.org/InStock" }
+}
+</script>
+
+<style>
+:root {
+  --primary: #2bb673;
+  --primary-dark: #1f8f5f;
+  --primary-light: #6fd3a7;
+  --primary-pale: #d8f3dc;
+  --primary-tint: #f0faf5;
+  --neutral-900: #0f172a;
+  --neutral-700: #334155;
+  --neutral-500: #64748b;
+  --neutral-300: #cbd5e1;
+  --neutral-200: #e2e8f0;
+  --neutral-100: #f1f5f9;
+  --neutral-50: #f8fafc;
+  --whatsapp: #25d366;
+}
+* { box-sizing: border-box; }
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  scroll-padding-top: 88px;
+}
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  color: var(--neutral-900);
+  background: #ffffff;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a { color: var(--primary-dark); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+/* Header */
+.nav {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--neutral-100);
+  background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.nav .container { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand:hover { text-decoration: none; }
+.brand-text { display: flex; flex-direction: column; line-height: 1; }
+.brand-text .title { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: var(--neutral-900); }
+.brand-text .subtitle { font-size: 10px; font-weight: 600; color: var(--neutral-500); text-transform: uppercase; letter-spacing: 0.15em; margin-top: 4px; }
+.brand svg { width: 36px; height: 44px; }
+.nav-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .nav-actions { gap: 8px; }
+  .nav-actions .btn-ghost { display: none; }
+  .nav-actions .btn { padding: 9px 14px; font-size: 13.5px; }
+}
+@media (max-width: 480px) {
+  .brand-text { display: none; }
+  .nav-actions .btn-secondary { display: none; }
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 20px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover { text-decoration: none; }
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-secondary {
+  background: #fff;
+  color: var(--primary-dark);
+  border-color: var(--primary);
+}
+.btn-secondary:hover { background: var(--primary-tint); }
+.btn-ghost {
+  background: transparent;
+  color: var(--neutral-700);
+  border-color: var(--neutral-200);
+}
+.btn-ghost:hover {
+  background: var(--neutral-50);
+  color: var(--neutral-900);
+  border-color: var(--neutral-300);
+}
+.btn-lg { padding: 16px 30px; font-size: 17px; }
+
+/* Hero */
+.hero {
+  background: linear-gradient(135deg, var(--primary-tint) 0%, #ffffff 60%);
+  padding: 84px 0 68px;
+}
+.hero h1 {
+  font-size: clamp(32px, 5.5vw, 52px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  margin: 0 0 20px;
+  max-width: 880px;
+  color: var(--neutral-900);
+}
+.hero h1 em { color: var(--primary-dark); font-style: normal; }
+.hero p.lead {
+  font-size: clamp(17px, 2vw, 21px);
+  color: var(--neutral-700);
+  max-width: 760px;
+  margin: 0 0 36px;
+}
+.hero-actions { display: flex; flex-wrap: wrap; gap: 14px; }
+@media (max-width: 480px) {
+  .hero { padding: 56px 0 48px; }
+  .hero-actions { flex-direction: column; gap: 10px; }
+  .hero-actions .btn { width: 100%; }
+}
+.hero-note {
+  display: block;
+  margin-top: 20px;
+  font-size: 14px;
+  color: var(--neutral-500);
+}
+
+/* Section base */
+section.block { padding: 64px 0; position: relative; }
+section.block.alt { background: var(--neutral-50); }
+section.block h2 {
+  font-size: clamp(26px, 3.4vw, 34px);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin: 0 0 12px;
+  color: var(--neutral-900);
+  line-height: 1.15;
+}
+section.block .section-lead {
+  color: var(--neutral-700);
+  max-width: 720px;
+  font-size: 16.5px;
+  margin: 0 0 36px;
+}
+
+/* Eyebrow / kicker label antes de h2 */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--primary-dark);
+  margin: 0 0 14px;
+}
+.eyebrow::before {
+  content: "";
+  display: block;
+  width: 22px;
+  height: 2px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+/* Background variants para dar ritmo y verdor sin exagerar */
+.bg-green-soft {
+  background:
+    radial-gradient(circle at 1px 1px, rgba(43, 182, 115, 0.14) 1px, transparent 1.5px),
+    linear-gradient(180deg, var(--primary-tint) 0%, #fbfdfc 100%);
+  background-size: 22px 22px, 100% 100%;
+  border-top: 1px solid rgba(111, 211, 167, 0.18);
+  border-bottom: 1px solid rgba(111, 211, 167, 0.18);
+}
+.bg-green-rich {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(160deg, var(--primary-tint) 0%, #ffffff 45%, var(--primary-tint) 100%);
+}
+.bg-green-rich > .container { position: relative; z-index: 1; }
+.bg-green-rich::before,
+.bg-green-rich::after {
+  content: "";
+  position: absolute;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: 0;
+}
+.bg-green-rich::before {
+  background: var(--primary-light);
+  opacity: 0.28;
+  top: -120px;
+  right: -100px;
+}
+.bg-green-rich::after {
+  background: var(--primary);
+  opacity: 0.12;
+  bottom: -140px;
+  left: -120px;
+}
+.bg-paper {
+  background: #fff;
+  position: relative;
+}
+.bg-paper::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80px;
+  height: 3px;
+  background: var(--primary);
+  border-radius: 0 0 2px 2px;
+  opacity: 0;
+}
+
+/* Features grid */
+.features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+@media (max-width: 900px) {
+  .features { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .features { grid-template-columns: 1fr; }
+}
+.feature {
+  background: #fff;
+  border: 1px solid var(--neutral-200);
+  border-radius: 12px;
+  padding: 28px 26px 26px;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  position: relative;
+}
+.feature:hover {
+  border-color: var(--primary-light);
+  box-shadow: 0 10px 28px rgba(31, 143, 95, 0.10);
+  transform: translateY(-3px);
+}
+.feature:hover .feature-arrow { transform: translateX(3px); color: var(--primary-dark); }
+.feature-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+  margin-bottom: 16px;
+  transition: transform 0.18s ease, color 0.18s ease;
+}
+.feature-arrow svg { width: 22px; height: 22px; }
+.feature h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  color: var(--neutral-900);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.feature p {
+  margin: 0;
+  color: var(--neutral-700);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+/* Módulos */
+.modules-section {
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(43, 182, 115, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(43, 182, 115, 0.05) 0%, transparent 50%),
+    #fafbfc;
+}
+.modules {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+@media (max-width: 980px) {
+  .modules { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .modules { grid-template-columns: 1fr; }
+}
+.module {
+  background: #fff;
+  border: 1px solid var(--neutral-200);
+  border-radius: 10px;
+  padding: 22px 22px 20px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  position: relative;
+  overflow: hidden;
+}
+.module::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--primary) 0%, var(--primary-light) 100%);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.module:hover {
+  border-color: var(--primary-light);
+  box-shadow: 0 8px 24px rgba(31, 143, 95, 0.10);
+  transform: translateY(-2px);
+}
+.module:hover::before { opacity: 1; }
+.module .icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--primary-tint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  color: var(--primary-dark);
+}
+.module .icon svg { width: 20px; height: 20px; }
+.module h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--neutral-900);
+  letter-spacing: -0.005em;
+}
+.module p {
+  margin: 0;
+  color: var(--neutral-700);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* Screenshots placeholders */
+.shots {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+  margin-top: 12px;
+}
+@media (max-width: 720px) {
+  .shots { grid-template-columns: 1fr; }
+}
+.shot {
+  background: #fff;
+  border: 1px solid var(--neutral-200);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.shot-img {
+  background: var(--neutral-100);
+  aspect-ratio: 16 / 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--neutral-500);
+  font-size: 13px;
+  font-style: italic;
+  border-bottom: 1px solid var(--neutral-200);
+  overflow: hidden;
+}
+.shot-img img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; cursor: zoom-in; transition: transform 0.3s ease; }
+.shot:hover .shot-img img { transform: scale(1.02); }
+.shot-img::after {
+  content: "Ver";
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 5px 10px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
+}
+.shot:hover .shot-img::after { opacity: 1; }
+.shot-img { position: relative; }
+.shot-img--mobile {
+  background: linear-gradient(180deg, var(--neutral-50) 0%, var(--primary-tint) 100%);
+}
+.shot-img--mobile img {
+  width: auto;
+  height: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  margin: 0 auto;
+}
+.shot-caption {
+  padding: 14px 16px;
+  font-size: 14px;
+  color: var(--neutral-700);
+}
+.shot-caption strong { color: var(--neutral-900); font-weight: 600; }
+
+/* Demo box */
+.demo-box {
+  background: #fff;
+  border: 1px solid var(--primary-light);
+  border-radius: 10px;
+  padding: 32px;
+  box-shadow: 0 6px 20px rgba(31, 143, 95, 0.08);
+}
+@media (max-width: 560px) {
+  .demo-box { padding: 22px 18px; border-radius: 8px; }
+  section.block { padding: 48px 0; }
+  .container { padding: 0 18px; }
+}
+.demo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+}
+@media (max-width: 720px) {
+  .demo-grid { grid-template-columns: 1fr; }
+}
+.demo-grid h3 {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--primary-dark);
+  margin: 0 0 14px;
+}
+.cred-table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+.cred-table td { padding: 7px 0; border-bottom: 1px solid var(--neutral-100); vertical-align: top; }
+.cred-table tr:last-child td { border-bottom: none; }
+.cred-table td:first-child { color: var(--neutral-500); padding-right: 16px; white-space: nowrap; }
+.cred-table td code {
+  background: var(--neutral-50);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--primary-dark);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* FAQ */
+.faq { max-width: 760px; }
+.faq details {
+  border-bottom: 1px solid var(--neutral-200);
+  padding: 18px 0;
+}
+.faq details:first-child { border-top: 1px solid var(--neutral-200); }
+.faq summary {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--neutral-900);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after {
+  content: "+";
+  font-weight: 400;
+  font-size: 22px;
+  color: var(--neutral-500);
+  line-height: 1;
+}
+.faq details[open] summary::after { content: "−"; }
+.faq details > p {
+  margin: 12px 0 0;
+  color: var(--neutral-700);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* Contact */
+.contact-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 8px 0 28px;
+  padding: 14px 18px;
+  background: #fff;
+  border: 1px solid var(--neutral-200);
+  border-radius: 10px;
+  max-width: 480px;
+}
+.contact-meta-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.contact-meta-info { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.contact-meta-name { font-size: 15px; font-weight: 600; color: var(--neutral-900); }
+.contact-meta-role { font-size: 13px; color: var(--neutral-500); }
+
+.contact-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+@media (max-width: 720px) {
+  .contact-cards { grid-template-columns: 1fr; }
+}
+.contact-card {
+  background: #fff;
+  border: 1px solid var(--neutral-200);
+  border-radius: 12px;
+  padding: 26px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-decoration: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  position: relative;
+}
+.contact-card:hover {
+  border-color: var(--primary-light);
+  box-shadow: 0 10px 28px rgba(31, 143, 95, 0.10);
+  transform: translateY(-2px);
+  text-decoration: none;
+}
+.contact-card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--primary-tint);
+  color: var(--primary-dark);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  transition: transform 0.18s ease;
+}
+.contact-card:hover .contact-card-icon { transform: scale(1.05); }
+.contact-card-icon svg { width: 22px; height: 22px; }
+.contact-card-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--neutral-500);
+  margin-bottom: 4px;
+}
+.contact-card-value {
+  font-size: 15.5px;
+  font-weight: 600;
+  color: var(--neutral-900);
+  word-break: break-word;
+  line-height: 1.35;
+}
+.contact-card-cta {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--primary-dark);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: gap 0.18s ease;
+}
+.contact-card:hover .contact-card-cta { gap: 8px; }
+
+/* WhatsApp card emphasized */
+.contact-card--wa {
+  background: linear-gradient(135deg, #effaf3 0%, #ffffff 100%);
+  border-color: var(--primary-light);
+}
+.contact-card--wa .contact-card-icon {
+  background: var(--whatsapp);
+  color: #fff;
+}
+.contact-card--wa .contact-card-cta { color: #1da851; }
+
+/* Footer */
+footer {
+  background: var(--neutral-900);
+  color: rgba(255,255,255,0.7);
+  padding: 32px 0;
+  font-size: 13.5px;
+  margin-top: 0;
+}
+footer .container { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; }
+footer a { color: var(--primary-light); }
+
+/* Lightbox */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 24px;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.lightbox.is-open { display: flex; }
+.lightbox-content {
+  position: relative;
+  max-width: 95vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.lightbox-img {
+  max-width: 100%;
+  max-height: calc(92vh - 60px);
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  background: #fff;
+}
+.lightbox-caption {
+  color: rgba(255,255,255,0.85);
+  font-size: 14px;
+  text-align: center;
+  max-width: 720px;
+  padding: 0 16px;
+}
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, transform 0.15s;
+  padding: 0;
+}
+.lightbox-close:hover { background: rgba(255, 255, 255, 0.2); transform: rotate(90deg); }
+.lightbox-close:focus-visible { outline: 2px solid var(--primary-light); outline-offset: 2px; }
+body.lightbox-open { overflow: hidden; }
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="container">
+    <a href="/" class="brand">
+      <svg viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#2bb673" />
+            <stop offset="100%" stop-color="#1f8f5f" />
+          </linearGradient>
+          <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#3ecf8e" />
+            <stop offset="100%" stop-color="#2bb673" />
+          </linearGradient>
+        </defs>
+        <polygon points="40,170 100,140 160,170 100,200" fill="#6fd3a7" opacity="0.6" />
+        <polygon points="35,150 100,120 165,150 100,180" fill="#39b87c" opacity="0.7" />
+        <polygon points="30,130 100,100 170,130 100,160" fill="url(#g2)" />
+        <path d="M100 25 C140 70,130 115,100 125 C70 115,60 70,100 25 Z" fill="url(#g1)" />
+        <polygon points="98,60 102,60 101,125 99,125" fill="#d8f3dc" />
+      </svg>
+      <div class="brand-text">
+        <span class="title">EcoBalance</span>
+        <span class="subtitle">ERP Reciclaje</span>
+      </div>
+    </a>
+    <div class="nav-actions">
+      <a href="#contacto" class="btn btn-ghost">Contacto</a>
+      <a href="/presentacion.pdf" class="btn btn-secondary">Propuesta (PDF)</a>
+      <a href="#probar" class="btn btn-primary">Entrar al demo</a>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="container">
+    <h1>El ERP que <em>reemplaza el Excel</em> de tu empresa de reciclaje.</h1>
+    <p class="lead">EcoBalance captura cada compra, venta, traslado y movimiento de tesorería una sola vez — y mantiene inventario, costo promedio, saldos de terceros y reportes financieros siempre al día, desde la báscula hasta la oficina contable.</p>
+    <div class="hero-actions">
+      <a href="#probar" class="btn btn-primary btn-lg">Probar el sistema gratis</a>
+      <a href="/presentacion.pdf" class="btn btn-secondary btn-lg">Descargar propuesta (PDF)</a>
+    </div>
+    <span class="hero-note">Ambiente de prueba con 4 meses de operación simulada.</span>
+  </div>
+</section>
+
+<section class="block modules-section">
+  <div class="container">
+    <span class="eyebrow">Alcance</span>
+    <h2>Módulos</h2>
+    <p class="section-lead">Operación, inventario, tesorería y reportes en una sola plataforma — todos conectados, sin re-digitación.</p>
+
+    <div class="modules">
+      <div class="module">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg></span>
+        <h3>Compras</h3>
+        <p>Registro de operaciones, liquidación con confirmación de precios y gastos directos, pago en línea o separado. Costo promedio móvil recalculado en cada liquidación.</p>
+      </div>
+      <div class="module">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></span>
+        <h3>Ventas</h3>
+        <p>Registro y liquidación con diferencia de báscula, comisiones a vendedores, cobro inmediato o aparte. COGS calculado al momento de cada venta.</p>
+      </div>
+      <div class="module">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></span>
+        <h3>Pasa Mano (Doble Partida)</h3>
+        <p>Operaciones intermediadas donde el material no pasa por bodega. Compra y venta simultáneas, comisiones y utilidad reportada por separado.</p>
+      </div>
+      <div class="module">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span>
+        <h3>Inventario</h3>
+        <p>Stock por bodega, separación entre tránsito y liquidado, transformaciones de material (desarmado), ajustes, traslados entre bodegas.</p>
+      </div>
+      <div class="module">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span>
+        <h3>Tesorería</h3>
+        <p>21 tipos de movimientos: pagos, cobros, anticipos, transferencias, provisiones, comisiones, gastos diferidos, repartición de utilidades.</p>
+      </div>
+      <div class="module">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/></svg></span>
+        <h3>Activos Fijos</h3>
+        <p>Depreciación mensual lineal, baja con ajuste acelerado, pago desde cuenta o crédito con proveedor, carga histórica desde otro sistema.</p>
+      </div>
+      <div class="module">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+        <h3>Terceros</h3>
+        <p>Proveedores, clientes, socios, pasivos, provisiones — todos clasificados por categoría. Estado de cuenta unificado por tercero con todas sus operaciones.</p>
+      </div>
+      <div class="module">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span>
+        <h3>Reportes</h3>
+        <p>Tablero, Estado de Resultados (período y mensual), Balance General histórico, Flujo de Caja, Rentabilidad por Unidad de Negocio, márgenes, gastos.</p>
+      </div>
+      <div class="module">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span>
+        <h3>Roles y Permisos</h3>
+        <p>67 permisos granulares en 11 módulos. Roles del sistema (admin, báscula, liquidador, viewer) y roles personalizados por organización.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block bg-green-soft">
+  <div class="container">
+    <span class="eyebrow">Diferenciadores</span>
+    <h2>Lo que lo hace distinto</h2>
+    <p class="section-lead">No es un ERP genérico al que haya que adaptarse — está pensado para las particularidades del negocio del reciclaje.</p>
+
+    <div class="features">
+      <div class="feature">
+        <span class="feature-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <h3>Costo promedio móvil</h3>
+        <p>Se recalcula automáticamente en cada liquidación de compra. Al vender hoy ya conoces el costo exacto del material que sale.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <h3>Utilidad en tiempo real</h3>
+        <p>Estado de Resultados, Balance General y Flujo de Caja siempre al día. No a fin de mes, no en Excel.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <h3>Estado de cuenta unificado</h3>
+        <p>Cada tercero tiene una sola línea de tiempo: compras, ventas, pagos, anticipos, comisiones, pasa-mano.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <h3>Drill-down hasta el origen</h3>
+        <p>Haz clic en cualquier número del Estado de Resultados y baja hasta los movimientos que lo componen.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <h3>Balance histórico</h3>
+        <p>Consulta el Balance General o el detallado a cualquier fecha pasada — útil para comparar contra estados financieros previos.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <h3>Funciona en celular</h3>
+        <p>La báscula opera desde el teléfono, el gerente consulta reportes desde cualquier lugar. Sin app aparte.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="container">
+    <span class="eyebrow">Producto</span>
+    <h2>Cómo se ve</h2>
+    <p class="section-lead">Capturas reales del sistema sobre datos de demostración.</p>
+
+    <div class="shots">
+      <div class="shot">
+        <div class="shot-img">
+          <img src="/screenshots/tablero.png" alt="Tablero EcoBalance" loading="lazy" />
+        </div>
+        <div class="shot-caption"><strong>Tablero.</strong> Vista general de la operación: utilidad del mes, compras, ventas, inventario.</div>
+      </div>
+      <div class="shot">
+        <div class="shot-img">
+          <img src="/screenshots/pnl.png" alt="Estado de Resultados mensual" loading="lazy" />
+        </div>
+        <div class="shot-caption"><strong>Estado de Resultados mensual.</strong> Comparación mes a mes con día de corte configurable. Cada número es clickeable.</div>
+      </div>
+      <div class="shot">
+        <div class="shot-img">
+          <img src="/screenshots/estado-cuenta.png" alt="Estado de cuenta de tercero" loading="lazy" />
+        </div>
+        <div class="shot-caption"><strong>Estado de cuenta de tercero.</strong> Todas sus operaciones en una sola línea de tiempo: compras, pagos, anticipos.</div>
+      </div>
+      <div class="shot">
+        <div class="shot-img shot-img--mobile">
+          <img src="/screenshots/mobile.png" alt="Vista mobile EcoBalance" loading="lazy" />
+        </div>
+        <div class="shot-caption"><strong>Vista mobile.</strong> La báscula puede operar desde el celular. Mismo sistema, sin app aparte.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block bg-green-rich" id="probar">
+  <div class="container">
+    <span class="eyebrow">Demo en vivo</span>
+    <h2>Pruébalo antes de hablar con nosotros</h2>
+    <p class="section-lead">Ambiente con 4 meses de operación cargada — compras, ventas, pasa-mano, gastos, depreciaciones, transformaciones. Solo abre el navegador.</p>
+
+    <div class="demo-box">
+      <div class="demo-grid">
+        <div>
+          <h3>Credenciales</h3>
+          <table class="cred-table">
+            <tr><td>URL</td><td><a href="https://app.ecobalance.cc"><strong>app.ecobalance.cc</strong></a></td></tr>
+            <tr><td>Gerente</td><td><code>gerente@demo.ecobalance.com</code></td></tr>
+            <tr><td>Báscula</td><td><code>bascula@demo.ecobalance.com</code></td></tr>
+            <tr><td>Contraseña</td><td><code>12345678</code></td></tr>
+          </table>
+        </div>
+        <div>
+          <h3>Sugerencia de recorrido</h3>
+          <ol style="margin:0;padding-left:18px;color:var(--neutral-700);font-size:15px;line-height:1.7;">
+            <li>Entra al <strong>Tablero</strong> para una vista general.</li>
+            <li>Abre <strong>Reportes → Estado de Resultados</strong> (mensual) y haz clic en cualquier número.</li>
+            <li>Revisa el <strong>Estado de Cuenta</strong> de un tercero.</li>
+            <li>Abre la misma URL desde tu celular y registra una compra de prueba.</li>
+          </ol>
+        </div>
+      </div>
+      <div style="margin-top:24px;">
+        <a href="https://app.ecobalance.cc" class="btn btn-primary">Abrir el sistema</a>
+      </div>
+    </div>
+    <p style="margin-top:14px;font-size:13px;color:var(--neutral-500);">Empresa demo: <em>Recicladora del Pacífico Demo S.A.S.</em> · Datos ficticios, segura para experimentar.</p>
+  </div>
+</section>
+
+<section class="block">
+  <div class="container">
+    <span class="eyebrow">FAQ</span>
+    <h2>Preguntas frecuentes</h2>
+    <div class="faq" style="margin-top:24px;">
+      <details>
+        <summary>¿Cómo es la migración desde Excel?</summary>
+        <p>Cargamos los maestros (materiales, terceros, bodegas, cuentas, saldos iniciales) desde una plantilla de Excel que entregamos. Las operaciones históricas no se importan — se hace un corte de inventario al día de arranque y a partir de ahí toda la operación queda en el sistema.</p>
+      </details>
+      <details>
+        <summary>¿Cuánto demora la implementación?</summary>
+        <p>Entre 1 y 3 semanas, dependiendo del volumen de maestros y de cuánto orden tenga la información actual. Incluye configuración, carga de maestros, capacitación al equipo operativo y administrativo, y acompañamiento durante la primera semana de operación real.</p>
+      </details>
+      <details>
+        <summary>¿Cómo manejan la seguridad y los respaldos?</summary>
+        <p>La base de datos se respalda automáticamente cada 6 horas con copia local y copia cifrada fuera del servidor. Acceso por usuario con contraseña, sesiones JWT, roles y permisos granulares por módulo. Auditoría de movimientos con anulación y motivo registrado.</p>
+      </details>
+      <details>
+        <summary>¿Funciona con varias bodegas o varias empresas?</summary>
+        <p>Sí. Inventario y stock se separan por bodega con transferencias entre ellas. Cada empresa tiene su propia organización en el sistema con datos completamente aislados; un mismo usuario puede pertenecer a varias organizaciones.</p>
+      </details>
+      <details>
+        <summary>¿Qué pasa si necesito soporte?</summary>
+        <p>Soporte directo por WhatsApp y correo en horario laboral. Las actualizaciones del sistema se publican sin interrupción y sin costo adicional durante el período contratado.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="block bg-green-soft" id="contacto">
+  <div class="container">
+    <span class="eyebrow">Hablemos</span>
+    <h2>Contacto</h2>
+    <p class="section-lead">¿Dudas, demo en vivo, presupuesto? Escribe por el canal que prefieras — respondemos el mismo día hábil.</p>
+
+    <div class="contact-meta">
+      <span class="contact-meta-avatar">EC</span>
+      <span class="contact-meta-info">
+        <span class="contact-meta-name">Eduardo Chain</span>
+        <span class="contact-meta-role">Fundador · EcoBalance</span>
+      </span>
+    </div>
+
+    <div class="contact-cards">
+      <a href="https://wa.me/573183508513?text=Hola%2C%20vi%20EcoBalance%20y%20me%20gustar%C3%ADa%20saber%20m%C3%A1s."
+         class="contact-card contact-card--wa"
+         target="_blank" rel="noopener"
+         aria-label="Escribir por WhatsApp al +57 318 350 8513">
+        <span class="contact-card-icon">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2zm0 18.15c-1.48 0-2.93-.4-4.2-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.264 8.264 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.82 2.42a8.183 8.183 0 0 1 2.41 5.83c.02 4.54-3.68 8.23-8.23 8.23zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.12-.16.25-.64.81-.78.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-1.99-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.02-.38.11-.51.11-.11.25-.29.37-.43.12-.14.17-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.4-.42-.56-.42-.14 0-.31-.02-.47-.02-.17 0-.43.06-.66.31-.23.25-.86.84-.86 2.05 0 1.21.88 2.38 1 2.54.12.17 1.72 2.64 4.17 3.69 1.5.64 2.34.51 2.99.42.62-.09 1.47-.6 1.67-1.18.21-.58.21-1.07.15-1.18-.07-.1-.23-.16-.48-.28z"/></svg>
+        </span>
+        <span class="contact-card-label">WhatsApp</span>
+        <span class="contact-card-value">+57 318 350 8513</span>
+        <span class="contact-card-cta">Escribir ahora →</span>
+      </a>
+
+      <a href="mailto:eduardo.d.chain@gmail.com?subject=Consulta%20EcoBalance"
+         class="contact-card"
+         aria-label="Enviar email a eduardo.d.chain@gmail.com">
+        <span class="contact-card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+        </span>
+        <span class="contact-card-label">Email</span>
+        <span class="contact-card-value">eduardo.d.chain@gmail.com</span>
+        <span class="contact-card-cta">Enviar correo →</span>
+      </a>
+
+      <a href="tel:+573183508513"
+         class="contact-card"
+         aria-label="Llamar al +57 318 350 8513">
+        <span class="contact-card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+        </span>
+        <span class="contact-card-label">Teléfono</span>
+        <span class="contact-card-value">+57 318 350 8513</span>
+        <span class="contact-card-cta">Llamar →</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div>&copy; 2026 EcoBalance · ERP Reciclaje</div>
+    <div><a href="https://app.ecobalance.cc">app.ecobalance.cc</a> · <a href="/presentacion.pdf">Propuesta (PDF)</a> · <a href="#contacto">Contacto</a></div>
+  </div>
+</footer>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-labelledby="lightbox-caption">
+  <div class="lightbox-content">
+    <img class="lightbox-img" id="lightbox-img" src="" alt="" />
+    <div class="lightbox-caption" id="lightbox-caption"></div>
+  </div>
+  <button class="lightbox-close" id="lightbox-close" aria-label="Cerrar">&times;</button>
+</div>
+
+<script>
+(function () {
+  const lb = document.getElementById('lightbox');
+  const lbImg = document.getElementById('lightbox-img');
+  const lbCap = document.getElementById('lightbox-caption');
+  const lbClose = document.getElementById('lightbox-close');
+  const shots = document.querySelectorAll('.shot');
+
+  function openLightbox(src, alt, caption) {
+    lbImg.src = src;
+    lbImg.alt = alt || '';
+    lbCap.textContent = caption || '';
+    lb.classList.add('is-open');
+    document.body.classList.add('lightbox-open');
+    lbClose.focus();
+  }
+
+  function closeLightbox() {
+    lb.classList.remove('is-open');
+    document.body.classList.remove('lightbox-open');
+    lbImg.src = '';
+  }
+
+  shots.forEach(function (shot) {
+    const img = shot.querySelector('.shot-img img');
+    const caption = shot.querySelector('.shot-caption');
+    if (!img) return;
+    const trigger = shot.querySelector('.shot-img');
+    trigger.style.cursor = 'zoom-in';
+    trigger.setAttribute('role', 'button');
+    trigger.setAttribute('tabindex', '0');
+    trigger.setAttribute('aria-label', 'Ampliar imagen: ' + (img.alt || ''));
+    const handler = function (e) {
+      e.preventDefault();
+      openLightbox(img.src, img.alt, caption ? caption.textContent.trim() : '');
+    };
+    trigger.addEventListener('click', handler);
+    trigger.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') handler(e);
+    });
+  });
+
+  lbClose.addEventListener('click', closeLightbox);
+  lb.addEventListener('click', function (e) {
+    if (e.target === lb) closeLightbox();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && lb.classList.contains('is-open')) closeLightbox();
+  });
+})();
+</script>
+
+</body>
+</html>
