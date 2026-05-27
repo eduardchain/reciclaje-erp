@@ -192,15 +192,24 @@ const orgNavItems: NavItem[] = [
   },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  mode?: "desktop" | "mobile";
+  onNavigate?: () => void;
+}
+
+export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps = {}) {
   const location = useLocation();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsedDesktop, setCollapsedDesktop] = useState(false);
   const { hasPermission, hasAnyPermission, isLoading } = usePermissions();
   const user = useAuthStore((s) => s.user);
   const organizationId = useAuthStore((s) => s.organizationId);
   const isSuperuser = user?.is_superuser ?? false;
   const isSystemMode = organizationId === "system";
+
+  const isMobile = mode === "mobile";
+  // En mobile: nunca colapsado (el drawer ya controla visibilidad)
+  const collapsed = isMobile ? false : collapsedDesktop;
 
   const filteredNavItems = useMemo(() => {
     if (isLoading) return [];
@@ -247,7 +256,7 @@ export default function Sidebar() {
       <aside
         className={cn(
           "bg-sidebar-bg h-full overflow-y-auto overflow-x-hidden flex flex-col transition-all duration-200",
-          collapsed ? "w-[68px]" : "w-64"
+          isMobile ? "w-full" : collapsed ? "w-[68px]" : "w-64"
         )}
       >
         {/* Logo */}
@@ -287,6 +296,7 @@ export default function Sidebar() {
                         <TooltipTrigger asChild>
                           <Link
                             to={item.path}
+                            onClick={onNavigate}
                             className={cn(
                               "flex items-center justify-center w-full p-2.5 rounded-lg transition-all duration-150",
                               active
@@ -330,6 +340,7 @@ export default function Sidebar() {
                                 <Link
                                   key={child.path}
                                   to={child.path}
+                                  onClick={onNavigate}
                                   className={cn(
                                     "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150",
                                     childActive
@@ -358,6 +369,7 @@ export default function Sidebar() {
                       <TooltipTrigger asChild>
                         <Link
                           to={item.path}
+                          onClick={onNavigate}
                           className={cn(
                             "flex items-center justify-center p-2.5 rounded-lg transition-all duration-150",
                             active
@@ -375,6 +387,7 @@ export default function Sidebar() {
                   ) : (
                     <Link
                       to={item.path}
+                      onClick={onNavigate}
                       className={cn(
                         "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150 group",
                         active
@@ -395,25 +408,27 @@ export default function Sidebar() {
           </div>
         </nav>
 
-        {/* Collapse toggle */}
-        <div className={cn(
-          "border-t border-white/10 p-3 shrink-0",
-          collapsed && "flex justify-center"
-        )}>
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground hover:text-white hover:bg-white/5 transition-all duration-150 w-full"
-          >
-            {collapsed ? (
-              <PanelLeft className="w-5 h-5 mx-auto" />
-            ) : (
-              <>
-                <PanelLeftClose className="w-5 h-5" />
-                <span className="text-sm">Colapsar</span>
-              </>
-            )}
-          </button>
-        </div>
+        {/* Collapse toggle - solo en desktop (en mobile el drawer ya provee cerrar) */}
+        {!isMobile && (
+          <div className={cn(
+            "border-t border-white/10 p-3 shrink-0",
+            collapsed && "flex justify-center"
+          )}>
+            <button
+              onClick={() => setCollapsedDesktop(!collapsed)}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground hover:text-white hover:bg-white/5 transition-all duration-150 w-full"
+            >
+              {collapsed ? (
+                <PanelLeft className="w-5 h-5 mx-auto" />
+              ) : (
+                <>
+                  <PanelLeftClose className="w-5 h-5" />
+                  <span className="text-sm">Colapsar</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </aside>
     </TooltipProvider>
   );

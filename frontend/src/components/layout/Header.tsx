@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Building2, Check, ChevronDown, KeyRound, LogOut, Settings, User } from "lucide-react";
+import { Building2, Check, ChevronDown, KeyRound, LogOut, Menu, Settings, User } from "lucide-react";
 import EcoBalanceLogo from "@/components/EcoBalanceLogo";
 import {
   DropdownMenu,
@@ -18,7 +18,11 @@ import { useLogout, useCurrentUser, useCurrentOrganization, useChangePassword } 
 import { useAuthStore } from "@/stores/authStore";
 import { getApiErrorMessage } from "@/utils/formatters";
 
-export default function Header() {
+interface HeaderProps {
+  onMenuClick?: () => void;
+}
+
+export default function Header({ onMenuClick }: HeaderProps = {}) {
   const user = useCurrentUser();
   const org = useCurrentOrganization();
   const organizations = useAuthStore((s) => s.organizations);
@@ -93,11 +97,22 @@ export default function Header() {
 
   return (
     <>
-      <header className="bg-white border-b border-slate-200/80 h-16 flex items-center px-6">
-        <div className="flex items-center justify-between w-full">
-          <EcoBalanceLogo textColor="dark" />
+      <header className="bg-white border-b border-slate-200/80 h-16 flex items-center px-3 md:px-6">
+        <div className="flex items-center justify-between w-full gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            {onMenuClick && (
+              <button
+                onClick={onMenuClick}
+                className="md:hidden p-2 -ml-2 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none"
+                aria-label="Abrir menu"
+              >
+                <Menu className="w-5 h-5 text-slate-600" />
+              </button>
+            )}
+            <EcoBalanceLogo textColor="dark" />
+          </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 md:gap-4">
             {/* Selector de org o pill estatico */}
             {showOrgSelector ? (
               <DropdownMenu>
@@ -108,7 +123,7 @@ export default function Header() {
                     ) : (
                       <Building2 className="w-3.5 h-3.5" />
                     )}
-                    <span className="font-medium max-w-[180px] truncate">{currentOrgLabel}</span>
+                    <span className="font-medium max-w-[120px] sm:max-w-[180px] truncate">{currentOrgLabel}</span>
                     <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                 </DropdownMenuTrigger>
