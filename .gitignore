@@ -286,3 +286,6 @@ presentacion/screenshots/
 
 # Copia local del PDF para preview del landing (el original vive en presentacion/build/)
 .claude/skills/deploy/landing/presentacion.pdf
+
+# Backups locales del landing antes de cambios mayores
+.claude/skills/deploy/landing/index.html.*
