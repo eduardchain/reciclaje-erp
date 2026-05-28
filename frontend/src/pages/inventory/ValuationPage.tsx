@@ -48,12 +48,12 @@ export default function ValuationPage() {
       </PageHeader>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           <Skeleton className="h-28 rounded-lg" />
           <Skeleton className="h-28 rounded-lg" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           <KpiCard label="Valor Total" metric={kpis.value} icon={<DollarSign className="h-4 w-4" />} accentColor="emerald" />
           <KpiCard label="Materiales" metric={kpis.count} icon={<Package className="h-4 w-4" />} accentColor="violet" formatValue={(n) => String(n)} />
         </div>

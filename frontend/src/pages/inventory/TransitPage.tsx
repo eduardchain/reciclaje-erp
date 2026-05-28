@@ -51,13 +51,13 @@ export default function TransitPage() {
       </PageHeader>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <KpiCard label="Stock en Transito" metric={kpis.transit} icon={<Truck className="h-4 w-4" />} accentColor="amber" formatValue={(n) => n.toFixed(2) + " kg"} />
           <KpiCard label="Compras Pendientes" metric={kpis.purchases} icon={<ShoppingCart className="h-4 w-4" />} accentColor="blue" formatValue={(n) => String(n)} />
           <KpiCard label="Ventas Pendientes" metric={kpis.sales} icon={<DollarSign className="h-4 w-4" />} accentColor="emerald" formatValue={(n) => String(n)} />

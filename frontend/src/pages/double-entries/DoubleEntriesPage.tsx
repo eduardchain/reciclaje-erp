@@ -257,11 +257,11 @@ export default function DoubleEntriesPage() {
         const cards: number = (canViewValues ? 2 : 0) + (canViewProfit ? 2 : 0) + 1;
         const gridClass =
           cards >= 5
-            ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4"
+            ? "grid grid-cols-2 lg:grid-cols-5 gap-4"
             : cards >= 3
-              ? "grid grid-cols-1 md:grid-cols-3 gap-4"
+              ? "grid grid-cols-2 md:grid-cols-3 gap-4"
               : cards === 2
-                ? "grid grid-cols-1 md:grid-cols-2 gap-4"
+                ? "grid grid-cols-2 gap-4"
                 : "grid grid-cols-1 gap-4";
         return isLoading ? (
           <div className={gridClass}>

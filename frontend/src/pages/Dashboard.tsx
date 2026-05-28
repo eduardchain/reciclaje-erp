@@ -41,7 +41,7 @@ export default function Dashboard() {
       </PageHeader>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         {isLoading ? (
           Array.from({ length: 6 }).map((_, i) => (
             <Card key={i} className="border-t-[3px] border-t-slate-200">

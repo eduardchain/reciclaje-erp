@@ -364,9 +364,9 @@ export default function SalesPage() {
         const cardCount = canViewPrices ? (canViewProfit ? 5 : 2) : 1;
         const gridClass =
           cardCount === 5
-            ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4"
+            ? "grid grid-cols-2 lg:grid-cols-5 gap-4"
             : cardCount === 2
-              ? "grid grid-cols-1 md:grid-cols-2 gap-4"
+              ? "grid grid-cols-2 gap-4"
               : "grid grid-cols-1 gap-4";
         return isLoading ? (
           <div className={gridClass}>

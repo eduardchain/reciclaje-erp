@@ -195,13 +195,13 @@ export default function MovementHistoryPage() {
       </PageHeader>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-[120px] rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <KpiCard label="Movimientos" metric={kpis.total} icon={<ArrowDownUp className="h-4 w-4" />} accentColor="sky" formatValue={(n) => String(n)} />
           <KpiCard label="Entradas" metric={kpis.entries} icon={<TrendingUp className="h-4 w-4" />} accentColor="emerald" formatValue={(n) => String(n)} />
           <KpiCard label="Salidas" metric={kpis.exits} icon={<TrendingDown className="h-4 w-4" />} accentColor="rose" formatValue={(n) => String(n)} />
