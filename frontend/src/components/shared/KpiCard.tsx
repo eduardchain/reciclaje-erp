@@ -53,50 +53,56 @@ export function KpiCard({
       borderClass,
       href && "hover:-translate-y-0.5 cursor-pointer"
     )}>
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", iconClass)}>
-              {icon}
-            </div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              {label}
-            </span>
+      <CardContent className="p-3 sm:p-5">
+        {/* Header: icon + label */}
+        <div className="flex items-center gap-2 mb-1 sm:mb-3">
+          <div className={cn(
+            "w-6 h-6 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center shrink-0",
+            iconClass,
+          )}>
+            {icon}
           </div>
+          <span className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500 truncate">
+            {label}
+          </span>
         </div>
 
-        <p className="text-2xl font-bold text-slate-900 tabular-nums tracking-tight">
-          {(formatValue ?? formatCurrency)(metric.current_value)}
-        </p>
+        {/* Valor + trend: inline en mobile, stacked en desktop */}
+        <div className="flex items-baseline justify-between gap-2 sm:block">
+          <p className="text-lg sm:text-2xl font-bold text-slate-900 tabular-nums tracking-tight truncate">
+            {(formatValue ?? formatCurrency)(metric.current_value)}
+          </p>
 
-        {metric.change_percentage != null && (
-          <div className="flex items-center gap-1.5 mt-2">
-            {metric.change_percentage >= 0 ? (
-              <div className="flex items-center gap-1 text-emerald-600">
-                <TrendingUp className="h-3.5 w-3.5" />
-                <span className="text-xs font-semibold tabular-nums">
-                  +{formatPercentage(metric.change_percentage)}
-                </span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1 text-rose-600">
-                <TrendingDown className="h-3.5 w-3.5" />
-                <span className="text-xs font-semibold tabular-nums">
-                  {formatPercentage(metric.change_percentage)}
-                </span>
-              </div>
-            )}
-            <span className="text-xs text-slate-400">vs periodo anterior</span>
-          </div>
-        )}
+          {metric.change_percentage != null && (
+            <div className="flex items-center gap-1 sm:gap-1.5 sm:mt-2 shrink-0">
+              {metric.change_percentage >= 0 ? (
+                <div className="flex items-center gap-0.5 sm:gap-1 text-emerald-600">
+                  <TrendingUp className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                  <span className="text-[10px] sm:text-xs font-semibold tabular-nums">
+                    +{formatPercentage(metric.change_percentage)}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-0.5 sm:gap-1 text-rose-600">
+                  <TrendingDown className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                  <span className="text-[10px] sm:text-xs font-semibold tabular-nums">
+                    {formatPercentage(metric.change_percentage)}
+                  </span>
+                </div>
+              )}
+              <span className="hidden sm:inline text-xs text-slate-400">vs periodo anterior</span>
+            </div>
+          )}
+        </div>
 
+        {/* Secondary: oculto en mobile */}
         {secondaryLabel && (
-          <>
+          <div className="hidden sm:block">
             <div className="border-t border-slate-100 my-3" />
             <p className="text-xs text-slate-400">
               {secondaryLabel}: <span className="font-medium text-slate-600">{secondaryValue}</span>
             </p>
-          </>
+          </div>
         )}
       </CardContent>
     </Card>

@@ -20,7 +20,7 @@ export function OperationListCard({
   operationNumber,
   date,
   partyName,
-  partyLabel,
+  partyLabel: _partyLabel,
   total,
   statusBadge,
   description,
@@ -32,49 +32,63 @@ export function OperationListCard({
   return (
     <div
       className={cn(
-        "rounded-md border bg-white p-3 shadow-sm",
+        "rounded-md border bg-white px-3 py-2 shadow-sm",
         cancelled && "opacity-60 bg-rose-50/40",
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <span className="font-semibold text-slate-700">#{operationNumber}</span>
-            <span className="text-slate-300">·</span>
-            <span>{formatDate(date)}</span>
-            {invoiceNumber && (
-              <>
-                <span className="text-slate-300">·</span>
-                <span className="truncate">Fac: {invoiceNumber}</span>
-              </>
+      {/* Linea 1: #NUM + Tercero (truncate) + Total + Status + Actions */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-slate-700 shrink-0 tabular-nums">
+          #{operationNumber}
+        </span>
+        <span
+          className={cn(
+            "text-sm font-medium text-slate-800 truncate flex-1 min-w-0",
+            cancelled && "line-through",
+          )}
+        >
+          {partyName}
+        </span>
+        {total != null && (
+          <span
+            className={cn(
+              "text-sm font-bold tabular-nums shrink-0",
+              cancelled && "line-through",
             )}
-          </div>
-        </div>
+          >
+            {formatCurrency(total)}
+          </span>
+        )}
         <div className="shrink-0 flex items-center gap-1">
           {statusBadge}
           {actions}
         </div>
       </div>
 
-      <div className="mt-1.5 flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1 text-sm">
-          {partyLabel && <span className="text-xs text-slate-400">{partyLabel}: </span>}
-          <span className={cn("font-medium text-slate-800 truncate", cancelled && "line-through")}>{partyName}</span>
-        </div>
-        {total != null && (
-          <span className={cn("font-bold tabular-nums text-sm shrink-0", cancelled && "line-through")}>
-            {formatCurrency(total)}
-          </span>
+      {/* Linea 2: meta (fecha · description · invoice) */}
+      <div
+        className={cn(
+          "mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500 leading-tight",
+          cancelled && "line-through",
+        )}
+      >
+        <span className="shrink-0">{formatDate(date)}</span>
+        {description && (
+          <>
+            <span className="text-slate-300 shrink-0">·</span>
+            <span className="truncate min-w-0">{description}</span>
+          </>
+        )}
+        {invoiceNumber && (
+          <>
+            <span className="text-slate-300 shrink-0">·</span>
+            <span className="shrink-0">Fac: {invoiceNumber}</span>
+          </>
         )}
       </div>
 
-      {description && (
-        <div className={cn("mt-1 text-xs text-slate-500 line-clamp-2", cancelled && "line-through")}>
-          {description}
-        </div>
-      )}
-
-      {extras && <div className="mt-1.5">{extras}</div>}
+      {/* Linea 3 (opcional): extras como chip inline */}
+      {extras && <div className="mt-1 flex items-center gap-1.5">{extras}</div>}
     </div>
   );
 }
