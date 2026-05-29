@@ -13,6 +13,7 @@ import { MoneyInput } from "@/components/shared/MoneyInput";
 import { BusinessUnitAllocationSelector } from "@/components/shared/BusinessUnitAllocationSelector";
 import { useCreateMovement, useUploadEvidence, useCreateTpTransfer, useCreateTpAdjustment } from "@/hooks/useMoneyMovements";
 import { usePayableSuppliers, useCustomers, useInvestors, useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties, useProvisions, useLiabilities, useGenericThirdParties } from "@/hooks/useMasterData";
+import { usePermissions } from "@/hooks/usePermissions";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 
@@ -58,6 +59,11 @@ export default function MovementCreatePage() {
   const createTpTransfer = useCreateTpTransfer();
   const createTpAdjustment = useCreateTpAdjustment();
   const uploadEvidence = useUploadEvidence();
+  const { hasPermission } = usePermissions();
+  // Mostrar saldo del tercero al lado del nombre en selectores solo si el rol
+  // tiene `third_parties.view_balance`. Config solicitada por el cliente —
+  // mismo permiso que oculta saldos en ThirdPartiesPage.
+  const canViewTpBalance = hasPermission("third_parties.view_balance");
 
   const { data: payableSuppliersData } = usePayableSuppliers();
   const { data: customersData } = useCustomers();
@@ -270,7 +276,7 @@ export default function MovementCreatePage() {
 
   const tpOption = (t: { id: string; name: string; current_balance: number }) => ({
     id: t.id,
-    label: `${t.name} (${formatCurrency(t.current_balance)})`,
+    label: canViewTpBalance ? `${t.name} (${formatCurrency(t.current_balance)})` : t.name,
   });
 
   const getThirdPartyOptions = () => {
@@ -394,14 +400,16 @@ export default function MovementCreatePage() {
                   <EntitySelect
                     value={thirdPartyId}
                     onChange={(v) => { setThirdPartyId(v); setAdjustDirection(thirdParties.find((t) => t.id === v)?.current_balance === 0 ? "increase" : "reduce"); }}
-                    options={thirdParties.map((t) => ({ id: t.id, label: `${t.name} (Saldo: ${formatCurrency(t.current_balance)})` }))}
+                    options={thirdParties.map((t) => ({ id: t.id, label: canViewTpBalance ? `${t.name} (Saldo: ${formatCurrency(t.current_balance)})` : t.name }))}
                     placeholder="Seleccionar tercero..."
                   />
                   {selectedTpForAdjustment && (
                     <>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Saldo actual: <span className={selectedTpBalance >= 0 ? "text-emerald-600 font-medium" : "text-red-600 font-medium"}>{formatCurrency(selectedTpBalance)}</span>
-                      </p>
+                      {canViewTpBalance && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          Saldo actual: <span className={selectedTpBalance >= 0 ? "text-emerald-600 font-medium" : "text-red-600 font-medium"}>{formatCurrency(selectedTpBalance)}</span>
+                        </p>
+                      )}
                       <div className="flex gap-2 mt-2">
                         {selectedTpBalance !== 0 && (
                           <button type="button" onClick={() => setAdjustDirection("reduce")}
@@ -421,7 +429,7 @@ export default function MovementCreatePage() {
                           Llevar a cero
                         </button>
                       )}
-                      {selectedTpForAdjustment && amount > 0 && (
+                      {canViewTpBalance && selectedTpForAdjustment && amount > 0 && (
                         <p className="text-xs text-slate-400 mt-1">
                           Saldo después: <span className="font-medium">{formatCurrency(
                             adjustDirection === "reduce"
@@ -467,11 +475,13 @@ export default function MovementCreatePage() {
                   onChange={setProvisionId}
                   options={provisions.map((p) => ({
                     id: p.id,
-                    label: `${p.name} (Fondos: ${formatCurrency(p.current_balance < 0 ? Math.abs(p.current_balance) : 0)})`,
+                    label: canViewTpBalance
+                      ? `${p.name} (Fondos: ${formatCurrency(p.current_balance < 0 ? Math.abs(p.current_balance) : 0)})`
+                      : p.name,
                   }))}
                   placeholder="Seleccionar provision..."
                 />
-                {selectedProvision && type === "provision_expense" && (
+                {canViewTpBalance && selectedProvision && type === "provision_expense" && (
                   <p className="text-xs mt-1 text-slate-500">
                     Fondos disponibles: <span className={availableFunds > 0 ? "text-emerald-600 font-medium" : "text-red-600 font-medium"}>{formatCurrency(availableFunds)}</span>
                   </p>
