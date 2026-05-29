@@ -127,6 +127,9 @@ export interface SaleLiquidateRequest {
  * Necesario para que las KPIs coincidan con el P&L cuando hay paginacion.
  */
 export interface PaginatedSaleResponse extends PaginatedResponse<SaleResponse> {
+  /** Count excluyendo canceladas — para KPI "Operaciones". `total` cuenta tambien canceladas (paginacion). */
+  active_total: number;
+  /** Sumas siempre excluyen canceladas (paridad con P&L). */
   total_amount_sum: number;
   total_profit_sum: number;
   total_commissions_sum: number;

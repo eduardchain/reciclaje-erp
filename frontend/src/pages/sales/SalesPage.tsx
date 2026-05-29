@@ -312,7 +312,9 @@ export default function SalesPage() {
     const totalCommissions = data?.total_commissions_sum ?? 0;
     const cogs = totalAmount - totalProfit;
     const netProfit = totalProfit - totalCommissions;
-    const count = data?.total ?? 0;
+    // active_total = count excluyendo canceladas (paridad con sumas).
+    // `total` (con canceladas) se queda para paginacion del listado.
+    const count = data?.active_total ?? 0;
     const margin = totalAmount > 0 ? (totalProfit / totalAmount) * 100 : 0;
     const netMargin = totalAmount > 0 ? (netProfit / totalAmount) * 100 : 0;
     const cogsRatio = totalAmount > 0 ? (cogs / totalAmount) * 100 : 0;

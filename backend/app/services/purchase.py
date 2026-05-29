@@ -961,12 +961,20 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         search: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_dir: str = "desc",
-    ) -> tuple[List[Purchase], int]:
+    ) -> tuple[List[Purchase], int, int, Decimal]:
         """
         Get multiple purchases with filtering, sorting, and pagination.
 
         sort_by se valida contra SORTABLE_COLUMNS (fallback silencioso a 'date').
         sort_dir 'asc' o 'desc' (default 'desc'). Tiebreaker estable: id ASC.
+
+        Returns:
+            (purchases, total, active_total, amount_sum)
+            - total: count incluyendo canceladas (para paginacion del listado)
+            - active_total: count excluyendo canceladas (para KPI "Operaciones")
+            - amount_sum: SUM(total_amount) sobre el set filtrado EXCLUYENDO
+              canceladas — paridad con P&L y necesario para que el KPI
+              "Total Compras" no infle con compras canceladas.
         """
         from sqlalchemy import or_, cast, String
 
@@ -1001,6 +1009,14 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Get total count before pagination
         total = query.count()
 
+        # Active count + amount sum excluyen canceladas (KPIs operacionales)
+        active_query = query.filter(Purchase.status != "cancelled")
+        active_total = active_query.count()
+        amount_sum_raw = active_query.with_entities(
+            func.coalesce(func.sum(Purchase.total_amount), 0)
+        ).scalar() or 0
+        amount_sum = Decimal(str(amount_sum_raw))
+
         # Sort con allowlist + tiebreaker estable id ASC
         sort_column, direction = self._resolve_sort_column(sort_by, sort_dir)
         order_clause = sort_column.desc() if direction == "desc" else sort_column.asc()
@@ -1013,7 +1029,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             joinedload(Purchase.payment_account),
         ).order_by(order_clause, Purchase.purchase_number.desc(), Purchase.id.asc()).offset(skip).limit(limit).all()
 
-        return purchases, total
+        return purchases, total, active_total, amount_sum
     
     def get_by_number(
         self,

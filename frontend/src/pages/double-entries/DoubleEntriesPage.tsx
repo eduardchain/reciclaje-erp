@@ -211,7 +211,9 @@ export default function DoubleEntriesPage() {
     const totalPurchase = data?.total_purchase_cost_sum ?? 0;
     const totalSale = data?.total_sale_amount_sum ?? 0;
     const totalProfit = data?.total_profit_sum ?? 0;
-    const count = data?.total ?? 0;
+    // active_total = count excluyendo canceladas (paridad con sumas).
+    // `total` (con canceladas) se queda para paginacion del listado.
+    const count = data?.active_total ?? 0;
     // Margen ponderado = profit / sale * 100 (mas preciso que promedio simple de margenes).
     const margin = totalSale > 0 ? (totalProfit / totalSale) * 100 : 0;
     return {

@@ -4,8 +4,8 @@ import type {
   PurchaseCreate,
   PurchaseFullUpdate,
   PurchaseLiquidateRequest,
+  PaginatedPurchaseResponse,
 } from "@/types/purchase";
-import type { PaginatedResponse } from "@/types/common";
 
 interface PurchaseFilters {
   skip?: number;
@@ -20,11 +20,11 @@ interface PurchaseFilters {
 }
 
 export const purchaseService = {
-  getAll: async (filters: PurchaseFilters = {}): Promise<PaginatedResponse<PurchaseResponse>> => {
+  getAll: async (filters: PurchaseFilters = {}): Promise<PaginatedPurchaseResponse> => {
     const params: Record<string, unknown> = { ...filters };
     if (!params.sort_by) delete params.sort_by;
     if (!params.sort_dir) delete params.sort_dir;
-    const response = await apiClient.get<PaginatedResponse<PurchaseResponse>>("/api/v1/purchases", { params });
+    const response = await apiClient.get<PaginatedPurchaseResponse>("/api/v1/purchases", { params });
     return response.data;
   },
 

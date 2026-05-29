@@ -253,12 +253,14 @@ class PaginatedSaleResponse(BaseModel):
     """Paginated response for sale lists.
 
     Los totales agregados (`total_amount_sum`, `total_profit_sum`,
-    `total_commissions_sum`) cubren TODO el set filtrado, no solo la pagina
-    actual — necesarios para que las KPIs en el listado coincidan con el P&L
-    cuando hay paginacion.
+    `total_commissions_sum`) cubren TODO el set filtrado EXCLUYENDO canceladas
+    — paridad con P&L. `active_total` es el count tambien excluyendo canceladas
+    (para el KPI "Operaciones"). `total` sigue contando canceladas para que la
+    paginacion del listado refleje lo que el usuario ve.
     """
     items: List[SaleResponse]
     total: int
+    active_total: int = 0
     skip: int
     limit: int
     total_amount_sum: float = 0.0

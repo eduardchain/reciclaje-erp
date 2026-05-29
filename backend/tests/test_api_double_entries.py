@@ -973,3 +973,48 @@ class TestDoubleEntryPerKgCommission:
         assert data["commissions"][0]["commission_type"] == "per_kg"
         # 1000 kg × $10/kg = $10,000
         assert data["commissions"][0]["commission_amount"] == 10000.0
+
+
+class TestDoubleEntryKpiSums:
+    """KPI sums + active_total deben excluir DPs canceladas (paridad con P&L)."""
+
+    def test_kpi_sums_exclude_cancelled(
+        self,
+        client,
+        org_headers,
+        test_supplier,
+        test_customer,
+        test_material,
+    ):
+        # Crear 2 DPs
+        payload = _create_payload(
+            test_supplier.id, test_customer.id, test_material.id,
+            quantity=100.0, purchase_price=80.0, sale_price=100.0,
+        )
+        client.post("/api/v1/double-entries", json=payload, headers=org_headers).raise_for_status()
+        client.post("/api/v1/double-entries", json=payload, headers=org_headers).raise_for_status()
+
+        r = client.get("/api/v1/double-entries", headers=org_headers)
+        body = r.json()
+        assert body["total"] == 2
+        assert body["active_total"] == 2
+        # 2 DPs × 100kg × $80 (purchase) = $16,000; × $100 (sale) = $20,000
+        assert body["total_purchase_cost_sum"] == 16000.0
+        assert body["total_sale_amount_sum"] == 20000.0
+        assert body["total_profit_sum"] == 4000.0  # 20k - 16k
+
+        # Cancelar una
+        de_id = body["items"][0]["id"]
+        client.patch(
+            f"/api/v1/double-entries/{de_id}/cancel",
+            json={"reason": "test"},
+            headers=org_headers,
+        ).raise_for_status()
+
+        r = client.get("/api/v1/double-entries", headers=org_headers)
+        body = r.json()
+        assert body["total"] == 2, "total para paginacion debe incluir canceladas"
+        assert body["active_total"] == 1, "active_total para KPI debe excluir canceladas"
+        assert body["total_purchase_cost_sum"] == 8000.0, "sum debe excluir DPs canceladas"
+        assert body["total_sale_amount_sum"] == 10000.0
+        assert body["total_profit_sum"] == 2000.0

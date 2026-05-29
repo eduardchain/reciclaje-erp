@@ -772,9 +772,58 @@ class TestGetSaleByNumber:
         """Test getting a sale by non-existent number."""
         # Act
         response = client.get("/api/v1/sales/by-number/9999", headers=org_headers)
-        
+
         # Assert
         assert response.status_code == 404
+
+
+class TestSaleKpiSums:
+    """KPI sums + active_total deben excluir ventas canceladas (paridad con P&L)."""
+
+    def test_kpi_sums_exclude_cancelled(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_material_with_stock,
+        test_warehouse,
+        test_organization,
+        db_session,
+    ):
+        from app.schemas.sale import SaleCreate, SaleLineCreate
+        from app.services.sale import crud_sale
+
+        # Crear 2 ventas
+        for _ in range(2):
+            data = SaleCreate(
+                customer_id=test_customer.id,
+                warehouse_id=test_warehouse.id,
+                date=datetime(2026, 3, 20, 12, 0, 0),
+                lines=[SaleLineCreate(
+                    material_id=test_material_with_stock.id,
+                    quantity=Decimal("10.0"),
+                    unit_price=Decimal("100.00"),
+                )],
+                commissions=[],
+                auto_liquidate=False,
+            )
+            crud_sale.create(db=db_session, obj_in=data, organization_id=test_organization.id)
+        db_session.commit()
+
+        r = client.get("/api/v1/sales", headers=org_headers)
+        body = r.json()
+        assert body["total"] == 2
+        assert body["active_total"] == 2
+        assert body["total_amount_sum"] == 2000.0
+
+        sale_id = body["items"][0]["id"]
+        client.patch(f"/api/v1/sales/{sale_id}/cancel", json={"reason": "test"}, headers=org_headers)
+
+        r = client.get("/api/v1/sales", headers=org_headers)
+        body = r.json()
+        assert body["total"] == 2, "total para paginacion debe incluir canceladas"
+        assert body["active_total"] == 1, "active_total para KPI debe excluir canceladas"
+        assert body["total_amount_sum"] == 1000.0, "sum debe excluir ventas canceladas"
 
 
 class TestListSalesByCustomer:

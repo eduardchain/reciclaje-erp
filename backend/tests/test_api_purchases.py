@@ -601,6 +601,56 @@ class TestListPurchases:
         assert response.status_code == 200
         assert response.json()["total"] >= 1
 
+    def test_kpi_sums_exclude_cancelled(
+        self,
+        client,
+        org_headers,
+        test_supplier,
+        test_material,
+        test_warehouse,
+        db_session,
+    ):
+        """Las cards KPI (total_amount_sum, active_total) deben excluir compras canceladas.
+        `total` (paginacion) sigue contando todo. Paridad con P&L."""
+        from app.schemas.purchase import PurchaseCreate, PurchaseLineCreate
+        from app.services.purchase import purchase as purchase_service
+
+        # Crear 2 compras
+        for _ in range(2):
+            data = PurchaseCreate(
+                supplier_id=test_supplier.id,
+                date=datetime.now(),
+                lines=[PurchaseLineCreate(
+                    material_id=test_material.id,
+                    quantity=Decimal("10.0"),
+                    unit_price=Decimal("100.00"),
+                    warehouse_id=test_warehouse.id,
+                )],
+                auto_liquidate=False,
+            )
+            purchase_service.create(
+                db=db_session, obj_in=data, organization_id=test_supplier.organization_id,
+            )
+        db_session.commit()
+
+        # Sanity: 2 activas, sum = 2000
+        r = client.get("/api/v1/purchases", headers=org_headers)
+        body = r.json()
+        assert body["total"] == 2
+        assert body["active_total"] == 2
+        assert body["total_amount_sum"] == 2000.0
+
+        # Cancelar una
+        purchase_id = body["items"][0]["id"]
+        client.patch(f"/api/v1/purchases/{purchase_id}/cancel", headers=org_headers)
+
+        # Despues de cancelar: total=2 (paginacion ve la cancelada), active_total=1, sum=1000
+        r = client.get("/api/v1/purchases", headers=org_headers)
+        body = r.json()
+        assert body["total"] == 2, "total para paginacion debe incluir canceladas"
+        assert body["active_total"] == 1, "active_total para KPI debe excluir canceladas"
+        assert body["total_amount_sum"] == 1000.0, "sum debe excluir compras canceladas"
+
 
 class TestListPendingPurchases:
     """Tests for GET /api/v1/purchases/pending"""

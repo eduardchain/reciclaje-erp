@@ -1,4 +1,4 @@
-import type { BaseEntity } from "./common";
+import type { BaseEntity, PaginatedResponse } from "./common";
 
 export type PurchaseStatus = "registered" | "liquidated" | "cancelled";
 
@@ -112,4 +112,15 @@ export interface PurchaseLiquidateRequest {
   immediate_payment?: boolean;
   payment_account_id?: string;
   liquidation_date?: string;
+}
+
+/**
+ * Listado paginado de compras con totales agregados sobre el set filtrado
+ * EXCLUYENDO canceladas (paridad con P&L).
+ */
+export interface PaginatedPurchaseResponse extends PaginatedResponse<PurchaseResponse> {
+  /** Count excluyendo canceladas — para KPI "Operaciones". `total` cuenta tambien canceladas (paginacion). */
+  active_total: number;
+  /** SUM(total_amount) excluyendo canceladas. */
+  total_amount_sum: number;
 }

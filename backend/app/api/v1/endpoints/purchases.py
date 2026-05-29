@@ -260,7 +260,7 @@ async def list_purchases(
         else:
             date_to_dt = None
 
-        purchases, total = purchase_service.get_multi(
+        purchases, total, active_total, amount_sum = purchase_service.get_multi(
             db=db,
             organization_id=org_context["organization_id"],
             skip=skip,
@@ -280,8 +280,10 @@ async def list_purchases(
         return PaginatedPurchaseResponse(
             items=items,
             total=total,
+            active_total=active_total,
             skip=skip,
             limit=limit,
+            total_amount_sum=float(amount_sum),
         )
     
     except Exception as e:
@@ -311,7 +313,7 @@ async def list_pending_purchases(
 ) -> PaginatedPurchaseResponse:
     """List purchases pending liquidation (status='registered')."""
     try:
-        purchases, total = purchase_service.get_multi(
+        purchases, total, active_total, amount_sum = purchase_service.get_multi(
             db=db,
             organization_id=org_context["organization_id"],
             skip=skip,
@@ -324,8 +326,10 @@ async def list_pending_purchases(
         return PaginatedPurchaseResponse(
             items=items,
             total=total,
+            active_total=active_total,
             skip=skip,
             limit=limit,
+            total_amount_sum=float(amount_sum),
         )
     
     except Exception as e:
@@ -386,7 +390,7 @@ async def list_purchases_by_supplier(
 ) -> PaginatedPurchaseResponse:
     """List purchases by supplier."""
     try:
-        purchases, total = purchase_service.get_multi(
+        purchases, total, active_total, amount_sum = purchase_service.get_multi(
             db=db,
             organization_id=org_context["organization_id"],
             skip=skip,
@@ -399,8 +403,10 @@ async def list_purchases_by_supplier(
         return PaginatedPurchaseResponse(
             items=items,
             total=total,
+            active_total=active_total,
             skip=skip,
             limit=limit,
+            total_amount_sum=float(amount_sum),
         )
     
     except Exception as e:

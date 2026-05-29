@@ -242,10 +242,11 @@ export default function PurchasesPage() {
   const pageCount = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
 
   const kpis = useMemo(() => {
-    const items = data?.items ?? [];
-    const totalAmount = items.reduce((sum, p) => sum + p.total_amount, 0);
-    const count = data?.total ?? 0;
-    const avg = count > 0 ? totalAmount / items.length : 0;
+    // Sumas y count excluyen canceladas (paridad con P&L y "Total Compras" real).
+    // `total` (con canceladas) sigue siendo el de paginacion del listado.
+    const totalAmount = data?.total_amount_sum ?? 0;
+    const count = data?.active_total ?? 0;
+    const avg = count > 0 ? totalAmount / count : 0;
     return {
       total: { current_value: totalAmount, previous_value: 0, change_percentage: null } as MetricCard,
       count: { current_value: count, previous_value: 0, change_percentage: null } as MetricCard,

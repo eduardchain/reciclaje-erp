@@ -183,7 +183,7 @@ async def list_double_entries(
     """Listar doble partidas con filtros."""
     date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
     date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
-    double_entries, total, purchase_sum, sale_sum, profit_sum = double_entry_service.get_multi(
+    double_entries, total, active_total, purchase_sum, sale_sum, profit_sum = double_entry_service.get_multi(
         db=db,
         organization_id=org_context["organization_id"],
         skip=skip,
@@ -208,6 +208,7 @@ async def list_double_entries(
     return PaginatedDoubleEntryResponse(
         items=items,
         total=total,
+        active_total=active_total,
         skip=skip,
         limit=limit,
         total_purchase_cost_sum=float(purchase_sum),

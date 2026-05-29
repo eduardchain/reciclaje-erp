@@ -228,7 +228,7 @@ async def list_sales(
         date_from_dt = datetime.combine(date_from, dt_time.min, tzinfo=tz.utc) if date_from else None
         date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
 
-        sales, total, amount_sum, profit_sum, commissions_sum = crud_sale.get_multi(
+        sales, total, active_total, amount_sum, profit_sum, commissions_sum = crud_sale.get_multi(
             db=db,
             organization_id=org_context["organization_id"],
             skip=skip,
@@ -251,6 +251,7 @@ async def list_sales(
         return PaginatedSaleResponse(
             items=items,
             total=total,
+            active_total=active_total,
             skip=skip,
             limit=limit,
             total_amount_sum=float(amount_sum),
@@ -285,7 +286,7 @@ async def list_pending_sales(
 ) -> PaginatedSaleResponse:
     """List sales pending liquidation (status='registered')."""
     try:
-        sales, total, amount_sum, profit_sum, commissions_sum = crud_sale.get_multi(
+        sales, total, active_total, amount_sum, profit_sum, commissions_sum = crud_sale.get_multi(
             db=db,
             organization_id=org_context["organization_id"],
             skip=skip,
@@ -298,6 +299,7 @@ async def list_pending_sales(
         return PaginatedSaleResponse(
             items=items,
             total=total,
+            active_total=active_total,
             skip=skip,
             limit=limit,
             total_amount_sum=float(amount_sum),
@@ -363,7 +365,7 @@ async def list_sales_by_customer(
 ) -> PaginatedSaleResponse:
     """List sales by customer."""
     try:
-        sales, total, amount_sum, profit_sum, commissions_sum = crud_sale.get_multi(
+        sales, total, active_total, amount_sum, profit_sum, commissions_sum = crud_sale.get_multi(
             db=db,
             organization_id=org_context["organization_id"],
             skip=skip,
@@ -376,6 +378,7 @@ async def list_sales_by_customer(
         return PaginatedSaleResponse(
             items=items,
             total=total,
+            active_total=active_total,
             skip=skip,
             limit=limit,
             total_amount_sum=float(amount_sum),

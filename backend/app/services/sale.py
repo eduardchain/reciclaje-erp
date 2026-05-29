@@ -908,7 +908,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         date_field: str = "date",
         sort_by: Optional[str] = None,
         sort_dir: str = "desc",
-    ) -> tuple[List[Sale], int, Decimal, Decimal, Decimal]:
+    ) -> tuple[List[Sale], int, int, Decimal, Decimal, Decimal]:
         """
         Get multiple sales with filtering and pagination.
 
@@ -963,18 +963,24 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         # Get total count + aggregates BEFORE pagination (sobre el set filtrado completo)
         subq = query.subquery()
         total = db.scalar(select(func.count()).select_from(subq)) or 0
-        amount_sum = db.scalar(select(func.coalesce(func.sum(subq.c.total_amount), 0))) or Decimal("0")
+        # active_total = count excluyendo canceladas. Sirve para el KPI "Operaciones"
+        # mientras `total` cubre la paginacion (que sigue mostrando canceladas).
+        active_subq = query.where(Sale.status != "cancelled").subquery()
+        active_total = db.scalar(select(func.count()).select_from(active_subq)) or 0
+        # Sums siempre excluyen canceladas: economicamente no existen y deben dar
+        # paridad con P&L. Si el usuario filtra status=cancelled, sums = 0 (correcto).
+        amount_sum = db.scalar(select(func.coalesce(func.sum(active_subq.c.total_amount), 0))) or Decimal("0")
         # Profit: SaleLine.total_price - (SaleLine.unit_cost * SaleLine.quantity) — mismo calculo que calculate_profit()
         profit_sum = db.scalar(
             select(func.coalesce(
                 func.sum(SaleLine.total_price - (SaleLine.unit_cost * SaleLine.quantity)),
                 0,
-            )).where(SaleLine.sale_id.in_(select(subq.c.id)))
+            )).where(SaleLine.sale_id.in_(select(active_subq.c.id)))
         ) or Decimal("0")
         # Comisiones: sumar SaleCommission.commission_amount sobre las ventas del set filtrado
         commissions_sum = db.scalar(
             select(func.coalesce(func.sum(SaleCommission.commission_amount), 0))
-            .where(SaleCommission.sale_id.in_(select(subq.c.id)))
+            .where(SaleCommission.sale_id.in_(select(active_subq.c.id)))
         ) or Decimal("0")
 
         # Sort con allowlist + tiebreaker estable id ASC
@@ -998,7 +1004,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
 
         sales = list(db.scalars(query).unique().all())
 
-        return sales, total, Decimal(str(amount_sum)), Decimal(str(profit_sum)), Decimal(str(commissions_sum))
+        return sales, total, active_total, Decimal(str(amount_sum)), Decimal(str(profit_sum)), Decimal(str(commissions_sum))
     
     def get(
         self,

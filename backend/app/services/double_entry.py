@@ -672,7 +672,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         date_field: str = "date",
         sort_by: Optional[str] = None,
         sort_dir: str = "desc",
-    ) -> tuple[List[DoubleEntry], int, Decimal, Decimal, Decimal]:
+    ) -> tuple[List[DoubleEntry], int, int, Decimal, Decimal, Decimal]:
         """Get multiple double_entries con filtros y paginacion.
 
         date_field: "date" | "liquidated_at" — campo de fecha contra el cual se aplican
@@ -723,9 +723,11 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
 
         total = query.count()
 
-        # Aggregates sobre el set filtrado completo (antes de paginar) — paridad con P&L
-        # Profit por linea = (sale_unit_price - purchase_unit_price) * quantity
-        de_ids_subq = query.with_entities(DoubleEntry.id).subquery()
+        # active_total = count excluyendo canceladas, para el KPI "Operaciones".
+        # Las sumas tambien excluyen canceladas (paridad con P&L).
+        active_query = query.filter(DoubleEntry.status != "cancelled")
+        active_total = active_query.count()
+        de_ids_subq = active_query.with_entities(DoubleEntry.id).subquery()
         agg_row = (
             db.query(
                 func.coalesce(func.sum(DoubleEntryLine.purchase_unit_price * DoubleEntryLine.quantity), 0),
@@ -747,7 +749,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             *self._eager_options()
         ).order_by(order_clause, DoubleEntry.id.asc()).offset(skip).limit(limit).all()
 
-        return double_entries, total, purchase_sum, sale_sum, profit_sum
+        return double_entries, total, active_total, purchase_sum, sale_sum, profit_sum
 
     def update(
         self,

@@ -71,6 +71,9 @@ export interface DoubleEntryLiquidateRequest {
  * Necesario para que las KPIs coincidan con el P&L cuando hay paginacion.
  */
 export interface PaginatedDoubleEntryResponse extends PaginatedResponse<DoubleEntryResponse> {
+  /** Count excluyendo canceladas — para KPI "Operaciones". `total` cuenta tambien canceladas (paginacion). */
+  active_total: number;
+  /** Sumas siempre excluyen canceladas (paridad con P&L). */
   total_purchase_cost_sum: number;
   total_sale_amount_sum: number;
   total_profit_sum: number;

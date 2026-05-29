@@ -227,8 +227,16 @@ class PurchaseLiquidateRequest(BaseModel):
 
 
 class PaginatedPurchaseResponse(BaseModel):
-    """Paginated response for purchase lists."""
+    """Paginated response for purchase lists.
+
+    `total_amount_sum` cubre TODO el set filtrado EXCLUYENDO canceladas
+    (paridad con P&L). `active_total` es el count tambien excluyendo canceladas
+    (para el KPI "Operaciones"). `total` sigue contando canceladas para la
+    paginacion del listado.
+    """
     items: List[PurchaseResponse]
     total: int
+    active_total: int = 0
     skip: int
     limit: int
+    total_amount_sum: float = 0.0
