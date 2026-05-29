@@ -51,7 +51,7 @@ export function exportPurchasePDF(purchase: PurchaseResponse, orgName?: string) 
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName || "EcoBalance ERP", 14, y);
+  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);
@@ -173,7 +173,7 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string, options?: { 
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName || "EcoBalance ERP", 14, y);
+  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);
@@ -345,7 +345,7 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string, 
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName || "EcoBalance ERP", 14, y);
+  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);
@@ -522,7 +522,7 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName || "EcoBalance ERP", 14, y);
+  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);
@@ -552,23 +552,23 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
   doc.line(14, y, pageWidth - 14, y);
   y += 8;
 
-  // Resumen
+  // Resumen (todo en una sola linea)
   doc.setFontSize(10);
+  const colWidth = (pageWidth - 28) / 3;
   doc.setFont("helvetica", "bold");
   doc.text("Saldo Actual:", 14, y);
   doc.setFont("helvetica", "normal");
-  doc.text(formatCurrency(data.currentBalance), 60, y);
+  doc.text(formatCurrency(data.currentBalance), 50, y);
 
   doc.setFont("helvetica", "bold");
-  doc.text("Total Debe:", pageWidth / 2, y);
+  doc.text("Total Debe:", 14 + colWidth, y);
   doc.setFont("helvetica", "normal");
-  doc.text(formatCurrency(data.totalDebit), pageWidth / 2 + 40, y);
-  y += 6;
+  doc.text(formatCurrency(data.totalDebit), 14 + colWidth + 36, y);
 
   doc.setFont("helvetica", "bold");
-  doc.text("Total Haber:", 14, y);
+  doc.text("Total Haber:", 14 + colWidth * 2, y);
   doc.setFont("helvetica", "normal");
-  doc.text(formatCurrency(data.totalCredit), 60, y);
+  doc.text(formatCurrency(data.totalCredit), 14 + colWidth * 2 + 36, y);
   y += 10;
 
   const isOps = data.viewMode === "operations";
@@ -693,7 +693,7 @@ export function exportBalanceSheetPDF(data: BalanceSheetResponse, orgName?: stri
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName || "EcoBalance ERP", 14, y);
+  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);
@@ -854,7 +854,7 @@ export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?
   // Header
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName || "EcoBalance ERP", 14, y);
+  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
   y += 7;
 
   doc.setFontSize(13);

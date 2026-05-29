@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { MovementListCard } from "@/components/shared/MovementListCard";
 import { useThirdPartyMovements } from "@/hooks/useMoneyMovements";
 import { useThirdParties } from "@/hooks/useMasterData";
+import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { exportAccountStatementPDF } from "@/utils/pdfExport";
 import { exportAccountStatementExcel } from "@/utils/excelExport";
@@ -138,6 +139,8 @@ export default function AccountStatementPage() {
 
   const { data: thirdPartiesData } = useThirdParties(undefined, { staleTime: 0 });
   const thirdParties = thirdPartiesData?.items ?? [];
+  const { organizationId, organizations } = useAuthStore();
+  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
 
   const filters = {
     ...(dateFrom ? { date_from: dateFrom } : {}),
@@ -205,7 +208,7 @@ export default function AccountStatementPage() {
             <Button size="sm" variant={viewMode === "financial" ? "default" : "ghost"} onClick={() => setViewMode("financial")} className="flex-1 sm:flex-none">Financiero</Button>
             <Button size="sm" variant={viewMode === "operations" ? "default" : "ghost"} onClick={() => setViewMode("operations")} className="flex-1 sm:flex-none">Operaciones</Button>
           </div>
-          <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData())} className="flex-1 sm:flex-none">
+          <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData(), orgName)} className="flex-1 sm:flex-none">
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
           <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())} className="flex-1 sm:flex-none">

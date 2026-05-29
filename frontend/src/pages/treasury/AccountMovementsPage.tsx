@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { MovementListCard } from "@/components/shared/MovementListCard";
 import { useAccountMovements } from "@/hooks/useMoneyMovements";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
+import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { exportAccountStatementPDF } from "@/utils/pdfExport";
 import { exportAccountStatementExcel } from "@/utils/excelExport";
@@ -82,6 +83,8 @@ export default function AccountMovementsPage() {
 
   const { data: accountsData } = useMoneyAccounts();
   const accounts = accountsData?.items ?? [];
+  const { organizationId, organizations } = useAuthStore();
+  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
 
   const filters = {
     ...(dateFrom ? { date_from: dateFrom } : {}),
@@ -141,7 +144,7 @@ export default function AccountMovementsPage() {
     <div className="space-y-6">
       <PageHeader title="Movimientos de Cuenta" description="Historial de movimientos con saldo corrido por cuenta">
         <div className="flex gap-2">
-          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData())}>
+          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData(), orgName)}>
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
           <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())}>
