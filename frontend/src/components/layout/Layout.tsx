@@ -1,9 +1,17 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import Header from "./Header";
 import Sidebar from "./Sidebar";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/useMediaQuery";
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-[50vh]">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-emerald-600" />
+    </div>
+  );
+}
 
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -38,7 +46,9 @@ export default function Layout() {
         <Header onMenuClick={() => setMobileOpen(true)} />
         <main id="main-scroll" className="flex-1 overflow-y-auto bg-slate-50/80">
           <div className="container mx-auto p-3 md:p-6 animate-fade-in">
-            <Outlet />
+            <Suspense fallback={<PageLoader />}>
+              <Outlet />
+            </Suspense>
           </div>
         </main>
       </div>

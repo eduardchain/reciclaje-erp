@@ -1,4 +1,16 @@
-export const API_BASE_URL = (import.meta.env.VITE_API_URL as string) || "http://localhost:8000";
+const _apiUrl = import.meta.env.VITE_API_URL as string | undefined;
+
+// Guard rail: builds de production NUNCA deben hablar a localhost.
+// Si pasa esto, el bundle quedo con la URL de dev horneada (.env.local mal-cargado)
+// y Chrome bloquea el request con Private Network Access prompt.
+if (import.meta.env.PROD && (!_apiUrl || _apiUrl.includes("localhost") || _apiUrl.includes("127.0.0.1"))) {
+  throw new Error(
+    `VITE_API_URL invalida para build de production: "${_apiUrl}". ` +
+    `Asegurate de buildear con VITE_API_URL=https://api.ecobalance.cc o tener .env.production correcto.`
+  );
+}
+
+export const API_BASE_URL = _apiUrl || "http://localhost:8000";
 
 export const APP_NAME = "EcoBalance";
 export const APP_VERSION = "0.1.0";

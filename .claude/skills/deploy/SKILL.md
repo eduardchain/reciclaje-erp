@@ -75,8 +75,16 @@ ssh deploy@76.13.118.195 "cd /home/deploy/reciclaje-erp/backend && source venv/b
 ### 7. Frontend (si hay cambios en frontend/)
 
 ```bash
-ssh deploy@76.13.118.195 "cd /home/deploy/reciclaje-erp/frontend && npm install && npm run build"
+ssh deploy@76.13.118.195 "cd /home/deploy/reciclaje-erp/frontend && rm -f .env.local && npm install && VITE_API_URL=https://api.ecobalance.cc npm run build"
 ```
+
+**Por que `rm -f .env.local` y `VITE_API_URL=...` explicito**: Vite carga `.env.local` ON TOP de `.env.production`, lo cual puede hornear una URL de dev (`http://localhost:8000`) en el bundle de prod. Esto causa que Chrome bloquee con prompt PNA (Private Network Access) y rompa el login para todos. Pasar la env var por shell tiene maxima prioridad y la elimina como fuente de fallo. Ver `frontend/src/utils/constants.ts` que ademas tiene un guard rail que lanza Error si el bundle quedo con localhost.
+
+**Verificacion post-build (recomendado)**:
+```bash
+ssh deploy@76.13.118.195 "grep -oE 'http[s]?://[^\\\"]+' /home/deploy/reciclaje-erp/frontend/dist/assets/index-*.js | sort -u | head -10"
+```
+Debe mostrar SOLO `https://api.ecobalance.cc` (mas `http://www.w3.org/...` del SVG namespace). NUNCA `http://localhost`.
 
 ### 8. Verificacion y recoleccion de datos
 

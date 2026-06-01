@@ -1,9 +1,36 @@
-# EcoBalance — nginx config (Cloudflare Flexible SSL, origin HTTP only)
-# Cloudflare termina TLS y proxea a este origen por HTTP (puerto 80).
+# EcoBalance — nginx config (Cloudflare Full Strict, origin HTTPS con Origin CA cert)
+# Cloudflare se conecta al origen via HTTPS validando el cert de Origin CA.
+# Esto habilita HTTP/2 + keepalive end-to-end CF↔origen, eliminando los 5xx
+# que aparecian con Flexible SSL (HTTP plano al origen).
+#
 # Sirve tres hostnames distintos desde el mismo VPS:
 #   ecobalance.cc / www.ecobalance.cc  -> landing comercial
 #   app.ecobalance.cc                  -> frontend SPA (React)
 #   api.ecobalance.cc                  -> backend FastAPI (uvicorn :8000)
+
+# -----------------------------------------------------------------------------
+# Upstream pool con keepalive — reutiliza conexiones TCP nginx→uvicorn
+# en lugar de abrir una nueva por cada request. uvicorn corre con
+# --timeout-keep-alive 75 (debe ser > 60s default de nginx para evitar
+# race condition que causaba 520s).
+# -----------------------------------------------------------------------------
+upstream ecobalance_api {
+    server 127.0.0.1:8000;
+    keepalive 32;
+}
+
+# -----------------------------------------------------------------------------
+# SSL config compartido por todos los server blocks
+#   (variables ssl_certificate/ssl_certificate_key se duplican por server
+#    porque son directivas de contexto server{}, no http{})
+# -----------------------------------------------------------------------------
+# ssl_protocols           TLSv1.2 TLSv1.3;
+# ssl_session_cache       shared:SSL:10m;
+# ssl_session_timeout     1d;
+# ssl_session_tickets     off;
+# ssl_prefer_server_ciphers off;
+# Nota: estas directivas las dejamos en /etc/nginx/nginx.conf (http{} context)
+# o las copiamos en cada server. Aqui las repetimos via include manual abajo.
 
 # -----------------------------------------------------------------------------
 # 1) Landing comercial (raiz)
@@ -11,7 +38,16 @@
 server {
     listen 80;
     listen [::]:80;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name ecobalance.cc www.ecobalance.cc;
+
+    ssl_certificate     /etc/ssl/ecobalance/origin.pem;
+    ssl_certificate_key /etc/ssl/ecobalance/origin.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
 
     root /var/www/landing;
     index index.html;
@@ -40,7 +76,16 @@ server {
 server {
     listen 80;
     listen [::]:80;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name app.ecobalance.cc;
+
+    ssl_certificate     /etc/ssl/ecobalance/origin.pem;
+    ssl_certificate_key /etc/ssl/ecobalance/origin.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
 
     root /home/deploy/reciclaje-erp/frontend/dist;
     index index.html;
@@ -48,10 +93,18 @@ server {
     access_log /var/log/nginx/ecobalance_app_access.log;
     error_log /var/log/nginx/ecobalance_app_error.log;
 
+    # HTML NUNCA se cachea — siempre revalidar para que los usuarios
+    # reciban el index.html nuevo despues de un deploy (que apunta a los
+    # chunks con hash actualizado).
     location / {
         try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-store, must-revalidate" always;
+        add_header Pragma "no-cache" always;
     }
 
+    # Chunks con hash: cachean 1 ano sin revalidar (el hash cambia con cada deploy
+    # asi que un cache stale apunta a un archivo que ya no existe → fallback al
+    # index.html no cacheado y se descargan los chunks frescos).
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
@@ -64,7 +117,16 @@ server {
 server {
     listen 80;
     listen [::]:80;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name api.ecobalance.cc;
+
+    ssl_certificate     /etc/ssl/ecobalance/origin.pem;
+    ssl_certificate_key /etc/ssl/ecobalance/origin.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
 
     access_log /var/log/nginx/ecobalance_api_access.log;
     error_log /var/log/nginx/ecobalance_api_error.log;
@@ -72,8 +134,9 @@ server {
     client_max_body_size 10M;  # uploads de evidencia: max 5M + headroom
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://ecobalance_api;
         proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -85,7 +148,7 @@ server {
 
 # -----------------------------------------------------------------------------
 # 4) Fallback IP directa (76.13.118.195) — mantiene compat con shortcuts viejos
-#    Sirve frontend SPA + /api/ proxy (igual que antes de migrar a dominios).
+#    Sirve frontend SPA + /api/ proxy. Solo HTTP — el cert no cubre la IP.
 # -----------------------------------------------------------------------------
 server {
     listen 80 default_server;
@@ -99,8 +162,9 @@ server {
     error_log /var/log/nginx/ecobalance_legacy_error.log;
 
     location /api/ {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://ecobalance_api;
         proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -109,10 +173,18 @@ server {
         proxy_connect_timeout 300;
     }
 
+    # HTML NUNCA se cachea — siempre revalidar para que los usuarios
+    # reciban el index.html nuevo despues de un deploy (que apunta a los
+    # chunks con hash actualizado).
     location / {
         try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-store, must-revalidate" always;
+        add_header Pragma "no-cache" always;
     }
 
+    # Chunks con hash: cachean 1 ano sin revalidar (el hash cambia con cada deploy
+    # asi que un cache stale apunta a un archivo que ya no existe → fallback al
+    # index.html no cacheado y se descargan los chunks frescos).
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
