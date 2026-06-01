@@ -113,6 +113,12 @@ server {
 
 # -----------------------------------------------------------------------------
 # 3) Backend API (api.ecobalance.cc)
+#
+# Cert Let's Encrypt (publicamente trusted) para que browsers puedan conectar
+# DIRECTO al origen via DNS-only en CF (saltea el routing CF↔Hostinger que
+# introduce 300ms-15s de latencia erratica). El cert CF Origin CA queda en
+# /etc/ssl/ecobalance/ para landing y app.* (que siguen via CF proxy y
+# necesitan un cert trusted por CF).
 # -----------------------------------------------------------------------------
 server {
     listen 80;
@@ -121,8 +127,11 @@ server {
     listen [::]:443 ssl http2;
     server_name api.ecobalance.cc;
 
-    ssl_certificate     /etc/ssl/ecobalance/origin.pem;
-    ssl_certificate_key /etc/ssl/ecobalance/origin.key;
+    # CERT publico Let's Encrypt para que browsers conecten DIRECTO al origen
+    # (api.ecobalance.cc en CF DNS-only, sin proxy). Renueva automaticamente
+    # cada ~60 dias via timer de certbot (validar: systemctl list-timers).
+    ssl_certificate     /etc/letsencrypt/live/api.ecobalance.cc/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.ecobalance.cc/privkey.pem;
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 1d;
@@ -133,6 +142,15 @@ server {
 
     client_max_body_size 10M;  # uploads de evidencia: max 5M + headroom
 
+    # HTTP-01 challenge para renovaciones automaticas de Let's Encrypt.
+    # certbot --webroot escribe el desafio en /var/www/letsencrypt; nginx lo
+    # sirve sin pasar por el proxy_pass al backend.
+    location /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type "text/plain";
+        try_files $uri =404;
+    }
+
     location / {
         proxy_pass http://ecobalance_api;
         proxy_http_version 1.1;
@@ -140,7 +158,13 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        # IMPRESCINDIBLE: $scheme (no $http_x_forwarded_proto). Con CF bypass,
+        # el browser pega DIRECTO al origen y no envia X-Forwarded-Proto. Si
+        # forwardeamos lo que el cliente mando (vacio), uvicorn cree que la
+        # conexion es HTTP y genera redirects a http:// (trailing slash
+        # redirects de FastAPI) que el browser bloquea por mixed content.
+        # $scheme refleja el listener real de nginx (https en :443).
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 300;
         proxy_connect_timeout 300;
     }
