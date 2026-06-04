@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { EntityLink } from "@/components/shared/EntityLink";
@@ -19,8 +19,11 @@ import { useThirdPartyMovements } from "@/hooks/useMoneyMovements";
 import { useThirdParties } from "@/hooks/useMasterData";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
-import { exportAccountStatementPDF } from "@/utils/pdfExport";
+import { exportAccountStatementPDF, type AccountStatementPdfFormat } from "@/utils/pdfExport";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { exportAccountStatementExcel } from "@/utils/excelExport";
+
+const PDF_FORMAT_STORAGE_KEY = "account_statement_pdf_format_v1";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -136,6 +139,13 @@ export default function AccountStatementPage() {
   const [dateTo, setDateTo] = useState("");
   const [viewMode, setViewMode] = useState<"financial" | "operations">("financial");
   const [limit, setLimit] = useState<number | undefined>(undefined);
+  const [pdfFormat, setPdfFormat] = useState<AccountStatementPdfFormat>(() => {
+    const saved = localStorage.getItem(PDF_FORMAT_STORAGE_KEY);
+    return saved === "desktop" ? "desktop" : "mobile";
+  });
+  useEffect(() => {
+    localStorage.setItem(PDF_FORMAT_STORAGE_KEY, pdfFormat);
+  }, [pdfFormat]);
 
   const { data: thirdPartiesData } = useThirdParties(undefined, { staleTime: 0 });
   const thirdParties = thirdPartiesData?.items ?? [];
@@ -208,7 +218,16 @@ export default function AccountStatementPage() {
             <Button size="sm" variant={viewMode === "financial" ? "default" : "ghost"} onClick={() => setViewMode("financial")} className="flex-1 sm:flex-none">Financiero</Button>
             <Button size="sm" variant={viewMode === "operations" ? "default" : "ghost"} onClick={() => setViewMode("operations")} className="flex-1 sm:flex-none">Operaciones</Button>
           </div>
-          <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData(), orgName)} className="flex-1 sm:flex-none">
+          <Select value={pdfFormat} onValueChange={(v) => setPdfFormat(v as AccountStatementPdfFormat)}>
+            <SelectTrigger className="h-9 w-full sm:w-32 text-xs" title="Formato PDF">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="mobile">Móvil (portrait)</SelectItem>
+              <SelectItem value="desktop">Escritorio (tabla)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData(), orgName, pdfFormat)} className="flex-1 sm:flex-none">
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
           <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())} className="flex-1 sm:flex-none">

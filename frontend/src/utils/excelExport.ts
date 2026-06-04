@@ -135,10 +135,11 @@ const LIABILITY_ORDER = [
   "generic_payable",
 ];
 
-export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
+export function exportBalanceDetailedExcel(data: BalanceDetailedResponse, filtersLabel?: string) {
   const rows: (string | number | null)[][] = [];
 
   rows.push([`Balance Detallado — Corte al: ${formatDate(data.as_of_date)}`]);
+  if (filtersLabel) rows.push([filtersLabel]);
   rows.push([]);
 
   // Activos
@@ -163,9 +164,13 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
     }
   };
 
-  for (const key of ASSET_ORDER) {
-    const section = data.assets[key];
-    if (!section) continue;
+  const pushHiddenNote = (count?: number, total?: number) => {
+    if (!count || count <= 0) return;
+    const totalStr = total != null && total !== 0 ? ` (suma: ${formatCurrency(total)})` : "";
+    rows.push(["", "", `${count} ${count === 1 ? "item" : "items"} por debajo del umbral no mostrado${count === 1 ? "" : "s"}${totalStr}`, null]);
+  };
+
+  const pushSection = (section: BalanceDetailedResponse["assets"][string]) => {
     rows.push([section.label, "", "", section.total]);
     if (section.groups && section.groups.length > 0) {
       for (const group of section.groups) {
@@ -173,10 +178,22 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
         for (const item of group.items) {
           rows.push(["", "", item.name, item.balance]);
         }
+        pushHiddenNote(group.hidden_count, group.hidden_total);
       }
+      // Items ocultos por grupos enteramente saltados (delta vs notas por-grupo)
+      const groupsHiddenCount = section.groups.reduce((sum, g) => sum + (g.hidden_count ?? 0), 0);
+      const groupsHiddenTotal = section.groups.reduce((sum, g) => sum + (g.hidden_total ?? 0), 0);
+      pushHiddenNote((section.hidden_count ?? 0) - groupsHiddenCount, (section.hidden_total ?? 0) - groupsHiddenTotal);
     } else {
       pushItems(section.items);
+      pushHiddenNote(section.hidden_count, section.hidden_total);
     }
+  };
+
+  for (const key of ASSET_ORDER) {
+    const section = data.assets[key];
+    if (!section) continue;
+    pushSection(section);
   }
 
   rows.push([]);
@@ -188,17 +205,7 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse) {
   for (const key of LIABILITY_ORDER) {
     const section = data.liabilities[key];
     if (!section) continue;
-    rows.push([section.label, "", "", section.total]);
-    if (section.groups && section.groups.length > 0) {
-      for (const group of section.groups) {
-        rows.push(["", group.label, "", group.total]);
-        for (const item of group.items) {
-          rows.push(["", "", item.name, item.balance]);
-        }
-      }
-    } else {
-      pushItems(section.items);
-    }
+    pushSection(section);
   }
 
   rows.push([]);

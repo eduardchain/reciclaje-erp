@@ -514,13 +514,34 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string, 
   doc.save(`doble_partida_${de.double_entry_number}.pdf`);
 }
 
-export function exportAccountStatementPDF(data: AccountStatementExportData, orgName?: string) {
-  const doc = new jsPDF({ orientation: "landscape" });
+export type AccountStatementPdfFormat = "mobile" | "desktop";
+
+export function exportAccountStatementPDF(
+  data: AccountStatementExportData,
+  orgName?: string,
+  format: AccountStatementPdfFormat = "mobile",
+) {
+  const isMobile = format === "mobile";
+  const doc = new jsPDF({ orientation: isMobile ? "portrait" : "landscape" });
   const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   let y = 20;
 
-  // Header
-  doc.setFontSize(18);
+  // Negativos en parentesis (convencion contable, consistente con Balance Detallado)
+  const fmtBal = (value: number) => value < 0 ? `(${formatCurrency(Math.abs(value))})` : formatCurrency(value);
+
+  // Trunca texto al ancho real (no por # de chars) — letras anchas (M, W) ya no causan overflow
+  const ellipsis = (text: string, maxWidth: number): string => {
+    if (doc.getTextWidth(text) <= maxWidth) return text;
+    let truncated = text;
+    while (truncated.length > 0 && doc.getTextWidth(truncated + "…") > maxWidth) {
+      truncated = truncated.slice(0, -1);
+    }
+    return truncated + "…";
+  };
+
+  // Header — mobile sube fuente porque iPhone muestra A4 al ancho completo (210mm en ~390pt → 9pt PDF se ve como ~5pt)
+  doc.setFontSize(isMobile ? 17 : 18);
   doc.setFont("helvetica", "bold");
   doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
   y += 8;
@@ -529,13 +550,13 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
   doc.text("Estado de Cuenta", 14, y);
   y += 8;
 
-  doc.setFontSize(12);
+  doc.setFontSize(isMobile ? 13 : 12);
   doc.setFont("helvetica", "normal");
   doc.text(data.thirdPartyName, 14, y);
-  y += 8;
+  y += isMobile ? 7 : 8;
 
   // Periodo
-  doc.setFontSize(10);
+  doc.setFontSize(isMobile ? 11 : 10);
   if (data.dateFrom || data.dateTo) {
     const from = data.dateFrom || "...";
     const to = data.dateTo || "...";
@@ -545,41 +566,192 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
     const lastDate = formatDate(data.movements[data.movements.length - 1].date);
     doc.text(`Periodo: ${firstDate} - ${lastDate}`, 14, y);
   }
-  y += 6;
+  y += isMobile ? 7 : 6;
 
   // Linea separadora
   doc.setDrawColor(200);
   doc.line(14, y, pageWidth - 14, y);
   y += 8;
 
-  // Resumen (todo en una sola linea)
-  doc.setFontSize(10);
-  const colWidth = (pageWidth - 28) / 3;
-  doc.setFont("helvetica", "bold");
-  doc.text("Saldo Actual:", 14, y);
-  doc.setFont("helvetica", "normal");
-  doc.text(formatCurrency(data.currentBalance), 50, y);
+  // Resumen: una sola linea en desktop, stacked en mobile (sino aprieta)
+  doc.setFontSize(isMobile ? 11 : 10);
+  if (isMobile) {
+    // Mobile: 3 lineas (cada total propia linea) para no sacrificar legibilidad
+    doc.setFont("helvetica", "bold");
+    doc.text("Saldo Actual:", 14, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(fmtBal(data.currentBalance), pageWidth - 14, y, { align: "right" });
+    y += 6.5;
+    doc.setFont("helvetica", "bold");
+    doc.text("Total Debe:", 14, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(formatCurrency(data.totalDebit), pageWidth - 14, y, { align: "right" });
+    y += 6.5;
+    doc.setFont("helvetica", "bold");
+    doc.text("Total Haber:", 14, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(formatCurrency(data.totalCredit), pageWidth - 14, y, { align: "right" });
+    y += 10;
+  } else {
+    const colWidth = (pageWidth - 28) / 3;
+    doc.setFont("helvetica", "bold");
+    doc.text("Saldo Actual:", 14, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(fmtBal(data.currentBalance), 50, y);
 
-  doc.setFont("helvetica", "bold");
-  doc.text("Total Debe:", 14 + colWidth, y);
-  doc.setFont("helvetica", "normal");
-  doc.text(formatCurrency(data.totalDebit), 14 + colWidth + 36, y);
+    doc.setFont("helvetica", "bold");
+    doc.text("Total Debe:", 14 + colWidth, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(formatCurrency(data.totalDebit), 14 + colWidth + 36, y);
 
-  doc.setFont("helvetica", "bold");
-  doc.text("Total Haber:", 14 + colWidth * 2, y);
-  doc.setFont("helvetica", "normal");
-  doc.text(formatCurrency(data.totalCredit), 14 + colWidth * 2 + 36, y);
-  y += 10;
+    doc.setFont("helvetica", "bold");
+    doc.text("Total Haber:", 14 + colWidth * 2, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(formatCurrency(data.totalCredit), 14 + colWidth * 2 + 36, y);
+    y += 10;
+  }
 
   const isOps = data.viewMode === "operations";
+
+  // === MOBILE LAYOUT: cards de 2-3 lineas por movimiento (portrait) ===
+  if (isMobile) {
+    const lastByGroup = new Map<string, number>();
+    data.movements.forEach((m, i) => {
+      if (m.parent_source_id) lastByGroup.set(m.parent_source_id, i);
+    });
+
+    if (data.dateFrom) {
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "italic");
+      doc.text("Saldo de apertura", 14, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(fmtBal(data.openingBalance), pageWidth - 14, y, { align: "right" });
+      y += 6.5;
+      doc.setDrawColor(220);
+      doc.line(14, y - 1.5, pageWidth - 14, y - 1.5);
+      y += 3.5;
+    }
+
+    // Layout en 2 columnas claras: IZQUIERDA = info (fecha/tipo/desc),
+    // DERECHA = plata (monto/saldo). Cada elemento en su columna fija.
+    // Reserva 80mm para la columna derecha (con fuente subida: "-$33.398.425" @ 11pt ≈ 32mm; "Saldo ($33.398.425)" @ 10pt ≈ 38mm).
+    const RIGHT_COL_WIDTH = 80;
+    const rightX = pageWidth - 14;
+    const leftMaxWidth = pageWidth - 28 - RIGHT_COL_WIDTH - 4;
+
+    data.movements.forEach((m, idx) => {
+      const hasDescLine = (m.is_line_item && m.material_code) || m.description || m.invoice_number || m.vehicle_plate;
+      // Alturas calibradas para fuentes mas grandes (linea 1: 11pt, linea 2: 10pt)
+      const cardHeight = hasDescLine ? 14 : 9;
+      if (y + cardHeight > pageHeight - 18) { doc.addPage(); y = 20; }
+
+      const showBalance = !m.parent_source_id
+        ? m.balance_after != null
+        : lastByGroup.get(m.parent_source_id) === idx && m.balance_after != null;
+
+      // === LINEA 1: Fecha · Tipo #N (left)  |  ±Monto (right, colored) ===
+      doc.setFontSize(11);
+      const dateStr = formatDate(m.date);
+
+      // Tipo: para line_items muestra "Compra/Venta/DP #N", sino typeLabel #movNumber
+      const numStr = !m.is_line_item && m.movement_number ? ` #${m.movement_number}` : "";
+      const tipoStr = m.is_line_item
+        ? (m.movement_type?.includes("purchase") ? "Compra" : m.movement_type?.includes("sale") ? "Venta" : "DP")
+          + (m.source_number ? ` #${m.source_number}` : "")
+        : `${m.typeLabel}${numStr}`;
+
+      // Date normal + gris
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(110);
+      doc.text(dateStr, 14, y);
+      const dateW = doc.getTextWidth(dateStr);
+
+      // Tipo bold black — truncate al ancho restante de la columna izquierda
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(0);
+      const tipoText = ` · ${tipoStr}`;
+      const tipoMaxWidth = leftMaxWidth - dateW;
+      doc.text(ellipsis(tipoText, tipoMaxWidth), 14 + dateW, y);
+
+      // Monto right-aligned en la columna derecha, colored
+      const amountSign = m.isDebit ? "-" : "+";
+      const amountStr = `${amountSign}${formatCurrency(m.amount)}`;
+      const amountColor: [number, number, number] = m.isDebit ? [180, 30, 30] : [30, 130, 70];
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...amountColor);
+      doc.text(amountStr, rightX, y, { align: "right" });
+      doc.setTextColor(0);
+      y += 6;
+
+      // === LINEA 2: Descripcion (left, truncate) | Saldo X (right, gris+bold) ===
+      if (hasDescLine || showBalance) {
+        doc.setFontSize(10);
+
+        // Right column primero: "Saldo X" como label + valor
+        if (showBalance) {
+          const saldoVal = fmtBal(m.balance_after!);
+          const saldoLabel = "Saldo ";
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(120);
+          const saldoValW = doc.getTextWidth(saldoVal);
+          doc.text(saldoLabel, rightX - saldoValW, y, { align: "right" });
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(60);
+          doc.text(saldoVal, rightX, y, { align: "right" });
+        }
+
+        // Left column: descripcion / material truncate al ancho disponible
+        if (hasDescLine) {
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(90);
+          const descParts: string[] = [];
+          if (m.is_line_item && m.material_code) {
+            descParts.push(`${m.material_code}${m.material_name ? " " + m.material_name : ""}`);
+            if (m.quantity) {
+              const qtyStr = formatWeight(m.quantity);
+              const priceStr = m.unit_price ? formatCurrency(m.unit_price) : "";
+              descParts.push(priceStr ? `${qtyStr} @ ${priceStr}` : qtyStr);
+            }
+          } else if (m.description) {
+            descParts.push(m.description);
+          }
+          if (m.invoice_number) descParts.push(`Fac ${m.invoice_number}`);
+          if (m.vehicle_plate) descParts.push(m.vehicle_plate);
+          const fullDesc = descParts.join(" · ");
+          doc.text(ellipsis(fullDesc, leftMaxWidth), 14, y);
+          doc.setTextColor(0);
+        }
+        y += 5;
+      }
+
+      // Hairline separador entre cards
+      doc.setDrawColor(225);
+      doc.line(14, y - 0.5, pageWidth - 14, y - 0.5);
+      y += 3;
+    });
+
+    // Footer
+    if (y + 10 > pageHeight - 10) { doc.addPage(); y = 20; }
+    y += 4;
+    doc.setFontSize(9);
+    doc.setTextColor(150);
+    doc.text(`Generado: ${new Date().toLocaleString("es-CO")}`, 14, y);
+    doc.setTextColor(0);
+
+    const safeName = data.thirdPartyName.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 30);
+    doc.save(`estado_cuenta_${safeName}.pdf`);
+    return;
+  }
+
+  // === DESKTOP LAYOUT: tablas landscape (comportamiento original) ===
 
   if (isOps) {
     // Vista Operaciones: Fecha, Concepto, Material, Peso, Precio, Dif $, Debito, Credito, Saldo
     const colO = { date: 14, concept: 36, material: 90, weight: 140, price: 165, difPeso: 195, debit: 225, credit: 252 };
     doc.setFillColor(245, 245, 245);
-    doc.rect(14, y - 4, pageWidth - 28, 8, "F");
+    doc.rect(14, y - 4.5, pageWidth - 28, 9, "F");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(7);
+    doc.setFontSize(9);
     doc.text("Fecha", colO.date, y);
     doc.text("Concepto", colO.concept, y);
     doc.text("Material", colO.material, y);
@@ -589,17 +761,17 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
     doc.text("Debito", colO.debit, y, { align: "right" });
     doc.text("Credito", colO.credit, y, { align: "right" });
     doc.text("Saldo", pageWidth - 14, y, { align: "right" });
-    y += 7;
+    y += 8;
 
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
+    doc.setFontSize(9);
 
     if (data.dateFrom) {
       doc.setFont("helvetica", "italic");
       doc.text("Saldo de apertura", colO.date, y);
       doc.setFont("helvetica", "normal");
-      doc.text(formatCurrency(data.openingBalance), pageWidth - 14, y, { align: "right" });
-      y += 5;
+      doc.text(fmtBal(data.openingBalance), pageWidth - 14, y, { align: "right" });
+      y += 6;
     }
 
     // Build last-in-group set for balance display
@@ -614,9 +786,9 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
         ? (m.vehicle_plate || m.invoice_number || `${m.movement_type?.includes("purchase") ? "Compra" : m.movement_type?.includes("sale") ? "Venta" : "DP"} #${m.source_number || ""}`)
         : (m.description || m.vehicle_plate || m.invoice_number || `#${m.source_number || ""}`);
       doc.text(formatDate(m.date), colO.date, y);
-      doc.text(concepto.substring(0, 30), colO.concept, y);
+      doc.text(concepto.substring(0, 28), colO.concept, y);
       if (m.is_line_item && m.material_code) {
-        doc.text(`${m.material_code}`.substring(0, 25), colO.material, y);
+        doc.text(`${m.material_code}`.substring(0, 22), colO.material, y);
         if (m.quantity) doc.text(formatWeight(m.quantity), colO.weight, y, { align: "right" });
         if (m.unit_price) doc.text(formatCurrency(m.unit_price), colO.price, y, { align: "right" });
         const diffPesoMoney = m.received_quantity && m.quantity && m.unit_price && m.received_quantity !== m.quantity
@@ -629,16 +801,19 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
       const showBalance = !m.parent_source_id
         ? m.balance_after != null
         : lastByGroup.get(m.parent_source_id) === idx && m.balance_after != null;
-      if (showBalance) doc.text(formatCurrency(m.balance_after!), pageWidth - 14, y, { align: "right" });
-      y += 5;
+      if (showBalance) doc.text(fmtBal(m.balance_after!), pageWidth - 14, y, { align: "right" });
+      // Hairline separador entre movimientos
+      doc.setDrawColor(230);
+      doc.line(14, y + 2, pageWidth - 14, y + 2);
+      y += 6.5;
     });
   } else {
     // Vista Financiera (landscape)
-    const colX = { num: 14, date: 24, type: 48, desc: 100, debit: 210, credit: 240, balance: 270 };
+    const colX = { num: 14, date: 24, type: 48, desc: 100, debit: 210, credit: 245, balance: 280 };
     doc.setFillColor(245, 245, 245);
-    doc.rect(14, y - 4, pageWidth - 28, 8, "F");
+    doc.rect(14, y - 4.5, pageWidth - 28, 9, "F");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
+    doc.setFontSize(10);
     doc.text("#", colX.num, y);
     doc.text("Fecha", colX.date, y);
     doc.text("Tipo", colX.type, y);
@@ -646,17 +821,17 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
     doc.text("Debe", colX.debit, y, { align: "right" });
     doc.text("Haber", colX.credit, y, { align: "right" });
     doc.text("Saldo", pageWidth - 14, y, { align: "right" });
-    y += 7;
+    y += 8;
 
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
+    doc.setFontSize(10);
 
     if (data.dateFrom) {
       doc.setFont("helvetica", "italic");
       doc.text("Saldo de apertura", colX.date, y);
       doc.setFont("helvetica", "normal");
-      doc.text(formatCurrency(data.openingBalance), pageWidth - 14, y, { align: "right" });
-      y += 6;
+      doc.text(fmtBal(data.openingBalance), pageWidth - 14, y, { align: "right" });
+      y += 7;
     }
 
     for (const m of data.movements) {
@@ -665,12 +840,20 @@ export function exportAccountStatementPDF(data: AccountStatementExportData, orgN
       const typeText = isAnnulled ? `${m.typeLabel} (Anulado)` : m.typeLabel;
       doc.text(String(m.movement_number), colX.num, y);
       doc.text(formatDate(m.date), colX.date, y);
-      doc.text(typeText.substring(0, 28), colX.type, y);
-      doc.text((m.description || "-").substring(0, 55), colX.desc, y);
+      // Tipo en bold para que se distinga del concepto.
+      // Truncate por ancho real: tipo cabe entre colX.type y colX.desc;
+      // desc cabe entre colX.desc y el monto right-aligned en colX.debit (~25mm de ancho).
+      doc.setFont("helvetica", "bold");
+      doc.text(ellipsis(typeText, colX.desc - colX.type - 2), colX.type, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(ellipsis(m.description || "-", colX.debit - colX.desc - 28), colX.desc, y);
       if (m.isDebit) doc.text(formatCurrency(m.amount), colX.debit, y, { align: "right" });
       else doc.text(formatCurrency(m.amount), colX.credit, y, { align: "right" });
-      if (m.balance_after != null) doc.text(formatCurrency(m.balance_after), pageWidth - 14, y, { align: "right" });
-      y += 5.5;
+      if (m.balance_after != null) doc.text(fmtBal(m.balance_after), pageWidth - 14, y, { align: "right" });
+      // Hairline separador entre movimientos
+      doc.setDrawColor(230);
+      doc.line(14, y + 2, pageWidth - 14, y + 2);
+      y += 7;
     }
   }
 
@@ -820,7 +1003,7 @@ export function exportBalanceSheetPDF(data: BalanceSheetResponse, orgName?: stri
   doc.save("balance_general.pdf");
 }
 
-export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?: string) {
+export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?: string, filtersLabel?: string) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 20;
@@ -866,12 +1049,22 @@ export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?
   doc.text(`Corte al: ${formatDate(data.as_of_date)}`, 14, y);
   y += 5;
 
+  if (filtersLabel) {
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(120, 80, 20);
+    doc.text(filtersLabel, 14, y);
+    doc.setTextColor(0);
+    doc.setFont("helvetica", "normal");
+    y += 5;
+  }
+
   doc.setDrawColor(200);
   doc.line(14, y, pageWidth - 14, y);
   y += 8;
 
   function renderSections(
-    sections: Record<string, { label: string; total: number; items: Array<{ name: string; balance: number }>; groups?: Array<{ label: string; total: number; items: Array<{ name: string; balance: number }> }> | null }>,
+    sections: Record<string, { label: string; total: number; items: Array<{ name: string; balance: number }>; groups?: Array<{ label: string; total: number; items: Array<{ name: string; balance: number }>; hidden_count?: number; hidden_total?: number }> | null; hidden_count?: number; hidden_total?: number }>,
     order: string[],
     titleColor: [number, number, number],
     title: string,
@@ -892,47 +1085,75 @@ export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?
 
       checkPageBreak();
 
-      // Section header
-      doc.setFontSize(8);
+      // Section header (rubro) — 10pt bold
+      doc.setFontSize(10);
       doc.setFont("helvetica", "bold");
       doc.setFillColor(245, 245, 245);
-      doc.rect(14, y - 3.5, pageWidth - 28, 6, "F");
+      doc.rect(14, y - 4, pageWidth - 28, 7, "F");
       doc.text(section.label, 16, y);
       doc.text(fmtBal(section.total), pageWidth - 16, y, { align: "right" });
-      y += 6;
+      y += 7;
 
-      // Items (grouped or flat)
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "normal");
+      // Items vienen pre-ordenados y pre-filtrados del helper transformBalanceData.
+      // PDF solo renderiza tal cual + nota al pie cuando hubo items ocultos.
+      const renderHidden = (count?: number, total?: number) => {
+        if (!count || count <= 0) return;
+        checkPageBreak();
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(7);
+        doc.setTextColor(140);
+        const totalStr = total != null && total !== 0 ? ` (suma: ${fmtBal(total)})` : "";
+        doc.text(`    ${count} ${count === 1 ? "item" : "items"} por debajo del umbral no mostrado${count === 1 ? "" : "s"}${totalStr}`, 16, y);
+        doc.setTextColor(0);
+        doc.setFont("helvetica", "normal");
+        y += 5;
+      };
 
       if (section.groups && section.groups.length > 0) {
         for (const group of section.groups) {
           checkPageBreak();
-          // Group header
+          // Group header — 9pt bold
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(7);
+          doc.setFontSize(9);
           doc.text(`  ${group.label}`, 16, y);
           doc.text(fmtBal(group.total), pageWidth - 16, y, { align: "right" });
-          y += 5;
-          doc.setFont("helvetica", "normal");
+          y += 6;
 
           for (const item of group.items) {
             checkPageBreak();
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
             doc.text(`    ${item.name}`, 16, y);
+            doc.setFont("helvetica", "normal");
             doc.text(fmtBal(item.balance), pageWidth - 16, y, { align: "right" });
-            y += 4.5;
+            doc.setDrawColor(230);
+            doc.line(16, y + 1.5, pageWidth - 16, y + 1.5);
+            y += 6;
           }
+          renderHidden(group.hidden_count, group.hidden_total);
         }
+        // Items ocultos por grupos enteramente saltados (delta vs notas por-grupo)
+        const groupsHiddenCount = section.groups.reduce((sum, g) => sum + (g.hidden_count ?? 0), 0);
+        const groupsHiddenTotal = section.groups.reduce((sum, g) => sum + (g.hidden_total ?? 0), 0);
+        const extraCount = (section.hidden_count ?? 0) - groupsHiddenCount;
+        const extraTotal = (section.hidden_total ?? 0) - groupsHiddenTotal;
+        renderHidden(extraCount, extraTotal);
       } else {
         for (const item of section.items) {
           checkPageBreak();
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9);
           doc.text(`  ${item.name}`, 16, y);
+          doc.setFont("helvetica", "normal");
           doc.text(fmtBal(item.balance), pageWidth - 16, y, { align: "right" });
-          y += 4.5;
+          doc.setDrawColor(230);
+          doc.line(16, y + 1.5, pageWidth - 16, y + 1.5);
+          y += 6;
         }
+        renderHidden(section.hidden_count, section.hidden_total);
       }
 
-      y += 2;
+      y += 3;
     }
 
     // Total line

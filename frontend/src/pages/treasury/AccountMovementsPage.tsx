@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { ArrowLeft, FileText, Download, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,10 +16,13 @@ import { useAccountMovements } from "@/hooks/useMoneyMovements";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate } from "@/utils/formatters";
-import { exportAccountStatementPDF } from "@/utils/pdfExport";
+import { exportAccountStatementPDF, type AccountStatementPdfFormat } from "@/utils/pdfExport";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { exportAccountStatementExcel } from "@/utils/excelExport";
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { ThirdPartyLink } from "@/components/shared/EntityLink";
+
+const PDF_FORMAT_STORAGE_KEY = "account_statement_pdf_format_v1";
 
 const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   payment_to_supplier: "Pago a Proveedor",
@@ -80,6 +83,13 @@ export default function AccountMovementsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [limit, setLimit] = useState<number | undefined>(undefined);
+  const [pdfFormat, setPdfFormat] = useState<AccountStatementPdfFormat>(() => {
+    const saved = localStorage.getItem(PDF_FORMAT_STORAGE_KEY);
+    return saved === "desktop" ? "desktop" : "mobile";
+  });
+  useEffect(() => {
+    localStorage.setItem(PDF_FORMAT_STORAGE_KEY, pdfFormat);
+  }, [pdfFormat]);
 
   const { data: accountsData } = useMoneyAccounts();
   const accounts = accountsData?.items ?? [];
@@ -144,7 +154,16 @@ export default function AccountMovementsPage() {
     <div className="space-y-6">
       <PageHeader title="Movimientos de Cuenta" description="Historial de movimientos con saldo corrido por cuenta">
         <div className="flex gap-2">
-          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData(), orgName)}>
+          <Select value={pdfFormat} onValueChange={(v) => setPdfFormat(v as AccountStatementPdfFormat)}>
+            <SelectTrigger className="h-9 w-full sm:w-32 text-xs" title="Formato PDF">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="mobile">Móvil (portrait)</SelectItem>
+              <SelectItem value="desktop">Escritorio (tabla)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData(), orgName, pdfFormat)}>
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
           <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())}>

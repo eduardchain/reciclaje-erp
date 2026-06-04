@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChevronRight, ChevronDown, Expand, Shrink, FileSpreadsheet, FileText, CheckCircle2 } from "lucide-react";
 import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import ReportsLayout from "./ReportsLayout";
@@ -14,7 +15,18 @@ import { exportBalanceDetailedPDF } from "@/utils/pdfExport";
 import { useAuthStore } from "@/stores/authStore";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useScrollRestoration, saveScroll } from "@/hooks/useScrollRestoration";
+import {
+  transformBalanceData,
+  filtersAreDefault,
+  filtersLabel,
+  sectionExtraHidden,
+  DEFAULT_BALANCE_FILTERS,
+  type BalanceFilters,
+  type BalanceSortBy,
+} from "@/utils/balanceTransform";
 import type { BalanceDetailedSection, BalanceDetailedItem, BalanceDetailedGroup } from "@/types/reports";
+
+const BALANCE_FILTERS_STORAGE_KEY = "balance_detailed_filters_v1";
 
 const ASSET_SECTION_ORDER = [
   "cash_and_bank", "inventory_liquidated",
@@ -87,8 +99,39 @@ export default function BalanceDetailedPage() {
     sessionStorage.setItem(expandedStorageKey, JSON.stringify([...expanded]));
   }, [expanded]);
 
+  // Filtros del usuario (threshold + sort), persistidos en localStorage
+  const [filters, setFilters] = useState<BalanceFilters>(() => {
+    try {
+      const saved = localStorage.getItem(BALANCE_FILTERS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Validar shape minimo
+        return {
+          hideBelow: typeof parsed.hideBelow === "number" ? parsed.hideBelow : DEFAULT_BALANCE_FILTERS.hideBelow,
+          sortBy: parsed.sortBy === "alphabetical" || parsed.sortBy === "amount_desc"
+            ? parsed.sortBy
+            : DEFAULT_BALANCE_FILTERS.sortBy,
+        };
+      }
+    } catch {
+      /* ignore */
+    }
+    return DEFAULT_BALANCE_FILTERS;
+  });
+  useEffect(() => {
+    localStorage.setItem(BALANCE_FILTERS_STORAGE_KEY, JSON.stringify(filters));
+  }, [filters]);
+
+  // Data transformada (ordenada + filtrada) — fuente unica para web/PDF/Excel
+  const displayData = useMemo(
+    () => (data ? transformBalanceData(data, filters) : null),
+    [data, filters],
+  );
+  const filtersActiveLabel = filtersLabel(filters, formatCurrency);
+  const hasActiveFilters = !filtersAreDefault(filters);
+
   const allExpandableKeys = useMemo(() => {
-    if (!data) return [];
+    if (!displayData) return [];
     const keys: string[] = [];
     const addSections = (sections: Record<string, BalanceDetailedSection>) => {
       for (const [key, section] of Object.entries(sections)) {
@@ -98,10 +141,10 @@ export default function BalanceDetailedPage() {
         }
       }
     };
-    addSections(data.assets);
-    addSections(data.liabilities);
+    addSections(displayData.assets);
+    addSections(displayData.liabilities);
     return keys;
-  }, [data]);
+  }, [displayData]);
 
   const toggleSection = (key: string) => {
     setExpanded((prev) => {
@@ -138,6 +181,16 @@ export default function BalanceDetailedPage() {
       );
     });
 
+  const renderHiddenNote = (count: number | undefined, total: number | undefined) => {
+    if (!count || count <= 0) return null;
+    const totalStr = total != null && total !== 0 ? ` (suma: ${fmtBalance(total)})` : "";
+    return (
+      <p className="text-xs text-slate-400 italic px-2 py-1">
+        {count} {count === 1 ? "item por debajo del umbral no mostrado" : "items por debajo del umbral no mostrados"}{totalStr}
+      </p>
+    );
+  };
+
   const renderGroup = (group: BalanceDetailedGroup, sectionKey: string, colorClass: string) => {
     const groupKey = `${sectionKey}:${group.label}`;
     const isGroupOpen = expanded.has(groupKey);
@@ -157,6 +210,7 @@ export default function BalanceDetailedPage() {
         {isGroupOpen && (
           <div className="pl-6 pr-2 pb-1 space-y-0.5">
             {renderItems(group.items, sectionKey)}
+            {renderHiddenNote(group.hidden_count, group.hidden_total)}
           </div>
         )}
       </div>
@@ -188,10 +242,21 @@ export default function BalanceDetailedPage() {
         </button>
         {isOpen && hasItems && (
           <div className="pl-9 pr-3 pb-2 space-y-1">
-            {hasGroups
-              ? section.groups!.map((g) => renderGroup(g, key, colorClass))
-              : renderItems(section.items, key)
-            }
+            {hasGroups ? (
+              <>
+                {section.groups!.map((g) => renderGroup(g, key, colorClass))}
+                {/* Items ocultos por grupos enteramente saltados (delta no cubierto por notas por-grupo) */}
+                {(() => {
+                  const extra = sectionExtraHidden(section);
+                  return renderHiddenNote(extra.count, extra.total);
+                })()}
+              </>
+            ) : (
+              <>
+                {renderItems(section.items, key)}
+                {renderHiddenNote(section.hidden_count, section.hidden_total)}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -212,26 +277,57 @@ export default function BalanceDetailedPage() {
     <ReportsLayout>
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}
 
-      {data && (
+      {data && displayData && (
         <div className="space-y-4">
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Corte al: {formatDate(data.as_of_date)}
-            </p>
+            <div className="flex flex-col gap-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Corte al: {formatDate(data.as_of_date)}
+              </p>
+              {hasActiveFilters && (
+                <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded inline-block w-fit">
+                  {filtersActiveLabel}
+                </span>
+              )}
+            </div>
             <ResponsiveFilterBar className="sm:items-center">
               <Input type="date" value={asOfDate} max={today} onChange={(e) => setAsOfDate(e.target.value)} className="w-full sm:w-40 h-8 text-xs" />
               {asOfDate && <Button variant="ghost" size="sm" className="text-xs h-8 w-full sm:w-auto" onClick={() => setAsOfDate("")}>Hoy</Button>}
+              <Input
+                type="number"
+                min={0}
+                step={1000}
+                value={filters.hideBelow || ""}
+                placeholder="Ocultar < $"
+                onChange={(e) => setFilters((f) => ({ ...f, hideBelow: Math.max(0, Number(e.target.value) || 0) }))}
+                className="w-full sm:w-36 h-8 text-xs"
+                title="Ocultar items con |saldo| menor a este valor"
+              />
+              <Select value={filters.sortBy} onValueChange={(v) => setFilters((f) => ({ ...f, sortBy: v as BalanceSortBy }))}>
+                <SelectTrigger className="w-full sm:w-32 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="amount_desc">Monto desc</SelectItem>
+                  <SelectItem value="alphabetical">Alfabético</SelectItem>
+                </SelectContent>
+              </Select>
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" className="text-xs h-8 w-full sm:w-auto" onClick={() => setFilters(DEFAULT_BALANCE_FILTERS)}>
+                  Reset
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={expandAll} className="w-full sm:w-auto">
                 <Expand className="w-4 h-4 mr-1" /> Expandir
               </Button>
               <Button variant="outline" size="sm" onClick={collapseAll} className="w-full sm:w-auto">
                 <Shrink className="w-4 h-4 mr-1" /> Colapsar
               </Button>
-              <Button variant="outline" size="sm" onClick={() => exportBalanceDetailedPDF(data, orgName)} className="w-full sm:w-auto">
+              <Button variant="outline" size="sm" onClick={() => exportBalanceDetailedPDF(displayData, orgName, filtersActiveLabel)} className="w-full sm:w-auto">
                 <FileText className="w-4 h-4 mr-1" /> PDF
               </Button>
-              <Button variant="outline" size="sm" onClick={() => exportBalanceDetailedExcel(data)} className="w-full sm:w-auto">
+              <Button variant="outline" size="sm" onClick={() => exportBalanceDetailedExcel(displayData, filtersActiveLabel)} className="w-full sm:w-auto">
                 <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
               </Button>
             </ResponsiveFilterBar>
@@ -242,11 +338,11 @@ export default function BalanceDetailedPage() {
             <div className="px-4 py-3 border-b bg-blue-50">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold uppercase tracking-wider text-blue-700">Activos</h3>
-                <span className="text-lg font-bold text-blue-700">{fmtBalance(data.total_assets)}</span>
+                <span className="text-lg font-bold text-blue-700">{fmtBalance(displayData.total_assets)}</span>
               </div>
             </div>
             <CardContent className="p-0">
-              {orderedSections(data.assets, ASSET_SECTION_ORDER, "text-blue-700")}
+              {orderedSections(displayData.assets, ASSET_SECTION_ORDER, "text-blue-700")}
             </CardContent>
           </Card>
 
@@ -255,11 +351,11 @@ export default function BalanceDetailedPage() {
             <div className="px-4 py-3 border-b bg-red-50">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold uppercase tracking-wider text-red-700">Pasivos</h3>
-                <span className="text-lg font-bold text-red-700">{fmtBalance(data.total_liabilities)}</span>
+                <span className="text-lg font-bold text-red-700">{fmtBalance(displayData.total_liabilities)}</span>
               </div>
             </div>
             <CardContent className="p-0">
-              {orderedSections(data.liabilities, LIABILITY_SECTION_ORDER, "text-red-700")}
+              {orderedSections(displayData.liabilities, LIABILITY_SECTION_ORDER, "text-red-700")}
             </CardContent>
           </Card>
 
@@ -269,14 +365,14 @@ export default function BalanceDetailedPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Patrimonio</h3>
-                  <p className="text-xs text-emerald-600 mt-1">{data.equity_label}</p>
+                  <p className="text-xs text-emerald-600 mt-1">{displayData.equity_label}</p>
                 </div>
-                <span className="text-2xl font-bold text-emerald-700">{fmtBalance(data.equity)}</span>
+                <span className="text-2xl font-bold text-emerald-700">{fmtBalance(displayData.equity)}</span>
               </div>
-              {(data.accumulated_profit !== 0 || data.distributed_profit !== 0) && (
+              {(displayData.accumulated_profit !== 0 || displayData.distributed_profit !== 0) && (
                 <div className="pt-2 border-t border-emerald-200 space-y-1 text-sm">
-                  <div className="flex justify-between"><span className="text-emerald-700">Utilidad Acumulada</span><span className="tabular-nums font-medium">{fmtBalance(data.accumulated_profit)}</span></div>
-                  <div className="flex justify-between"><span className="text-red-600">(-) Utilidades Distribuidas</span><span className="tabular-nums font-medium text-red-600">{fmtBalance(data.distributed_profit)}</span></div>
+                  <div className="flex justify-between"><span className="text-emerald-700">Utilidad Acumulada</span><span className="tabular-nums font-medium">{fmtBalance(displayData.accumulated_profit)}</span></div>
+                  <div className="flex justify-between"><span className="text-red-600">(-) Utilidades Distribuidas</span><span className="tabular-nums font-medium text-red-600">{fmtBalance(displayData.distributed_profit)}</span></div>
                 </div>
               )}
             </CardContent>
@@ -284,10 +380,10 @@ export default function BalanceDetailedPage() {
 
           {/* Verificacion */}
           <Separator />
-          <div className={`flex items-center justify-center gap-2 py-3 rounded-md text-sm font-medium ${data.verification.is_balanced ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+          <div className={`flex items-center justify-center gap-2 py-3 rounded-md text-sm font-medium ${displayData.verification.is_balanced ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
             <CheckCircle2 className="w-4 h-4" />
-            <span>{data.verification.formula} = {fmtBalance(data.verification.result)}</span>
-            {data.verification.is_balanced && <span>Cuadrado</span>}
+            <span>{displayData.verification.formula} = {fmtBalance(displayData.verification.result)}</span>
+            {displayData.verification.is_balanced && <span>Cuadrado</span>}
           </div>
         </div>
       )}

@@ -202,6 +202,9 @@ export interface BalanceDetailedGroup {
   label: string;
   total: number;
   items: BalanceDetailedItem[];
+  /** Items filtrados client-side (no enviados por backend). */
+  hidden_count?: number;
+  hidden_total?: number;
 }
 
 export interface BalanceDetailedSection {
@@ -209,6 +212,9 @@ export interface BalanceDetailedSection {
   total: number;
   items: BalanceDetailedItem[];
   groups?: BalanceDetailedGroup[] | null;
+  /** Items filtrados client-side (no enviados por backend). */
+  hidden_count?: number;
+  hidden_total?: number;
 }
 
 export interface BalanceDetailedVerification {
