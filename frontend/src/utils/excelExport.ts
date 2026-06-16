@@ -404,9 +404,9 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   rows.push([]);
   rows.push(["Concepto", "Valor"]);
   rows.push(["Ingresos por Ventas", data.sales_revenue]);
-  rows.push(["Ingresos por Servicios", data.service_income]);
   rows.push(["Costo de Ventas (COGS)", data.cost_of_goods_sold]);
   rows.push(["Utilidad Bruta Ventas", data.gross_profit_sales]);
+  rows.push(["Ingresos por Servicios", data.service_income]);
   rows.push(["Utilidad Pasa Mano", data.double_entry_profit]);
   if (data.transformation_profit !== 0) rows.push(["Gan/Perd Transformaciones", data.transformation_profit]);
   if (data.waste_loss > 0) rows.push(["Perdida por Merma", -data.waste_loss]);
@@ -461,9 +461,9 @@ export function exportPnlMonthlyExcel(
   };
 
   pushRow("Ingresos por Ventas", (p) => p.sales_revenue);
-  pushRow("Ingresos por Servicios", (p) => p.service_income);
   pushRow("Costo de Ventas (COGS)", (p) => p.cost_of_goods_sold, { prefix: "-" });
   pushRow("Utilidad Bruta Ventas", (p) => p.gross_profit_sales, { bold: true });
+  pushRow("Ingresos por Servicios", (p) => p.service_income);
   pushRow("Utilidad Pasa Mano", (p) => p.double_entry_profit);
 
   if (data.periods.some((p) => Math.abs(p.transformation_profit) > 0.01) || Math.abs(data.totals.transformation_profit) > 0.01) {

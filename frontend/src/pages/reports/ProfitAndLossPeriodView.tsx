@@ -57,11 +57,6 @@ export default function ProfitAndLossPeriodView() {
                 value={formatCurrency(data.sales_revenue)}
               />
               <DrillRow
-                to="/treasury?tab=service_income&status=confirmed"
-                label="Ingresos por Servicios"
-                value={formatCurrency(data.service_income)}
-              />
-              <DrillRow
                 to="/sales?tab=liquidated&dp=exclude&date_field=liquidated_at"
                 label="Costo de Ventas (COGS)"
                 value={`-${formatCurrency(data.cost_of_goods_sold)}`}
@@ -72,6 +67,12 @@ export default function ProfitAndLossPeriodView() {
             </div>
 
             <div className="space-y-2">
+              <DrillRow
+                to="/treasury?tab=service_income&status=confirmed"
+                label="Ingresos por Servicios"
+                value={formatCurrency(data.service_income)}
+                valueClass="text-emerald-700"
+              />
               <DrillRow
                 to="/double-entries?tab=liquidated&date_field=liquidated_at"
                 label={`Utilidad Pasa Mano (${data.double_entry_count} operaciones)`}

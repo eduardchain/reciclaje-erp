@@ -135,11 +135,6 @@ export default function ProfitAndLossMonthlyView() {
       value: (p) => p.sales_revenue,
     },
     {
-      label: "Ingresos por Servicios",
-      drillUrl: (p) => withDateRange("/treasury?tab=service_income&status=confirmed", p.period_from, p.period_to),
-      value: (p) => p.service_income,
-    },
-    {
       label: "Costo de Ventas (COGS)",
       drillUrl: (p) => withDateRange("/sales?tab=liquidated&dp=exclude&date_field=liquidated_at", p.period_from, p.period_to),
       value: (p) => p.cost_of_goods_sold,
@@ -153,6 +148,12 @@ export default function ProfitAndLossMonthlyView() {
       separatorAbove: true,
       cellClass: (v) => v >= 0 ? "text-emerald-700" : "text-red-700",
       subtotal: true,
+    },
+    {
+      label: "Ingresos por Servicios",
+      drillUrl: (p) => withDateRange("/treasury?tab=service_income&status=confirmed", p.period_from, p.period_to),
+      value: (p) => p.service_income,
+      cellClass: () => "text-emerald-700",
     },
     {
       label: "Utilidad Pasa Mano",
