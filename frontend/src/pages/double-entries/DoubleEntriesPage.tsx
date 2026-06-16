@@ -27,6 +27,7 @@ import { toast } from "sonner";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatPercentage } from "@/utils/formatters";
 import { exportDoubleEntryPDF } from "@/utils/pdfExport";
+import { exportDoubleEntriesDetailExcel } from "@/utils/excelExport";
 import { ROUTES } from "@/utils/constants";
 import type { DoubleEntryResponse } from "@/types/double-entry";
 import type { MetricCard } from "@/types/reports";
@@ -360,6 +361,7 @@ export default function DoubleEntriesPage() {
         exportFilename="ecobalance_doble-partidas"
         onExportAll={handleExportAll}
         currencyColumns={["total_sale_amount", "profit"]}
+        exportOverride={(rows) => exportDoubleEntriesDetailExcel(rows, { canViewValues, canViewProfit })}
         renderMobileCard={(de) => {
           const totalCommissions = de.commissions.reduce((sum, c) => sum + c.commission_amount, 0);
           return (

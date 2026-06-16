@@ -31,6 +31,7 @@ import type { PurchaseResponse } from "@/types/purchase";
 import type { MetricCard } from "@/types/reports";
 import { useAuthStore } from "@/stores/authStore";
 import { exportPurchasePDF } from "@/utils/pdfExport";
+import { exportPurchasesDetailExcel } from "@/utils/excelExport";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
@@ -343,6 +344,7 @@ export default function PurchasesPage() {
         exportFilename="ecobalance_compras"
         onExportAll={handleExportAll}
         currencyColumns={["total_amount"]}
+        exportOverride={(rows) => exportPurchasesDetailExcel(rows, { canViewPrices })}
         renderMobileCard={(p) => (
           <OperationListCard
             operationNumber={p.purchase_number}

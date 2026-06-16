@@ -51,6 +51,10 @@ interface DataTableProps<TData, TValue> {
   exportFilename?: string;
   onExportAll?: () => Promise<TData[]>;
   currencyColumns?: string[];
+  /** Si se pasa, reemplaza el export genérico (basado en columnas) por una
+   * función dedicada que recibe los datos ya cargados — para Excel multi-hoja
+   * con detalle de líneas. Requiere `onExportAll` para obtener el set completo. */
+  exportOverride?: (rows: TData[]) => void;
   toolbar?: React.ReactNode;
   /** Controlled sorting state. Si se pasa junto con `onSortingChange`, el orden
    * lo controla el padre (util para persistir en URL/store). Si no, se maneja
@@ -123,6 +127,7 @@ export function DataTable<TData, TValue>({
   exportFilename,
   onExportAll,
   currencyColumns,
+  exportOverride,
   toolbar,
   sorting: externalSorting,
   onSortingChange: externalOnSortingChange,
@@ -180,7 +185,8 @@ export function DataTable<TData, TValue>({
       setExporting(true);
       try {
         const all = await onExportAll();
-        exportToExcel(columns as ColumnDef<TData, unknown>[], all, exportFilename, currencyColumns);
+        if (exportOverride) exportOverride(all);
+        else exportToExcel(columns as ColumnDef<TData, unknown>[], all, exportFilename, currencyColumns);
       } catch {
         toast.error("Error al exportar");
       } finally {
@@ -189,7 +195,7 @@ export function DataTable<TData, TValue>({
     } else {
       exportToExcel(columns as ColumnDef<TData, unknown>[], data, exportFilename, currencyColumns);
     }
-  }, [columns, data, exportFilename, onExportAll, currencyColumns]);
+  }, [columns, data, exportFilename, onExportAll, currencyColumns, exportOverride]);
 
   if (loading) {
     return (

@@ -31,6 +31,7 @@ import type { SaleResponse } from "@/types/sale";
 import type { MetricCard } from "@/types/reports";
 import { useAuthStore } from "@/stores/authStore";
 import { exportSalePDF } from "@/utils/pdfExport";
+import { exportSalesDetailExcel } from "@/utils/excelExport";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
@@ -483,6 +484,7 @@ export default function SalesPage() {
         exportFilename="ecobalance_ventas"
         onExportAll={handleExportAll}
         currencyColumns={["total_amount", "total_profit"]}
+        exportOverride={(rows) => exportSalesDetailExcel(rows, { canViewPrices, canViewProfit })}
         renderMobileCard={(s) => (
           <OperationListCard
             operationNumber={s.sale_number}

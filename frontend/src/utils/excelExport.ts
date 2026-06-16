@@ -17,7 +17,10 @@ import type {
   ExpenseDetailResponse,
 } from "@/types/reports";
 import type { StockItem } from "@/types/inventory";
-import { formatCurrency, formatDate } from "@/utils/formatters";
+import type { PurchaseResponse } from "@/types/purchase";
+import type { SaleResponse } from "@/types/sale";
+import type { DoubleEntryResponse } from "@/types/double-entry";
+import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { applyCurrencyFormat } from "@/utils/excelHelpers";
 
 export function exportAccountStatementExcel(data: AccountStatementExportData) {
@@ -804,4 +807,290 @@ export function exportThirdPartyBalancesExcel(data: ThirdPartyBalancesResponse) 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Saldos Terceros");
   XLSX.writeFile(wb, "saldos_terceros.xlsx");
+}
+
+// ============================================================================
+// Export de operaciones (Compras / Ventas / Doble Partida) con detalle de
+// lineas — workbook multi-hoja: "Resumen" (1 fila por operacion, igual que la
+// tabla en pantalla) + "Detalle" (1 fila por material con kg, para analisis y
+// liquidacion de comisiones). Decision del cliente: kg como numero sumable.
+// ============================================================================
+
+const WEIGHT_FMT = "#,##0.####";
+
+// Compras/ventas/DPs comparten estados (decision #2). Etiquetas en femenino
+// (sirven para compra/venta/doble partida).
+const OP_STATUS_LABELS: Record<string, string> = {
+  registered: "Registrada",
+  liquidated: "Liquidada",
+  cancelled: "Cancelada",
+};
+const opStatus = (s: string) => OP_STATUS_LABELS[s] ?? s;
+
+// Backend serializa Decimal como string ("100000.00"). Coercer a numero para
+// que Excel lo reconozca como numerico (sumable/sorteable).
+const num = (v: unknown): number => {
+  if (typeof v === "number") return v;
+  if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))) return Number(v);
+  return 0;
+};
+
+// Aplica un formato numerico (z) a columnas por indice, solo a celdas numericas.
+function applyNumberFormat(ws: XLSX.WorkSheet, cols: number[], fmt: string) {
+  if (!ws["!ref"]) return;
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    for (const C of cols) {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (cell && typeof cell.v === "number") {
+        cell.t = "n";
+        cell.z = fmt;
+      }
+    }
+  }
+}
+
+const materialsText = (lines: { material_code: string; quantity: number }[]) =>
+  lines.map((l) => `${l.material_code} (${formatWeight(num(l.quantity))})`).join(", ");
+
+export function exportPurchasesDetailExcel(
+  purchases: PurchaseResponse[],
+  opts: { canViewPrices: boolean },
+) {
+  const { canViewPrices } = opts;
+  const wb = XLSX.utils.book_new();
+
+  // --- Hoja Resumen (1 fila por compra) ---
+  const resumenHeader = [
+    "#", "Factura", "Fecha", "Proveedor", "Detalle",
+    ...(canViewPrices ? ["Total"] : []),
+    "Pasa Mano", "Estado",
+  ];
+  const resumenRows = purchases.map((p) => [
+    p.purchase_number,
+    p.invoice_number || "",
+    formatDate(p.date),
+    p.supplier_name,
+    materialsText(p.lines),
+    ...(canViewPrices ? [num(p.total_amount)] : []),
+    p.double_entry_id ? "Sí" : "No",
+    opStatus(p.status),
+  ]);
+  const wsResumen = XLSX.utils.aoa_to_sheet([resumenHeader, ...resumenRows]);
+  wsResumen["!cols"] = [
+    { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 40 },
+    ...(canViewPrices ? [{ wch: 16 }] : []),
+    { wch: 10 }, { wch: 12 },
+  ];
+  if (canViewPrices) applyCurrencyFormat(wsResumen, [5]);
+  XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen");
+
+  // --- Hoja Detalle (1 fila por material) ---
+  const detalleHeader = [
+    "# Compra", "Fecha", "Proveedor", "Factura", "Material", "Bodega", "Kg",
+    ...(canViewPrices ? ["Precio Unit", "Total Línea"] : []),
+    "Estado",
+  ];
+  const detalleRows: (string | number)[][] = [];
+  for (const p of purchases) {
+    for (const l of p.lines) {
+      detalleRows.push([
+        p.purchase_number,
+        formatDate(p.date),
+        p.supplier_name,
+        p.invoice_number || "",
+        `${l.material_code} - ${l.material_name}`,
+        l.warehouse_name || "",
+        num(l.quantity),
+        ...(canViewPrices ? [num(l.unit_price), num(l.total_price)] : []),
+        opStatus(p.status),
+      ]);
+    }
+  }
+  const wsDetalle = XLSX.utils.aoa_to_sheet([detalleHeader, ...detalleRows]);
+  wsDetalle["!cols"] = [
+    { wch: 10 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 34 }, { wch: 18 }, { wch: 12 },
+    ...(canViewPrices ? [{ wch: 16 }, { wch: 16 }] : []),
+    { wch: 12 },
+  ];
+  applyNumberFormat(wsDetalle, [6], WEIGHT_FMT);
+  if (canViewPrices) applyCurrencyFormat(wsDetalle, [7, 8]);
+  XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle");
+
+  XLSX.writeFile(wb, "ecobalance_compras.xlsx");
+}
+
+export function exportSalesDetailExcel(
+  sales: SaleResponse[],
+  opts: { canViewPrices: boolean; canViewProfit: boolean },
+) {
+  const { canViewPrices, canViewProfit } = opts;
+  const wb = XLSX.utils.book_new();
+
+  // --- Hoja Resumen (1 fila por venta) ---
+  const resumenHeader = [
+    "#", "Factura", "Fecha", "Cliente", "Detalle",
+    ...(canViewPrices ? ["Total"] : []),
+    ...(canViewProfit ? ["COGS", "Utilidad Bruta"] : []),
+    "Pasa Mano", "Estado",
+  ];
+  const resumenRows = sales.map((s) => {
+    const total = num(s.total_amount);
+    const profit = num(s.total_profit);
+    return [
+      s.sale_number,
+      s.invoice_number || "",
+      formatDate(s.date),
+      s.customer_name,
+      materialsText(s.lines),
+      ...(canViewPrices ? [total] : []),
+      ...(canViewProfit ? [total - profit, profit] : []),
+      s.double_entry_id ? "Sí" : "No",
+      opStatus(s.status),
+    ];
+  });
+  const wsResumen = XLSX.utils.aoa_to_sheet([resumenHeader, ...resumenRows]);
+  const baseCols = [{ wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 40 }];
+  wsResumen["!cols"] = [
+    ...baseCols,
+    ...(canViewPrices ? [{ wch: 16 }] : []),
+    ...(canViewProfit ? [{ wch: 16 }, { wch: 16 }] : []),
+    { wch: 10 }, { wch: 12 },
+  ];
+  {
+    const currencyCols: number[] = [];
+    let idx = 5;
+    if (canViewPrices) currencyCols.push(idx++);
+    if (canViewProfit) { currencyCols.push(idx++, idx++); }
+    if (currencyCols.length) applyCurrencyFormat(wsResumen, currencyCols);
+  }
+  XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen");
+
+  // --- Hoja Detalle (1 fila por material) ---
+  const detalleHeader = [
+    "# Venta", "Fecha", "Cliente", "Factura", "Material", "Kg", "Kg Recibido",
+    ...(canViewPrices ? ["Precio Unit", "Total Línea"] : []),
+    ...(canViewProfit ? ["Costo Unit", "Utilidad"] : []),
+    "Estado",
+  ];
+  const detalleRows: (string | number)[][] = [];
+  for (const s of sales) {
+    for (const l of s.lines) {
+      detalleRows.push([
+        s.sale_number,
+        formatDate(s.date),
+        s.customer_name,
+        s.invoice_number || "",
+        `${l.material_code} - ${l.material_name}`,
+        num(l.quantity),
+        l.received_quantity != null ? num(l.received_quantity) : "",
+        ...(canViewPrices ? [num(l.unit_price), num(l.total_price)] : []),
+        ...(canViewProfit ? [num(l.unit_cost), num(l.profit)] : []),
+        opStatus(s.status),
+      ]);
+    }
+  }
+  const wsDetalle = XLSX.utils.aoa_to_sheet([detalleHeader, ...detalleRows]);
+  wsDetalle["!cols"] = [
+    { wch: 10 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 34 }, { wch: 12 }, { wch: 12 },
+    ...(canViewPrices ? [{ wch: 16 }, { wch: 16 }] : []),
+    ...(canViewProfit ? [{ wch: 16 }, { wch: 16 }] : []),
+    { wch: 12 },
+  ];
+  applyNumberFormat(wsDetalle, [5, 6], WEIGHT_FMT);
+  {
+    const currencyCols: number[] = [];
+    let idx = 7;
+    if (canViewPrices) currencyCols.push(idx++, idx++);
+    if (canViewProfit) currencyCols.push(idx++, idx++);
+    if (currencyCols.length) applyCurrencyFormat(wsDetalle, currencyCols);
+  }
+  XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle");
+
+  XLSX.writeFile(wb, "ecobalance_ventas.xlsx");
+}
+
+export function exportDoubleEntriesDetailExcel(
+  entries: DoubleEntryResponse[],
+  opts: { canViewValues: boolean; canViewProfit: boolean },
+) {
+  const { canViewValues, canViewProfit } = opts;
+  const wb = XLSX.utils.book_new();
+
+  // --- Hoja Resumen (1 fila por DP) ---
+  const resumenHeader = [
+    "#", "Factura", "Fecha", "Proveedor", "Cliente", "Detalle",
+    ...(canViewValues ? ["Total"] : []),
+    ...(canViewProfit ? ["Utilidad Bruta"] : []),
+    "Estado",
+  ];
+  const resumenRows = entries.map((d) => [
+    d.double_entry_number,
+    d.invoice_number || "",
+    formatDate(d.date),
+    d.supplier_name,
+    d.customer_name,
+    d.materials_summary,
+    ...(canViewValues ? [num(d.total_sale_amount)] : []),
+    ...(canViewProfit ? [num(d.profit)] : []),
+    opStatus(d.status),
+  ]);
+  const wsResumen = XLSX.utils.aoa_to_sheet([resumenHeader, ...resumenRows]);
+  wsResumen["!cols"] = [
+    { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 26 }, { wch: 26 }, { wch: 40 },
+    ...(canViewValues ? [{ wch: 16 }] : []),
+    ...(canViewProfit ? [{ wch: 16 }] : []),
+    { wch: 12 },
+  ];
+  {
+    const currencyCols: number[] = [];
+    let idx = 6;
+    if (canViewValues) currencyCols.push(idx++);
+    if (canViewProfit) currencyCols.push(idx++);
+    if (currencyCols.length) applyCurrencyFormat(wsResumen, currencyCols);
+  }
+  XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen");
+
+  // --- Hoja Detalle (1 fila por material) ---
+  const detalleHeader = [
+    "# DP", "Fecha", "Proveedor", "Cliente", "Factura", "Material", "Kg",
+    ...(canViewValues ? ["Precio Compra", "Precio Venta", "Total Compra", "Total Venta"] : []),
+    ...(canViewProfit ? ["Utilidad"] : []),
+    "Estado",
+  ];
+  const detalleRows: (string | number)[][] = [];
+  for (const d of entries) {
+    for (const l of d.lines) {
+      detalleRows.push([
+        d.double_entry_number,
+        formatDate(d.date),
+        d.supplier_name,
+        d.customer_name,
+        d.invoice_number || "",
+        `${l.material_code} - ${l.material_name}`,
+        num(l.quantity),
+        ...(canViewValues ? [num(l.purchase_unit_price), num(l.sale_unit_price), num(l.total_purchase), num(l.total_sale)] : []),
+        ...(canViewProfit ? [num(l.profit)] : []),
+        opStatus(d.status),
+      ]);
+    }
+  }
+  const wsDetalle = XLSX.utils.aoa_to_sheet([detalleHeader, ...detalleRows]);
+  wsDetalle["!cols"] = [
+    { wch: 10 }, { wch: 12 }, { wch: 26 }, { wch: 26 }, { wch: 14 }, { wch: 34 }, { wch: 12 },
+    ...(canViewValues ? [{ wch: 15 }, { wch: 15 }, { wch: 16 }, { wch: 16 }] : []),
+    ...(canViewProfit ? [{ wch: 16 }] : []),
+    { wch: 12 },
+  ];
+  applyNumberFormat(wsDetalle, [6], WEIGHT_FMT);
+  {
+    const currencyCols: number[] = [];
+    let idx = 7;
+    if (canViewValues) currencyCols.push(idx++, idx++, idx++, idx++);
+    if (canViewProfit) currencyCols.push(idx++);
+    if (currencyCols.length) applyCurrencyFormat(wsDetalle, currencyCols);
+  }
+  XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle");
+
+  XLSX.writeFile(wb, "ecobalance_doble-partidas.xlsx");
 }
