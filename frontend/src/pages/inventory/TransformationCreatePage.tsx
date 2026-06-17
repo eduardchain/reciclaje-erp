@@ -49,11 +49,28 @@ export default function TransformationCreatePage() {
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
 
+  const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
+  const sourceUnit = materialById.get(sourceMaterialId)?.default_unit ?? "";
+
+  // Cambio de unidad: el origen y al menos un destino tienen unidades distintas
+  // (ej: desarmar Aire Acondicionado [unidad] en metales [kg]). En ese caso la
+  // conservacion de masa no aplica — no se exige balance ni se usa merma.
+  const isCrossUnit = useMemo(() => {
+    if (!sourceUnit) return false;
+    return lines.some((l) => {
+      if (!l.destination_material_id) return false;
+      const u = materialById.get(l.destination_material_id)?.default_unit;
+      return u != null && u !== sourceUnit;
+    });
+  }, [lines, sourceUnit, materialById]);
+
   const totalDestQty = useMemo(() => lines.reduce((sum, l) => sum + l.quantity, 0), [lines]);
   const balance = sourceQuantity - totalDestQty - wasteQuantity;
   const isBalanced = Math.abs(balance) < 0.001;
+  // En cambio de unidad no se exige balance de masa.
+  const balanceOk = isCrossUnit || isBalanced;
 
-  const canSubmit = sourceMaterialId && sourceWarehouseId && sourceQuantity > 0 && reason.length >= 3 && date && lines.length > 0 && lines.every((l) => l.destination_material_id && l.destination_warehouse_id && l.quantity > 0) && isBalanced && (costDistribution !== "manual" || lines.every((l) => l.unit_cost !== null && l.unit_cost > 0));
+  const canSubmit = sourceMaterialId && sourceWarehouseId && sourceQuantity > 0 && reason.length >= 3 && date && lines.length > 0 && lines.every((l) => l.destination_material_id && l.destination_warehouse_id && l.quantity > 0) && balanceOk && (costDistribution !== "manual" || lines.every((l) => l.unit_cost !== null && l.unit_cost > 0));
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -62,7 +79,7 @@ export default function TransformationCreatePage() {
         source_material_id: sourceMaterialId,
         source_warehouse_id: sourceWarehouseId,
         source_quantity: sourceQuantity,
-        waste_quantity: wasteQuantity,
+        waste_quantity: isCrossUnit ? 0 : wasteQuantity,
         cost_distribution: costDistribution,
         lines: lines.map(({ destination_material_id, destination_warehouse_id, quantity, unit_cost }) => ({
           destination_material_id,
@@ -78,7 +95,7 @@ export default function TransformationCreatePage() {
     );
   };
 
-  const materialOptions = materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }));
+  const materialOptions = materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name} (${m.default_unit})` }));
   const warehouseOptions = warehouses.map((w) => ({ id: w.id, label: w.name }));
 
   return (
@@ -103,7 +120,7 @@ export default function TransformationCreatePage() {
               <EntitySelect value={sourceWarehouseId} onChange={setSourceWarehouseId} options={warehouseOptions} placeholder="Seleccionar..." />
             </div>
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cantidad *{sourceUnit ? ` (${sourceUnit})` : ""}</Label>
               <MoneyInput value={sourceQuantity} onChange={setSourceQuantity} decimals={2} />
             </div>
             <div>
@@ -150,7 +167,9 @@ export default function TransformationCreatePage() {
                 <EntitySelect value={line.destination_warehouse_id} onChange={(v) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, destination_warehouse_id: v } : l))} options={warehouseOptions} placeholder="Bodega..." />
               </div>
               <div className={costDistribution === "manual" ? "md:col-span-2" : "md:col-span-5"}>
-                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad</Label>
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>
+                  Cantidad{line.destination_material_id && materialById.get(line.destination_material_id)?.default_unit ? ` (${materialById.get(line.destination_material_id)!.default_unit})` : ""}
+                </Label>
                 <MoneyInput value={line.quantity} onChange={(v) => setLines((p) => p.map((l) => l._key === line._key ? { ...l, quantity: v } : l))} decimals={2} />
               </div>
               {costDistribution === "manual" && (
@@ -165,27 +184,50 @@ export default function TransformationCreatePage() {
       </Card>
 
       {/* Merma y Balance */}
-      <Card className={`shadow-sm border-2 ${isBalanced ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Merma/Desperdicio</Label>
-              <MoneyInput value={wasteQuantity} onChange={setWasteQuantity} decimals={2} />
+      {isCrossUnit ? (
+        /* Cambio de unidad: no aplica conservacion de masa. Sin merma (se modela
+           como un material destino en kg). Panel informativo, no bloquea. */
+        <Card className="shadow-sm border-2 border-indigo-200 bg-indigo-50">
+          <CardContent className="pt-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="text-sm">
+                <p className="text-slate-700">
+                  Se consumen <span className="font-semibold">{sourceQuantity.toFixed(2)} {sourceUnit}</span> de origen
+                  {" → "}se producen <span className="font-semibold">{totalDestQty.toFixed(2)}</span> en destinos.
+                </p>
+                <p className="text-indigo-700 mt-1">
+                  Transformacion con cambio de unidad — no aplica balance de masa. La merma de peso se registra como un material destino (ej: "Basura").
+                </p>
+              </div>
+              <span className="shrink-0 self-start sm:self-center bg-indigo-100 text-indigo-700 text-xs font-medium px-2.5 py-1 rounded-full">
+                {sourceUnit || "?"} → kg
+              </span>
             </div>
-            <div className="text-sm">
-              <p className="text-slate-500">Origen: <span className="font-medium">{sourceQuantity.toFixed(2)}</span></p>
-              <p className="text-slate-500">Destinos: <span className="font-medium">{totalDestQty.toFixed(2)}</span></p>
-              <p className="text-slate-500">Merma: <span className="font-medium">{wasteQuantity.toFixed(2)}</span></p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className={`shadow-sm border-2 ${isBalanced ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Merma/Desperdicio{sourceUnit ? ` (${sourceUnit})` : ""}</Label>
+                <MoneyInput value={wasteQuantity} onChange={setWasteQuantity} decimals={2} />
+              </div>
+              <div className="text-sm">
+                <p className="text-slate-500">Origen: <span className="font-medium">{sourceQuantity.toFixed(2)}</span></p>
+                <p className="text-slate-500">Destinos: <span className="font-medium">{totalDestQty.toFixed(2)}</span></p>
+                <p className="text-slate-500">Merma: <span className="font-medium">{wasteQuantity.toFixed(2)}</span></p>
+              </div>
+              <div className="md:col-span-2 text-right">
+                <p className="text-sm text-slate-500">Balance</p>
+                <p className={`text-2xl font-bold ${isBalanced ? "text-emerald-700" : "text-red-700"}`}>
+                  {isBalanced ? "Cuadra" : `Diferencia: ${balance.toFixed(2)}`}
+                </p>
+              </div>
             </div>
-            <div className="md:col-span-2 text-right">
-              <p className="text-sm text-slate-500">Balance</p>
-              <p className={`text-2xl font-bold ${isBalanced ? "text-emerald-700" : "text-red-700"}`}>
-                {isBalanced ? "Cuadra" : `Diferencia: ${balance.toFixed(2)}`}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Razon y notas */}
       <Card className="shadow-sm">

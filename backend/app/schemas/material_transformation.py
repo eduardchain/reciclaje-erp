@@ -46,18 +46,12 @@ class MaterialTransformationCreate(BaseModel):
     reason: str = Field(..., min_length=3, description="Razon de la transformacion")
     notes: Optional[str] = None
 
-    @model_validator(mode='after')
-    def validate_quantities_balance(self):
-        """Validar que sum(destinos) + merma == origen."""
-        total_dest = sum(line.quantity for line in self.lines)
-        expected_total = total_dest + self.waste_quantity
-        if abs(expected_total - self.source_quantity) > Decimal("0.0001"):
-            raise ValueError(
-                f"Balance de cantidades no cuadra: destinos ({total_dest}) + "
-                f"merma ({self.waste_quantity}) = {expected_total}, "
-                f"pero origen = {self.source_quantity}"
-            )
-        return self
+    # NOTA: el balance de cantidades (sum(destinos) + merma == origen) NO se valida
+    # aqui porque depende de la unidad de medida de los materiales, que este schema
+    # no conoce. Se valida en el servicio (`MaterialTransformationService.create`),
+    # que tiene acceso a `Material.default_unit`: solo se exige conservacion de masa
+    # cuando origen y destinos comparten unidad (ej: kg->kg). Si difieren (ej:
+    # desarmar Aire Acondicionado [unidad] en metales [kg]), no aplica.
 
     @model_validator(mode='after')
     def validate_cost_distribution(self):

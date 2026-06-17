@@ -67,7 +67,7 @@ class CRUDMaterialTransformation:
         Flujo:
         1. Validar material de origen tiene stock suficiente
         2. Validar materiales destino pertenecen a la org
-        3. Validar balance: sum(destinos) + merma == origen
+        3. Validar balance: sum(destinos) + merma == origen (solo si misma unidad)
         4. Validar source != destinos
         5. Distribuir costos (proporcional o manual)
         6. Descontar stock del origen
@@ -92,6 +92,7 @@ class CRUDMaterialTransformation:
 
         # V-TRANS-05 y V-TRANS-06: Validar materiales destino
         dest_material_ids = set()
+        dest_units: set[str] = set()
         for line in data.lines:
             dest_material = self._validate_material(db, line.destination_material_id, organization_id)
             self._validate_warehouse(db, line.destination_warehouse_id, organization_id)
@@ -102,6 +103,37 @@ class CRUDMaterialTransformation:
                     detail=f"Material destino '{dest_material.name}' no puede ser igual al material de origen",
                 )
             dest_material_ids.add(line.destination_material_id)
+            dest_units.add((dest_material.default_unit or "").strip().lower())
+
+        # V-TRANS-03: Balance de cantidades — SOLO aplica cuando origen y destinos
+        # comparten unidad de medida (conservacion de masa, ej: kg->kg). Si difieren
+        # (ej: desarmar Aire Acondicionado [unidad] en Hierro/Cobre [kg]), no hay
+        # invariante de cantidad: se consumen las unidades de origen y se producen
+        # libremente los kg destino. En ese caso la merma se modela como un material
+        # destino en la unidad destino, no como merma del origen.
+        source_unit = (source_material.default_unit or "").strip().lower()
+        homogeneous_units = all(u == source_unit for u in dest_units)
+        if homogeneous_units:
+            total_dest = sum(line.quantity for line in data.lines)
+            expected_total = total_dest + data.waste_quantity
+            if abs(expected_total - data.source_quantity) > Decimal("0.0001"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Balance de cantidades no cuadra: destinos ({total_dest}) + "
+                        f"merma ({data.waste_quantity}) = {expected_total}, "
+                        f"pero origen = {data.source_quantity}"
+                    ),
+                )
+        elif data.waste_quantity and data.waste_quantity > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "En transformaciones con cambio de unidad la merma se modela como "
+                    "un material destino en la unidad destino, no como merma del origen. "
+                    "Deje la merma en 0."
+                ),
+            )
 
         # Capturar costo promedio actual del origen
         source_unit_cost = source_material.current_average_cost

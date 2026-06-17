@@ -106,6 +106,26 @@ def dest_aluminum(db_session, test_organization):
 
 
 @pytest.fixture
+def source_unit_material(db_session, test_organization):
+    """Aire Acondicionado - medido por UNIDAD (no kg). 10 unidades @ $50.000/unidad."""
+    material = Material(
+        code="AC-001",
+        name="Aire Acondicionado",
+        default_unit="unidad",
+        current_stock=Decimal("10.0000"),
+        current_stock_liquidated=Decimal("10.0000"),
+        current_stock_transit=Decimal("0"),
+        current_average_cost=Decimal("50000.0000"),
+        organization_id=test_organization.id,
+        is_active=True,
+    )
+    db_session.add(material)
+    db_session.commit()
+    db_session.refresh(material)
+    return material
+
+
+@pytest.fixture
 def test_warehouse(db_session, test_organization):
     """Bodega Principal."""
     wh = Warehouse(
@@ -316,7 +336,11 @@ class TestCreateTransformation:
         dest_iron,
         dest_aluminum,
     ):
-        """sum(lines.qty) + waste != source_qty should return 422 validation error."""
+        """sum(lines.qty) + waste != source_qty (misma unidad) debe rechazar con 400.
+
+        El balance se valida en el servicio (unit-aware), no en el schema Pydantic,
+        por eso es 400 (HTTPException) y no 422 (validation error).
+        """
         # Arrange — quantities don't balance: 200+180+100+20 = 500, but source=600
         payload = _build_transformation_payload(
             source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
@@ -327,7 +351,77 @@ class TestCreateTransformation:
         response = client.post(BASE_URL, json=payload, headers=org_headers)
 
         # Assert
-        assert response.status_code == 422
+        assert response.status_code == 400
+        assert "balance" in response.json()["detail"].lower()
+
+    def test_cross_unit_skips_balance(
+        self,
+        client,
+        org_headers,
+        source_unit_material,
+        test_warehouse,
+        dest_copper,
+        dest_iron,
+        dest_aluminum,
+    ):
+        """Origen por unidad + destinos por kg: NO se exige balance de masa.
+
+        Desarmar 4 unidades de Aire Acondicionado produce 134 kg de metales.
+        4 != 134 pero las unidades difieren, asi que se permite (decision: balance
+        inteligente por unidad).
+        """
+        payload = _build_transformation_payload(
+            source_unit_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+            source_quantity=4.0,
+            waste_quantity=0.0,
+            cost_distribution="proportional_weight",
+            lines_override=[
+                {"destination_material_id": str(dest_copper.id), "destination_warehouse_id": str(test_warehouse.id), "quantity": 100.0},
+                {"destination_material_id": str(dest_iron.id), "destination_warehouse_id": str(test_warehouse.id), "quantity": 34.0},
+            ],
+        )
+
+        response = client.post(BASE_URL, json=payload, headers=org_headers)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["status"] == "confirmed"
+        assert abs(data["source_quantity"] - 4.0) < 0.01
+        assert len(data["lines"]) == 2
+        # Valor del origen (4 * 50.000 = 200.000) se reparte por peso entre los 134 kg
+        total_cost = sum(l["total_cost"] for l in data["lines"])
+        assert abs(total_cost - 200000.0) < 1.0
+
+    def test_cross_unit_with_waste_rejected(
+        self,
+        client,
+        org_headers,
+        source_unit_material,
+        test_warehouse,
+        dest_copper,
+        dest_iron,
+        dest_aluminum,
+    ):
+        """Cambio de unidad + merma > 0 debe rechazar con 400.
+
+        En transformaciones con cambio de unidad la merma se modela como un
+        material destino en kg, no como merma del origen en unidades.
+        """
+        payload = _build_transformation_payload(
+            source_unit_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+            source_quantity=4.0,
+            waste_quantity=1.0,  # merma > 0 no permitida en cambio de unidad
+            cost_distribution="proportional_weight",
+            lines_override=[
+                {"destination_material_id": str(dest_copper.id), "destination_warehouse_id": str(test_warehouse.id), "quantity": 100.0},
+                {"destination_material_id": str(dest_iron.id), "destination_warehouse_id": str(test_warehouse.id), "quantity": 34.0},
+            ],
+        )
+
+        response = client.post(BASE_URL, json=payload, headers=org_headers)
+
+        assert response.status_code == 400
+        assert "merma" in response.json()["detail"].lower()
 
     def test_create_insufficient_stock(
         self,
