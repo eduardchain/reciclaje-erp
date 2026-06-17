@@ -52,6 +52,7 @@ def _enrich_double_entry_response(double_entry: DoubleEntry) -> dict:
             "profit": line.profit,
             "material_code": line.material.code if line.material else "",
             "material_name": line.material.name if line.material else "",
+            "material_unit": line.material.default_unit if line.material else "kg",
         }
         for line in double_entry.lines
     ]

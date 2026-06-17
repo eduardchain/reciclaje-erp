@@ -86,6 +86,11 @@ export default function SaleEditPage() {
   const materials = materialsData?.items ?? [];
   const warehouses = warehousesData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
+  // Unidad de medida por linea (kg, unidad, etc.) — resuelta desde el material elegido.
+  const unitSuffix = (materialId: string) => {
+    const u = materials.find((m) => m.id === materialId)?.default_unit;
+    return u ? ` (${u})` : "";
+  };
   const { hasPermission } = usePermissions();
   const canViewProfit = hasPermission("sales.view_profit");
 
@@ -305,7 +310,7 @@ export default function SaleEditPage() {
                 />
               </div>
               <div className="md:col-span-2 relative">
-                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad (kg) *</Label>
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad{unitSuffix(line.material_id)} *</Label>
                 <MoneyInput
                   value={line.quantity}
                   onChange={(v) => updateLine(line._key, "quantity", v)}

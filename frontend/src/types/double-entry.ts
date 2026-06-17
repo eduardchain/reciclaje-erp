@@ -25,6 +25,7 @@ export interface DoubleEntryLineResponse {
   profit: number;
   material_code: string;
   material_name: string;
+  material_unit: string;
 }
 
 // ============================================================================

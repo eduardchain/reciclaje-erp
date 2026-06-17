@@ -25,6 +25,7 @@ interface LiquidationLine {
   material_id: string;
   material_name: string;
   material_code: string;
+  material_unit: string;
   quantity: number;
   purchase_unit_price: number;
   sale_unit_price: number;
@@ -76,6 +77,7 @@ export default function DoubleEntryLiquidatePage() {
           material_id: line.material_id,
           material_name: line.material_name,
           material_code: line.material_code,
+          material_unit: line.material_unit,
           quantity: line.quantity,
           purchase_unit_price: line.purchase_unit_price,
           sale_unit_price: line.sale_unit_price,
@@ -212,8 +214,8 @@ export default function DoubleEntryLiquidatePage() {
                   </p>
                 </div>
                 <div className="md:col-span-1 flex md:block items-center justify-between">
-                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500 md:hidden", lineLabelClass(idx))}>Cantidad</Label>
-                  <p className="md:h-10 md:flex md:items-center text-sm tabular-nums">{formatWeight(line.quantity)}</p>
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500 md:hidden", lineLabelClass(idx))}>Cantidad{line.material_unit ? ` (${line.material_unit})` : ""}</Label>
+                  <p className="md:h-10 md:flex md:items-center text-sm tabular-nums">{formatWeight(line.quantity, line.material_unit || "kg")}</p>
                 </div>
                 <div className="md:col-span-2 relative">
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>P. Compra *</Label>

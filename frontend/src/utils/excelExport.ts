@@ -850,8 +850,8 @@ function applyNumberFormat(ws: XLSX.WorkSheet, cols: number[], fmt: string) {
   }
 }
 
-const materialsText = (lines: { material_code: string; quantity: number }[]) =>
-  lines.map((l) => `${l.material_code} (${formatWeight(num(l.quantity))})`).join(", ");
+const materialsText = (lines: { material_code: string; quantity: number; material_unit?: string }[]) =>
+  lines.map((l) => `${l.material_code} (${formatWeight(num(l.quantity), l.material_unit || "kg")})`).join(", ");
 
 export function exportPurchasesDetailExcel(
   purchases: PurchaseResponse[],
@@ -887,7 +887,7 @@ export function exportPurchasesDetailExcel(
 
   // --- Hoja Detalle (1 fila por material) ---
   const detalleHeader = [
-    "# Compra", "Fecha", "Proveedor", "Factura", "Material", "Bodega", "Kg",
+    "# Compra", "Fecha", "Proveedor", "Factura", "Material", "Bodega", "Cantidad", "Unidad",
     ...(canViewPrices ? ["Precio Unit", "Total Línea"] : []),
     "Estado",
   ];
@@ -902,6 +902,7 @@ export function exportPurchasesDetailExcel(
         `${l.material_code} - ${l.material_name}`,
         l.warehouse_name || "",
         num(l.quantity),
+        l.material_unit || "kg",
         ...(canViewPrices ? [num(l.unit_price), num(l.total_price)] : []),
         opStatus(p.status),
       ]);
@@ -909,12 +910,12 @@ export function exportPurchasesDetailExcel(
   }
   const wsDetalle = XLSX.utils.aoa_to_sheet([detalleHeader, ...detalleRows]);
   wsDetalle["!cols"] = [
-    { wch: 10 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 34 }, { wch: 18 }, { wch: 12 },
+    { wch: 10 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 34 }, { wch: 18 }, { wch: 12 }, { wch: 10 },
     ...(canViewPrices ? [{ wch: 16 }, { wch: 16 }] : []),
     { wch: 12 },
   ];
   applyNumberFormat(wsDetalle, [6], WEIGHT_FMT);
-  if (canViewPrices) applyCurrencyFormat(wsDetalle, [7, 8]);
+  if (canViewPrices) applyCurrencyFormat(wsDetalle, [8, 9]);
   XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle");
 
   XLSX.writeFile(wb, "ecobalance_compras.xlsx");
@@ -968,7 +969,7 @@ export function exportSalesDetailExcel(
 
   // --- Hoja Detalle (1 fila por material) ---
   const detalleHeader = [
-    "# Venta", "Fecha", "Cliente", "Factura", "Material", "Kg", "Kg Recibido",
+    "# Venta", "Fecha", "Cliente", "Factura", "Material", "Cantidad", "Unidad", "Cantidad Recibida",
     ...(canViewPrices ? ["Precio Unit", "Total Línea"] : []),
     ...(canViewProfit ? ["Costo Unit", "Utilidad"] : []),
     "Estado",
@@ -983,6 +984,7 @@ export function exportSalesDetailExcel(
         s.invoice_number || "",
         `${l.material_code} - ${l.material_name}`,
         num(l.quantity),
+        l.material_unit || "kg",
         l.received_quantity != null ? num(l.received_quantity) : "",
         ...(canViewPrices ? [num(l.unit_price), num(l.total_price)] : []),
         ...(canViewProfit ? [num(l.unit_cost), num(l.profit)] : []),
@@ -992,15 +994,15 @@ export function exportSalesDetailExcel(
   }
   const wsDetalle = XLSX.utils.aoa_to_sheet([detalleHeader, ...detalleRows]);
   wsDetalle["!cols"] = [
-    { wch: 10 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 34 }, { wch: 12 }, { wch: 12 },
+    { wch: 10 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 34 }, { wch: 12 }, { wch: 10 }, { wch: 14 },
     ...(canViewPrices ? [{ wch: 16 }, { wch: 16 }] : []),
     ...(canViewProfit ? [{ wch: 16 }, { wch: 16 }] : []),
     { wch: 12 },
   ];
-  applyNumberFormat(wsDetalle, [5, 6], WEIGHT_FMT);
+  applyNumberFormat(wsDetalle, [5, 7], WEIGHT_FMT);
   {
     const currencyCols: number[] = [];
-    let idx = 7;
+    let idx = 8;
     if (canViewPrices) currencyCols.push(idx++, idx++);
     if (canViewProfit) currencyCols.push(idx++, idx++);
     if (currencyCols.length) applyCurrencyFormat(wsDetalle, currencyCols);
@@ -1053,7 +1055,7 @@ export function exportDoubleEntriesDetailExcel(
 
   // --- Hoja Detalle (1 fila por material) ---
   const detalleHeader = [
-    "# DP", "Fecha", "Proveedor", "Cliente", "Factura", "Material", "Kg",
+    "# DP", "Fecha", "Proveedor", "Cliente", "Factura", "Material", "Cantidad", "Unidad",
     ...(canViewValues ? ["Precio Compra", "Precio Venta", "Total Compra", "Total Venta"] : []),
     ...(canViewProfit ? ["Utilidad"] : []),
     "Estado",
@@ -1069,6 +1071,7 @@ export function exportDoubleEntriesDetailExcel(
         d.invoice_number || "",
         `${l.material_code} - ${l.material_name}`,
         num(l.quantity),
+        l.material_unit || "kg",
         ...(canViewValues ? [num(l.purchase_unit_price), num(l.sale_unit_price), num(l.total_purchase), num(l.total_sale)] : []),
         ...(canViewProfit ? [num(l.profit)] : []),
         opStatus(d.status),
@@ -1077,7 +1080,7 @@ export function exportDoubleEntriesDetailExcel(
   }
   const wsDetalle = XLSX.utils.aoa_to_sheet([detalleHeader, ...detalleRows]);
   wsDetalle["!cols"] = [
-    { wch: 10 }, { wch: 12 }, { wch: 26 }, { wch: 26 }, { wch: 14 }, { wch: 34 }, { wch: 12 },
+    { wch: 10 }, { wch: 12 }, { wch: 26 }, { wch: 26 }, { wch: 14 }, { wch: 34 }, { wch: 12 }, { wch: 10 },
     ...(canViewValues ? [{ wch: 15 }, { wch: 15 }, { wch: 16 }, { wch: 16 }] : []),
     ...(canViewProfit ? [{ wch: 16 }] : []),
     { wch: 12 },
@@ -1085,7 +1088,7 @@ export function exportDoubleEntriesDetailExcel(
   applyNumberFormat(wsDetalle, [6], WEIGHT_FMT);
   {
     const currencyCols: number[] = [];
-    let idx = 7;
+    let idx = 8;
     if (canViewValues) currencyCols.push(idx++, idx++, idx++, idx++);
     if (canViewProfit) currencyCols.push(idx++);
     if (currencyCols.length) applyCurrencyFormat(wsDetalle, currencyCols);

@@ -63,6 +63,11 @@ export default function PurchaseCreatePage() {
   const suppliers = suppliersData?.items ?? [];
   const payableProviders = payableData?.items ?? [];
   const materials = materialsData?.items ?? [];
+  // Unidad de medida por linea (kg, unidad, etc.) — resuelta desde el material elegido.
+  const unitSuffix = (materialId: string) => {
+    const u = materials.find((m) => m.id === materialId)?.default_unit;
+    return u ? ` (${u})` : "";
+  };
   const warehouses = warehousesData?.items ?? [];
   const accounts = accountsData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
@@ -303,7 +308,7 @@ export default function PurchaseCreatePage() {
                 />
               </div>
               <div className={canViewPrices ? "md:col-span-2" : "md:col-span-3"}>
-                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad (kg) *</Label>
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad{unitSuffix(line.material_id)} *</Label>
                 <MoneyInput
                   value={line.quantity}
                   onChange={(v) => updateLine(line._key, "quantity", v)}

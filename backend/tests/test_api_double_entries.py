@@ -259,6 +259,7 @@ class TestDoubleEntryAPI:
         assert len(data["lines"]) == 1
         line = data["lines"][0]
         assert line["material_code"] == "COPPER-01"
+        assert line["material_unit"] == "kg"  # unidad de medida del material
         assert float(line["quantity"]) == 1000.0
         assert float(data["total_purchase_cost"]) == 1000 * 8000
         assert float(data["total_sale_amount"]) == 1000 * 10000
@@ -284,6 +285,24 @@ class TestDoubleEntryAPI:
         assert sale.status == "registered"
         assert sale.liquidated_at is None
         assert sale.warehouse_id is None
+
+    def test_line_includes_material_unit(
+        self, client, org_headers, test_supplier, test_customer, db_session, test_organization,
+    ):
+        """La response de doble partida expone material_unit por linea (kg, unidad, etc.)."""
+        unit_material = Material(
+            id=uuid4(), code="AC-UNIT", name="Aire Acondicionado", default_unit="unidad",
+            current_stock=Decimal("0.00"), current_average_cost=Decimal("0.00"),
+            organization_id=test_organization.id, is_active=True,
+        )
+        db_session.add(unit_material)
+        db_session.commit()
+
+        payload = _create_payload(test_supplier.id, test_customer.id, unit_material.id)
+        resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+
+        assert resp.status_code == 201
+        assert resp.json()["lines"][0]["material_unit"] == "unidad"
 
     def test_create_multi_line(
         self, client, org_headers, test_supplier, test_customer,

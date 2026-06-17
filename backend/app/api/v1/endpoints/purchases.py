@@ -54,6 +54,7 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None) -> dict:
                 **line.__dict__,
                 "material_code": line.material.code if line.material else None,
                 "material_name": line.material.name if line.material else None,
+                "material_unit": line.material.default_unit if line.material else "kg",
                 "warehouse_name": line.warehouse.name if line.warehouse else None,
             }
             for line in purchase.lines

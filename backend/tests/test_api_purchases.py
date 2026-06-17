@@ -253,8 +253,53 @@ class TestCreatePurchase:
         assert len(data["lines"]) == 1
         assert float(data["lines"][0]["quantity"]) == 50.0  # Quantity comes as string from Decimal
         assert data["lines"][0]["material_code"] == "COPPER-001"
+        assert data["lines"][0]["material_unit"] == "kg"  # unidad de medida del material
         assert "id" in data
         assert "created_at" in data
+
+    def test_purchase_line_includes_material_unit(
+        self,
+        client,
+        org_headers,
+        test_supplier,
+        test_warehouse,
+        db_session,
+        test_organization,
+    ):
+        """La response de compra expone material_unit por linea (kg, unidad, etc.)."""
+        # Material medido por UNIDAD (no kg)
+        unit_material = Material(
+            id=uuid4(),
+            code="AC-UNIT",
+            name="Aire Acondicionado",
+            default_unit="unidad",
+            current_stock=Decimal("0.0000"),
+            current_average_cost=Decimal("0.0000"),
+            organization_id=test_organization.id,
+            is_active=True,
+        )
+        db_session.add(unit_material)
+        db_session.commit()
+
+        purchase_data = {
+            "supplier_id": str(test_supplier.id),
+            "date": datetime.now().isoformat(),
+            "lines": [
+                {
+                    "material_id": str(unit_material.id),
+                    "quantity": 4.0,
+                    "unit_price": 50000.00,
+                    "warehouse_id": str(test_warehouse.id),
+                }
+            ],
+            "auto_liquidate": False,
+        }
+
+        response = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["lines"][0]["material_unit"] == "unidad"
     
     def test_create_purchase_1step_workflow(
         self,

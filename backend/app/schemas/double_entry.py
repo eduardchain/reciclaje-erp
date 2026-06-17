@@ -39,6 +39,7 @@ class DoubleEntryLineResponse(BaseModel):
     profit: float
     material_code: str
     material_name: str
+    material_unit: str = "kg"
 
     model_config = {"from_attributes": True}
 

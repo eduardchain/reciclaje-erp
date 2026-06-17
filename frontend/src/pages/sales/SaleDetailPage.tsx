@@ -151,16 +151,16 @@ export default function SaleDetailPage() {
                       <span className="font-medium">{line.material_name}</span>
                       <span className="text-slate-400 ml-2 text-xs">{line.material_code}</span>
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{formatWeight(line.quantity)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatWeight(line.quantity, line.material_unit)}</TableCell>
                     {sale.lines.some((l) => l.received_quantity !== null) && (
                       <>
                         <TableCell className="text-right tabular-nums">
-                          {line.received_quantity != null ? formatWeight(line.received_quantity) : <span className="text-slate-400">&mdash;</span>}
+                          {line.received_quantity != null ? formatWeight(line.received_quantity, line.material_unit) : <span className="text-slate-400">&mdash;</span>}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {line.quantity_difference != null && Math.abs(line.quantity_difference) > 0.001 ? (
                             <div className={line.quantity_difference > 0 ? "text-emerald-600" : "text-red-600"}>
-                              <div>{line.quantity_difference > 0 ? "+" : ""}{line.quantity_difference.toFixed(2)} kg</div>
+                              <div>{line.quantity_difference > 0 ? "+" : ""}{line.quantity_difference.toFixed(2)} {line.material_unit || "kg"}</div>
                               {line.amount_difference != null && (
                                 <div className="text-xs">
                                   ({line.amount_difference > 0 ? "+" : ""}{formatCurrency(line.amount_difference)})
@@ -194,7 +194,7 @@ export default function SaleDetailPage() {
                   </span>
                   {sale.total_quantity_difference != null && (
                     <span className="text-slate-500 ml-2 text-xs">
-                      ({sale.total_quantity_difference > 0 ? "+" : ""}{sale.total_quantity_difference.toFixed(2)} kg)
+                      ({sale.total_quantity_difference > 0 ? "+" : ""}{sale.total_quantity_difference.toFixed(2)} {sale.lines.every((l) => l.material_unit === sale.lines[0]?.material_unit) ? (sale.lines[0]?.material_unit || "kg") : ""})
                     </span>
                   )}
                 </div>

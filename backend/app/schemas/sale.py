@@ -89,6 +89,7 @@ class SaleLineResponse(SaleLineBase):
     # Joined data from related models
     material_code: str = Field(..., description="Material code (e.g., MAT-001)")
     material_name: str = Field(..., description="Material name")
+    material_unit: str = Field("kg", description="Unidad de medida del material (kg, unidad, etc.)")
 
     model_config = {"from_attributes": True}
 

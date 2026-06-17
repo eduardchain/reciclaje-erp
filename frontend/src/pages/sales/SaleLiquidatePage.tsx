@@ -26,6 +26,7 @@ interface LiquidationLine {
   material_id: string;
   material_name: string;
   material_code: string;
+  material_unit: string;
   quantity: number;
   received_quantity: number;
   unit_price: number;
@@ -90,6 +91,7 @@ export default function SaleLiquidatePage() {
             material_id: line.material_id,
             material_name: line.material_name,
             material_code: line.material_code,
+            material_unit: line.material_unit,
             quantity: line.quantity,
             received_quantity: line.quantity,
             unit_price: price,
@@ -154,6 +156,8 @@ export default function SaleLiquidatePage() {
     lines.reduce((sum, l) => sum + (l.received_quantity - l.quantity) * l.unit_price, 0),
   [lines]);
   const hasDifference = Math.abs(totalQtyDifference) > 0.001;
+  // Unidad del total: solo si todas las lineas comparten unidad (sino es ambiguo sumar kg + unidad).
+  const diffUnit = lines.length > 0 && lines.every((l) => l.material_unit === lines[0].material_unit) ? (lines[0].material_unit || "kg") : "";
 
   const totalQuantity = lines.reduce((sum, l) => sum + (l.quantity || 0), 0);
   const commissionAmounts = commissions.map((c) => {
@@ -283,11 +287,11 @@ export default function SaleLiquidatePage() {
                 <div className="md:col-span-1 flex md:block items-center justify-between">
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Despachado</Label>
                   <p className="md:h-10 flex items-center text-sm tabular-nums">
-                    {formatWeight(line.quantity)}
+                    {formatWeight(line.quantity, line.material_unit || "kg")}
                   </p>
                 </div>
                 <div className="md:col-span-2">
-                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Recibido (kg)</Label>
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Recibido{line.material_unit ? ` (${line.material_unit})` : ""}</Label>
                   <MoneyInput
                     value={line.received_quantity}
                     onChange={(v) => updateReceivedQuantity(line.line_id, v)}
@@ -302,7 +306,7 @@ export default function SaleLiquidatePage() {
                       <span className="text-slate-400">&mdash;</span>
                     ) : (
                       <div className={lineDiff > 0 ? "text-emerald-600" : "text-red-600"}>
-                        <div>{lineDiff > 0 ? "+" : ""}{lineDiff.toFixed(2)} kg</div>
+                        <div>{lineDiff > 0 ? "+" : ""}{lineDiff.toFixed(2)} {line.material_unit || "kg"}</div>
                         <div className="text-xs">
                           ({lineDiff > 0 ? "+" : ""}{formatCurrency(lineDiff * line.unit_price)})
                         </div>
@@ -361,7 +365,7 @@ export default function SaleLiquidatePage() {
             </span>
           </div>
           <p className="text-sm text-slate-600 mt-1">
-            Diferencia total: {totalQtyDifference > 0 ? "+" : ""}{totalQtyDifference.toFixed(2)} kg
+            Diferencia total: {totalQtyDifference > 0 ? "+" : ""}{totalQtyDifference.toFixed(2)} {diffUnit}
           </p>
         </div>
       )}

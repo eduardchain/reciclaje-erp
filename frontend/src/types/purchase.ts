@@ -39,6 +39,7 @@ export interface PurchaseLineResponse {
   created_at: string;
   material_code: string;
   material_name: string;
+  material_unit: string;
   warehouse_name: string | null;
 }
 

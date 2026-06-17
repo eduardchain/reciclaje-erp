@@ -139,7 +139,7 @@ export function exportPurchasePDF(purchase: PurchaseResponse, orgName?: string) 
     }
     doc.text(`${line.material_code} - ${line.material_name}`.substring(0, 35), colX.material, y);
     doc.text((line.warehouse_name ?? "-").substring(0, 18), colX.warehouse, y);
-    doc.text(formatWeight(line.quantity), colX.qty, y, { align: "right" });
+    doc.text(formatWeight(line.quantity, line.material_unit), colX.qty, y, { align: "right" });
     doc.text(formatCurrency(line.unit_price), colX.price, y, { align: "right" });
     doc.text(formatCurrency(line.total_price), pageWidth - 14, y, { align: "right" });
     y += 6;
@@ -269,7 +269,7 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string, options?: { 
       y = 20;
     }
     doc.text(`${line.material_code} - ${line.material_name}`.substring(0, 40), colX.material, y);
-    doc.text(formatWeight(line.quantity), colX.qty, y, { align: "right" });
+    doc.text(formatWeight(line.quantity, line.material_unit), colX.qty, y, { align: "right" });
     if (showPrices) {
       doc.text(formatCurrency(line.unit_price), colX.price, y, { align: "right" });
       doc.text(formatCurrency(line.unit_cost), colX.cost, y, { align: "right" });
@@ -430,7 +430,7 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string, 
       y = 20;
     }
     doc.text(`${line.material_code} - ${line.material_name}`.substring(0, 28), colX.material, y);
-    doc.text(formatWeight(line.quantity), colX.qty, y, { align: "right" });
+    doc.text(formatWeight(line.quantity, line.material_unit), colX.qty, y, { align: "right" });
     doc.text(formatCurrency(line.purchase_unit_price), colX.pCompra, y, { align: "right" });
     doc.text(formatCurrency(line.sale_unit_price), colX.pVenta, y, { align: "right" });
     doc.text(formatCurrency(line.total_purchase), colX.tCompra, y, { align: "right" });

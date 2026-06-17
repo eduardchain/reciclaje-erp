@@ -195,7 +195,7 @@ export default function PurchaseDetailPage() {
                       </div>
                     </TableCell>
                     <TableCell>{line.warehouse_name ?? "-"}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatWeight(line.quantity)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatWeight(line.quantity, line.material_unit)}</TableCell>
                     {canViewPrices && <TableCell className="text-right tabular-nums">{formatCurrency(line.unit_price)}</TableCell>}
                     {canViewPrices && <TableCell className="text-right tabular-nums font-medium">{formatCurrency(line.total_price)}</TableCell>}
                   </TableRow>

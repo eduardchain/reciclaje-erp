@@ -289,11 +289,53 @@ class TestCreateSale:
         assert len(data["lines"]) == 1
         assert float(data["lines"][0]["quantity"]) == 50.0
         assert data["lines"][0]["material_code"] == "COPPER-001"
+        assert data["lines"][0]["material_unit"] == "kg"  # unidad de medida del material
         assert float(data["lines"][0]["unit_cost"]) == 45.0  # Captured cost
         assert float(data["lines"][0]["profit"]) == 1750.0  # (80-45) * 50
         assert "total_profit" in data
         assert "id" in data
         assert "created_at" in data
+
+    def test_sale_line_includes_material_unit(
+        self,
+        client,
+        org_headers,
+        test_customer,
+        test_warehouse,
+        db_session,
+        test_organization,
+    ):
+        """La response de venta expone material_unit por linea (kg, unidad, etc.)."""
+        unit_material = Material(
+            id=uuid4(),
+            code="AC-UNIT",
+            name="Aire Acondicionado",
+            default_unit="unidad",
+            current_stock=Decimal("10.0000"),
+            current_stock_liquidated=Decimal("10.0000"),
+            current_average_cost=Decimal("50000.0000"),
+            organization_id=test_organization.id,
+            is_active=True,
+        )
+        db_session.add(unit_material)
+        db_session.commit()
+
+        sale_data = {
+            "customer_id": str(test_customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": "2026-03-20T12:00:00",
+            "lines": [
+                {"material_id": str(unit_material.id), "quantity": 4.0, "unit_price": 80000.00}
+            ],
+            "commissions": [],
+            "auto_liquidate": False,
+        }
+
+        response = client.post("/api/v1/sales", json=sale_data, headers=org_headers)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["lines"][0]["material_unit"] == "unidad"
     
     def test_create_sale_with_commissions(
         self,

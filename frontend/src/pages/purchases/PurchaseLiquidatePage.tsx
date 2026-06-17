@@ -25,6 +25,7 @@ interface LiquidationLine {
   material_id: string;
   material_name: string;
   material_code: string;
+  material_unit: string;
   warehouse_name: string | null;
   quantity: number;
   unit_price: number;
@@ -84,6 +85,7 @@ export default function PurchaseLiquidatePage() {
             material_id: line.material_id,
             material_name: line.material_name,
             material_code: line.material_code,
+            material_unit: line.material_unit,
             warehouse_name: line.warehouse_name,
             quantity: line.quantity,
             unit_price: price,
@@ -252,9 +254,9 @@ export default function PurchaseLiquidatePage() {
                 </p>
               </div>
               <div className="md:col-span-2 flex md:block items-center justify-between">
-                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad (kg)</Label>
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad{line.material_unit ? ` (${line.material_unit})` : ""}</Label>
                 <p className="md:h-10 flex items-center text-sm tabular-nums">
-                  {formatWeight(line.quantity)}
+                  {formatWeight(line.quantity, line.material_unit || "kg")}
                 </p>
               </div>
               <div className={cn("relative", linesCostData ? "md:col-span-2" : "md:col-span-3")}>

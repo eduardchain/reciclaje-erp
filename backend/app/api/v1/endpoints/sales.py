@@ -61,6 +61,7 @@ def _enrich_sale_response(sale: Sale, db: Session = None, warnings: list[str] | 
                 **line.__dict__,
                 "material_code": line.material.code if line.material else None,
                 "material_name": line.material.name if line.material else None,
+                "material_unit": line.material.default_unit if line.material else "kg",
                 "profit": float(line.calculate_profit()),
                 "received_quantity": float(line.received_quantity) if line.received_quantity is not None else None,
                 "quantity_difference": float(line.received_quantity - line.quantity) if line.received_quantity is not None else None,

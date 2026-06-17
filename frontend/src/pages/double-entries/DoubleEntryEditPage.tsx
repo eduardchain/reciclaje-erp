@@ -51,6 +51,11 @@ export default function DoubleEntryEditPage() {
   const payableProviders = payableData?.items ?? [];
   const customers = customersData?.items ?? [];
   const materials = materialsData?.items ?? [];
+  // Unidad de medida por linea (kg, unidad, etc.) — resuelta desde el material elegido.
+  const unitSuffix = (materialId: string) => {
+    const u = materials.find((m) => m.id === materialId)?.default_unit;
+    return u ? ` (${u})` : "";
+  };
   const { getSuggestedPrice } = usePriceSuggestions();
 
   const [lines, setLines] = useState<LineFormData[]>([]);
@@ -221,7 +226,7 @@ export default function DoubleEntryEditPage() {
         <CardContent className="space-y-0">
           <div className="hidden md:grid grid-cols-12 gap-2 pb-2 border-b border-slate-200 mb-2">
             <div className="col-span-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Material</div>
-            <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cantidad (kg)</div>
+            <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cantidad</div>
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">P. Compra</div>
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">P. Venta</div>
             {canViewProfit && <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 text-right">Ganancia</div>}
@@ -251,7 +256,7 @@ export default function DoubleEntryEditPage() {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad (kg)</Label>
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad{unitSuffix(line.material_id)}</Label>
                   <MoneyInput value={line.quantity} onChange={(v) => updateLine(line._key, "quantity", v)} decimals={2} />
                 </div>
                 <div className="md:col-span-2 relative">

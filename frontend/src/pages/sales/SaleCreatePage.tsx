@@ -34,7 +34,7 @@ interface CommissionFormData extends SaleCommissionCreate {
   _key: number;
 }
 
-function WarehouseStockIndicator({ materialId, warehouseId, quantity }: { materialId: string; warehouseId: string; quantity: number }) {
+function WarehouseStockIndicator({ materialId, warehouseId, quantity, unit }: { materialId: string; warehouseId: string; quantity: number; unit?: string }) {
   const { data } = useQuery({
     queryKey: ["inventory", "stock-detail", materialId],
     queryFn: () => inventoryService.getStockDetail(materialId),
@@ -49,11 +49,11 @@ function WarehouseStockIndicator({ materialId, warehouseId, quantity }: { materi
     <div className="text-xs mt-1 whitespace-nowrap">
       <span className="text-slate-500">Stock: </span>
       <span className={insufficient ? "text-amber-600 font-medium" : "text-emerald-600"}>
-        {formatWeight(stock)}
+        {formatWeight(stock, unit || "kg")}
       </span>
       {insufficient && (
         <span className="text-amber-600 ml-1">
-          (faltan {formatWeight(quantity - stock)})
+          (faltan {formatWeight(quantity - stock, unit || "kg")})
         </span>
       )}
     </div>
@@ -87,6 +87,12 @@ export default function SaleCreatePage() {
   const warehouses = warehousesData?.items ?? [];
   const accounts = accountsData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
+  // Unidad de medida por linea (kg, unidad, etc.) — resuelta desde el material elegido.
+  const unitOf = (materialId: string) => materials.find((m) => m.id === materialId)?.default_unit ?? "";
+  const unitSuffix = (materialId: string) => {
+    const u = unitOf(materialId);
+    return u ? ` (${u})` : "";
+  };
   const { hasPermission } = usePermissions();
   const canLiquidate = hasPermission("sales.liquidate");
   const canViewPrices = hasPermission("sales.view_prices");
@@ -283,10 +289,10 @@ export default function SaleCreatePage() {
                 <EntitySelect value={line.material_id} onChange={(v) => handleMaterialChange(line._key, v)} options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))} placeholder="Material..." />
               </div>
               <div className={cn("relative", canViewPrices ? "md:col-span-2" : "md:col-span-5")}>
-                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad (kg) *</Label>
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad{unitSuffix(line.material_id)} *</Label>
                 <MoneyInput value={line.quantity} onChange={(v) => updateLine(line._key, "quantity", v)} decimals={2} placeholder="0,00" />
                 <div className="absolute left-0 w-max" style={{ top: "100%" }}>
-                  <WarehouseStockIndicator materialId={line.material_id} warehouseId={warehouseId} quantity={line.quantity} />
+                  <WarehouseStockIndicator materialId={line.material_id} warehouseId={warehouseId} quantity={line.quantity} unit={unitOf(line.material_id)} />
                 </div>
               </div>
               {canViewPrices && (

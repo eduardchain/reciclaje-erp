@@ -153,7 +153,7 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
         <div className="space-y-0.5">
           {row.original.lines.map((line) => (
             <div key={line.id} className="text-xs text-slate-600">
-              {line.material_code} - {formatWeight(line.quantity)}{canViewPrices ? ` x ${formatCurrency(line.unit_price)}` : ""}
+              {line.material_code} - {formatWeight(line.quantity, line.material_unit)}{canViewPrices ? ` x ${formatCurrency(line.unit_price)}` : ""}
             </div>
           ))}
         </div>
@@ -356,7 +356,7 @@ export default function PurchasesPage() {
             statusBadge={<StatusBadge status={p.status} />}
             cancelled={p.status === "cancelled"}
             actions={<ActionsCell purchase={p} />}
-            description={p.lines.length > 0 ? p.lines.map((l) => `${l.material_code} ${formatWeight(l.quantity)}`).join(" · ") : undefined}
+            description={p.lines.length > 0 ? p.lines.map((l) => `${l.material_code} ${formatWeight(l.quantity, l.material_unit)}`).join(" · ") : undefined}
             extras={p.double_entry_id ? <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium">Pasa Mano</span> : undefined}
           />
         )}

@@ -75,6 +75,7 @@ class PurchaseLineResponse(PurchaseLineBase):
     # Joined data from related models
     material_code: str = Field(..., description="Material code (e.g., MAT-001)")
     material_name: str = Field(..., description="Material name")
+    material_unit: str = Field("kg", description="Unidad de medida del material (kg, unidad, etc.)")
     warehouse_name: Optional[str] = Field(None, description="Warehouse name (null for double-entry)")
     
     model_config = {"from_attributes": True}

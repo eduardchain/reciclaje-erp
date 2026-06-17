@@ -149,7 +149,7 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean, showCogs: bo
         <div className="space-y-0.5">
           {row.original.lines.map((line) => (
             <div key={line.id} className="text-xs text-slate-600">
-              {line.material_code} - {formatWeight(line.quantity)}{canViewPrices ? ` x ${formatCurrency(line.unit_price)}` : ""}
+              {line.material_code} - {formatWeight(line.quantity, line.material_unit)}{canViewPrices ? ` x ${formatCurrency(line.unit_price)}` : ""}
             </div>
           ))}
         </div>
@@ -496,7 +496,7 @@ export default function SalesPage() {
             statusBadge={<StatusBadge status={s.status} />}
             cancelled={s.status === "cancelled"}
             actions={<ActionsCell sale={s} />}
-            description={s.lines.length > 0 ? s.lines.map((l) => `${l.material_code} ${formatWeight(l.quantity)}`).join(" · ") : undefined}
+            description={s.lines.length > 0 ? s.lines.map((l) => `${l.material_code} ${formatWeight(l.quantity, l.material_unit)}`).join(" · ") : undefined}
             extras={
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                 {canViewProfit && (

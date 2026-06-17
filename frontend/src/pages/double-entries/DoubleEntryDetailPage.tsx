@@ -125,7 +125,7 @@ export default function DoubleEntryDetailPage() {
                 {de.lines.map((line) => (
                   <TableRow key={line.id}>
                     <TableCell><span className="font-medium">{line.material_name}</span> <span className="text-slate-400 text-xs">{line.material_code}</span></TableCell>
-                    <TableCell className="text-right tabular-nums">{formatWeight(line.quantity)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatWeight(line.quantity, line.material_unit)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(line.purchase_unit_price)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(line.sale_unit_price)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(line.total_purchase)}</TableCell>

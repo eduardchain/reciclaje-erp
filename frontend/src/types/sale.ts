@@ -39,6 +39,7 @@ export interface SaleLineResponse {
   created_at: string;
   material_code: string;
   material_name: string;
+  material_unit: string;
   received_quantity: number | null;
   quantity_difference: number | null;
   amount_difference: number | null;
