@@ -54,28 +54,56 @@ Verificar requisitos antes de tocar nada:
 # 1. Excel existe y es legible
 test -f "$EXCEL_PATH" && echo "OK: archivo existe" || (echo "ERROR: no existe" && exit 1)
 
-# 2. Excel tiene las 13 hojas esperadas
-./venv/bin/python -c "
-from openpyxl import load_workbook
-wb = load_workbook('$EXCEL_PATH', read_only=True)
-expected = {'NOTAS','UnidadesNegocio','Bodegas','CategoriaMateriales','CategoriaGastos','CategoriaTerceros','MapeoUN','Materiales','Precios','Terceros','Cuentas','Inventario','ActivosFijos'}
-actual = set(wb.sheetnames)
-missing = expected - actual
-print('Hojas:', sorted(actual))
-if missing:
-    print('FALTAN:', sorted(missing))
-    exit(1)
-print('OK: 13 hojas presentes')
-"
+# 2. **Verificar que :8000 corra EcoBalance (no otro proyecto)**.
+#    Gotcha real: el user puede tener otro uvicorn en :8000 y decir "esta corriendo".
+#    Login devolvera 405 inentendible si las rutas son las equivocadas.
+lsof -i :8000 | head -3
+curl -s http://localhost:8000/health  # debe responder {"status":"healthy"...}
+# Si responde "Method Not Allowed" o el lsof no es de reciclaje-erp:
+# matar el otro proceso y levantar EcoBalance.
 
-# 3. Backend dev corriendo
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/health || echo "ERROR: backend dev no responde en :8000 — corre 'cd backend && ./venv/bin/uvicorn app.main:app --reload --port 8000'"
+# 3. Migraciones al dia en dev
+cd /Users/daniel.chain/Projects/reciclaje-erp/backend && ./venv/bin/alembic current
+# Comparar contra heads(). Si difiere: 'alembic upgrade head' antes de continuar.
 
-# 4. Migraciones al dia en dev
-cd /Users/daniel.chain/Projects/reciclaje-erp/backend && ./venv/bin/alembic check 2>&1 || (echo "ERROR: hay migraciones pendientes en dev — correr 'alembic upgrade head' antes" && exit 1)
 ```
 
 Si cualquiera falla, ABORTAR y reportar al usuario. No continuar.
+
+### 2.5. Auditoria del Excel del cliente (CHECKLIST)
+
+**Paso obligatorio antes del dry-run** — el dry-run del script principal es OFFLINE
+y NO atrapa errores de contenido (typos en nombres, jerarquias invalidas, formatos
+de fecha, cruces rotos entre hojas, etc.). Esos errores solo aparecen en el apply,
+forzando iteraciones costosas con el cliente.
+
+El script `audit_migration_excel.py` los detecta TODOS en plain Spanish:
+
+```bash
+cd /Users/daniel.chain/Projects/reciclaje-erp/backend
+./venv/bin/python scripts/audit_migration_excel.py "$EXCEL_PATH"
+```
+
+**Reglas:**
+- Si reporta **errores bloqueantes** (🔴): ABORTAR. Pasarle el reporte al cliente
+  para que corrija. NO correr dry-run hasta tener 0 errores.
+- Si reporta **warnings** (🟡): revisarlos con el cliente uno por uno. La mayoria
+  son legitimos (ej: materiales sin precio, terceros sospechosos como
+  'RECICLAJE' que pueden ser materiales mal etiquetados).
+- Si todo OK: avanzar al paso 3 (dry-run).
+
+**Que detecta** (lecciones de la migracion de Biogreen 2026-06-23):
+- Texto suelto en fila NOTAS que rompe el parser
+- Typos en nombres (`Genral` vs `General`, `Resindenciales` vs `Residenciales`)
+- Cruces rotos (MapeoUN apunta a categoria que no existe; Inventario.bodega
+  apunta a nombre de material en vez de bodega)
+- Jerarquia >2 niveles en CategoriaGastos
+- Formato de fecha invalido en Inventario (debe ser YYYY-MM-DD)
+- Columna `categorias` vacia en Terceros (obligatorio)
+- `tipo_comportamiento` invalido en CategoriaTerceros
+- Codigos duplicados en Materiales
+- Sample rows del template que el cliente olvido borrar (ej: "Bascula Demo")
+- Heuristicas: nombres en MAYUSCULAS que parecen materiales en vez de terceros
 
 ### 3. Dry-run en DEV (validacion de estructura)
 
@@ -325,3 +353,12 @@ Si fallo:
 4. **Nunca skipear las dos confirmaciones criticas** (post-test dev y pre-apply prod), incluso si el usuario dice "vai sin preguntar". Estas son las salvaguardas core de la skill.
 5. **Si el dry-run prod falla**, NO seguir a apply. El cliente tiene que corregir el Excel o tu tienes que limpiar prod primero.
 6. **Logs en `/tmp/migration-*.log`** se conservan toda la sesion para auditoria. No borrar.
+7. **Si necesitas editar el Excel programaticamente** (con `openpyxl` desde Python),
+   pedile al usuario que **cierre Excel.app primero**. Si el archivo esta abierto
+   en la app, cuando el usuario haga Cmd+S sobrescribe tu cambio y se pierde.
+   Gotcha real de Biogreen: vacie 31 fechas de Inventario, el user guardo en Excel,
+   y mi cambio se perdio — el siguiente apply volvio a fallar con los mismos
+   errores. Verificalo con `os.path.getmtime` despues del save.
+8. **El dry-run es OFFLINE** (no llama al API). Si el cliente cambia algo despues
+   del dry-run, **vuelve a correr la auditoria (paso 2.5) ANTES del apply**, no
+   te confies del dry-run anterior.
