@@ -304,7 +304,7 @@ export default function SaleCreatePage() {
               {canViewPrices && (
               <div className="md:col-span-2 relative">
                 <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Precio {canEditPrices ? "*" : ""}</Label>
-                <MoneyInput value={line.unit_price} onChange={(v) => updateLine(line._key, "unit_price", v)} placeholder="0" disabled={!canEditPrices} />
+                <MoneyInput value={line.unit_price} onChange={(v) => updateLine(line._key, "unit_price", v)} decimals={2} placeholder="0" disabled={!canEditPrices} />
                 {canEditPrices && (
                 <div className="absolute left-0 w-max" style={{ top: "100%" }}>
                   <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "unit_price", p)} />

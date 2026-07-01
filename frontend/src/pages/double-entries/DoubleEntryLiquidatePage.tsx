@@ -222,6 +222,7 @@ export default function DoubleEntryLiquidatePage() {
                   <MoneyInput
                     value={line.purchase_unit_price}
                     onChange={(v) => updateLine(line.line_id, "purchase_unit_price", v)}
+                    decimals={2}
                     placeholder="0"
                     className={line.purchase_unit_price <= 0 ? "border-red-300" : ""}
                   />
@@ -237,6 +238,7 @@ export default function DoubleEntryLiquidatePage() {
                   <MoneyInput
                     value={line.sale_unit_price}
                     onChange={(v) => updateLine(line.line_id, "sale_unit_price", v)}
+                    decimals={2}
                     placeholder="0"
                     className={line.sale_unit_price <= 0 ? "border-red-300" : ""}
                   />

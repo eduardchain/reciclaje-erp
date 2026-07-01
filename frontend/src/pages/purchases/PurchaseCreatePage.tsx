@@ -322,6 +322,7 @@ export default function PurchaseCreatePage() {
                 <MoneyInput
                   value={line.unit_price}
                   onChange={(v) => updateLine(line._key, "unit_price", v)}
+                  decimals={2}
                   placeholder="0"
                   disabled={!canEditPrices}
                 />

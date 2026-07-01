@@ -339,6 +339,7 @@ export default function PurchaseEditPage() {
                 <MoneyInput
                   value={line.unit_price}
                   onChange={(v) => updateLine(line._key, "unit_price", v)}
+                  decimals={2}
                   placeholder="0"
                 />
                 <div className="absolute left-0 w-max" style={{ top: "100%" }}>

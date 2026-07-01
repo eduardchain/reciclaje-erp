@@ -261,14 +261,14 @@ export default function DoubleEntryEditPage() {
                 </div>
                 <div className="md:col-span-2 relative">
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>P. Compra</Label>
-                  <MoneyInput value={line.purchase_unit_price} onChange={(v) => updateLine(line._key, "purchase_unit_price", v)} />
+                  <MoneyInput value={line.purchase_unit_price} onChange={(v) => updateLine(line._key, "purchase_unit_price", v)} decimals={2} />
                   <div className="absolute left-0 w-max" style={{ top: "100%" }}>
                     <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "purchase")} onApply={(p) => updateLine(line._key, "purchase_unit_price", p)} />
                   </div>
                 </div>
                 <div className="md:col-span-2 relative">
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>P. Venta</Label>
-                  <MoneyInput value={line.sale_unit_price} onChange={(v) => updateLine(line._key, "sale_unit_price", v)} />
+                  <MoneyInput value={line.sale_unit_price} onChange={(v) => updateLine(line._key, "sale_unit_price", v)} decimals={2} />
                   <div className="absolute left-0 w-max" style={{ top: "100%" }}>
                     <PriceSuggestion suggestedPrice={getSuggestedPrice(line.material_id, "sale")} onApply={(p) => updateLine(line._key, "sale_unit_price", p)} />
                   </div>

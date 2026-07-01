@@ -264,6 +264,7 @@ export default function PurchaseLiquidatePage() {
                 <MoneyInput
                   value={line.unit_price}
                   onChange={(v) => updatePrice(line.line_id, v)}
+                  decimals={2}
                   placeholder="0"
                   className={line.unit_price <= 0 ? "border-red-300" : ""}
                 />
