@@ -8,6 +8,12 @@ const apiClient = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
+  // Serializar arrays como `key=a&key=b` (repeat), NO `key[]=a&key[]=b` (default axios).
+  // FastAPI (Query(list)) solo parsea el formato repeat; con corchetes el filtro llega
+  // como None y se ignora silenciosamente (ej: filtros multi-select de reportes).
+  paramsSerializer: {
+    indexes: null,
+  },
 });
 
 // Request interceptor: JWT token + Organization ID
