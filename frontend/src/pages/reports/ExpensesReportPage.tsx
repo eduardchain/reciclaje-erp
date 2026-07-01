@@ -276,10 +276,24 @@ function ExpenseDetailSheet({
 
         {data && (
           <>
-            <div className="text-sm text-slate-600 mb-3 flex items-center gap-3">
-              <span>{data.total_count} movimiento{data.total_count === 1 ? "" : "s"}</span>
-              <span className="text-slate-300">·</span>
-              <span>Total asignado: <span className="font-semibold tabular-nums">{formatCurrency(data.total_allocated)}</span></span>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="text-sm text-slate-600 flex items-center gap-3 flex-wrap">
+                <span>{data.total_count} movimiento{data.total_count === 1 ? "" : "s"}</span>
+                <span className="text-slate-300">·</span>
+                <span>Total asignado: <span className="font-semibold tabular-nums">{formatCurrency(data.total_allocated)}</span></span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => exportExpensesFlatExcel(data, dateFrom, dateTo, {
+                  buLabel: context?.bu_label || "Todas",
+                  catLabel: context?.cat_label || "Todas",
+                })}
+                disabled={data.total_count === 0}
+                className="shrink-0"
+              >
+                <FileSpreadsheet className="w-4 h-4 mr-1" /> Excel
+              </Button>
             </div>
             <div className="border rounded overflow-x-auto">
               <table className="w-full text-sm min-w-[640px]">

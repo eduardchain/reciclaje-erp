@@ -320,6 +320,7 @@ export function exportExpensesFlatExcel(
   data: ExpenseDetailResponse,
   periodFrom: string,
   periodTo: string,
+  context?: { buLabel?: string; catLabel?: string },
 ) {
   const ALLOC_LABEL: Record<string, string> = {
     direct: "Directo",
@@ -330,11 +331,13 @@ export function exportExpensesFlatExcel(
 
   rows.push(["Reporte de Gastos - Detalle"]);
   rows.push([`Periodo: ${periodFrom} - ${periodTo}`]);
+  if (context?.buLabel) rows.push([`UN: ${context.buLabel}`]);
+  if (context?.catLabel) rows.push([`Categoria: ${context.catLabel}`]);
   rows.push([]);
   rows.push(["Total movimientos", data.total_count]);
-  rows.push(["Total", data.total_allocated]);
+  rows.push(["Total asignado", data.total_allocated]);
   rows.push([]);
-  rows.push(["Fecha", "#", "Tipo", "Tercero", "UN", "Categoria", "Descripcion", "Monto", "Asignacion"]);
+  rows.push(["Fecha", "#", "Tipo", "Tercero", "UN", "Categoria", "Descripcion", "Monto Original", "Asignado", "Asignacion"]);
 
   for (const item of data.items) {
     rows.push([
@@ -346,6 +349,7 @@ export function exportExpensesFlatExcel(
       item.expense_category_name ?? "Sin Categoria",
       item.description ?? "",
       item.amount,
+      item.allocated_amount,
       ALLOC_LABEL[item.allocation_type] ?? item.allocation_type,
     ]);
   }
@@ -359,12 +363,13 @@ export function exportExpensesFlatExcel(
     { wch: 18 }, // UN
     { wch: 24 }, // Categoria
     { wch: 40 }, // Descripcion
-    { wch: 16 }, // Monto
+    { wch: 16 }, // Monto Original
+    { wch: 16 }, // Asignado
     { wch: 14 }, // Asignacion
   ];
 
-  // Total cell + columna Monto
-  applyCurrencyFormat(ws, [7]);
+  // Columnas Monto Original + Asignado
+  applyCurrencyFormat(ws, [7, 8]);
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Gastos detalle");
