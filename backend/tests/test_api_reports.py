@@ -413,14 +413,25 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         expense_category_id=cat_gasto_indirecto.id,
         description="Arriendo mensual", status="confirmed",
     )
-    # Comision: $50,000
+    # Comision pagada (commission_payment): $50,000 → afecta Cash Flow, NO P&L
     mm_comision = MoneyMovement(
         movement_number=3, organization_id=org_id,
         date=now - timedelta(days=2),
         movement_type="commission_payment", amount=Decimal("50000"),
         account_id=cuenta_efectivo.id,
         third_party_id=comisionista.id,
-        description="Comision venta", status="confirmed",
+        description="Pago comision venta", status="confirmed",
+    )
+    # Comision causada (commission_accrual): $50,000 → afecta P&L (base devengado,
+    # decision #23), account_id=NULL. Es lo que el P&L cuenta como commissions_paid,
+    # NO el commission_payment (que es el desembolso, va a Cash Flow).
+    mm_comision_accrual = MoneyMovement(
+        movement_number=12, organization_id=org_id,
+        date=now - timedelta(days=2),
+        movement_type="commission_accrual", amount=Decimal("50000"),
+        account_id=None,
+        third_party_id=comisionista.id,
+        description="Comision causada venta", status="confirmed",
     )
     # Service income: $150,000
     mm_servicio = MoneyMovement(
@@ -439,7 +450,7 @@ def report_data(db_session: Session, test_organization: Organization, test_user:
         third_party_id=cliente1.id,
         description="Abono cliente", status="confirmed",
     )
-    db_session.add_all([mm_gasto, mm_arriendo, mm_comision, mm_servicio, mm_cobro])
+    db_session.add_all([mm_gasto, mm_arriendo, mm_comision, mm_comision_accrual, mm_servicio, mm_cobro])
 
     # --- Pagos de compras y cobros de ventas (Cash Flow puro) ---
     # Pago compra 1: $1,600,000 (cuenta efectivo)
