@@ -1232,25 +1232,14 @@ def get_by_third_party(
     balance = initial
     opening_balance = initial
     all_items = []
+    in_range_items = []
 
-    # Fila sintetica de saldo inicial (solo si != 0 y no hay date_from del usuario)
-    if initial != 0 and not date_from:
-        all_items.append({
-            "id": f"initial-{third_party_id}",
-            "date": tp.created_at.isoformat() if tp.created_at else None,
-            "event_type": "initial_balance",
-            "description": "Saldo Inicial",
-            "amount": float(abs(initial)),
-            "direction": 1 if initial > 0 else -1,
-            "balance_after": float(initial),
-            "status": "confirmed",
-            "reference_number": None,
-            "movement_number": None,
-            "source": "system",
-            "source_id": None,
-            "source_number": None,
-        })
-
+    # Primera pasada: calcular el saldo corrido sobre TODOS los eventos.
+    # Los movimientos ANTERIORES a la ventana (date_from_dt) se absorben en
+    # opening_balance (= saldo de apertura real del periodo visible) y NO se
+    # listan. Asi el saldo corrido queda trazable aunque el default de 90 dias
+    # deje operaciones fuera de la vista (sin esto, el saldo "saltaba" sin
+    # mostrar el movimiento que lo movio).
     for _, _, _, filter_dt, evt in events:
         if evt["status"] not in ("annulled", "cancelled"):
             balance += Decimal(str(evt["amount"])) * evt["direction"]
@@ -1262,7 +1251,29 @@ def get_by_third_party(
         if date_to_dt and filter_dt >= date_to_dt:
             continue
 
-        all_items.append(evt)
+        in_range_items.append(evt)
+
+    # Fila sintetica de saldo inicial: refleja el SALDO DE APERTURA de la ventana
+    # (opening_balance, que ya incluye lo ocurrido antes del rango), NO el
+    # initial_balance crudo del tercero. Solo cuando el usuario no filtro por fecha.
+    if opening_balance != 0 and not date_from:
+        all_items.append({
+            "id": f"initial-{third_party_id}",
+            "date": tp.created_at.isoformat() if tp.created_at else None,
+            "event_type": "initial_balance",
+            "description": "Saldo Inicial",
+            "amount": float(abs(opening_balance)),
+            "direction": 1 if opening_balance > 0 else -1,
+            "balance_after": float(opening_balance),
+            "status": "confirmed",
+            "reference_number": None,
+            "movement_number": None,
+            "source": "system",
+            "source_id": None,
+            "source_number": None,
+        })
+
+    all_items.extend(in_range_items)
 
     # --- Paginar ---
     total = len(all_items)
@@ -1274,6 +1285,10 @@ def get_by_third_party(
         "skip": skip,
         "limit": limit,
         "opening_balance": float(opening_balance) if date_from_dt else None,
+        # Saldo actual del tercero, fresco desde BD — el KPI "Saldo Contable" debe
+        # usar este y no el current_balance de la lista de terceros (cacheada en el
+        # front), que se desfasa cuando hay movimientos recientes sin invalidar cache.
+        "current_balance": float(tp.current_balance) if tp and tp.current_balance is not None else 0.0,
     }
 
 

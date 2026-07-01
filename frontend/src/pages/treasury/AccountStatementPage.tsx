@@ -175,6 +175,10 @@ export default function AccountStatementPage() {
   }, 0);
 
   const selectedThirdParty = thirdParties.find((t) => t.id === thirdPartyId);
+  // Saldo actual: preferir el valor fresco del statement (backend) sobre el de la
+  // lista de terceros (cacheada), que se desfasa con movimientos recientes sin refrescar.
+  const currentBalance = (data as { current_balance?: number } | undefined)?.current_balance
+    ?? selectedThirdParty?.current_balance ?? 0;
 
   const canExport = !!thirdPartyId && movements.length > 0;
 
@@ -182,7 +186,7 @@ export default function AccountStatementPage() {
     thirdPartyName: selectedThirdParty?.name ?? "",
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
-    currentBalance: selectedThirdParty?.current_balance ?? 0,
+    currentBalance,
     totalDebit,
     totalCredit,
     openingBalance,
@@ -272,7 +276,7 @@ export default function AccountStatementPage() {
           <Card className="border-t-[3px] border-t-sky-500 shadow-sm">
             <CardContent className="p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Saldo Contable</p>
-              <MoneyDisplay amount={selectedThirdParty?.current_balance ?? 0} className="text-xl font-bold" />
+              <MoneyDisplay amount={currentBalance} className="text-xl font-bold" />
             </CardContent>
           </Card>
           <Card className="border-t-[3px] border-t-rose-500 shadow-sm">

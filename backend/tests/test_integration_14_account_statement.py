@@ -356,6 +356,70 @@ class TestAccountStatement:
             assert items[i]["date"] >= items[i-1]["date"], \
                 f"Ordering broken: item {i-1} date={items[i-1]['date']} > item {i} date={items[i]['date']}"
 
+    def test_opening_balance_reflects_movements_before_window(self, client, org_headers, scenario):
+        """FIX: sin date_from (vista default 90 dias), la fila 'Saldo Inicial' debe
+        reflejar el SALDO DE APERTURA real (incluyendo movimientos ANTERIORES a la
+        ventana), no el initial_balance crudo. Sin el fix, un movimiento que sale de
+        la ventana de 90 dias deja de listarse pero su efecto persiste en el saldo,
+        provocando un 'salto' inexplicable. Tambien valida current_balance fresco en
+        el response (fix del KPI 'Saldo Contable' que antes leia cache del front).
+        """
+        from datetime import date, timedelta
+        s = scenario
+        h = org_headers
+        sup_id = str(s["supplier"].id)
+
+        # Fondear cuenta para los anticipos
+        api_money_movement(client, h, "capital-injection", {
+            "investor_id": s["investor"].id, "amount": 2_000_000,
+            "account_id": s["account"].id, "date": f"{TODAY}T12:00:00",
+            "description": "Capital",
+        })
+
+        old_date = (date.today() - timedelta(days=120)).isoformat()  # FUERA de la ventana de 90 dias
+        recent_date = date.today().isoformat()                        # DENTRO de la ventana
+
+        # Movimiento VIEJO (fuera de ventana): anticipo $50K -> proveedor nos debe +$50K
+        api_money_movement(client, h, "advance-payment", {
+            "supplier_id": s["supplier"].id, "amount": 50_000,
+            "account_id": s["account"].id, "date": f"{old_date}T12:00:00",
+            "description": "Anticipo viejo (fuera de ventana)",
+        })
+        # Movimiento RECIENTE (dentro de ventana): anticipo $10K -> +$10K = $60K total
+        api_money_movement(client, h, "advance-payment", {
+            "supplier_id": s["supplier"].id, "amount": 10_000,
+            "account_id": s["account"].id, "date": f"{recent_date}T12:00:00",
+            "description": "Anticipo reciente (dentro de ventana)",
+        })
+
+        assert_tp_balance(client, h, sup_id, 60_000)
+
+        # Statement SIN date_from -> usa el default de 90 dias
+        stmt = get_statement(client, h, sup_id)
+        items = stmt["items"]
+
+        # FIX KPI: current_balance fresco en el response == saldo real actual
+        assert stmt["current_balance"] == pytest.approx(60_000, abs=0.01), \
+            f"current_balance deberia ser 60K fresco, got {stmt.get('current_balance')}"
+
+        # El movimiento VIEJO no debe listarse (cayo fuera de la ventana)
+        descriptions = [i["description"] for i in items]
+        assert not any("viejo" in d for d in descriptions), \
+            f"Movimiento viejo no deberia listarse (fuera de ventana): {descriptions}"
+        assert any("reciente" in d for d in descriptions), \
+            f"Movimiento reciente deberia listarse: {descriptions}"
+
+        # FIX PRINCIPAL: la fila 'Saldo Inicial' refleja el saldo de APERTURA ($50K del
+        # viejo), NO $0. Sin el fix no existiria (initial=0) y el saldo saltaria 0->60K.
+        initial_rows = [i for i in items if i["event_type"] == "initial_balance"]
+        assert len(initial_rows) == 1, \
+            f"Esperaba fila 'Saldo Inicial', tipos: {[i['event_type'] for i in items]}"
+        assert initial_rows[0]["balance_after"] == pytest.approx(50_000, abs=0.01), \
+            f"Saldo de apertura deberia ser 50K (incluye movimiento viejo), got {initial_rows[0]['balance_after']}"
+
+        # Saldo corrido trazable: ultimo item == saldo actual, sin salto
+        verify_running_balance(items, 60_000)
+
     def test_acid_all_statements(self, client, org_headers, scenario):
         """ACID: P&L == Balance Sheet despues de todas las operaciones."""
         s = scenario
