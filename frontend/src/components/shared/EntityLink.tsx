@@ -2,6 +2,7 @@ import { Link, useLocation } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import { ReactNode } from "react";
 import { ROUTES, buildRoute } from "@/utils/constants";
+import { saveScroll } from "@/hooks/useScrollRestoration";
 
 interface EntityLinkProps {
   to: string | null | undefined;
@@ -41,7 +42,9 @@ export function EntityLink({
       to={finalTo}
       className={className ?? defaultClass}
       title={title}
-      onClick={(e) => e.stopPropagation()}
+      // Guardar la posicion de scroll de la pagina actual (a la que se vuelve via
+      // returnTo) para que useScrollRestoration la restaure al regresar del detalle.
+      onClick={(e) => { e.stopPropagation(); saveScroll(returnTo ?? currentPath); }}
     >
       {children}
       {showIcon && <ExternalLink size={iconSize} />}

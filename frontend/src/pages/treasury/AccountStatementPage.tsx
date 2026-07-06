@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
+import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { EntityLink } from "@/components/shared/EntityLink";
 import { ROUTES, buildRoute } from "@/utils/constants";
 import { ArrowLeft, FileText, Download, AlertTriangle } from "lucide-react";
@@ -162,6 +163,10 @@ export default function AccountStatementPage() {
   const { data, isLoading } = useThirdPartyMovements(thirdPartyId, filters);
   const movements: StatementItem[] = data?.items ?? [];
   const total = data?.total ?? 0;
+
+  // Restaurar scroll al volver del detalle de un movimiento (venta/cruce/etc.).
+  // EntityLink guarda la posicion antes de navegar; aqui se restaura al regresar.
+  useScrollRestoration(!isLoading);
   const isTruncated = total > movements.length;
   const openingBalance = data?.opening_balance ?? 0;
 
