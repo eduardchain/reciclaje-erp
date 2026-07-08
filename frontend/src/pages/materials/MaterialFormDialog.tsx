@@ -20,7 +20,8 @@ export default function MaterialFormDialog({ open, onOpenChange, editItem }: Pro
   const { data: businessUnitsData } = useBusinessUnits();
 
   const categories = categoriesData?.items ?? [];
-  const businessUnits = businessUnitsData?.items ?? [];
+  // Excluir UN de sistema (Pasa Mano): no puede tener materiales (backend la rechaza con 400)
+  const businessUnits = (businessUnitsData?.items ?? []).filter((b) => !b.system_code);
 
   const [code, setCode] = useState("");
   const [name, setName] = useState("");

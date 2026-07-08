@@ -45,6 +45,7 @@ from app.schemas.reports import (
     DashboardAlert,
     DashboardMetrics,
     DashboardResponse,
+    DoubleEntryProfitability,
     ExpenseCategoryBreakdown,
     MarginAnalysisResponse,
     MaterialMargin,
@@ -3262,19 +3263,35 @@ class ReportService:
         self, db: Session, organization_id: UUID,
         date_from: date, date_to: date,
     ) -> ProfitabilityByBUResponse:
-        """Reporte de rentabilidad por Unidad de Negocio."""
+        """Reporte de rentabilidad por Unidad de Negocio (SOLO bodega).
+
+        Doble partida se analiza aparte en la seccion `double_entry` con logica
+        propia: margen bruto + comisiones DP + gastos directos a la UN sistema.
+        Ver plan-rentabilidad-un-pasamano.md.
+        """
         dt_from, dt_to = self._date_range(date_from, date_to)
 
-        # 1. Obtener UNs activas
+        # 1. Obtener UNs activas.
+        # La UN de sistema (Pasa Mano) se EXCLUYE de la tabla bodega — sus
+        # gastos directos van a la seccion double_entry.
+        # ⚠️ Esta exclusion va SOLO aca, NUNCA en _compute_expense_allocations
+        # (el Reporte de Gastos DEBE mostrar la UN Pasa Mano como grupo).
         bus = db.execute(
-            select(BusinessUnit.id, BusinessUnit.name)
+            select(BusinessUnit.id, BusinessUnit.name, BusinessUnit.system_code)
             .where(
                 BusinessUnit.organization_id == organization_id,
                 BusinessUnit.is_active == True,
             )
             .order_by(BusinessUnit.name)
         ).all()
-        bu_names = {str(bu.id): bu.name for bu in bus}
+        system_bu_id: Optional[str] = None
+        system_bu_name = "Pasa Mano"
+        for bu in bus:
+            if bu.system_code == "double_entry":
+                system_bu_id = str(bu.id)
+                system_bu_name = bu.name
+                break
+        bu_names = {str(bu.id): bu.name for bu in bus if not bu.system_code}
         all_bu_keys = list(bu_names.keys()) + ["unassigned"]
 
         # 2. Compras por UN (base para prorrateo)
@@ -3309,33 +3326,31 @@ class ReportService:
             revenue_by_bu[key] = Decimal(str(revenue))
             cogs_by_bu[key] = Decimal(str(cogs))
 
-        # 4. Margen de Doble Partida por UN
+        # 4. Totales de Doble Partida (seccion Pasa Mano — NO entra a las filas por UN).
+        # ⚠️ NO confundir con el `de_profit` local de _calculate_profit (P&L):
+        # ese es otro calculo con el mismo nombre y NO se toca.
         de_filters = [
             DoubleEntry.organization_id == organization_id,
             DoubleEntry.status == "liquidated",
             DoubleEntry.liquidated_at >= dt_from,
             DoubleEntry.liquidated_at < dt_to,
         ]
-        de_rows = db.execute(
+        de_row = db.execute(
             select(
-                Material.business_unit_id,
                 func.coalesce(
-                    func.sum(
-                        (DoubleEntryLine.sale_unit_price - DoubleEntryLine.purchase_unit_price)
-                        * DoubleEntryLine.quantity
-                    ), 0
+                    func.sum(DoubleEntryLine.sale_unit_price * DoubleEntryLine.quantity), 0
+                ),
+                func.coalesce(
+                    func.sum(DoubleEntryLine.purchase_unit_price * DoubleEntryLine.quantity), 0
                 ),
             )
             .select_from(DoubleEntryLine)
             .join(DoubleEntry, DoubleEntryLine.double_entry_id == DoubleEntry.id)
-            .join(Material, DoubleEntryLine.material_id == Material.id)
             .where(*de_filters)
-            .group_by(Material.business_unit_id)
-        ).all()
-        de_profit_by_bu: dict[str, Decimal] = {}
-        for bu_id, profit in de_rows:
-            key = str(bu_id) if bu_id else "unassigned"
-            de_profit_by_bu[key] = Decimal(str(profit))
+        ).one()
+        de_sales_total = Decimal(str(de_row[0]))
+        de_purchases_total = Decimal(str(de_row[1]))
+        de_gross_profit = de_sales_total - de_purchases_total
 
         # 5. Gastos P&L por tipo de asignacion
         expense_filters = [
@@ -3365,6 +3380,9 @@ class ReportService:
         general_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
         # Desglose directo por categoria
         direct_detail: dict[str, dict[str, Decimal]] = {k: {} for k in all_bu_keys}
+        # Acumuladores Pasa Mano (gastos directos a la UN sistema)
+        pasamano_direct = Decimal("0")
+        pasamano_direct_detail: dict[str, Decimal] = {}
 
         for row in expense_rows:
             amt = Decimal(str(row.amount))
@@ -3372,6 +3390,16 @@ class ReportService:
             applicable = row.applicable_business_unit_ids  # JSONB: list of UUID strings or None
 
             if bu_id:
+                # DIRECTO a la UN sistema -> seccion Pasa Mano.
+                # ⚠️ Sin este branch caeria en "unassigned" (la UN sistema no
+                # esta en bu_names) — punto fragil marcado por QA en el plan.
+                if system_bu_id and bu_id == system_bu_id:
+                    pasamano_direct += amt
+                    cat_name = row.cat_name or "Sin Categoría"
+                    pasamano_direct_detail[cat_name] = (
+                        pasamano_direct_detail.get(cat_name, Decimal("0")) + amt
+                    )
+                    continue
                 # DIRECTO: 100% a esta UN
                 key = bu_id if bu_id in bu_names else "unassigned"
                 direct_by_bu[key] = direct_by_bu.get(key, Decimal("0")) + amt
@@ -3398,12 +3426,17 @@ class ReportService:
                     for k, v in prorated.items():
                         general_by_bu[k] = general_by_bu.get(k, Decimal("0")) + v
 
-        # 6. Comisiones de venta por UN (prorrateo por valor de linea)
+        # 6. Comisiones de venta por UN (prorrateo por valor de linea).
+        # Split bodega vs DP: las comisiones de ventas con double_entry_id van a
+        # la seccion Pasa Mano — antes contaminaban las UN de bodega (fuga #2
+        # del plan: ~$48M de comisiones pasamano caian en "Chatarra").
         commission_rows = db.execute(
             select(
                 MoneyMovement.sale_id,
                 MoneyMovement.amount,
+                Sale.double_entry_id,
             )
+            .join(Sale, MoneyMovement.sale_id == Sale.id)
             .where(
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.status == "confirmed",
@@ -3415,11 +3448,15 @@ class ReportService:
         ).all()
 
         commissions_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
+        pasamano_commissions = Decimal("0")
         if commission_rows:
-            # Agrupar comisiones por sale_id
+            # Agrupar comisiones por sale_id (solo bodega; DP va al total pasamano)
             sale_commissions: dict[UUID, Decimal] = {}
             sale_ids_set: set[UUID] = set()
-            for sale_id, comm_amt in commission_rows:
+            for sale_id, comm_amt, de_id in commission_rows:
+                if de_id is not None:
+                    pasamano_commissions += Decimal(str(comm_amt))
+                    continue
                 sale_commissions[sale_id] = sale_commissions.get(sale_id, Decimal("0")) + Decimal(str(comm_amt))
                 sale_ids_set.add(sale_id)
 
@@ -3464,8 +3501,8 @@ class ReportService:
             bu_name = bu_names.get(bu_key, "Sin Asignar")
             revenue = revenue_by_bu.get(bu_key, Decimal("0"))
             cogs = cogs_by_bu.get(bu_key, Decimal("0"))
-            de_profit = de_profit_by_bu.get(bu_key, Decimal("0"))
-            gross_profit = revenue - cogs + de_profit
+            # Sin DP: utilidad bruta de la UN = solo operacion de bodega
+            gross_profit = revenue - cogs
 
             direct = direct_by_bu.get(bu_key, Decimal("0"))
             shared = shared_by_bu.get(bu_key, Decimal("0"))
@@ -3488,7 +3525,7 @@ class ReportService:
             ]
 
             # Solo incluir si tiene alguna actividad
-            has_activity = any([revenue, cogs, de_profit, direct, shared, general, comms])
+            has_activity = any([revenue, cogs, direct, shared, general, comms])
             if not has_activity:
                 continue
 
@@ -3503,7 +3540,6 @@ class ReportService:
                 sales_revenue=float(revenue),
                 sales_cogs=float(cogs),
                 sales_gross_profit=float(revenue - cogs),
-                de_profit=float(de_profit),
                 total_gross_profit=float(gross_profit),
                 direct_expenses=float(direct),
                 shared_expenses=float(shared),
@@ -3521,7 +3557,6 @@ class ReportService:
             totals.sales_revenue += float(revenue)
             totals.sales_cogs += float(cogs)
             totals.sales_gross_profit += float(revenue - cogs)
-            totals.de_profit += float(de_profit)
             totals.total_gross_profit += float(gross_profit)
             totals.direct_expenses += float(direct)
             totals.shared_expenses += float(shared)
@@ -3537,11 +3572,37 @@ class ReportService:
                 Decimal(str(totals.sales_revenue)),
             )
 
+        # 8. Seccion Pasa Mano: margen DP + comisiones DP + gastos directos a
+        # la UN sistema. Sin prorrateo de generales (decision del cliente).
+        pasamano_detail = [
+            ExpenseByCategoryItem(category_name=cat, amount=float(val))
+            for cat, val in sorted(pasamano_direct_detail.items(), key=lambda x: -x[1])
+            if val != 0
+        ]
+        pasamano_net = de_gross_profit - pasamano_commissions - pasamano_direct
+        double_entry_section = DoubleEntryProfitability(
+            business_unit_id=system_bu_id,
+            label=system_bu_name,
+            sales_total=float(de_sales_total),
+            purchases_total=float(de_purchases_total),
+            gross_profit=float(de_gross_profit),
+            commissions=float(pasamano_commissions),
+            direct_expenses=float(pasamano_direct),
+            direct_expenses_detail=pasamano_detail,
+            net_profit=float(pasamano_net),
+            net_margin=(
+                self._safe_pct(pasamano_net, de_sales_total)
+                if de_sales_total > 0 else 0.0
+            ),
+        )
+
         return ProfitabilityByBUResponse(
             period_from=date_from,
             period_to=date_to,
             business_units=result_bus,
             totals=totals,
+            double_entry=double_entry_section,
+            grand_total_net=totals.net_profit + float(pasamano_net),
         )
 
     # ==================================================================
@@ -3555,16 +3616,23 @@ class ReportService:
         """Reporte de costo real por material = costo promedio + overhead rate."""
         dt_from, dt_to = self._date_range(date_from, date_to)
 
-        # 1. UNs activas
+        # 1. UNs activas.
+        # La UN de sistema (Pasa Mano) se excluye: sus gastos directos son costo
+        # de doble partida, NO overhead de material. Sin este skip, generaria
+        # una fila fantasma (gastos > 0, kg = 0, sin materiales) o — peor — sus
+        # gastos caerian en "Sin Asignar".
         bus = db.execute(
-            select(BusinessUnit.id, BusinessUnit.name)
+            select(BusinessUnit.id, BusinessUnit.name, BusinessUnit.system_code)
             .where(
                 BusinessUnit.organization_id == organization_id,
                 BusinessUnit.is_active == True,
             )
             .order_by(BusinessUnit.name)
         ).all()
-        bu_names = {str(bu.id): bu.name for bu in bus}
+        system_bu_id: Optional[str] = next(
+            (str(bu.id) for bu in bus if bu.system_code == "double_entry"), None
+        )
+        bu_names = {str(bu.id): bu.name for bu in bus if not bu.system_code}
         all_bu_keys = list(bu_names.keys()) + ["unassigned"]
 
         # 2. Compras por UN (valor + kg)
@@ -3598,6 +3666,10 @@ class ReportService:
             applicable = row.applicable_business_unit_ids
 
             if bu_id:
+                # Gasto directo a la UN sistema (Pasa Mano): costo de doble
+                # partida, no overhead de material — fuera de este reporte.
+                if system_bu_id and bu_id == system_bu_id:
+                    continue
                 key = bu_id if bu_id in bu_names else "unassigned"
                 total_expenses_by_bu[key] = total_expenses_by_bu.get(key, Decimal("0")) + amt
             elif applicable:
@@ -3703,6 +3775,11 @@ class ReportService:
         """Calcular alocaciones (mov_id, bu_id, cat_id, allocated_amount, allocation_type)
         para todos los gastos del periodo, replicando la logica 3-tier de
         get_profitability_by_business_unit.
+
+        ⚠️ NO "sincronizar" con profitability: aca la UN de sistema (Pasa Mano)
+        SI se incluye en bu_names — el Reporte de Gastos DEBE mostrarla como
+        grupo con sus gastos directos. La exclusion de la UN sistema aplica
+        SOLO en get_profitability_by_business_unit y get_real_cost_by_material.
 
         Returns:
             (allocations, bu_names, cat_info)

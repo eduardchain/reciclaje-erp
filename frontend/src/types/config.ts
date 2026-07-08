@@ -7,6 +7,8 @@ export interface BusinessUnitResponse extends BaseEntity {
   name: string;
   description: string | null;
   is_active: boolean;
+  // 'double_entry' = UN de sistema Pasa Mano (sin materiales, sin compartidos)
+  system_code: string | null;
 }
 
 export interface BusinessUnitCreate {

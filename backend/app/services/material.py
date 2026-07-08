@@ -112,7 +112,14 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="La unidad de negocio no pertenece a esta organizacion"
             )
-        
+        # Guard: UN de sistema (Pasa Mano) no agrupa materiales — con materiales
+        # entraria a la base de prorrateo y rompe el aislamiento de doble partida.
+        if business_unit.system_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No se pueden asignar materiales a la UN '{business_unit.name}' (unidad de sistema)"
+            )
+
         # Validate category belongs to organization
         cat_statement = select(MaterialCategory).where(
             MaterialCategory.id == obj_in.category_id,
@@ -191,6 +198,12 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="La unidad de negocio no pertenece a esta organizacion"
+                )
+            # Guard: UN de sistema (Pasa Mano) no agrupa materiales
+            if business_unit.system_code:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No se pueden asignar materiales a la UN '{business_unit.name}' (unidad de sistema)"
                 )
         
         # Validate category if being updated

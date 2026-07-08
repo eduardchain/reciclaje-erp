@@ -1724,10 +1724,14 @@ def bu_data(db_session: Session, test_organization, test_user):
     org_id = test_organization.id
     now = datetime.now(tz=timezone.utc)
 
-    # UNs
+    # UNs (incluye la UN de sistema Pasa Mano, como la crea el seed/migracion)
     bu_cobre = BusinessUnit(name="Cobre", organization_id=org_id, is_active=True)
     bu_chatarra = BusinessUnit(name="Chatarra", organization_id=org_id, is_active=True)
-    db_session.add_all([bu_cobre, bu_chatarra])
+    bu_pasamano = BusinessUnit(
+        name="Pasa Mano", organization_id=org_id, is_active=True,
+        system_code="double_entry",
+    )
+    db_session.add_all([bu_cobre, bu_chatarra, bu_pasamano])
     db_session.flush()
 
     # Categorias
@@ -1848,13 +1852,90 @@ def bu_data(db_session: Session, test_organization, test_user):
     )
     db_session.add(gasto_compartido)
 
+    # --- Doble Partida liquidada (material Chatarra): 300kg @1000 compra / @1400 venta ---
+    # Sus compras NO entran a la base de prorrateo (double_entry_id != NULL) y
+    # su margen/comisiones van a la seccion Pasa Mano, no a la UN Chatarra.
+    de_purchase = Purchase(
+        organization_id=org_id, purchase_number=950,
+        supplier_id=supplier.id, date=now, status="liquidated",
+        liquidated_at=now, total_amount=Decimal("300000"),
+    )
+    db_session.add(de_purchase)
+    db_session.flush()
+    de_sale = Sale(
+        organization_id=org_id, sale_number=950,
+        customer_id=customer.id, date=now, status="liquidated",
+        liquidated_at=now, total_amount=Decimal("420000"),
+    )
+    db_session.add(de_sale)
+    db_session.flush()
+    dp = DoubleEntry(
+        double_entry_number=950, organization_id=org_id,
+        date=now.date(), supplier_id=supplier.id, customer_id=customer.id,
+        purchase_id=de_purchase.id, sale_id=de_sale.id,
+        status="liquidated", liquidated_at=now,
+    )
+    db_session.add(dp)
+    db_session.flush()
+    de_purchase.double_entry_id = dp.id
+    de_sale.double_entry_id = dp.id
+    db_session.add(DoubleEntryLine(
+        double_entry_id=dp.id, material_id=mat_chatarra.id,
+        quantity=Decimal("300"), purchase_unit_price=Decimal("1000"),
+        sale_unit_price=Decimal("1400"),
+    ))
+    db_session.add(PurchaseLine(
+        purchase_id=de_purchase.id, material_id=mat_chatarra.id,
+        warehouse_id=wh.id, quantity=Decimal("300"), unit_price=Decimal("1000"),
+        total_price=Decimal("300000"),
+    ))
+    db_session.add(SaleLine(
+        sale_id=de_sale.id, material_id=mat_chatarra.id,
+        quantity=Decimal("300"), unit_price=Decimal("1400"),
+        total_price=Decimal("420000"), unit_cost=Decimal("1000"),
+    ))
+
+    # Comision de la DP: $30K -> debe ir a la seccion Pasa Mano (fuga #2)
+    comm_dp = MoneyMovement(
+        organization_id=org_id, movement_number=903,
+        date=now, movement_type="commission_accrual", amount=Decimal("30000"),
+        account_id=None, sale_id=de_sale.id,
+        description="Comision DP", status="confirmed",
+    )
+    db_session.add(comm_dp)
+
+    # Comision de la venta de bodega (Cobre): $60K -> se queda en la UN Cobre
+    comm_bodega = MoneyMovement(
+        organization_id=org_id, movement_number=904,
+        date=now, movement_type="commission_accrual", amount=Decimal("60000"),
+        account_id=None, sale_id=venta.id,
+        description="Comision venta bodega", status="confirmed",
+    )
+    db_session.add(comm_bodega)
+
+    # Gasto DIRECTO a la UN sistema Pasa Mano: $250K (ej. bono de mula foranea)
+    gasto_pasamano = MoneyMovement(
+        organization_id=org_id, movement_number=905,
+        date=now, movement_type="expense", amount=Decimal("250000"),
+        account_id=cuenta.id, description="Bono mula foranea",
+        expense_category_id=cat_gasto_directo.id,
+        business_unit_id=bu_pasamano.id,
+        status="confirmed",
+    )
+    db_session.add(gasto_pasamano)
+
     db_session.commit()
 
     return {
         "bu_cobre": bu_cobre,
         "bu_chatarra": bu_chatarra,
+        "bu_pasamano": bu_pasamano,
         "mat_cobre": mat_cobre,
         "mat_chatarra": mat_chatarra,
+        "cat_metales": cat_metales,
+        "cat_gasto_directo": cat_gasto_directo,
+        "cuenta": cuenta,
+        "gasto_general_mov": gasto_general,
         "compra_cobre_value": Decimal("1600000"),  # 200kg @ $8000
         "compra_chatarra_value": Decimal("600000"),  # 500kg @ $1200
         "compra_total": Decimal("2200000"),
@@ -1863,6 +1944,13 @@ def bu_data(db_session: Session, test_organization, test_user):
         "gasto_directo_chatarra": Decimal("500000"),
         "gasto_general": Decimal("1000000"),
         "gasto_compartido": Decimal("200000"),
+        # Doble partida
+        "dp_sales": Decimal("420000"),
+        "dp_purchases": Decimal("300000"),
+        "dp_gross": Decimal("120000"),
+        "dp_commission": Decimal("30000"),
+        "bodega_commission": Decimal("60000"),
+        "gasto_pasamano": Decimal("250000"),
     }
 
 
@@ -2006,6 +2094,350 @@ class TestBUValidation:
                 "business_unit_id": bu_data["bu_cobre"].id,
                 "applicable_business_unit_ids": [bu_data["bu_chatarra"].id],
             })
+
+
+PROFITABILITY_URL = "/api/v1/reports/profitability-by-business-unit"
+PROFITABILITY_PARAMS = {"date_from": "2026-01-01", "date_to": "2026-12-31"}
+
+
+class TestPasamanoSection:
+    """Seccion Pasa Mano del reporte de rentabilidad (plan-rentabilidad-un-pasamano.md).
+
+    La tabla por UN es SOLO bodega; doble partida se analiza en `double_entry`.
+    """
+
+    def test_bu_rows_exclude_dp_commissions(self, client, org_headers, bu_data):
+        """Fuga #2: la comision de la DP ($30K, material Chatarra) NO cae en la
+        UN Chatarra; la comision de bodega ($60K) SI queda en Cobre."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        cobre = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre")
+        assert chatarra["sale_commissions"] == 0.0
+        assert cobre["sale_commissions"] == float(bu_data["bodega_commission"])
+        assert data["double_entry"]["commissions"] == float(bu_data["dp_commission"])
+
+    def test_bu_rows_have_no_de_profit(self, client, org_headers, bu_data):
+        """Las filas por UN no exponen de_profit y la utilidad bruta = revenue - cogs."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        for bu in data["business_units"] + [data["totals"]]:
+            assert "de_profit" not in bu
+            assert bu["total_gross_profit"] == pytest.approx(
+                bu["sales_revenue"] - bu["sales_cogs"], abs=0.01
+            )
+        # El margen de la DP (material Chatarra) NO infla la bruta de Chatarra
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        assert chatarra["sales_revenue"] == 0.0
+        assert chatarra["total_gross_profit"] == 0.0
+
+    def test_system_bu_not_a_bodega_row(self, client, org_headers, bu_data):
+        """La UN sistema no aparece como fila de la tabla bodega."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        names = {bu["business_unit_name"] for bu in data["business_units"]}
+        assert "Pasa Mano" not in names
+
+    def test_pasamano_section_totals(self, client, org_headers, bu_data):
+        """Seccion Pasa Mano: ventas/compras/margen/comisiones/gastos/neta/margen%."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        de = resp.json()["double_entry"]
+        assert de["label"] == "Pasa Mano"
+        assert de["business_unit_id"] == str(bu_data["bu_pasamano"].id)
+        assert de["sales_total"] == float(bu_data["dp_sales"])
+        assert de["purchases_total"] == float(bu_data["dp_purchases"])
+        assert de["gross_profit"] == float(bu_data["dp_gross"])
+        assert de["commissions"] == float(bu_data["dp_commission"])
+        assert de["direct_expenses"] == float(bu_data["gasto_pasamano"])
+        expected_net = float(bu_data["dp_gross"] - bu_data["dp_commission"] - bu_data["gasto_pasamano"])
+        assert de["net_profit"] == pytest.approx(expected_net, abs=0.01)
+        # Detalle por categoria
+        assert de["direct_expenses_detail"][0]["amount"] == float(bu_data["gasto_pasamano"])
+
+    def test_grand_total_net(self, client, org_headers, bu_data):
+        """Total General = neta bodega + neta pasamano."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        assert data["grand_total_net"] == pytest.approx(
+            data["totals"]["net_profit"] + data["double_entry"]["net_profit"], abs=0.01
+        )
+
+    def test_pasamano_margin_matches_pnl(self, client, org_headers, bu_data):
+        """Paridad: pasamano.gross_profit == P&L double_entry_profit."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        de = resp.json()["double_entry"]
+        pnl = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params=PROFITABILITY_PARAMS, headers=org_headers,
+        ).json()
+        assert de["gross_profit"] == pytest.approx(pnl["double_entry_profit"], abs=1)
+
+    def test_pasamano_direct_expense_not_in_unassigned(self, client, org_headers, bu_data):
+        """El gasto directo a la UN sistema NO fuga a 'Sin Asignar' (punto fragil QA)."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        unassigned = next(
+            (bu for bu in data["business_units"] if bu["business_unit_name"] == "Sin Asignar"),
+            None,
+        )
+        if unassigned is not None:
+            assert unassigned["direct_expenses"] == 0.0
+
+    def test_expenses_report_shows_pasamano_group(self, client, org_headers, bu_data):
+        """Reporte de Gastos (#44): la UN Pasa Mano SI aparece como grupo con su directo."""
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={**PROFITABILITY_PARAMS, "group_by": "bu"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        groups = resp.json()["groups"]
+        pasamano = next((g for g in groups if g["label"] == "Pasa Mano"), None)
+        assert pasamano is not None
+        assert pasamano["total"] == float(bu_data["gasto_pasamano"])
+
+    def test_proration_unchanged_with_dp_present(self, client, org_headers, bu_data):
+        """Criterio #6: el prorrateo de generales NO cambia por la presencia de DP
+        (la compra DP de $300K queda fuera de la base $2.2M)."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        cobre = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre")
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        # Mismos valores exactos que test_general_expenses_prorated (base 1.6M/0.6M de 2.2M)
+        assert abs(cobre["general_expenses"] - 727272.73) < 1
+        assert abs(chatarra["general_expenses"] - 272727.27) < 1
+
+    def test_real_cost_excludes_system_bu(self, client, org_headers, bu_data):
+        """Costo Real por Material: la UN sistema no genera fila fantasma ni
+        su gasto cae en 'Sin Asignar'."""
+        resp = client.get(
+            "/api/v1/reports/real-cost-by-material",
+            params=PROFITABILITY_PARAMS, headers=org_headers,
+        )
+        data = resp.json()
+        names = {bu["business_unit_name"] for bu in data["business_units"]}
+        assert "Pasa Mano" not in names
+        unassigned = next(
+            (bu for bu in data["business_units"] if bu["business_unit_name"] == "Sin Asignar"),
+            None,
+        )
+        if unassigned is not None:
+            assert unassigned["total_expenses"] == 0.0
+
+    def test_empty_period_pasamano_zeros(self, client, org_headers, bu_data):
+        """Periodo sin actividad: seccion pasamano en ceros, sin error."""
+        resp = client.get(
+            PROFITABILITY_URL,
+            params={"date_from": "2020-01-01", "date_to": "2020-01-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["double_entry"]["sales_total"] == 0
+        assert data["double_entry"]["net_profit"] == 0
+        assert data["grand_total_net"] == 0
+
+
+class TestSystemBUGuards:
+    """Guards de la UN de sistema (Pasa Mano): 5 puntos de entrada de asignacion
+    compartida + materiales + delete."""
+
+    def test_pasamano_bu_created_on_new_org(self, db_session, test_user):
+        """El seed de org nueva crea la UN Pasa Mano con system_code."""
+        from sqlalchemy import select
+        from app.services.organization import create_organization
+        from app.schemas.organization import OrganizationCreate
+
+        org = create_organization(
+            db_session,
+            OrganizationCreate(name="Org Seed Pasamano Test"),
+            owner_user_id=test_user.id,
+        )
+        bu = db_session.execute(
+            select(BusinessUnit).where(
+                BusinessUnit.organization_id == org.id,
+                BusinessUnit.system_code == "double_entry",
+            )
+        ).scalar_one_or_none()
+        assert bu is not None
+        assert bu.name == "Pasa Mano"
+        assert bu.is_active is True
+
+    def test_material_cannot_use_system_bu_on_create(self, client, org_headers, bu_data):
+        resp = client.post(
+            "/api/v1/materials",
+            json={
+                "code": "PMX-1", "name": "Material invalido",
+                "category_id": str(bu_data["cat_metales"].id),
+                "business_unit_id": str(bu_data["bu_pasamano"].id),
+                "default_unit": "kg",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "sistema" in resp.json()["detail"]
+
+    def test_material_cannot_use_system_bu_on_update(self, client, org_headers, bu_data):
+        resp = client.patch(
+            f"/api/v1/materials/{bu_data['mat_cobre'].id}",
+            json={"business_unit_id": str(bu_data["bu_pasamano"].id)},
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "sistema" in resp.json()["detail"]
+
+    def test_system_bu_cannot_be_deleted(self, client, org_headers, bu_data):
+        resp = client.delete(
+            f"/api/v1/business-units/{bu_data['bu_pasamano'].id}",
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "sistema" in resp.json()["detail"]
+
+    def test_system_bu_rename_allowed(self, client, org_headers, bu_data):
+        """Rename SI permitido (lookup por system_code, no por nombre)."""
+        resp = client.patch(
+            f"/api/v1/business-units/{bu_data['bu_pasamano'].id}",
+            json={"name": "Foráneos"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Foráneos"
+        assert resp.json()["system_code"] == "double_entry"
+
+    def test_shared_expense_rejects_system_bu(self, client, org_headers, bu_data):
+        """Punto de entrada 1: create MoneyMovement (expense)."""
+        resp = client.post(
+            "/api/v1/money-movements/expense",
+            json={
+                "amount": 100000,
+                "account_id": str(bu_data["cuenta"].id),
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "date": "2026-03-17T12:00:00Z",
+                "description": "Gasto compartido invalido",
+                "applicable_business_unit_ids": [
+                    str(bu_data["bu_cobre"].id),
+                    str(bu_data["bu_pasamano"].id),
+                ],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "sistema" in str(resp.json()["detail"])
+
+    def test_direct_expense_to_system_bu_allowed(self, client, org_headers, bu_data):
+        """Asignacion DIRECTA a la UN sistema: permitida (es el proposito)."""
+        resp = client.post(
+            "/api/v1/money-movements/expense",
+            json={
+                "amount": 150000,
+                "account_id": str(bu_data["cuenta"].id),
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "date": "2026-03-17T12:00:00Z",
+                "description": "Flete DP directo",
+                "business_unit_id": str(bu_data["bu_pasamano"].id),
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["business_unit_id"] == str(bu_data["bu_pasamano"].id)
+
+    def test_shared_scheduled_expense_rejects_system_bu(self, client, org_headers, bu_data):
+        """Punto de entrada 2: create ScheduledExpense."""
+        resp = client.post(
+            "/api/v1/scheduled-expenses/",
+            json={
+                "name": "Poliza compartida invalida",
+                "total_amount": 1200000,
+                "total_months": 12,
+                "source_account_id": str(bu_data["cuenta"].id),
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "start_date": "2026-03-01",
+                "applicable_business_unit_ids": [str(bu_data["bu_pasamano"].id)],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "sistema" in str(resp.json()["detail"])
+
+    def test_shared_fixed_asset_rejects_system_bu(self, client, org_headers, bu_data):
+        """Punto de entrada 3: create FixedAsset."""
+        resp = client.post(
+            "/api/v1/fixed-assets/",
+            json={
+                "name": "Prensa compartida invalida",
+                "purchase_date": "2026-03-01",
+                "purchase_value": 5000000,
+                "salvage_value": 0,
+                "depreciation_rate": 10,
+                "depreciation_start_date": "2026-03-01",
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "source_account_id": str(bu_data["cuenta"].id),
+                "applicable_business_unit_ids": [str(bu_data["bu_pasamano"].id)],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "sistema" in str(resp.json()["detail"])
+
+    def test_reclassify_shared_to_system_bu_rejected(self, client, org_headers, bu_data):
+        """Punto de entrada 4 (gap QA): PATCH /classification con UN sistema en compartido."""
+        mov = bu_data["gasto_general_mov"]
+        resp = client.patch(
+            f"/api/v1/money-movements/{mov.id}/classification",
+            json={
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "applicable_business_unit_ids": [
+                    str(bu_data["bu_cobre"].id),
+                    str(bu_data["bu_pasamano"].id),
+                ],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "sistema" in str(resp.json()["detail"])
+
+    def test_reclassify_direct_to_system_bu_allowed(self, client, org_headers, bu_data):
+        """Reclasificar DIRECTO a la UN sistema: permitido (Gustavo reclasifica un flete)."""
+        mov = bu_data["gasto_general_mov"]
+        resp = client.patch(
+            f"/api/v1/money-movements/{mov.id}/classification",
+            json={
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "business_unit_id": str(bu_data["bu_pasamano"].id),
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["business_unit_id"] == str(bu_data["bu_pasamano"].id)
+
+    def test_expense_category_default_shared_rejects_system_bu(self, client, org_headers, bu_data):
+        """Punto de entrada 5: default compartido de ExpenseCategory."""
+        resp = client.post(
+            "/api/v1/expense-categories",
+            json={
+                "name": "Cat default compartido invalido",
+                "is_direct_expense": True,
+                "default_applicable_business_unit_ids": [str(bu_data["bu_pasamano"].id)],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "sistema" in str(resp.json()["detail"])
+
+    def test_expense_category_default_direct_to_system_bu_allowed(self, client, org_headers, bu_data):
+        """Default DIRECTO a la UN sistema: permitido (ej. categoria 'Bonos Foraneos')."""
+        resp = client.post(
+            "/api/v1/expense-categories",
+            json={
+                "name": "Bonos Foraneos",
+                "is_direct_expense": True,
+                "default_business_unit_id": str(bu_data["bu_pasamano"].id),
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["default_business_unit_id"] == str(bu_data["bu_pasamano"].id)
 
     def test_expense_with_direct_bu_valid(self, client, org_headers, bu_data):
         """business_unit_id solo → valido."""
@@ -2154,10 +2586,12 @@ def bu_data_with_de_commission(db_session: Session, test_organization, test_user
 
 class TestDECommissionProration:
 
-    def test_de_commission_prorated_by_sale_lines(
+    def test_de_commission_goes_to_pasamano_section(
         self, client, org_headers, bu_data_with_de_commission,
     ):
-        """Comision de DP $1M se prorratear: Cobre 5M/6.5M, Chatarra 1.5M/6.5M."""
+        """Comision de DP $1M NO se prorratea a las UN de bodega — va a la
+        seccion Pasa Mano (antes contaminaba Cobre/Chatarra, fuga #2 del plan).
+        """
         resp = client.get(
             "/api/v1/reports/profitability-by-business-unit",
             params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
@@ -2171,10 +2605,12 @@ class TestDECommissionProration:
         assert cobre is not None
         assert chatarra is not None
 
-        # Cobre: 5M/6.5M * 1M ≈ 769,230.77
-        assert abs(cobre["sale_commissions"] - 769230.77) < 1
-        # Chatarra: 1.5M/6.5M * 1M ≈ 230,769.23
-        assert abs(chatarra["sale_commissions"] - 230769.23) < 1
+        # Bodega: solo la comision de la venta de bodega ($60K, en Cobre)
+        assert cobre["sale_commissions"] == 60000.0
+        assert chatarra["sale_commissions"] == 0.0
+
+        # Pasa Mano: comision DP de este fixture ($1M) + la del bu_data base ($30K)
+        assert data["double_entry"]["commissions"] == pytest.approx(1030000.0, abs=1)
 
 
 class TestEdgeCases:

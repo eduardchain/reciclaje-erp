@@ -69,6 +69,17 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
         """Crear categoria con validacion de jerarquia."""
         obj_data = obj_in.model_dump()
 
+        # Guard: UN sistema (Pasa Mano) no va en default COMPARTIDO (produciria
+        # forms pre-llenados que revientan 422 al guardar). Default DIRECTO
+        # (default_business_unit_id) a la UN sistema SI se permite — ej.
+        # categoria "Bonos Foraneos" con default directo a Pasa Mano.
+        from app.services.business_unit import validate_not_shared_with_system_bu
+        validate_not_shared_with_system_bu(
+            db, organization_id,
+            obj_data.get("default_applicable_business_unit_ids"),
+            field_label="default compartido de categoria",
+        )
+
         # Normalizar applicable_business_unit_ids a strings para JSONB
         if obj_data.get("default_applicable_business_unit_ids"):
             obj_data["default_applicable_business_unit_ids"] = [
@@ -125,6 +136,15 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                         detail="No se puede asignar padre a una categoria que ya tiene subcategorias",
                     )
+
+        # Guard: UN sistema no va en default compartido (mismo guard que create)
+        if update_data.get("default_applicable_business_unit_ids"):
+            from app.services.business_unit import validate_not_shared_with_system_bu
+            validate_not_shared_with_system_bu(
+                db, organization_id,
+                update_data["default_applicable_business_unit_ids"],
+                field_label="default compartido de categoria",
+            )
 
         # Normalizar UUIDs a strings para JSONB
         if "default_applicable_business_unit_ids" in update_data and update_data["default_applicable_business_unit_ids"]:

@@ -48,6 +48,15 @@ class CRUDFixedAsset:
         3. Calcular depreciacion mensual y vida util
         4. Crear FixedAsset + MoneyMovement
         """
+        # 0. Guard: UN sistema (Pasa Mano) no acepta asignacion compartida.
+        # Validar aca (fuente) — las depreciaciones mensuales heredan esta asignacion.
+        from app.services.business_unit import validate_not_shared_with_system_bu
+        validate_not_shared_with_system_bu(
+            db, organization_id,
+            getattr(data, "applicable_business_unit_ids", None),
+            field_label="gasto compartido (activo fijo)",
+        )
+
         # 1. Validar categoria de gasto
         cat = db.execute(
             select(ExpenseCategory).where(

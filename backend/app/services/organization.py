@@ -111,6 +111,18 @@ def create_organization(
         ))
     db.flush()
 
+    # Seed UN de sistema "Pasa Mano" (system_code='double_entry').
+    # Path de seed nuevo: las orgs no reciben otras BUs por defecto.
+    # Sin materiales, excluida del prorrateo — solo para gastos directos de DP.
+    from app.models.business_unit import BusinessUnit
+    db.add(BusinessUnit(
+        name="Pasa Mano",
+        description="Unidad de sistema para gastos directos de doble partida",
+        organization_id=organization.id,
+        system_code="double_entry",
+    ))
+    db.flush()
+
     # Obtener rol admin para asignar al owner
     admin_role = role_service.get_admin_role_for_org(db, organization.id)
 

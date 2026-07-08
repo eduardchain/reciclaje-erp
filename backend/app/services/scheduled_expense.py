@@ -49,6 +49,15 @@ class CRUDScheduledExpense:
         5. Crea MoneyMovement deferred_funding: account(-), third_party(+)
         6. Crea ScheduledExpense
         """
+        # 0. Guard: UN sistema (Pasa Mano) no acepta asignacion compartida.
+        # Validar aca (fuente) — fallar en la cuota mensual N seria pesimo UX.
+        from app.services.business_unit import validate_not_shared_with_system_bu
+        validate_not_shared_with_system_bu(
+            db, organization_id,
+            getattr(data, "applicable_business_unit_ids", None),
+            field_label="gasto compartido (gasto programado)",
+        )
+
         # 1. Validar cuenta
         account = db.execute(
             select(MoneyAccount).where(

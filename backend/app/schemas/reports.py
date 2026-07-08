@@ -543,7 +543,11 @@ class ExpenseByCategoryItem(BaseModel):
 
 
 class BusinessUnitProfitability(BaseModel):
-    """Rentabilidad de una Unidad de Negocio."""
+    """Rentabilidad de una Unidad de Negocio (SOLO operacion de bodega).
+
+    Doble partida excluida de todas las columnas — se analiza en la seccion
+    `double_entry` del response (plan-rentabilidad-un-pasamano.md).
+    """
     business_unit_id: Optional[str] = None
     business_unit_name: str
     # Compras (base prorrateo)
@@ -553,7 +557,6 @@ class BusinessUnitProfitability(BaseModel):
     sales_revenue: float = 0
     sales_cogs: float = 0
     sales_gross_profit: float = 0
-    de_profit: float = 0
     total_gross_profit: float = 0
     # Gastos
     direct_expenses: float = 0
@@ -568,12 +571,32 @@ class BusinessUnitProfitability(BaseModel):
     net_margin: float = 0
 
 
+class DoubleEntryProfitability(BaseModel):
+    """Rentabilidad del Pasa Mano (doble partida) — logica propia, sin prorrateo.
+
+    Solo recibe gastos DIRECTOS asignados a la UN de sistema + sus comisiones.
+    """
+    business_unit_id: Optional[str] = None  # id de la UN sistema (drill-down)
+    label: str = "Pasa Mano"
+    sales_total: float = 0
+    purchases_total: float = 0
+    gross_profit: float = 0
+    commissions: float = 0
+    direct_expenses: float = 0
+    direct_expenses_detail: list[ExpenseByCategoryItem] = []
+    net_profit: float = 0
+    net_margin: float = 0  # net_profit / sales_total
+
+
 class ProfitabilityByBUResponse(BaseModel):
     """Respuesta del reporte de rentabilidad por UN."""
     period_from: date
     period_to: date
     business_units: list[BusinessUnitProfitability]
-    totals: BusinessUnitProfitability
+    totals: BusinessUnitProfitability  # solo bodega (consistente con la tabla)
+    double_entry: DoubleEntryProfitability
+    # Total general = neta bodega + neta pasamano
+    grand_total_net: float = 0
 
 
 # ---------------------------------------------------------------------------

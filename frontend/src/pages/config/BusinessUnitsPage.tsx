@@ -3,6 +3,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 import { Plus } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -12,7 +13,18 @@ import ConfigLayout from "./ConfigLayout";
 import type { BusinessUnitResponse } from "@/types/config";
 
 const columns: ColumnDef<BusinessUnitResponse, unknown>[] = [
-  { accessorKey: "name", header: "Nombre", cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
+  {
+    accessorKey: "name",
+    header: "Nombre",
+    cell: ({ row }) => (
+      <span className="font-medium inline-flex items-center gap-2">
+        {row.original.name}
+        {row.original.system_code && (
+          <Badge variant="outline" className="text-[10px] border-indigo-300 text-indigo-700 bg-indigo-50">Sistema</Badge>
+        )}
+      </span>
+    ),
+  },
   { accessorKey: "description", header: "Descripcion", cell: ({ row }) => row.original.description ?? "-" },
 ];
 
@@ -54,6 +66,11 @@ export default function BusinessUnitsPage() {
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>{editItem ? "Editar Unidad" : "Nueva Unidad de Negocio"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
+            {editItem?.system_code && (
+              <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md p-2">
+                Unidad de sistema (Pasa Mano): agrupa los gastos directos de doble partida. Puedes renombrarla, pero no eliminarla ni asignarle materiales.
+              </p>
+            )}
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Descripcion</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} /></div>
           </div>

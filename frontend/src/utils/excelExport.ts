@@ -257,18 +257,34 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
     }
   }
 
-  // Totales
+  // Totales (solo bodega)
   rows.push([]);
   const t = data.totals;
   rows.push([
-    "TOTAL", t.purchases_total, "100%",
+    "TOTAL BODEGA", t.purchases_total, "100%",
     t.sales_revenue, t.sales_cogs, t.total_gross_profit,
     t.direct_expenses, t.shared_expenses, t.general_expenses,
     t.sale_commissions, t.net_profit, `${t.net_margin.toFixed(1)}%`,
   ]);
 
+  // Seccion Pasa Mano (doble partida) — logica propia, sin prorrateo
+  const de = data.double_entry;
+  rows.push([]);
+  rows.push([`${de.label} (Doble Partida)`]);
+  rows.push(["Ventas Pasa Mano", de.sales_total]);
+  rows.push(["Compras Pasa Mano", de.purchases_total]);
+  rows.push(["Margen Bruto", de.gross_profit]);
+  rows.push(["Comisiones", -de.commissions]);
+  rows.push(["Gastos Directos", -de.direct_expenses]);
+  for (const d of de.direct_expenses_detail) {
+    rows.push(["  " + d.category_name, -d.amount]);
+  }
+  rows.push(["Utilidad Neta Pasa Mano", de.net_profit, `${de.net_margin.toFixed(1)}%`]);
+  rows.push([]);
+  rows.push(["TOTAL GENERAL (Bodega + Pasa Mano)", data.grand_total_net]);
+
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [{ wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
+  ws["!cols"] = [{ wch: 32 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
 
   // Currency cols: 1, 3, 4, 5, 6, 7, 8, 9, 10
   applyCurrencyFormat(ws, [1, 3, 4, 5, 6, 7, 8, 9, 10]);

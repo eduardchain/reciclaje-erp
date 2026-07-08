@@ -451,6 +451,7 @@ export interface ExpenseByCategoryItem {
   amount: number;
 }
 
+// Solo operacion de bodega — la doble partida va en la seccion `double_entry`
 export interface BusinessUnitProfitability {
   business_unit_id: string | null;
   business_unit_name: string;
@@ -459,7 +460,6 @@ export interface BusinessUnitProfitability {
   sales_revenue: number;
   sales_cogs: number;
   sales_gross_profit: number;
-  de_profit: number;
   total_gross_profit: number;
   direct_expenses: number;
   shared_expenses: number;
@@ -471,11 +471,27 @@ export interface BusinessUnitProfitability {
   net_margin: number;
 }
 
+// Seccion Pasa Mano: logica propia, sin prorrateo de generales
+export interface DoubleEntryProfitability {
+  business_unit_id: string | null;
+  label: string;
+  sales_total: number;
+  purchases_total: number;
+  gross_profit: number;
+  commissions: number;
+  direct_expenses: number;
+  direct_expenses_detail: ExpenseByCategoryItem[];
+  net_profit: number;
+  net_margin: number;
+}
+
 export interface ProfitabilityByBUResponse {
   period_from: string;
   period_to: string;
   business_units: BusinessUnitProfitability[];
   totals: BusinessUnitProfitability;
+  double_entry: DoubleEntryProfitability;
+  grand_total_net: number;
 }
 
 // --- Costo Real por Material ---

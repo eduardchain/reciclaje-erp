@@ -33,6 +33,8 @@ class BusinessUnitResponse(BusinessUnitBase):
     id: UUID
     organization_id: UUID
     is_active: bool
+    # 'double_entry' = UN de sistema Pasa Mano (el frontend filtra selectores con esto)
+    system_code: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
