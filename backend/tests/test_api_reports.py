@@ -996,6 +996,56 @@ class TestSalesReport:
         assert len(data["by_material"]) == 1
         assert data["by_material"][0]["material_code"] == "FE"
 
+    def test_sales_profit_received_quantity_matches_pnl(
+        self, client: TestClient, org_headers: dict, db_session, report_data: dict,
+    ):
+        """Utilidad bruta con diferencia de bascula (received_quantity).
+
+        total_price = received_qty x precio (decision #18), COGS usa la
+        cantidad original. La formula vieja (price - cost) x qty ignoraba
+        la bascula y descuadraba contra el P&L (caso real Costa: $357M vs
+        $342.5M). Guardrail: reporte de ventas == P&L gross_profit_sales.
+        """
+        now = report_data["now"]
+        venta = Sale(
+            organization_id=report_data["org_id"], sale_number=990,
+            customer_id=report_data["cliente1"].id, date=now,
+            status="liquidated", liquidated_at=now,
+            total_amount=Decimal("950000"),  # 95kg recibidos x 10000
+        )
+        db_session.add(venta)
+        db_session.flush()
+        db_session.add(SaleLine(
+            sale_id=venta.id, material_id=report_data["mat_cobre"].id,
+            quantity=Decimal("100"), received_quantity=Decimal("95"),
+            unit_price=Decimal("10000"), total_price=Decimal("950000"),
+            unit_cost=Decimal("8000"),
+        ))
+        db_session.commit()
+
+        params = {
+            "date_from": str(report_data["date_from"]),
+            "date_to": str(report_data["date_to"]),
+        }
+        report = client.get(
+            "/api/v1/reports/sales",
+            params={**params, "dp_filter": "exclude"},
+            headers=org_headers,
+        ).json()
+        pnl = client.get(
+            "/api/v1/reports/profit-and-loss", params=params, headers=org_headers,
+        ).json()
+
+        # La utilidad de esta venta es 950000 - 800000 = 150000
+        # (la formula vieja diria (10000-8000)x100 = 200000)
+        assert report["total_profit"] == pytest.approx(
+            pnl["gross_profit_sales"], abs=1
+        )
+        # Identidad interna: profit == revenue - cost tambien con bascula
+        assert report["total_profit"] == pytest.approx(
+            report["total_revenue"] - report["total_cost"], abs=1
+        )
+
 
 # ---------------------------------------------------------------------------
 # Margin Analysis Tests

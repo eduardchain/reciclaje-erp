@@ -2148,7 +2148,12 @@ class ReportService:
         if material_id:
             line_filters.append(SaleLine.material_id == material_id)
 
-        # Totals
+        # Totals.
+        # Utilidad bruta = total_price - unit_cost*quantity: usa la cantidad
+        # RECIBIDA para el ingreso (total_price, decision #18) y la original
+        # para el COGS — misma formula que gross_profit_sales del P&L. Con
+        # (unit_price - unit_cost)*quantity las ventas con diferencia de
+        # bascula descuadraban contra el P&L.
         totals = db.execute(
             select(
                 func.coalesce(func.sum(SaleLine.total_price), 0),
@@ -2156,7 +2161,7 @@ class ReportService:
                 func.count(func.distinct(Sale.id)),
                 func.coalesce(func.sum(SaleLine.unit_cost * SaleLine.quantity), 0),
                 func.coalesce(
-                    func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity),
+                    func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity),
                     0,
                 ),
             )
@@ -2179,7 +2184,7 @@ class ReportService:
                 func.coalesce(func.sum(SaleLine.quantity), 0),
                 func.count(func.distinct(Sale.id)),
                 func.coalesce(
-                    func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity),
+                    func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity),
                     0,
                 ),
             )
@@ -2209,7 +2214,7 @@ class ReportService:
                 func.coalesce(func.sum(SaleLine.quantity), 0),
                 func.coalesce(func.sum(SaleLine.unit_cost * SaleLine.quantity), 0),
                 func.coalesce(
-                    func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity),
+                    func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity),
                     0,
                 ),
             )
@@ -2525,11 +2530,15 @@ class ReportService:
             ))
 
         def _period_gross_profit(dt_f, dt_t):
-            """Calcula profit de ventas normales + DE en periodo."""
+            """Calcula profit de ventas normales + DE en periodo.
+
+            total_price - unit_cost*quantity: consciente de cantidad recibida
+            (decision #18), misma formula que el P&L y el reporte de ventas.
+            """
             sale_profit = Decimal(str(
                 db.scalar(
                     select(func.coalesce(
-                        func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity),
+                        func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity),
                         0,
                     ))
                     .select_from(SaleLine)
@@ -2644,7 +2653,7 @@ class ReportService:
                 SaleLine.material_id,
                 Material.name,
                 func.coalesce(
-                    func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity), 0
+                    func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity), 0
                 ).label("profit"),
                 func.coalesce(func.sum(SaleLine.total_price), 0).label("revenue"),
             )
@@ -2658,7 +2667,7 @@ class ReportService:
                 Sale.liquidated_at < dt_to,
             )
             .group_by(SaleLine.material_id, Material.name)
-            .order_by(func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity).desc())
+            .order_by(func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity).desc())
             .limit(5)
         ).all()
 
@@ -2702,9 +2711,9 @@ class ReportService:
             select(
                 Sale.customer_id,
                 ThirdParty.name,
-                func.coalesce(func.sum(SaleLine.unit_price * SaleLine.quantity), 0),
+                func.coalesce(func.sum(SaleLine.total_price), 0),
                 func.coalesce(
-                    func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity), 0
+                    func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity), 0
                 ),
             )
             .select_from(Sale)
@@ -2717,7 +2726,7 @@ class ReportService:
                 Sale.liquidated_at < dt_to,
             )
             .group_by(Sale.customer_id, ThirdParty.name)
-            .order_by(func.sum(SaleLine.unit_price * SaleLine.quantity).desc())
+            .order_by(func.sum(SaleLine.total_price).desc())
             .limit(5)
         ).all()
 

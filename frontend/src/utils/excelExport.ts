@@ -460,7 +460,7 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   rows.push(["Comisiones Pagadas", data.commissions_paid]);
   rows.push([]);
   rows.push(["Utilidad Neta", data.net_profit]);
-  rows.push(["Margen Neto", `${(data.net_margin * 100).toFixed(1)}%`]);
+  rows.push(["Margen Neto", `${data.net_margin.toFixed(1)}%`]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 35 }, { wch: 20 }];
@@ -701,18 +701,18 @@ export function exportSalesReportExcel(data: SalesReportResponse, dpFilterLabel:
   rows.push([]);
   rows.push(["Total Ventas", data.total_revenue]);
   rows.push(["Costo", data.total_cost]);
-  rows.push(["Utilidad", data.total_profit]);
-  rows.push(["Margen", `${data.overall_margin.toFixed(1)}%`]);
+  rows.push(["Utilidad Bruta", data.total_profit]);
+  rows.push(["Margen Bruto", `${data.overall_margin.toFixed(1)}%`]);
   rows.push(["Operaciones", data.sale_count]);
   rows.push([]);
   rows.push(["POR CLIENTE", "", "", "", ""]);
-  rows.push(["Cliente", "Total", "Cantidad", "# Ventas", "Utilidad"]);
+  rows.push(["Cliente", "Total", "Cantidad", "# Ventas", "Ut. Bruta"]);
   for (const c of data.by_customer) {
     rows.push([c.customer_name, c.total_amount, c.total_quantity, c.sale_count, c.total_profit]);
   }
   rows.push([]);
   rows.push(["POR MATERIAL", "", "", "", ""]);
-  rows.push(["Material", "Ventas", "Costo", "Utilidad", "Margen"]);
+  rows.push(["Material", "Ventas", "Costo", "Ut. Bruta", "Margen Bruto"]);
   for (const m of data.by_material) {
     rows.push([`${m.material_code} - ${m.material_name}`, m.total_amount, m.total_cost, m.total_profit, `${m.margin_percentage.toFixed(1)}%`]);
   }
