@@ -4,6 +4,7 @@ Operaciones CRUD para ExpenseCategory (Categorias de Gastos).
 Incluye busqueda por nombre, validacion de jerarquia (max 2 niveles),
 y endpoint flat con display_name para selectors.
 """
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -59,6 +60,31 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
 
         return parent
 
+    @staticmethod
+    def _validate_dp_pct(
+        pct: Optional[Decimal],
+        parent_id: Optional[UUID],
+        is_direct: bool,
+    ) -> None:
+        """El % Pasa Mano solo aplica a categorias raiz e indirectas.
+
+        - Subcategorias heredan el % del padre en LECTURA (no se persiste en ellas).
+        - Los gastos generales de una categoria directa nunca llegan al prorrateo
+          (caen al edge legacy 'Sin Asignar'), asi que un % ahi seria letra muerta.
+        """
+        if pct is None or pct == 0:
+            return
+        if parent_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="El % Pasa Mano se configura en la categoria padre (las subcategorias lo heredan)",
+            )
+        if is_direct:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="El % Pasa Mano solo aplica a categorias de gasto indirecto (los gastos generales de una categoria directa no se prorratean)",
+            )
+
     def create(
         self,
         db: Session,
@@ -91,6 +117,14 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
             # Subcategoria hereda solo is_direct_expense del padre (UN es independiente)
             obj_data["is_direct_expense"] = parent.is_direct_expense
 
+        # % Pasa Mano: solo categorias raiz e indirectas (hijas heredan en lectura;
+        # los generales de una categoria directa nunca llegan al prorrateo)
+        self._validate_dp_pct(
+            obj_data.get("double_entry_general_pct"),
+            parent_id=obj_data.get("parent_id"),
+            is_direct=obj_data.get("is_direct_expense", False),
+        )
+
         obj_data["organization_id"] = organization_id
         db_obj = self.model(**obj_data)
         db.add(db_obj)
@@ -122,6 +156,10 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
                 parent = self._validate_parent(db, new_parent_id, organization_id, exclude_id=id)
                 # Heredar is_direct_expense del padre
                 update_data["is_direct_expense"] = parent.is_direct_expense
+                # G1: al volverse hija, el % Pasa Mano propio se zerea (heredara
+                # el del padre en lectura). Sin esto quedaria un pct huerfano en
+                # DB que resurge si se re-promueve a raiz.
+                update_data["double_entry_general_pct"] = Decimal("0")
 
             # Si tiene hijos, no puede convertirse en subcategoria
             if new_parent_id is not None:
@@ -151,6 +189,18 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
             update_data["default_applicable_business_unit_ids"] = [
                 str(uid) for uid in update_data["default_applicable_business_unit_ids"]
             ]
+
+        # % Pasa Mano: validar el estado RESULTANTE (payload mergeado sobre el
+        # actual) — atrapa tanto pct en el payload como pct existente al cambiar
+        # parent_id / is_direct_expense
+        merged_pct = update_data.get(
+            "double_entry_general_pct", db_obj.double_entry_general_pct
+        )
+        merged_parent = (
+            update_data["parent_id"] if "parent_id" in update_data else db_obj.parent_id
+        )
+        merged_is_direct = update_data.get("is_direct_expense", db_obj.is_direct_expense)
+        self._validate_dp_pct(merged_pct, parent_id=merged_parent, is_direct=merged_is_direct)
 
         for field, value in update_data.items():
             setattr(db_obj, field, value)

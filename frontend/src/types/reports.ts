@@ -471,7 +471,14 @@ export interface BusinessUnitProfitability {
   net_margin: number;
 }
 
-// Seccion Pasa Mano: logica propia, sin prorrateo de generales
+// Tajada de generales atribuida a Pasa Mano por % de categoria (plan A.2)
+export interface DoubleEntryGeneralExpenseItem {
+  category_name: string;
+  pct: number;
+  amount: number;
+}
+
+// Seccion Pasa Mano: gastos directos asignados + comisiones DP + % de generales
 export interface DoubleEntryProfitability {
   business_unit_id: string | null;
   label: string;
@@ -481,8 +488,20 @@ export interface DoubleEntryProfitability {
   commissions: number;
   direct_expenses: number;
   direct_expenses_detail: ExpenseByCategoryItem[];
+  general_expenses: number;
+  general_expenses_detail: DoubleEntryGeneralExpenseItem[];
   net_profit: number;
   net_margin: number;
+}
+
+// Conciliacion con P&L: lineas no atribuibles a UN.
+// grand_total_net + estas 4 lineas == pnl_net_profit
+export interface PnlReconciliation {
+  service_income: number;
+  transformation_net: number;
+  inventory_adjustment_net: number;
+  tp_adjustment_net: number;
+  pnl_net_profit: number;
 }
 
 export interface ProfitabilityByBUResponse {
@@ -492,6 +511,7 @@ export interface ProfitabilityByBUResponse {
   totals: BusinessUnitProfitability;
   double_entry: DoubleEntryProfitability;
   grand_total_net: number;
+  pnl_reconciliation: PnlReconciliation;
 }
 
 // --- Costo Real por Material ---

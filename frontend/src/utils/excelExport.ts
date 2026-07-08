@@ -267,7 +267,7 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
     t.sale_commissions, t.net_profit, `${t.net_margin.toFixed(1)}%`,
   ]);
 
-  // Seccion Pasa Mano (doble partida) — logica propia, sin prorrateo
+  // Seccion Pasa Mano (doble partida) — logica propia
   const de = data.double_entry;
   rows.push([]);
   rows.push([`${de.label} (Doble Partida)`]);
@@ -279,9 +279,23 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
   for (const d of de.direct_expenses_detail) {
     rows.push(["  " + d.category_name, -d.amount]);
   }
+  rows.push(["Gastos Generales asignados (% por categoria)", -de.general_expenses]);
+  for (const d of de.general_expenses_detail) {
+    rows.push([`  ${d.category_name} (${d.pct.toFixed(1)}%)`, -d.amount]);
+  }
   rows.push(["Utilidad Neta Pasa Mano", de.net_profit, `${de.net_margin.toFixed(1)}%`]);
   rows.push([]);
   rows.push(["TOTAL GENERAL (Bodega + Pasa Mano)", data.grand_total_net]);
+
+  // Conciliacion con P&L: lineas no atribuibles a UN
+  const rec = data.pnl_reconciliation;
+  rows.push([]);
+  rows.push(["Conciliacion con Estado de Resultados"]);
+  rows.push(["Ingresos por Servicios", rec.service_income]);
+  rows.push(["Transformaciones (neto)", rec.transformation_net]);
+  rows.push(["Ajustes de Inventario (neto)", rec.inventory_adjustment_net]);
+  rows.push(["Ajustes de Terceros (neto)", rec.tp_adjustment_net]);
+  rows.push(["= Utilidad Neta P&L", rec.pnl_net_profit]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 32 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];

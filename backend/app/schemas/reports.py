@@ -571,10 +571,18 @@ class BusinessUnitProfitability(BaseModel):
     net_margin: float = 0
 
 
+class DoubleEntryGeneralExpenseItem(BaseModel):
+    """Tajada de gastos generales atribuida a Pasa Mano, por categoria (plan A.2)."""
+    category_name: str
+    pct: float  # % efectivo de la categoria (raiz)
+    amount: float
+
+
 class DoubleEntryProfitability(BaseModel):
     """Rentabilidad del Pasa Mano (doble partida) — logica propia, sin prorrateo.
 
-    Solo recibe gastos DIRECTOS asignados a la UN de sistema + sus comisiones.
+    Recibe gastos DIRECTOS asignados a la UN de sistema + sus comisiones +
+    la tajada de gastos GENERALES por % de categoria (plan A.2).
     """
     business_unit_id: Optional[str] = None  # id de la UN sistema (drill-down)
     label: str = "Pasa Mano"
@@ -584,8 +592,24 @@ class DoubleEntryProfitability(BaseModel):
     commissions: float = 0
     direct_expenses: float = 0
     direct_expenses_detail: list[ExpenseByCategoryItem] = []
+    general_expenses: float = 0  # tajada por % de categoria
+    general_expenses_detail: list[DoubleEntryGeneralExpenseItem] = []
     net_profit: float = 0
     net_margin: float = 0  # net_profit / sales_total
+
+
+class PnlReconciliation(BaseModel):
+    """Conciliacion con el Estado de Resultados (plan A.2 §3.7).
+
+    Las 4 lineas del P&L no atribuibles a ninguna UN. Promesa contractual:
+    grand_total_net + estas 4 lineas == pnl_net_profit (tolerancia $1).
+    Guardrail: test_reconciliation_residual_zero.
+    """
+    service_income: float = 0
+    transformation_net: float = 0  # transformation_profit - waste_loss
+    inventory_adjustment_net: float = 0
+    tp_adjustment_net: float = 0  # gain - loss
+    pnl_net_profit: float = 0
 
 
 class ProfitabilityByBUResponse(BaseModel):
@@ -597,6 +621,7 @@ class ProfitabilityByBUResponse(BaseModel):
     double_entry: DoubleEntryProfitability
     # Total general = neta bodega + neta pasamano
     grand_total_net: float = 0
+    pnl_reconciliation: PnlReconciliation = PnlReconciliation()
 
 
 # ---------------------------------------------------------------------------

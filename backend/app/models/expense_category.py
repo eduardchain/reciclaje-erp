@@ -10,10 +10,11 @@ Esta distincion es fundamental para:
 - Analizar rentabilidad por linea de negocio (prorrateo de indirectos)
 - Generar reportes de P&L precisos
 """
+from decimal import Decimal
 from uuid import UUID, uuid4
 from typing import Optional
 
-from sqlalchemy import String, Boolean, ForeignKey
+from sqlalchemy import String, Boolean, ForeignKey, Numeric
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -77,6 +78,17 @@ class ExpenseCategory(Base, TimestampMixin, OrganizationMixin):
         JSONB,
         nullable=True,
         comment="Default: prorrateo compartido entre estas UNs",
+    )
+
+    double_entry_general_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default="0",
+        comment=(
+            "% de los gastos GENERALES de esta categoria atribuido a la UN sistema "
+            "Pasa Mano (0-100). Solo categorias raiz indirectas; hijas heredan en lectura."
+        ),
     )
 
     is_active: Mapped[bool] = mapped_column(

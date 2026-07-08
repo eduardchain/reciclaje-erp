@@ -46,6 +46,8 @@ from app.schemas.reports import (
     DashboardMetrics,
     DashboardResponse,
     DoubleEntryProfitability,
+    DoubleEntryGeneralExpenseItem,
+    PnlReconciliation,
     ExpenseCategoryBreakdown,
     MarginAnalysisResponse,
     MaterialMargin,
@@ -3235,6 +3237,46 @@ class ReportService:
             result[key] = Decimal(str(total))
         return result
 
+    def _get_dp_pct_by_category(
+        self, db: Session, organization_id: UUID,
+    ) -> dict[str, Decimal]:
+        """% efectivo Pasa Mano por categoria de gasto (plan A.2).
+
+        Herencia en LECTURA: una subcategoria usa el % de su padre (el propio
+        esta forzado a 0 por el service de categorias). Categorias directas
+        nunca aplican (sus generales caen al edge legacy 'Sin Asignar').
+        Retorna solo entradas con % > 0; usar .get(cat_id, 0) en el consumidor.
+        Key: str(category_id).
+        """
+        rows = db.execute(
+            select(
+                ExpenseCategory.id,
+                ExpenseCategory.parent_id,
+                ExpenseCategory.double_entry_general_pct,
+                ExpenseCategory.is_direct_expense,
+            ).where(ExpenseCategory.organization_id == organization_id)
+        ).all()
+        own_pct: dict[str, Decimal] = {
+            str(r.id): Decimal(str(r.double_entry_general_pct or 0)) for r in rows
+        }
+        result: dict[str, Decimal] = {}
+        for r in rows:
+            if r.is_direct_expense:
+                continue
+            pct = own_pct[str(r.parent_id)] if r.parent_id else own_pct[str(r.id)]
+            if pct > 0:
+                result[str(r.id)] = pct
+        return result
+
+    @staticmethod
+    def _dp_slice(amount: Decimal, pct: Decimal) -> Decimal:
+        """Tajada Pasa Mano de un gasto general, cuantizada al centavo (G2).
+
+        El remanente a prorratear es el literal `amount - slice` — conservacion
+        exacta por construccion sin importar el redondeo del slice.
+        """
+        return (amount * pct / Decimal("100")).quantize(Decimal("0.01"))
+
     def _prorate_expense(
         self, amount: Decimal,
         applicable_bu_ids: list[str] | None,
@@ -3383,6 +3425,13 @@ class ReportService:
         # Acumuladores Pasa Mano (gastos directos a la UN sistema)
         pasamano_direct = Decimal("0")
         pasamano_direct_detail: dict[str, Decimal] = {}
+        # A.2: tajada de gastos GENERALES por % de categoria (plan A.2).
+        # Sin UN sistema el % se trata como 0 — el slice nunca se pierde.
+        dp_pct_by_cat = (
+            self._get_dp_pct_by_category(db, organization_id) if system_bu_id else {}
+        )
+        pasamano_general = Decimal("0")
+        pasamano_general_detail: dict[str, dict] = {}  # cat_name -> {pct, amount}
 
         for row in expense_rows:
             amt = Decimal(str(row.amount))
@@ -3422,6 +3471,19 @@ class ReportService:
                         direct_detail["unassigned"] = {}
                     direct_detail["unassigned"][cat_name] = direct_detail["unassigned"].get(cat_name, Decimal("0")) + amt
                 else:
+                    # A.2: % de la categoria -> tajada a la seccion Pasa Mano,
+                    # el remanente literal se prorratea entre bodegas como siempre
+                    pct = dp_pct_by_cat.get(str(row.expense_category_id), Decimal("0"))
+                    if pct > 0:
+                        slice_amt = self._dp_slice(amt, pct)
+                        if slice_amt > 0:
+                            pasamano_general += slice_amt
+                            cat_name = row.cat_name or "Sin Categoría"
+                            entry = pasamano_general_detail.setdefault(
+                                cat_name, {"pct": pct, "amount": Decimal("0")}
+                            )
+                            entry["amount"] += slice_amt
+                        amt = amt - slice_amt
                     prorated = self._prorate_expense(amt, None, purchases_by_bu)
                     for k, v in prorated.items():
                         general_by_bu[k] = general_by_bu.get(k, Decimal("0")) + v
@@ -3573,13 +3635,24 @@ class ReportService:
             )
 
         # 8. Seccion Pasa Mano: margen DP + comisiones DP + gastos directos a
-        # la UN sistema. Sin prorrateo de generales (decision del cliente).
+        # la UN sistema + tajada de generales por % de categoria (plan A.2).
         pasamano_detail = [
             ExpenseByCategoryItem(category_name=cat, amount=float(val))
             for cat, val in sorted(pasamano_direct_detail.items(), key=lambda x: -x[1])
             if val != 0
         ]
-        pasamano_net = de_gross_profit - pasamano_commissions - pasamano_direct
+        pasamano_general_items = [
+            DoubleEntryGeneralExpenseItem(
+                category_name=cat, pct=float(d["pct"]), amount=float(d["amount"])
+            )
+            for cat, d in sorted(
+                pasamano_general_detail.items(), key=lambda x: -x[1]["amount"]
+            )
+            if d["amount"] != 0
+        ]
+        pasamano_net = (
+            de_gross_profit - pasamano_commissions - pasamano_direct - pasamano_general
+        )
         double_entry_section = DoubleEntryProfitability(
             business_unit_id=system_bu_id,
             label=system_bu_name,
@@ -3589,11 +3662,30 @@ class ReportService:
             commissions=float(pasamano_commissions),
             direct_expenses=float(pasamano_direct),
             direct_expenses_detail=pasamano_detail,
+            general_expenses=float(pasamano_general),
+            general_expenses_detail=pasamano_general_items,
             net_profit=float(pasamano_net),
             net_margin=(
                 self._safe_pct(pasamano_net, de_sales_total)
                 if de_sales_total > 0 else 0.0
             ),
+        )
+
+        # 9. Conciliacion con P&L (§3.7 plan A.2): las 4 lineas del P&L que NO
+        # son atribuibles a ninguna UN. Se derivan de LA MISMA funcion que
+        # alimenta el tab P&L (`_calculate_profit`) — paridad por construccion,
+        # cambios futuros al P&L se propagan solos. Guardrail:
+        # test_reconciliation_residual_zero.
+        # Limitacion conocida (pre-existente): si el periodo no tiene compras,
+        # _prorate_expense descarta los generales/compartidos de la tabla y el
+        # residual no cierra — mismo comportamiento del reporte desde siempre.
+        pnl = self._calculate_profit(db, organization_id, date_from, date_to)
+        reconciliation = PnlReconciliation(
+            service_income=float(pnl["service_income"]),
+            transformation_net=float(pnl["transformation_profit"] - pnl["waste_loss"]),
+            inventory_adjustment_net=float(pnl["adjustment_net"]),
+            tp_adjustment_net=float(pnl["tp_adjustment_gain"] - pnl["tp_adjustment_loss"]),
+            pnl_net_profit=float(pnl["net_profit"]),
         )
 
         return ProfitabilityByBUResponse(
@@ -3603,6 +3695,7 @@ class ReportService:
             totals=totals,
             double_entry=double_entry_section,
             grand_total_net=totals.net_profit + float(pasamano_net),
+            pnl_reconciliation=reconciliation,
         )
 
     # ==================================================================
@@ -3652,11 +3745,19 @@ class ReportService:
                 MoneyMovement.amount,
                 MoneyMovement.business_unit_id,
                 MoneyMovement.applicable_business_unit_ids,
+                MoneyMovement.expense_category_id,
                 ExpenseCategory.is_direct_expense,
             )
             .outerjoin(ExpenseCategory, MoneyMovement.expense_category_id == ExpenseCategory.id)
             .where(*expense_filters)
         ).all()
+
+        # A.2: % Pasa Mano por categoria — la tajada de generales es costo de
+        # doble partida, NO overhead de material: se descarta de este reporte
+        # (mismo criterio que los gastos directos a la UN sistema).
+        dp_pct_by_cat = (
+            self._get_dp_pct_by_category(db, organization_id) if system_bu_id else {}
+        )
 
         total_expenses_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
 
@@ -3680,6 +3781,9 @@ class ReportService:
                 if row.is_direct_expense and row.business_unit_id is None:
                     total_expenses_by_bu["unassigned"] = total_expenses_by_bu.get("unassigned", Decimal("0")) + amt
                 else:
+                    pct = dp_pct_by_cat.get(str(row.expense_category_id), Decimal("0"))
+                    if pct > 0:
+                        amt = amt - self._dp_slice(amt, pct)
                     prorated = self._prorate_expense(amt, None, purchases_by_bu)
                     for k, v in prorated.items():
                         total_expenses_by_bu[k] = total_expenses_by_bu.get(k, Decimal("0")) + v
@@ -3791,9 +3895,9 @@ class ReportService:
             - cat_info: {cat_id_str: {"name", "parent_id", "is_direct_expense"}} y
               key especial "none" para "Sin Categoría".
         """
-        # 1. UNs activas
+        # 1. UNs activas (la UN sistema SI va en bu_names — regla decision #58)
         bus = db.execute(
-            select(BusinessUnit.id, BusinessUnit.name)
+            select(BusinessUnit.id, BusinessUnit.name, BusinessUnit.system_code)
             .where(
                 BusinessUnit.organization_id == organization_id,
                 BusinessUnit.is_active == True,
@@ -3802,6 +3906,15 @@ class ReportService:
         ).all()
         bu_names: dict[str, str] = {str(bu.id): bu.name for bu in bus}
         bu_names["unassigned"] = "Sin Asignar"
+        system_bu_id: Optional[str] = next(
+            (str(bu.id) for bu in bus if bu.system_code == "double_entry"), None
+        )
+        # A.2: % Pasa Mano por categoria — la tajada de generales se aloca a la
+        # UN sistema como allocation_type "general" (misma plata que muestra
+        # Rentabilidad por UN; guardrail: test_total_matches_profitability_bu_sum)
+        dp_pct_by_cat = (
+            self._get_dp_pct_by_category(db, organization_id) if system_bu_id else {}
+        )
 
         # 2. Compras por UN (base prorrateo)
         purchases_by_bu = self._get_purchases_by_bu(db, organization_id, dt_from, dt_to)
@@ -3893,6 +4006,18 @@ class ReportService:
                         "allocation_type": "direct",
                     })
                 else:
+                    # A.2: tajada del % de la categoria -> UN sistema (Pasa Mano)
+                    pct = dp_pct_by_cat.get(str(row.expense_category_id), Decimal("0"))
+                    if pct > 0:
+                        slice_amt = self._dp_slice(amt, pct)
+                        if slice_amt > 0:
+                            allocations.append({
+                                **base,
+                                "bu_id": system_bu_id,
+                                "allocated_amount": slice_amt,
+                                "allocation_type": "general",
+                            })
+                        amt = amt - slice_amt
                     prorated = self._prorate_expense(amt, None, purchases_by_bu)
                     for k, v in prorated.items():
                         allocations.append({
