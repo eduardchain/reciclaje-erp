@@ -74,6 +74,8 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
 interface StatementItem {
   id: string;
   date: string;
+  /** Fecha del documento cuando difiere de la fecha de efecto (liquidación) */
+  document_date?: string | null;
   event_type: string;
   description: string;
   amount: number;
@@ -95,6 +97,23 @@ interface StatementItem {
   is_line_item?: boolean;
   parent_source_id?: string | null;
   parent_source_type?: string | null;
+}
+
+/** Fecha del documento solo cuando difiere de la fecha de efecto (liquidación) */
+function docDate(m: StatementItem): string | null {
+  return m.document_date && m.document_date.slice(0, 10) !== m.date?.slice(0, 10)
+    ? m.document_date
+    : null;
+}
+
+function DateWithDoc({ m }: { m: StatementItem }) {
+  const doc = docDate(m);
+  return (
+    <div>
+      <span>{formatDate(m.date)}</span>
+      {doc && <div className="text-[10px] text-slate-400 leading-tight whitespace-nowrap">doc: {formatDate(doc)}</div>}
+    </div>
+  );
 }
 
 function resolveSourceLink(m: StatementItem): string | null {
@@ -199,6 +218,7 @@ export default function AccountStatementPage() {
     movements: movements.filter((m) => m.status !== "annulled" && m.status !== "cancelled").map((m) => ({
       movement_number: m.movement_number ?? "",
       date: m.date,
+      document_date: m.document_date ?? null,
       movement_type: m.event_type,
       typeLabel: EVENT_TYPE_LABELS[m.event_type] || m.event_type,
       description: m.description,
@@ -348,7 +368,7 @@ export default function AccountStatementPage() {
                         movementNumber={m.movement_number ?? undefined}
                         amount={m.amount}
                         isInflow={!isDebit}
-                        description={m.description}
+                        description={docDate(m) ? `${m.description} · doc ${formatDate(docDate(m)!)}` : m.description}
                         balanceAfter={m.balance_after ?? undefined}
                         annulled={isAnnulled}
                       />
@@ -389,7 +409,7 @@ export default function AccountStatementPage() {
                       return (
                         <TableRow key={m.id} className={isAnnulled ? "opacity-50 bg-rose-50/50" : ""}>
                           <TableCell className="text-xs text-slate-400">{m.movement_number ?? ""}</TableCell>
-                          <TableCell className="text-sm">{formatDate(m.date)}</TableCell>
+                          <TableCell className="text-sm"><DateWithDoc m={m} /></TableCell>
                           <TableCell className="text-sm">
                             <span className={isAnnulled ? "line-through" : ""}>{EVENT_TYPE_LABELS[m.event_type] || m.event_type}</span>
                             {isAnnulled && <Badge variant="outline" className="ml-2 bg-rose-50 text-rose-600 text-[10px] py-0">Anulado</Badge>}
@@ -462,7 +482,7 @@ export default function AccountStatementPage() {
                           <MovementListCard
                             key={m.id}
                             date={m.date}
-                            typeLabel={concepto}
+                            typeLabel={docDate(m) ? `${concepto} · doc ${formatDate(docDate(m)!)}` : concepto}
                             amount={m.amount}
                             isInflow={!isDebit}
                             balanceAfter={showBalance ? m.balance_after! : undefined}
@@ -518,7 +538,7 @@ export default function AccountStatementPage() {
 
                           return (
                             <TableRow key={m.id} className={isAnnulled ? "opacity-50 bg-rose-50/50" : ""}>
-                              <TableCell className="text-sm">{formatDate(m.date)}</TableCell>
+                              <TableCell className="text-sm"><DateWithDoc m={m} /></TableCell>
                               <TableCell className={`text-sm max-w-[200px] truncate ${isAnnulled ? "line-through" : ""}`}>
                                 <EntityLink to={resolveSourceLink(m)} showIcon={false} className="hover:underline text-slate-900 hover:text-blue-600">
                                   {concepto}

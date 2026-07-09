@@ -23,6 +23,9 @@ import type { DoubleEntryResponse } from "@/types/double-entry";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { applyCurrencyFormat } from "@/utils/excelHelpers";
 
+const docDateOf = (m: { date: string; document_date?: string | null }): string | null =>
+  m.document_date && m.document_date.slice(0, 10) !== m.date?.slice(0, 10) ? m.document_date : null;
+
 export function exportAccountStatementExcel(data: AccountStatementExportData) {
   const rows: (string | number | null)[][] = [];
 
@@ -45,9 +48,9 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
   const isOps = data.viewMode === "operations";
 
   if (isOps) {
-    rows.push(["Fecha", "Concepto", "Material", "Peso", "Precio", "Dif Peso", "Debito", "Credito", "Saldo"]);
+    rows.push(["Fecha", "Fecha Doc", "Concepto", "Material", "Peso", "Precio", "Dif Peso", "Debito", "Credito", "Saldo"]);
     if (data.dateFrom) {
-      rows.push(["", "Saldo de apertura", "", "", "", "", "", "", data.openingBalance]);
+      rows.push(["", "", "Saldo de apertura", "", "", "", "", "", "", data.openingBalance]);
     }
     // Build last-in-group set for balance display
     const lastByGroup = new Map<string, number>();
@@ -66,6 +69,7 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
         : lastByGroup.get(m.parent_source_id) === idx && m.balance_after != null;
       rows.push([
         formatDate(m.date),
+        docDateOf(m) ? formatDate(docDateOf(m)!) : "",
         concepto,
         m.is_line_item && m.material_code ? `${m.material_code} - ${m.material_name || ""}` : "",
         m.is_line_item && m.quantity ? m.quantity : "",
@@ -77,9 +81,9 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
       ]);
     });
   } else {
-    rows.push(["#", "Fecha", "Tipo", "Descripcion", "Debe", "Haber", "Saldo"]);
+    rows.push(["#", "Fecha", "Fecha Doc", "Tipo", "Descripcion", "Debe", "Haber", "Saldo"]);
     if (data.dateFrom) {
-      rows.push(["", "", "Saldo de apertura", "", "", "", data.openingBalance]);
+      rows.push(["", "", "", "Saldo de apertura", "", "", "", data.openingBalance]);
     }
     for (const m of data.movements) {
       const isAnnulled = m.status === "annulled";
@@ -87,6 +91,7 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
       rows.push([
         m.movement_number,
         formatDate(m.date),
+        docDateOf(m) ? formatDate(docDateOf(m)!) : "",
         typeText,
         m.description || "-",
         m.isDebit ? m.amount : "",
@@ -100,20 +105,20 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
 
   // Column widths
   ws["!cols"] = isOps ? [
-    { wch: 12 }, { wch: 18 }, { wch: 25 }, { wch: 12 }, { wch: 14 },
+    { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 25 }, { wch: 12 }, { wch: 14 },
     { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
   ] : [
-    { wch: 8 }, { wch: 12 }, { wch: 28 }, { wch: 30 },
+    { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 28 }, { wch: 30 },
     { wch: 16 }, { wch: 16 }, { wch: 16 },
   ];
 
-  // Apply currency format
+  // Apply currency format (columnas corridas +1 por "Fecha Doc")
   if (isOps) {
-    // Resumen row (cols 0,1,2) + Precio (4), Dif Peso (5), Debito (6), Credito (7), Saldo (8)
-    applyCurrencyFormat(ws, [0, 1, 2, 4, 5, 6, 7, 8]);
+    // Resumen row (cols 0,1,2) + Precio (5), Dif Peso (6), Debito (7), Credito (8), Saldo (9)
+    applyCurrencyFormat(ws, [0, 1, 2, 5, 6, 7, 8, 9]);
   } else {
-    // Resumen (0,1,2) + Debe (4), Haber (5), Saldo (6)
-    applyCurrencyFormat(ws, [0, 1, 2, 4, 5, 6]);
+    // Resumen (0,1,2) + Debe (5), Haber (6), Saldo (7)
+    applyCurrencyFormat(ws, [0, 1, 2, 5, 6, 7]);
   }
 
   const wb = XLSX.utils.book_new();

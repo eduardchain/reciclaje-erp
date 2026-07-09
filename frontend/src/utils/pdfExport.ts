@@ -17,6 +17,8 @@ export interface AccountStatementExportData {
   movements: Array<{
     movement_number: string | number;
     date: string;
+    /** Fecha del documento cuando difiere de la fecha de efecto (liquidación) */
+    document_date?: string | null;
     movement_type: string;
     typeLabel: string;
     description: string;
@@ -540,6 +542,10 @@ export function exportAccountStatementPDF(
     return truncated + "…";
   };
 
+  // Fecha del documento solo cuando difiere de la fecha de efecto (liquidación)
+  const docDateOf = (m: { date: string; document_date?: string | null }): string | null =>
+    m.document_date && m.document_date.slice(0, 10) !== m.date?.slice(0, 10) ? m.document_date : null;
+
   // Header — mobile sube fuente porque iPhone muestra A4 al ancho completo (210mm en ~390pt → 9pt PDF se ve como ~5pt)
   doc.setFontSize(isMobile ? 17 : 18);
   doc.setFont("helvetica", "bold");
@@ -640,7 +646,7 @@ export function exportAccountStatementPDF(
     const leftMaxWidth = pageWidth - 28 - RIGHT_COL_WIDTH - 4;
 
     data.movements.forEach((m, idx) => {
-      const hasDescLine = (m.is_line_item && m.material_code) || m.description || m.invoice_number || m.vehicle_plate;
+      const hasDescLine = (m.is_line_item && m.material_code) || m.description || m.invoice_number || m.vehicle_plate || docDateOf(m);
       // Alturas calibradas para fuentes mas grandes (linea 1: 11pt, linea 2: 10pt)
       const cardHeight = hasDescLine ? 14 : 9;
       if (y + cardHeight > pageHeight - 18) { doc.addPage(); y = 20; }
@@ -717,6 +723,8 @@ export function exportAccountStatementPDF(
           }
           if (m.invoice_number) descParts.push(`Fac ${m.invoice_number}`);
           if (m.vehicle_plate) descParts.push(m.vehicle_plate);
+          const ddMobile = docDateOf(m);
+          if (ddMobile) descParts.push(`doc ${formatDate(ddMobile)}`);
           const fullDesc = descParts.join(" · ");
           doc.text(ellipsis(fullDesc, leftMaxWidth), 14, y);
           doc.setTextColor(0);
@@ -782,11 +790,13 @@ export function exportAccountStatementPDF(
 
     data.movements.forEach((m, idx) => {
       if (y > 185) { doc.addPage(); y = 20; }
-      const concepto = m.is_line_item
+      const conceptoBase = m.is_line_item
         ? (m.vehicle_plate || m.invoice_number || `${m.movement_type?.includes("purchase") ? "Compra" : m.movement_type?.includes("sale") ? "Venta" : "DP"} #${m.source_number || ""}`)
         : (m.description || m.vehicle_plate || m.invoice_number || `#${m.source_number || ""}`);
+      const ddOps = docDateOf(m);
+      const concepto = ddOps ? `${conceptoBase} · doc ${formatDate(ddOps)}` : conceptoBase;
       doc.text(formatDate(m.date), colO.date, y);
-      doc.text(concepto.substring(0, 28), colO.concept, y);
+      doc.text(ellipsis(concepto, colO.material - colO.concept - 2), colO.concept, y);
       if (m.is_line_item && m.material_code) {
         doc.text(`${m.material_code}`.substring(0, 22), colO.material, y);
         if (m.quantity) doc.text(formatWeight(m.quantity), colO.weight, y, { align: "right" });
@@ -846,7 +856,9 @@ export function exportAccountStatementPDF(
       doc.setFont("helvetica", "bold");
       doc.text(ellipsis(typeText, colX.desc - colX.type - 2), colX.type, y);
       doc.setFont("helvetica", "normal");
-      doc.text(ellipsis(m.description || "-", colX.debit - colX.desc - 28), colX.desc, y);
+      const ddFin = docDateOf(m);
+      const descText = ddFin ? `${m.description || "-"} · doc ${formatDate(ddFin)}` : (m.description || "-");
+      doc.text(ellipsis(descText, colX.debit - colX.desc - 28), colX.desc, y);
       if (m.isDebit) doc.text(formatCurrency(m.amount), colX.debit, y, { align: "right" });
       else doc.text(formatCurrency(m.amount), colX.credit, y, { align: "right" });
       if (m.balance_after != null) doc.text(fmtBal(m.balance_after), pageWidth - 14, y, { align: "right" });

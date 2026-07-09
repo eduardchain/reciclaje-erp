@@ -555,3 +555,193 @@ class TestFix3InventoryByLiquidation:
         assert r2.rowcount == 0
 
 
+# ---------------------------------------------------------------------------
+# Fix 4 — Estado de cuenta por fecha de liquidación
+# ---------------------------------------------------------------------------
+
+class TestFix4StatementByLiquidation:
+
+    def test_purchase_positioned_at_liquidation_with_document_date(
+        self, client, org_headers, base,
+    ):
+        p = api_create_purchase(
+            client, org_headers, supplier_id=base["supplier"].id,
+            lines=[{"material_id": base["mat"].id, "quantity": 20, "unit_price": 5000, "warehouse_id": base["wh"].id}],
+            auto_liquidate=False, date="2026-04-20",
+        )
+        _liquidate_purchase(client, org_headers, p["id"], liquidation_date="2026-05-20")
+
+        items = _statement(client, org_headers, base["supplier"].id)["items"]
+        evt = next(e for e in items if e["source"] == "purchase" and e["source_id"] == p["id"])
+        assert evt["date"][:10] == "2026-05-20"
+        assert evt["document_date"][:10] == "2026-04-20"
+
+    def test_windowing_follows_liquidation_date(self, client, org_headers, base):
+        """Ventana y saldo de apertura (#55) siguen la fecha de liquidación."""
+        p = api_create_purchase(
+            client, org_headers, supplier_id=base["supplier"].id,
+            lines=[{"material_id": base["mat"].id, "quantity": 20, "unit_price": 5000, "warehouse_id": base["wh"].id}],
+            auto_liquidate=False, date="2026-04-20",
+        )
+        _liquidate_purchase(client, org_headers, p["id"], liquidation_date="2026-05-20")
+
+        # Ventana desde 1-may: la compra (liq 20-may) SE LISTA y no está en apertura
+        data = _statement(client, org_headers, base["supplier"].id, date_from="2026-05-01")
+        assert any(e["source"] == "purchase" and e["source_id"] == p["id"] for e in data["items"])
+        # apertura solo tiene la compra base de abril (-2.5M)
+        assert data["opening_balance"] == pytest.approx(-2_500_000, abs=0.01)
+
+        # Ventana desde 1-jun: absorbida en apertura, no listada
+        data2 = _statement(client, org_headers, base["supplier"].id, date_from="2026-06-01")
+        assert not any(e.get("source_id") == p["id"] for e in data2["items"])
+        assert data2["opening_balance"] == pytest.approx(-2_600_000, abs=0.01)
+
+    def test_commission_positioned_with_its_sale(
+        self, client, org_headers, db_session, test_organization, base,
+    ):
+        """La comisión del comisionista aparece en la fecha de liquidación de la
+        venta, nunca antes."""
+        org_id = test_organization.id
+        comisionista = create_third_party_with_category(
+            db_session, org_id, "Com Stmt", "service_provider")
+        db_session.commit()
+
+        sale = api_create_sale(
+            client, org_headers, customer_id=base["customer"].id, warehouse_id=base["wh"].id,
+            lines=[{"material_id": base["mat"].id, "quantity": 10, "unit_price": 10000}],
+            commissions=[{
+                "third_party_id": str(comisionista.id), "concept": "Com",
+                "commission_type": "fixed", "commission_value": 5000,
+            }],
+            auto_liquidate=False, date="2026-04-20",
+        )
+        _liquidate_sale(client, org_headers, sale["id"], liquidation_date="2026-05-20")
+
+        items = _statement(client, org_headers, comisionista.id)["items"]
+        comm_events = [e for e in items if e["event_type"] == "commission_accrual"]
+        assert len(comm_events) == 1
+        assert comm_events[0]["date"][:10] == "2026-05-20"
+
+    def test_dp_positioned_at_liquidation_date(
+        self, client, org_headers, db_session, test_organization, base,
+    ):
+        org_id = test_organization.id
+        dp_supplier = create_third_party_with_category(db_session, org_id, "Prov DP Stmt", "material_supplier")
+        dp_customer = create_third_party_with_category(db_session, org_id, "Cli DP Stmt", "customer")
+        db_session.commit()
+
+        de = api_create_double_entry(
+            client, org_headers, supplier_id=dp_supplier.id, customer_id=dp_customer.id,
+            lines=[{"material_id": base["mat"].id, "quantity": 10,
+                    "purchase_unit_price": 5000, "sale_unit_price": 6000}],
+            date="2026-04-20",
+        )
+        _liquidate_de(client, org_headers, de["id"], liquidation_date="2026-05-20")
+
+        items = _statement(client, org_headers, dp_supplier.id)["items"]
+        evt = next(e for e in items if e["event_type"] == "double_entry_purchase")
+        assert evt["date"][:10] == "2026-05-20"
+        assert evt["document_date"][:10] == "2026-04-20"
+
+    def test_cancelled_pair_adjacent_and_balance_neutral(
+        self, client, org_headers, db_session, test_organization, base,
+    ):
+        """Venta liquidada y cancelada: ambos eventos en la fecha de liquidación,
+        sin efecto en el saldo corrido."""
+        org_id = test_organization.id
+        cust2 = create_third_party_with_category(db_session, org_id, "Cli Cancel", "customer")
+        db_session.commit()
+
+        sale = api_create_sale(
+            client, org_headers, customer_id=cust2.id, warehouse_id=base["wh"].id,
+            lines=[{"material_id": base["mat"].id, "quantity": 10, "unit_price": 10000}],
+            auto_liquidate=False, date="2026-04-20",
+        )
+        _liquidate_sale(client, org_headers, sale["id"], liquidation_date="2026-05-20")
+        api_cancel_sale(client, org_headers, sale["id"])
+
+        data = _statement(client, org_headers, cust2.id)
+        evts = [e for e in data["items"] if e.get("source_id") == sale["id"]]
+        assert len(evts) == 2
+        assert all(e["date"][:10] == "2026-05-20" for e in evts)
+        assert {e["status"] for e in evts} == {"cancelled", "annulled"}
+        # Saldo final del tercero: 0 (los eventos cancelados no mueven balance)
+        assert data["current_balance"] == pytest.approx(0, abs=0.01)
+        if data["items"]:
+            assert data["items"][-1]["balance_after"] == pytest.approx(0, abs=0.01)
+
+    def test_golden_parity_statement_vs_balance_detailed(
+        self, client, org_headers, db_session, test_organization, base,
+    ):
+        """🔴 TEST DE ORO (QA obligatoria #2): saldo corrido del estado de cuenta
+        al corte X == saldo del tercero en balance detallado as-of X.
+
+        Fixture no-trivial por flujo natural: el tercero X es cliente de una
+        venta standalone, cliente de un DP, comisionista de otra venta (accrual)
+        y receptor de un cobro — los dedup de accruals y la representación de
+        DPs difieren entre los dos code paths; un fixture trivial no protege nada.
+        """
+        from app.models.third_party_category import ThirdPartyCategoryAssignment
+
+        org_id = test_organization.id
+        # X: customer + service_provider (multi-behavior)
+        x = create_third_party_with_category(db_session, org_id, "Multi X", "customer")
+        sp_cat = _get_or_create_category(db_session, org_id, "service_provider")
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=x.id, category_id=sp_cat.id))
+        dp_supplier = create_third_party_with_category(db_session, org_id, "Prov DP Gold", "material_supplier")
+        other_customer = create_third_party_with_category(db_session, org_id, "Cli Otro Gold", "customer")
+        db_session.commit()
+
+        # (a) Venta standalone a X: doc 10-abr, liq 20-abr → X +100.000
+        s1 = api_create_sale(
+            client, org_headers, customer_id=x.id, warehouse_id=base["wh"].id,
+            lines=[{"material_id": base["mat"].id, "quantity": 10, "unit_price": 10000}],
+            auto_liquidate=False, date="2026-04-10",
+        )
+        _liquidate_sale(client, org_headers, s1["id"], liquidation_date="2026-04-20")
+
+        # (b) DP con X como cliente: doc 5-may, liq 15-may → X +60.000
+        de = api_create_double_entry(
+            client, org_headers, supplier_id=dp_supplier.id, customer_id=x.id,
+            lines=[{"material_id": base["mat"].id, "quantity": 10,
+                    "purchase_unit_price": 5000, "sale_unit_price": 6000}],
+            date="2026-05-05",
+        )
+        _liquidate_de(client, org_headers, de["id"], liquidation_date="2026-05-15")
+
+        # (c) Venta a OTRO cliente con comisión a X: doc 20-may, liq 25-may → X -5.000
+        s2 = api_create_sale(
+            client, org_headers, customer_id=other_customer.id, warehouse_id=base["wh"].id,
+            lines=[{"material_id": base["mat"].id, "quantity": 5, "unit_price": 10000}],
+            commissions=[{
+                "third_party_id": str(x.id), "concept": "Com Gold",
+                "commission_type": "fixed", "commission_value": 5000,
+            }],
+            auto_liquidate=False, date="2026-05-20",
+        )
+        _liquidate_sale(client, org_headers, s2["id"], liquidation_date="2026-05-25")
+
+        # (d) Cobro a X: 10-jun → X -50.000
+        api_money_movement(client, org_headers, "customer-collection", {
+            "customer_id": x.id, "amount": 50_000,
+            "account_id": base["acc"].id, "date": "2026-06-10T12:00:00",
+            "description": "Cobro parcial X",
+        })
+
+        expected = {
+            "2026-04-30": 100_000,           # solo (a)
+            "2026-05-31": 155_000,           # (a)+(b)-(c)
+            "2026-07-01": 105_000,           # todo
+        }
+        stmt_items = _statement(client, org_headers, x.id)["items"]
+        for cutoff, exp in expected.items():
+            stmt_bal = _statement_balance_at(stmt_items, cutoff)
+            bd_bal, item, section = _bd_find_tp(
+                _bd(client, org_headers, as_of=cutoff), x.id)
+            assert stmt_bal == pytest.approx(exp, abs=1), f"statement@{cutoff}"
+            assert bd_bal == pytest.approx(exp, abs=1), (
+                f"balance-detailed@{cutoff} (section={section})"
+            )
+            assert stmt_bal == pytest.approx(bd_bal, abs=1), (
+                f"PARIDAD ROTA @{cutoff}: statement={stmt_bal} vs balance={bd_bal}"
+            )
