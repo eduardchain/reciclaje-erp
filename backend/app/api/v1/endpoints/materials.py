@@ -12,7 +12,6 @@ from app.schemas.material import (
     MaterialCreate,
     MaterialUpdate,
     MaterialResponse,
-    MaterialStockUpdate
 )
 from app.services.base import PaginatedResponse
 from app.services.material import material
@@ -190,38 +189,5 @@ def delete_material(
     return material.delete(
         db=db,
         id=material_id,
-        organization_id=org_id
-    )
-
-
-@router.post("/{material_id}/stock", response_model=MaterialResponse)
-def update_material_stock(
-    material_id: UUID,
-    stock_update: MaterialStockUpdate,
-    org_context: tuple = Depends(require_permission("materials.edit")),
-    db: Session = Depends(get_db)
-):
-    """
-    Update material stock by adding or subtracting quantity.
-    
-    **Usage:**
-    - Positive `quantity_delta`: Add stock (e.g., purchase, production)
-    - Negative `quantity_delta`: Subtract stock (e.g., sale, consumption)
-    
-    **Validation:**
-    - Resulting stock cannot be negative
-    
-    **Returns:**
-    - 404 if material not found
-    - 400 if would result in negative stock
-    
-    **Note:** Movement records will be created in Phase 2
-    """
-    org_id = org_context["organization_id"]
-    
-    return material.update_stock(
-        db=db,
-        material_id=material_id,
-        quantity_delta=stock_update.quantity_delta,
         organization_id=org_id
     )

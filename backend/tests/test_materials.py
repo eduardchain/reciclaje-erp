@@ -537,86 +537,17 @@ class TestDeleteMaterial:
         assert response.status_code == 404
 
 
-class TestUpdateMaterialStock:
-    """Tests for POST /api/v1/materials/{id}/stock"""
+class TestLegacyStockEndpointDisabled:
+    """El endpoint legacy POST /materials/{id}/stock fue eliminado: mutaba
+    current_stock sin transit/liquidated ni InventoryMovement, rompiendo los
+    invariantes de inventario (stock == transit + liquidated == SUM(movimientos)).
+    Ajustar stock ahora es exclusivamente via /inventory/adjustments."""
 
-    def test_update_stock_positive_delta(self, client, org_headers, test_material, db_session):
-        """Test increasing material stock."""
-        # Arrange
-        initial_stock = float(test_material.current_stock)
-        stock_update = {"quantity_delta": 5.0}
-
-        # Act
-        response = client.post(f"/api/v1/materials/{test_material.id}/stock", json=stock_update, headers=org_headers)
-
-        # Assert
-        assert response.status_code == 200
-        data = response.json()
-        assert data["current_stock"] == initial_stock + 5.0
-
-        # Verify in DB
-        db_session.expire_all()
-        updated_material = db_session.get(Material, test_material.id)
-        assert float(updated_material.current_stock) == initial_stock + 5.0
-
-    def test_update_stock_negative_delta(self, client, org_headers, test_material, db_session):
-        """Test decreasing material stock."""
-        # Arrange
-        initial_stock = float(test_material.current_stock)
-        stock_update = {"quantity_delta": -3.0}
-
-        # Act
-        response = client.post(f"/api/v1/materials/{test_material.id}/stock", json=stock_update, headers=org_headers)
-
-        # Assert
-        assert response.status_code == 200
-        data = response.json()
-        assert data["current_stock"] == initial_stock - 3.0
-
-        # Verify in DB
-        db_session.expire_all()
-        updated_material = db_session.get(Material, test_material.id)
-        assert float(updated_material.current_stock) == initial_stock - 3.0
-
-    def test_update_stock_below_zero_fails(self, client, org_headers, test_material):
-        """Test updating stock to negative value returns 400."""
-        # Arrange
-        stock_update = {"quantity_delta": -1000.0}  # More than current stock
-
-        # Act
-        response = client.post(f"/api/v1/materials/{test_material.id}/stock", json=stock_update, headers=org_headers)
-
-        # Assert
-        assert response.status_code == 400
-        assert "stock insuficiente" in response.json()["detail"].lower()
-
-    def test_update_stock_to_exactly_zero(self, client, org_headers, test_material, db_session):
-        """Test updating stock to exactly zero."""
-        # Arrange
-        initial_stock = float(test_material.current_stock)
-        stock_update = {"quantity_delta": -initial_stock}
-
-        # Act
-        response = client.post(f"/api/v1/materials/{test_material.id}/stock", json=stock_update, headers=org_headers)
-
-        # Assert
-        assert response.status_code == 200
-        data = response.json()
-        assert data["current_stock"] == 0.0
-
-        # Verify in DB
-        db_session.expire_all()
-        updated_material = db_session.get(Material, test_material.id)
-        assert float(updated_material.current_stock) == 0.0
-
-    def test_update_stock_material_not_found(self, client, org_headers):
-        """Test updating stock of non-existent material returns 404."""
-        # Arrange
-        fake_id = uuid4()
-        stock_update = {"quantity_delta": 10.0}
-
-        # Act
-        response = client.post(f"/api/v1/materials/{fake_id}/stock", json=stock_update, headers=org_headers)
-
-        # Assert
-        assert response.status_code == 404
+    def test_legacy_stock_endpoint_gone(self, client, org_headers, test_material):
+        """POST al endpoint legacy ya no existe -> 404/405, nunca muta stock."""
+        response = client.post(
+            f"/api/v1/materials/{test_material.id}/stock",
+            json={"quantity_delta": 5.0},
+            headers=org_headers,
+        )
+        assert response.status_code in (404, 405)
