@@ -1863,6 +1863,22 @@ class ReportService:
         )
         return Decimal(str(fa.current_value)) + Decimal(str(future_dep))
 
+    @staticmethod
+    def _fa_existed_at_cutoff(cutoff_dt: datetime):
+        """Activos que existían al corte: activos hoy, o dados de baja DESPUÉS
+        del corte (la baja no es un error de captura — el activo existía).
+        `cancelled` se excluye siempre (filosofía 735c2c3: nunca existió).
+        Boundary: baja el mismo día del corte → ya no está al cierre del día.
+        """
+        return or_(
+            FixedAsset.status.notin_(["disposed", "cancelled"]),
+            and_(
+                FixedAsset.status == "disposed",
+                FixedAsset.disposed_at.isnot(None),
+                FixedAsset.disposed_at >= cutoff_dt,
+            ),
+        )
+
     def _get_fixed_assets_as_of(
         self,
         db: Session,
@@ -1873,6 +1889,7 @@ class ReportService:
 
         Usa AssetDepreciation.period ("YYYY-MM") como fecha contable,
         no applied_at (cuándo el usuario clickó aplicar).
+        Incluye activos dados de baja después del corte (existían al corte).
         """
         cutoff_date = (cutoff_dt - timedelta(days=1)).date()
         cutoff_period = cutoff_date.strftime("%Y-%m")
@@ -1880,7 +1897,7 @@ class ReportService:
             select(FixedAsset).where(
                 FixedAsset.organization_id == organization_id,
                 FixedAsset.purchase_date <= cutoff_date,
-                FixedAsset.status.notin_(["disposed", "cancelled"]),
+                self._fa_existed_at_cutoff(cutoff_dt),
             )
         ).all()
 
@@ -1902,7 +1919,7 @@ class ReportService:
             select(FixedAsset).where(
                 FixedAsset.organization_id == organization_id,
                 FixedAsset.purchase_date <= cutoff_date,
-                FixedAsset.status.notin_(["disposed", "cancelled"]),
+                self._fa_existed_at_cutoff(cutoff_dt),
             )
         ).all()
 
@@ -1912,8 +1929,11 @@ class ReportService:
             if current_value > 0:
                 # Depreciacion acumulada historica = diferencia vs purchase_value
                 acc_dep = Decimal(str(fa.purchase_value)) - current_value
+                name = fa.name
+                if fa.status == "disposed" and fa.disposed_at:
+                    name = f"{name} (baja {fa.disposed_at.strftime('%d/%m/%Y')})"
                 items.append(BalanceDetailedItem(
-                    id=str(fa.id), name=fa.name,
+                    id=str(fa.id), name=name,
                     current_value=float(current_value),
                     purchase_value=float(fa.purchase_value),
                     accumulated_depreciation=float(acc_dep),
