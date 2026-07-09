@@ -237,3 +237,112 @@ class TestFix1DisposedAssets:
         assert not any(i["id"] == fa_id for i in data["assets"]["fixed_assets"]["items"])
 
 
+# ---------------------------------------------------------------------------
+# Fix 2 — Terceros y cuentas inactivos en cortes históricos
+# ---------------------------------------------------------------------------
+
+class TestFix2InactiveEntities:
+
+    def test_deactivate_tp_does_not_rewrite_past_cutoff(
+        self, client, org_headers, db_session, base,
+    ):
+        """Reproducción del incidente (Luminarias/Cienaga): desactivar un tercero
+        con saldo 0 hoy no lo borra de cortes donde SÍ tenía saldo."""
+        cust = base["customer"]
+        # Venta liquidada 20-abr: cliente queda debiendo 100.000
+        sale = api_create_sale(
+            client, org_headers, customer_id=cust.id, warehouse_id=base["wh"].id,
+            lines=[{"material_id": base["mat"].id, "quantity": 10, "unit_price": 10000}],
+            auto_liquidate=False, date="2026-04-10",
+        )
+        _liquidate_sale(client, org_headers, sale["id"], liquidation_date="2026-04-20")
+
+        before, _, section_before = _bd_find_tp(
+            _bd(client, org_headers, as_of="2026-04-30"), cust.id)
+        assert before == pytest.approx(100_000, abs=0.01)
+        assert section_before == "customers_receivable"
+
+        # Cobrar TODO el 20-may (saldo 0) y desactivar
+        api_money_movement(client, org_headers, "customer-collection", {
+            "customer_id": cust.id, "amount": 100_000,
+            "account_id": base["acc"].id, "date": "2026-05-20T12:00:00",
+            "description": "Cobro total",
+        })
+        resp = client.delete(f"/api/v1/third-parties/{cust.id}", headers=org_headers)
+        assert resp.status_code == 200, resp.json()
+
+        # Corte 30-abr: el tercero sigue con su saldo de entonces + flag inactivo
+        after_bal, after_item, section = _bd_find_tp(
+            _bd(client, org_headers, as_of="2026-04-30"), cust.id)
+        assert after_bal == pytest.approx(100_000, abs=0.01)
+        assert section == "customers_receivable"
+        assert after_item["is_inactive"] is True
+
+        # balance-sheet histórico también lo cuenta
+        bs = client.get(f"{BS_URL}?as_of_date=2026-04-30", headers=org_headers).json()
+        assert bs["assets"]["accounts_receivable"] == pytest.approx(100_000, abs=0.01)
+
+    def test_deactivated_tp_absent_when_balance_zero_at_cutoff(
+        self, client, org_headers, db_session, base,
+    ):
+        """En un corte posterior al cobro total, el inactivo no aparece (saldo 0)."""
+        cust = base["customer"]
+        sale = api_create_sale(
+            client, org_headers, customer_id=cust.id, warehouse_id=base["wh"].id,
+            lines=[{"material_id": base["mat"].id, "quantity": 10, "unit_price": 10000}],
+            auto_liquidate=False, date="2026-04-10",
+        )
+        _liquidate_sale(client, org_headers, sale["id"], liquidation_date="2026-04-20")
+        api_money_movement(client, org_headers, "customer-collection", {
+            "customer_id": cust.id, "amount": 100_000,
+            "account_id": base["acc"].id, "date": "2026-05-20T12:00:00",
+            "description": "Cobro total",
+        })
+        client.delete(f"/api/v1/third-parties/{cust.id}", headers=org_headers)
+
+        bal, item, _ = _bd_find_tp(_bd(client, org_headers, as_of="2026-06-15"), cust.id)
+        assert item is None, "tercero con saldo 0 al corte no debe listarse"
+
+    def test_fast_path_excludes_inactive(self, client, org_headers, db_session, base):
+        """El balance ACTUAL (sin as_of) mantiene el comportamiento previo."""
+        cust = base["customer"]
+        client.delete(f"/api/v1/third-parties/{cust.id}", headers=org_headers)
+        bal, item, _ = _bd_find_tp(_bd(client, org_headers), cust.id)
+        assert item is None
+
+    def test_inactive_account_in_past_cutoff(
+        self, client, org_headers, db_session, test_organization, base,
+    ):
+        """Cuenta desactivada hoy sigue en cortes donde tenía saldo."""
+        org_id = test_organization.id
+        acc2 = create_account(db_session, org_id, "Cuenta Temporal", balance=0)
+        exp_cat = create_expense_category(db_session, org_id, "Gasto Hist", is_direct=False)
+        db_session.commit()
+
+        api_money_movement(client, org_headers, "service-income", {
+            "amount": 5_000_000, "account_id": acc2.id,
+            "date": "2026-04-15T12:00:00", "description": "Ingreso",
+        })
+        api_money_movement(client, org_headers, "expense", {
+            "amount": 5_000_000, "account_id": acc2.id,
+            "date": "2026-05-15T12:00:00", "description": "Gasto",
+            "expense_category_id": str(exp_cat.id),
+        })
+        resp = client.delete(f"/api/v1/money-accounts/{acc2.id}", headers=org_headers)
+        assert resp.status_code == 200, resp.json()
+
+        data = _bd(client, org_headers, as_of="2026-04-30")
+        item = next(
+            (i for i in data["assets"]["cash_and_bank"]["items"] if i["id"] == str(acc2.id)),
+            None,
+        )
+        assert item is not None, "cuenta inactiva con saldo al corte debe listarse"
+        assert item["balance"] == pytest.approx(5_000_000, abs=0.01)
+        assert item["is_inactive"] is True
+
+    def test_active_items_have_is_inactive_false(self, client, org_headers, base):
+        data = _bd(client, org_headers, as_of="2026-06-30")
+        for i in data["assets"]["cash_and_bank"]["items"]:
+            assert i["is_inactive"] is False
+
+

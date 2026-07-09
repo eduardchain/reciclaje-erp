@@ -173,7 +173,14 @@ export default function BalanceDetailedPage() {
           }}
         >
           <div className="flex flex-col">
-            <span>{item.name}</span>
+            <span>
+              {item.name}
+              {item.is_inactive && (
+                <span className="ml-2 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 align-middle">
+                  Inactivo
+                </span>
+              )}
+            </span>
             <ItemDetail item={item} sectionKey={sectionKey} />
           </div>
           <span className="tabular-nums font-medium">{fmtBalance(item.balance)}</span>

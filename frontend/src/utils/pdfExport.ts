@@ -1064,7 +1064,7 @@ export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?
   y += 8;
 
   function renderSections(
-    sections: Record<string, { label: string; total: number; items: Array<{ name: string; balance: number }>; groups?: Array<{ label: string; total: number; items: Array<{ name: string; balance: number }>; hidden_count?: number; hidden_total?: number }> | null; hidden_count?: number; hidden_total?: number }>,
+    sections: Record<string, { label: string; total: number; items: Array<{ name: string; balance: number; is_inactive?: boolean }>; groups?: Array<{ label: string; total: number; items: Array<{ name: string; balance: number; is_inactive?: boolean }>; hidden_count?: number; hidden_total?: number }> | null; hidden_count?: number; hidden_total?: number }>,
     order: string[],
     titleColor: [number, number, number],
     title: string,
@@ -1123,7 +1123,7 @@ export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?
             checkPageBreak();
             doc.setFont("helvetica", "bold");
             doc.setFontSize(9);
-            doc.text(`    ${item.name}`, 16, y);
+            doc.text(`    ${item.is_inactive ? `${item.name} (inactivo)` : item.name}`, 16, y);
             doc.setFont("helvetica", "normal");
             doc.text(fmtBal(item.balance), pageWidth - 16, y, { align: "right" });
             doc.setDrawColor(230);
@@ -1143,7 +1143,7 @@ export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?
           checkPageBreak();
           doc.setFont("helvetica", "bold");
           doc.setFontSize(9);
-          doc.text(`  ${item.name}`, 16, y);
+          doc.text(`  ${item.is_inactive ? `${item.name} (inactivo)` : item.name}`, 16, y);
           doc.setFont("helvetica", "normal");
           doc.text(fmtBal(item.balance), pageWidth - 16, y, { align: "right" });
           doc.setDrawColor(230);

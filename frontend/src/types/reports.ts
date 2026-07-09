@@ -196,6 +196,8 @@ export interface BalanceDetailedItem {
   accumulated_depreciation?: number | null;
   investor_type?: string | null;
   account_type?: string | null;
+  /** Tercero/cuenta desactivado hoy pero con saldo al corte histórico (solo as_of_date) */
+  is_inactive?: boolean;
 }
 
 export interface BalanceDetailedGroup {

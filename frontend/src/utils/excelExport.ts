@@ -163,7 +163,7 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse, filter
       } else if (item.investor_type) {
         detail = item.investor_type;
       }
-      rows.push(["", detail, item.name, item.balance]);
+      rows.push(["", detail, item.is_inactive ? `${item.name} (inactivo)` : item.name, item.balance]);
     }
   };
 
@@ -179,7 +179,7 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse, filter
       for (const group of section.groups) {
         rows.push(["", group.label, "", group.total]);
         for (const item of group.items) {
-          rows.push(["", "", item.name, item.balance]);
+          rows.push(["", "", item.is_inactive ? `${item.name} (inactivo)` : item.name, item.balance]);
         }
         pushHiddenNote(group.hidden_count, group.hidden_total);
       }

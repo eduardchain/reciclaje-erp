@@ -267,6 +267,8 @@ class BalanceDetailedItem(BaseModel):
     accumulated_depreciation: Optional[float] = None
     investor_type: Optional[str] = None
     account_type: Optional[str] = None
+    # Tercero/cuenta desactivado hoy pero con saldo al corte historico (solo as_of_date)
+    is_inactive: bool = False
 
 
 class BalanceDetailedGroup(BaseModel):

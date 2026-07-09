@@ -979,13 +979,12 @@ class ReportService:
         # Terceros historicos
         tp_balances = self._get_tp_balances_as_of(db, organization_id, cutoff_dt)
 
-        # Pre-cargar metadatos de terceros
+        # Pre-cargar metadatos de terceros (incluye inactivos — existían al corte)
         tp_behaviors, tp_cat_names, _ = self._load_tp_behavior_map(db, organization_id)
         tp_objs = {
             tp.id: tp for tp in db.scalars(
                 select(ThirdParty).where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_active == True,
                 )
             ).all()
         }
@@ -1276,13 +1275,12 @@ class ReportService:
         """Balance Detallado calculado a una fecha de corte historica."""
         cutoff_dt = datetime.combine(as_of_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
 
-        # Pre-cargar metadatos de terceros
+        # Pre-cargar metadatos de terceros (incluye inactivos — existían al corte)
         tp_behaviors, tp_cat_names, tp_cat_by_behavior = self._load_tp_behavior_map(db, organization_id)
         tp_objs = {
             tp.id: tp for tp in db.scalars(
                 select(ThirdParty).where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_active == True,
                 )
             ).all()
         }
@@ -1302,12 +1300,11 @@ class ReportService:
                 label=label, total=round(total, 2), items=items, groups=groups,
             )
 
-        # 1. Cuentas de dinero
+        # 1. Cuentas de dinero (incluye inactivas — existían al corte)
         account_balances = self._get_account_balances_as_of(db, organization_id, cutoff_dt)
         acc_objs = {a.id: a for a in db.scalars(
             select(MoneyAccount).where(
                 MoneyAccount.organization_id == organization_id,
-                MoneyAccount.is_active == True,
             )
         ).all()}
         cash_items = [
@@ -1315,17 +1312,17 @@ class ReportService:
                 id=str(acc_id), name=acc_objs[acc_id].name,
                 balance=float(bal),
                 account_type=acc_objs[acc_id].account_type,
+                is_inactive=not acc_objs[acc_id].is_active,
             )
             for acc_id, bal in account_balances.items()
             if acc_id in acc_objs
         ]
 
-        # 2. Inventario historico
+        # 2. Inventario historico (materiales inactivos: solo para resolver nombre)
         inventory_by_mat = self._get_inventory_as_of(db, organization_id, cutoff_dt)
         mat_objs = {m.id: m for m in db.scalars(
             select(Material).where(
                 Material.organization_id == organization_id,
-                Material.is_active == True,
             )
         ).all()}
         inv_liq_items = [
@@ -1367,6 +1364,7 @@ class ReportService:
                 tp_buckets[section].append(BalanceDetailedItem(
                     id=str(tp_id), name=tp.name,
                     balance=abs(float(balance)),
+                    is_inactive=not tp.is_active,
                 ))
 
         assets: dict[str, BalanceDetailedSection] = {}
@@ -1554,11 +1552,14 @@ class ReportService:
         organization_id: UUID,
         cutoff_dt: datetime,
     ) -> dict[UUID, Decimal]:
-        """Saldo de cada cuenta activa a la fecha de corte."""
+        """Saldo de cada cuenta a la fecha de corte.
+
+        Incluye cuentas inactivas: existían al corte. Desactivar una cuenta
+        no debe reescribir balances históricos ya consultados (incidente Costa).
+        """
         accounts = db.scalars(
             select(MoneyAccount).where(
                 MoneyAccount.organization_id == organization_id,
-                MoneyAccount.is_active == True,
             )
         ).all()
 
@@ -1591,15 +1592,21 @@ class ReportService:
         organization_id: UUID,
         cutoff_dt: datetime,
     ) -> dict[UUID, Decimal]:
-        """Saldo de cada tercero a la fecha de corte (5 fuentes)."""
+        """Saldo de cada tercero a la fecha de corte (5 fuentes).
+
+        Incluye terceros inactivos: existían al corte (desactivar exige saldo 0,
+        pero al corte histórico su saldo era real). Antes el filtro is_active
+        producía un medio-conteo: el inactivo perdía su initial_balance pero
+        sus movimientos sí sumaban (fuentes 1-5 no filtran), y el frankenstein
+        se descartaba al clasificar — desaparición retroactiva (incidente Costa).
+        """
         from collections import defaultdict
         balances: dict[UUID, Decimal] = defaultdict(Decimal)
 
-        # Base: initial_balance de cada tercero
+        # Base: initial_balance de cada tercero (activos e inactivos)
         tps = db.scalars(
             select(ThirdParty).where(
                 ThirdParty.organization_id == organization_id,
-                ThirdParty.is_active == True,
             )
         ).all()
         for tp in tps:
