@@ -346,3 +346,212 @@ class TestFix2InactiveEntities:
             assert i["is_inactive"] is False
 
 
+# ---------------------------------------------------------------------------
+# Fix 3 — Inventario histórico por fecha de liquidación + fechas canónicas
+# ---------------------------------------------------------------------------
+
+class TestFix3InventoryByLiquidation:
+
+    def test_late_sale_liquidation_does_not_rewrite_cutoff(
+        self, client, org_headers, base,
+    ):
+        """Reproducción del incidente (ventas Aburrà): liquidar hoy una venta de
+        abril NO baja el inventario del corte de abril; baja en la fecha de
+        liquidación."""
+        mat = base["mat"]
+        sale = api_create_sale(
+            client, org_headers, customer_id=base["customer"].id, warehouse_id=base["wh"].id,
+            lines=[{"material_id": mat.id, "quantity": 100, "unit_price": 9000}],
+            auto_liquidate=False, date="2026-04-20",
+        )
+        # Corte 3-may con la venta REGISTRADA: stock intacto (500 @ 5000)
+        v_before = _bd_inventory_value(_bd(client, org_headers, as_of="2026-05-03"), mat.id)
+        assert v_before == pytest.approx(2_500_000, abs=0.01)
+
+        # Liquidar con fecha 20-may
+        _liquidate_sale(client, org_headers, sale["id"], liquidation_date="2026-05-20")
+
+        # El corte 3-may NO cambió (antes del fix caía a 400 unidades)
+        v_after = _bd_inventory_value(_bd(client, org_headers, as_of="2026-05-03"), mat.id)
+        assert v_after == pytest.approx(v_before, abs=0.01)
+
+        # En un corte posterior a la liquidación el stock sí salió
+        v_late = _bd_inventory_value(_bd(client, org_headers, as_of="2026-05-25"), mat.id)
+        assert v_late == pytest.approx(2_000_000, abs=0.01)  # 400 @ 5000
+
+    def test_purchase_transit_then_liquidation_counts_at_liq_date(
+        self, client, org_headers, base,
+    ):
+        """Compra en tránsito: excluida del corte; al liquidar entra en la fecha
+        de liquidación, no en la fecha del documento."""
+        mat = base["mat"]
+        p = api_create_purchase(
+            client, org_headers, supplier_id=base["supplier"].id,
+            lines=[{"material_id": mat.id, "quantity": 200, "unit_price": 6000, "warehouse_id": base["wh"].id}],
+            auto_liquidate=False, date="2026-04-10",
+        )
+        v_before = _bd_inventory_value(_bd(client, org_headers, as_of="2026-04-15"), mat.id)
+        assert v_before == pytest.approx(2_500_000, abs=0.01)  # solo la base
+
+        _liquidate_purchase(client, org_headers, p["id"], liquidation_date="2026-05-10")
+
+        # Corte 15-abr: estable (antes del fix, el flip la metía en 10-abr)
+        v_after = _bd_inventory_value(_bd(client, org_headers, as_of="2026-04-15"), mat.id)
+        assert v_after == pytest.approx(v_before, abs=0.01)
+
+        # Corte 15-may: entra el stock (700 unidades al costo promedio nuevo)
+        data_late = _bd(client, org_headers, as_of="2026-05-15")
+        item = next(i for i in data_late["assets"]["inventory_liquidated"]["items"]
+                    if i["id"] == str(mat.id))
+        assert item["stock"] == pytest.approx(700, abs=0.001)
+
+    def test_cancelled_purchase_no_phantom_stock(
+        self, client, org_headers, db_session, test_organization, base,
+    ):
+        """Compra liquidada y cancelada después: desaparece de TODOS los cortes
+        (antes dejaba stock fantasma en cortes entre documento y cancelación)."""
+        org_id = test_organization.id
+        mat2 = create_material(db_session, org_id, "HI-02", "Cobre Hist", base["cat"].id, base["bu"].id)
+        db_session.commit()
+
+        api_create_purchase(
+            client, org_headers, supplier_id=base["supplier"].id,
+            lines=[{"material_id": mat2.id, "quantity": 50, "unit_price": 8000, "warehouse_id": base["wh"].id}],
+            auto_liquidate=True, date="2026-04-05",
+        )
+        v = _bd_inventory_value(_bd(client, org_headers, as_of="2026-04-30"), mat2.id)
+        assert v == pytest.approx(400_000, abs=0.01)
+
+        # Cancelar HOY → el corte de abril ya no la muestra (nunca existió)
+        purchases = client.get("/api/v1/purchases?limit=50", headers=org_headers).json()
+        target = next(p for p in purchases["items"]
+                      if any(l["material_id"] == str(mat2.id) for l in p["lines"]))
+        api_cancel_purchase(client, org_headers, target["id"])
+
+        v_after = _bd_inventory_value(_bd(client, org_headers, as_of="2026-04-30"), mat2.id)
+        assert v_after == pytest.approx(0, abs=0.01)
+
+    def test_cutoff_cost_stable_when_old_purchase_liquidated_late(
+        self, client, org_headers, base, db_session,
+    ):
+        """El MCH de una liquidación tardía nace con transaction_date = fecha de
+        liquidación → el costo de cortes anteriores no se reescribe."""
+        mat = base["mat"]
+        # Costo al 30-abr: 5000 (compra base)
+        data = _bd(client, org_headers, as_of="2026-04-30")
+        item = next(i for i in data["assets"]["inventory_liquidated"]["items"]
+                    if i["id"] == str(mat.id))
+        assert item["avg_cost"] == pytest.approx(5000, abs=0.01)
+
+        # Compra doc 20-abr liquidada con fecha 20-may @ 9000
+        p = api_create_purchase(
+            client, org_headers, supplier_id=base["supplier"].id,
+            lines=[{"material_id": mat.id, "quantity": 500, "unit_price": 9000, "warehouse_id": base["wh"].id}],
+            auto_liquidate=False, date="2026-04-20",
+        )
+        _liquidate_purchase(client, org_headers, p["id"], liquidation_date="2026-05-20")
+
+        # MCH nació con transaction_date = 20-may (no 20-abr)
+        mch = db_session.query(MaterialCostHistory).filter_by(
+            source_type="purchase_liquidation", source_id=p["id"],
+        ).first()
+        assert mch is not None
+        assert mch.transaction_date == date(2026, 5, 20)
+
+        # Costo del corte 30-abr: intacto (antes del fix saltaba a 7000)
+        data2 = _bd(client, org_headers, as_of="2026-04-30")
+        item2 = next(i for i in data2["assets"]["inventory_liquidated"]["items"]
+                     if i["id"] == str(mat.id))
+        assert item2["avg_cost"] == pytest.approx(5000, abs=0.01)
+
+        # Y el corte 31-may sí ve el promedio nuevo (7000 = (500*5000+500*9000)/1000)
+        data3 = _bd(client, org_headers, as_of="2026-05-31")
+        item3 = next(i for i in data3["assets"]["inventory_liquidated"]["items"]
+                     if i["id"] == str(mat.id))
+        assert item3["avg_cost"] == pytest.approx(7000, abs=0.01)
+
+    def test_commission_accrual_born_at_liquidation_date(
+        self, client, org_headers, db_session, test_organization, base,
+    ):
+        """Opción B: el commission_accrual nace con date = liquidated_at."""
+        org_id = test_organization.id
+        comisionista = create_third_party_with_category(
+            db_session, org_id, "Comisionista Hist", "service_provider")
+        db_session.commit()
+
+        sale = api_create_sale(
+            client, org_headers, customer_id=base["customer"].id, warehouse_id=base["wh"].id,
+            lines=[{"material_id": base["mat"].id, "quantity": 10, "unit_price": 10000}],
+            commissions=[{
+                "third_party_id": str(comisionista.id), "concept": "Com",
+                "commission_type": "fixed", "commission_value": 5000,
+            }],
+            auto_liquidate=False, date="2026-04-20",
+        )
+        _liquidate_sale(client, org_headers, sale["id"], liquidation_date="2026-05-20")
+
+        mm = db_session.query(MoneyMovement).filter_by(
+            movement_type="commission_accrual", sale_id=sale["id"],
+        ).first()
+        assert mm is not None
+        assert mm.date.date() == date(2026, 5, 20)
+
+    def test_dp_commission_accrual_born_at_liquidation_date(
+        self, client, org_headers, db_session, test_organization, base,
+    ):
+        """Opción B en DPs: liq_dt se pasa como parámetro (trampa de orden QA #1)."""
+        org_id = test_organization.id
+        dp_supplier = create_third_party_with_category(db_session, org_id, "Prov DP Hist", "material_supplier")
+        dp_customer = create_third_party_with_category(db_session, org_id, "Cli DP Hist", "customer")
+        comisionista = create_third_party_with_category(db_session, org_id, "Com DP Hist", "service_provider")
+        db_session.commit()
+
+        de = api_create_double_entry(
+            client, org_headers, supplier_id=dp_supplier.id, customer_id=dp_customer.id,
+            lines=[{"material_id": base["mat"].id, "quantity": 10,
+                    "purchase_unit_price": 5000, "sale_unit_price": 6000}],
+            commissions=[{
+                "third_party_id": str(comisionista.id), "concept": "Com DP",
+                "commission_type": "fixed", "commission_value": 3000,
+            }],
+            date="2026-04-20",
+        )
+        _liquidate_de(client, org_headers, de["id"], liquidation_date="2026-05-20")
+
+        mm = db_session.query(MoneyMovement).filter_by(
+            movement_type="commission_accrual", sale_id=de["sale_id"],
+        ).first()
+        assert mm is not None
+        assert mm.date.date() == date(2026, 5, 20)
+
+    def test_migration_backfill_idempotent(self, db_session, org_headers, client, base):
+        """La lógica de la migración 4d8f2c1e9a7b: alinear → segunda pasada 0 filas."""
+        p = api_create_purchase(
+            client, org_headers, supplier_id=base["supplier"].id,
+            lines=[{"material_id": base["mat"].id, "quantity": 10, "unit_price": 5000, "warehouse_id": base["wh"].id}],
+            auto_liquidate=False, date="2026-04-02",
+        )
+        _liquidate_purchase(client, org_headers, p["id"], liquidation_date="2026-05-02")
+        # Desalinear a mano (simular dato pre-fix)
+        db_session.execute(text(
+            "UPDATE material_cost_histories SET transaction_date = '2026-04-02' "
+            "WHERE source_type='purchase_liquidation' AND source_id = :pid"
+        ), {"pid": p["id"]})
+        db_session.commit()
+
+        upd = text("""
+            UPDATE material_cost_histories mch
+            SET transaction_date = (p.liquidated_at AT TIME ZONE 'UTC')::date
+            FROM purchases p
+            WHERE mch.source_type = 'purchase_liquidation' AND mch.source_id = p.id
+              AND p.liquidated_at IS NOT NULL
+              AND mch.transaction_date IS DISTINCT FROM (p.liquidated_at AT TIME ZONE 'UTC')::date
+        """)
+        r1 = db_session.execute(upd)
+        db_session.commit()
+        assert r1.rowcount >= 1
+        r2 = db_session.execute(upd)
+        db_session.commit()
+        assert r2.rowcount == 0
+
+

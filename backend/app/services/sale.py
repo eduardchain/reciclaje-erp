@@ -1205,14 +1205,19 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         for commission in commissions:
             recipient = db.get(ThirdParty, commission.third_party_id)
 
-            # Crear movimiento commission_accrual para P&L
+            # Crear movimiento commission_accrual para P&L.
+            # Fecha = liquidated_at (decision #42): la comision se devenga al
+            # LIQUIDAR — con sale.date quedaba retro-fechada al documento,
+            # desalineada del revenue y reescribiendo saldos historicos del
+            # comisionista en liquidaciones tardias. liquidate() asigna
+            # liquidated_at ANTES de llamar aca; fallback defensivo a sale.date.
             mm_service._create_movement(
                 db=db,
                 organization_id=sale.organization_id,
                 movement_type="commission_accrual",
                 amount=commission.commission_amount,
                 account_id=None,
-                date=sale.date,
+                date=sale.liquidated_at or sale.date,
                 description=f"Comisión venta #{sale.sale_number} - {commission.concept}",
                 third_party_id=commission.third_party_id,
                 sale_id=sale.id,

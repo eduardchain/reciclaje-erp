@@ -433,6 +433,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 line_weight = line_value / purchase.total_amount
                 commission_prorate[line.id] = total_commission * line_weight
 
+        # Fecha canonica del efecto financiero (decision #42) para el historial
+        # de costo. USAR EL PARAMETRO: purchase.liquidated_at se asigna recien
+        # en el Step 9 (mas abajo) — leerlo aqui daria None.
+        effective_liq_date = liquidation_date or purchase.date
+        if hasattr(effective_liq_date, "date"):
+            effective_liq_date = effective_liq_date.date()
+
         # Step 5 y 6: Actualizar InventoryMovement.unit_cost y recalcular costo promedio
         for line in purchase.lines:
             # Costo ajustado = precio + comision prorrateada
@@ -465,7 +472,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 source_type="purchase_liquidation",
                 source_id=purchase.id,
                 organization_id=organization_id,
-                transaction_date=purchase.date.date() if hasattr(purchase.date, "date") else purchase.date,
+                transaction_date=effective_liq_date,
             )
 
             if line_commission > 0:

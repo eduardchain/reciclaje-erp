@@ -1714,41 +1714,74 @@ class ReportService:
         """Stock liquidado y costo promedio por material a la fecha de corte.
 
         Returns dict[material_id, (stock, avg_cost)]
-        Excluye:
-        - Compras registradas (unit_cost=0, solo transito)
-        - Ventas no liquidadas al corte
+
+        Compras y ventas cuentan por su FECHA DE LIQUIDACION (decision #42:
+        liquidated_at = fecha canonica de efecto financiero), consistente con
+        las fuentes 2/3 de _get_tp_balances_as_of: liquidar hoy una operacion
+        vieja ya NO reescribe cortes anteriores (incidente Costa). El resto de
+        movimientos (ajustes, transformaciones, transfers) cuenta por su fecha.
+        Canceladas: excluidas SIEMPRE (735c2c3) — original y reversa salen
+        juntas (arregla el stock fantasma de compras canceladas post-corte).
         """
         # cutoff_dt = as_of_date + 1 día (00:00 UTC del día siguiente).
         # Para comparar con MaterialCostHistory.transaction_date (date),
         # necesitamos as_of_date original, no cutoff_dt.date() que da as_of_date+1.
         cutoff_date = (cutoff_dt - timedelta(days=1)).date()
 
-        # Movimientos de inventario hasta el corte
-        # Excluir compras en transito (unit_cost=0 + reference_type='purchase' sin venta liquidada)
-        # y ventas aun no liquidadas al corte
+        is_purchase_ref = InventoryMovement.reference_type == "purchase"
+        is_sale_ref = InventoryMovement.reference_type == "sale"
+        purchase_liq_at_cutoff = exists(
+            select(Purchase.id).where(
+                Purchase.id == InventoryMovement.reference_id,
+                Purchase.status == "liquidated",
+                Purchase.liquidated_at < cutoff_dt,
+            )
+        )
+        purchase_exists = exists(
+            select(Purchase.id).where(Purchase.id == InventoryMovement.reference_id)
+        )
+        sale_liq_at_cutoff = exists(
+            select(Sale.id).where(
+                Sale.id == InventoryMovement.reference_id,
+                Sale.status == "liquidated",
+                Sale.liquidated_at < cutoff_dt,
+            )
+        )
+        sale_exists = exists(
+            select(Sale.id).where(Sale.id == InventoryMovement.reference_id)
+        )
+
         movement_rows = db.execute(
             select(
                 InventoryMovement.material_id,
                 func.sum(InventoryMovement.quantity),
             ).where(
                 InventoryMovement.organization_id == organization_id,
-                InventoryMovement.date < cutoff_dt,
-                # Excluir compras en transito (unit_cost = 0)
                 or_(
-                    InventoryMovement.movement_type != "purchase",
-                    InventoryMovement.unit_cost != 0,
-                ),
-                # Excluir ventas no liquidadas al corte (original y reversal)
-                # Razón: sale_reversal de ventas canceladas (no liquidadas) quedaba incluido
-                # pero su original (-X) quedaba excluido, generando stock fantasma.
-                ~and_(
-                    InventoryMovement.movement_type.in_(["sale", "sale_reversal"]),
-                    InventoryMovement.reference_type == "sale",
-                    exists(
-                        select(Sale.id).where(
-                            Sale.id == InventoryMovement.reference_id,
-                            ~self._active_at_cutoff(Sale.status),
-                        )
+                    # Rama 1: movimientos no comerciales → por fecha del movimiento
+                    # (reference_type NULL debe pasar: NOT IN con NULL da NULL)
+                    and_(
+                        or_(
+                            InventoryMovement.reference_type.is_(None),
+                            InventoryMovement.reference_type.notin_(["purchase", "sale"]),
+                        ),
+                        InventoryMovement.date < cutoff_dt,
+                    ),
+                    # Rama 2: compras → por fecha de liquidacion de la compra
+                    and_(is_purchase_ref, purchase_liq_at_cutoff),
+                    # Rama 2b: compras huerfanas (sin fila padre; fixtures/legacy,
+                    # cero en prod 2026-07-08) → comportamiento previo
+                    and_(
+                        is_purchase_ref, ~purchase_exists,
+                        InventoryMovement.date < cutoff_dt,
+                        InventoryMovement.unit_cost != 0,
+                    ),
+                    # Rama 3: ventas → por fecha de liquidacion de la venta
+                    and_(is_sale_ref, sale_liq_at_cutoff),
+                    # Rama 3b: ventas huerfanas → comportamiento previo
+                    and_(
+                        is_sale_ref, ~sale_exists,
+                        InventoryMovement.date < cutoff_dt,
                     ),
                 ),
             ).group_by(InventoryMovement.material_id)
@@ -1807,6 +1840,9 @@ class ReportService:
             # Fallback 2: materiales sin ningun registro en MaterialCostHistory
             # (ajustes legacy sin historial de costo) → unit_cost del último movimiento
             # de compra/ajuste antes del corte. El costo está guardado en el movimiento.
+            # Movimientos de compra: solo si su compra estaba liquidada al corte
+            # (unit_cost se muta in-place al liquidar — sin el gate, una
+            # liquidacion tardia inyectaria un costo que al corte no existia).
             missing2 = [mid for mid in stock_by_mat if mid not in cost_by_mat]
             if missing2:
                 movement_cost_rows = db.execute(
@@ -1820,6 +1856,11 @@ class ReportService:
                         InventoryMovement.date < cutoff_dt,
                         InventoryMovement.unit_cost > 0,
                         InventoryMovement.movement_type.in_(["purchase", "adjustment"]),
+                        or_(
+                            InventoryMovement.movement_type != "purchase",
+                            purchase_liq_at_cutoff,
+                            ~purchase_exists,
+                        ),
                     ).order_by(
                         InventoryMovement.material_id,
                         InventoryMovement.date.desc(),
