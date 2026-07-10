@@ -324,6 +324,12 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         customer.current_balance += sale_total
         print(f"  💰 Customer '{customer.name}' balance: {customer.current_balance - sale_total} → {customer.current_balance}")
 
+        # Fecha canonica de liquidacion (decision #42) — se calcula ANTES del
+        # Step 5 porque los commission_accrual deben nacer con esta fecha
+        # (con sale.date quedaban retro-fechados al documento, reescribiendo
+        # saldos historicos del comisionista en liquidaciones tardias).
+        liq_dt = liquidation_date or double_entry.date
+
         # Step 5: Pagar comisiones (crear MoneyMovements + actualizar balances)
         commissions = db.scalars(select(SaleCommission).where(SaleCommission.sale_id == sale.id)).all()
         for commission in commissions:
@@ -334,7 +340,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                 movement_type="commission_accrual",
                 amount=commission.commission_amount,
                 account_id=None,
-                date=sale.date,
+                date=liq_dt,
                 description=f"Comisión DP #{double_entry.double_entry_number} - {commission.concept}",
                 third_party_id=commission.third_party_id,
                 sale_id=sale.id,
@@ -344,7 +350,6 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             print(f"  💼 Commission: {commission.concept} - ${commission.commission_amount}")
 
         # Step 6: Marcar como liquidated
-        liq_dt = liquidation_date or double_entry.date
         purchase.status = "liquidated"
         purchase.liquidated_at = liq_dt
         purchase.liquidated_by = user_id

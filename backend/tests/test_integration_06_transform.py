@@ -206,19 +206,13 @@ class TestTransformationStress:
         assert cu_resp.json()["current_stock"] == pytest.approx(450, abs=0.01)
 
         # =================================================================
-        # PASO 6: Anulacion de transformacion (t3: cobre→hierro sin merma)
-        # Debe revertir: hierro -100, cobre +100, avg_cost de hierro revertido
+        # PASO 6: Anulacion de transformacion
+        # (El intento de anular t3 esperando 400 fue eliminado — Fase 5:
+        # anular con operaciones posteriores ya no bloquea, la remocion
+        # ponderada conserva valor por construccion. Cubierto en
+        # test_avg_cost_model_l.py TestFase5WeightedRemoval. Aca se mantiene
+        # el annul de t5, que preserva el flujo del stress test.)
         # =================================================================
-        # Primero, el hierro actual tiene transformaciones posteriores (t4, t5)
-        # sobre hierro como FUENTE → transformation_out bloquea?
-        # t4 usó hierro como fuente → sí, transformation_out existe
-        # Intentar anular t3 debería FALLAR porque t4 es posterior sobre hierro
-        resp_annul_blocked = client.post(
-            f"/api/v1/inventory/transformations/{t3['id']}/annul",
-            json={"reason": "Revertir"}, headers=h,
-        )
-        assert resp_annul_blocked.status_code == 400, \
-            f"Expected 400 for blocked annul, got {resp_annul_blocked.status_code}"
 
         # Anular t5 (la ultima sobre hierro como fuente, sin posteriores sobre hierro)
         # Pero t5 agregó cobre como destino → hay transformation_in sobre cobre

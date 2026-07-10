@@ -88,7 +88,17 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         default=0,
         comment="Total purchase amount (sum of all line totals)",
     )
-    
+
+    cancellation_cost_adjustment: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+        comment="Ajuste de costo al cancelar compra liquidada (Fase 5 remocion "
+                "ponderada): diferencia entre lo que la compra metio al pool y lo "
+                "que la remocion pudo sacar. Entra al P&L por cancelled_at.",
+    )
+
     status: Mapped[str] = mapped_column(
         Enum("registered", "liquidated", "cancelled", name="purchase_status"),
         nullable=False,
@@ -292,7 +302,17 @@ class PurchaseLine(Base, TimestampMixin):
         nullable=False,
         comment="Line total (quantity × unit_price)",
     )
-    
+
+    cost_adjustment: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+        comment="Ajuste de costo por sobreventa al liquidar (Modelo L #65): "
+                "diferencia entre el COGS ya cargado por el hueco negativo y el "
+                "costo real de reposicion. >0 ganancia, <0 perdida. Entra al P&L.",
+    )
+
     # Relationships
     purchase: Mapped["Purchase"] = relationship(
         "Purchase",

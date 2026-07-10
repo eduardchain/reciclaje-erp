@@ -482,9 +482,14 @@ class TestPurchaseCommissions:
         db_session.refresh(test_commission_recipient)
         assert test_commission_recipient.current_balance == Decimal("0.00")
 
-        # Costo promedio revertido a 0
+        # Fase 5 (remocion ponderada): al vaciar el pool el avg queda como
+        # remanente inocuo (50.50 = precio 50 + comision prorrateada 0.50 —
+        # de paso verifica H1: la remocion leyo el costo AJUSTADO del
+        # movimiento). Con stock 0 el avg es irrelevante: la proxima entrada
+        # resetea via incorporate con pool==0. Pool value $0 igual que antes.
         db_session.refresh(test_material)
-        assert test_material.current_average_cost == Decimal("0.00")
+        assert test_material.current_stock_liquidated == Decimal("0")
+        assert test_material.current_average_cost == Decimal("50.50")
 
     def test_registered_purchase_commissions_no_balance_effect(
         self,

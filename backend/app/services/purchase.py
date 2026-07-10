@@ -8,6 +8,7 @@ Supports 1-step and 2-step purchase workflows:
 Liquidation confirms prices, moves stock transit->liquidated, updates avg cost and supplier balance.
 Payment to supplier is a separate operation via MoneyMovement (type='payment_to_supplier').
 """
+from collections import defaultdict, deque
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Optional, List
@@ -22,10 +23,12 @@ from app.models.purchase import Purchase, PurchaseCommission, PurchaseLine
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
 from app.models.money_account import MoneyAccount
+from app.models.money_movement import MoneyMovement
 from app.models.third_party import ThirdParty
 from app.models.warehouse import Warehouse
 from app.schemas.purchase import PurchaseCreate, PurchaseUpdate, PurchaseFullUpdate
 from app.services.base import CRUDBase
+from app.services.inventory_costing import incorporate_into_pool, remove_from_pool
 from app.services.material_cost_history import material_cost_history_service
 from app.services.money_movement import money_movement as mm_service
 
@@ -433,27 +436,57 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 line_weight = line_value / purchase.total_amount
                 commission_prorate[line.id] = total_commission * line_weight
 
+        # Fecha canonica del efecto financiero (decision #42) para el historial
+        # de costo. USAR EL PARAMETRO: purchase.liquidated_at se asigna recien
+        # en el Step 9 (mas abajo) — leerlo aqui daria None.
+        effective_liq_date = liquidation_date or purchase.date
+        if hasattr(effective_liq_date, "date"):
+            effective_liq_date = effective_liq_date.date()
+
+        # Pre-cargar los movimientos de inventario de esta compra y agruparlos por
+        # firma fisica (material, bodega, cantidad) en colas. Una compra puede
+        # repetir el mismo material en varias lineas (distinto precio/calidad):
+        # con .first() todas esas lineas escribian el MISMO movimiento (uno quedaba
+        # en unit_cost=0 para siempre). La cantidad de la linea es inmutable al
+        # liquidar (line_updates solo cambia unit_price), asi que la firma empareja
+        # 1:1 linea<->movimiento de forma estable.
+        movements = db.query(InventoryMovement).filter(
+            InventoryMovement.reference_type == "purchase",
+            InventoryMovement.reference_id == purchase.id,
+            InventoryMovement.movement_type == "purchase",
+        ).all()
+        movements_by_key: dict = defaultdict(deque)
+        for mv in movements:
+            movements_by_key[(mv.material_id, mv.warehouse_id, mv.quantity)].append(mv)
+
         # Step 5 y 6: Actualizar InventoryMovement.unit_cost y recalcular costo promedio
         for line in purchase.lines:
             # Costo ajustado = precio + comision prorrateada
             line_commission = commission_prorate.get(line.id, Decimal("0"))
             adjusted_unit_cost = line.unit_price + (line_commission / line.quantity) if line.quantity > 0 else line.unit_price
 
-            # Actualizar costo en movimiento de inventario
-            inv_movement = db.query(InventoryMovement).filter(
-                InventoryMovement.reference_type == "purchase",
-                InventoryMovement.reference_id == purchase.id,
-                InventoryMovement.material_id == line.material_id,
-                InventoryMovement.movement_type == "purchase",
-            ).first()
+            # Actualizar costo en el movimiento de ESTA linea (no .first())
+            queue = movements_by_key.get((line.material_id, line.warehouse_id, line.quantity))
+            inv_movement = queue.popleft() if queue else None
             if inv_movement:
                 inv_movement.unit_cost = adjusted_unit_cost
 
-            # Recalcular costo promedio del material con costo AJUSTADO
+            # Recalcular costo promedio del material con costo AJUSTADO.
+            # cost_adjustment != 0 solo cuando esta linea rellena un hueco de
+            # oversell (liquidated < 0) — entra al P&L por liquidated_at (#65).
             material = line.material
             old_cost = material.current_average_cost
             old_liquidated_stock = material.current_stock_liquidated
-            self._apply_cost_at_liquidation(material, line.quantity, adjusted_unit_cost)
+            line.cost_adjustment = self._apply_cost_at_liquidation(
+                material, line.quantity, adjusted_unit_cost
+            )
+
+            # Reclasificar transito -> liquidado de ESTA linea AHORA (antes se hacia
+            # en batch al final): asi la siguiente linea del mismo material promedia
+            # contra el stock ya incorporado, no contra un old_liquidated stale que
+            # hacia el costo promedio dependiente del orden de las lineas.
+            material.current_stock_transit -= line.quantity
+            material.current_stock_liquidated += line.quantity
 
             material_cost_history_service.record_cost_change(
                 db=db,
@@ -465,16 +498,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 source_type="purchase_liquidation",
                 source_id=purchase.id,
                 organization_id=organization_id,
-                transaction_date=purchase.date.date() if hasattr(purchase.date, "date") else purchase.date,
+                transaction_date=effective_liq_date,
             )
 
             if line_commission > 0:
                 print(f"  💲 {material.code}: precio=${line.unit_price} + comision=${line_commission} = costo=${adjusted_unit_cost}, costo_prom=${material.current_average_cost}")
             else:
                 print(f"  💲 {material.code}: precio=${line.unit_price}, costo_prom=${material.current_average_cost}")
-
-        # Step 7: Mover stock de transito a liquidado
-        self._move_stock_transit_to_liquidated(db, purchase)
 
         # Step 8: Actualizar saldo del proveedor (deuda — solo materiales, sin comisiones)
         supplier = purchase.supplier
@@ -542,10 +572,11 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         purchase_id: UUID,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
-    ) -> Purchase:
+        annul_linked_payments: bool = False,
+    ) -> tuple[Purchase, list[str]]:
         """
         Cancel a purchase and reverse all effects.
-        
+
         Workflow:
         1. Validate purchase exists and can be cancelled
         2. Validate sufficient stock to reverse
@@ -553,16 +584,25 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         4. Create reversal InventoryMovements (negative quantity)
         5. Revert Material.current_stock
         6. Revert Supplier.current_balance
-        7. Revert average cost using MaterialCostHistory (blocks if subsequent operations exist)
-        
+        7. Remocion PONDERADA del costo promedio (Fase 5): saca del pool lo que
+           la compra metio (costo ajustado + fill adjustment, leido del
+           InventoryMovement), nunca bloquea, conserva valor por construccion.
+           La diferencia va a purchase.cancellation_cost_adjustment (P&L por
+           cancelled_at). El historial de costo es append-only: se registra
+           purchase_cancellation, no se borra la liquidacion.
+
         Args:
             db: Database session
             purchase_id: Purchase UUID
             organization_id: Organization UUID
-            
+
         Returns:
-            Cancelled Purchase
-            
+            (Cancelled Purchase, warnings). Warnings no bloqueantes (PR-3 #65,
+            filosofia "avisar, no bloquear"): la cancelacion de una compra cuyo
+            material ya fue vendido deja el stock liquidado negativo — el sistema
+            queda consistente (la Fase 2 maneja el hueco al rellenarse) pero el
+            operador debe saberlo.
+
         Raises:
             HTTPException: 400 if already cancelled, paid, or insufficient stock
             HTTPException: 404 if not found
@@ -597,22 +637,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
         was_liquidated = purchase.status == "liquidated"
 
-        # Step 2a: Si liquidada, verificar que no hay operaciones posteriores de costo
-        if was_liquidated:
-            for line in purchase.lines:
-                can_revert, blocking = material_cost_history_service.check_can_revert(
-                    db=db,
-                    material_id=line.material_id,
-                    source_type="purchase_liquidation",
-                    source_id=purchase.id,
-                )
-                if not can_revert:
-                    material = line.material
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"No se puede cancelar: existen operaciones posteriores que afectaron "
-                               f"el costo de '{material.name}'. Cancele primero: {', '.join(blocking)}"
-                    )
+        # Fase 5: ya NO hay guard check_can_revert (bloqueaba por MCH posterior
+        # pero era ciego a extracciones MCH-silenciosas — ventas liquidadas y
+        # decreases). La remocion ponderada conserva valor por construccion sin
+        # importar que paso despues, asi que cancelar siempre es valido.
 
         # Step 2b: Validate sufficient stock to reverse (para registered, estricto; para liquidated, permitir negativo con warning)
         if not was_liquidated:
@@ -633,17 +661,42 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # via MoneyMovement y debe anularse por separado si corresponde.
 
         # Step 5: Create reversal movements and revert stock
+        # Fase 5 (remocion ponderada): la remocion saca lo que la compra METIO
+        # realmente. Fuente H1: el costo ajustado por comision vive en el
+        # InventoryMovement (se escribio al liquidar), NO en la linea (que solo
+        # tiene unit_price crudo) — se lee via el mismo patron deque-por-firma
+        # de liquidate/QW-B, single source of truth sin recompute drift.
+        movements_by_key: dict = defaultdict(deque)
+        if was_liquidated:
+            purchase_movements = db.query(InventoryMovement).filter(
+                InventoryMovement.reference_type == "purchase",
+                InventoryMovement.reference_id == purchase.id,
+                InventoryMovement.movement_type == "purchase",
+            ).all()
+            for mv in purchase_movements:
+                movements_by_key[(mv.material_id, mv.warehouse_id, mv.quantity)].append(mv)
+
+        total_cancellation_adjustment = Decimal("0")
         for line in purchase.lines:
             material = line.material
 
-            # Create reversal movement
+            # Costo ajustado desde el movimiento de ESTA linea (fallback al
+            # precio crudo solo si el movimiento no existe — huerfanos/legacy)
+            adjusted_unit_cost = line.unit_price
+            if was_liquidated:
+                queue = movements_by_key.get((line.material_id, line.warehouse_id, line.quantity))
+                inv_movement = queue.popleft() if queue else None
+                if inv_movement is not None:
+                    adjusted_unit_cost = inv_movement.unit_cost
+
+            # Create reversal movement (unit_cost = ajustado, por auditoria)
             reversal = InventoryMovement(
                 organization_id=organization_id,
                 material_id=line.material_id,
                 warehouse_id=line.warehouse_id,
                 movement_type="purchase_reversal",
                 quantity=-line.quantity,  # Negative = out
-                unit_cost=line.unit_price,
+                unit_cost=adjusted_unit_cost,
                 reference_type="purchase",
                 reference_id=purchase.id,
                 date=purchase.date,
@@ -654,18 +707,51 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             # Revert stock del bucket correcto segun estado previo
             material.current_stock -= line.quantity
             if was_liquidated:
-                material.current_stock_liquidated -= line.quantity
-                # Revertir costo promedio usando historial
-                material_cost_history_service.revert_cost_change(
-                    db=db,
-                    material=material,
-                    source_type="purchase_liquidation",
-                    source_id=purchase.id,
+                # Contribucion REAL de la linea al pool: costo ajustado + el
+                # relleno de hueco que hizo al liquidar (H1) — si el fill sale
+                # del P&L (status cancelled), su valor tambien sale del pool.
+                u_total = adjusted_unit_cost
+                if line.quantity > 0:
+                    u_total = adjusted_unit_cost + (line.cost_adjustment / line.quantity)
+
+                old_liq = material.current_stock_liquidated
+                old_avg = material.current_average_cost
+                new_avg, adjustment = remove_from_pool(
+                    liquidated=old_liq,
+                    avg_cost=old_avg,
+                    quantity=line.quantity,
+                    unit_cost=u_total,
                 )
+                material.current_average_cost = new_avg
+                material.current_stock_liquidated -= line.quantity
+                total_cancellation_adjustment += adjustment
+                # Append-only: la cancelacion escribe su propio registro en el
+                # historial (no borra el de la liquidacion). SIEMPRE, incluso si
+                # el avg no cambio: el registro original queda oculto para la
+                # valuacion as-of (op cancelada, filtro H2) — sin este registro
+                # la cadena visible perderia el costo y as-of(hoy) != balance vivo.
+                material_cost_history_service.record_cost_change(
+                        db=db,
+                        material=material,
+                        previous_cost=old_avg,
+                        previous_stock=old_liq,
+                        new_cost=new_avg,
+                        new_stock=old_liq - line.quantity,
+                        source_type="purchase_cancellation",
+                        source_id=purchase.id,
+                        organization_id=organization_id,
+                        transaction_date=datetime.now(timezone.utc).date(),
+                    )
             else:
                 material.current_stock_transit -= line.quantity
 
             print(f"  ↩️  Reversed: {material.code} -{line.quantity} (new stock: {material.current_stock}, cost: {material.current_average_cost})")
+
+        if was_liquidated:
+            # != 0 solo si la remocion no pudo sacar exactamente lo que la compra
+            # metio (hubo extracciones intermedias o cruzo a hueco). P&L por
+            # cancelled_at (G3: puede caer en periodo distinto al de la compra).
+            purchase.cancellation_cost_adjustment = total_cancellation_adjustment
 
         # Step 6: Revert supplier balance (solo si estaba liquidada, ya que al crear no se modifica)
         supplier = db.get(ThirdParty, purchase.supplier_id)
@@ -678,14 +764,72 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 recipient.current_balance += comm.commission_amount
                 print(f"  ↩️  Comision revertida: ${comm.commission_amount} → {recipient.name}")
 
+        # Step 7: opcional — anular pagos inmediatos enlazados (payment_to_supplier con purchase_id).
+        # Simétrico a ventas (decisión #63): revierte el efecto del pago: caja +amount, proveedor
+        # -amount. Solo confirmed (no re-anula un pago ya anulado; no-op seguro si no hay ninguno).
+        if annul_linked_payments:
+            linked = db.scalars(
+                select(MoneyMovement).where(
+                    MoneyMovement.purchase_id == purchase_id,
+                    MoneyMovement.movement_type == "payment_to_supplier",
+                    MoneyMovement.status == "confirmed",
+                )
+            ).all()
+            for mov in linked:
+                if mov.account_id:
+                    account = db.get(MoneyAccount, mov.account_id)
+                    if account:
+                        account.current_balance += mov.amount
+                if mov.third_party_id:
+                    tp = db.get(ThirdParty, mov.third_party_id)
+                    if tp:
+                        tp.current_balance -= mov.amount
+                mov.status = "annulled"
+                mov.annulled_at = datetime.now(timezone.utc)
+                mov.annulled_by = user_id
+                mov.annulled_reason = f"Cancelación compra #{purchase.purchase_number}"
+                print(f"  📝 Pago #{mov.movement_number} anulado (cancelación compra)")
+
+        # Step 8: warnings de hueco proyectado (una vez por material, estado FINAL)
+        warnings: list[str] = []
+        if was_liquidated:
+            seen: dict = {}
+            for line in purchase.lines:
+                seen[line.material_id] = line.material
+            for material in seen.values():
+                if material.current_stock_liquidated < 0:
+                    warnings.append(
+                        f"El stock liquidado de {material.code} queda negativo tras la "
+                        f"cancelación: {float(material.current_stock_liquidated):g} "
+                        f"{material.default_unit or 'kg'} (el material ya fue vendido)"
+                    )
+
         print(f"❌ Cancelled purchase #{purchase.purchase_number}")
         print(f"   Supplier balance: {supplier.current_balance} (debt reduced by ${purchase.total_amount})")
-        
+
         db.commit()
         db.refresh(purchase)
-        
-        return purchase
+
+        return purchase, warnings
     
+    def get_linked_payment_total(
+        self, db: Session, purchase_id: UUID, organization_id: UUID
+    ) -> Decimal:
+        """Suma de pagos inmediatos enlazados (payment_to_supplier, confirmed) a esta compra.
+
+        El detalle lo expone para el diálogo de cancelación (decisión #63): avisa que hay un pago
+        vivo que quedaría como anticipo al proveedor si no se anula. 0 si no hay ninguno.
+        """
+        total = db.execute(
+            select(func.coalesce(func.sum(MoneyMovement.amount), 0)).where(
+                MoneyMovement.purchase_id == purchase_id,
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.movement_type == "payment_to_supplier",
+                MoneyMovement.status == "confirmed",
+            )
+        ).scalar_one()
+        return Decimal(str(total or 0))
+
     def update(
         self,
         db: Session,
@@ -1148,23 +1292,31 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         material: Material,
         quantity: Decimal,
         confirmed_price: Decimal,
-    ) -> None:
+    ) -> Decimal:
         """
         Incorporar costo confirmado al promedio ponderado durante liquidacion.
 
         Usa current_stock_liquidated (NO current_stock) para que el stock en
-        transito de compras registradas no diluya el costo promedio.
-        Se llama ANTES de _move_stock_transit_to_liquidated, asi que
-        current_stock_liquidated aun tiene el valor pre-liquidacion.
+        transito de compras registradas no diluya el costo promedio. El caller
+        (liquidate) reclasifica transito->liquidado de la linea inmediatamente
+        despues de esta llamada, asi que current_stock_liquidated aun refleja el
+        stock previo a incorporar esta linea.
+
+        Retorna el cost_adjustment (Modelo L #65): cuando el pool esta en hueco
+        (liquidated < 0, oversell), la diferencia entre el COGS ya cargado y el
+        costo real de reposicion. Antes esa diferencia se BORRABA (la rama reset
+        `avg = confirmed_price` ignoraba el valor del hueco). El caller la
+        persiste en PurchaseLine.cost_adjustment y el P&L la reconoce.
+        confirmed_price debe ser el costo AJUSTADO por comision (G1).
         """
-        old_liquidated = material.current_stock_liquidated
-        if old_liquidated <= 0:
-            # Primera liquidacion o todo el stock liquidado es de esta compra
-            material.current_average_cost = confirmed_price
-        else:
-            old_value = old_liquidated * material.current_average_cost
-            new_value = old_value + quantity * confirmed_price
-            material.current_average_cost = new_value / (old_liquidated + quantity)
+        new_avg, adjustment = incorporate_into_pool(
+            liquidated=material.current_stock_liquidated,
+            avg_cost=material.current_average_cost,
+            quantity=quantity,
+            unit_cost=confirmed_price,
+        )
+        material.current_average_cost = new_avg
+        return adjustment
 
     def _update_material_stock_and_cost(
         self,
@@ -1213,24 +1365,6 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         material.current_stock = new_stock
 
         print(f"    📊 {material.code}: stock {old_stock} → {new_stock}, cost ${old_cost} → ${material.current_average_cost}")
-
-    def _move_stock_transit_to_liquidated(
-        self,
-        db: Session,
-        purchase: Purchase
-    ) -> None:
-        """
-        Move stock from transit to liquidated when a purchase is liquidated.
-
-        This doesn't change total stock or average cost, just reclassifies it.
-        """
-        for line in purchase.lines:
-            material = db.get(Material, line.material_id)
-            if material:
-                material.current_stock_transit -= line.quantity
-                material.current_stock_liquidated += line.quantity
-                print(f"    📦 {material.code}: transit -{line.quantity}, liquidated +{line.quantity}")
-
 
     def _process_commissions(
         self,

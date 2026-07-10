@@ -64,6 +64,7 @@ export default function ExpenseCategoriesPage() {
   const [description, setDescription] = useState("");
   const [isDirect, setIsDirect] = useState(false);
   const [parentId, setParentId] = useState("");
+  const [dpPct, setDpPct] = useState("");
   const [buAllocationType, setBuAllocationType] = useState<"direct" | "shared" | "general">("general");
   const [buDirectId, setBuDirectId] = useState("");
   const [buSharedIds, setBuSharedIds] = useState<string[]>([]);
@@ -83,6 +84,8 @@ export default function ExpenseCategoriesPage() {
     setDescription(item?.description ?? "");
     setIsDirect(item?.is_direct_expense ?? false);
     setParentId(item?.parent_id ?? "");
+    const pct = Number(item?.double_entry_general_pct ?? 0);
+    setDpPct(pct > 0 ? String(pct) : "");
     // Cargar default BU
     if (item?.default_business_unit_id) {
       setBuAllocationType("direct");
@@ -112,6 +115,10 @@ export default function ExpenseCategoriesPage() {
     if (!parentId) {
       payload.is_direct_expense = isDirect;
     }
+    // % Pasa Mano: solo raiz indirecta. En hijas/directas se manda 0 explicito
+    // (evita 422 al cambiar a directa una categoria que tenia %)
+    payload.double_entry_general_pct =
+      !parentId && !isDirect ? Number(dpPct) || 0 : 0;
     const opts = { onSuccess: () => setDialogOpen(false) };
     if (editItem) { update.mutate({ id: editItem.id, data: payload }, opts); }
     else { create.mutate(payload as never, opts); }
@@ -150,7 +157,22 @@ export default function ExpenseCategoriesPage() {
               </div>
             )}
             {parentId && (
-              <p className="text-xs text-slate-400">El tipo de gasto (directo/indirecto) se hereda de la categoria padre.</p>
+              <p className="text-xs text-slate-400">El tipo de gasto (directo/indirecto) y el % Pasa Mano se heredan de la categoria padre.</p>
+            )}
+            {!parentId && !isDirect && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">% Pasa Mano (gastos generales)</Label>
+                <Input
+                  type="number" min={0} max={100} step="0.01"
+                  inputMode="decimal" placeholder="0"
+                  value={dpPct}
+                  onChange={(e) => setDpPct(e.target.value)}
+                />
+                <p className="text-xs text-slate-400 mt-1">
+                  Porcentaje de los gastos generales de esta categoria que se atribuye a la
+                  UN Pasa Mano en Rentabilidad por UN. 0 = todo se prorratea entre bodegas.
+                </p>
+              </div>
             )}
             <BusinessUnitAllocationSelector
               businessUnitId={buDirectId}

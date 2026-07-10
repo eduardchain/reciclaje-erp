@@ -1126,6 +1126,15 @@ class CRUDMoneyMovement:
         # Validar que la categoria existe y pertenece a la org
         self._validate_expense_category(db, expense_category_id, organization_id)
 
+        # Guard: la UN de sistema (Pasa Mano) no acepta asignacion compartida.
+        # Sin esto, reclasificar burlaria el guard de creacion (gap QA).
+        # La asignacion DIRECTA (business_unit_id) a la UN sistema SI se permite.
+        from app.services.business_unit import validate_not_shared_with_system_bu
+        validate_not_shared_with_system_bu(
+            db, organization_id, applicable_business_unit_ids,
+            field_label="gasto compartido (reclasificacion)",
+        )
+
         # Aplicar cambios de clasificacion
         movement.expense_category_id = expense_category_id
         movement.business_unit_id = business_unit_id
@@ -1439,6 +1448,12 @@ class CRUDMoneyMovement:
         applicable_business_unit_ids: Optional[list] = None,
     ) -> MoneyMovement:
         """Crear registro de movimiento en BD (sin commit, sin aplicar efectos)."""
+        # Guard: la UN de sistema (Pasa Mano) no acepta asignacion compartida.
+        # Embudo unico — cubre todos los tipos de movimiento y los auto-creados.
+        from app.services.business_unit import validate_not_shared_with_system_bu
+        validate_not_shared_with_system_bu(
+            db, organization_id, applicable_business_unit_ids
+        )
         number = self._generate_movement_number(db, organization_id)
 
         movement = MoneyMovement(

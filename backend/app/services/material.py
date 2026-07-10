@@ -112,7 +112,14 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="La unidad de negocio no pertenece a esta organizacion"
             )
-        
+        # Guard: UN de sistema (Pasa Mano) no agrupa materiales — con materiales
+        # entraria a la base de prorrateo y rompe el aislamiento de doble partida.
+        if business_unit.system_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No se pueden asignar materiales a la UN '{business_unit.name}' (unidad de sistema)"
+            )
+
         # Validate category belongs to organization
         cat_statement = select(MaterialCategory).where(
             MaterialCategory.id == obj_in.category_id,
@@ -191,6 +198,12 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="La unidad de negocio no pertenece a esta organizacion"
+                )
+            # Guard: UN de sistema (Pasa Mano) no agrupa materiales
+            if business_unit.system_code:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No se pueden asignar materiales a la UN '{business_unit.name}' (unidad de sistema)"
                 )
         
         # Validate category if being updated
@@ -300,70 +313,6 @@ class CRUDMaterial(CRUDBase[Material, MaterialCreate, MaterialUpdate]):
             limit=limit,
             is_active=True
         )
-    
-    def update_stock(
-        self,
-        db: Session,
-        material_id: UUID,
-        quantity_delta: float,
-        organization_id: UUID
-    ) -> Material:
-        """
-        Update material stock by delta amount.
-        
-        Validation:
-        - Resulting stock cannot be negative
-        
-        Args:
-            db: Database session
-            material_id: Material UUID
-            quantity_delta: Amount to add (positive) or subtract (negative)
-            organization_id: Organization UUID
-            
-        Returns:
-            Updated Material
-            
-        Raises:
-            HTTPException: 400 if would result in negative stock, 404 if not found
-        
-        TODO: Create movement record in Phase 2
-        """
-        # Get material
-        material = self.get_or_404(
-            db, 
-            material_id, 
-            organization_id,
-            detail="Material no encontrado"
-        )
-        
-        # Convert to Decimal for calculation
-        from decimal import Decimal
-        quantity_delta_decimal = Decimal(str(quantity_delta))
-        
-        # Calculate new stock
-        new_stock = material.current_stock + quantity_delta_decimal
-        
-        # Validate non-negative
-        if new_stock < 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Stock insuficiente. Actual: {material.current_stock}, Solicitado: {abs(quantity_delta)}"
-            )
-        
-        # Update stock
-        material.current_stock = new_stock
-        
-        db.commit()
-        db.refresh(material)
-        
-        # TODO: Create movement record in Phase 2
-        # movement = MaterialMovement(
-        #     material_id=material_id,
-        #     quantity=quantity_delta,
-        #     ...
-        # )
-        
-        return material
 
 
 # Instances for use in endpoints

@@ -28,7 +28,7 @@ export default function MarginAnalysisPage() {
           <Card className="shadow-sm">
             <CardContent className="pt-6">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Margen Global</p>
-              <p className="text-3xl font-bold">{(data.overall_margin * 100).toFixed(1)}%</p>
+              <p className="text-3xl font-bold">{data.overall_margin.toFixed(1)}%</p>
             </CardContent>
           </Card>
 
@@ -64,7 +64,7 @@ export default function MarginAnalysisPage() {
                         <TableCell className="text-right">{formatCurrency(m.total_sold_revenue)}</TableCell>
                         <TableCell className="text-right">{formatCurrency(m.avg_sale_price)}</TableCell>
                         <TableCell className={`text-right font-medium ${m.gross_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{formatCurrency(m.gross_profit)}</TableCell>
-                        <TableCell className="text-right">{(m.margin_percentage * 100).toFixed(1)}%</TableCell>
+                        <TableCell className="text-right">{m.margin_percentage.toFixed(1)}%</TableCell>
                         <TableCell className="text-right tabular-nums">{m.double_entry_qty.toFixed(0)}</TableCell>
                         <TableCell className="text-right text-emerald-700">{formatCurrency(m.double_entry_profit)}</TableCell>
                       </TableRow>

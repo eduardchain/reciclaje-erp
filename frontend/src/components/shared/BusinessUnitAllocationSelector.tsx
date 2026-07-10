@@ -29,7 +29,12 @@ export function BusinessUnitAllocationSelector({
   setAllocationType,
 }: Props) {
   const { data: busData } = useBusinessUnits();
-  const businessUnits = (busData?.items ?? []).filter((bu) => bu.is_active);
+  const allActive = (busData?.items ?? []).filter((bu) => bu.is_active);
+  // Directo: incluye la UN de sistema (Pasa Mano) — asignarle gastos directos
+  // es su proposito. Compartido: se excluye (el backend la rechaza con 422;
+  // por prorrateo le tocaria $0 — no tiene compras).
+  const businessUnits = allActive;
+  const shareableUnits = allActive.filter((bu) => !bu.system_code);
 
   const handleTypeChange = (v: AllocationType) => {
     setAllocationType(v);
@@ -78,27 +83,27 @@ export function BusinessUnitAllocationSelector({
 
       {allocationType === "shared" && (
         <div className="space-y-2 p-3 border rounded-md bg-slate-50">
-          {businessUnits.length > 0 && (
+          {shareableUnits.length > 0 && (
             <div className="flex justify-end">
               <button
                 type="button"
                 onClick={() =>
                   setApplicableBusinessUnitIds(
-                    applicableBusinessUnitIds.length === businessUnits.length
+                    applicableBusinessUnitIds.length === shareableUnits.length
                       ? []
-                      : businessUnits.map((bu) => bu.id)
+                      : shareableUnits.map((bu) => bu.id)
                   )
                 }
                 className="text-xs text-emerald-700 hover:text-emerald-800 underline"
               >
-                {applicableBusinessUnitIds.length === businessUnits.length
+                {applicableBusinessUnitIds.length === shareableUnits.length
                   ? "Deseleccionar todas"
                   : "Seleccionar todas"}
               </button>
             </div>
           )}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            {businessUnits.map((bu) => (
+            {shareableUnits.map((bu) => (
               <div key={bu.id} className="flex items-center space-x-2">
                 <Checkbox
                   id={`bu-${bu.id}`}
@@ -108,7 +113,7 @@ export function BusinessUnitAllocationSelector({
                 <label htmlFor={`bu-${bu.id}`} className="text-sm cursor-pointer">{bu.name}</label>
               </div>
             ))}
-            {businessUnits.length === 0 && (
+            {shareableUnits.length === 0 && (
               <p className="text-xs text-slate-400 col-span-full">No hay unidades de negocio activas</p>
             )}
           </div>

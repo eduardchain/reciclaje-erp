@@ -76,11 +76,15 @@ class MaterialCostHistory(Base, TimestampMixin):
         comment="Stock despues del cambio (solo auditoria/debugging)",
     )
 
-    # Origen del cambio
+    # Origen del cambio. Los ultimos 3 son REVERSIONES (Fase 5): el historial es
+    # append-only — revertir una operacion escribe su propio registro en vez de
+    # borrar el original.
     source_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        comment="purchase_liquidation | adjustment_increase | transformation_in | transformation_out",
+        comment="purchase_liquidation | adjustment_increase | transformation_in | "
+                "transformation_out | sale_cancellation | purchase_cancellation | "
+                "adjustment_annulment | transformation_annulment",
     )
 
     source_id: Mapped[UUID] = mapped_column(

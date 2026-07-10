@@ -73,8 +73,8 @@ export default function SalesReportPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card className="shadow-sm"><CardContent className="pt-6"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ingresos</p><p className="text-2xl font-bold">{formatCurrency(data.total_revenue)}</p></CardContent></Card>
             <Card className="shadow-sm"><CardContent className="pt-6"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500"># Ventas</p><p className="text-2xl font-bold">{data.sale_count}</p></CardContent></Card>
-            <Card className="shadow-sm"><CardContent className="pt-6"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Utilidad</p><p className="text-2xl font-bold text-emerald-700">{formatCurrency(data.total_profit)}</p></CardContent></Card>
-            <Card className="shadow-sm"><CardContent className="pt-6"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Margen</p><p className="text-2xl font-bold">{(data.overall_margin * 100).toFixed(1)}%</p></CardContent></Card>
+            <Card className="shadow-sm"><CardContent className="pt-6"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Utilidad Bruta</p><p className="text-2xl font-bold text-emerald-700">{formatCurrency(data.total_profit)}</p></CardContent></Card>
+            <Card className="shadow-sm"><CardContent className="pt-6"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Margen Bruto</p><p className="text-2xl font-bold">{data.overall_margin.toFixed(1)}%</p></CardContent></Card>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -88,7 +88,7 @@ export default function SalesReportPage() {
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Cliente</TableHead>
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Ventas</TableHead>
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Total</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Utilidad</TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Ut. Bruta</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -115,8 +115,8 @@ export default function SalesReportPage() {
                     <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Material</TableHead>
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Cantidad</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Utilidad</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Margen</TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Ut. Bruta</TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Margen Bruto</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -125,7 +125,7 @@ export default function SalesReportPage() {
                         <TableCell>{m.material_code} - {m.material_name}</TableCell>
                         <TableCell className="text-right tabular-nums">{m.total_quantity.toFixed(0)}</TableCell>
                         <TableCell className="text-right font-medium text-emerald-700">{formatCurrency(m.total_profit)}</TableCell>
-                        <TableCell className="text-right">{(m.margin_percentage * 100).toFixed(1)}%</TableCell>
+                        <TableCell className="text-right">{m.margin_percentage.toFixed(1)}%</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

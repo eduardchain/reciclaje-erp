@@ -1,5 +1,6 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useDateFilter } from "@/stores/dateFilterStore";
+import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -19,9 +20,13 @@ interface DrillRowProps {
 }
 
 function DrillRow({ to, label, value, valueClass = "", indent = false }: DrillRowProps) {
+  const location = useLocation();
   return (
     <Link
       to={to}
+      // Guardar el scroll del P&L antes de irse al drill-down, para que
+      // useScrollRestoration lo restaure al volver (patron decision #57)
+      onClick={() => saveScroll(location.pathname + location.search)}
       className={`group flex justify-between text-sm cursor-pointer hover:bg-slate-50 rounded px-2 -mx-2 py-0.5 transition-colors ${indent ? "pl-4 text-slate-600" : ""}`}
     >
       <span className="flex items-center gap-1">
@@ -36,6 +41,7 @@ function DrillRow({ to, label, value, valueClass = "", indent = false }: DrillRo
 export default function ProfitAndLossPeriodView() {
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
   const { data, isLoading } = useProfitAndLoss({ date_from: dateFrom, date_to: dateTo });
+  useScrollRestoration(!isLoading);
 
   return (
     <>
@@ -102,6 +108,14 @@ export default function ProfitAndLossPeriodView() {
                   value={`${data.adjustment_net >= 0 ? "" : "-"}${formatCurrency(Math.abs(data.adjustment_net))}`}
                   valueClass={data.adjustment_net >= 0 ? "text-emerald-700" : "text-red-700"}
                 />
+              )}
+              {data.oversell_cost_adjustment !== 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Ajuste Costo por Sobreventa y Reversiones</span>
+                  <span className={data.oversell_cost_adjustment >= 0 ? "text-emerald-700" : "text-red-700"}>
+                    {`${data.oversell_cost_adjustment >= 0 ? "" : "-"}${formatCurrency(Math.abs(data.oversell_cost_adjustment))}`}
+                  </span>
+                </div>
               )}
               {data.tp_adjustment_gain > 0 && (
                 <DrillRow

@@ -5,7 +5,7 @@ Cubre: pagos a proveedores, cobros a clientes, gastos, ingresos por servicio,
 transferencias, capital injection/return, pagos de comision, anulacion,
 listado con filtros, resumen y aislamiento multi-tenant.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -17,6 +17,18 @@ from app.models.money_account import MoneyAccount
 from app.models.third_party import ThirdParty
 from app.models.expense_category import ExpenseCategory
 from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
+
+
+def _recent_iso(days_ago: int) -> str:
+    """Fecha reciente relativa (dentro de la ventana default de 90 dias).
+
+    Los endpoints de estado de cuenta filtran por defecto a los ultimos 90
+    dias — fechas hardcodeadas se pudren con el calendario (los tests
+    empezaban a fallar cuando la fecha cruzaba el umbral).
+    """
+    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime(
+        "%Y-%m-%dT10:00:00Z"
+    )
 
 
 def _assign_category(db_session: Session, tp: ThirdParty, behavior_type: str, organization_id) -> None:
@@ -1068,7 +1080,7 @@ class TestSpecialQueries:
             "amount": 100000,
             "account_id": str(test_account.id),
             "description": "Ingreso caja",
-            "date": "2026-02-14T10:00:00Z",
+            "date": _recent_iso(10),
         }, headers=org_headers)
 
         # Ingreso en cuenta 2
@@ -1076,7 +1088,7 @@ class TestSpecialQueries:
             "amount": 200000,
             "account_id": str(test_account2.id),
             "description": "Ingreso banco",
-            "date": "2026-02-14T11:00:00Z",
+            "date": _recent_iso(10),
         }, headers=org_headers)
 
         response = client.get(
@@ -1479,7 +1491,7 @@ class TestAccountStatement:
                     "supplier_id": str(test_supplier.id),
                     "amount": amt,
                     "account_id": str(test_account.id),
-                    "date": "2026-03-01T10:00:00Z",
+                    "date": _recent_iso(10),
                 },
                 headers=org_headers,
             )
@@ -1566,14 +1578,16 @@ class TestAccountStatement:
         db_session.commit()
         db_session.refresh(tp)
 
-        # Crear pago al proveedor de $1000
+        # Crear pago al proveedor de $1000 (fecha reciente: dentro de la ventana
+        # de 90 dias — si quedara fuera, la fila sintetica lo absorberia en el
+        # saldo de apertura, decision #55)
         resp = client.post(
             "/api/v1/money-movements/supplier-payment",
             json={
                 "supplier_id": str(tp.id),
                 "amount": 1000,
                 "account_id": str(test_account.id),
-                "date": "2026-03-01T10:00:00Z",
+                "date": _recent_iso(10),
             },
             headers=org_headers,
         )
@@ -1582,7 +1596,7 @@ class TestAccountStatement:
         # Consultar estado de cuenta (sin date_from → ve fila sintetica)
         resp = client.get(
             f"/api/v1/money-movements/third-party/{tp.id}",
-            params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
+            params={"date_from": "2026-01-01", "date_to": "2027-12-31"},
             headers=org_headers,
         )
         assert resp.status_code == 200
@@ -1996,18 +2010,18 @@ class TestAccountMovements:
                 "supplier_id": str(test_supplier.id),
                 "amount": 300000,
                 "account_id": str(test_account.id),
-                "date": "2026-03-01T10:00:00Z",
+                "date": _recent_iso(10),
             },
             headers=org_headers,
         )
-        # Cobro a cliente: account +500K
+        # Cobro a cliente: account +500K (un dia despues del pago)
         client.post(
             "/api/v1/money-movements/customer-collection",
             json={
                 "customer_id": str(test_customer.id),
                 "amount": 500000,
                 "account_id": str(test_account.id),
-                "date": "2026-03-02T10:00:00Z",
+                "date": _recent_iso(9),
             },
             headers=org_headers,
         )
@@ -2085,7 +2099,7 @@ class TestAccountMovements:
                 "supplier_id": str(test_supplier.id),
                 "amount": 400000,
                 "account_id": str(test_account.id),
-                "date": "2026-03-10T10:00:00Z",
+                "date": _recent_iso(10),
             },
             headers=org_headers,
         )

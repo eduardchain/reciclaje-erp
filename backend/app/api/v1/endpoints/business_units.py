@@ -6,7 +6,7 @@ Ejemplos: Fibras, Chatarra, Metales No Ferrosos.
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permission, require_any_permission, get_db
@@ -81,7 +81,12 @@ def update_business_unit(
     org_context: dict = Depends(require_permission("config.manage_business_units")),
     db: Session = Depends(get_db),
 ):
-    """Actualizar una unidad de negocio (campos parciales)."""
+    """Actualizar una unidad de negocio (campos parciales).
+
+    UN de sistema (Pasa Mano): rename/descripcion permitidos (el lookup es por
+    system_code, no por nombre). BusinessUnitUpdate no expone is_active — la
+    desactivacion solo pasa por DELETE, que ya la bloquea para UN de sistema.
+    """
     return business_unit.update(
         db=db,
         id=unit_id,
@@ -96,9 +101,20 @@ def delete_business_unit(
     org_context: dict = Depends(require_permission("config.manage_business_units")),
     db: Session = Depends(get_db),
 ):
-    """Soft delete de unidad de negocio (is_active = False)."""
+    """Soft delete de unidad de negocio (is_active = False).
+
+    UN de sistema (Pasa Mano): bloqueado — el reporte de rentabilidad y los
+    guards de asignacion dependen de que exista.
+    """
+    org_id = org_context["organization_id"]
+    existing = business_unit.get_or_404(db=db, id=unit_id, organization_id=org_id)
+    if existing.system_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"La UN '{existing.name}' es de sistema (Pasa Mano) y no se puede eliminar",
+        )
     return business_unit.delete(
         db=db,
         id=unit_id,
-        organization_id=org_context["organization_id"],
+        organization_id=org_id,
     )

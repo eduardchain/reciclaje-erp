@@ -23,6 +23,9 @@ import type { DoubleEntryResponse } from "@/types/double-entry";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { applyCurrencyFormat } from "@/utils/excelHelpers";
 
+const docDateOf = (m: { date: string; document_date?: string | null }): string | null =>
+  m.document_date && m.document_date.slice(0, 10) !== m.date?.slice(0, 10) ? m.document_date : null;
+
 export function exportAccountStatementExcel(data: AccountStatementExportData) {
   const rows: (string | number | null)[][] = [];
 
@@ -45,9 +48,9 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
   const isOps = data.viewMode === "operations";
 
   if (isOps) {
-    rows.push(["Fecha", "Concepto", "Material", "Peso", "Precio", "Dif Peso", "Debito", "Credito", "Saldo"]);
+    rows.push(["Fecha", "Fecha Doc", "Concepto", "Material", "Peso", "Precio", "Dif Peso", "Debito", "Credito", "Saldo"]);
     if (data.dateFrom) {
-      rows.push(["", "Saldo de apertura", "", "", "", "", "", "", data.openingBalance]);
+      rows.push(["", "", "Saldo de apertura", "", "", "", "", "", "", data.openingBalance]);
     }
     // Build last-in-group set for balance display
     const lastByGroup = new Map<string, number>();
@@ -66,6 +69,7 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
         : lastByGroup.get(m.parent_source_id) === idx && m.balance_after != null;
       rows.push([
         formatDate(m.date),
+        docDateOf(m) ? formatDate(docDateOf(m)!) : "",
         concepto,
         m.is_line_item && m.material_code ? `${m.material_code} - ${m.material_name || ""}` : "",
         m.is_line_item && m.quantity ? m.quantity : "",
@@ -77,9 +81,9 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
       ]);
     });
   } else {
-    rows.push(["#", "Fecha", "Tipo", "Descripcion", "Debe", "Haber", "Saldo"]);
+    rows.push(["#", "Fecha", "Fecha Doc", "Tipo", "Descripcion", "Debe", "Haber", "Saldo"]);
     if (data.dateFrom) {
-      rows.push(["", "", "Saldo de apertura", "", "", "", data.openingBalance]);
+      rows.push(["", "", "", "Saldo de apertura", "", "", "", data.openingBalance]);
     }
     for (const m of data.movements) {
       const isAnnulled = m.status === "annulled";
@@ -87,6 +91,7 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
       rows.push([
         m.movement_number,
         formatDate(m.date),
+        docDateOf(m) ? formatDate(docDateOf(m)!) : "",
         typeText,
         m.description || "-",
         m.isDebit ? m.amount : "",
@@ -100,20 +105,20 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
 
   // Column widths
   ws["!cols"] = isOps ? [
-    { wch: 12 }, { wch: 18 }, { wch: 25 }, { wch: 12 }, { wch: 14 },
+    { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 25 }, { wch: 12 }, { wch: 14 },
     { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
   ] : [
-    { wch: 8 }, { wch: 12 }, { wch: 28 }, { wch: 30 },
+    { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 28 }, { wch: 30 },
     { wch: 16 }, { wch: 16 }, { wch: 16 },
   ];
 
-  // Apply currency format
+  // Apply currency format (columnas corridas +1 por "Fecha Doc")
   if (isOps) {
-    // Resumen row (cols 0,1,2) + Precio (4), Dif Peso (5), Debito (6), Credito (7), Saldo (8)
-    applyCurrencyFormat(ws, [0, 1, 2, 4, 5, 6, 7, 8]);
+    // Resumen row (cols 0,1,2) + Precio (5), Dif Peso (6), Debito (7), Credito (8), Saldo (9)
+    applyCurrencyFormat(ws, [0, 1, 2, 5, 6, 7, 8, 9]);
   } else {
-    // Resumen (0,1,2) + Debe (4), Haber (5), Saldo (6)
-    applyCurrencyFormat(ws, [0, 1, 2, 4, 5, 6]);
+    // Resumen (0,1,2) + Debe (5), Haber (6), Saldo (7)
+    applyCurrencyFormat(ws, [0, 1, 2, 5, 6, 7]);
   }
 
   const wb = XLSX.utils.book_new();
@@ -163,7 +168,7 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse, filter
       } else if (item.investor_type) {
         detail = item.investor_type;
       }
-      rows.push(["", detail, item.name, item.balance]);
+      rows.push(["", detail, item.is_inactive ? `${item.name} (inactivo)` : item.name, item.balance]);
     }
   };
 
@@ -179,7 +184,7 @@ export function exportBalanceDetailedExcel(data: BalanceDetailedResponse, filter
       for (const group of section.groups) {
         rows.push(["", group.label, "", group.total]);
         for (const item of group.items) {
-          rows.push(["", "", item.name, item.balance]);
+          rows.push(["", "", item.is_inactive ? `${item.name} (inactivo)` : item.name, item.balance]);
         }
         pushHiddenNote(group.hidden_count, group.hidden_total);
       }
@@ -257,18 +262,49 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
     }
   }
 
-  // Totales
+  // Totales (solo bodega)
   rows.push([]);
   const t = data.totals;
   rows.push([
-    "TOTAL", t.purchases_total, "100%",
+    "TOTAL BODEGA", t.purchases_total, "100%",
     t.sales_revenue, t.sales_cogs, t.total_gross_profit,
     t.direct_expenses, t.shared_expenses, t.general_expenses,
     t.sale_commissions, t.net_profit, `${t.net_margin.toFixed(1)}%`,
   ]);
 
+  // Seccion Pasa Mano (doble partida) — logica propia
+  const de = data.double_entry;
+  rows.push([]);
+  rows.push([`${de.label} (Doble Partida)`]);
+  rows.push(["Ventas Pasa Mano", de.sales_total]);
+  rows.push(["Compras Pasa Mano", de.purchases_total]);
+  rows.push(["Margen Bruto", de.gross_profit]);
+  rows.push(["Comisiones", -de.commissions]);
+  rows.push(["Gastos Directos", -de.direct_expenses]);
+  for (const d of de.direct_expenses_detail) {
+    rows.push(["  " + d.category_name, -d.amount]);
+  }
+  rows.push(["Gastos Generales asignados (% por categoria)", -de.general_expenses]);
+  for (const d of de.general_expenses_detail) {
+    rows.push([`  ${d.category_name} (${d.pct.toFixed(1)}%)`, -d.amount]);
+  }
+  rows.push(["Utilidad Neta Pasa Mano", de.net_profit, `${de.net_margin.toFixed(1)}%`]);
+  rows.push([]);
+  rows.push(["TOTAL GENERAL (Bodega + Pasa Mano)", data.grand_total_net]);
+
+  // Conciliacion con P&L: lineas no atribuibles a UN
+  const rec = data.pnl_reconciliation;
+  rows.push([]);
+  rows.push(["Conciliacion con Estado de Resultados"]);
+  rows.push(["Ingresos por Servicios", rec.service_income]);
+  rows.push(["Transformaciones (neto)", rec.transformation_net]);
+  rows.push(["Ajustes de Inventario (neto)", rec.inventory_adjustment_net]);
+  rows.push(["Ajustes de Terceros (neto)", rec.tp_adjustment_net]);
+  rows.push(["Ajuste Costo por Sobreventa y Reversiones", rec.oversell_cost_adjustment]);
+  rows.push(["= Utilidad Neta P&L", rec.pnl_net_profit]);
+
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [{ wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
+  ws["!cols"] = [{ wch: 32 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
 
   // Currency cols: 1, 3, 4, 5, 6, 7, 8, 9, 10
   applyCurrencyFormat(ws, [1, 3, 4, 5, 6, 7, 8, 9, 10]);
@@ -419,6 +455,7 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   if (data.transformation_profit !== 0) rows.push(["Gan/Perd Transformaciones", data.transformation_profit]);
   if (data.waste_loss > 0) rows.push(["Perdida por Merma", -data.waste_loss]);
   if (data.adjustment_net !== 0) rows.push(["Ajustes de Inventario", data.adjustment_net]);
+  if (data.oversell_cost_adjustment !== 0) rows.push(["Ajuste Costo por Sobreventa y Reversiones", data.oversell_cost_adjustment]);
   if (data.tp_adjustment_gain > 0) rows.push(["+ Ganancia Ajuste Terceros", data.tp_adjustment_gain]);
   if (data.tp_adjustment_loss > 0) rows.push(["- Perdida Ajuste Terceros", -data.tp_adjustment_loss]);
   rows.push(["Utilidad Bruta Total", data.total_gross_profit]);
@@ -430,7 +467,7 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   rows.push(["Comisiones Pagadas", data.commissions_paid]);
   rows.push([]);
   rows.push(["Utilidad Neta", data.net_profit]);
-  rows.push(["Margen Neto", `${(data.net_margin * 100).toFixed(1)}%`]);
+  rows.push(["Margen Neto", `${data.net_margin.toFixed(1)}%`]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 35 }, { wch: 20 }];
@@ -482,6 +519,9 @@ export function exportPnlMonthlyExcel(
   }
   if (data.periods.some((p) => Math.abs(p.adjustment_net) > 0.01) || Math.abs(data.totals.adjustment_net) > 0.01) {
     pushRow("Ajustes de Inventario", (p) => p.adjustment_net);
+  }
+  if (data.periods.some((p) => Math.abs(p.oversell_cost_adjustment) > 0.01) || Math.abs(data.totals.oversell_cost_adjustment) > 0.01) {
+    pushRow("Ajuste Costo por Sobreventa y Reversiones", (p) => p.oversell_cost_adjustment);
   }
   if (data.periods.some((p) => p.tp_adjustment_gain > 0) || data.totals.tp_adjustment_gain > 0) {
     pushRow("+ Ganancia Ajuste Terceros", (p) => p.tp_adjustment_gain);
@@ -671,18 +711,18 @@ export function exportSalesReportExcel(data: SalesReportResponse, dpFilterLabel:
   rows.push([]);
   rows.push(["Total Ventas", data.total_revenue]);
   rows.push(["Costo", data.total_cost]);
-  rows.push(["Utilidad", data.total_profit]);
-  rows.push(["Margen", `${data.overall_margin.toFixed(1)}%`]);
+  rows.push(["Utilidad Bruta", data.total_profit]);
+  rows.push(["Margen Bruto", `${data.overall_margin.toFixed(1)}%`]);
   rows.push(["Operaciones", data.sale_count]);
   rows.push([]);
   rows.push(["POR CLIENTE", "", "", "", ""]);
-  rows.push(["Cliente", "Total", "Cantidad", "# Ventas", "Utilidad"]);
+  rows.push(["Cliente", "Total", "Cantidad", "# Ventas", "Ut. Bruta"]);
   for (const c of data.by_customer) {
     rows.push([c.customer_name, c.total_amount, c.total_quantity, c.sale_count, c.total_profit]);
   }
   rows.push([]);
   rows.push(["POR MATERIAL", "", "", "", ""]);
-  rows.push(["Material", "Ventas", "Costo", "Utilidad", "Margen"]);
+  rows.push(["Material", "Ventas", "Costo", "Ut. Bruta", "Margen Bruto"]);
   for (const m of data.by_material) {
     rows.push([`${m.material_code} - ${m.material_name}`, m.total_amount, m.total_cost, m.total_profit, `${m.margin_percentage.toFixed(1)}%`]);
   }

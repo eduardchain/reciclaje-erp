@@ -26,11 +26,11 @@ export function useSales(filters: SaleFilters = {}) {
   });
 }
 
-export function useSale(id: string) {
+export function useSale(id: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["sales", "detail", id],
     queryFn: () => saleService.getById(id),
-    enabled: !!id,
+    enabled: !!id && (options?.enabled ?? true),
   });
 }
 
@@ -92,7 +92,8 @@ export function useLiquidateSale() {
 export function useCancelSale() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => saleService.cancel(id),
+    mutationFn: ({ id, annulLinkedPayments }: { id: string; annulLinkedPayments?: boolean }) =>
+      saleService.cancel(id, annulLinkedPayments ?? false),
     onSuccess: () => {
       invalidateAfterSaleLiquidateOrCancel(queryClient);
       toast.success("Venta cancelada exitosamente");

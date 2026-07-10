@@ -277,7 +277,8 @@ class TestProfitabilityByBU:
         assert ch["purchases_weight_pct"] == pytest.approx(70, abs=1)
         assert ch["sales_revenue"] == pytest.approx(60_000, abs=1)
         assert ch["sales_cogs"] == pytest.approx(35_000, abs=1)
-        assert ch["de_profit"] == pytest.approx(6_000, abs=1)
+        # de_profit ya NO existe por UN — el margen DP va a la seccion Pasa Mano
+        assert "de_profit" not in ch
         # direct: $7K(flete) + $3K(accrual) = $10K
         assert ch["direct_expenses"] == pytest.approx(10_000, abs=1)
         # shared: $10K × 70/(70+20) = $7,777.78
@@ -285,15 +286,15 @@ class TestProfitabilityByBU:
         # general: $15K × 70% = $10,500
         assert ch["general_expenses"] == pytest.approx(10_500, abs=1)
         assert ch["sale_commissions"] == pytest.approx(0, abs=1)
-        # net: (60K - 35K + 6K) - (10K + 7777.78 + 10500 + 0) = 31K - 28277.78 = 2,722.22
-        assert ch["net_profit"] == pytest.approx(2_722.22, abs=1)
+        # net SOLO bodega: (60K - 35K) - (10K + 7777.78 + 10500 + 0) = -3,277.78
+        # (el margen DP de $6K ya no infla esta UN — va a la seccion Pasa Mano)
+        assert ch["net_profit"] == pytest.approx(-3_277.78, abs=1)
 
         # --- No Ferrosos (20% peso) ---
         assert nf["purchases_total"] == pytest.approx(20_000, abs=1)
         assert nf["purchases_weight_pct"] == pytest.approx(20, abs=1)
         assert nf["sales_revenue"] == pytest.approx(20_000, abs=1)
         assert nf["sales_cogs"] == pytest.approx(10_500, abs=1)  # 50 × $210 (incluye comision compra)
-        assert nf["de_profit"] == pytest.approx(0, abs=1)
         # direct: $2K(provision expense)
         assert nf["direct_expenses"] == pytest.approx(2_000, abs=1)
         # shared: $10K × 20/(70+20) = $2,222.22
@@ -310,7 +311,6 @@ class TestProfitabilityByBU:
         assert el["purchases_weight_pct"] == pytest.approx(10, abs=1)
         assert el["sales_revenue"] == pytest.approx(0, abs=1)  # venta cancelada
         assert el["sales_cogs"] == pytest.approx(0, abs=1)
-        assert el["de_profit"] == pytest.approx(0, abs=1)
         # direct: $1K(deferred expense)
         assert el["direct_expenses"] == pytest.approx(1_000, abs=1)
         # shared: $0 (no incluido en el compartido)
@@ -321,10 +321,19 @@ class TestProfitabilityByBU:
         # net: (0 - 0) - (1K + 0 + 1.5K) = -2,500
         assert el["net_profit"] == pytest.approx(-2_500, abs=1)
 
-        # --- Sum(UNs) == P&L ---
+        # --- Seccion Pasa Mano (margen DP fuera de las UNs) ---
+        de_section = bu_resp.json()["double_entry"]
+        assert de_section["gross_profit"] == pytest.approx(6_000, abs=1)
+        assert de_section["commissions"] == pytest.approx(0, abs=1)
+        assert de_section["direct_expenses"] == pytest.approx(0, abs=1)
+        assert de_section["net_profit"] == pytest.approx(6_000, abs=1)
+
+        # --- Sum(UNs bodega) + Pasa Mano == P&L (grand_total_net) ---
         total_un = ch["net_profit"] + nf["net_profit"] + el["net_profit"]
-        assert total_un == pytest.approx(pnl_net, abs=1), \
-            f"Sum UNs ({total_un}) != P&L ({pnl_net})"
+        grand_total = bu_resp.json()["grand_total_net"]
+        assert grand_total == pytest.approx(total_un + de_section["net_profit"], abs=1)
+        assert grand_total == pytest.approx(pnl_net, abs=1), \
+            f"Grand total ({grand_total}) != P&L ({pnl_net})"
 
         # =================================================================
         # REPORTE DE COSTO REAL POR MATERIAL

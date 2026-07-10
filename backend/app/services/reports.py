@@ -45,6 +45,9 @@ from app.schemas.reports import (
     DashboardAlert,
     DashboardMetrics,
     DashboardResponse,
+    DoubleEntryProfitability,
+    DoubleEntryGeneralExpenseItem,
+    PnlReconciliation,
     ExpenseCategoryBreakdown,
     MarginAnalysisResponse,
     MaterialMargin,
@@ -391,6 +394,151 @@ class ReportService:
             )
         ))
 
+        # 3.8 Ajuste de costo por sobreventa (Modelo L, decision #65): al liquidar
+        # una compra que rellena un hueco de oversell (liquidated < 0), la
+        # diferencia entre el COGS ya cargado a las ventas del hueco y el costo
+        # real de reposicion se persiste en PurchaseLine.cost_adjustment.
+        # Fecha: liquidated_at de la COMPRA que rellena — G3: puede caer en un
+        # mes distinto al de la venta que sobrevendio (el ajuste es un evento
+        # del momento del relleno; recien ahi se conoce el costo real).
+        oversell_purchase_filters = [
+            Purchase.organization_id == organization_id,
+            self._active_at_cutoff(Purchase.status),
+            PurchaseLine.cost_adjustment != 0,
+        ]
+        if has_dates:
+            oversell_purchase_filters += [Purchase.liquidated_at >= dt_from, Purchase.liquidated_at < dt_to]
+
+        oversell_from_purchases = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(PurchaseLine.cost_adjustment), 0))
+                .select_from(PurchaseLine)
+                .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+                .where(*oversell_purchase_filters)
+            )
+        ))
+
+        # Reingreso de venta liquidada cancelada sobre hueco: mismo fenomeno,
+        # persistido en Sale.cancellation_cost_adjustment, fechado por cancelled_at
+        # (evento contable real de la cancelacion — se cuenta aunque la venta
+        # este cancelled, a diferencia del resto de sus efectos).
+        oversell_sale_filters = [
+            Sale.organization_id == organization_id,
+            Sale.status == "cancelled",
+            Sale.cancellation_cost_adjustment != 0,
+        ]
+        if has_dates:
+            oversell_sale_filters += [Sale.cancelled_at >= dt_from, Sale.cancelled_at < dt_to]
+
+        oversell_from_cancellations = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(Sale.cancellation_cost_adjustment), 0))
+                .where(*oversell_sale_filters)
+            )
+        ))
+
+        # Ajuste de inventario (increase) sobre hueco: mismo fenomeno via entrada
+        # manual, persistido en InventoryAdjustment.cost_adjustment (PR-4). Fechado
+        # por la fecha del ajuste. No hace falta excluir seeds de migracion: entran
+        # sobre pool 0 y el helper devuelve adjustment 0 (el filtro != 0 los deja fuera).
+        oversell_adj_filters = [
+            InventoryAdjustment.organization_id == organization_id,
+            self._active_at_cutoff(InventoryAdjustment.status, "confirmed"),
+            InventoryAdjustment.cost_adjustment != 0,
+        ]
+        if has_dates:
+            oversell_adj_filters += [InventoryAdjustment.date >= dt_from, InventoryAdjustment.date < dt_to]
+
+        oversell_from_adjustments = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(InventoryAdjustment.cost_adjustment), 0))
+                .where(*oversell_adj_filters)
+            )
+        ))
+
+        # Destino de transformacion sobre hueco: la linea destino entra a un pool
+        # negativo, persistido en MaterialTransformationLine.cost_adjustment (PR-4).
+        # Fechado por la fecha de la transformacion.
+        from app.models.material_transformation import MaterialTransformationLine
+
+        oversell_tline_filters = [
+            MaterialTransformation.organization_id == organization_id,
+            self._active_at_cutoff(MaterialTransformation.status, "confirmed"),
+            MaterialTransformationLine.cost_adjustment != 0,
+        ]
+        if has_dates:
+            oversell_tline_filters += [MaterialTransformation.date >= dt_from, MaterialTransformation.date < dt_to]
+
+        oversell_from_transformations = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(MaterialTransformationLine.cost_adjustment), 0))
+                .select_from(MaterialTransformationLine)
+                .join(
+                    MaterialTransformation,
+                    MaterialTransformationLine.transformation_id == MaterialTransformation.id,
+                )
+                .where(*oversell_tline_filters)
+            )
+        ))
+
+        # Reversiones ponderadas (Fase 5): diferencia entre lo que la operacion
+        # revertida habia metido/sacado del pool y lo que la remocion/reingreso
+        # pudo mover. Se cuentan aunque la operacion este cancelled/annulled
+        # (la reversion es un evento nuevo con efecto propio — mismo patron que
+        # cancellation_cost_adjustment de ventas). Fechadas por el momento de
+        # la reversion (cancelled_at / annulled_at).
+        rev_purchase_filters = [
+            Purchase.organization_id == organization_id,
+            Purchase.status == "cancelled",
+            Purchase.cancellation_cost_adjustment != 0,
+        ]
+        if has_dates:
+            rev_purchase_filters += [Purchase.cancelled_at >= dt_from, Purchase.cancelled_at < dt_to]
+        oversell_from_purchase_cancels = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(Purchase.cancellation_cost_adjustment), 0))
+                .where(*rev_purchase_filters)
+            )
+        ))
+
+        rev_adj_filters = [
+            InventoryAdjustment.organization_id == organization_id,
+            InventoryAdjustment.status == "annulled",
+            InventoryAdjustment.annul_cost_adjustment != 0,
+        ]
+        if has_dates:
+            rev_adj_filters += [InventoryAdjustment.annulled_at >= dt_from, InventoryAdjustment.annulled_at < dt_to]
+        oversell_from_adjustment_annuls = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(InventoryAdjustment.annul_cost_adjustment), 0))
+                .where(*rev_adj_filters)
+            )
+        ))
+
+        rev_trans_filters = [
+            MaterialTransformation.organization_id == organization_id,
+            MaterialTransformation.status == "annulled",
+            MaterialTransformation.annul_cost_adjustment != 0,
+        ]
+        if has_dates:
+            rev_trans_filters += [MaterialTransformation.annulled_at >= dt_from, MaterialTransformation.annulled_at < dt_to]
+        oversell_from_transformation_annuls = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(MaterialTransformation.annul_cost_adjustment), 0))
+                .where(*rev_trans_filters)
+            )
+        ))
+
+        oversell_adjustment = (
+            oversell_from_purchases
+            + oversell_from_cancellations
+            + oversell_from_adjustments
+            + oversell_from_transformations
+            + oversell_from_purchase_cancels
+            + oversell_from_adjustment_annuls
+            + oversell_from_transformation_annuls
+        )
+
         # 4. Ajustes de terceros (perdida/ganancia)
         tp_adj_filters = [
             MoneyMovement.organization_id == organization_id,
@@ -499,7 +647,7 @@ class ReportService:
 
         # Calculos
         gross_profit_sales = sales_revenue - cogs
-        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss
+        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss + oversell_adjustment
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
         return {
@@ -512,6 +660,7 @@ class ReportService:
             "transformation_count": transformation_count,
             "waste_loss": waste_loss,
             "adjustment_net": adjustment_net,
+            "oversell_adjustment": oversell_adjustment,
             "tp_adjustment_loss": tp_adj_loss,
             "tp_adjustment_gain": tp_adj_gain,
             "service_income": service_income,
@@ -666,6 +815,7 @@ class ReportService:
             transformation_count=r["transformation_count"],
             waste_loss=float(r["waste_loss"]),
             adjustment_net=float(r["adjustment_net"]),
+            oversell_cost_adjustment=float(r["oversell_adjustment"]),
             tp_adjustment_loss=float(r["tp_adjustment_loss"]),
             tp_adjustment_gain=float(r["tp_adjustment_gain"]),
             total_gross_profit=float(r["total_gross_profit"]),
@@ -976,13 +1126,12 @@ class ReportService:
         # Terceros historicos
         tp_balances = self._get_tp_balances_as_of(db, organization_id, cutoff_dt)
 
-        # Pre-cargar metadatos de terceros
+        # Pre-cargar metadatos de terceros (incluye inactivos — existían al corte)
         tp_behaviors, tp_cat_names, _ = self._load_tp_behavior_map(db, organization_id)
         tp_objs = {
             tp.id: tp for tp in db.scalars(
                 select(ThirdParty).where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_active == True,
                 )
             ).all()
         }
@@ -1273,13 +1422,12 @@ class ReportService:
         """Balance Detallado calculado a una fecha de corte historica."""
         cutoff_dt = datetime.combine(as_of_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
 
-        # Pre-cargar metadatos de terceros
+        # Pre-cargar metadatos de terceros (incluye inactivos — existían al corte)
         tp_behaviors, tp_cat_names, tp_cat_by_behavior = self._load_tp_behavior_map(db, organization_id)
         tp_objs = {
             tp.id: tp for tp in db.scalars(
                 select(ThirdParty).where(
                     ThirdParty.organization_id == organization_id,
-                    ThirdParty.is_active == True,
                 )
             ).all()
         }
@@ -1299,12 +1447,11 @@ class ReportService:
                 label=label, total=round(total, 2), items=items, groups=groups,
             )
 
-        # 1. Cuentas de dinero
+        # 1. Cuentas de dinero (incluye inactivas — existían al corte)
         account_balances = self._get_account_balances_as_of(db, organization_id, cutoff_dt)
         acc_objs = {a.id: a for a in db.scalars(
             select(MoneyAccount).where(
                 MoneyAccount.organization_id == organization_id,
-                MoneyAccount.is_active == True,
             )
         ).all()}
         cash_items = [
@@ -1312,17 +1459,17 @@ class ReportService:
                 id=str(acc_id), name=acc_objs[acc_id].name,
                 balance=float(bal),
                 account_type=acc_objs[acc_id].account_type,
+                is_inactive=not acc_objs[acc_id].is_active,
             )
             for acc_id, bal in account_balances.items()
             if acc_id in acc_objs
         ]
 
-        # 2. Inventario historico
+        # 2. Inventario historico (materiales inactivos: solo para resolver nombre)
         inventory_by_mat = self._get_inventory_as_of(db, organization_id, cutoff_dt)
         mat_objs = {m.id: m for m in db.scalars(
             select(Material).where(
                 Material.organization_id == organization_id,
-                Material.is_active == True,
             )
         ).all()}
         inv_liq_items = [
@@ -1364,6 +1511,7 @@ class ReportService:
                 tp_buckets[section].append(BalanceDetailedItem(
                     id=str(tp_id), name=tp.name,
                     balance=abs(float(balance)),
+                    is_inactive=not tp.is_active,
                 ))
 
         assets: dict[str, BalanceDetailedSection] = {}
@@ -1551,11 +1699,14 @@ class ReportService:
         organization_id: UUID,
         cutoff_dt: datetime,
     ) -> dict[UUID, Decimal]:
-        """Saldo de cada cuenta activa a la fecha de corte."""
+        """Saldo de cada cuenta a la fecha de corte.
+
+        Incluye cuentas inactivas: existían al corte. Desactivar una cuenta
+        no debe reescribir balances históricos ya consultados (incidente Costa).
+        """
         accounts = db.scalars(
             select(MoneyAccount).where(
                 MoneyAccount.organization_id == organization_id,
-                MoneyAccount.is_active == True,
             )
         ).all()
 
@@ -1588,15 +1739,21 @@ class ReportService:
         organization_id: UUID,
         cutoff_dt: datetime,
     ) -> dict[UUID, Decimal]:
-        """Saldo de cada tercero a la fecha de corte (5 fuentes)."""
+        """Saldo de cada tercero a la fecha de corte (5 fuentes).
+
+        Incluye terceros inactivos: existían al corte (desactivar exige saldo 0,
+        pero al corte histórico su saldo era real). Antes el filtro is_active
+        producía un medio-conteo: el inactivo perdía su initial_balance pero
+        sus movimientos sí sumaban (fuentes 1-5 no filtran), y el frankenstein
+        se descartaba al clasificar — desaparición retroactiva (incidente Costa).
+        """
         from collections import defaultdict
         balances: dict[UUID, Decimal] = defaultdict(Decimal)
 
-        # Base: initial_balance de cada tercero
+        # Base: initial_balance de cada tercero (activos e inactivos)
         tps = db.scalars(
             select(ThirdParty).where(
                 ThirdParty.organization_id == organization_id,
-                ThirdParty.is_active == True,
             )
         ).all()
         for tp in tps:
@@ -1704,41 +1861,74 @@ class ReportService:
         """Stock liquidado y costo promedio por material a la fecha de corte.
 
         Returns dict[material_id, (stock, avg_cost)]
-        Excluye:
-        - Compras registradas (unit_cost=0, solo transito)
-        - Ventas no liquidadas al corte
+
+        Compras y ventas cuentan por su FECHA DE LIQUIDACION (decision #42:
+        liquidated_at = fecha canonica de efecto financiero), consistente con
+        las fuentes 2/3 de _get_tp_balances_as_of: liquidar hoy una operacion
+        vieja ya NO reescribe cortes anteriores (incidente Costa). El resto de
+        movimientos (ajustes, transformaciones, transfers) cuenta por su fecha.
+        Canceladas: excluidas SIEMPRE (735c2c3) — original y reversa salen
+        juntas (arregla el stock fantasma de compras canceladas post-corte).
         """
         # cutoff_dt = as_of_date + 1 día (00:00 UTC del día siguiente).
         # Para comparar con MaterialCostHistory.transaction_date (date),
         # necesitamos as_of_date original, no cutoff_dt.date() que da as_of_date+1.
         cutoff_date = (cutoff_dt - timedelta(days=1)).date()
 
-        # Movimientos de inventario hasta el corte
-        # Excluir compras en transito (unit_cost=0 + reference_type='purchase' sin venta liquidada)
-        # y ventas aun no liquidadas al corte
+        is_purchase_ref = InventoryMovement.reference_type == "purchase"
+        is_sale_ref = InventoryMovement.reference_type == "sale"
+        purchase_liq_at_cutoff = exists(
+            select(Purchase.id).where(
+                Purchase.id == InventoryMovement.reference_id,
+                Purchase.status == "liquidated",
+                Purchase.liquidated_at < cutoff_dt,
+            )
+        )
+        purchase_exists = exists(
+            select(Purchase.id).where(Purchase.id == InventoryMovement.reference_id)
+        )
+        sale_liq_at_cutoff = exists(
+            select(Sale.id).where(
+                Sale.id == InventoryMovement.reference_id,
+                Sale.status == "liquidated",
+                Sale.liquidated_at < cutoff_dt,
+            )
+        )
+        sale_exists = exists(
+            select(Sale.id).where(Sale.id == InventoryMovement.reference_id)
+        )
+
         movement_rows = db.execute(
             select(
                 InventoryMovement.material_id,
                 func.sum(InventoryMovement.quantity),
             ).where(
                 InventoryMovement.organization_id == organization_id,
-                InventoryMovement.date < cutoff_dt,
-                # Excluir compras en transito (unit_cost = 0)
                 or_(
-                    InventoryMovement.movement_type != "purchase",
-                    InventoryMovement.unit_cost != 0,
-                ),
-                # Excluir ventas no liquidadas al corte (original y reversal)
-                # Razón: sale_reversal de ventas canceladas (no liquidadas) quedaba incluido
-                # pero su original (-X) quedaba excluido, generando stock fantasma.
-                ~and_(
-                    InventoryMovement.movement_type.in_(["sale", "sale_reversal"]),
-                    InventoryMovement.reference_type == "sale",
-                    exists(
-                        select(Sale.id).where(
-                            Sale.id == InventoryMovement.reference_id,
-                            ~self._active_at_cutoff(Sale.status),
-                        )
+                    # Rama 1: movimientos no comerciales → por fecha del movimiento
+                    # (reference_type NULL debe pasar: NOT IN con NULL da NULL)
+                    and_(
+                        or_(
+                            InventoryMovement.reference_type.is_(None),
+                            InventoryMovement.reference_type.notin_(["purchase", "sale"]),
+                        ),
+                        InventoryMovement.date < cutoff_dt,
+                    ),
+                    # Rama 2: compras → por fecha de liquidacion de la compra
+                    and_(is_purchase_ref, purchase_liq_at_cutoff),
+                    # Rama 2b: compras huerfanas (sin fila padre; fixtures/legacy,
+                    # cero en prod 2026-07-08) → comportamiento previo
+                    and_(
+                        is_purchase_ref, ~purchase_exists,
+                        InventoryMovement.date < cutoff_dt,
+                        InventoryMovement.unit_cost != 0,
+                    ),
+                    # Rama 3: ventas → por fecha de liquidacion de la venta
+                    and_(is_sale_ref, sale_liq_at_cutoff),
+                    # Rama 3b: ventas huerfanas → comportamiento previo
+                    and_(
+                        is_sale_ref, ~sale_exists,
+                        InventoryMovement.date < cutoff_dt,
                     ),
                 ),
             ).group_by(InventoryMovement.material_id)
@@ -1751,7 +1941,66 @@ class ReportService:
         }
 
         # Costo promedio historico via MaterialCostHistory.transaction_date
-        # Ultimo registro con transaction_date <= corte
+        # Ultimo registro con transaction_date <= corte.
+        #
+        # Filtro Fase 5 (H2, MCH append-only): las reversiones ya NO borran el
+        # MCH original — un registro de una op luego-cancelada/anulada
+        # sobrevive, pero su costo NO debe verse en cortes donde la doctrina
+        # #41 dice "nunca existio" (el stock ya la excluye por status). El
+        # filtro es DUAL por nivel:
+        # - Camino principal (new_cost del ultimo <= corte): EXCLUIR MCH de
+        #   ops cancelled/annulled. Los source_types de reversion no matchean
+        #   ninguna rama del predicado → pasan (son eventos validos siempre;
+        #   su new_cost == avg vivo tras la reversion).
+        # - Fallback 1 (previous_cost del primer registro POSTERIOR al corte):
+        #   INVERTIDO — INCLUIR los de ops canceladas (entre el corte y ese
+        #   registro solo hubo eventos MCH-silenciosos, el avg no cambio →
+        #   su previous_cost == avg al corte, evidencia valida) y EXCLUIR los
+        #   de reversion Fase 5 (su ORIGINAL oculto movio el avg antes → su
+        #   previous_cost incluye actividad de una op que "nunca existio").
+        #   EXCEPCION: sale_cancellation SI se incluye — la venta que revierte
+        #   nunca escribio MCH (extraccion silenciosa), asi que su
+        #   previous_cost es evidencia valida; ademas preserva exactamente el
+        #   comportamiento actual para datos existentes (unico tipo de
+        #   reversion que existe pre-Fase 5).
+        from app.models.inventory_adjustment import InventoryAdjustment as _IA
+        from app.models.material_transformation import MaterialTransformation as _MT
+
+        MCH_FASE5_REVERSAL_TYPES = [
+            "purchase_cancellation",
+            "adjustment_annulment",
+            "transformation_annulment",
+        ]
+        mch_source_is_cancelled = or_(
+            and_(
+                MaterialCostHistory.source_type == "purchase_liquidation",
+                exists(
+                    select(Purchase.id).where(
+                        Purchase.id == MaterialCostHistory.source_id,
+                        Purchase.status == "cancelled",
+                    )
+                ),
+            ),
+            and_(
+                MaterialCostHistory.source_type == "adjustment_increase",
+                exists(
+                    select(_IA.id).where(
+                        _IA.id == MaterialCostHistory.source_id,
+                        _IA.status == "annulled",
+                    )
+                ),
+            ),
+            and_(
+                MaterialCostHistory.source_type.in_(["transformation_in", "transformation_out"]),
+                exists(
+                    select(_MT.id).where(
+                        _MT.id == MaterialCostHistory.source_id,
+                        _MT.status == "annulled",
+                    )
+                ),
+            ),
+        )
+
         cost_by_mat: dict[UUID, Decimal] = {}
         if stock_by_mat:
             cost_rows = db.execute(
@@ -1763,6 +2012,7 @@ class ReportService:
                     MaterialCostHistory.organization_id == organization_id,
                     MaterialCostHistory.material_id.in_(list(stock_by_mat.keys())),
                     MaterialCostHistory.transaction_date <= cutoff_date,
+                    ~mch_source_is_cancelled,
                 ).order_by(
                     MaterialCostHistory.material_id,
                     MaterialCostHistory.transaction_date.desc(),
@@ -1773,7 +2023,9 @@ class ReportService:
                 if mat_id not in cost_by_mat:
                     cost_by_mat[mat_id] = Decimal(str(cost))
 
-            # Fallback 1: materiales sin historial al corte → previous_cost del primer registro posterior
+            # Fallback 1: materiales sin historial al corte → previous_cost del
+            # primer registro posterior (dualidad H2: sin reversiones, con
+            # ops canceladas — ver bloque de arriba)
             missing = [mid for mid in stock_by_mat if mid not in cost_by_mat]
             if missing:
                 fallback_rows = db.execute(
@@ -1784,6 +2036,7 @@ class ReportService:
                     .where(
                         MaterialCostHistory.organization_id == organization_id,
                         MaterialCostHistory.material_id.in_(missing),
+                        MaterialCostHistory.source_type.notin_(MCH_FASE5_REVERSAL_TYPES),
                     ).order_by(
                         MaterialCostHistory.material_id,
                         MaterialCostHistory.transaction_date.asc(),
@@ -1797,6 +2050,9 @@ class ReportService:
             # Fallback 2: materiales sin ningun registro en MaterialCostHistory
             # (ajustes legacy sin historial de costo) → unit_cost del último movimiento
             # de compra/ajuste antes del corte. El costo está guardado en el movimiento.
+            # Movimientos de compra: solo si su compra estaba liquidada al corte
+            # (unit_cost se muta in-place al liquidar — sin el gate, una
+            # liquidacion tardia inyectaria un costo que al corte no existia).
             missing2 = [mid for mid in stock_by_mat if mid not in cost_by_mat]
             if missing2:
                 movement_cost_rows = db.execute(
@@ -1810,6 +2066,11 @@ class ReportService:
                         InventoryMovement.date < cutoff_dt,
                         InventoryMovement.unit_cost > 0,
                         InventoryMovement.movement_type.in_(["purchase", "adjustment"]),
+                        or_(
+                            InventoryMovement.movement_type != "purchase",
+                            purchase_liq_at_cutoff,
+                            ~purchase_exists,
+                        ),
                     ).order_by(
                         InventoryMovement.material_id,
                         InventoryMovement.date.desc(),
@@ -1860,6 +2121,22 @@ class ReportService:
         )
         return Decimal(str(fa.current_value)) + Decimal(str(future_dep))
 
+    @staticmethod
+    def _fa_existed_at_cutoff(cutoff_dt: datetime):
+        """Activos que existían al corte: activos hoy, o dados de baja DESPUÉS
+        del corte (la baja no es un error de captura — el activo existía).
+        `cancelled` se excluye siempre (filosofía 735c2c3: nunca existió).
+        Boundary: baja el mismo día del corte → ya no está al cierre del día.
+        """
+        return or_(
+            FixedAsset.status.notin_(["disposed", "cancelled"]),
+            and_(
+                FixedAsset.status == "disposed",
+                FixedAsset.disposed_at.isnot(None),
+                FixedAsset.disposed_at >= cutoff_dt,
+            ),
+        )
+
     def _get_fixed_assets_as_of(
         self,
         db: Session,
@@ -1870,6 +2147,7 @@ class ReportService:
 
         Usa AssetDepreciation.period ("YYYY-MM") como fecha contable,
         no applied_at (cuándo el usuario clickó aplicar).
+        Incluye activos dados de baja después del corte (existían al corte).
         """
         cutoff_date = (cutoff_dt - timedelta(days=1)).date()
         cutoff_period = cutoff_date.strftime("%Y-%m")
@@ -1877,7 +2155,7 @@ class ReportService:
             select(FixedAsset).where(
                 FixedAsset.organization_id == organization_id,
                 FixedAsset.purchase_date <= cutoff_date,
-                FixedAsset.status.notin_(["disposed", "cancelled"]),
+                self._fa_existed_at_cutoff(cutoff_dt),
             )
         ).all()
 
@@ -1899,7 +2177,7 @@ class ReportService:
             select(FixedAsset).where(
                 FixedAsset.organization_id == organization_id,
                 FixedAsset.purchase_date <= cutoff_date,
-                FixedAsset.status.notin_(["disposed", "cancelled"]),
+                self._fa_existed_at_cutoff(cutoff_dt),
             )
         ).all()
 
@@ -1909,8 +2187,11 @@ class ReportService:
             if current_value > 0:
                 # Depreciacion acumulada historica = diferencia vs purchase_value
                 acc_dep = Decimal(str(fa.purchase_value)) - current_value
+                name = fa.name
+                if fa.status == "disposed" and fa.disposed_at:
+                    name = f"{name} (baja {fa.disposed_at.strftime('%d/%m/%Y')})"
                 items.append(BalanceDetailedItem(
-                    id=str(fa.id), name=fa.name,
+                    id=str(fa.id), name=name,
                     current_value=float(current_value),
                     purchase_value=float(fa.purchase_value),
                     accumulated_depreciation=float(acc_dep),
@@ -2145,7 +2426,12 @@ class ReportService:
         if material_id:
             line_filters.append(SaleLine.material_id == material_id)
 
-        # Totals
+        # Totals.
+        # Utilidad bruta = total_price - unit_cost*quantity: usa la cantidad
+        # RECIBIDA para el ingreso (total_price, decision #18) y la original
+        # para el COGS — misma formula que gross_profit_sales del P&L. Con
+        # (unit_price - unit_cost)*quantity las ventas con diferencia de
+        # bascula descuadraban contra el P&L.
         totals = db.execute(
             select(
                 func.coalesce(func.sum(SaleLine.total_price), 0),
@@ -2153,7 +2439,7 @@ class ReportService:
                 func.count(func.distinct(Sale.id)),
                 func.coalesce(func.sum(SaleLine.unit_cost * SaleLine.quantity), 0),
                 func.coalesce(
-                    func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity),
+                    func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity),
                     0,
                 ),
             )
@@ -2176,7 +2462,7 @@ class ReportService:
                 func.coalesce(func.sum(SaleLine.quantity), 0),
                 func.count(func.distinct(Sale.id)),
                 func.coalesce(
-                    func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity),
+                    func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity),
                     0,
                 ),
             )
@@ -2206,7 +2492,7 @@ class ReportService:
                 func.coalesce(func.sum(SaleLine.quantity), 0),
                 func.coalesce(func.sum(SaleLine.unit_cost * SaleLine.quantity), 0),
                 func.coalesce(
-                    func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity),
+                    func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity),
                     0,
                 ),
             )
@@ -2522,11 +2808,15 @@ class ReportService:
             ))
 
         def _period_gross_profit(dt_f, dt_t):
-            """Calcula profit de ventas normales + DE en periodo."""
+            """Calcula profit de ventas normales + DE en periodo.
+
+            total_price - unit_cost*quantity: consciente de cantidad recibida
+            (decision #18), misma formula que el P&L y el reporte de ventas.
+            """
             sale_profit = Decimal(str(
                 db.scalar(
                     select(func.coalesce(
-                        func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity),
+                        func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity),
                         0,
                     ))
                     .select_from(SaleLine)
@@ -2641,7 +2931,7 @@ class ReportService:
                 SaleLine.material_id,
                 Material.name,
                 func.coalesce(
-                    func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity), 0
+                    func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity), 0
                 ).label("profit"),
                 func.coalesce(func.sum(SaleLine.total_price), 0).label("revenue"),
             )
@@ -2655,7 +2945,7 @@ class ReportService:
                 Sale.liquidated_at < dt_to,
             )
             .group_by(SaleLine.material_id, Material.name)
-            .order_by(func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity).desc())
+            .order_by(func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity).desc())
             .limit(5)
         ).all()
 
@@ -2699,9 +2989,9 @@ class ReportService:
             select(
                 Sale.customer_id,
                 ThirdParty.name,
-                func.coalesce(func.sum(SaleLine.unit_price * SaleLine.quantity), 0),
+                func.coalesce(func.sum(SaleLine.total_price), 0),
                 func.coalesce(
-                    func.sum((SaleLine.unit_price - SaleLine.unit_cost) * SaleLine.quantity), 0
+                    func.sum(SaleLine.total_price - SaleLine.unit_cost * SaleLine.quantity), 0
                 ),
             )
             .select_from(Sale)
@@ -2714,7 +3004,7 @@ class ReportService:
                 Sale.liquidated_at < dt_to,
             )
             .group_by(Sale.customer_id, ThirdParty.name)
-            .order_by(func.sum(SaleLine.unit_price * SaleLine.quantity).desc())
+            .order_by(func.sum(SaleLine.total_price).desc())
             .limit(5)
         ).all()
 
@@ -3234,6 +3524,46 @@ class ReportService:
             result[key] = Decimal(str(total))
         return result
 
+    def _get_dp_pct_by_category(
+        self, db: Session, organization_id: UUID,
+    ) -> dict[str, Decimal]:
+        """% efectivo Pasa Mano por categoria de gasto (plan A.2).
+
+        Herencia en LECTURA: una subcategoria usa el % de su padre (el propio
+        esta forzado a 0 por el service de categorias). Categorias directas
+        nunca aplican (sus generales caen al edge legacy 'Sin Asignar').
+        Retorna solo entradas con % > 0; usar .get(cat_id, 0) en el consumidor.
+        Key: str(category_id).
+        """
+        rows = db.execute(
+            select(
+                ExpenseCategory.id,
+                ExpenseCategory.parent_id,
+                ExpenseCategory.double_entry_general_pct,
+                ExpenseCategory.is_direct_expense,
+            ).where(ExpenseCategory.organization_id == organization_id)
+        ).all()
+        own_pct: dict[str, Decimal] = {
+            str(r.id): Decimal(str(r.double_entry_general_pct or 0)) for r in rows
+        }
+        result: dict[str, Decimal] = {}
+        for r in rows:
+            if r.is_direct_expense:
+                continue
+            pct = own_pct[str(r.parent_id)] if r.parent_id else own_pct[str(r.id)]
+            if pct > 0:
+                result[str(r.id)] = pct
+        return result
+
+    @staticmethod
+    def _dp_slice(amount: Decimal, pct: Decimal) -> Decimal:
+        """Tajada Pasa Mano de un gasto general, cuantizada al centavo (G2).
+
+        El remanente a prorratear es el literal `amount - slice` — conservacion
+        exacta por construccion sin importar el redondeo del slice.
+        """
+        return (amount * pct / Decimal("100")).quantize(Decimal("0.01"))
+
     def _prorate_expense(
         self, amount: Decimal,
         applicable_bu_ids: list[str] | None,
@@ -3262,19 +3592,35 @@ class ReportService:
         self, db: Session, organization_id: UUID,
         date_from: date, date_to: date,
     ) -> ProfitabilityByBUResponse:
-        """Reporte de rentabilidad por Unidad de Negocio."""
+        """Reporte de rentabilidad por Unidad de Negocio (SOLO bodega).
+
+        Doble partida se analiza aparte en la seccion `double_entry` con logica
+        propia: margen bruto + comisiones DP + gastos directos a la UN sistema.
+        Ver plan-rentabilidad-un-pasamano.md.
+        """
         dt_from, dt_to = self._date_range(date_from, date_to)
 
-        # 1. Obtener UNs activas
+        # 1. Obtener UNs activas.
+        # La UN de sistema (Pasa Mano) se EXCLUYE de la tabla bodega — sus
+        # gastos directos van a la seccion double_entry.
+        # ⚠️ Esta exclusion va SOLO aca, NUNCA en _compute_expense_allocations
+        # (el Reporte de Gastos DEBE mostrar la UN Pasa Mano como grupo).
         bus = db.execute(
-            select(BusinessUnit.id, BusinessUnit.name)
+            select(BusinessUnit.id, BusinessUnit.name, BusinessUnit.system_code)
             .where(
                 BusinessUnit.organization_id == organization_id,
                 BusinessUnit.is_active == True,
             )
             .order_by(BusinessUnit.name)
         ).all()
-        bu_names = {str(bu.id): bu.name for bu in bus}
+        system_bu_id: Optional[str] = None
+        system_bu_name = "Pasa Mano"
+        for bu in bus:
+            if bu.system_code == "double_entry":
+                system_bu_id = str(bu.id)
+                system_bu_name = bu.name
+                break
+        bu_names = {str(bu.id): bu.name for bu in bus if not bu.system_code}
         all_bu_keys = list(bu_names.keys()) + ["unassigned"]
 
         # 2. Compras por UN (base para prorrateo)
@@ -3309,33 +3655,31 @@ class ReportService:
             revenue_by_bu[key] = Decimal(str(revenue))
             cogs_by_bu[key] = Decimal(str(cogs))
 
-        # 4. Margen de Doble Partida por UN
+        # 4. Totales de Doble Partida (seccion Pasa Mano — NO entra a las filas por UN).
+        # ⚠️ NO confundir con el `de_profit` local de _calculate_profit (P&L):
+        # ese es otro calculo con el mismo nombre y NO se toca.
         de_filters = [
             DoubleEntry.organization_id == organization_id,
             DoubleEntry.status == "liquidated",
             DoubleEntry.liquidated_at >= dt_from,
             DoubleEntry.liquidated_at < dt_to,
         ]
-        de_rows = db.execute(
+        de_row = db.execute(
             select(
-                Material.business_unit_id,
                 func.coalesce(
-                    func.sum(
-                        (DoubleEntryLine.sale_unit_price - DoubleEntryLine.purchase_unit_price)
-                        * DoubleEntryLine.quantity
-                    ), 0
+                    func.sum(DoubleEntryLine.sale_unit_price * DoubleEntryLine.quantity), 0
+                ),
+                func.coalesce(
+                    func.sum(DoubleEntryLine.purchase_unit_price * DoubleEntryLine.quantity), 0
                 ),
             )
             .select_from(DoubleEntryLine)
             .join(DoubleEntry, DoubleEntryLine.double_entry_id == DoubleEntry.id)
-            .join(Material, DoubleEntryLine.material_id == Material.id)
             .where(*de_filters)
-            .group_by(Material.business_unit_id)
-        ).all()
-        de_profit_by_bu: dict[str, Decimal] = {}
-        for bu_id, profit in de_rows:
-            key = str(bu_id) if bu_id else "unassigned"
-            de_profit_by_bu[key] = Decimal(str(profit))
+        ).one()
+        de_sales_total = Decimal(str(de_row[0]))
+        de_purchases_total = Decimal(str(de_row[1]))
+        de_gross_profit = de_sales_total - de_purchases_total
 
         # 5. Gastos P&L por tipo de asignacion
         expense_filters = [
@@ -3365,6 +3709,16 @@ class ReportService:
         general_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
         # Desglose directo por categoria
         direct_detail: dict[str, dict[str, Decimal]] = {k: {} for k in all_bu_keys}
+        # Acumuladores Pasa Mano (gastos directos a la UN sistema)
+        pasamano_direct = Decimal("0")
+        pasamano_direct_detail: dict[str, Decimal] = {}
+        # A.2: tajada de gastos GENERALES por % de categoria (plan A.2).
+        # Sin UN sistema el % se trata como 0 — el slice nunca se pierde.
+        dp_pct_by_cat = (
+            self._get_dp_pct_by_category(db, organization_id) if system_bu_id else {}
+        )
+        pasamano_general = Decimal("0")
+        pasamano_general_detail: dict[str, dict] = {}  # cat_name -> {pct, amount}
 
         for row in expense_rows:
             amt = Decimal(str(row.amount))
@@ -3372,6 +3726,16 @@ class ReportService:
             applicable = row.applicable_business_unit_ids  # JSONB: list of UUID strings or None
 
             if bu_id:
+                # DIRECTO a la UN sistema -> seccion Pasa Mano.
+                # ⚠️ Sin este branch caeria en "unassigned" (la UN sistema no
+                # esta en bu_names) — punto fragil marcado por QA en el plan.
+                if system_bu_id and bu_id == system_bu_id:
+                    pasamano_direct += amt
+                    cat_name = row.cat_name or "Sin Categoría"
+                    pasamano_direct_detail[cat_name] = (
+                        pasamano_direct_detail.get(cat_name, Decimal("0")) + amt
+                    )
+                    continue
                 # DIRECTO: 100% a esta UN
                 key = bu_id if bu_id in bu_names else "unassigned"
                 direct_by_bu[key] = direct_by_bu.get(key, Decimal("0")) + amt
@@ -3394,16 +3758,34 @@ class ReportService:
                         direct_detail["unassigned"] = {}
                     direct_detail["unassigned"][cat_name] = direct_detail["unassigned"].get(cat_name, Decimal("0")) + amt
                 else:
+                    # A.2: % de la categoria -> tajada a la seccion Pasa Mano,
+                    # el remanente literal se prorratea entre bodegas como siempre
+                    pct = dp_pct_by_cat.get(str(row.expense_category_id), Decimal("0"))
+                    if pct > 0:
+                        slice_amt = self._dp_slice(amt, pct)
+                        if slice_amt > 0:
+                            pasamano_general += slice_amt
+                            cat_name = row.cat_name or "Sin Categoría"
+                            entry = pasamano_general_detail.setdefault(
+                                cat_name, {"pct": pct, "amount": Decimal("0")}
+                            )
+                            entry["amount"] += slice_amt
+                        amt = amt - slice_amt
                     prorated = self._prorate_expense(amt, None, purchases_by_bu)
                     for k, v in prorated.items():
                         general_by_bu[k] = general_by_bu.get(k, Decimal("0")) + v
 
-        # 6. Comisiones de venta por UN (prorrateo por valor de linea)
+        # 6. Comisiones de venta por UN (prorrateo por valor de linea).
+        # Split bodega vs DP: las comisiones de ventas con double_entry_id van a
+        # la seccion Pasa Mano — antes contaminaban las UN de bodega (fuga #2
+        # del plan: ~$48M de comisiones pasamano caian en "Chatarra").
         commission_rows = db.execute(
             select(
                 MoneyMovement.sale_id,
                 MoneyMovement.amount,
+                Sale.double_entry_id,
             )
+            .join(Sale, MoneyMovement.sale_id == Sale.id)
             .where(
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.status == "confirmed",
@@ -3415,11 +3797,15 @@ class ReportService:
         ).all()
 
         commissions_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
+        pasamano_commissions = Decimal("0")
         if commission_rows:
-            # Agrupar comisiones por sale_id
+            # Agrupar comisiones por sale_id (solo bodega; DP va al total pasamano)
             sale_commissions: dict[UUID, Decimal] = {}
             sale_ids_set: set[UUID] = set()
-            for sale_id, comm_amt in commission_rows:
+            for sale_id, comm_amt, de_id in commission_rows:
+                if de_id is not None:
+                    pasamano_commissions += Decimal(str(comm_amt))
+                    continue
                 sale_commissions[sale_id] = sale_commissions.get(sale_id, Decimal("0")) + Decimal(str(comm_amt))
                 sale_ids_set.add(sale_id)
 
@@ -3464,8 +3850,8 @@ class ReportService:
             bu_name = bu_names.get(bu_key, "Sin Asignar")
             revenue = revenue_by_bu.get(bu_key, Decimal("0"))
             cogs = cogs_by_bu.get(bu_key, Decimal("0"))
-            de_profit = de_profit_by_bu.get(bu_key, Decimal("0"))
-            gross_profit = revenue - cogs + de_profit
+            # Sin DP: utilidad bruta de la UN = solo operacion de bodega
+            gross_profit = revenue - cogs
 
             direct = direct_by_bu.get(bu_key, Decimal("0"))
             shared = shared_by_bu.get(bu_key, Decimal("0"))
@@ -3488,7 +3874,7 @@ class ReportService:
             ]
 
             # Solo incluir si tiene alguna actividad
-            has_activity = any([revenue, cogs, de_profit, direct, shared, general, comms])
+            has_activity = any([revenue, cogs, direct, shared, general, comms])
             if not has_activity:
                 continue
 
@@ -3503,7 +3889,6 @@ class ReportService:
                 sales_revenue=float(revenue),
                 sales_cogs=float(cogs),
                 sales_gross_profit=float(revenue - cogs),
-                de_profit=float(de_profit),
                 total_gross_profit=float(gross_profit),
                 direct_expenses=float(direct),
                 shared_expenses=float(shared),
@@ -3521,7 +3906,6 @@ class ReportService:
             totals.sales_revenue += float(revenue)
             totals.sales_cogs += float(cogs)
             totals.sales_gross_profit += float(revenue - cogs)
-            totals.de_profit += float(de_profit)
             totals.total_gross_profit += float(gross_profit)
             totals.direct_expenses += float(direct)
             totals.shared_expenses += float(shared)
@@ -3537,11 +3921,69 @@ class ReportService:
                 Decimal(str(totals.sales_revenue)),
             )
 
+        # 8. Seccion Pasa Mano: margen DP + comisiones DP + gastos directos a
+        # la UN sistema + tajada de generales por % de categoria (plan A.2).
+        pasamano_detail = [
+            ExpenseByCategoryItem(category_name=cat, amount=float(val))
+            for cat, val in sorted(pasamano_direct_detail.items(), key=lambda x: -x[1])
+            if val != 0
+        ]
+        pasamano_general_items = [
+            DoubleEntryGeneralExpenseItem(
+                category_name=cat, pct=float(d["pct"]), amount=float(d["amount"])
+            )
+            for cat, d in sorted(
+                pasamano_general_detail.items(), key=lambda x: -x[1]["amount"]
+            )
+            if d["amount"] != 0
+        ]
+        pasamano_net = (
+            de_gross_profit - pasamano_commissions - pasamano_direct - pasamano_general
+        )
+        double_entry_section = DoubleEntryProfitability(
+            business_unit_id=system_bu_id,
+            label=system_bu_name,
+            sales_total=float(de_sales_total),
+            purchases_total=float(de_purchases_total),
+            gross_profit=float(de_gross_profit),
+            commissions=float(pasamano_commissions),
+            direct_expenses=float(pasamano_direct),
+            direct_expenses_detail=pasamano_detail,
+            general_expenses=float(pasamano_general),
+            general_expenses_detail=pasamano_general_items,
+            net_profit=float(pasamano_net),
+            net_margin=(
+                self._safe_pct(pasamano_net, de_sales_total)
+                if de_sales_total > 0 else 0.0
+            ),
+        )
+
+        # 9. Conciliacion con P&L (§3.7 plan A.2): las 4 lineas del P&L que NO
+        # son atribuibles a ninguna UN. Se derivan de LA MISMA funcion que
+        # alimenta el tab P&L (`_calculate_profit`) — paridad por construccion,
+        # cambios futuros al P&L se propagan solos. Guardrail:
+        # test_reconciliation_residual_zero.
+        # Limitacion conocida (pre-existente): si el periodo no tiene compras,
+        # _prorate_expense descarta los generales/compartidos de la tabla y el
+        # residual no cierra — mismo comportamiento del reporte desde siempre.
+        pnl = self._calculate_profit(db, organization_id, date_from, date_to)
+        reconciliation = PnlReconciliation(
+            service_income=float(pnl["service_income"]),
+            transformation_net=float(pnl["transformation_profit"] - pnl["waste_loss"]),
+            inventory_adjustment_net=float(pnl["adjustment_net"]),
+            tp_adjustment_net=float(pnl["tp_adjustment_gain"] - pnl["tp_adjustment_loss"]),
+            oversell_cost_adjustment=float(pnl["oversell_adjustment"]),
+            pnl_net_profit=float(pnl["net_profit"]),
+        )
+
         return ProfitabilityByBUResponse(
             period_from=date_from,
             period_to=date_to,
             business_units=result_bus,
             totals=totals,
+            double_entry=double_entry_section,
+            grand_total_net=totals.net_profit + float(pasamano_net),
+            pnl_reconciliation=reconciliation,
         )
 
     # ==================================================================
@@ -3555,16 +3997,23 @@ class ReportService:
         """Reporte de costo real por material = costo promedio + overhead rate."""
         dt_from, dt_to = self._date_range(date_from, date_to)
 
-        # 1. UNs activas
+        # 1. UNs activas.
+        # La UN de sistema (Pasa Mano) se excluye: sus gastos directos son costo
+        # de doble partida, NO overhead de material. Sin este skip, generaria
+        # una fila fantasma (gastos > 0, kg = 0, sin materiales) o — peor — sus
+        # gastos caerian en "Sin Asignar".
         bus = db.execute(
-            select(BusinessUnit.id, BusinessUnit.name)
+            select(BusinessUnit.id, BusinessUnit.name, BusinessUnit.system_code)
             .where(
                 BusinessUnit.organization_id == organization_id,
                 BusinessUnit.is_active == True,
             )
             .order_by(BusinessUnit.name)
         ).all()
-        bu_names = {str(bu.id): bu.name for bu in bus}
+        system_bu_id: Optional[str] = next(
+            (str(bu.id) for bu in bus if bu.system_code == "double_entry"), None
+        )
+        bu_names = {str(bu.id): bu.name for bu in bus if not bu.system_code}
         all_bu_keys = list(bu_names.keys()) + ["unassigned"]
 
         # 2. Compras por UN (valor + kg)
@@ -3584,11 +4033,19 @@ class ReportService:
                 MoneyMovement.amount,
                 MoneyMovement.business_unit_id,
                 MoneyMovement.applicable_business_unit_ids,
+                MoneyMovement.expense_category_id,
                 ExpenseCategory.is_direct_expense,
             )
             .outerjoin(ExpenseCategory, MoneyMovement.expense_category_id == ExpenseCategory.id)
             .where(*expense_filters)
         ).all()
+
+        # A.2: % Pasa Mano por categoria — la tajada de generales es costo de
+        # doble partida, NO overhead de material: se descarta de este reporte
+        # (mismo criterio que los gastos directos a la UN sistema).
+        dp_pct_by_cat = (
+            self._get_dp_pct_by_category(db, organization_id) if system_bu_id else {}
+        )
 
         total_expenses_by_bu: dict[str, Decimal] = {k: Decimal("0") for k in all_bu_keys}
 
@@ -3598,6 +4055,10 @@ class ReportService:
             applicable = row.applicable_business_unit_ids
 
             if bu_id:
+                # Gasto directo a la UN sistema (Pasa Mano): costo de doble
+                # partida, no overhead de material — fuera de este reporte.
+                if system_bu_id and bu_id == system_bu_id:
+                    continue
                 key = bu_id if bu_id in bu_names else "unassigned"
                 total_expenses_by_bu[key] = total_expenses_by_bu.get(key, Decimal("0")) + amt
             elif applicable:
@@ -3608,6 +4069,9 @@ class ReportService:
                 if row.is_direct_expense and row.business_unit_id is None:
                     total_expenses_by_bu["unassigned"] = total_expenses_by_bu.get("unassigned", Decimal("0")) + amt
                 else:
+                    pct = dp_pct_by_cat.get(str(row.expense_category_id), Decimal("0"))
+                    if pct > 0:
+                        amt = amt - self._dp_slice(amt, pct)
                     prorated = self._prorate_expense(amt, None, purchases_by_bu)
                     for k, v in prorated.items():
                         total_expenses_by_bu[k] = total_expenses_by_bu.get(k, Decimal("0")) + v
@@ -3704,6 +4168,11 @@ class ReportService:
         para todos los gastos del periodo, replicando la logica 3-tier de
         get_profitability_by_business_unit.
 
+        ⚠️ NO "sincronizar" con profitability: aca la UN de sistema (Pasa Mano)
+        SI se incluye en bu_names — el Reporte de Gastos DEBE mostrarla como
+        grupo con sus gastos directos. La exclusion de la UN sistema aplica
+        SOLO en get_profitability_by_business_unit y get_real_cost_by_material.
+
         Returns:
             (allocations, bu_names, cat_info)
             - allocations: lista de dicts con keys: movement_id, bu_id (str|None),
@@ -3714,9 +4183,9 @@ class ReportService:
             - cat_info: {cat_id_str: {"name", "parent_id", "is_direct_expense"}} y
               key especial "none" para "Sin Categoría".
         """
-        # 1. UNs activas
+        # 1. UNs activas (la UN sistema SI va en bu_names — regla decision #58)
         bus = db.execute(
-            select(BusinessUnit.id, BusinessUnit.name)
+            select(BusinessUnit.id, BusinessUnit.name, BusinessUnit.system_code)
             .where(
                 BusinessUnit.organization_id == organization_id,
                 BusinessUnit.is_active == True,
@@ -3725,6 +4194,15 @@ class ReportService:
         ).all()
         bu_names: dict[str, str] = {str(bu.id): bu.name for bu in bus}
         bu_names["unassigned"] = "Sin Asignar"
+        system_bu_id: Optional[str] = next(
+            (str(bu.id) for bu in bus if bu.system_code == "double_entry"), None
+        )
+        # A.2: % Pasa Mano por categoria — la tajada de generales se aloca a la
+        # UN sistema como allocation_type "general" (misma plata que muestra
+        # Rentabilidad por UN; guardrail: test_total_matches_profitability_bu_sum)
+        dp_pct_by_cat = (
+            self._get_dp_pct_by_category(db, organization_id) if system_bu_id else {}
+        )
 
         # 2. Compras por UN (base prorrateo)
         purchases_by_bu = self._get_purchases_by_bu(db, organization_id, dt_from, dt_to)
@@ -3816,6 +4294,18 @@ class ReportService:
                         "allocation_type": "direct",
                     })
                 else:
+                    # A.2: tajada del % de la categoria -> UN sistema (Pasa Mano)
+                    pct = dp_pct_by_cat.get(str(row.expense_category_id), Decimal("0"))
+                    if pct > 0:
+                        slice_amt = self._dp_slice(amt, pct)
+                        if slice_amt > 0:
+                            allocations.append({
+                                **base,
+                                "bu_id": system_bu_id,
+                                "allocated_amount": slice_amt,
+                                "allocation_type": "general",
+                            })
+                        amt = amt - slice_amt
                     prorated = self._prorate_expense(amt, None, purchases_by_bu)
                     for k, v in prorated.items():
                         allocations.append({

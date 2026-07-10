@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useDateFilter } from "@/stores/dateFilterStore";
+import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,8 +56,14 @@ interface CellLinkProps {
 }
 
 function CellLink({ to, children, valueClass = "" }: CellLinkProps) {
+  const location = useLocation();
   return (
-    <Link to={to} className={`hover:underline hover:text-emerald-700 ${valueClass}`}>
+    <Link
+      to={to}
+      // Guardar el scroll del P&L mensual antes del drill-down (patron #57)
+      onClick={() => saveScroll(location.pathname + location.search)}
+      className={`hover:underline hover:text-emerald-700 ${valueClass}`}
+    >
       {children}
     </Link>
   );
@@ -112,6 +119,7 @@ export default function ProfitAndLossMonthlyView() {
     date_to: dateTo,
     cutoff_day: cutoffDay,
   });
+  useScrollRestoration(!isLoading);
 
   const commitCutoffDay = (v: number) => {
     const clamped = Math.max(1, Math.min(28, v));
@@ -186,6 +194,13 @@ export default function ProfitAndLossMonthlyView() {
       cellClass: (v) => v >= 0 ? "text-emerald-700" : "text-red-700",
       visible: (d) => d.periods.some((p) => Math.abs(p.adjustment_net) > 0.01)
                    || Math.abs(d.totals.adjustment_net) > 0.01,
+    },
+    {
+      label: "Ajuste Costo por Sobreventa y Reversiones",
+      value: (p) => p.oversell_cost_adjustment,
+      cellClass: (v) => v >= 0 ? "text-emerald-700" : "text-red-700",
+      visible: (d) => d.periods.some((p) => Math.abs(p.oversell_cost_adjustment) > 0.01)
+                   || Math.abs(d.totals.oversell_cost_adjustment) > 0.01,
     },
     {
       label: "+ Ganancia Ajuste Terceros",

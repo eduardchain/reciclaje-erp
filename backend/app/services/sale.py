@@ -12,6 +12,7 @@ Cancelacion:
 - registered: revierte stock solamente
 - liquidated: revierte stock + saldo cliente + comisiones pagadas
 """
+from collections import defaultdict, deque
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Optional, List
@@ -33,6 +34,8 @@ from app.schemas.sale import SaleCreate, SaleUpdate, SaleFullUpdate
 from app.services.money_movement import money_movement as mm_service
 from app.models.material_cost_history import MaterialCostHistory
 from app.services.base import CRUDBase
+from app.services.inventory_costing import incorporate_into_pool
+from app.services.material_cost_history import material_cost_history_service
 
 
 class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
@@ -389,11 +392,41 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         sale.liquidated_by = user_id
         sale.liquidated_at = liquidation_date or sale.date
 
-        # Step 5b: Move stock from transit to liquidated (confirmar salida)
+        # Step 5b: Finalizar COGS al promedio vigente (Modelo L, decision #64).
+        # El costo de la venta se fija en SU liquidacion, no en el registro: el
+        # unit_cost capturado al registrar es provisional (compras liquidadas entre
+        # registro y liquidacion ya movieron el promedio). Extraer al promedio no
+        # cambia el promedio, por eso NO se crea MaterialCostHistory aqui.
+        # Pre-cargar movimientos y emparejar por firma (material, cantidad) con
+        # colas — mismo patron que compra multi-linea. La venta es mono-bodega
+        # (sale.warehouse_id), la firma no necesita bodega.
+        movements = db.query(InventoryMovement).filter(
+            InventoryMovement.reference_type == "sale",
+            InventoryMovement.reference_id == sale.id,
+            InventoryMovement.movement_type == "sale",
+        ).all()
+        movements_by_key: dict = defaultdict(deque)
+        for mv in movements:
+            movements_by_key[(mv.material_id, mv.quantity)].append(mv)
+
+        # Step 5c: Move stock from transit to liquidated (confirmar salida)
         stmt_lines = select(SaleLine).where(SaleLine.sale_id == sale.id)
         sale_lines = db.scalars(stmt_lines).all()
         for line in sale_lines:
             material = db.get(Material, line.material_id)
+
+            # COGS final = promedio vigente al liquidar. Fallback al ultimo costo
+            # conocido si el material aun no tiene promedio (mismo criterio que create).
+            final_cost = material.current_average_cost
+            if final_cost == 0:
+                final_cost = self._get_last_known_cost(db, material.id, organization_id)
+            line.unit_cost = final_cost
+
+            queue = movements_by_key.get((line.material_id, -line.quantity))
+            inv_movement = queue.popleft() if queue else None
+            if inv_movement:
+                inv_movement.unit_cost = final_cost
+
             material.current_stock_transit += line.quantity      # devolver de transit
             material.current_stock_liquidated -= line.quantity   # confirmar en liquidated
 
@@ -448,7 +481,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         db: Session,
         sale_id: UUID,
         organization_id: UUID,
-        user_id: UUID = None
+        user_id: UUID = None,
+        annul_linked_payments: bool = False,
     ) -> Sale:
         """
         Cancelar venta y revertir todos los efectos.
@@ -504,6 +538,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         sale.cancelled_at = datetime.now(timezone.utc)
 
         # Step 5: Reverse inventory movements and restore stock
+        total_cancellation_adjustment = Decimal("0")
         for line in lines:
             material = db.get(Material, line.material_id)
 
@@ -523,13 +558,48 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
 
             material.current_stock += line.quantity
             if was_liquidated:
+                # Reingreso PONDERADO al pool (Modelo L #65): el COGS revertido
+                # (line.unit_cost) vuelve al inventario como VALOR, no solo como
+                # cantidad. Antes el stock volvia sin recalcular el promedio → el
+                # inventario se re-valuaba al avg vigente mientras el P&L devolvia
+                # el COGS historico (diferencia fantasma sin registro).
+                old_liq = material.current_stock_liquidated
+                old_avg = material.current_average_cost
+                new_avg, adjustment = incorporate_into_pool(
+                    liquidated=old_liq,
+                    avg_cost=old_avg,
+                    quantity=line.quantity,
+                    unit_cost=line.unit_cost,
+                )
+                material.current_average_cost = new_avg
                 material.current_stock_liquidated += line.quantity
+                total_cancellation_adjustment += adjustment
+                if new_avg != old_avg:
+                    # El cambio de promedio queda en el historial (append-only):
+                    # audita el reingreso. Desde Fase 5 ya no hay rol bloqueante
+                    # (las reversiones son ponderadas, no rewind).
+                    material_cost_history_service.record_cost_change(
+                        db=db,
+                        material=material,
+                        previous_cost=old_avg,
+                        previous_stock=old_liq,
+                        new_cost=new_avg,
+                        new_stock=old_liq + line.quantity,
+                        source_type="sale_cancellation",
+                        source_id=sale.id,
+                        organization_id=organization_id,
+                        transaction_date=datetime.now(timezone.utc).date(),
+                    )
             else:
                 material.current_stock_transit += line.quantity
             print(f"  🔄 Restored {line.quantity} of {material.name}, stock: {material.current_stock - line.quantity} → {material.current_stock}")
 
         # Step 6: Si estaba liquidada, revertir saldo cliente y comisiones
         if was_liquidated:
+            # Ajuste de cancelacion (Modelo L #65): != 0 solo si el reingreso
+            # rellenó un hueco de oversell. Entra al P&L por cancelled_at.
+            sale.cancellation_cost_adjustment = total_cancellation_adjustment
+
             customer = db.get(ThirdParty, sale.customer_id)
             customer.current_balance -= sale.total_amount
             print(f"👤 Customer '{customer.name}' balance reverted: ${customer.current_balance + sale.total_amount} → ${customer.current_balance}")
@@ -557,11 +627,56 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 recipient.current_balance += comm.commission_amount
                 print(f"  💰 Commission reverted for '{recipient.name}': +${comm.commission_amount}")
 
+        # Step 7: opcional — anular cobros inmediatos enlazados (collection_from_client con sale_id).
+        # El usuario eligió "anular también el cobro" en el diálogo de cancelación (decisión #63,
+        # Opción 1). Revierte el efecto del cobro: caja -amount, cliente +amount. Solo confirmed
+        # (no re-anula un cobro ya anulado a mano; si no hay ninguno es no-op seguro).
+        if annul_linked_payments:
+            linked = db.scalars(
+                select(MoneyMovement).where(
+                    MoneyMovement.sale_id == sale_id,
+                    MoneyMovement.movement_type == "collection_from_client",
+                    MoneyMovement.status == "confirmed",
+                )
+            ).all()
+            for mov in linked:
+                if mov.account_id:
+                    account = db.get(MoneyAccount, mov.account_id)
+                    if account:
+                        account.current_balance -= mov.amount
+                if mov.third_party_id:
+                    tp = db.get(ThirdParty, mov.third_party_id)
+                    if tp:
+                        tp.current_balance += mov.amount
+                mov.status = "annulled"
+                mov.annulled_at = datetime.now(timezone.utc)
+                mov.annulled_by = user_id
+                mov.annulled_reason = f"Cancelación venta #{sale.sale_number}"
+                print(f"  📝 Cobro #{mov.movement_number} anulado (cancelación venta)")
+
         db.flush()
 
         print(f"❌ Sale #{sale.sale_number} cancelled (was {('liquidated' if was_liquidated else 'registered')})")
 
         return sale
+
+    def get_linked_payment_total(
+        self, db: Session, sale_id: UUID, organization_id: UUID
+    ) -> Decimal:
+        """Suma de cobros inmediatos enlazados (collection_from_client, confirmed) a esta venta.
+
+        El detalle lo expone para que el diálogo de cancelación (decisión #63) avise que existe un
+        cobro vivo que quedaría como anticipo del cliente si no se anula. 0 si no hay ninguno.
+        """
+        total = db.execute(
+            select(func.coalesce(func.sum(MoneyMovement.amount), 0)).where(
+                MoneyMovement.sale_id == sale_id,
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.movement_type == "collection_from_client",
+                MoneyMovement.status == "confirmed",
+            )
+        ).scalar_one()
+        return Decimal(str(total or 0))
 
     def update(
         self,
@@ -1205,14 +1320,19 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         for commission in commissions:
             recipient = db.get(ThirdParty, commission.third_party_id)
 
-            # Crear movimiento commission_accrual para P&L
+            # Crear movimiento commission_accrual para P&L.
+            # Fecha = liquidated_at (decision #42): la comision se devenga al
+            # LIQUIDAR — con sale.date quedaba retro-fechada al documento,
+            # desalineada del revenue y reescribiendo saldos historicos del
+            # comisionista en liquidaciones tardias. liquidate() asigna
+            # liquidated_at ANTES de llamar aca; fallback defensivo a sale.date.
             mm_service._create_movement(
                 db=db,
                 organization_id=sale.organization_id,
                 movement_type="commission_accrual",
                 amount=commission.commission_amount,
                 account_id=None,
-                date=sale.date,
+                date=sale.liquidated_at or sale.date,
                 description=f"Comisión venta #{sale.sale_number} - {commission.concept}",
                 third_party_id=commission.third_party_id,
                 sale_id=sale.id,

@@ -89,6 +89,7 @@ export interface PurchaseResponse extends BaseEntity {
   payment_account_name: string | null;
   lines: PurchaseLineResponse[];
   commissions: PurchaseCommissionResponse[];
+  linked_payment_total: number | null;
   warnings?: string[];
 }
 

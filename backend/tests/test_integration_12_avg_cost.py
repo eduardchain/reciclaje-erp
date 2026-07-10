@@ -4,8 +4,9 @@ Test 12: Costo Promedio Movil — Edge Cases
 Verifica calculo de costo promedio ponderado en todos los escenarios:
 - Multiples compras a precios distintos
 - Venta no cambia avg
-- Cancelacion revierte avg (MaterialCostHistory)
-- Bloqueo de cancelacion por operaciones posteriores (3 tipos)
+- Cancelacion con remocion ponderada (Fase 5: conserva valor, nunca bloquea;
+  los antiguos "bloqueos por operaciones posteriores" fueron retirados —
+  ver tests dedicados en test_avg_cost_model_l.py TestFase5WeightedRemoval)
 - Comision per_kg prorrateada al costo
 - Stock a cero + nueva compra (avg = precio nuevo)
 - Adjustment increase mezcla con avg existente
@@ -148,14 +149,9 @@ class TestAvgCostEdgeCases:
         assert_material(client, h, cobre_id, total=200, liquidated=200, avg_cost=67.50)
 
         # =================================================================
-        # Step 5a: Cancel Purchase B -> MUST FAIL (Purchase C es posterior)
+        # (Step 5a eliminado — Fase 5: cancelar con operacion posterior ya no
+        # bloquea; la remocion ponderada se cubre en TestFase5WeightedRemoval)
         # =================================================================
-        resp_cancel_b = client.patch(f"/api/v1/purchases/{purchase_b['id']}/cancel", headers=h)
-        assert resp_cancel_b.status_code == 400, \
-            f"Expected 400 for blocked cancel, got {resp_cancel_b.status_code}: {resp_cancel_b.json()}"
-        # Verificar que sigue liquidada
-        resp_check = client.get(f"/api/v1/purchases/{purchase_b['id']}", headers=h)
-        assert resp_check.json()["status"] == "liquidated"
 
         # =================================================================
         # Step 5b: Cancel Purchase C (ultima, sin operaciones posteriores)
@@ -227,13 +223,8 @@ class TestAvgCostEdgeCases:
         assert_material(client, h, cobre_id, total=100, liquidated=100, avg_cost=106.00)
 
         # =================================================================
-        # Step 10: Cancel Purchase E -> MUST FAIL (adjustment es posterior)
+        # (Step 10 eliminado — Fase 5: ver nota del Step 5a)
         # =================================================================
-        resp_cancel_e = client.patch(f"/api/v1/purchases/{purchase_e['id']}/cancel", headers=h)
-        assert resp_cancel_e.status_code == 400, \
-            f"Expected 400 for blocked cancel, got {resp_cancel_e.status_code}: {resp_cancel_e.json()}"
-        resp_check_e = client.get(f"/api/v1/purchases/{purchase_e['id']}", headers=h)
-        assert resp_check_e.json()["status"] == "liquidated"
 
         # =================================================================
         # Step 11: Purchase CHATARRA — 500kg x $30
@@ -272,15 +263,10 @@ class TestAvgCostEdgeCases:
         assert transf_1["waste_value"] == pytest.approx(1500.00, abs=0.01)
 
         # =================================================================
-        # Step 12a: Cancel Purchase CHATARRA -> MUST FAIL
-        # transformation_out en CHATARRA bloquea la cancelacion (sin hacks)
+        # (Step 12a eliminado — Fase 5: #40 superseded, cancelar compra de
+        # material ya transformado conserva por construccion; cubierto en
+        # TestFase5WeightedRemoval.test_cancel_purchase_after_transformation_out)
         # =================================================================
-        resp_cancel_ch = client.patch(f"/api/v1/purchases/{purchase_chatarra['id']}/cancel", headers=h)
-        assert resp_cancel_ch.status_code == 400, \
-            f"Expected 400 for blocked cancel (transformation_out), got {resp_cancel_ch.status_code}: {resp_cancel_ch.json()}"
-        # Verificar que sigue liquidada
-        resp_check_ch = client.get(f"/api/v1/purchases/{purchase_chatarra['id']}", headers=h)
-        assert resp_check_ch.json()["status"] == "liquidated"
 
         # =================================================================
         # Step 13: Purchase MOTOR 100kg x $200 + Transform -> COBRE 80kg + waste 20kg

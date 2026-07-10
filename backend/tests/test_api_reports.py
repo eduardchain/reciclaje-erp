@@ -996,6 +996,56 @@ class TestSalesReport:
         assert len(data["by_material"]) == 1
         assert data["by_material"][0]["material_code"] == "FE"
 
+    def test_sales_profit_received_quantity_matches_pnl(
+        self, client: TestClient, org_headers: dict, db_session, report_data: dict,
+    ):
+        """Utilidad bruta con diferencia de bascula (received_quantity).
+
+        total_price = received_qty x precio (decision #18), COGS usa la
+        cantidad original. La formula vieja (price - cost) x qty ignoraba
+        la bascula y descuadraba contra el P&L (caso real Costa: $357M vs
+        $342.5M). Guardrail: reporte de ventas == P&L gross_profit_sales.
+        """
+        now = report_data["now"]
+        venta = Sale(
+            organization_id=report_data["org_id"], sale_number=990,
+            customer_id=report_data["cliente1"].id, date=now,
+            status="liquidated", liquidated_at=now,
+            total_amount=Decimal("950000"),  # 95kg recibidos x 10000
+        )
+        db_session.add(venta)
+        db_session.flush()
+        db_session.add(SaleLine(
+            sale_id=venta.id, material_id=report_data["mat_cobre"].id,
+            quantity=Decimal("100"), received_quantity=Decimal("95"),
+            unit_price=Decimal("10000"), total_price=Decimal("950000"),
+            unit_cost=Decimal("8000"),
+        ))
+        db_session.commit()
+
+        params = {
+            "date_from": str(report_data["date_from"]),
+            "date_to": str(report_data["date_to"]),
+        }
+        report = client.get(
+            "/api/v1/reports/sales",
+            params={**params, "dp_filter": "exclude"},
+            headers=org_headers,
+        ).json()
+        pnl = client.get(
+            "/api/v1/reports/profit-and-loss", params=params, headers=org_headers,
+        ).json()
+
+        # La utilidad de esta venta es 950000 - 800000 = 150000
+        # (la formula vieja diria (10000-8000)x100 = 200000)
+        assert report["total_profit"] == pytest.approx(
+            pnl["gross_profit_sales"], abs=1
+        )
+        # Identidad interna: profit == revenue - cost tambien con bascula
+        assert report["total_profit"] == pytest.approx(
+            report["total_revenue"] - report["total_cost"], abs=1
+        )
+
 
 # ---------------------------------------------------------------------------
 # Margin Analysis Tests
@@ -1724,10 +1774,14 @@ def bu_data(db_session: Session, test_organization, test_user):
     org_id = test_organization.id
     now = datetime.now(tz=timezone.utc)
 
-    # UNs
+    # UNs (incluye la UN de sistema Pasa Mano, como la crea el seed/migracion)
     bu_cobre = BusinessUnit(name="Cobre", organization_id=org_id, is_active=True)
     bu_chatarra = BusinessUnit(name="Chatarra", organization_id=org_id, is_active=True)
-    db_session.add_all([bu_cobre, bu_chatarra])
+    bu_pasamano = BusinessUnit(
+        name="Pasa Mano", organization_id=org_id, is_active=True,
+        system_code="double_entry",
+    )
+    db_session.add_all([bu_cobre, bu_chatarra, bu_pasamano])
     db_session.flush()
 
     # Categorias
@@ -1848,13 +1902,92 @@ def bu_data(db_session: Session, test_organization, test_user):
     )
     db_session.add(gasto_compartido)
 
+    # --- Doble Partida liquidada (material Chatarra): 300kg @1000 compra / @1400 venta ---
+    # Sus compras NO entran a la base de prorrateo (double_entry_id != NULL) y
+    # su margen/comisiones van a la seccion Pasa Mano, no a la UN Chatarra.
+    de_purchase = Purchase(
+        organization_id=org_id, purchase_number=950,
+        supplier_id=supplier.id, date=now, status="liquidated",
+        liquidated_at=now, total_amount=Decimal("300000"),
+    )
+    db_session.add(de_purchase)
+    db_session.flush()
+    de_sale = Sale(
+        organization_id=org_id, sale_number=950,
+        customer_id=customer.id, date=now, status="liquidated",
+        liquidated_at=now, total_amount=Decimal("420000"),
+    )
+    db_session.add(de_sale)
+    db_session.flush()
+    dp = DoubleEntry(
+        double_entry_number=950, organization_id=org_id,
+        date=now.date(), supplier_id=supplier.id, customer_id=customer.id,
+        purchase_id=de_purchase.id, sale_id=de_sale.id,
+        status="liquidated", liquidated_at=now,
+    )
+    db_session.add(dp)
+    db_session.flush()
+    de_purchase.double_entry_id = dp.id
+    de_sale.double_entry_id = dp.id
+    db_session.add(DoubleEntryLine(
+        double_entry_id=dp.id, material_id=mat_chatarra.id,
+        quantity=Decimal("300"), purchase_unit_price=Decimal("1000"),
+        sale_unit_price=Decimal("1400"),
+    ))
+    db_session.add(PurchaseLine(
+        purchase_id=de_purchase.id, material_id=mat_chatarra.id,
+        warehouse_id=wh.id, quantity=Decimal("300"), unit_price=Decimal("1000"),
+        total_price=Decimal("300000"),
+    ))
+    db_session.add(SaleLine(
+        sale_id=de_sale.id, material_id=mat_chatarra.id,
+        quantity=Decimal("300"), unit_price=Decimal("1400"),
+        total_price=Decimal("420000"), unit_cost=Decimal("1000"),
+    ))
+
+    # Comision de la DP: $30K -> debe ir a la seccion Pasa Mano (fuga #2)
+    comm_dp = MoneyMovement(
+        organization_id=org_id, movement_number=903,
+        date=now, movement_type="commission_accrual", amount=Decimal("30000"),
+        account_id=None, sale_id=de_sale.id,
+        description="Comision DP", status="confirmed",
+    )
+    db_session.add(comm_dp)
+
+    # Comision de la venta de bodega (Cobre): $60K -> se queda en la UN Cobre
+    comm_bodega = MoneyMovement(
+        organization_id=org_id, movement_number=904,
+        date=now, movement_type="commission_accrual", amount=Decimal("60000"),
+        account_id=None, sale_id=venta.id,
+        description="Comision venta bodega", status="confirmed",
+    )
+    db_session.add(comm_bodega)
+
+    # Gasto DIRECTO a la UN sistema Pasa Mano: $250K (ej. bono de mula foranea)
+    gasto_pasamano = MoneyMovement(
+        organization_id=org_id, movement_number=905,
+        date=now, movement_type="expense", amount=Decimal("250000"),
+        account_id=cuenta.id, description="Bono mula foranea",
+        expense_category_id=cat_gasto_directo.id,
+        business_unit_id=bu_pasamano.id,
+        status="confirmed",
+    )
+    db_session.add(gasto_pasamano)
+
     db_session.commit()
 
     return {
         "bu_cobre": bu_cobre,
         "bu_chatarra": bu_chatarra,
+        "bu_pasamano": bu_pasamano,
         "mat_cobre": mat_cobre,
         "mat_chatarra": mat_chatarra,
+        "cat_metales": cat_metales,
+        "cat_gasto_directo": cat_gasto_directo,
+        "cat_gasto_indirecto": cat_gasto_indirecto,
+        "warehouse": wh,
+        "cuenta": cuenta,
+        "gasto_general_mov": gasto_general,
         "compra_cobre_value": Decimal("1600000"),  # 200kg @ $8000
         "compra_chatarra_value": Decimal("600000"),  # 500kg @ $1200
         "compra_total": Decimal("2200000"),
@@ -1863,6 +1996,13 @@ def bu_data(db_session: Session, test_organization, test_user):
         "gasto_directo_chatarra": Decimal("500000"),
         "gasto_general": Decimal("1000000"),
         "gasto_compartido": Decimal("200000"),
+        # Doble partida
+        "dp_sales": Decimal("420000"),
+        "dp_purchases": Decimal("300000"),
+        "dp_gross": Decimal("120000"),
+        "dp_commission": Decimal("30000"),
+        "bodega_commission": Decimal("60000"),
+        "gasto_pasamano": Decimal("250000"),
     }
 
 
@@ -2006,6 +2146,350 @@ class TestBUValidation:
                 "business_unit_id": bu_data["bu_cobre"].id,
                 "applicable_business_unit_ids": [bu_data["bu_chatarra"].id],
             })
+
+
+PROFITABILITY_URL = "/api/v1/reports/profitability-by-business-unit"
+PROFITABILITY_PARAMS = {"date_from": "2026-01-01", "date_to": "2026-12-31"}
+
+
+class TestPasamanoSection:
+    """Seccion Pasa Mano del reporte de rentabilidad (plan-rentabilidad-un-pasamano.md).
+
+    La tabla por UN es SOLO bodega; doble partida se analiza en `double_entry`.
+    """
+
+    def test_bu_rows_exclude_dp_commissions(self, client, org_headers, bu_data):
+        """Fuga #2: la comision de la DP ($30K, material Chatarra) NO cae en la
+        UN Chatarra; la comision de bodega ($60K) SI queda en Cobre."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        cobre = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre")
+        assert chatarra["sale_commissions"] == 0.0
+        assert cobre["sale_commissions"] == float(bu_data["bodega_commission"])
+        assert data["double_entry"]["commissions"] == float(bu_data["dp_commission"])
+
+    def test_bu_rows_have_no_de_profit(self, client, org_headers, bu_data):
+        """Las filas por UN no exponen de_profit y la utilidad bruta = revenue - cogs."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        for bu in data["business_units"] + [data["totals"]]:
+            assert "de_profit" not in bu
+            assert bu["total_gross_profit"] == pytest.approx(
+                bu["sales_revenue"] - bu["sales_cogs"], abs=0.01
+            )
+        # El margen de la DP (material Chatarra) NO infla la bruta de Chatarra
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        assert chatarra["sales_revenue"] == 0.0
+        assert chatarra["total_gross_profit"] == 0.0
+
+    def test_system_bu_not_a_bodega_row(self, client, org_headers, bu_data):
+        """La UN sistema no aparece como fila de la tabla bodega."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        names = {bu["business_unit_name"] for bu in data["business_units"]}
+        assert "Pasa Mano" not in names
+
+    def test_pasamano_section_totals(self, client, org_headers, bu_data):
+        """Seccion Pasa Mano: ventas/compras/margen/comisiones/gastos/neta/margen%."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        de = resp.json()["double_entry"]
+        assert de["label"] == "Pasa Mano"
+        assert de["business_unit_id"] == str(bu_data["bu_pasamano"].id)
+        assert de["sales_total"] == float(bu_data["dp_sales"])
+        assert de["purchases_total"] == float(bu_data["dp_purchases"])
+        assert de["gross_profit"] == float(bu_data["dp_gross"])
+        assert de["commissions"] == float(bu_data["dp_commission"])
+        assert de["direct_expenses"] == float(bu_data["gasto_pasamano"])
+        expected_net = float(bu_data["dp_gross"] - bu_data["dp_commission"] - bu_data["gasto_pasamano"])
+        assert de["net_profit"] == pytest.approx(expected_net, abs=0.01)
+        # Detalle por categoria
+        assert de["direct_expenses_detail"][0]["amount"] == float(bu_data["gasto_pasamano"])
+
+    def test_grand_total_net(self, client, org_headers, bu_data):
+        """Total General = neta bodega + neta pasamano."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        assert data["grand_total_net"] == pytest.approx(
+            data["totals"]["net_profit"] + data["double_entry"]["net_profit"], abs=0.01
+        )
+
+    def test_pasamano_margin_matches_pnl(self, client, org_headers, bu_data):
+        """Paridad: pasamano.gross_profit == P&L double_entry_profit."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        de = resp.json()["double_entry"]
+        pnl = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params=PROFITABILITY_PARAMS, headers=org_headers,
+        ).json()
+        assert de["gross_profit"] == pytest.approx(pnl["double_entry_profit"], abs=1)
+
+    def test_pasamano_direct_expense_not_in_unassigned(self, client, org_headers, bu_data):
+        """El gasto directo a la UN sistema NO fuga a 'Sin Asignar' (punto fragil QA)."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        unassigned = next(
+            (bu for bu in data["business_units"] if bu["business_unit_name"] == "Sin Asignar"),
+            None,
+        )
+        if unassigned is not None:
+            assert unassigned["direct_expenses"] == 0.0
+
+    def test_expenses_report_shows_pasamano_group(self, client, org_headers, bu_data):
+        """Reporte de Gastos (#44): la UN Pasa Mano SI aparece como grupo con su directo."""
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={**PROFITABILITY_PARAMS, "group_by": "bu"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        groups = resp.json()["groups"]
+        pasamano = next((g for g in groups if g["label"] == "Pasa Mano"), None)
+        assert pasamano is not None
+        assert pasamano["total"] == float(bu_data["gasto_pasamano"])
+
+    def test_proration_unchanged_with_dp_present(self, client, org_headers, bu_data):
+        """Criterio #6: el prorrateo de generales NO cambia por la presencia de DP
+        (la compra DP de $300K queda fuera de la base $2.2M)."""
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        data = resp.json()
+        cobre = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre")
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        # Mismos valores exactos que test_general_expenses_prorated (base 1.6M/0.6M de 2.2M)
+        assert abs(cobre["general_expenses"] - 727272.73) < 1
+        assert abs(chatarra["general_expenses"] - 272727.27) < 1
+
+    def test_real_cost_excludes_system_bu(self, client, org_headers, bu_data):
+        """Costo Real por Material: la UN sistema no genera fila fantasma ni
+        su gasto cae en 'Sin Asignar'."""
+        resp = client.get(
+            "/api/v1/reports/real-cost-by-material",
+            params=PROFITABILITY_PARAMS, headers=org_headers,
+        )
+        data = resp.json()
+        names = {bu["business_unit_name"] for bu in data["business_units"]}
+        assert "Pasa Mano" not in names
+        unassigned = next(
+            (bu for bu in data["business_units"] if bu["business_unit_name"] == "Sin Asignar"),
+            None,
+        )
+        if unassigned is not None:
+            assert unassigned["total_expenses"] == 0.0
+
+    def test_empty_period_pasamano_zeros(self, client, org_headers, bu_data):
+        """Periodo sin actividad: seccion pasamano en ceros, sin error."""
+        resp = client.get(
+            PROFITABILITY_URL,
+            params={"date_from": "2020-01-01", "date_to": "2020-01-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["double_entry"]["sales_total"] == 0
+        assert data["double_entry"]["net_profit"] == 0
+        assert data["grand_total_net"] == 0
+
+
+class TestSystemBUGuards:
+    """Guards de la UN de sistema (Pasa Mano): 5 puntos de entrada de asignacion
+    compartida + materiales + delete."""
+
+    def test_pasamano_bu_created_on_new_org(self, db_session, test_user):
+        """El seed de org nueva crea la UN Pasa Mano con system_code."""
+        from sqlalchemy import select
+        from app.services.organization import create_organization
+        from app.schemas.organization import OrganizationCreate
+
+        org = create_organization(
+            db_session,
+            OrganizationCreate(name="Org Seed Pasamano Test"),
+            owner_user_id=test_user.id,
+        )
+        bu = db_session.execute(
+            select(BusinessUnit).where(
+                BusinessUnit.organization_id == org.id,
+                BusinessUnit.system_code == "double_entry",
+            )
+        ).scalar_one_or_none()
+        assert bu is not None
+        assert bu.name == "Pasa Mano"
+        assert bu.is_active is True
+
+    def test_material_cannot_use_system_bu_on_create(self, client, org_headers, bu_data):
+        resp = client.post(
+            "/api/v1/materials",
+            json={
+                "code": "PMX-1", "name": "Material invalido",
+                "category_id": str(bu_data["cat_metales"].id),
+                "business_unit_id": str(bu_data["bu_pasamano"].id),
+                "default_unit": "kg",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "sistema" in resp.json()["detail"]
+
+    def test_material_cannot_use_system_bu_on_update(self, client, org_headers, bu_data):
+        resp = client.patch(
+            f"/api/v1/materials/{bu_data['mat_cobre'].id}",
+            json={"business_unit_id": str(bu_data["bu_pasamano"].id)},
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "sistema" in resp.json()["detail"]
+
+    def test_system_bu_cannot_be_deleted(self, client, org_headers, bu_data):
+        resp = client.delete(
+            f"/api/v1/business-units/{bu_data['bu_pasamano'].id}",
+            headers=org_headers,
+        )
+        assert resp.status_code == 400
+        assert "sistema" in resp.json()["detail"]
+
+    def test_system_bu_rename_allowed(self, client, org_headers, bu_data):
+        """Rename SI permitido (lookup por system_code, no por nombre)."""
+        resp = client.patch(
+            f"/api/v1/business-units/{bu_data['bu_pasamano'].id}",
+            json={"name": "Foráneos"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Foráneos"
+        assert resp.json()["system_code"] == "double_entry"
+
+    def test_shared_expense_rejects_system_bu(self, client, org_headers, bu_data):
+        """Punto de entrada 1: create MoneyMovement (expense)."""
+        resp = client.post(
+            "/api/v1/money-movements/expense",
+            json={
+                "amount": 100000,
+                "account_id": str(bu_data["cuenta"].id),
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "date": "2026-03-17T12:00:00Z",
+                "description": "Gasto compartido invalido",
+                "applicable_business_unit_ids": [
+                    str(bu_data["bu_cobre"].id),
+                    str(bu_data["bu_pasamano"].id),
+                ],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "sistema" in str(resp.json()["detail"])
+
+    def test_direct_expense_to_system_bu_allowed(self, client, org_headers, bu_data):
+        """Asignacion DIRECTA a la UN sistema: permitida (es el proposito)."""
+        resp = client.post(
+            "/api/v1/money-movements/expense",
+            json={
+                "amount": 150000,
+                "account_id": str(bu_data["cuenta"].id),
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "date": "2026-03-17T12:00:00Z",
+                "description": "Flete DP directo",
+                "business_unit_id": str(bu_data["bu_pasamano"].id),
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["business_unit_id"] == str(bu_data["bu_pasamano"].id)
+
+    def test_shared_scheduled_expense_rejects_system_bu(self, client, org_headers, bu_data):
+        """Punto de entrada 2: create ScheduledExpense."""
+        resp = client.post(
+            "/api/v1/scheduled-expenses/",
+            json={
+                "name": "Poliza compartida invalida",
+                "total_amount": 1200000,
+                "total_months": 12,
+                "source_account_id": str(bu_data["cuenta"].id),
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "start_date": "2026-03-01",
+                "applicable_business_unit_ids": [str(bu_data["bu_pasamano"].id)],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "sistema" in str(resp.json()["detail"])
+
+    def test_shared_fixed_asset_rejects_system_bu(self, client, org_headers, bu_data):
+        """Punto de entrada 3: create FixedAsset."""
+        resp = client.post(
+            "/api/v1/fixed-assets/",
+            json={
+                "name": "Prensa compartida invalida",
+                "purchase_date": "2026-03-01",
+                "purchase_value": 5000000,
+                "salvage_value": 0,
+                "depreciation_rate": 10,
+                "depreciation_start_date": "2026-03-01",
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "source_account_id": str(bu_data["cuenta"].id),
+                "applicable_business_unit_ids": [str(bu_data["bu_pasamano"].id)],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "sistema" in str(resp.json()["detail"])
+
+    def test_reclassify_shared_to_system_bu_rejected(self, client, org_headers, bu_data):
+        """Punto de entrada 4 (gap QA): PATCH /classification con UN sistema en compartido."""
+        mov = bu_data["gasto_general_mov"]
+        resp = client.patch(
+            f"/api/v1/money-movements/{mov.id}/classification",
+            json={
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "applicable_business_unit_ids": [
+                    str(bu_data["bu_cobre"].id),
+                    str(bu_data["bu_pasamano"].id),
+                ],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "sistema" in str(resp.json()["detail"])
+
+    def test_reclassify_direct_to_system_bu_allowed(self, client, org_headers, bu_data):
+        """Reclasificar DIRECTO a la UN sistema: permitido (Gustavo reclasifica un flete)."""
+        mov = bu_data["gasto_general_mov"]
+        resp = client.patch(
+            f"/api/v1/money-movements/{mov.id}/classification",
+            json={
+                "expense_category_id": str(bu_data["cat_gasto_directo"].id),
+                "business_unit_id": str(bu_data["bu_pasamano"].id),
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["business_unit_id"] == str(bu_data["bu_pasamano"].id)
+
+    def test_expense_category_default_shared_rejects_system_bu(self, client, org_headers, bu_data):
+        """Punto de entrada 5: default compartido de ExpenseCategory."""
+        resp = client.post(
+            "/api/v1/expense-categories",
+            json={
+                "name": "Cat default compartido invalido",
+                "is_direct_expense": True,
+                "default_applicable_business_unit_ids": [str(bu_data["bu_pasamano"].id)],
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        assert "sistema" in str(resp.json()["detail"])
+
+    def test_expense_category_default_direct_to_system_bu_allowed(self, client, org_headers, bu_data):
+        """Default DIRECTO a la UN sistema: permitido (ej. categoria 'Bonos Foraneos')."""
+        resp = client.post(
+            "/api/v1/expense-categories",
+            json={
+                "name": "Bonos Foraneos",
+                "is_direct_expense": True,
+                "default_business_unit_id": str(bu_data["bu_pasamano"].id),
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["default_business_unit_id"] == str(bu_data["bu_pasamano"].id)
 
     def test_expense_with_direct_bu_valid(self, client, org_headers, bu_data):
         """business_unit_id solo → valido."""
@@ -2152,12 +2636,391 @@ def bu_data_with_de_commission(db_session: Session, test_organization, test_user
     }
 
 
+class TestDpPctGeneralExpenses:
+    """Plan A.2: % de gastos generales por categoria atribuido a Pasa Mano.
+
+    Fixture base bu_data: compras Cobre $1.6M / Chatarra $600K (base $2.2M),
+    gasto GENERAL $1M en 'Arriendo BU' (indirecta raiz), compartido $200K,
+    directo Chatarra $500K, directo Pasa Mano $250K, DP margen $120K,
+    comisiones DP $30K / bodega $60K.
+    """
+
+    CATS_URL = "/api/v1/expense-categories"
+
+    def _set_pct(self, db_session, cat, pct):
+        cat.double_entry_general_pct = Decimal(str(pct))
+        db_session.commit()
+
+    def _get_report(self, client, org_headers):
+        resp = client.get(PROFITABILITY_URL, params=PROFITABILITY_PARAMS, headers=org_headers)
+        assert resp.status_code == 200
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Mecanica del slice en Rentabilidad por UN
+    # ------------------------------------------------------------------
+
+    def test_pct_slice_to_pasamano(self, client, org_headers, db_session, bu_data):
+        """General $1M al 20% -> $200K a Pasa Mano, $800K prorrateados."""
+        self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 20)
+        data = self._get_report(client, org_headers)
+
+        de = data["double_entry"]
+        assert de["general_expenses"] == pytest.approx(200000, abs=0.01)
+        assert len(de["general_expenses_detail"]) == 1
+        detail = de["general_expenses_detail"][0]
+        assert detail["category_name"] == "Arriendo BU"
+        assert detail["pct"] == pytest.approx(20.0)
+        assert detail["amount"] == pytest.approx(200000, abs=0.01)
+
+        cobre = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre")
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        # 800K x (1.6/2.2) y 800K x (0.6/2.2)
+        assert abs(cobre["general_expenses"] - 581818.18) < 1
+        assert abs(chatarra["general_expenses"] - 218181.82) < 1
+
+    def test_pct_child_inherits_parent(self, client, org_headers, db_session, bu_data):
+        """Gasto general en subcategoria usa el % del padre (herencia en lectura)."""
+        parent = bu_data["cat_gasto_indirecto"]
+        self._set_pct(db_session, parent, 20)
+        child = ExpenseCategory(
+            name="Arriendo Bodega Norte", organization_id=parent.organization_id,
+            is_direct_expense=False, parent_id=parent.id, is_active=True,
+        )
+        db_session.add(child)
+        db_session.flush()
+        db_session.add(MoneyMovement(
+            organization_id=parent.organization_id, movement_number=960,
+            date=datetime.now(tz=timezone.utc), movement_type="expense",
+            amount=Decimal("500000"), account_id=bu_data["cuenta"].id,
+            description="Arriendo bodega norte", expense_category_id=child.id,
+            status="confirmed",
+        ))
+        db_session.commit()
+
+        data = self._get_report(client, org_headers)
+        de = data["double_entry"]
+        # 200K del padre ($1M) + 100K de la hija ($500K), ambos al 20%
+        assert de["general_expenses"] == pytest.approx(300000, abs=0.01)
+        child_line = next(
+            d for d in de["general_expenses_detail"]
+            if d["category_name"] == "Arriendo Bodega Norte"
+        )
+        assert child_line["pct"] == pytest.approx(20.0)
+        assert child_line["amount"] == pytest.approx(100000, abs=0.01)
+
+    def test_pct_zero_default_unchanged(self, client, org_headers, bu_data):
+        """Sin % configurado (default 0): numeros identicos a la decision #58."""
+        data = self._get_report(client, org_headers)
+        cobre = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre")
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        assert abs(cobre["general_expenses"] - 727272.73) < 1
+        assert abs(chatarra["general_expenses"] - 272727.27) < 1
+        assert data["double_entry"]["general_expenses"] == 0
+        assert data["double_entry"]["general_expenses_detail"] == []
+
+    def test_pct_100_percent(self, client, org_headers, db_session, bu_data):
+        """100%: todo el general a Pasa Mano, bodegas $0 de esa categoria."""
+        self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 100)
+        data = self._get_report(client, org_headers)
+        assert data["double_entry"]["general_expenses"] == pytest.approx(1000000, abs=0.01)
+        cobre = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre")
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        assert cobre["general_expenses"] == pytest.approx(0, abs=0.01)
+        assert chatarra["general_expenses"] == pytest.approx(0, abs=0.01)
+
+    def test_pct_uncategorized_general_ignored(self, client, org_headers, db_session, bu_data):
+        """Gasto general SIN categoria -> 0%, se prorratea completo."""
+        self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 20)
+        db_session.add(MoneyMovement(
+            organization_id=bu_data["cat_gasto_indirecto"].organization_id,
+            movement_number=961, date=datetime.now(tz=timezone.utc),
+            movement_type="expense", amount=Decimal("300000"),
+            account_id=bu_data["cuenta"].id, description="Gasto sin categoria",
+            expense_category_id=None, status="confirmed",
+        ))
+        db_session.commit()
+
+        data = self._get_report(client, org_headers)
+        # Solo el $1M de Arriendo aporta slice; el $300K sin categoria no
+        assert data["double_entry"]["general_expenses"] == pytest.approx(200000, abs=0.01)
+        cobre = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre")
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        # (800K + 300K) prorrateados
+        assert abs(cobre["general_expenses"] - 800000.00) < 1
+        assert abs(chatarra["general_expenses"] - 300000.00) < 1
+
+    def test_pct_direct_and_shared_untouched(self, client, org_headers, db_session, bu_data):
+        """El % NO toca gastos directos ni compartidos de la misma categoria."""
+        # 'Arriendo BU' tambien tiene el compartido de $200K — debe quedar igual
+        self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 20)
+        data = self._get_report(client, org_headers)
+        cobre = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Cobre")
+        chatarra = next(bu for bu in data["business_units"] if bu["business_unit_name"] == "Chatarra")
+        assert abs(cobre["shared_expenses"] - 145454.55) < 1
+        assert abs(chatarra["shared_expenses"] - 54545.45) < 1
+        assert chatarra["direct_expenses"] == pytest.approx(500000, abs=0.01)
+        assert data["double_entry"]["direct_expenses"] == pytest.approx(250000, abs=0.01)
+
+    def test_pct_net_and_grand_total_parity(self, client, org_headers, db_session, bu_data):
+        """La neta Pasa Mano baja exactamente el slice; el TOTAL GENERAL no cambia."""
+        before = self._get_report(client, org_headers)
+        self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 20)
+        after = self._get_report(client, org_headers)
+
+        assert after["double_entry"]["net_profit"] == pytest.approx(
+            before["double_entry"]["net_profit"] - 200000, abs=0.01
+        )
+        # El slice solo MUEVE plata dentro del reporte
+        assert after["grand_total_net"] == pytest.approx(before["grand_total_net"], abs=1)
+        # Sin lineas no-UN en este fixture, el P&L == TOTAL GENERAL
+        rec = after["pnl_reconciliation"]
+        assert rec["pnl_net_profit"] == pytest.approx(after["grand_total_net"], abs=1)
+
+    # ------------------------------------------------------------------
+    # Sync: Reporte de Gastos + drill-down + Costo Real
+    # ------------------------------------------------------------------
+
+    def test_pct_expenses_report_shows_pasamano_general(
+        self, client, org_headers, db_session, bu_data,
+    ):
+        """El grupo Pasa Mano del Reporte de Gastos incluye directo + slice."""
+        self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 20)
+        resp = client.get(
+            "/api/v1/reports/expenses",
+            params={"date_from": "2026-01-01", "date_to": "2026-12-31", "group_by": "bu"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        groups = resp.json()["groups"]
+        pasamano = next((g for g in groups if g["label"] == "Pasa Mano"), None)
+        assert pasamano is not None
+        # $250K directo + $200K slice de generales
+        assert pasamano["total"] == pytest.approx(450000, abs=0.01)
+
+    def test_pct_expenses_detail_drilldown(self, client, org_headers, db_session, bu_data):
+        """El drill-down del grupo Pasa Mano lista el gasto con allocated == slice."""
+        self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 20)
+        resp = client.get(
+            "/api/v1/reports/expenses/detail",
+            params={
+                "date_from": "2026-01-01", "date_to": "2026-12-31",
+                "business_unit_id": str(bu_data["bu_pasamano"].id),
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        general_item = next(
+            i for i in items if i["movement_id"] == str(bu_data["gasto_general_mov"].id)
+        )
+        assert general_item["allocated_amount"] == pytest.approx(200000, abs=0.01)
+        assert general_item["allocation_type"] == "general"
+
+    def test_pct_real_cost_excludes_slice(self, client, org_headers, db_session, bu_data):
+        """Costo Real por Material: el slice NO es overhead de material."""
+        self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 20)
+        resp = client.get(
+            "/api/v1/reports/real-cost-by-material",
+            params=PROFITABILITY_PARAMS,
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        bus = resp.json()["business_units"]
+        cobre = next(b for b in bus if b["business_unit_name"] == "Cobre")
+        chatarra = next(b for b in bus if b["business_unit_name"] == "Chatarra")
+        # Cobre: compartido 145,454.55 + general 581,818.18 (de los $800K restantes)
+        assert abs(cobre["total_expenses"] - 727272.73) < 1
+        # Chatarra: directo 500K + compartido 54,545.45 + general 218,181.82
+        assert abs(chatarra["total_expenses"] - 772727.27) < 1
+
+    # ------------------------------------------------------------------
+    # Validaciones del CRUD de categorias
+    # ------------------------------------------------------------------
+    # RBAC del PATCH (treasury.manage_expenses) ya cubierto en
+    # test_permission_enforcement.py — el % viaja por el endpoint existente.
+
+    def test_pct_validation_range(self, client, org_headers):
+        for bad_pct in (-1, 101):
+            resp = client.post(
+                self.CATS_URL,
+                json={"name": f"Cat pct {bad_pct}", "double_entry_general_pct": bad_pct},
+                headers=org_headers,
+            )
+            assert resp.status_code == 422
+
+    def test_pct_on_subcategory_rejected(self, client, org_headers, db_session, bu_data):
+        parent = bu_data["cat_gasto_indirecto"]
+        # Crear hija con pct > 0 -> 422
+        resp = client.post(
+            self.CATS_URL,
+            json={
+                "name": "Hija con pct", "parent_id": str(parent.id),
+                "double_entry_general_pct": 10,
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        # Editar hija existente para ponerle pct -> 422
+        child = ExpenseCategory(
+            name="Hija sin pct", organization_id=parent.organization_id,
+            is_direct_expense=False, parent_id=parent.id, is_active=True,
+        )
+        db_session.add(child)
+        db_session.commit()
+        resp = client.patch(
+            f"{self.CATS_URL}/{child.id}",
+            json={"double_entry_general_pct": 10},
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_pct_on_direct_category_rejected(self, client, org_headers, bu_data):
+        # Crear directa con pct -> 422
+        resp = client.post(
+            self.CATS_URL,
+            json={
+                "name": "Directa con pct", "is_direct_expense": True,
+                "double_entry_general_pct": 10,
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+        # Editar la directa existente para ponerle pct -> 422
+        resp = client.patch(
+            f"{self.CATS_URL}/{bu_data['cat_gasto_directo'].id}",
+            json={"double_entry_general_pct": 10},
+            headers=org_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_pct_cleared_on_reparent(self, client, org_headers, db_session, bu_data):
+        """G1 (QA): reparentar una raiz con pct > 0 zerea el pct (no queda huerfano)."""
+        resp = client.post(
+            self.CATS_URL,
+            json={"name": "Raiz con pct", "double_entry_general_pct": 20},
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        cat_id = resp.json()["id"]
+        assert float(resp.json()["double_entry_general_pct"]) == pytest.approx(20.0)
+
+        resp = client.patch(
+            f"{self.CATS_URL}/{cat_id}",
+            json={"parent_id": str(bu_data["cat_gasto_indirecto"].id)},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert float(resp.json()["double_entry_general_pct"]) == 0
+
+    def test_pct_no_system_bu_fallback(self, client, org_headers, db_session, bu_data):
+        """Sin UN sistema el % se ignora — la plata no se pierde."""
+        bu_data["bu_pasamano"].system_code = None
+        self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 20)
+        data = self._get_report(client, org_headers)
+        assert data["double_entry"]["general_expenses"] == 0
+        # El $1M general se prorratea completo (conservacion)
+        total_general = sum(bu["general_expenses"] for bu in data["business_units"])
+        assert abs(total_general - 1000000) < 1
+
+    # ------------------------------------------------------------------
+    # Bloque de conciliacion con P&L (§3.7)
+    # ------------------------------------------------------------------
+
+    def test_reconciliation_zero_case(self, client, org_headers, bu_data):
+        """Sin servicios/transformaciones/ajustes: 4 lineas en 0 y P&L == TOTAL GENERAL."""
+        data = self._get_report(client, org_headers)
+        rec = data["pnl_reconciliation"]
+        assert rec["service_income"] == 0
+        assert rec["transformation_net"] == 0
+        assert rec["inventory_adjustment_net"] == 0
+        assert rec["tp_adjustment_net"] == 0
+        assert rec["pnl_net_profit"] == pytest.approx(data["grand_total_net"], abs=1)
+
+    def test_reconciliation_residual_zero(self, client, org_headers, db_session, bu_data):
+        """Test de oro anti-drift: TOTAL GENERAL + 4 lineas == Utilidad Neta P&L.
+
+        Si el P&L gana una linea nueva y nadie la agrega al bloque, esto revienta.
+        """
+        from app.models.inventory_adjustment import InventoryAdjustment
+        from app.models.material_transformation import MaterialTransformation
+
+        org_id = bu_data["cat_gasto_indirecto"].organization_id
+        now = datetime.now(tz=timezone.utc)
+        self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 20)
+
+        # Servicios: +150K
+        db_session.add(MoneyMovement(
+            organization_id=org_id, movement_number=962, date=now,
+            movement_type="service_income", amount=Decimal("150000"),
+            account_id=bu_data["cuenta"].id, description="Servicio de pesaje",
+            status="confirmed",
+        ))
+        # Ajustes de terceros: gain 80K - loss 50K = +30K
+        db_session.add(MoneyMovement(
+            organization_id=org_id, movement_number=963, date=now,
+            movement_type="tp_adjustment_credit", amount=Decimal("80000"),
+            adjustment_class="gain", description="Ajuste a favor",
+            status="confirmed",
+        ))
+        db_session.add(MoneyMovement(
+            organization_id=org_id, movement_number=964, date=now,
+            movement_type="tp_adjustment_debit", amount=Decimal("50000"),
+            adjustment_class="loss", description="Ajuste en contra",
+            status="confirmed",
+        ))
+        # Ajuste de inventario: +10kg @ 1200 = +12K
+        db_session.add(InventoryAdjustment(
+            organization_id=org_id, adjustment_number=97001, date=now,
+            adjustment_type="increase", material_id=bu_data["mat_chatarra"].id,
+            warehouse_id=bu_data["warehouse"].id,
+            previous_stock=Decimal("1000"), quantity=Decimal("10"),
+            new_stock=Decimal("1010"), unit_cost=Decimal("1200"),
+            total_value=Decimal("12000"), reason="Ajuste conteo fisico",
+            status="confirmed",
+        ))
+        # Transformacion: value_difference 25K - waste 5K = +20K
+        db_session.add(MaterialTransformation(
+            organization_id=org_id, transformation_number=970, date=now,
+            source_material_id=bu_data["mat_chatarra"].id,
+            source_warehouse_id=bu_data["warehouse"].id,
+            source_quantity=Decimal("50"), source_unit_cost=Decimal("1200"),
+            source_total_value=Decimal("60000"),
+            waste_quantity=Decimal("2"), waste_value=Decimal("5000"),
+            value_difference=Decimal("25000"), cost_distribution="average_cost",
+            reason="Desarmado test A.2", status="confirmed",
+        ))
+        db_session.commit()
+
+        data = self._get_report(client, org_headers)
+        rec = data["pnl_reconciliation"]
+        assert rec["service_income"] == pytest.approx(150000, abs=1)
+        assert rec["transformation_net"] == pytest.approx(20000, abs=1)
+        assert rec["inventory_adjustment_net"] == pytest.approx(12000, abs=1)
+        assert rec["tp_adjustment_net"] == pytest.approx(30000, abs=1)
+        # 5a linea (Modelo L #65): sin oversell en esta fixture debe ser 0
+        assert rec["oversell_cost_adjustment"] == pytest.approx(0, abs=1)
+
+        residual = (
+            rec["pnl_net_profit"]
+            - data["grand_total_net"]
+            - rec["service_income"]
+            - rec["transformation_net"]
+            - rec["inventory_adjustment_net"]
+            - rec["tp_adjustment_net"]
+            - rec["oversell_cost_adjustment"]
+        )
+        assert abs(residual) < 1
+
+
 class TestDECommissionProration:
 
-    def test_de_commission_prorated_by_sale_lines(
+    def test_de_commission_goes_to_pasamano_section(
         self, client, org_headers, bu_data_with_de_commission,
     ):
-        """Comision de DP $1M se prorratear: Cobre 5M/6.5M, Chatarra 1.5M/6.5M."""
+        """Comision de DP $1M NO se prorratea a las UN de bodega — va a la
+        seccion Pasa Mano (antes contaminaba Cobre/Chatarra, fuga #2 del plan).
+        """
         resp = client.get(
             "/api/v1/reports/profitability-by-business-unit",
             params={"date_from": "2026-01-01", "date_to": "2026-12-31"},
@@ -2171,10 +3034,12 @@ class TestDECommissionProration:
         assert cobre is not None
         assert chatarra is not None
 
-        # Cobre: 5M/6.5M * 1M ≈ 769,230.77
-        assert abs(cobre["sale_commissions"] - 769230.77) < 1
-        # Chatarra: 1.5M/6.5M * 1M ≈ 230,769.23
-        assert abs(chatarra["sale_commissions"] - 230769.23) < 1
+        # Bodega: solo la comision de la venta de bodega ($60K, en Cobre)
+        assert cobre["sale_commissions"] == 60000.0
+        assert chatarra["sale_commissions"] == 0.0
+
+        # Pasa Mano: comision DP de este fixture ($1M) + la del bu_data base ($30K)
+        assert data["double_entry"]["commissions"] == pytest.approx(1030000.0, abs=1)
 
 
 class TestEdgeCases:

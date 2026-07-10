@@ -106,6 +106,7 @@ export interface SaleResponse extends BaseEntity {
   commissions: SaleCommissionResponse[];
   total_quantity_difference: number | null;
   total_amount_difference: number | null;
+  linked_payment_total: number | null;
   warnings: string[];
 }
 

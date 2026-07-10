@@ -79,6 +79,7 @@ export interface ProfitAndLossResponse {
   transformation_count: number;
   waste_loss: number;
   adjustment_net: number;
+  oversell_cost_adjustment: number;
   tp_adjustment_loss: number;
   tp_adjustment_gain: number;
   total_gross_profit: number;
@@ -196,6 +197,8 @@ export interface BalanceDetailedItem {
   accumulated_depreciation?: number | null;
   investor_type?: string | null;
   account_type?: string | null;
+  /** Tercero/cuenta desactivado hoy pero con saldo al corte histórico (solo as_of_date) */
+  is_inactive?: boolean;
 }
 
 export interface BalanceDetailedGroup {
@@ -451,6 +454,7 @@ export interface ExpenseByCategoryItem {
   amount: number;
 }
 
+// Solo operacion de bodega — la doble partida va en la seccion `double_entry`
 export interface BusinessUnitProfitability {
   business_unit_id: string | null;
   business_unit_name: string;
@@ -459,7 +463,6 @@ export interface BusinessUnitProfitability {
   sales_revenue: number;
   sales_cogs: number;
   sales_gross_profit: number;
-  de_profit: number;
   total_gross_profit: number;
   direct_expenses: number;
   shared_expenses: number;
@@ -471,11 +474,48 @@ export interface BusinessUnitProfitability {
   net_margin: number;
 }
 
+// Tajada de generales atribuida a Pasa Mano por % de categoria (plan A.2)
+export interface DoubleEntryGeneralExpenseItem {
+  category_name: string;
+  pct: number;
+  amount: number;
+}
+
+// Seccion Pasa Mano: gastos directos asignados + comisiones DP + % de generales
+export interface DoubleEntryProfitability {
+  business_unit_id: string | null;
+  label: string;
+  sales_total: number;
+  purchases_total: number;
+  gross_profit: number;
+  commissions: number;
+  direct_expenses: number;
+  direct_expenses_detail: ExpenseByCategoryItem[];
+  general_expenses: number;
+  general_expenses_detail: DoubleEntryGeneralExpenseItem[];
+  net_profit: number;
+  net_margin: number;
+}
+
+// Conciliacion con P&L: lineas no atribuibles a UN.
+// grand_total_net + estas 5 lineas == pnl_net_profit
+export interface PnlReconciliation {
+  service_income: number;
+  transformation_net: number;
+  inventory_adjustment_net: number;
+  tp_adjustment_net: number;
+  oversell_cost_adjustment: number;
+  pnl_net_profit: number;
+}
+
 export interface ProfitabilityByBUResponse {
   period_from: string;
   period_to: string;
   business_units: BusinessUnitProfitability[];
   totals: BusinessUnitProfitability;
+  double_entry: DoubleEntryProfitability;
+  grand_total_net: number;
+  pnl_reconciliation: PnlReconciliation;
 }
 
 // --- Costo Real por Material ---

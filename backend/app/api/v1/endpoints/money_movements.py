@@ -917,8 +917,12 @@ def get_by_third_party(
                     "is_line_item": True,
                     "parent_source_id": str(p.id),
                 }
-                _evt(p.date, p.liquidated_at, 0,
-                     id=f"purchase-line-{line.id}", date=p.date.isoformat(),
+                # Posicionado en liquidated_at (fecha canonica de efecto
+                # financiero, decision #42) — document_date conserva la fecha
+                # del documento para mostrar ambas.
+                _evt(p.liquidated_at, p.liquidated_at, 0,
+                     id=f"purchase-line-{line.id}", date=p.liquidated_at.isoformat(),
+                     document_date=p.date.isoformat(),
                      event_type="purchase_liquidation",
                      description=f"Compra #{p.purchase_number} liquidada",
                      amount=float(line.total_price), direction=-1,
@@ -927,18 +931,22 @@ def get_by_third_party(
                      source="purchase", source_id=str(p.id), source_number=p.purchase_number,
                      **ops_fields)
         else:
-            _evt(p.date, p.liquidated_at, 0,
-                 id=f"purchase-{p.id}", date=p.date.isoformat(),
+            _evt(p.liquidated_at, p.liquidated_at, 0,
+                 id=f"purchase-{p.id}", date=p.liquidated_at.isoformat(),
+                 document_date=p.date.isoformat(),
                  event_type="purchase_liquidation",
                  description=f"Compra #{p.purchase_number} liquidada",
                  amount=float(p.total_amount), direction=-1,
                  status="confirmed" if p.status == "liquidated" else "cancelled",
                  reference_number=None, movement_number=None,
                  source="purchase", source_id=str(p.id), source_number=p.purchase_number)
-        # Cancelacion siempre como evento unico (usa total para reversa)
+        # Cancelacion siempre como evento unico (usa total para reversa).
+        # Posicionada junto a su liquidacion (par adyacente, display-only:
+        # los eventos annulled/cancelled no mueven el balance).
         if p.status == "cancelled" and p.cancelled_at:
-            _evt(p.date, p.cancelled_at, 2,
-                 id=f"purchase-cancel-{p.id}", date=p.date.isoformat(),
+            _evt(p.liquidated_at, p.cancelled_at, 2,
+                 id=f"purchase-cancel-{p.id}", date=p.liquidated_at.isoformat(),
+                 document_date=p.date.isoformat(),
                  event_type="purchase_cancellation",
                  description=f"Compra #{p.purchase_number} cancelada (reversa)",
                  amount=float(p.total_amount), direction=1,
@@ -960,8 +968,9 @@ def get_by_third_party(
         )
     )
     for comm, purch in db.execute(purch_comm_query).all():
-        _evt(purch.date, purch.liquidated_at, 0,
-             id=f"purch-commission-{comm.id}", date=purch.date.isoformat(),
+        _evt(purch.liquidated_at, purch.liquidated_at, 0,
+             id=f"purch-commission-{comm.id}", date=purch.liquidated_at.isoformat(),
+             document_date=purch.date.isoformat(),
              event_type="purchase_commission",
              description=f"Comision Compra #{purch.purchase_number}: {comm.concept}",
              amount=float(comm.commission_amount), direction=-1,
@@ -970,8 +979,9 @@ def get_by_third_party(
              source="purchase_commission", source_id=str(comm.id), source_number=purch.purchase_number,
              **_null_ops)
         if purch.status == "cancelled" and purch.cancelled_at:
-            _evt(purch.date, purch.cancelled_at, 2,
-                 id=f"purch-comm-cancel-{comm.id}", date=purch.date.isoformat(),
+            _evt(purch.liquidated_at, purch.cancelled_at, 2,
+                 id=f"purch-comm-cancel-{comm.id}", date=purch.liquidated_at.isoformat(),
+                 document_date=purch.date.isoformat(),
                  event_type="purchase_commission_cancellation",
                  description=f"Comision Compra #{purch.purchase_number} cancelada (reversa)",
                  amount=float(comm.commission_amount), direction=1,
@@ -1007,8 +1017,9 @@ def get_by_third_party(
                     "is_line_item": True,
                     "parent_source_id": str(s.id),
                 }
-                _evt(s.date, s.liquidated_at, 0,
-                     id=f"sale-line-{line.id}", date=s.date.isoformat(),
+                _evt(s.liquidated_at, s.liquidated_at, 0,
+                     id=f"sale-line-{line.id}", date=s.liquidated_at.isoformat(),
+                     document_date=s.date.isoformat(),
                      event_type="sale_liquidation",
                      description=f"Venta #{s.sale_number} liquidada",
                      amount=float(line.total_price), direction=1,
@@ -1017,8 +1028,9 @@ def get_by_third_party(
                      source="sale", source_id=str(s.id), source_number=s.sale_number,
                      **ops_fields)
         else:
-            _evt(s.date, s.liquidated_at, 0,
-                 id=f"sale-{s.id}", date=s.date.isoformat(),
+            _evt(s.liquidated_at, s.liquidated_at, 0,
+                 id=f"sale-{s.id}", date=s.liquidated_at.isoformat(),
+                 document_date=s.date.isoformat(),
                  event_type="sale_liquidation",
                  description=f"Venta #{s.sale_number} liquidada",
                  amount=float(s.total_amount), direction=1,
@@ -1027,8 +1039,9 @@ def get_by_third_party(
                  source="sale", source_id=str(s.id), source_number=s.sale_number)
         # Cancelacion siempre como evento unico (usa total para reversa)
         if s.status == "cancelled" and s.cancelled_at:
-            _evt(s.date, s.cancelled_at, 2,
-                 id=f"sale-cancel-{s.id}", date=s.date.isoformat(),
+            _evt(s.liquidated_at, s.cancelled_at, 2,
+                 id=f"sale-cancel-{s.id}", date=s.liquidated_at.isoformat(),
+                 document_date=s.date.isoformat(),
                  event_type="sale_cancellation",
                  description=f"Venta #{s.sale_number} cancelada (reversa)",
                  amount=float(s.total_amount), direction=-1,
@@ -1062,8 +1075,9 @@ def get_by_third_party(
     for comm, sale in db.execute(comm_query).all():
         if sale.id in sales_with_accrual:
             continue
-        _evt(sale.date, sale.liquidated_at, 0,
-             id=f"commission-{comm.id}", date=sale.date.isoformat(),
+        _evt(sale.liquidated_at, sale.liquidated_at, 0,
+             id=f"commission-{comm.id}", date=sale.liquidated_at.isoformat(),
+             document_date=sale.date.isoformat(),
              event_type="sale_commission",
              description=f"Comision Venta #{sale.sale_number}: {comm.concept}",
              amount=float(comm.commission_amount), direction=1,
@@ -1072,8 +1086,9 @@ def get_by_third_party(
              source="commission", source_id=str(comm.id), source_number=sale.sale_number,
              **_null_ops)
         if sale.status == "cancelled" and sale.cancelled_at:
-            _evt(sale.date, sale.cancelled_at, 2,
-                 id=f"commission-cancel-{comm.id}", date=sale.date.isoformat(),
+            _evt(sale.liquidated_at, sale.cancelled_at, 2,
+                 id=f"commission-cancel-{comm.id}", date=sale.liquidated_at.isoformat(),
+                 document_date=sale.date.isoformat(),
                  event_type="commission_cancellation",
                  description=f"Comision Venta #{sale.sale_number} cancelada (reversa)",
                  amount=float(comm.commission_amount), direction=-1,
@@ -1105,6 +1120,10 @@ def get_by_third_party(
         is_active = de.status == "liquidated"
         evt_status = "confirmed" if is_active else "cancelled"
         de_date_iso = datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat()
+        # Fecha canonica de efecto financiero (decision #42); fallback a la
+        # fecha del documento para DPs canceladas sin liquidar (liquidated_at NULL)
+        de_liq_dt = de.liquidated_at or datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc)
+        de_liq_iso = de_liq_dt.isoformat()
         de_vehicle = getattr(de, "vehicle_plate", None) or (de.purchase.vehicle_plate if de.purchase else None) or (de.sale.vehicle_plate if de.sale else None)
 
         if view == "operations":
@@ -1122,8 +1141,8 @@ def get_by_third_party(
                 }
                 # Como proveedor — precio de compra
                 if de.supplier_id == third_party_id:
-                    _evt(de.date, de_dt, 0,
-                         id=f"de-supplier-line-{line.id}", date=de_date_iso,
+                    _evt(de_liq_dt, de_liq_dt, 0,
+                         id=f"de-supplier-line-{line.id}", date=de_liq_iso, document_date=de_date_iso,
                          event_type="double_entry_purchase",
                          description=f"Doble Partida #{de.double_entry_number} (como proveedor)",
                          amount=float(line.quantity * line.purchase_unit_price), direction=-1,
@@ -1132,8 +1151,8 @@ def get_by_third_party(
                          unit_price=float(line.purchase_unit_price), **base_ops)
                 # Como cliente — precio de venta
                 if de.customer_id == third_party_id:
-                    _evt(de.date, de_dt, 0,
-                         id=f"de-customer-line-{line.id}", date=de_date_iso,
+                    _evt(de_liq_dt, de_liq_dt, 0,
+                         id=f"de-customer-line-{line.id}", date=de_liq_iso, document_date=de_date_iso,
                          event_type="double_entry_sale",
                          description=f"Doble Partida #{de.double_entry_number} (como cliente)",
                          amount=float(line.quantity * line.sale_unit_price), direction=1,
@@ -1143,8 +1162,8 @@ def get_by_third_party(
         else:
             # Como proveedor
             if de.supplier_id == third_party_id:
-                _evt(de.date, de_dt, 0,
-                     id=f"de-supplier-{de.id}", date=de_date_iso,
+                _evt(de_liq_dt, de_liq_dt, 0,
+                     id=f"de-supplier-{de.id}", date=de_liq_iso, document_date=de_date_iso,
                      event_type="double_entry_purchase",
                      description=f"Doble Partida #{de.double_entry_number} (como proveedor)",
                      amount=purchase_amount, direction=-1,
@@ -1152,8 +1171,8 @@ def get_by_third_party(
                      source="double_entry", source_id=str(de.id), source_number=de.double_entry_number)
             # Como cliente
             if de.customer_id == third_party_id:
-                _evt(de.date, de_dt, 0,
-                     id=f"de-customer-{de.id}", date=de_date_iso,
+                _evt(de_liq_dt, de_liq_dt, 0,
+                     id=f"de-customer-{de.id}", date=de_liq_iso, document_date=de_date_iso,
                      event_type="double_entry_sale",
                      description=f"Doble Partida #{de.double_entry_number} (como cliente)",
                      amount=sale_amount, direction=1,
@@ -1164,8 +1183,8 @@ def get_by_third_party(
         if de.status == "cancelled":
             cancel_dt = de.updated_at or de_dt
             if de.supplier_id == third_party_id:
-                _evt(de.date, cancel_dt, 2,
-                     id=f"de-cancel-supplier-{de.id}", date=de_date_iso,
+                _evt(de_liq_dt, cancel_dt, 2,
+                     id=f"de-cancel-supplier-{de.id}", date=de_liq_iso, document_date=de_date_iso,
                      event_type="double_entry_cancellation",
                      description=f"Doble Partida #{de.double_entry_number} cancelada (reversa proveedor)",
                      amount=purchase_amount, direction=1,
@@ -1173,8 +1192,8 @@ def get_by_third_party(
                      source="double_entry", source_id=str(de.id), source_number=de.double_entry_number,
                      **_null_ops)
             if de.customer_id == third_party_id:
-                _evt(de.date, cancel_dt, 2,
-                     id=f"de-cancel-customer-{de.id}", date=de_date_iso,
+                _evt(de_liq_dt, cancel_dt, 2,
+                     id=f"de-cancel-customer-{de.id}", date=de_liq_iso, document_date=de_date_iso,
                      event_type="double_entry_cancellation",
                      description=f"Doble Partida #{de.double_entry_number} cancelada (reversa cliente)",
                      amount=sale_amount, direction=-1,
@@ -1198,8 +1217,13 @@ def get_by_third_party(
             continue
         de_dt = de.created_at
         is_active = de.status == "liquidated"
-        _evt(de.date, de_dt, 0,
-             id=f"de-commission-{comm.id}", date=datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat(),
+        # Redefinir por loop: este bloque NO comparte scope de iteracion con el
+        # bloque 5 (fallback a fecha documento si la DP nunca se liquido)
+        de_doc_iso = datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat()
+        de_liq_dt = de.liquidated_at or datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc)
+        de_liq_iso = de_liq_dt.isoformat()
+        _evt(de_liq_dt, de_liq_dt, 0,
+             id=f"de-commission-{comm.id}", date=de_liq_iso, document_date=de_doc_iso,
              event_type="double_entry_commission",
              description=f"Comision DP #{de.double_entry_number}: {comm.concept}",
              amount=float(comm.commission_amount), direction=1,
@@ -1209,8 +1233,8 @@ def get_by_third_party(
              **_null_ops)
         if de.status == "cancelled":
             cancel_dt = de.updated_at or de_dt
-            _evt(de.date, cancel_dt, 2,
-                 id=f"de-comm-cancel-{comm.id}", date=datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat(),
+            _evt(de_liq_dt, cancel_dt, 2,
+                 id=f"de-comm-cancel-{comm.id}", date=de_liq_iso, document_date=de_doc_iso,
                  event_type="double_entry_commission_cancellation",
                  description=f"Comision DP #{de.double_entry_number} cancelada (reversa)",
                  amount=float(comm.commission_amount), direction=-1,

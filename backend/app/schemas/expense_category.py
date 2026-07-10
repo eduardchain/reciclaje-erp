@@ -5,6 +5,7 @@ Distingue entre gastos directos (afectan costo de material) e
 indirectos (gastos administrativos). Soporta subcategorias (max 2 niveles).
 """
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -17,6 +18,10 @@ class ExpenseCategoryBase(BaseModel):
     description: Optional[str] = Field(None, max_length=500)
     is_direct_expense: bool = Field(
         False, description="True = gasto directo (afecta costo). False = indirecto."
+    )
+    double_entry_general_pct: Decimal = Field(
+        Decimal("0"), ge=0, le=100,
+        description="% de gastos GENERALES atribuido a la UN Pasa Mano (solo raiz indirecta)",
     )
 
 
@@ -43,6 +48,7 @@ class ExpenseCategoryUpdate(BaseModel):
     parent_id: Optional[UUID] = None
     default_business_unit_id: Optional[UUID] = None
     default_applicable_business_unit_ids: Optional[list[UUID]] = None
+    double_entry_general_pct: Optional[Decimal] = Field(None, ge=0, le=100)
 
 
 class ExpenseCategoryResponse(ExpenseCategoryBase):

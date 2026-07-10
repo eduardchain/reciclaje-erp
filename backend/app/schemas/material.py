@@ -104,8 +104,3 @@ class MaterialResponse(MaterialBase):
     def serialize_decimal(self, value: Decimal) -> float:
         """Convert Decimal to float for JSON serialization."""
         return float(value)
-
-
-class MaterialStockUpdate(BaseModel):
-    """Schema for updating material stock."""
-    quantity_delta: float = Field(..., description="Amount to add (positive) or subtract (negative)")

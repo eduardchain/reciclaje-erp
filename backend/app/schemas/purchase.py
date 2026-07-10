@@ -197,7 +197,10 @@ class PurchaseResponse(PurchaseBase):
     
     # Double-entry link
     double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
-    
+
+    # Pago inmediato enlazado vivo (solo en detalle) — para el diálogo de cancelación (decisión #63)
+    linked_payment_total: Optional[float] = Field(None, description="Suma de pagos inmediatos enlazados confirmados (payment_to_supplier con purchase_id). null/0 = ninguno")
+
     model_config = {"from_attributes": True}
     
     @field_serializer('total_amount')

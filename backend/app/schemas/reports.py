@@ -123,6 +123,10 @@ class ProfitAndLossResponse(BaseModel):
     # Ajustes de inventario (positivo=ganancia, negativo=perdida)
     adjustment_net: float = 0.0
 
+    # Ajuste de costo por sobreventa (Modelo L #65): diferencia entre el COGS
+    # cargado a ventas en hueco y el costo real de reposicion al rellenar.
+    oversell_cost_adjustment: float = 0.0
+
     # Ajustes de terceros
     tp_adjustment_loss: float = 0.0
     tp_adjustment_gain: float = 0.0
@@ -267,6 +271,8 @@ class BalanceDetailedItem(BaseModel):
     accumulated_depreciation: Optional[float] = None
     investor_type: Optional[str] = None
     account_type: Optional[str] = None
+    # Tercero/cuenta desactivado hoy pero con saldo al corte historico (solo as_of_date)
+    is_inactive: bool = False
 
 
 class BalanceDetailedGroup(BaseModel):
@@ -543,7 +549,11 @@ class ExpenseByCategoryItem(BaseModel):
 
 
 class BusinessUnitProfitability(BaseModel):
-    """Rentabilidad de una Unidad de Negocio."""
+    """Rentabilidad de una Unidad de Negocio (SOLO operacion de bodega).
+
+    Doble partida excluida de todas las columnas — se analiza en la seccion
+    `double_entry` del response (plan-rentabilidad-un-pasamano.md).
+    """
     business_unit_id: Optional[str] = None
     business_unit_name: str
     # Compras (base prorrateo)
@@ -553,7 +563,6 @@ class BusinessUnitProfitability(BaseModel):
     sales_revenue: float = 0
     sales_cogs: float = 0
     sales_gross_profit: float = 0
-    de_profit: float = 0
     total_gross_profit: float = 0
     # Gastos
     direct_expenses: float = 0
@@ -568,12 +577,58 @@ class BusinessUnitProfitability(BaseModel):
     net_margin: float = 0
 
 
+class DoubleEntryGeneralExpenseItem(BaseModel):
+    """Tajada de gastos generales atribuida a Pasa Mano, por categoria (plan A.2)."""
+    category_name: str
+    pct: float  # % efectivo de la categoria (raiz)
+    amount: float
+
+
+class DoubleEntryProfitability(BaseModel):
+    """Rentabilidad del Pasa Mano (doble partida) — logica propia, sin prorrateo.
+
+    Recibe gastos DIRECTOS asignados a la UN de sistema + sus comisiones +
+    la tajada de gastos GENERALES por % de categoria (plan A.2).
+    """
+    business_unit_id: Optional[str] = None  # id de la UN sistema (drill-down)
+    label: str = "Pasa Mano"
+    sales_total: float = 0
+    purchases_total: float = 0
+    gross_profit: float = 0
+    commissions: float = 0
+    direct_expenses: float = 0
+    direct_expenses_detail: list[ExpenseByCategoryItem] = []
+    general_expenses: float = 0  # tajada por % de categoria
+    general_expenses_detail: list[DoubleEntryGeneralExpenseItem] = []
+    net_profit: float = 0
+    net_margin: float = 0  # net_profit / sales_total
+
+
+class PnlReconciliation(BaseModel):
+    """Conciliacion con el Estado de Resultados (plan A.2 §3.7).
+
+    Las 5 lineas del P&L no atribuibles a ninguna UN. Promesa contractual:
+    grand_total_net + estas 5 lineas == pnl_net_profit (tolerancia $1).
+    Guardrail: test_reconciliation_residual_zero.
+    """
+    service_income: float = 0
+    transformation_net: float = 0  # transformation_profit - waste_loss
+    inventory_adjustment_net: float = 0
+    tp_adjustment_net: float = 0  # gain - loss
+    oversell_cost_adjustment: float = 0  # Modelo L #65 (org-level, no atribuible a UN — G4)
+    pnl_net_profit: float = 0
+
+
 class ProfitabilityByBUResponse(BaseModel):
     """Respuesta del reporte de rentabilidad por UN."""
     period_from: date
     period_to: date
     business_units: list[BusinessUnitProfitability]
-    totals: BusinessUnitProfitability
+    totals: BusinessUnitProfitability  # solo bodega (consistente con la tabla)
+    double_entry: DoubleEntryProfitability
+    # Total general = neta bodega + neta pasamano
+    grand_total_net: float = 0
+    pnl_reconciliation: PnlReconciliation = PnlReconciliation()
 
 
 # ---------------------------------------------------------------------------

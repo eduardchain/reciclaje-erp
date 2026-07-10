@@ -26,6 +26,7 @@ from app.models import (
     BusinessUnit,
     MaterialCostHistory,
 )
+from app.models.inventory_movement import InventoryMovement
 from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 
 
@@ -1816,11 +1817,14 @@ class TestCostHistory:
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
     ):
         """
-        Cancelar compra liquidada revierte el costo promedio al valor anterior.
+        Cancelar compra liquidada saca su valor del pool (remocion ponderada).
 
         1. Material empieza en costo=0, stock=0
         2. Compra 1: 1000kg @ $2000 → costo=$2000
-        3. Cancelar Compra 1 → costo vuelve a $0
+        3. Cancelar Compra 1 → pool 0; el avg queda en $2000 como remanente
+           inocuo (Fase 5: con stock 0 el avg es irrelevante — la proxima
+           entrada resetea via incorporate con pool==0). Antes el rewind lo
+           devolvia a $0; mismo valor de pool ($0) en ambos casos.
         """
         payload = {
             "supplier_id": str(test_supplier.id),
@@ -1850,7 +1854,8 @@ class TestCostHistory:
         assert response.status_code == 200
 
         db_session.refresh(test_material)
-        assert test_material.current_average_cost == Decimal("0.0000")
+        assert test_material.current_stock_liquidated == Decimal("0")
+        assert test_material.current_average_cost == Decimal("2000.0000")
 
     def test_cancel_most_recent_allowed(
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
@@ -1908,15 +1913,16 @@ class TestCostHistory:
         db_session.refresh(test_material)
         assert test_material.current_average_cost == Decimal("2000.0000")
 
-    def test_cancel_blocked_by_subsequent_purchase(
+    def test_cancel_earlier_purchase_weighted_removal(
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
     ):
         """
-        Cancelar compra bloqueada por operacion posterior.
+        Fase 5: cancelar una compra con operacion posterior YA NO bloquea —
+        remocion ponderada exacta (antes: HTTP 400 "Cancele primero").
 
         1. Compra 1: 1000kg @ $2000 → costo=$2000
         2. Compra 2: 1000kg @ $2400 → costo=$2200
-        3. Intentar cancelar Compra 1 → HTTP 400
+        3. Cancelar Compra 1 → 200; quedan 1000kg de la Compra 2 @ $2400
         """
         base_payload = {
             "supplier_id": str(test_supplier.id),
@@ -1948,18 +1954,23 @@ class TestCostHistory:
         r2 = client.post("/api/v1/purchases", json=payload2, headers=org_headers)
         assert r2.status_code == 201
 
-        # Intentar cancelar Compra 1 → debe fallar
+        # Cancelar Compra 1: remocion ponderada
+        # (2000x2200 - 1000x2000) / 1000 = 2400 — exactamente la Compra 2
         response = client.patch(
             f"/api/v1/purchases/{purchase1_id}/cancel",
             headers=org_headers,
         )
-        assert response.status_code == 400
-        assert "operaciones posteriores" in response.json()["detail"]
+        assert response.status_code == 200, response.text
+        db_session.expire_all()
+        db_session.refresh(test_material)
+        assert test_material.current_average_cost == Decimal("2400.0000")
+        assert test_material.current_stock_liquidated == Decimal("1000")
 
-    def test_cost_history_deleted_on_reversal(
+    def test_cost_history_append_only_on_cancel(
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
     ):
-        """Verificar que el registro de historial se elimina al revertir."""
+        """Fase 5: cancelar NO borra el historial — se agrega el registro de
+        la cancelacion (append-only). El de la liquidacion sobrevive."""
         payload = {
             "supplier_id": str(test_supplier.id),
             "date": datetime.utcnow().isoformat(),
@@ -1986,11 +1997,17 @@ class TestCostHistory:
         # Cancelar
         client.patch(f"/api/v1/purchases/{purchase_id}/cancel", headers=org_headers)
 
-        # Historial debe estar eliminado
-        count_after = db_session.query(MaterialCostHistory).filter(
+        # Append-only: la liquidacion sobrevive Y se agrego la cancelacion
+        liq_count = db_session.query(MaterialCostHistory).filter(
             MaterialCostHistory.source_id == purchase_id,
+            MaterialCostHistory.source_type == "purchase_liquidation",
         ).count()
-        assert count_after == 0
+        cancel_count = db_session.query(MaterialCostHistory).filter(
+            MaterialCostHistory.source_id == purchase_id,
+            MaterialCostHistory.source_type == "purchase_cancellation",
+        ).count()
+        assert liq_count == 1
+        assert cancel_count == 1
 
     def test_cancel_registered_no_history_check(
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
@@ -2133,20 +2150,23 @@ class TestImmediatePayment:
 
 class TestCancelBlockedByTransformationSameCost:
     """
-    Bug fix: transformacion posterior con mismo costo promedio
-    no creaba registro en MaterialCostHistory, permitiendo cancelar
-    la compra previa y corrompiendo el costo a $0.
+    Historia: el bug FE004 era que una transformacion posterior con mismo costo
+    no creaba MCH → el guard permitia cancelar la compra previa y el REWIND
+    corrompia el costo a $0. Fase 5 elimino guard y rewind: la cancelacion es
+    remocion PONDERADA — conserva valor por construccion sin importar la
+    transformacion posterior. El registro MCH de la transformacion se mantiene
+    (auditoria + valuacion as-of).
     """
 
-    def test_cancel_blocked_by_transformation_same_cost(
+    def test_cancel_after_transformation_same_cost_conserves(
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
     ):
         """
-        Escenario del bug FE004:
+        Escenario (ex bug FE004, semantica Fase 5):
         1. Compra liquidada: 36kg @ $1200 → costo = $1200
         2. Transformacion: material destino recibe 100kg al mismo costo $1200
-           (costo no cambia → antes no se registraba en historial)
-        3. Intentar cancelar compra → debe BLOQUEAR (hay transformacion posterior)
+           (costo no cambia, pero SI registra historial)
+        3. Cancelar compra → 200, remocion ponderada exacta (100@1200 quedan)
         """
         # Crear material destino de la transformacion (distinto del source)
         dest_material = Material(
@@ -2242,10 +2262,227 @@ class TestCancelBlockedByTransformationSameCost:
         ).count()
         assert history_count == 1, "Transformacion debe registrar historial incluso si costo no cambia"
 
-        # 3. Intentar cancelar la compra → debe BLOQUEAR
+        # 3. Cancelar la compra (Fase 5: ya no bloquea — remocion ponderada).
+        # Pool 136@1.200, remover 36@1.200 → rama 1 exacta: quedan 100@1.200.
         response = client.patch(
             f"/api/v1/purchases/{purchase_id}/cancel",
             headers=org_headers,
         )
-        assert response.status_code == 400
-        assert "operaciones posteriores" in response.json()["detail"]
+        assert response.status_code == 200, response.text
+        db_session.expire_all()
+        db_session.refresh(test_material)
+        assert float(test_material.current_average_cost) == 1200
+        assert float(test_material.current_stock_liquidated) == 100
+
+
+class TestLiquidateMultiLineSameMaterial:
+    """Compra con el MISMO material en varias lineas: antes de la correccion,
+    el loop de liquidacion usaba .first() (todas las lineas escribian el mismo
+    InventoryMovement -> uno quedaba en unit_cost=0) y leia un current_stock_liquidated
+    stale (el promedio dependia del orden de las lineas). Casos reales: Costa #1074
+    y #1295. Estos tests son el candado de regresion."""
+
+    def _create_and_liquidate(self, client, org_headers, supplier_id, warehouse_id, lines):
+        purchase_data = {
+            "supplier_id": str(supplier_id),
+            "date": datetime.now(timezone.utc).isoformat(),
+            "lines": lines,
+            "auto_liquidate": False,
+        }
+        resp = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert resp.status_code == 201, resp.text
+        purchase_id = resp.json()["id"]
+        resp = client.patch(
+            f"/api/v1/purchases/{purchase_id}/liquidate", json={}, headers=org_headers
+        )
+        assert resp.status_code == 200, resp.text
+        return purchase_id
+
+    def test_two_lines_same_material_both_movements_costed(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """Dos lineas del mismo material con precios distintos: cada movimiento
+        recibe SU costo (ninguno queda en 0) y el promedio es el ponderado."""
+        self._create_and_liquidate(
+            client, org_headers, test_supplier.id, test_warehouse.id,
+            lines=[
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 10.0, "warehouse_id": str(test_warehouse.id)},
+                {"material_id": str(test_material.id), "quantity": 300.0,
+                 "unit_price": 20.0, "warehouse_id": str(test_warehouse.id)},
+            ],
+        )
+
+        db_session.expire_all()
+        movements = db_session.query(InventoryMovement).filter(
+            InventoryMovement.material_id == test_material.id,
+            InventoryMovement.movement_type == "purchase",
+        ).all()
+        costs = sorted(float(m.unit_cost) for m in movements)
+        assert costs == [10.0, 20.0], "ningun movimiento debe quedar en unit_cost=0"
+
+        material = db_session.get(Material, test_material.id)
+        # Ponderado: (100*10 + 300*20) / 400 = 17.5
+        assert float(material.current_average_cost) == pytest.approx(17.5)
+        assert float(material.current_stock_liquidated) == pytest.approx(400.0)
+        # Invariante de stock
+        assert float(material.current_stock) == pytest.approx(
+            float(material.current_stock_transit) + float(material.current_stock_liquidated)
+        )
+
+    def test_multi_line_weighted_over_existing_liquidated_stock(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """Con stock liquidado previo, la 2a linea del mismo material debe promediar
+        contra el stock que YA incorporo la 1a linea (no el old_liquidated stale)."""
+        # Compra previa: 200 @ $10 -> avg 10, liquidated 200
+        self._create_and_liquidate(
+            client, org_headers, test_supplier.id, test_warehouse.id,
+            lines=[{"material_id": str(test_material.id), "quantity": 200.0,
+                    "unit_price": 10.0, "warehouse_id": str(test_warehouse.id)}],
+        )
+        # Compra multi-linea del mismo material: 100 @ $16 y 100 @ $22
+        self._create_and_liquidate(
+            client, org_headers, test_supplier.id, test_warehouse.id,
+            lines=[
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 16.0, "warehouse_id": str(test_warehouse.id)},
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 22.0, "warehouse_id": str(test_warehouse.id)},
+            ],
+        )
+
+        db_session.expire_all()
+        material = db_session.get(Material, test_material.id)
+        # Correcto: (200*10 + 100*16 + 100*22) / 400 = 14.5
+        # (con el bug del old_liquidated stale daba 15.33)
+        assert float(material.current_average_cost) == pytest.approx(14.5)
+        assert float(material.current_stock_liquidated) == pytest.approx(400.0)
+
+    def test_three_lines_same_material_all_costed(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """La cola de movimientos empareja correctamente con 3+ lineas del mismo material."""
+        self._create_and_liquidate(
+            client, org_headers, test_supplier.id, test_warehouse.id,
+            lines=[
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 10.0, "warehouse_id": str(test_warehouse.id)},
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 20.0, "warehouse_id": str(test_warehouse.id)},
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 30.0, "warehouse_id": str(test_warehouse.id)},
+            ],
+        )
+
+        db_session.expire_all()
+        movements = db_session.query(InventoryMovement).filter(
+            InventoryMovement.material_id == test_material.id,
+            InventoryMovement.movement_type == "purchase",
+        ).all()
+        costs = sorted(float(m.unit_cost) for m in movements)
+        assert costs == [10.0, 20.0, 30.0], "los 3 movimientos deben tener su costo, ninguno en 0"
+
+        material = db_session.get(Material, test_material.id)
+        # (100*10 + 100*20 + 100*30) / 300 = 20
+        assert float(material.current_average_cost) == pytest.approx(20.0)
+        assert float(material.current_stock_liquidated) == pytest.approx(300.0)
+
+
+class TestCancelPurchaseWithLinkedPayment:
+    """Cancelación de compra con pago inmediato enlazado (decisión #63, simétrico a ventas).
+
+    El pago inmediato (payment_to_supplier con purchase_id) queda vivo al cancelar salvo que el
+    usuario elija anularlo. annul_linked_payments=True lo anula y devuelve todo al estado pre-compra;
+    sin el flag (default) queda como prepago al proveedor (nos debe).
+    """
+
+    def _liquidate_with_payment(self, db_session, purchase, account):
+        from app.services.purchase import purchase as purchase_service
+        purchase_service.liquidate(
+            db=db_session,
+            purchase_id=purchase.id,
+            organization_id=purchase.organization_id,
+            immediate_payment=True,
+            payment_account_id=account.id,
+        )
+        # purchase.liquidate hace commit interno
+
+    def _linked_payments(self, db_session, purchase_id):
+        from sqlalchemy import select
+        from app.models.money_movement import MoneyMovement
+        return db_session.scalars(
+            select(MoneyMovement).where(
+                MoneyMovement.purchase_id == purchase_id,
+                MoneyMovement.movement_type == "payment_to_supplier",
+            )
+        ).all()
+
+    def test_detail_exposes_linked_payment_total(
+        self, client, org_headers, test_purchase, test_money_account, db_session
+    ):
+        """El detalle expone linked_payment_total = monto del pago enlazado."""
+        self._liquidate_with_payment(db_session, test_purchase, test_money_account)
+        resp = client.get(f"/api/v1/purchases/{test_purchase.id}", headers=org_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_amount"] > 0
+        assert data["linked_payment_total"] == pytest.approx(data["total_amount"])
+
+    def test_detail_linked_payment_total_zero_without_payment(
+        self, client, org_headers, test_purchase, db_session
+    ):
+        """Sin pago enlazado, linked_payment_total es 0 en el detalle."""
+        resp = client.get(f"/api/v1/purchases/{test_purchase.id}", headers=org_headers)
+        assert resp.status_code == 200
+        assert resp.json()["linked_payment_total"] == 0
+
+    def test_cancel_annul_linked_true_returns_to_origin(
+        self, client, org_headers, test_purchase, test_supplier, test_money_account, db_session
+    ):
+        """annul_linked_payments=True: anula el pago y devuelve caja y proveedor al estado pre-compra."""
+        db_session.refresh(test_supplier)
+        s0 = float(test_supplier.current_balance)
+        db_session.refresh(test_money_account)
+        a0 = float(test_money_account.current_balance)
+
+        self._liquidate_with_payment(db_session, test_purchase, test_money_account)
+
+        resp = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}/cancel?annul_linked_payments=true",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
+        # Round-trip exacto al origen
+        db_session.refresh(test_supplier)
+        assert float(test_supplier.current_balance) == pytest.approx(s0)
+        db_session.refresh(test_money_account)
+        assert float(test_money_account.current_balance) == pytest.approx(a0)
+
+        mm = self._linked_payments(db_session, test_purchase.id)
+        assert len(mm) == 1 and mm[0].status == "annulled"
+
+    def test_cancel_default_leaves_prepayment(
+        self, client, org_headers, test_purchase, test_supplier, test_money_account, db_session
+    ):
+        """Sin flag (default): el pago queda vivo, proveedor +total (prepago), caja mantiene el egreso."""
+        db_session.refresh(test_supplier)
+        s0 = float(test_supplier.current_balance)
+        db_session.refresh(test_money_account)
+        a0 = float(test_money_account.current_balance)
+
+        self._liquidate_with_payment(db_session, test_purchase, test_money_account)
+
+        resp = client.patch(f"/api/v1/purchases/{test_purchase.id}/cancel", headers=org_headers)
+        assert resp.status_code == 200
+        total = float(resp.json()["total_amount"])
+
+        db_session.refresh(test_supplier)
+        assert float(test_supplier.current_balance) == pytest.approx(s0 + total)
+        db_session.refresh(test_money_account)
+        assert float(test_money_account.current_balance) == pytest.approx(a0 - total)
+
+        mm = self._linked_payments(db_session, test_purchase.id)
+        assert len(mm) == 1 and mm[0].status == "confirmed"

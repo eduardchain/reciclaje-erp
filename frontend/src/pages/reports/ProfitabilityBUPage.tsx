@@ -1,16 +1,18 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useDateFilter } from "@/stores/dateFilterStore";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
-import { ChevronDown, ChevronRight, FileSpreadsheet } from "lucide-react";
+import { ChevronDown, ChevronRight, FileSpreadsheet, Settings } from "lucide-react";
 import ReportsLayout from "./ReportsLayout";
 import { useProfitabilityByBU } from "@/hooks/useReports";
 import { formatCurrency, formatPercentage } from "@/utils/formatters";
 import { exportProfitabilityBUExcel } from "@/utils/excelExport";
-import type { BusinessUnitProfitability } from "@/types/reports";
+import type { BusinessUnitProfitability, DoubleEntryProfitability, PnlReconciliation } from "@/types/reports";
 
 function BURow({ bu, isTotal = false }: { bu: BusinessUnitProfitability; isTotal?: boolean }) {
   const [expanded, setExpanded] = useState(false);
@@ -44,13 +46,6 @@ function BURow({ bu, isTotal = false }: { bu: BusinessUnitProfitability; isTotal
       </tr>
       {expanded && !isTotal && (
         <>
-          {bu.de_profit !== 0 && (
-            <tr className="text-xs text-slate-500 bg-slate-50/50">
-              <td className="py-1 px-3 pl-8" colSpan={5}>Margen Doble Partida</td>
-              <td className="py-1 px-3 text-right tabular-nums">{formatCurrency(bu.de_profit)}</td>
-              <td colSpan={6} />
-            </tr>
-          )}
           {bu.direct_expenses_detail.map((d) => (
             <tr key={d.category_name} className="text-xs text-slate-500 bg-slate-50/50">
               <td className="py-1 px-3 pl-8" colSpan={6}>{d.category_name}</td>
@@ -61,6 +56,171 @@ function BURow({ bu, isTotal = false }: { bu: BusinessUnitProfitability; isTotal
         </>
       )}
     </>
+  );
+}
+
+function PasaManoCard({
+  de,
+  grandTotalNet,
+  reconciliation,
+}: {
+  de: DoubleEntryProfitability;
+  grandTotalNet: number;
+  reconciliation: PnlReconciliation;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [generalExpanded, setGeneralExpanded] = useState(false);
+  const [reconExpanded, setReconExpanded] = useState(false);
+  const { hasPermission } = usePermissions();
+  const hasActivity =
+    de.sales_total !== 0 || de.gross_profit !== 0 || de.commissions !== 0 ||
+    de.direct_expenses !== 0 || de.general_expenses !== 0;
+
+  const Line = ({ label, value, negative = false, bold = false }: { label: string; value: number; negative?: boolean; bold?: boolean }) => (
+    <div className={`flex justify-between gap-3 py-1.5 ${bold ? "font-semibold" : ""}`}>
+      <span className={bold ? "" : "text-slate-600"}>{label}</span>
+      <span className={`tabular-nums ${negative && value !== 0 ? "text-red-700" : ""}`}>
+        {negative && value !== 0 ? `(${formatCurrency(value)})` : formatCurrency(value)}
+      </span>
+    </div>
+  );
+
+  // Linea de gasto expandible (Directos / Generales comparten patron)
+  const ExpenseLine = ({
+    label, total, hasDetail, isOpen, onToggle,
+  }: {
+    label: string; total: number; hasDetail: boolean; isOpen: boolean; onToggle: () => void;
+  }) => (
+    <div className="flex justify-between gap-3 py-1.5">
+      <button
+        type="button"
+        className="flex items-center gap-1 text-slate-600 hover:text-emerald-700"
+        onClick={onToggle}
+        disabled={!hasDetail}
+      >
+        {hasDetail && (isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />)}
+        {label}
+      </button>
+      <span className={`tabular-nums ${total !== 0 ? "text-red-700" : ""}`}>
+        {total !== 0 ? `(${formatCurrency(total)})` : formatCurrency(0)}
+      </span>
+    </div>
+  );
+
+  return (
+    <Card className="shadow-sm">
+      <CardContent className="p-4 md:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-3">
+          <h3 className="font-semibold text-indigo-900 flex items-center gap-2">
+            {de.label} (Doble Partida)
+            {hasPermission("treasury.manage_expenses") && (
+              <Link
+                to="/config/expense-categories"
+                title="Configurar % Pasa Mano por categoria de gasto"
+                className="text-slate-400 hover:text-indigo-700"
+              >
+                <Settings className="h-4 w-4" />
+              </Link>
+            )}
+          </h3>
+          <span className="text-xs text-slate-500">
+            Comisiones y gastos directos asignados + % de gastos generales por categoría
+          </span>
+        </div>
+
+        {!hasActivity ? (
+          <p className="text-sm text-slate-400">Sin actividad de doble partida en el periodo</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 text-sm">
+            <div>
+              <Line label="Ventas Pasa Mano" value={de.sales_total} />
+              <Line label="Compras Pasa Mano" value={de.purchases_total} />
+              <Separator className="my-1" />
+              <Line label="Margen Bruto" value={de.gross_profit} bold />
+            </div>
+            <div>
+              <Line label="Comisiones" value={de.commissions} negative />
+              <ExpenseLine
+                label="Gastos Directos"
+                total={de.direct_expenses}
+                hasDetail={de.direct_expenses_detail.length > 0}
+                isOpen={expanded}
+                onToggle={() => setExpanded(!expanded)}
+              />
+              {expanded &&
+                de.direct_expenses_detail.map((d) => (
+                  <div key={d.category_name} className="flex justify-between gap-3 py-0.5 pl-5 text-xs text-slate-500">
+                    <span>{d.category_name}</span>
+                    <span className="tabular-nums">{formatCurrency(d.amount)}</span>
+                  </div>
+                ))}
+              <ExpenseLine
+                label="Gastos Generales asignados"
+                total={de.general_expenses}
+                hasDetail={de.general_expenses_detail.length > 0}
+                isOpen={generalExpanded}
+                onToggle={() => setGeneralExpanded(!generalExpanded)}
+              />
+              {generalExpanded &&
+                de.general_expenses_detail.map((d) => (
+                  <div key={d.category_name} className="flex justify-between gap-3 py-0.5 pl-5 text-xs text-slate-500">
+                    <span>{d.category_name} ({formatPercentage(d.pct)})</span>
+                    <span className="tabular-nums">{formatCurrency(d.amount)}</span>
+                  </div>
+                ))}
+              <Separator className="my-1" />
+              <div className="flex justify-between gap-3 py-1.5 font-semibold">
+                <span>Utilidad Neta Pasa Mano</span>
+                <span className={`tabular-nums ${de.net_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                  {formatCurrency(de.net_profit)}
+                  <span className="ml-2 text-xs font-normal text-slate-500">({formatPercentage(de.net_margin)})</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <Separator className="my-3" />
+        <div className="flex justify-between gap-3 text-sm font-bold">
+          <span>TOTAL GENERAL (Bodega + Pasa Mano)</span>
+          <span className={`tabular-nums ${grandTotalNet >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+            {formatCurrency(grandTotalNet)}
+          </span>
+        </div>
+
+        {/* Conciliacion con P&L: lineas no atribuibles a UN (plan A.2 §3.7) */}
+        <div className="mt-2 text-sm">
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-700"
+            onClick={() => setReconExpanded(!reconExpanded)}
+          >
+            {reconExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            Conciliación con Estado de Resultados
+          </button>
+          {reconExpanded && (
+            <div className="mt-1 pl-4 border-l-2 border-slate-100">
+              <Line label="Ingresos por Servicios" value={reconciliation.service_income} />
+              <Line label="Transformaciones (neto)" value={reconciliation.transformation_net} />
+              <Line label="Ajustes de Inventario (neto)" value={reconciliation.inventory_adjustment_net} />
+              <Line label="Ajustes de Terceros (neto)" value={reconciliation.tp_adjustment_net} />
+              <Line label="Ajuste Costo por Sobreventa y Reversiones" value={reconciliation.oversell_cost_adjustment} />
+              <Separator className="my-1" />
+              <div className="flex justify-between gap-3 py-1.5 font-bold">
+                <span>= Utilidad Neta P&L</span>
+                <span className={`tabular-nums ${reconciliation.pnl_net_profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                  {formatCurrency(reconciliation.pnl_net_profit)}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 pb-1">
+                Servicios, transformaciones y ajustes no pertenecen a ninguna unidad de negocio —
+                por eso el TOTAL GENERAL difiere de la utilidad del P&L.
+              </p>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -87,6 +247,9 @@ export default function ProfitabilityBUPage() {
       {data && (
         <Card className="shadow-sm overflow-x-auto">
           <CardContent className="p-0">
+            <div className="px-3 pt-3 text-xs text-slate-500">
+              Solo operación de bodega — el Pasa Mano (doble partida) se analiza en la sección de abajo
+            </div>
             <table className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr className="border-b bg-slate-50 text-xs text-slate-500 uppercase tracking-wider">
@@ -117,7 +280,15 @@ export default function ProfitabilityBUPage() {
       )}
 
       {data && data.business_units.length === 0 && (
-        <div className="text-center text-slate-400 py-8">No hay datos para el periodo seleccionado</div>
+        <div className="text-center text-slate-400 py-8">No hay datos de bodega para el periodo seleccionado</div>
+      )}
+
+      {data && (
+        <PasaManoCard
+          de={data.double_entry}
+          grandTotalNet={data.grand_total_net}
+          reconciliation={data.pnl_reconciliation}
+        />
       )}
     </ReportsLayout>
   );

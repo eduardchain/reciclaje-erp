@@ -4,7 +4,7 @@ Tests para endpoints de ScheduledExpense (Gastos Diferidos Programados).
 Cubre: crear con pago upfront, aplicar cuotas, ultima cuota con residuo,
 cancelar, intentar aplicar completado/cancelado, P&L.
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -478,10 +478,15 @@ class TestScheduledExpensePnL:
         )
         assert resp.status_code == 201
 
-        # Consultar P&L
+        # Consultar P&L: la cuota se estampa con la fecha de HOY (apply usa
+        # col_today), asi que la ventana debe incluir hoy — un rango
+        # hardcodeado se pudre con el calendario.
         resp = client.get(
             "/api/v1/reports/profit-and-loss",
-            params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+            params={
+                "date_from": str(date.today() - timedelta(days=15)),
+                "date_to": str(date.today() + timedelta(days=15)),
+            },
             headers=org_headers,
         )
         assert resp.status_code == 200

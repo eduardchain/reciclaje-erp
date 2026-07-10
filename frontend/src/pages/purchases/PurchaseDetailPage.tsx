@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { LinkedPaymentChoice } from "@/components/shared/LinkedPaymentChoice";
 import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
 import { useAuthStore } from "@/stores/authStore";
@@ -41,12 +42,22 @@ export default function PurchaseDetailPage() {
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
 
   const [showCancel, setShowCancel] = useState(false);
+  const [annulChoice, setAnnulChoice] = useState<"annul" | "advance" | null>(null);
+
+  const linkedPaymentTotal = purchase?.linked_payment_total ?? 0;
+  const hasLinkedPayment = linkedPaymentTotal > 0;
 
   const handleCancel = () => {
     if (!id) return;
-    cancel.mutate(id, {
-      onSuccess: () => setShowCancel(false),
-    });
+    cancel.mutate(
+      { id, annulLinkedPayments: annulChoice === "annul" },
+      {
+        onSuccess: () => {
+          setShowCancel(false);
+          setAnnulChoice(null);
+        },
+      },
+    );
   };
 
   const canEdit = purchase?.status === "registered" && !purchase?.double_entry_id && hasPermission("purchases.edit");
@@ -312,7 +323,10 @@ export default function PurchaseDetailPage() {
       {/* Cancel Dialog */}
       <ConfirmDialog
         open={showCancel}
-        onOpenChange={setShowCancel}
+        onOpenChange={(open) => {
+          setShowCancel(open);
+          if (!open) setAnnulChoice(null);
+        }}
         title="Cancelar Compra"
         description={
           purchase.status === "liquidated"
@@ -323,7 +337,15 @@ export default function PurchaseDetailPage() {
         variant="destructive"
         onConfirm={handleCancel}
         loading={cancel.isPending}
-      />
+        disabled={hasLinkedPayment && annulChoice === null}
+      >
+        <LinkedPaymentChoice
+          kind="purchase"
+          amount={linkedPaymentTotal}
+          value={annulChoice}
+          onChange={setAnnulChoice}
+        />
+      </ConfirmDialog>
     </div>
   );
 }

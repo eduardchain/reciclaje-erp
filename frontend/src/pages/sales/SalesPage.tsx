@@ -21,8 +21,9 @@ import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { LinkedPaymentChoice, type AnnulChoice } from "@/components/shared/LinkedPaymentChoice";
 import { OperationListCard } from "@/components/shared/OperationListCard";
-import { useSales, useCancelSale } from "@/hooks/useSales";
+import { useSales, useSale, useCancelSale } from "@/hooks/useSales";
 import { saleService } from "@/services/sales";
 import { toast } from "sonner";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
@@ -44,9 +45,17 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
   const { organizationId, organizations } = useAuthStore();
   const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [annulChoice, setAnnulChoice] = useState<AnnulChoice>(null);
   const { hasPermission } = usePermissions();
 
   const cancelMutation = useCancelSale();
+
+  // Al abrir el dialogo de cancelacion de una liquidada, consultamos el cobro enlazado
+  // para ofrecer la misma eleccion que el detalle (decision #63). Sin fetch por fila.
+  const isLiquidated = sale.status === "liquidated";
+  const linkedQuery = useSale(sale.id, { enabled: cancelOpen && isLiquidated });
+  const linkedPaymentTotal = linkedQuery.data?.linked_payment_total ?? 0;
+  const linkedLoading = cancelOpen && isLiquidated && linkedQuery.isLoading;
 
   const canEdit = sale.status === "registered" && !sale.double_entry_id && hasPermission("sales.edit");
   const canLiquidate = sale.status === "registered" && !sale.double_entry_id && hasPermission("sales.liquidate");
@@ -101,18 +110,35 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
       {/* Dialog Cancelar */}
       <ConfirmDialog
         open={cancelOpen}
-        onOpenChange={setCancelOpen}
+        onOpenChange={(open) => {
+          setCancelOpen(open);
+          if (!open) setAnnulChoice(null);
+        }}
         title="Cancelar Venta"
-        description={`Esta accion cancelara la venta #${sale.sale_number} y revertira los movimientos de inventario. Esta accion no se puede deshacer.`}
+        description={`Esta accion cancelara la venta #${sale.sale_number} y revertira inventario y saldos asociados. No se puede deshacer.`}
         confirmLabel="Cancelar Venta"
         variant="destructive"
         onConfirm={() => {
-          cancelMutation.mutate(sale.id, {
-            onSuccess: () => setCancelOpen(false),
-          });
+          cancelMutation.mutate(
+            { id: sale.id, annulLinkedPayments: annulChoice === "annul" },
+            {
+              onSuccess: () => {
+                setCancelOpen(false);
+                setAnnulChoice(null);
+              },
+            },
+          );
         }}
         loading={cancelMutation.isPending}
-      />
+        disabled={linkedLoading || (linkedPaymentTotal > 0 && annulChoice === null)}
+      >
+        <LinkedPaymentChoice
+          kind="sale"
+          amount={linkedPaymentTotal}
+          value={annulChoice}
+          onChange={setAnnulChoice}
+        />
+      </ConfirmDialog>
     </>
   );
 }

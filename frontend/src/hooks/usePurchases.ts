@@ -24,11 +24,11 @@ export function usePurchases(filters: PurchaseFilters = {}) {
   });
 }
 
-export function usePurchase(id: string) {
+export function usePurchase(id: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["purchases", "detail", id],
     queryFn: () => purchaseService.getById(id),
-    enabled: !!id,
+    enabled: !!id && (options?.enabled ?? true),
   });
 }
 
@@ -87,10 +87,13 @@ export function useLiquidatePurchase() {
 export function useCancelPurchase() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => purchaseService.cancel(id),
-    onSuccess: () => {
+    mutationFn: ({ id, annulLinkedPayments }: { id: string; annulLinkedPayments?: boolean }) =>
+      purchaseService.cancel(id, annulLinkedPayments ?? false),
+    onSuccess: (data) => {
       invalidateAfterPurchaseLiquidateOrCancel(queryClient);
       toast.success("Compra cancelada exitosamente");
+      // Warnings no bloqueantes (#65 PR-3): ej. stock liquidado queda negativo
+      (data?.warnings ?? []).forEach((w) => toast.warning(w, { duration: 8000 }));
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al cancelar la compra"));

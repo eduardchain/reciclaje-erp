@@ -27,10 +27,15 @@ class BusinessUnit(Base, TimestampMixin, OrganizationMixin):
     # Organization FK is inherited from OrganizationMixin
     
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    
+
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # UN de sistema: 'double_entry' = UN Pasa Mano (gastos directos de doble partida).
+    # Lookup por codigo, no por nombre — el cliente puede renombrarla.
+    # NULL = UN normal creada por el usuario.
+    system_code: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     
     # Relationships
     materials: Mapped[List["Material"]] = relationship(

@@ -177,6 +177,15 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
         comment="Timestamp when the sale was cancelled"
     )
 
+    cancellation_cost_adjustment: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+        comment="Ajuste de costo al cancelar venta liquidada sobre pool en hueco "
+                "(Modelo L #65). >0 ganancia, <0 perdida. Entra al P&L por cancelled_at.",
+    )
+
     # Double-entry link (optional)
     double_entry_id: Mapped[Optional[UUID]] = mapped_column(
         GUID(),
