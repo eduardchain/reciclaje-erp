@@ -69,6 +69,7 @@ export const ROUTES = {
   REPORTS_PROFITABILITY_BU: "/reports/profitability-bu",
   REPORTS_REAL_COST: "/reports/real-cost-material",
   REPORTS_EXPENSES: "/reports/expenses",
+  REPORTS_INACTIVE_BALANCES: "/reports/inactive-balances",
 
   // Maestros
   THIRD_PARTIES: "/third-parties",

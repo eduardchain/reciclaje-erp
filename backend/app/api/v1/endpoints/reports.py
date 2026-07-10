@@ -19,6 +19,7 @@ from app.schemas.reports import (
     DashboardResponse,
     ExpenseDetailResponse,
     ExpensesReportResponse,
+    InactiveBalancesResponse,
     MarginAnalysisResponse,
     ProfitAndLossMonthlyResponse,
     ProfitAndLossResponse,
@@ -180,6 +181,28 @@ def get_balance_detailed(
         db=db,
         organization_id=org_context["organization_id"],
         as_of_date=as_of_date,
+    )
+
+
+@router.get("/inactive-balances", response_model=InactiveBalancesResponse)
+def get_inactive_balances(
+    min_days: int = Query(10, ge=0, description="Dias minimos sin movimiento para listar"),
+    min_amount: float = Query(0, ge=0, description="Ocultar saldos menores a este monto"),
+    org_context: dict = Depends(require_any_permission("reports.view", "reports.view_balance")),
+    db: Session = Depends(get_db),
+):
+    """
+    Dinero Inactivo: saldos a favor (terceros que nos deben) sin movimiento >= min_days.
+
+    Solo el lado activo (excluye lo que nosotros debemos y las entidades de sistema).
+    El reloj se reinicia con cualquier movimiento real del saldo; las operaciones
+    anuladas/canceladas no cuentan. Ordenado del mas viejo al mas reciente.
+    """
+    return report_service.get_inactive_balances(
+        db=db,
+        organization_id=org_context["organization_id"],
+        min_days=min_days,
+        min_amount=min_amount,
     )
 
 

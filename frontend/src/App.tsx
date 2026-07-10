@@ -68,6 +68,7 @@ const AuditBalancesPage = lazy(() => import("@/pages/reports/AuditBalancesPage")
 const ProfitabilityBUPage = lazy(() => import("@/pages/reports/ProfitabilityBUPage"));
 const RealCostMaterialPage = lazy(() => import("@/pages/reports/RealCostMaterialPage"));
 const ExpensesReportPage = lazy(() => import("@/pages/reports/ExpensesReportPage"));
+const InactiveBalancesPage = lazy(() => import("@/pages/reports/InactiveBalancesPage"));
 const ThirdPartiesPage = lazy(() => import("@/pages/third-parties/ThirdPartiesPage"));
 const MaterialsPage = lazy(() => import("@/pages/materials/MaterialsPage"));
 const CategoriesPage = lazy(() => import("@/pages/materials/CategoriesPage"));
@@ -171,6 +172,7 @@ function App() {
               <Route path={ROUTES.REPORTS_PROFITABILITY_BU} element={<P permission="reports.view_pnl"><ProfitabilityBUPage /></P>} />
               <Route path={ROUTES.REPORTS_REAL_COST} element={<P permission="reports.view_pnl"><RealCostMaterialPage /></P>} />
               <Route path={ROUTES.REPORTS_EXPENSES} element={<P permission="reports.view_expenses"><ExpensesReportPage /></P>} />
+              <Route path={ROUTES.REPORTS_INACTIVE_BALANCES} element={<P permission="reports.view_balance"><InactiveBalancesPage /></P>} />
               {/* Maestros */}
               <Route path={ROUTES.THIRD_PARTIES} element={<P permission="third_parties.view"><ThirdPartiesPage /></P>} />
               <Route path={ROUTES.MATERIALS} element={<P permission="materials.view"><MaterialsPage /></P>} />

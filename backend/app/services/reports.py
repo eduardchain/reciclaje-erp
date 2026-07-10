@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, func, case, cast, Date, exists, or_, and_
+from sqlalchemy import select, func, case, cast, Date, DateTime, exists, or_, and_, union_all
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.double_entry import DoubleEntry, DoubleEntryLine
@@ -39,6 +39,8 @@ from app.schemas.reports import (
     CashFlowInflows,
     CashFlowOutflows,
     CashFlowResponse,
+    InactiveBalanceItem,
+    InactiveBalancesResponse,
     CustomerBalance,
     CustomerRevenueSummary,
     DailyTrendItem,
@@ -216,6 +218,196 @@ class ReportService:
             # Solo guardar la primera categoria por behavior_type (evitar duplicados M:N)
             tp_cat_by_behavior.setdefault(tp_id, {}).setdefault(bt, display)
         return tp_behaviors, tp_cat_names, tp_cat_by_behavior
+
+    # ------------------------------------------------------------------
+    # Dinero Inactivo (R1) — saldos a favor sin movimiento en N dias
+    # ------------------------------------------------------------------
+
+    # Colombia es UTC-5 fijo (sin horario de verano)
+    _BOGOTA_TZ = timezone(timedelta(hours=-5))
+
+    @classmethod
+    def _to_bogota_date(cls, dt) -> Optional[date]:
+        """Convierte un timestamp a fecha de negocio en Bogota (UTC-5).
+
+        Evita el off-by-one de hacer .date() crudo sobre UTC: un evento a las
+        02:00 UTC es el dia anterior en Bogota. Asume UTC si el datetime es naive.
+        """
+        if dt is None:
+            return None
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(cls._BOGOTA_TZ).date()
+        return dt  # ya es date
+
+    def _get_last_activity_map(self, db: Session, organization_id: UUID) -> dict:
+        """MAX fecha de negocio del ultimo evento VIVO por tercero (dict[UUID, date]).
+
+        Une las 7 fuentes del estado de cuenta unificado (#16), pero SOLO eventos
+        confirmados/liquidados — las canceladas/anuladas NO resetean el reloj (D1).
+        Cada rama filtra por organization_id (multi-tenancy). El dedup de
+        commission_accrual del statement se OMITE a proposito: la comision aparece
+        como MoneyMovement (rama 1) y como SaleCommission (ramas 5/7) con la MISMA
+        fecha (liquidated_at, #61), asi que el MAX no cambia si se cuenta dos veces.
+        """
+        # DP: fecha de efecto = liquidated_at; fallback a fecha de documento a mediodia
+        de_dt = func.coalesce(
+            DoubleEntry.liquidated_at,
+            cast(DoubleEntry.date, DateTime) + timedelta(hours=12),
+        )
+        branches = [
+            # 1. Movimientos de tesoreria (incluye commission_accrual, pagos, cobros, anticipos)
+            select(MoneyMovement.third_party_id.label("tp"), MoneyMovement.date.label("dt"))
+            .where(
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.status == "confirmed",
+                MoneyMovement.third_party_id.isnot(None),
+            ),
+            # 2. Compras liquidadas standalone
+            select(Purchase.supplier_id.label("tp"), Purchase.liquidated_at.label("dt"))
+            .where(
+                Purchase.organization_id == organization_id,
+                Purchase.status == "liquidated",
+                Purchase.liquidated_at.isnot(None),
+                Purchase.double_entry_id.is_(None),
+                Purchase.supplier_id.isnot(None),
+            ),
+            # 3. Comisiones de compra
+            select(PurchaseCommission.third_party_id.label("tp"), Purchase.liquidated_at.label("dt"))
+            .join(Purchase, PurchaseCommission.purchase_id == Purchase.id)
+            .where(
+                Purchase.organization_id == organization_id,
+                Purchase.status == "liquidated",
+                Purchase.liquidated_at.isnot(None),
+                Purchase.double_entry_id.is_(None),
+            ),
+            # 4. Ventas liquidadas standalone
+            select(Sale.customer_id.label("tp"), Sale.liquidated_at.label("dt"))
+            .where(
+                Sale.organization_id == organization_id,
+                Sale.status == "liquidated",
+                Sale.liquidated_at.isnot(None),
+                Sale.double_entry_id.is_(None),
+                Sale.customer_id.isnot(None),
+            ),
+            # 5. Comisiones de venta standalone (sin dedup — ver docstring)
+            select(SaleCommission.third_party_id.label("tp"), Sale.liquidated_at.label("dt"))
+            .join(Sale, SaleCommission.sale_id == Sale.id)
+            .where(
+                Sale.organization_id == organization_id,
+                Sale.status == "liquidated",
+                Sale.liquidated_at.isnot(None),
+                Sale.double_entry_id.is_(None),
+            ),
+            # 6a. Doble partida — rol proveedor
+            select(DoubleEntry.supplier_id.label("tp"), de_dt.label("dt"))
+            .where(
+                DoubleEntry.organization_id == organization_id,
+                DoubleEntry.status == "liquidated",
+                DoubleEntry.supplier_id.isnot(None),
+            ),
+            # 6b. Doble partida — rol cliente (DOS ramas: el group-by agrupa por tercero)
+            select(DoubleEntry.customer_id.label("tp"), de_dt.label("dt"))
+            .where(
+                DoubleEntry.organization_id == organization_id,
+                DoubleEntry.status == "liquidated",
+                DoubleEntry.customer_id.isnot(None),
+            ),
+            # 7. Comisiones de doble partida
+            select(SaleCommission.third_party_id.label("tp"), de_dt.label("dt"))
+            .join(Sale, SaleCommission.sale_id == Sale.id)
+            .join(DoubleEntry, DoubleEntry.sale_id == Sale.id)
+            .where(
+                DoubleEntry.organization_id == organization_id,
+                DoubleEntry.status == "liquidated",
+            ),
+        ]
+        u = union_all(*branches).subquery()
+        rows = db.execute(
+            select(u.c.tp, func.max(u.c.dt)).where(u.c.tp.isnot(None)).group_by(u.c.tp)
+        ).all()
+        result: dict = {}
+        for tp_id, dt in rows:
+            d = self._to_bogota_date(dt)
+            if d is not None and (tp_id not in result or d > result[tp_id]):
+                result[tp_id] = d
+        return result
+
+    # Seccion del lado activo → behavior_type mostrado (para las tabs del panel)
+    _INACTIVE_SECTION_TYPE = {
+        "customers_receivable": "customer",
+        "supplier_advances": "material_supplier",
+        "service_provider_advances": "service_provider",
+        "liability_advances": "liability",
+        "investor_receivable": "investor",
+        "provision_funds": "provision",
+        "generic_receivable": "generic",
+    }
+
+    def get_inactive_balances(
+        self,
+        db: Session,
+        organization_id: UUID,
+        min_days: int = 10,
+        min_amount: float = 0.0,
+    ) -> InactiveBalancesResponse:
+        """Panel de dinero inactivo: saldos a favor (lado activo) sin movimiento >= min_days.
+
+        Excluye prepaid_expenses (entidades de sistema, no perseguibles). provision_funds
+        se muestra con abs() (fondos apartados). Reloj = ultima actividad VIVA (D1); si el
+        tercero no tiene eventos, cuenta desde created_at (fallback D6, conservador).
+        """
+        today = datetime.now(self._BOGOTA_TZ).date()
+        tps = db.execute(
+            select(ThirdParty).where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.is_active == True,  # noqa: E712
+                ThirdParty.current_balance != 0,
+            )
+        ).scalars().all()
+        tp_behaviors, tp_cat_names, _ = self._load_tp_behavior_map(db, organization_id)
+        last_activity = self._get_last_activity_map(db, organization_id)
+
+        active_sections = set(self._INACTIVE_SECTION_TYPE.keys())
+        items: list[InactiveBalanceItem] = []
+        for tp in tps:
+            section = self._classify_third_party(
+                tp, tp_behaviors.get(tp.id, set()), tp_cat_names.get(tp.id, set())
+            )
+            if section not in active_sections:
+                continue
+            last = last_activity.get(tp.id)
+            has_movements = last is not None
+            if last is None:
+                last = self._to_bogota_date(tp.created_at)  # fallback D6, ya en Bogota
+            days_inactive = (today - last).days if last else 0
+            bal = Decimal(str(tp.current_balance))
+            amount = float(abs(bal) if section == "provision_funds" else bal)
+            if days_inactive < min_days or amount < min_amount:
+                continue
+            items.append(InactiveBalanceItem(
+                third_party_id=str(tp.id),
+                third_party_name=tp.name,
+                third_party_type=self._INACTIVE_SECTION_TYPE[section],
+                section=section,
+                amount_inactive=amount,
+                days_inactive=days_inactive,
+                last_activity_date=last if has_movements else None,
+                has_movements=has_movements,
+                phone=tp.phone,
+            ))
+        # Mas viejo arriba; desempate por monto (preguntas resueltas §11)
+        items.sort(key=lambda x: (x.days_inactive, x.amount_inactive), reverse=True)
+        total = float(sum(i.amount_inactive for i in items))
+        return InactiveBalancesResponse(
+            as_of=today,
+            min_days=min_days,
+            min_amount=min_amount,
+            total_inactive_balance=total,
+            item_count=len(items),
+            items=items,
+        )
 
     @staticmethod
     def _safe_pct(numerator: Decimal, denominator: Decimal) -> float:
