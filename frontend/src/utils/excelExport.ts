@@ -598,6 +598,7 @@ export function exportCashFlowExcel(data: CashFlowResponse) {
   rows.push(["Aportes de Capital", data.inflows.capital_injections]);
   if (data.inflows.advance_collections > 0) rows.push(["Anticipos de Clientes", data.inflows.advance_collections]);
   if (data.inflows.generic_collections > 0) rows.push(["Cobros Genericos", data.inflows.generic_collections]);
+  if (data.inflows.asset_devaluation_collections > 0) rows.push(["Devaluacion de Activos (Reembolso)", data.inflows.asset_devaluation_collections]);
   rows.push(["Total Ingresos", data.total_inflows]);
   rows.push([]);
   rows.push(["EGRESOS", ""]);

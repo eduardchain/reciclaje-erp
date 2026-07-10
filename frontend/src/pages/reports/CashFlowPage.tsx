@@ -37,6 +37,9 @@ export default function CashFlowPage() {
               {data.inflows.generic_collections > 0 && (
                 <div className="flex justify-between"><span>Cobros a Terceros Genéricos</span><span>{formatCurrency(data.inflows.generic_collections)}</span></div>
               )}
+              {data.inflows.asset_devaluation_collections > 0 && (
+                <div className="flex justify-between"><span>Devaluación de Activos (Reembolso)</span><span>{formatCurrency(data.inflows.asset_devaluation_collections)}</span></div>
+              )}
               <Separator />
               <div className="flex justify-between font-bold text-emerald-700"><span>Total Ingresos</span><span>{formatCurrency(data.total_inflows)}</span></div>
             </CardContent>

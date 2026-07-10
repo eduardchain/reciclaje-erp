@@ -138,6 +138,12 @@ class FixedAsset(Base, OrganizationMixin, TimestampMixin):
         order_by="AssetDepreciation.depreciation_number",
     )
 
+    revaluations: Mapped[List["AssetRevaluation"]] = relationship(
+        "AssetRevaluation",
+        back_populates="fixed_asset",
+        order_by="AssetRevaluation.applied_at",
+    )
+
     __table_args__ = (
         Index("ix_fixed_assets_org_status", "organization_id", "status"),
     )
@@ -188,4 +194,83 @@ class AssetDepreciation(Base, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("fixed_asset_id", "period", name="uq_asset_depreciation_period"),
+    )
+
+class AssetRevaluation(Base, OrganizationMixin, TimestampMixin):
+    """Revalorizacion de activo fijo (alza = mejora capitalizable / baja = recuperacion).
+
+    La contrapartida SIEMPRE es una cuenta o un tercero (via money_movement_id) —
+    cero efecto en P&L y cero linea de patrimonio. Evento append-only con anulacion
+    por is_active (patron AssetDepreciation). Los snapshots value_after/monthly_after
+    son acumulativos: junto con AssetDepreciation.current_value_after forman el
+    timeline completo del valor del activo para el balance historico as-of.
+    """
+
+    __tablename__ = "asset_revaluations"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=uuid4)
+
+    fixed_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("fixed_assets.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+
+    revaluation_type: Mapped[str] = mapped_column(
+        String(10), nullable=False,
+        comment="increase | decrease",
+    )
+
+    amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False,
+        comment="Siempre > 0; el signo lo da revaluation_type",
+    )
+
+    months_extended: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="Meses de vida util agregados (solo increase)",
+    )
+
+    # Snapshots exactos (acumulativos, como AssetDepreciation.current_value_after)
+    value_before: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    value_after: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    monthly_before: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    monthly_after: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+
+    period: Mapped[str] = mapped_column(
+        String(10), nullable=False,
+        comment='"YYYY-MM" derivado de la fecha de aplicacion (hoy Bogota) — ancla contable as-of',
+    )
+
+    money_movement_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("money_movements.id", ondelete="RESTRICT"), nullable=False,
+    )
+
+    reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    applied_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        comment="Tiebreaker dentro del mismo period en el merge as-of",
+    )
+
+    applied_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    annulled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    annulled_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )
+    annulled_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    # Relationships
+    fixed_asset: Mapped["FixedAsset"] = relationship(
+        "FixedAsset", back_populates="revaluations",
+    )
+
+    money_movement: Mapped["MoneyMovement"] = relationship(
+        "MoneyMovement", foreign_keys=[money_movement_id],
     )

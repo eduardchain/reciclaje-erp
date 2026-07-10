@@ -75,6 +75,8 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "tp_transfer_in": 1,             # Transferencia entre terceros: dest recibe pago (se le abona)
     "tp_adjustment_credit": 1,       # Ajuste credito: saldo sube (hacia cero desde negativo)
     "tp_adjustment_debit": -1,       # Ajuste debito: saldo baja (hacia cero desde positivo)
+    "asset_revaluation_credit": -1,     # Revalorizacion activo alza a credito: le debemos (balance baja)
+    "asset_devaluation_receivable": 1,  # Devaluacion activo a cargo del tercero: nos debe (balance sube)
 }
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -96,6 +98,8 @@ ACCOUNT_BALANCE_DIRECTION = {
     "deferred_funding": -1,         # Pago inicial gasto diferido: sale dinero de cuenta
     "payment_to_generic": -1,        # Pago a generico: sale dinero
     "collection_from_generic": 1,    # Cobro a generico: entra dinero
+    "asset_revaluation_payment": -1,    # Revalorizacion activo alza pagada: sale dinero
+    "asset_devaluation_collection": 1,  # Devaluacion activo con reembolso: entra dinero
     # expense_accrual: NO toca cuenta (account_id=None)
     # deferred_expense: NO toca cuenta (account_id=None)
 }

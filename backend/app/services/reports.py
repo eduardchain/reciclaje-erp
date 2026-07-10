@@ -23,7 +23,7 @@ from app.models.purchase import PurchaseCommission
 from app.models.sale import Sale, SaleLine
 from app.models.third_party import ThirdParty
 from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
-from app.models.fixed_asset import FixedAsset, AssetDepreciation
+from app.models.fixed_asset import FixedAsset, AssetDepreciation, AssetRevaluation
 from app.models.inventory_movement import InventoryMovement
 from app.models.business_unit import BusinessUnit
 
@@ -105,6 +105,8 @@ ACCOUNT_BALANCE_DIRECTION = {
     "deferred_funding": -1,
     "payment_to_generic": -1,
     "collection_from_generic": 1,
+    "asset_revaluation_payment": -1,     # Revalorizacion alza pagada: sale dinero
+    "asset_devaluation_collection": 1,   # Devaluacion con reembolso: entra dinero
 }
 
 # Direccion del efecto en el balance del tercero por tipo de movimiento.
@@ -130,6 +132,8 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "tp_transfer_in": 1,             # Transferencia entre terceros: dest recibe
     "tp_adjustment_credit": 1,       # Ajuste credito: saldo sube
     "tp_adjustment_debit": -1,       # Ajuste debito: saldo baja
+    "asset_revaluation_credit": -1,     # Revalorizacion alza a credito: le debemos
+    "asset_devaluation_receivable": 1,  # Devaluacion a cargo del tercero: nos debe
 }
 
 # Tipos de money_movement que representan inflows a cuentas
@@ -140,6 +144,7 @@ INFLOW_TYPES = frozenset([
     "transfer_in",
     "advance_collection",
     "collection_from_generic",
+    "asset_devaluation_collection",  # Devaluacion de activo con reembolso: entra dinero
 ])
 
 # Tipos de money_movement que representan outflows de cuentas
@@ -154,6 +159,7 @@ OUTFLOW_TYPES = frozenset([
     "asset_payment",      # Pago de activo fijo: sale dinero de cuenta
     "deferred_funding",   # Pago inicial gasto diferido: sale dinero de cuenta
     "payment_to_generic", # Pago a tercero generico: sale dinero de cuenta
+    "asset_revaluation_payment",  # Revalorizacion de activo al alza pagada: sale dinero
 ])
 # Nota: provision_expense NO va aqui — no afecta cuentas de dinero
 
@@ -875,6 +881,7 @@ class ReportService:
         service_income = mm_map.get("service_income", Decimal("0"))
         capital_injections = mm_map.get("capital_injection", Decimal("0"))
         advance_collections = mm_map.get("advance_collection", Decimal("0"))
+        asset_devaluation_collections = mm_map.get("asset_devaluation_collection", Decimal("0"))
 
         supplier_payments = mm_map.get("payment_to_supplier", Decimal("0"))
         expenses = mm_map.get("expense", Decimal("0"))
@@ -883,14 +890,18 @@ class ReportService:
         provision_deposits = mm_map.get("provision_deposit", Decimal("0"))
         deferred_fundings = mm_map.get("deferred_funding", Decimal("0"))
         advance_payments = mm_map.get("advance_payment", Decimal("0"))
-        asset_payments = mm_map.get("asset_payment", Decimal("0"))
+        # Capex: pago de compra de activo + revalorizacion al alza pagada (mismo bucket)
+        asset_payments = (
+            mm_map.get("asset_payment", Decimal("0"))
+            + mm_map.get("asset_revaluation_payment", Decimal("0"))
+        )
         generic_payments = mm_map.get("payment_to_generic", Decimal("0"))
         generic_collections = mm_map.get("collection_from_generic", Decimal("0"))
 
         total_inflows = (
             customer_collections + service_income
             + capital_injections + advance_collections
-            + generic_collections
+            + generic_collections + asset_devaluation_collections
         )
         total_outflows = (
             supplier_payments + expenses
@@ -936,6 +947,7 @@ class ReportService:
                 capital_injections=float(capital_injections),
                 advance_collections=float(advance_collections),
                 generic_collections=float(generic_collections),
+                asset_devaluation_collections=float(asset_devaluation_collections),
                 total=float(total_inflows),
             ),
             total_inflows=float(total_inflows),
@@ -1295,12 +1307,36 @@ class ReportService:
                 FixedAsset.current_value > 0,
             )
         ).scalars().all()
+        # Revalorizaciones activas por activo (una query agregada, sin N+1).
+        # Nota H3: accumulated_depreciation es el campo almacenado (solo
+        # depreciacion real); current_value ya incluye las revalorizaciones —
+        # revalued_amount hace visible la diferencia.
+        reval_by_asset = {
+            row[0]: Decimal(str(row[1]))
+            for row in db.execute(
+                select(
+                    AssetRevaluation.fixed_asset_id,
+                    func.coalesce(func.sum(
+                        case(
+                            (AssetRevaluation.revaluation_type == "increase", AssetRevaluation.amount),
+                            else_=-AssetRevaluation.amount,
+                        )
+                    ), 0),
+                ).where(
+                    AssetRevaluation.organization_id == organization_id,
+                    AssetRevaluation.is_active == True,
+                ).group_by(AssetRevaluation.fixed_asset_id)
+            ).all()
+        }
         fa_items = [
             BalanceDetailedItem(
                 id=str(fa.id), name=fa.name,
                 current_value=float(fa.current_value),
                 purchase_value=float(fa.purchase_value),
                 accumulated_depreciation=float(fa.accumulated_depreciation),
+                revalued_amount=(
+                    float(reval_by_asset[fa.id]) if fa.id in reval_by_asset else None
+                ),
                 balance=float(fa.current_value),
             ) for fa in fixed_assets
         ]
@@ -2087,30 +2123,78 @@ class ReportService:
                 result[mat_id] = (stock, avg_cost)
         return result
 
-    def _fa_value_at_cutoff(self, db: Session, fa, cutoff_period: str) -> Decimal:
-        """Valor de un activo fijo en un período de corte dado.
-
-        Lógica de 2 niveles:
-        1. Si existen depreciaciones aplicadas con period <= cutoff_period,
-           usar current_value_after del último período cubierto.
-        2. Si no hay registros al corte (activo cargado con depreciación acumulada
-           histórica pre-sistema), reconstruir el valor revirtiendo las depreciaciones
-           posteriores al corte: current_value + SUM(amount para period > cutoff_period).
-           Esto da el valor exacto que tenía el activo en el corte.
-        """
-        last_dep = db.scalar(
-            select(AssetDepreciation.current_value_after)
-            .where(
-                AssetDepreciation.fixed_asset_id == fa.id,
-                AssetDepreciation.is_active == True,
-                AssetDepreciation.period <= cutoff_period,
-            ).order_by(AssetDepreciation.period.desc())
-            .limit(1)
+    @staticmethod
+    def _fa_reval_delta(db: Session, fixed_asset_id) -> Decimal:
+        """Σ deltas firmados (alza − baja) de TODAS las revalorizaciones activas
+        del activo. Para cortes históricos usar total − _fa_reval_future_delta
+        (ancla diaria) — NUNCA filtrar por `period` mensual."""
+        val = db.scalar(
+            select(func.coalesce(func.sum(
+                case(
+                    (AssetRevaluation.revaluation_type == "increase", AssetRevaluation.amount),
+                    else_=-AssetRevaluation.amount,
+                )
+            ), 0)).where(
+                AssetRevaluation.fixed_asset_id == fixed_asset_id,
+                AssetRevaluation.is_active == True,
+            )
         )
-        if last_dep is not None:
-            return Decimal(str(last_dep))
+        return Decimal(str(val))
 
-        # Sin registros al corte: revertir depreciaciones posteriores
+    def _fa_reval_future_delta(
+        self,
+        db: Session,
+        fixed_asset_id,
+        cutoff_dt: datetime,
+    ) -> Decimal:
+        """Σ deltas firmados de revalorizaciones ACTIVAS posteriores al corte.
+
+        Ancla DIARIA via la fecha del MoneyMovement de contrapartida — la misma
+        que mueve la cuenta/tercero en los saldos as-of. Sin esta simetría, un
+        corte del día anterior a la revalorización mostraría el activo con el
+        valor nuevo pero la caja sin el egreso → el balance no cuadra (bug
+        reportado en pruebas de usuario: corte de ayer 'crecía' por el monto).
+        NO usar `period` (mensual): esa semántica es de depreciaciones (#41,
+        la cuota pertenece al mes); la revalorización es un evento puntual.
+        """
+        val = db.scalar(
+            select(func.coalesce(func.sum(
+                case(
+                    (AssetRevaluation.revaluation_type == "increase", AssetRevaluation.amount),
+                    else_=-AssetRevaluation.amount,
+                )
+            ), 0))
+            .select_from(AssetRevaluation)
+            .join(MoneyMovement, MoneyMovement.id == AssetRevaluation.money_movement_id)
+            .where(
+                AssetRevaluation.fixed_asset_id == fixed_asset_id,
+                AssetRevaluation.is_active == True,
+                MoneyMovement.date >= cutoff_dt,
+            )
+        )
+        return Decimal(str(val))
+
+    def _fa_value_at_cutoff(
+        self,
+        db: Session,
+        fa,
+        cutoff_period: str,
+        cutoff_dt: datetime,
+    ) -> Decimal:
+        """Valor de un activo fijo a la fecha de corte — reconstrucción pura.
+
+        `valor(corte) = current_value + Σ dep.amount(period > corte) − Σ reval
+        firmada(MM.date >= corte)`. Las sumas conmutan, así que es exacta sin
+        importar el orden de APLICACIÓN de los eventos (una depreciación de mayo
+        aplicada tarde en julio no contamina cortes intermedios — el snapshot
+        `current_value_after` sí lo haría, por eso NO se usan snapshots aquí).
+
+        Anclas mixtas deliberadas: depreciaciones por `period` mensual (#41 — la
+        cuota pertenece al mes contable) y revalorizaciones por fecha DIARIA del
+        MoneyMovement (evento puntual, simétrico con el saldo de caja/tercero).
+        Cubre también activos con carga histórica #46: su depreciación
+        pre-sistema está embebida en current_value y no tiene filas que revertir.
+        """
         future_dep = db.scalar(
             select(func.coalesce(func.sum(AssetDepreciation.amount), 0))
             .where(
@@ -2119,7 +2203,12 @@ class ReportService:
                 AssetDepreciation.period > cutoff_period,
             )
         )
-        return Decimal(str(fa.current_value)) + Decimal(str(future_dep))
+        future_reval = self._fa_reval_future_delta(db, fa.id, cutoff_dt)
+        return (
+            Decimal(str(fa.current_value))
+            + Decimal(str(future_dep))
+            - future_reval
+        )
 
     @staticmethod
     def _fa_existed_at_cutoff(cutoff_dt: datetime):
@@ -2160,7 +2249,7 @@ class ReportService:
         ).all()
 
         return sum(
-            (self._fa_value_at_cutoff(db, fa, cutoff_period) for fa in assets),
+            (self._fa_value_at_cutoff(db, fa, cutoff_period, cutoff_dt) for fa in assets),
             Decimal("0"),
         )
 
@@ -2183,10 +2272,17 @@ class ReportService:
 
         items = []
         for fa in assets:
-            current_value = self._fa_value_at_cutoff(db, fa, cutoff_period)
+            current_value = self._fa_value_at_cutoff(db, fa, cutoff_period, cutoff_dt)
             if current_value > 0:
-                # Depreciacion acumulada historica = diferencia vs purchase_value
-                acc_dep = Decimal(str(fa.purchase_value)) - current_value
+                # Depreciacion acumulada historica al corte. H3: el valor al corte
+                # incluye revalorizaciones — sin sumarlas, un alza haria que
+                # (purchase − current) diera negativo/incorrecto. Delta al corte
+                # con ancla DIARIA (total activas − posteriores al corte).
+                reval_delta = (
+                    self._fa_reval_delta(db, fa.id)
+                    - self._fa_reval_future_delta(db, fa.id, cutoff_dt)
+                )
+                acc_dep = Decimal(str(fa.purchase_value)) + reval_delta - current_value
                 name = fa.name
                 if fa.status == "disposed" and fa.disposed_at:
                     name = f"{name} (baja {fa.disposed_at.strftime('%d/%m/%Y')})"
@@ -2195,6 +2291,7 @@ class ReportService:
                     current_value=float(current_value),
                     purchase_value=float(fa.purchase_value),
                     accumulated_depreciation=float(acc_dep),
+                    revalued_amount=float(reval_delta) if reval_delta != 0 else None,
                     balance=float(current_value),
                 ))
         return items

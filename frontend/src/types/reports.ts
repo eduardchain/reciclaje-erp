@@ -118,6 +118,7 @@ export interface CashFlowInflows {
   capital_injections: number;
   advance_collections: number;
   generic_collections: number;
+  asset_devaluation_collections: number;
   total: number;
 }
 
