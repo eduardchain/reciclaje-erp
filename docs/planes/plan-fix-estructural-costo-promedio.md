@@ -195,7 +195,9 @@ El hallazgo original ("`check_can_revert` ciego a ventas") se redefine: no hay q
 - Frontend: toast/`WarningsList` post-cancelación. (Mejora opcional futura: preview ANTES de confirmar — requeriría endpoint de preview; no en v1.)
 - `check_can_revert` NO cambia su lógica MCH (sigue bloqueando lo suyo); solo gana la etiqueta `sale_cancellation` (sección 4.2).
 
-## 6. FASE 4 — Remediación de datos históricos (gated, NO bundlear)
+## 6. FASE 4 — Remediación de datos históricos ~~(gated, NO bundlear)~~ — **DESCARTADA (decisión de negocio, Daniel 2026-07-10)**
+
+> **🔴 DECISIÓN FINAL: NO se remedia.** Las reglas del Modelo L aplican **desde el deploy hacia adelante**; el COGS histórico queda con el método viejo, documentado. Razones: coherente con la doctrina #61 "el pasado no se reescribe"; el cliente ya vio esos P&L (re-presentarlos cuesta credibilidad, especialmente post-incidente Costa); magnitud <1% del COGS (Costa +$13,8M sobre $2.845M) ya cubierta por `docs/justificacion-cliente-diferencias-inventario.md`. La remediación NO tocaba cobros/estados de cuenta/saldos (solo COGS interno) — el descarte no es por riesgo técnico sino por costo de comunicación vs beneficio. **La remediación QW-B (#1074/#1295, ~$1M kardex) también se descarta por coherencia** (error de dato puntual, promedio actual ya auto-corregido; separable si algún día se reabre). El dry-run de abajo queda como registro por si se reabre la discusión.
 
 Re-costear `SaleLine.unit_cost` (y el `InventoryMovement` espejo) de ventas **liquidadas** históricas al avg as-of su liquidación, leído de `MaterialCostHistory` — que el audit halló 100% íntegro (avg == último MCH, cadena continua) → **mucho más confiable que el replay físico** que falló en Costa.
 
@@ -229,7 +231,7 @@ Por mes (Δ COGS): Costa mar +6,1M / abr −0,3M / **may +16,5M** / jun −3,6M 
 2. **PR-2 = Fases 2a+2b+4.4** (helper + 2 columnas + MCH nuevo + línea P&L + conciliación) — 1 migración.
 3. **PR-3 = Fase 3** (warnings cancel compra) — trivial tras PR-2.
 4. **PR-4 = Fase 2c** (ajustes/transformaciones adoptan helper) — 1 migración.
-5. **Fase 4** — script de remediación con su propio QA y el go/no-go de Daniel sobre el dry-run. Coordinar con deploy #61 y con la remediación QW-B (#1074/#1295) pendiente: **un solo paquete de re-presentación histórica**.
+5. ~~**Fase 4** — script de remediación con su propio QA y el go/no-go de Daniel sobre el dry-run.~~ **DESCARTADA 2026-07-10** (ver banner sección 6): las reglas aplican desde el deploy; sin re-presentación histórica (ni Fase 4 ni QW-B #1074/#1295).
 
 Cada PR con QA-gate antes de commit (regla de la sesión).
 
@@ -285,4 +287,4 @@ Cada PR con QA-gate antes de commit (regla de la sesión).
 
 - ¿La línea P&L nueva se muestra siempre o solo cuando ≠ 0? (Propuesta: solo ≠ 0.)
 - ¿Rotular "utilidad estimada" en el detalle de ventas registered? (Propuesta: sí, texto gris pequeño — barato y evita la pregunta del cliente.)
-- Remediación (Fase 4): ¿se corre junto con la de QW-B #1074/#1295 en un solo paquete de re-presentación? (Propuesta: sí.)
+- ~~Remediación (Fase 4): ¿se corre junto con la de QW-B #1074/#1295 en un solo paquete de re-presentación? (Propuesta: sí.)~~ **RESUELTA 2026-07-10: no se remedia ninguna de las dos** (banner sección 6).
