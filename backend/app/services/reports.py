@@ -436,7 +436,57 @@ class ReportService:
                 .where(*oversell_sale_filters)
             )
         ))
-        oversell_adjustment = oversell_from_purchases + oversell_from_cancellations
+
+        # Ajuste de inventario (increase) sobre hueco: mismo fenomeno via entrada
+        # manual, persistido en InventoryAdjustment.cost_adjustment (PR-4). Fechado
+        # por la fecha del ajuste. No hace falta excluir seeds de migracion: entran
+        # sobre pool 0 y el helper devuelve adjustment 0 (el filtro != 0 los deja fuera).
+        oversell_adj_filters = [
+            InventoryAdjustment.organization_id == organization_id,
+            self._active_at_cutoff(InventoryAdjustment.status, "confirmed"),
+            InventoryAdjustment.cost_adjustment != 0,
+        ]
+        if has_dates:
+            oversell_adj_filters += [InventoryAdjustment.date >= dt_from, InventoryAdjustment.date < dt_to]
+
+        oversell_from_adjustments = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(InventoryAdjustment.cost_adjustment), 0))
+                .where(*oversell_adj_filters)
+            )
+        ))
+
+        # Destino de transformacion sobre hueco: la linea destino entra a un pool
+        # negativo, persistido en MaterialTransformationLine.cost_adjustment (PR-4).
+        # Fechado por la fecha de la transformacion.
+        from app.models.material_transformation import MaterialTransformationLine
+
+        oversell_tline_filters = [
+            MaterialTransformation.organization_id == organization_id,
+            self._active_at_cutoff(MaterialTransformation.status, "confirmed"),
+            MaterialTransformationLine.cost_adjustment != 0,
+        ]
+        if has_dates:
+            oversell_tline_filters += [MaterialTransformation.date >= dt_from, MaterialTransformation.date < dt_to]
+
+        oversell_from_transformations = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(MaterialTransformationLine.cost_adjustment), 0))
+                .select_from(MaterialTransformationLine)
+                .join(
+                    MaterialTransformation,
+                    MaterialTransformationLine.transformation_id == MaterialTransformation.id,
+                )
+                .where(*oversell_tline_filters)
+            )
+        ))
+
+        oversell_adjustment = (
+            oversell_from_purchases
+            + oversell_from_cancellations
+            + oversell_from_adjustments
+            + oversell_from_transformations
+        )
 
         # 4. Ajustes de terceros (perdida/ganancia)
         tp_adj_filters = [

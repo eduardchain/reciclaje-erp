@@ -35,6 +35,7 @@ from app.schemas.inventory_adjustment import (
 )
 
 
+from app.services.inventory_costing import incorporate_into_pool
 from app.services.material_cost_history import material_cost_history_service
 
 
@@ -83,15 +84,18 @@ class CRUDInventoryAdjustment:
         previous_stock = material.current_stock_liquidated
         new_stock = previous_stock + data.quantity
 
-        # Recalcular costo promedio (solo stock liquidado, transito no afecta costo)
+        # Recalcular costo promedio con conservacion de valor (Modelo L, #65):
+        # sobre pool negativo la entrada rellena el hueco al costo promedio previo
+        # y la diferencia queda como cost_adjustment (entra al P&L, no se pierde).
         old_liquidated = material.current_stock_liquidated
         old_cost = material.current_average_cost
-        if old_liquidated <= 0:
-            material.current_average_cost = data.unit_cost
-        else:
-            total_old_value = old_liquidated * old_cost
-            total_new_value = data.quantity * data.unit_cost
-            material.current_average_cost = (total_old_value + total_new_value) / (old_liquidated + data.quantity)
+        new_avg, cost_adjustment = incorporate_into_pool(
+            liquidated=old_liquidated,
+            avg_cost=old_cost,
+            quantity=data.quantity,
+            unit_cost=data.unit_cost,
+        )
+        material.current_average_cost = new_avg
 
         # Aplicar cambio de stock
         material.current_stock_liquidated = new_stock
@@ -114,6 +118,7 @@ class CRUDInventoryAdjustment:
             notes=data.notes,
             user_id=user_id,
         )
+        adjustment.cost_adjustment = cost_adjustment
 
         # Registrar cambio de costo en historial
         material_cost_history_service.record_cost_change(

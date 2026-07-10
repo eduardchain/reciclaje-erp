@@ -145,6 +145,15 @@ class InventoryAdjustment(Base, OrganizationMixin, TimestampMixin):
         comment="Valor total del ajuste: |quantity| * unit_cost",
     )
 
+    cost_adjustment: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+        comment="Ajuste de costo por sobreventa (Modelo L #65, solo increase sobre "
+                "pool negativo): COGS ya cargado vs costo real de entrada. Entra al P&L.",
+    )
+
     # Razon y notas
     reason: Mapped[str] = mapped_column(
         Text,

@@ -27,6 +27,7 @@ from app.models.warehouse import Warehouse
 from app.schemas.material_transformation import MaterialTransformationCreate
 
 
+from app.services.inventory_costing import incorporate_into_pool
 from app.services.material_cost_history import material_cost_history_service
 
 
@@ -219,7 +220,8 @@ class CRUDMaterialTransformation:
         db.add(transformation)
         db.flush()
 
-        # Crear lineas de destino
+        # Crear lineas de destino (se conservan para setear cost_adjustment abajo)
+        created_lines: list[MaterialTransformationLine] = []
         for i, line_data in enumerate(data.lines):
             unit_cost, total_cost = line_costs[i]
             line = MaterialTransformationLine(
@@ -231,6 +233,7 @@ class CRUDMaterialTransformation:
                 total_cost=total_cost,
             )
             db.add(line)
+            created_lines.append(line)
 
         db.flush()
 
@@ -277,14 +280,19 @@ class CRUDMaterialTransformation:
             dest_material = db.get(Material, line_data.destination_material_id)
             unit_cost, total_cost = line_costs[i]
 
-            # Recalcular costo promedio del destino (solo stock liquidado, transito no afecta)
+            # Recalcular costo promedio del destino con conservacion de valor (Modelo L,
+            # #65): sobre pool negativo la entrada rellena el hueco al costo previo y la
+            # diferencia queda como cost_adjustment en la linea (entra al P&L).
             old_liquidated = dest_material.current_stock_liquidated
             old_cost = dest_material.current_average_cost
-            if old_liquidated <= 0:
-                dest_material.current_average_cost = unit_cost
-            else:
-                total_old_value = old_liquidated * old_cost
-                dest_material.current_average_cost = (total_old_value + total_cost) / (old_liquidated + line_data.quantity)
+            new_avg, cost_adjustment = incorporate_into_pool(
+                liquidated=old_liquidated,
+                avg_cost=old_cost,
+                quantity=line_data.quantity,
+                unit_cost=unit_cost,
+            )
+            dest_material.current_average_cost = new_avg
+            created_lines[i].cost_adjustment = cost_adjustment
 
             dest_material.current_stock_liquidated += line_data.quantity
             dest_material.current_stock += line_data.quantity

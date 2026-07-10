@@ -712,17 +712,277 @@ class TestCancelPurchaseHoleWarning:
 
 
 # ============================================================================
+# PR-4 (Fase 2c): ajustes de inventario y transformaciones adoptan el helper
+# ============================================================================
+
+ADJ_URL = "/api/v1/inventory/adjustments"
+TRANS_URL = "/api/v1/inventory/transformations"
+
+
+def _increase(client, org_headers, material, warehouse, qty, cost):
+    resp = client.post(
+        f"{ADJ_URL}/increase",
+        json={
+            "material_id": str(material.id),
+            "warehouse_id": str(warehouse.id),
+            "quantity": float(qty),
+            "unit_cost": float(cost),
+            "date": DOC_DATE,
+            "reason": "Ajuste Modelo L PR-4",
+        },
+        headers=org_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _decrease(client, org_headers, material, warehouse, qty):
+    resp = client.post(
+        f"{ADJ_URL}/decrease",
+        json={
+            "material_id": str(material.id),
+            "warehouse_id": str(warehouse.id),
+            "quantity": float(qty),
+            "date": DOC_DATE,
+            "reason": "Ajuste Modelo L PR-4",
+        },
+        headers=org_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _annul_adjustment(client, org_headers, adjustment_id, expect=200):
+    resp = client.post(
+        f"{ADJ_URL}/{adjustment_id}/annul",
+        json={"reason": "Anulacion test PR-4"},
+        headers=org_headers,
+    )
+    assert resp.status_code == expect, resp.text
+    return resp.json()
+
+
+def _seed_hole(client, org_headers, db_session, supplier, customer, warehouse, material, seed_qty, sell_qty, seed_cost=10000):
+    """Pool en hueco: compra seed auto-liquidada + venta liquidada que sobrevende."""
+    _create_purchase(client, org_headers, supplier, warehouse, material, seed_qty, seed_cost, auto=True)
+    sale = _create_sale(client, org_headers, customer, warehouse, material, sell_qty, 12000)
+    _liquidate_sale(client, org_headers, sale["id"])
+    db_session.refresh(material)
+    assert material.current_stock_liquidated == Decimal(str(seed_qty - sell_qty))
+    assert material.current_average_cost == Decimal(str(seed_cost))
+    return sale
+
+
+def _pnl_oversell(client, org_headers):
+    resp = client.get(
+        "/api/v1/reports/profit-and-loss",
+        params={"date_from": "2026-06-01", "date_to": "2026-06-30"},
+        headers=org_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["oversell_cost_adjustment"]
+
+
+def _mk_material(db_session, org_id, code):
+    """Material adicional (fuente de transformaciones), mismo patron que ml_material."""
+    category = MaterialCategory(id=uuid4(), name=f"Cat {code}", organization_id=org_id, is_active=True)
+    bu = BusinessUnit(id=uuid4(), name=f"UN {code}", organization_id=org_id, is_active=True)
+    db_session.add_all([category, bu])
+    db_session.flush()
+    material = Material(
+        id=uuid4(),
+        code=code,
+        name=f"Material {code}",
+        category_id=category.id,
+        business_unit_id=bu.id,
+        default_unit="kg",
+        current_stock=Decimal("0"),
+        current_stock_liquidated=Decimal("0"),
+        current_stock_transit=Decimal("0"),
+        current_average_cost=Decimal("0"),
+        organization_id=org_id,
+        is_active=True,
+    )
+    db_session.add(material)
+    db_session.commit()
+    return material
+
+
+def _create_transformation(client, org_headers, source, source_wh, source_qty, lines, distribution="proportional_weight", waste=0):
+    resp = client.post(
+        TRANS_URL,
+        json={
+            "source_material_id": str(source.id),
+            "source_warehouse_id": str(source_wh.id),
+            "source_quantity": float(source_qty),
+            "waste_quantity": float(waste),
+            "cost_distribution": distribution,
+            "date": DOC_DATE,
+            "reason": "Transformacion Modelo L PR-4",
+            "lines": lines,
+        },
+        headers=org_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+class TestOversellInventoryIncrease:
+    """PR-4: increase sobre hueco usa el helper — sin reset destructivo del avg."""
+
+    def test_increase_over_hole_adjustment_pnl_and_annul_roundtrip(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        from app.models.inventory_adjustment import InventoryAdjustment
+
+        _seed_hole(client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material, 100, 300)
+        # Pool: -200 @ 10.000. Increase 1.000 @ 8.000 (Ejemplo A via ajuste manual).
+        adj = _increase(client, org_headers, ml_material, ml_warehouse, 1000, 8000)
+
+        db_session.expire_all()
+        adj_db = db_session.get(InventoryAdjustment, adj["id"])
+        assert adj_db.cost_adjustment == Decimal("400000")
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("8000")
+        assert ml_material.current_stock_liquidated == Decimal("800")
+        # ANTES del fix: reset avg=8.000 sin adjustment → los 400K se esfumaban del P&L
+
+        assert _pnl_oversell(client, org_headers) == pytest.approx(400000, abs=1)
+
+        # Round-trip: anular el increase → pool y P&L vuelven exactos
+        _annul_adjustment(client, org_headers, adj["id"])
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("10000")
+        assert ml_material.current_stock_liquidated == Decimal("-200")
+        assert _pnl_oversell(client, org_headers) == pytest.approx(0, abs=1)
+
+    def test_increase_partial_fill_keeps_prev_avg(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        from app.models.inventory_adjustment import InventoryAdjustment
+
+        _seed_hole(client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material, 100, 300)
+        # Pool: -200 @ 10.000. Increase 150 @ 8.000: hueco NO cubierto → avg queda
+        adj = _increase(client, org_headers, ml_material, ml_warehouse, 150, 8000)
+
+        db_session.expire_all()
+        assert db_session.get(InventoryAdjustment, adj["id"]).cost_adjustment == Decimal("300000")
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("10000")
+        assert ml_material.current_stock_liquidated == Decimal("-50")
+
+    def test_increase_positive_pool_weighted_zero_adjustment(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        from app.models.inventory_adjustment import InventoryAdjustment
+
+        # Paridad legacy: pool positivo → ponderado clasico, adjustment 0
+        _create_purchase(client, org_headers, ml_supplier, ml_warehouse, ml_material, 100, 10000, auto=True)
+        adj = _increase(client, org_headers, ml_material, ml_warehouse, 100, 8000)
+
+        db_session.expire_all()
+        assert db_session.get(InventoryAdjustment, adj["id"]).cost_adjustment == Decimal("0")
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("9000")
+        assert ml_material.current_stock_liquidated == Decimal("200")
+
+
+class TestOversellTransformationDestination:
+    """PR-4: linea destino que entra a pool negativo usa el helper."""
+
+    def test_destination_over_hole_proportional_adjustment_pnl_annul(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        from app.models.material_transformation import MaterialTransformationLine
+
+        # Destino (ml_material) en hueco: -100 @ 10.000
+        _seed_hole(client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material, 100, 200)
+        # Fuente independiente: 200 kg @ 5.000
+        source = _mk_material(db_session, ml_material.organization_id, "ML-MOTOR")
+        _create_purchase(client, org_headers, ml_supplier, ml_warehouse, source, 200, 5000, auto=True)
+
+        # Desarme 200 kg fuente → 200 kg destino (proporcional: entra a 5.000/kg)
+        trans = _create_transformation(
+            client, org_headers, source, ml_warehouse, 200,
+            [{
+                "destination_material_id": str(ml_material.id),
+                "destination_warehouse_id": str(ml_warehouse.id),
+                "quantity": 200,
+            }],
+        )
+
+        # filled 100 x (10.000 - 5.000) = 500.000; remaining 100 entra a 5.000
+        db_session.expire_all()
+        line = db_session.query(MaterialTransformationLine).filter(
+            MaterialTransformationLine.transformation_id == trans["id"]
+        ).one()
+        assert line.cost_adjustment == Decimal("500000")
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("5000")
+        assert ml_material.current_stock_liquidated == Decimal("100")
+
+        assert _pnl_oversell(client, org_headers) == pytest.approx(500000, abs=1)
+
+        # Anular: destino vuelve a -100 @ 10.000, fuente recupera 200 @ 5.000, P&L a 0
+        resp = client.post(
+            f"{TRANS_URL}/{trans['id']}/annul",
+            json={"reason": "Anulacion test PR-4"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("10000")
+        assert ml_material.current_stock_liquidated == Decimal("-100")
+        db_session.refresh(source)
+        assert source.current_stock_liquidated == Decimal("200")
+        assert _pnl_oversell(client, org_headers) == pytest.approx(0, abs=1)
+
+    def test_destination_average_cost_method_self_neutral(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        """Metodo average_cost: el destino entra A SU PROPIO promedio → el relleno
+        del hueco es neutro (filled x (avg - avg) = 0). La diferencia de valor va
+        a value_difference (decision #17), no al oversell."""
+        from app.models.material_transformation import MaterialTransformationLine
+
+        _seed_hole(client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material, 100, 200)
+        source = _mk_material(db_session, ml_material.organization_id, "ML-AIRE")
+        _create_purchase(client, org_headers, ml_supplier, ml_warehouse, source, 200, 5000, auto=True)
+
+        trans = _create_transformation(
+            client, org_headers, source, ml_warehouse, 200,
+            [{
+                "destination_material_id": str(ml_material.id),
+                "destination_warehouse_id": str(ml_warehouse.id),
+                "quantity": 200,
+            }],
+            distribution="average_cost",
+        )
+
+        db_session.expire_all()
+        line = db_session.query(MaterialTransformationLine).filter(
+            MaterialTransformationLine.transformation_id == trans["id"]
+        ).one()
+        assert line.cost_adjustment == Decimal("0")
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("10000")
+        assert ml_material.current_stock_liquidated == Decimal("100")
+        assert _pnl_oversell(client, org_headers) == pytest.approx(0, abs=1)
+
+
+# ============================================================================
 # Stress test: random walk determinista con invariantes globales
 # ============================================================================
 
 class TestInventoryStressWalk:
-    """Barrido combinatorio del motor de costeo (Modelo L completo, PR-1+PR-2).
+    """Barrido combinatorio del motor de costeo (Modelo L completo, PR-1+PR-2+PR-4).
 
     ~60 operaciones pseudo-aleatorias con SEMILLA FIJA (determinista, sin
     flakes): crear/liquidar compras y ventas en ordenes arbitrarios (incluye
-    oversell natural), cancelar liquidadas y registradas. Tras CADA operacion
-    se verifican los invariantes globales leyendo TODO de la BD (no de un
-    tracking paralelo del test):
+    oversell natural), cancelar liquidadas y registradas, ajustes de inventario
+    increase/decrease y anulacion de increases. Tras CADA operacion se verifican
+    los invariantes globales leyendo TODO de la BD (no de un tracking paralelo
+    del test):
 
     I1. stock == transit + liquidated (invariante duro del sistema)
     I2. stock == SUM(inventory_movements.quantity)
@@ -731,8 +991,19 @@ class TestInventoryStressWalk:
         por eso el ultimo MCH siempre refleja el estado vigente)
     I5. CONSERVACION DE VALOR (la promesa del Modelo L):
         liquidated x avg == compras_liquidadas_in - COGS_ventas_liquidadas
-                            + ajustes_oversell (compras activas + cancels)
+                            + ajustes_inventario_in/out (qty x unit_cost, confirmed)
+                            + ajustes_oversell (compras activas + cancels
+                              + cost_adjustment de ajustes confirmed)
         con tolerancia = $1 + $0.005 x kg (redondeo Numeric(15,2) de unit_cost).
+
+    Fuera del walk (documentado, pre-existente): las reversiones via MCH (anular
+    increase, cancelar compra liquidada) solo son exactas si NADA extrajo/reingreso
+    valor del pool despues sin dejar MCH — y bajo Modelo L las ventas liquidadas,
+    cancels sin cambio de avg y decreases son MCH-silenciosas (check_can_revert no
+    las ve). Por eso el walk invalida los candidatos a annul tras cada operacion
+    MCH-silenciosa (clear de confirmed_increases) y solo anula increases "limpios".
+    Anular un DECREASE tiene el mismo gap (reingresa al avg vigente, no al de la
+    salida) — documentado en el reporte QA, fuera de alcance de PR-4.
     """
 
     OPS = 60
@@ -781,13 +1052,27 @@ class TestInventoryStressWalk:
         ).join(SaleLine, SaleLine.sale_id == Sale.id).filter(
             SaleLine.material_id == material.id, Sale.status == "cancelled"
         ).scalar()
+        # PR-4: ajustes de inventario confirmed — valor entrado/salido (quantity
+        # es delta con signo) + su cost_adjustment por relleno de hueco
+        from app.models.inventory_adjustment import InventoryAdjustment as IA
+        ia_value = db_session.query(
+            sa_func.coalesce(sa_func.sum(IA.quantity * IA.unit_cost), 0)
+        ).filter(IA.material_id == material.id, IA.status == "confirmed").scalar()
+        ia_cost_adj = db_session.query(
+            sa_func.coalesce(sa_func.sum(IA.cost_adjustment), 0)
+        ).filter(IA.material_id == material.id, IA.status == "confirmed").scalar()
 
         pool_value = material.current_stock_liquidated * material.current_average_cost
-        expected = Decimal(str(in_total)) - Decimal(str(cogs_total)) + Decimal(str(purchase_adj)) + Decimal(str(cancel_adj))
+        expected = (
+            Decimal(str(in_total)) - Decimal(str(cogs_total))
+            + Decimal(str(purchase_adj)) + Decimal(str(cancel_adj))
+            + Decimal(str(ia_value)) + Decimal(str(ia_cost_adj))
+        )
         tolerance = Decimal("1") + tol_qty * Decimal("0.005")
         assert abs(pool_value - expected) <= tolerance, (
             f"Conservacion rota: pool={pool_value} vs esperado={expected} "
-            f"(in={in_total} cogs={cogs_total} adj_compras={purchase_adj} adj_cancels={cancel_adj}, tol={tolerance})"
+            f"(in={in_total} cogs={cogs_total} adj_compras={purchase_adj} adj_cancels={cancel_adj} "
+            f"aj_inv={ia_value} aj_inv_cost={ia_cost_adj}, tol={tolerance})"
         )
 
     def test_random_walk_all_invariants_hold(
@@ -800,14 +1085,23 @@ class TestInventoryStressWalk:
         liquidated_purchases: list[str] = []
         pending_sales: list[str] = []
         liquidated_sales: list[str] = []
+        confirmed_increases: list[str] = []
         tol_qty = Decimal("0")  # kg acumulados que pasaron por redondeo 2-dec
         saw_hole = False
-        counts = {"pc": 0, "pl": 0, "sc": 0, "sl": 0, "s_cxl": 0, "p_cxl": 0, "p_cxl_blocked": 0}
+        counts = {
+            "pc": 0, "pl": 0, "sc": 0, "sl": 0, "s_cxl": 0,
+            "p_cxl": 0, "p_cxl_blocked": 0,
+            "ai": 0, "ad": 0, "aa": 0, "aa_blocked": 0,
+        }
 
         for _ in range(self.OPS):
             action = rng.choices(
-                ["purchase_create", "purchase_liq", "sale_create", "sale_liq", "sale_cancel", "purchase_cancel"],
-                weights=[25, 20, 25, 20, 5, 5],
+                [
+                    "purchase_create", "purchase_liq", "sale_create", "sale_liq",
+                    "sale_cancel", "purchase_cancel",
+                    "adj_increase", "adj_decrease", "adj_annul",
+                ],
+                weights=[20, 17, 20, 17, 5, 5, 6, 6, 4],
             )[0]
 
             if action == "purchase_create":
@@ -832,11 +1126,13 @@ class TestInventoryStressWalk:
                 liquidated_sales.append(sid)
                 tol_qty += Decimal("400")
                 counts["sl"] += 1
+                confirmed_increases.clear()  # extraccion MCH-silenciosa: revert ya no es exacto
             elif action == "sale_cancel" and liquidated_sales:
                 sid = liquidated_sales.pop(rng.randrange(len(liquidated_sales)))
                 _cancel_sale(client, org_headers, sid)
                 tol_qty += Decimal("400")
                 counts["s_cxl"] += 1
+                confirmed_increases.clear()  # reingreso posiblemente MCH-silencioso
             elif action == "purchase_cancel" and liquidated_purchases:
                 pid = liquidated_purchases.pop(rng.randrange(len(liquidated_purchases)))
                 resp = client.patch(f"/api/v1/purchases/{pid}/cancel", headers=org_headers)
@@ -844,9 +1140,36 @@ class TestInventoryStressWalk:
                 assert resp.status_code in (200, 400), resp.text
                 if resp.status_code == 200:
                     counts["p_cxl"] += 1
+                    confirmed_increases.clear()  # el cancel rebobino el pool
                 else:
                     counts["p_cxl_blocked"] += 1
                     liquidated_purchases.append(pid)  # sigue liquidada
+            elif action == "adj_increase":
+                qty = rng.randrange(30, 300, 10)
+                cost = rng.randrange(1000, 12000, 100)
+                a = _increase(client, org_headers, ml_material, ml_warehouse, qty, cost)
+                confirmed_increases.append(a["id"])
+                tol_qty += Decimal("300")
+                counts["ai"] += 1
+            elif action == "adj_decrease":
+                qty = rng.randrange(30, 250, 10)
+                _decrease(client, org_headers, ml_material, ml_warehouse, qty)
+                counts["ad"] += 1
+                confirmed_increases.clear()  # extraccion MCH-silenciosa: revert ya no es exacto
+            elif action == "adj_annul" and confirmed_increases:
+                aid = confirmed_increases.pop(rng.randrange(len(confirmed_increases)))
+                resp = client.post(
+                    f"{ADJ_URL}/{aid}/annul",
+                    json={"reason": "Anulacion walk"},
+                    headers=org_headers,
+                )
+                # 400 = bloqueado por check_can_revert (MCH posterior) — valido
+                assert resp.status_code in (200, 400), resp.text
+                if resp.status_code == 200:
+                    counts["aa"] += 1
+                else:
+                    counts["aa_blocked"] += 1
+                    confirmed_increases.append(aid)  # sigue confirmado
 
             self._invariants(db_session, ml_material, tol_qty)
             if ml_material.current_stock_liquidated < 0:
@@ -856,6 +1179,8 @@ class TestInventoryStressWalk:
         assert counts["pl"] >= 5, counts
         assert counts["sl"] >= 5, counts
         assert counts["s_cxl"] + counts["p_cxl"] >= 1, counts
+        assert counts["ai"] >= 2, counts
+        assert counts["ad"] >= 2, counts
         assert saw_hole, f"El walk nunca paso por oversell — ajustar semilla/pesos: {counts}"
 
         # Cierre: liquidar todo lo pendiente y verificar una ultima vez
