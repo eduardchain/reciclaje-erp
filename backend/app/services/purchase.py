@@ -28,6 +28,7 @@ from app.models.third_party import ThirdParty
 from app.models.warehouse import Warehouse
 from app.schemas.purchase import PurchaseCreate, PurchaseUpdate, PurchaseFullUpdate
 from app.services.base import CRUDBase
+from app.services.inventory_costing import incorporate_into_pool
 from app.services.material_cost_history import material_cost_history_service
 from app.services.money_movement import money_movement as mm_service
 
@@ -470,11 +471,15 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             if inv_movement:
                 inv_movement.unit_cost = adjusted_unit_cost
 
-            # Recalcular costo promedio del material con costo AJUSTADO
+            # Recalcular costo promedio del material con costo AJUSTADO.
+            # cost_adjustment != 0 solo cuando esta linea rellena un hueco de
+            # oversell (liquidated < 0) — entra al P&L por liquidated_at (#65).
             material = line.material
             old_cost = material.current_average_cost
             old_liquidated_stock = material.current_stock_liquidated
-            self._apply_cost_at_liquidation(material, line.quantity, adjusted_unit_cost)
+            line.cost_adjustment = self._apply_cost_at_liquidation(
+                material, line.quantity, adjusted_unit_cost
+            )
 
             # Reclasificar transito -> liquidado de ESTA linea AHORA (antes se hacia
             # en batch al final): asi la siguiente linea del mismo material promedia
@@ -1218,7 +1223,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         material: Material,
         quantity: Decimal,
         confirmed_price: Decimal,
-    ) -> None:
+    ) -> Decimal:
         """
         Incorporar costo confirmado al promedio ponderado durante liquidacion.
 
@@ -1227,15 +1232,22 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         (liquidate) reclasifica transito->liquidado de la linea inmediatamente
         despues de esta llamada, asi que current_stock_liquidated aun refleja el
         stock previo a incorporar esta linea.
+
+        Retorna el cost_adjustment (Modelo L #65): cuando el pool esta en hueco
+        (liquidated < 0, oversell), la diferencia entre el COGS ya cargado y el
+        costo real de reposicion. Antes esa diferencia se BORRABA (la rama reset
+        `avg = confirmed_price` ignoraba el valor del hueco). El caller la
+        persiste en PurchaseLine.cost_adjustment y el P&L la reconoce.
+        confirmed_price debe ser el costo AJUSTADO por comision (G1).
         """
-        old_liquidated = material.current_stock_liquidated
-        if old_liquidated <= 0:
-            # Primera liquidacion o todo el stock liquidado es de esta compra
-            material.current_average_cost = confirmed_price
-        else:
-            old_value = old_liquidated * material.current_average_cost
-            new_value = old_value + quantity * confirmed_price
-            material.current_average_cost = new_value / (old_liquidated + quantity)
+        new_avg, adjustment = incorporate_into_pool(
+            liquidated=material.current_stock_liquidated,
+            avg_cost=material.current_average_cost,
+            quantity=quantity,
+            unit_cost=confirmed_price,
+        )
+        material.current_average_cost = new_avg
+        return adjustment
 
     def _update_material_stock_and_cost(
         self,

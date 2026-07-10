@@ -196,6 +196,13 @@ export default function ProfitAndLossMonthlyView() {
                    || Math.abs(d.totals.adjustment_net) > 0.01,
     },
     {
+      label: "Ajuste Costo por Sobreventa",
+      value: (p) => p.oversell_cost_adjustment,
+      cellClass: (v) => v >= 0 ? "text-emerald-700" : "text-red-700",
+      visible: (d) => d.periods.some((p) => Math.abs(p.oversell_cost_adjustment) > 0.01)
+                   || Math.abs(d.totals.oversell_cost_adjustment) > 0.01,
+    },
+    {
       label: "+ Ganancia Ajuste Terceros",
       drillUrl: (p) => withDateRange("/treasury?tab=tp_adjustment&adjustment_class=gain&status=confirmed", p.period_from, p.period_to),
       value: (p) => p.tp_adjustment_gain,

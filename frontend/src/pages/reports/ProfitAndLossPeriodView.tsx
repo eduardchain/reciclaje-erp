@@ -109,6 +109,14 @@ export default function ProfitAndLossPeriodView() {
                   valueClass={data.adjustment_net >= 0 ? "text-emerald-700" : "text-red-700"}
                 />
               )}
+              {data.oversell_cost_adjustment !== 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Ajuste Costo por Sobreventa</span>
+                  <span className={data.oversell_cost_adjustment >= 0 ? "text-emerald-700" : "text-red-700"}>
+                    {`${data.oversell_cost_adjustment >= 0 ? "" : "-"}${formatCurrency(Math.abs(data.oversell_cost_adjustment))}`}
+                  </span>
+                </div>
+              )}
               {data.tp_adjustment_gain > 0 && (
                 <DrillRow
                   to="/treasury?tab=tp_adjustment&adjustment_class=gain&status=confirmed"

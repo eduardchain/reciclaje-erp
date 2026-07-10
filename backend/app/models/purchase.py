@@ -292,7 +292,17 @@ class PurchaseLine(Base, TimestampMixin):
         nullable=False,
         comment="Line total (quantity × unit_price)",
     )
-    
+
+    cost_adjustment: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+        comment="Ajuste de costo por sobreventa al liquidar (Modelo L #65): "
+                "diferencia entre el COGS ya cargado por el hueco negativo y el "
+                "costo real de reposicion. >0 ganancia, <0 perdida. Entra al P&L.",
+    )
+
     # Relationships
     purchase: Mapped["Purchase"] = relationship(
         "Purchase",

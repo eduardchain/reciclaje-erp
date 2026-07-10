@@ -112,6 +112,7 @@ class MaterialCostHistoryService:
                 "adjustment_increase": "Ajuste aumento",
                 "transformation_in": "Transformacion (entrada)",
                 "transformation_out": "Transformacion (salida)",
+                "sale_cancellation": "Cancelacion de venta",
             }
             for op in subsequent:
                 label = source_labels.get(op.source_type, op.source_type)

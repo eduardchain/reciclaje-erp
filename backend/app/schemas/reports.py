@@ -123,6 +123,10 @@ class ProfitAndLossResponse(BaseModel):
     # Ajustes de inventario (positivo=ganancia, negativo=perdida)
     adjustment_net: float = 0.0
 
+    # Ajuste de costo por sobreventa (Modelo L #65): diferencia entre el COGS
+    # cargado a ventas en hueco y el costo real de reposicion al rellenar.
+    oversell_cost_adjustment: float = 0.0
+
     # Ajustes de terceros
     tp_adjustment_loss: float = 0.0
     tp_adjustment_gain: float = 0.0
@@ -603,14 +607,15 @@ class DoubleEntryProfitability(BaseModel):
 class PnlReconciliation(BaseModel):
     """Conciliacion con el Estado de Resultados (plan A.2 §3.7).
 
-    Las 4 lineas del P&L no atribuibles a ninguna UN. Promesa contractual:
-    grand_total_net + estas 4 lineas == pnl_net_profit (tolerancia $1).
+    Las 5 lineas del P&L no atribuibles a ninguna UN. Promesa contractual:
+    grand_total_net + estas 5 lineas == pnl_net_profit (tolerancia $1).
     Guardrail: test_reconciliation_residual_zero.
     """
     service_income: float = 0
     transformation_net: float = 0  # transformation_profit - waste_loss
     inventory_adjustment_net: float = 0
     tp_adjustment_net: float = 0  # gain - loss
+    oversell_cost_adjustment: float = 0  # Modelo L #65 (org-level, no atribuible a UN — G4)
     pnl_net_profit: float = 0
 
 

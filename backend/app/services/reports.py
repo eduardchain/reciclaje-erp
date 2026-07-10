@@ -394,6 +394,50 @@ class ReportService:
             )
         ))
 
+        # 3.8 Ajuste de costo por sobreventa (Modelo L, decision #65): al liquidar
+        # una compra que rellena un hueco de oversell (liquidated < 0), la
+        # diferencia entre el COGS ya cargado a las ventas del hueco y el costo
+        # real de reposicion se persiste en PurchaseLine.cost_adjustment.
+        # Fecha: liquidated_at de la COMPRA que rellena — G3: puede caer en un
+        # mes distinto al de la venta que sobrevendio (el ajuste es un evento
+        # del momento del relleno; recien ahi se conoce el costo real).
+        oversell_purchase_filters = [
+            Purchase.organization_id == organization_id,
+            self._active_at_cutoff(Purchase.status),
+            PurchaseLine.cost_adjustment != 0,
+        ]
+        if has_dates:
+            oversell_purchase_filters += [Purchase.liquidated_at >= dt_from, Purchase.liquidated_at < dt_to]
+
+        oversell_from_purchases = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(PurchaseLine.cost_adjustment), 0))
+                .select_from(PurchaseLine)
+                .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+                .where(*oversell_purchase_filters)
+            )
+        ))
+
+        # Reingreso de venta liquidada cancelada sobre hueco: mismo fenomeno,
+        # persistido en Sale.cancellation_cost_adjustment, fechado por cancelled_at
+        # (evento contable real de la cancelacion — se cuenta aunque la venta
+        # este cancelled, a diferencia del resto de sus efectos).
+        oversell_sale_filters = [
+            Sale.organization_id == organization_id,
+            Sale.status == "cancelled",
+            Sale.cancellation_cost_adjustment != 0,
+        ]
+        if has_dates:
+            oversell_sale_filters += [Sale.cancelled_at >= dt_from, Sale.cancelled_at < dt_to]
+
+        oversell_from_cancellations = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(Sale.cancellation_cost_adjustment), 0))
+                .where(*oversell_sale_filters)
+            )
+        ))
+        oversell_adjustment = oversell_from_purchases + oversell_from_cancellations
+
         # 4. Ajustes de terceros (perdida/ganancia)
         tp_adj_filters = [
             MoneyMovement.organization_id == organization_id,
@@ -502,7 +546,7 @@ class ReportService:
 
         # Calculos
         gross_profit_sales = sales_revenue - cogs
-        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss
+        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss + oversell_adjustment
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
         return {
@@ -515,6 +559,7 @@ class ReportService:
             "transformation_count": transformation_count,
             "waste_loss": waste_loss,
             "adjustment_net": adjustment_net,
+            "oversell_adjustment": oversell_adjustment,
             "tp_adjustment_loss": tp_adj_loss,
             "tp_adjustment_gain": tp_adj_gain,
             "service_income": service_income,
@@ -669,6 +714,7 @@ class ReportService:
             transformation_count=r["transformation_count"],
             waste_loss=float(r["waste_loss"]),
             adjustment_net=float(r["adjustment_net"]),
+            oversell_cost_adjustment=float(r["oversell_adjustment"]),
             tp_adjustment_loss=float(r["tp_adjustment_loss"]),
             tp_adjustment_gain=float(r["tp_adjustment_gain"]),
             total_gross_profit=float(r["total_gross_profit"]),
@@ -3762,6 +3808,7 @@ class ReportService:
             transformation_net=float(pnl["transformation_profit"] - pnl["waste_loss"]),
             inventory_adjustment_net=float(pnl["adjustment_net"]),
             tp_adjustment_net=float(pnl["tp_adjustment_gain"] - pnl["tp_adjustment_loss"]),
+            oversell_cost_adjustment=float(pnl["oversell_adjustment"]),
             pnl_net_profit=float(pnl["net_profit"]),
         )
 

@@ -204,6 +204,7 @@ function PasaManoCard({
               <Line label="Transformaciones (neto)" value={reconciliation.transformation_net} />
               <Line label="Ajustes de Inventario (neto)" value={reconciliation.inventory_adjustment_net} />
               <Line label="Ajustes de Terceros (neto)" value={reconciliation.tp_adjustment_net} />
+              <Line label="Ajuste Costo por Sobreventa" value={reconciliation.oversell_cost_adjustment} />
               <Separator className="my-1" />
               <div className="flex justify-between gap-3 py-1.5 font-bold">
                 <span>= Utilidad Neta P&L</span>

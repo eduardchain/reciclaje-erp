@@ -79,6 +79,7 @@ export interface ProfitAndLossResponse {
   transformation_count: number;
   waste_loss: number;
   adjustment_net: number;
+  oversell_cost_adjustment: number;
   tp_adjustment_loss: number;
   tp_adjustment_gain: number;
   total_gross_profit: number;
@@ -497,12 +498,13 @@ export interface DoubleEntryProfitability {
 }
 
 // Conciliacion con P&L: lineas no atribuibles a UN.
-// grand_total_net + estas 4 lineas == pnl_net_profit
+// grand_total_net + estas 5 lineas == pnl_net_profit
 export interface PnlReconciliation {
   service_income: number;
   transformation_net: number;
   inventory_adjustment_net: number;
   tp_adjustment_net: number;
+  oversell_cost_adjustment: number;
   pnl_net_profit: number;
 }
 

@@ -34,6 +34,8 @@ from app.schemas.sale import SaleCreate, SaleUpdate, SaleFullUpdate
 from app.services.money_movement import money_movement as mm_service
 from app.models.material_cost_history import MaterialCostHistory
 from app.services.base import CRUDBase
+from app.services.inventory_costing import incorporate_into_pool
+from app.services.material_cost_history import material_cost_history_service
 
 
 class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
@@ -536,6 +538,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         sale.cancelled_at = datetime.now(timezone.utc)
 
         # Step 5: Reverse inventory movements and restore stock
+        total_cancellation_adjustment = Decimal("0")
         for line in lines:
             material = db.get(Material, line.material_id)
 
@@ -555,13 +558,48 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
 
             material.current_stock += line.quantity
             if was_liquidated:
+                # Reingreso PONDERADO al pool (Modelo L #65): el COGS revertido
+                # (line.unit_cost) vuelve al inventario como VALOR, no solo como
+                # cantidad. Antes el stock volvia sin recalcular el promedio → el
+                # inventario se re-valuaba al avg vigente mientras el P&L devolvia
+                # el COGS historico (diferencia fantasma sin registro).
+                old_liq = material.current_stock_liquidated
+                old_avg = material.current_average_cost
+                new_avg, adjustment = incorporate_into_pool(
+                    liquidated=old_liq,
+                    avg_cost=old_avg,
+                    quantity=line.quantity,
+                    unit_cost=line.unit_cost,
+                )
+                material.current_average_cost = new_avg
                 material.current_stock_liquidated += line.quantity
+                total_cancellation_adjustment += adjustment
+                if new_avg != old_avg:
+                    # El cambio de promedio queda en el historial: audita el
+                    # reingreso y hace que check_can_revert bloquee reverts de
+                    # compras anteriores (serian invalidos tras mover el avg).
+                    material_cost_history_service.record_cost_change(
+                        db=db,
+                        material=material,
+                        previous_cost=old_avg,
+                        previous_stock=old_liq,
+                        new_cost=new_avg,
+                        new_stock=old_liq + line.quantity,
+                        source_type="sale_cancellation",
+                        source_id=sale.id,
+                        organization_id=organization_id,
+                        transaction_date=datetime.now(timezone.utc).date(),
+                    )
             else:
                 material.current_stock_transit += line.quantity
             print(f"  🔄 Restored {line.quantity} of {material.name}, stock: {material.current_stock - line.quantity} → {material.current_stock}")
 
         # Step 6: Si estaba liquidada, revertir saldo cliente y comisiones
         if was_liquidated:
+            # Ajuste de cancelacion (Modelo L #65): != 0 solo si el reingreso
+            # rellenó un hueco de oversell. Entra al P&L por cancelled_at.
+            sale.cancellation_cost_adjustment = total_cancellation_adjustment
+
             customer = db.get(ThirdParty, sale.customer_id)
             customer.current_balance -= sale.total_amount
             print(f"👤 Customer '{customer.name}' balance reverted: ${customer.current_balance + sale.total_amount} → ${customer.current_balance}")
