@@ -68,13 +68,8 @@ export default function SaleLiquidatePage() {
   const todayStr = `${_todayNow.getFullYear()}-${String(_todayNow.getMonth() + 1).padStart(2, "0")}-${String(_todayNow.getDate()).padStart(2, "0")}`;
   const docDateStr = sale ? (() => { const d = new Date(sale.date); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })() : "";
 
-  // Inicializar fecha de liquidacion con la fecha del documento
-  useEffect(() => {
-    if (sale && !liquidationDate) {
-      const d = new Date(sale.date);
-      setLiquidationDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
-    }
-  }, [sale, liquidationDate]);
+  // Fecha de liquidacion SIN default: el liquidador debe elegirla conscientemente
+  // (evita back-dating silencioso a la fecha del documento). Ver retro-fechado.
 
   // Inicializar líneas y comisiones desde la venta cargada
   useEffect(() => {
@@ -172,7 +167,8 @@ export default function SaleLiquidatePage() {
   const allPricesValid = lines.every((l) => l.unit_price > 0);
   const allReceivedValid = lines.every((l) => l.received_quantity > 0);
   const canSubmit = allPricesValid && allReceivedValid && lines.length > 0
-    && (!immediateCollection || !!collectionAccountId);
+    && (!immediateCollection || !!collectionAccountId)
+    && !!liquidationDate;
 
   const handleSubmit = () => {
     if (!canSubmit || !id) return;
@@ -498,8 +494,10 @@ export default function SaleLiquidatePage() {
         <CardContent className="pt-6 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
             <div className="flex-1">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Liquidación</Label>
-              <p className="text-xs text-slate-500 mt-0.5">Por defecto usa la fecha del documento.</p>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Liquidación <span className="text-red-500">*</span></Label>
+              <p className={`text-xs mt-0.5 ${liquidationDate ? "text-slate-500" : "text-red-600"}`}>
+                {liquidationDate ? "Fecha en que la operación tiene efecto financiero." : "Obligatorio: elige conscientemente la fecha en que se liquida."}
+              </p>
             </div>
             <Input
               type="date"
@@ -507,7 +505,7 @@ export default function SaleLiquidatePage() {
               min={docDateStr}
               max={todayStr}
               onChange={(e) => setLiquidationDate(e.target.value)}
-              className="w-full sm:w-40 h-9 sm:h-8 text-xs"
+              className={`w-full sm:w-40 h-9 sm:h-8 text-xs ${liquidationDate ? "" : "border-red-300 focus-visible:ring-red-400"}`}
             />
           </div>
           <div className="border-t border-slate-100" />

@@ -61,13 +61,8 @@ export default function PurchaseLiquidatePage() {
   const todayStr = `${_todayNow.getFullYear()}-${String(_todayNow.getMonth() + 1).padStart(2, "0")}-${String(_todayNow.getDate()).padStart(2, "0")}`;
   const docDateStr = purchase ? (() => { const d = new Date(purchase.date); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })() : "";
 
-  // Inicializar fecha de liquidacion con la fecha del documento
-  useEffect(() => {
-    if (purchase && !liquidationDate) {
-      const d = new Date(purchase.date);
-      setLiquidationDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
-    }
-  }, [purchase, liquidationDate]);
+  // Fecha de liquidacion SIN default: el liquidador debe elegirla conscientemente
+  // (evita back-dating silencioso a la fecha del documento). Ver retro-fechado.
 
   // Inicializar lineas y comisiones desde la compra cargada
   useEffect(() => {
@@ -144,7 +139,8 @@ export default function PurchaseLiquidatePage() {
   const selectedAccount = accounts.find((a) => a.id === paymentAccountId);
   const canSubmit = allPricesValid && lines.length > 0
     && (!immediatePayment || (paymentAccountId && (!selectedAccount || selectedAccount.current_balance >= total)))
-    && commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0);
+    && commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0)
+    && !!liquidationDate;
 
   const handleSubmit = () => {
     if (!canSubmit || !id) return;
@@ -408,8 +404,10 @@ export default function PurchaseLiquidatePage() {
         <CardContent className="pt-6 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
             <div className="flex-1">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Liquidación</Label>
-              <p className="text-xs text-slate-500 mt-0.5">Por defecto usa la fecha del documento.</p>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Liquidación <span className="text-red-500">*</span></Label>
+              <p className={`text-xs mt-0.5 ${liquidationDate ? "text-slate-500" : "text-red-600"}`}>
+                {liquidationDate ? "Fecha en que la operación tiene efecto financiero." : "Obligatorio: elige conscientemente la fecha en que se liquida."}
+              </p>
             </div>
             <Input
               type="date"
@@ -417,7 +415,7 @@ export default function PurchaseLiquidatePage() {
               min={docDateStr}
               max={todayStr}
               onChange={(e) => setLiquidationDate(e.target.value)}
-              className="w-full sm:w-40 h-9 sm:h-8 text-xs"
+              className={`w-full sm:w-40 h-9 sm:h-8 text-xs ${liquidationDate ? "" : "border-red-300 focus-visible:ring-red-400"}`}
             />
           </div>
           <div className="border-t border-slate-100" />

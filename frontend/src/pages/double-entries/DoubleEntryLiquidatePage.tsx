@@ -60,13 +60,8 @@ export default function DoubleEntryLiquidatePage() {
   const todayStr = `${_todayNow.getFullYear()}-${String(_todayNow.getMonth() + 1).padStart(2, "0")}-${String(_todayNow.getDate()).padStart(2, "0")}`;
   const docDateStr = de ? (() => { const d = new Date(de.date); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })() : "";
 
-  // Inicializar fecha de liquidacion con la fecha del documento
-  useEffect(() => {
-    if (de && !liquidationDate) {
-      const d = new Date(de.date);
-      setLiquidationDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
-    }
-  }, [de, liquidationDate]);
+  // Fecha de liquidacion SIN default: el liquidador debe elegirla conscientemente
+  // (evita back-dating silencioso a la fecha del documento). Ver retro-fechado.
 
   // Inicializar desde DP cargada
   useEffect(() => {
@@ -130,7 +125,7 @@ export default function DoubleEntryLiquidatePage() {
   const netProfit = grossProfit - totalCommissions;
 
   const allPricesValid = lines.every((l) => l.purchase_unit_price > 0 && l.sale_unit_price > 0);
-  const canSubmit = allPricesValid && lines.length > 0;
+  const canSubmit = allPricesValid && lines.length > 0 && !!liquidationDate;
 
   const handleSubmit = () => {
     if (!canSubmit || !id) return;
@@ -340,8 +335,10 @@ export default function DoubleEntryLiquidatePage() {
         <CardContent className="pt-6">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Liquidación</Label>
-              <p className="text-xs text-slate-500 mt-0.5">Por defecto usa la fecha del documento.</p>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha de Liquidación <span className="text-red-500">*</span></Label>
+              <p className={`text-xs mt-0.5 ${liquidationDate ? "text-slate-500" : "text-red-600"}`}>
+                {liquidationDate ? "Fecha en que la operación tiene efecto financiero." : "Obligatorio: elige conscientemente la fecha en que se liquida."}
+              </p>
             </div>
             <Input
               type="date"
@@ -349,7 +346,7 @@ export default function DoubleEntryLiquidatePage() {
               min={docDateStr}
               max={todayStr}
               onChange={(e) => setLiquidationDate(e.target.value)}
-              className="w-full sm:w-40 h-9 sm:h-8 text-sm sm:text-xs"
+              className={`w-full sm:w-40 h-9 sm:h-8 text-sm sm:text-xs ${liquidationDate ? "" : "border-red-300 focus-visible:ring-red-400"}`}
             />
           </div>
         </CardContent>
