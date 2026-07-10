@@ -448,7 +448,8 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         db: Session,
         sale_id: UUID,
         organization_id: UUID,
-        user_id: UUID = None
+        user_id: UUID = None,
+        annul_linked_payments: bool = False,
     ) -> Sale:
         """
         Cancelar venta y revertir todos los efectos.
@@ -557,11 +558,56 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 recipient.current_balance += comm.commission_amount
                 print(f"  💰 Commission reverted for '{recipient.name}': +${comm.commission_amount}")
 
+        # Step 7: opcional — anular cobros inmediatos enlazados (collection_from_client con sale_id).
+        # El usuario eligió "anular también el cobro" en el diálogo de cancelación (decisión #63,
+        # Opción 1). Revierte el efecto del cobro: caja -amount, cliente +amount. Solo confirmed
+        # (no re-anula un cobro ya anulado a mano; si no hay ninguno es no-op seguro).
+        if annul_linked_payments:
+            linked = db.scalars(
+                select(MoneyMovement).where(
+                    MoneyMovement.sale_id == sale_id,
+                    MoneyMovement.movement_type == "collection_from_client",
+                    MoneyMovement.status == "confirmed",
+                )
+            ).all()
+            for mov in linked:
+                if mov.account_id:
+                    account = db.get(MoneyAccount, mov.account_id)
+                    if account:
+                        account.current_balance -= mov.amount
+                if mov.third_party_id:
+                    tp = db.get(ThirdParty, mov.third_party_id)
+                    if tp:
+                        tp.current_balance += mov.amount
+                mov.status = "annulled"
+                mov.annulled_at = datetime.now(timezone.utc)
+                mov.annulled_by = user_id
+                mov.annulled_reason = f"Cancelación venta #{sale.sale_number}"
+                print(f"  📝 Cobro #{mov.movement_number} anulado (cancelación venta)")
+
         db.flush()
 
         print(f"❌ Sale #{sale.sale_number} cancelled (was {('liquidated' if was_liquidated else 'registered')})")
 
         return sale
+
+    def get_linked_payment_total(
+        self, db: Session, sale_id: UUID, organization_id: UUID
+    ) -> Decimal:
+        """Suma de cobros inmediatos enlazados (collection_from_client, confirmed) a esta venta.
+
+        El detalle lo expone para que el diálogo de cancelación (decisión #63) avise que existe un
+        cobro vivo que quedaría como anticipo del cliente si no se anula. 0 si no hay ninguno.
+        """
+        total = db.execute(
+            select(func.coalesce(func.sum(MoneyMovement.amount), 0)).where(
+                MoneyMovement.sale_id == sale_id,
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.movement_type == "collection_from_client",
+                MoneyMovement.status == "confirmed",
+            )
+        ).scalar_one()
+        return Decimal(str(total or 0))
 
     def update(
         self,

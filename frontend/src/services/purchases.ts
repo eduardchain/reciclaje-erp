@@ -62,8 +62,12 @@ export const purchaseService = {
     return response.data;
   },
 
-  cancel: async (id: string): Promise<PurchaseResponse> => {
-    const response = await apiClient.patch<PurchaseResponse>(`/api/v1/purchases/${id}/cancel`);
+  cancel: async (id: string, annulLinkedPayments = false): Promise<PurchaseResponse> => {
+    const response = await apiClient.patch<PurchaseResponse>(
+      `/api/v1/purchases/${id}/cancel`,
+      undefined,
+      { params: { annul_linked_payments: annulLinkedPayments } },
+    );
     return response.data;
   },
 };

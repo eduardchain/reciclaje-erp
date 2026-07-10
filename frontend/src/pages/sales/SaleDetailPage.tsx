@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { LinkedPaymentChoice } from "@/components/shared/LinkedPaymentChoice";
 import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { WarningsList } from "@/components/shared/WarningsList";
 import { useSale, useCancelSale } from "@/hooks/useSales";
@@ -38,10 +39,22 @@ export default function SaleDetailPage() {
   const cancel = useCancelSale();
 
   const [showCancel, setShowCancel] = useState(false);
+  const [annulChoice, setAnnulChoice] = useState<"annul" | "advance" | null>(null);
+
+  const linkedPaymentTotal = sale?.linked_payment_total ?? 0;
+  const hasLinkedPayment = linkedPaymentTotal > 0;
 
   const handleCancel = () => {
     if (!id) return;
-    cancel.mutate(id, { onSuccess: () => setShowCancel(false) });
+    cancel.mutate(
+      { id, annulLinkedPayments: annulChoice === "annul" },
+      {
+        onSuccess: () => {
+          setShowCancel(false);
+          setAnnulChoice(null);
+        },
+      },
+    );
   };
 
   if (isLoading) {
@@ -319,14 +332,25 @@ export default function SaleDetailPage() {
       {/* Cancel Dialog */}
       <ConfirmDialog
         open={showCancel}
-        onOpenChange={setShowCancel}
+        onOpenChange={(open) => {
+          setShowCancel(open);
+          if (!open) setAnnulChoice(null);
+        }}
         title="Cancelar Venta"
         description="Esta accion revertira los movimientos de inventario y saldos asociados. Esta seguro?"
         confirmLabel="Si, cancelar"
         variant="destructive"
         onConfirm={handleCancel}
         loading={cancel.isPending}
-      />
+        disabled={hasLinkedPayment && annulChoice === null}
+      >
+        <LinkedPaymentChoice
+          kind="sale"
+          amount={linkedPaymentTotal}
+          value={annulChoice}
+          onChange={setAnnulChoice}
+        />
+      </ConfirmDialog>
     </div>
   );
 }

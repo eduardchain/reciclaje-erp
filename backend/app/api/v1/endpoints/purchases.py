@@ -373,6 +373,9 @@ async def get_purchase_by_number(
     )
     
     response_data = _enrich_purchase_response(purchase, db)
+    response_data["linked_payment_total"] = float(
+        purchase_service.get_linked_payment_total(db, purchase.id, org_context["organization_id"])
+    )
     return PurchaseResponse(**response_data)
 
 
@@ -451,6 +454,9 @@ async def get_purchase(
         )
     
     response_data = _enrich_purchase_response(purchase, db)
+    response_data["linked_payment_total"] = float(
+        purchase_service.get_linked_payment_total(db, purchase.id, org_context["organization_id"])
+    )
     return PurchaseResponse(**response_data)
 
 
@@ -605,6 +611,7 @@ async def liquidate_purchase(
 )
 async def cancel_purchase(
     purchase_id: UUID,
+    annul_linked_payments: bool = Query(False, description="Anular también los pagos inmediatos enlazados a esta compra (decisión #63)"),
     db: Session = Depends(get_db),
     org_context: dict = Depends(require_permission("purchases.cancel")),
 ) -> PurchaseResponse:
@@ -615,6 +622,7 @@ async def cancel_purchase(
             purchase_id=purchase_id,
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
+            annul_linked_payments=annul_linked_payments,
         )
         
         response_data = _enrich_purchase_response(purchase, db)

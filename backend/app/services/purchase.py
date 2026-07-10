@@ -23,6 +23,7 @@ from app.models.purchase import Purchase, PurchaseCommission, PurchaseLine
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
 from app.models.money_account import MoneyAccount
+from app.models.money_movement import MoneyMovement
 from app.models.third_party import ThirdParty
 from app.models.warehouse import Warehouse
 from app.schemas.purchase import PurchaseCreate, PurchaseUpdate, PurchaseFullUpdate
@@ -566,6 +567,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         purchase_id: UUID,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
+        annul_linked_payments: bool = False,
     ) -> Purchase:
         """
         Cancel a purchase and reverse all effects.
@@ -702,6 +704,32 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 recipient.current_balance += comm.commission_amount
                 print(f"  ↩️  Comision revertida: ${comm.commission_amount} → {recipient.name}")
 
+        # Step 7: opcional — anular pagos inmediatos enlazados (payment_to_supplier con purchase_id).
+        # Simétrico a ventas (decisión #63): revierte el efecto del pago: caja +amount, proveedor
+        # -amount. Solo confirmed (no re-anula un pago ya anulado; no-op seguro si no hay ninguno).
+        if annul_linked_payments:
+            linked = db.scalars(
+                select(MoneyMovement).where(
+                    MoneyMovement.purchase_id == purchase_id,
+                    MoneyMovement.movement_type == "payment_to_supplier",
+                    MoneyMovement.status == "confirmed",
+                )
+            ).all()
+            for mov in linked:
+                if mov.account_id:
+                    account = db.get(MoneyAccount, mov.account_id)
+                    if account:
+                        account.current_balance += mov.amount
+                if mov.third_party_id:
+                    tp = db.get(ThirdParty, mov.third_party_id)
+                    if tp:
+                        tp.current_balance -= mov.amount
+                mov.status = "annulled"
+                mov.annulled_at = datetime.now(timezone.utc)
+                mov.annulled_by = user_id
+                mov.annulled_reason = f"Cancelación compra #{purchase.purchase_number}"
+                print(f"  📝 Pago #{mov.movement_number} anulado (cancelación compra)")
+
         print(f"❌ Cancelled purchase #{purchase.purchase_number}")
         print(f"   Supplier balance: {supplier.current_balance} (debt reduced by ${purchase.total_amount})")
         
@@ -710,6 +738,24 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         
         return purchase
     
+    def get_linked_payment_total(
+        self, db: Session, purchase_id: UUID, organization_id: UUID
+    ) -> Decimal:
+        """Suma de pagos inmediatos enlazados (payment_to_supplier, confirmed) a esta compra.
+
+        El detalle lo expone para el diálogo de cancelación (decisión #63): avisa que hay un pago
+        vivo que quedaría como anticipo al proveedor si no se anula. 0 si no hay ninguno.
+        """
+        total = db.execute(
+            select(func.coalesce(func.sum(MoneyMovement.amount), 0)).where(
+                MoneyMovement.purchase_id == purchase_id,
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.movement_type == "payment_to_supplier",
+                MoneyMovement.status == "confirmed",
+            )
+        ).scalar_one()
+        return Decimal(str(total or 0))
+
     def update(
         self,
         db: Session,

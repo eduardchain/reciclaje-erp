@@ -44,8 +44,12 @@ export const saleService = {
     return response.data;
   },
 
-  cancel: async (id: string): Promise<SaleResponse> => {
-    const response = await apiClient.patch<SaleResponse>(`/api/v1/sales/${id}/cancel`);
+  cancel: async (id: string, annulLinkedPayments = false): Promise<SaleResponse> => {
+    const response = await apiClient.patch<SaleResponse>(
+      `/api/v1/sales/${id}/cancel`,
+      undefined,
+      { params: { annul_linked_payments: annulLinkedPayments } },
+    );
     return response.data;
   },
 

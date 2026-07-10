@@ -37,7 +37,11 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      {/* stopPropagation: el diálogo se renderiza en un portal, pero los eventos de click
+          burbujean por el árbol de React hasta ancestros (ej. onRowClick de una fila del
+          listado). Sin esto, seleccionar un radio o botón dentro del diálogo dispararía la
+          navegación de la fila. Un modal nunca debe filtrar clicks al contenido de fondo. */}
+      <DialogContent onClick={(e) => e.stopPropagation()}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>

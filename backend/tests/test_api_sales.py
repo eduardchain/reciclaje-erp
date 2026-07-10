@@ -1866,3 +1866,137 @@ class TestSalePerKgCommission:
         assert data["commissions"][0]["commission_type"] == "per_kg"
         # 500 kg × $10/kg = $5,000
         assert data["commissions"][0]["commission_amount"] == 5000.0
+
+
+class TestCancelSaleWithLinkedCollection:
+    """Cancelación de venta con cobro inmediato enlazado (decisión #63, Opción 1: advertir y elegir).
+
+    El cobro inmediato (collection_from_client con sale_id) queda vivo al cancelar salvo que el
+    usuario elija anularlo. annul_linked_payments=True lo anula y devuelve todo al estado pre-venta;
+    sin el flag (default) queda como anticipo del cliente.
+    """
+
+    def _liquidate_with_collection(self, db_session, sale, account):
+        from app.services.sale import crud_sale
+        crud_sale.liquidate(
+            db=db_session,
+            sale_id=sale.id,
+            organization_id=sale.organization_id,
+            immediate_collection=True,
+            collection_account_id=account.id,
+        )
+        db_session.commit()
+
+    def _linked_collections(self, db_session, sale_id):
+        from sqlalchemy import select
+        from app.models.money_movement import MoneyMovement
+        return db_session.scalars(
+            select(MoneyMovement).where(
+                MoneyMovement.sale_id == sale_id,
+                MoneyMovement.movement_type == "collection_from_client",
+            )
+        ).all()
+
+    def test_detail_exposes_linked_payment_total(
+        self, client, org_headers, test_sale, test_customer, test_money_account, db_session
+    ):
+        """El detalle expone linked_payment_total = monto del cobro enlazado."""
+        self._liquidate_with_collection(db_session, test_sale, test_money_account)
+        resp = client.get(f"/api/v1/sales/{test_sale.id}", headers=org_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_amount"] > 0
+        assert data["linked_payment_total"] == pytest.approx(data["total_amount"])
+
+    def test_detail_linked_payment_total_zero_without_collection(
+        self, client, org_headers, test_sale, db_session
+    ):
+        """Sin cobro enlazado, linked_payment_total es 0 en el detalle."""
+        resp = client.get(f"/api/v1/sales/{test_sale.id}", headers=org_headers)
+        assert resp.status_code == 200
+        assert resp.json()["linked_payment_total"] == 0
+
+    def test_cancel_annul_linked_true_returns_to_origin(
+        self, client, org_headers, test_sale, test_customer, test_money_account, db_session
+    ):
+        """annul_linked_payments=True: anula el cobro y devuelve caja y cliente al estado pre-venta."""
+        db_session.refresh(test_customer)
+        c0 = float(test_customer.current_balance)
+        db_session.refresh(test_money_account)
+        a0 = float(test_money_account.current_balance)
+
+        self._liquidate_with_collection(db_session, test_sale, test_money_account)
+
+        resp = client.patch(
+            f"/api/v1/sales/{test_sale.id}/cancel?annul_linked_payments=true",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
+        # Round-trip exacto al origen (caja y cliente vuelven a como estaban antes de la venta)
+        db_session.refresh(test_customer)
+        assert float(test_customer.current_balance) == pytest.approx(c0)
+        db_session.refresh(test_money_account)
+        assert float(test_money_account.current_balance) == pytest.approx(a0)
+
+        mm = self._linked_collections(db_session, test_sale.id)
+        assert len(mm) == 1 and mm[0].status == "annulled"
+
+    def test_cancel_default_leaves_advance(
+        self, client, org_headers, test_sale, test_customer, test_money_account, db_session
+    ):
+        """Sin flag (default): el cobro queda vivo, cliente −total (anticipo), caja retiene el efectivo."""
+        db_session.refresh(test_customer)
+        c0 = float(test_customer.current_balance)
+        db_session.refresh(test_money_account)
+        a0 = float(test_money_account.current_balance)
+
+        self._liquidate_with_collection(db_session, test_sale, test_money_account)
+
+        resp = client.patch(f"/api/v1/sales/{test_sale.id}/cancel", headers=org_headers)
+        assert resp.status_code == 200
+        total = float(resp.json()["total_amount"])
+
+        db_session.refresh(test_customer)
+        assert float(test_customer.current_balance) == pytest.approx(c0 - total)
+        db_session.refresh(test_money_account)
+        assert float(test_money_account.current_balance) == pytest.approx(a0 + total)
+
+        mm = self._linked_collections(db_session, test_sale.id)
+        assert len(mm) == 1 and mm[0].status == "confirmed"
+
+    def test_cancel_annul_linked_true_noop_without_collection(
+        self, client, org_headers, test_sale, db_session
+    ):
+        """annul_linked_payments=True sin cobro enlazado: no rompe nada (no-op seguro)."""
+        from app.services.sale import crud_sale
+        crud_sale.liquidate(
+            db=db_session, sale_id=test_sale.id, organization_id=test_sale.organization_id
+        )
+        db_session.commit()
+        resp = client.patch(
+            f"/api/v1/sales/{test_sale.id}/cancel?annul_linked_payments=true", headers=org_headers
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
+    def test_cancel_skips_already_annulled_collection(
+        self, client, org_headers, test_sale, test_money_account, db_session
+    ):
+        """Un cobro ya anulado a mano no se re-anula ni vuelve a mover la caja."""
+        self._liquidate_with_collection(db_session, test_sale, test_money_account)
+        mm = self._linked_collections(db_session, test_sale.id)
+        assert len(mm) == 1
+        mm[0].status = "annulled"
+        db_session.commit()
+        db_session.refresh(test_money_account)
+        account_before = float(test_money_account.current_balance)
+
+        resp = client.patch(
+            f"/api/v1/sales/{test_sale.id}/cancel?annul_linked_payments=true", headers=org_headers
+        )
+        assert resp.status_code == 200
+        # La caja no se movió por el cobro (Step 7 solo toca los 'confirmed')
+        db_session.refresh(test_money_account)
+        assert float(test_money_account.current_balance) == pytest.approx(account_before)

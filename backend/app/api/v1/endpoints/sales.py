@@ -348,6 +348,9 @@ async def get_sale_by_number(
     )
     
     response_data = _enrich_sale_response(sale, db=db)
+    response_data["linked_payment_total"] = float(
+        crud_sale.get_linked_payment_total(db, sale.id, org_context["organization_id"])
+    )
     return SaleResponse(**response_data)
 
 
@@ -468,6 +471,9 @@ async def get_sale(
         )
     
     response_data = _enrich_sale_response(sale, db=db)
+    response_data["linked_payment_total"] = float(
+        crud_sale.get_linked_payment_total(db, sale.id, org_context["organization_id"])
+    )
     return SaleResponse(**response_data)
 
 
@@ -635,6 +641,7 @@ async def liquidate_sale(
 )
 async def cancel_sale(
     sale_id: UUID,
+    annul_linked_payments: bool = Query(False, description="Anular también los cobros inmediatos enlazados a esta venta (decisión #63)"),
     db: Session = Depends(get_db),
     org_context: dict = Depends(require_permission("sales.cancel")),
 ) -> SaleResponse:
@@ -645,6 +652,7 @@ async def cancel_sale(
             sale_id=sale_id,
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
+            annul_linked_payments=annul_linked_payments,
         )
         
         db.commit()

@@ -217,6 +217,9 @@ class SaleResponse(SaleBase):
     total_quantity_difference: Optional[float] = Field(None, description="Suma de diferencias de cantidad")
     total_amount_difference: Optional[float] = Field(None, description="Impacto total en monto por diferencias")
 
+    # Cobro inmediato enlazado vivo (solo en detalle) — para el diálogo de cancelación (decisión #63)
+    linked_payment_total: Optional[float] = Field(None, description="Suma de cobros inmediatos enlazados confirmados (collection_from_client con sale_id). null/0 = ninguno")
+
     # Warnings (stock negativo, etc.) — RN-INV-03
     warnings: List[str] = Field(default_factory=list, description="Warnings (e.g., negative stock)")
 

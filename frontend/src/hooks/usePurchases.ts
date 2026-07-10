@@ -24,11 +24,11 @@ export function usePurchases(filters: PurchaseFilters = {}) {
   });
 }
 
-export function usePurchase(id: string) {
+export function usePurchase(id: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["purchases", "detail", id],
     queryFn: () => purchaseService.getById(id),
-    enabled: !!id,
+    enabled: !!id && (options?.enabled ?? true),
   });
 }
 
@@ -87,7 +87,8 @@ export function useLiquidatePurchase() {
 export function useCancelPurchase() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => purchaseService.cancel(id),
+    mutationFn: ({ id, annulLinkedPayments }: { id: string; annulLinkedPayments?: boolean }) =>
+      purchaseService.cancel(id, annulLinkedPayments ?? false),
     onSuccess: () => {
       invalidateAfterPurchaseLiquidateOrCancel(queryClient);
       toast.success("Compra cancelada exitosamente");

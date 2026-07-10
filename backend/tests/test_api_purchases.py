@@ -2364,3 +2364,102 @@ class TestLiquidateMultiLineSameMaterial:
         # (100*10 + 100*20 + 100*30) / 300 = 20
         assert float(material.current_average_cost) == pytest.approx(20.0)
         assert float(material.current_stock_liquidated) == pytest.approx(300.0)
+
+
+class TestCancelPurchaseWithLinkedPayment:
+    """Cancelación de compra con pago inmediato enlazado (decisión #63, simétrico a ventas).
+
+    El pago inmediato (payment_to_supplier con purchase_id) queda vivo al cancelar salvo que el
+    usuario elija anularlo. annul_linked_payments=True lo anula y devuelve todo al estado pre-compra;
+    sin el flag (default) queda como prepago al proveedor (nos debe).
+    """
+
+    def _liquidate_with_payment(self, db_session, purchase, account):
+        from app.services.purchase import purchase as purchase_service
+        purchase_service.liquidate(
+            db=db_session,
+            purchase_id=purchase.id,
+            organization_id=purchase.organization_id,
+            immediate_payment=True,
+            payment_account_id=account.id,
+        )
+        # purchase.liquidate hace commit interno
+
+    def _linked_payments(self, db_session, purchase_id):
+        from sqlalchemy import select
+        from app.models.money_movement import MoneyMovement
+        return db_session.scalars(
+            select(MoneyMovement).where(
+                MoneyMovement.purchase_id == purchase_id,
+                MoneyMovement.movement_type == "payment_to_supplier",
+            )
+        ).all()
+
+    def test_detail_exposes_linked_payment_total(
+        self, client, org_headers, test_purchase, test_money_account, db_session
+    ):
+        """El detalle expone linked_payment_total = monto del pago enlazado."""
+        self._liquidate_with_payment(db_session, test_purchase, test_money_account)
+        resp = client.get(f"/api/v1/purchases/{test_purchase.id}", headers=org_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_amount"] > 0
+        assert data["linked_payment_total"] == pytest.approx(data["total_amount"])
+
+    def test_detail_linked_payment_total_zero_without_payment(
+        self, client, org_headers, test_purchase, db_session
+    ):
+        """Sin pago enlazado, linked_payment_total es 0 en el detalle."""
+        resp = client.get(f"/api/v1/purchases/{test_purchase.id}", headers=org_headers)
+        assert resp.status_code == 200
+        assert resp.json()["linked_payment_total"] == 0
+
+    def test_cancel_annul_linked_true_returns_to_origin(
+        self, client, org_headers, test_purchase, test_supplier, test_money_account, db_session
+    ):
+        """annul_linked_payments=True: anula el pago y devuelve caja y proveedor al estado pre-compra."""
+        db_session.refresh(test_supplier)
+        s0 = float(test_supplier.current_balance)
+        db_session.refresh(test_money_account)
+        a0 = float(test_money_account.current_balance)
+
+        self._liquidate_with_payment(db_session, test_purchase, test_money_account)
+
+        resp = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}/cancel?annul_linked_payments=true",
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
+        # Round-trip exacto al origen
+        db_session.refresh(test_supplier)
+        assert float(test_supplier.current_balance) == pytest.approx(s0)
+        db_session.refresh(test_money_account)
+        assert float(test_money_account.current_balance) == pytest.approx(a0)
+
+        mm = self._linked_payments(db_session, test_purchase.id)
+        assert len(mm) == 1 and mm[0].status == "annulled"
+
+    def test_cancel_default_leaves_prepayment(
+        self, client, org_headers, test_purchase, test_supplier, test_money_account, db_session
+    ):
+        """Sin flag (default): el pago queda vivo, proveedor +total (prepago), caja mantiene el egreso."""
+        db_session.refresh(test_supplier)
+        s0 = float(test_supplier.current_balance)
+        db_session.refresh(test_money_account)
+        a0 = float(test_money_account.current_balance)
+
+        self._liquidate_with_payment(db_session, test_purchase, test_money_account)
+
+        resp = client.patch(f"/api/v1/purchases/{test_purchase.id}/cancel", headers=org_headers)
+        assert resp.status_code == 200
+        total = float(resp.json()["total_amount"])
+
+        db_session.refresh(test_supplier)
+        assert float(test_supplier.current_balance) == pytest.approx(s0 + total)
+        db_session.refresh(test_money_account)
+        assert float(test_money_account.current_balance) == pytest.approx(a0 - total)
+
+        mm = self._linked_payments(db_session, test_purchase.id)
+        assert len(mm) == 1 and mm[0].status == "confirmed"
