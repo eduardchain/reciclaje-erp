@@ -26,6 +26,7 @@ from app.models import (
     BusinessUnit,
     MaterialCostHistory,
 )
+from app.models.inventory_movement import InventoryMovement
 from app.models.third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 
 
@@ -2249,3 +2250,117 @@ class TestCancelBlockedByTransformationSameCost:
         )
         assert response.status_code == 400
         assert "operaciones posteriores" in response.json()["detail"]
+
+
+class TestLiquidateMultiLineSameMaterial:
+    """Compra con el MISMO material en varias lineas: antes de la correccion,
+    el loop de liquidacion usaba .first() (todas las lineas escribian el mismo
+    InventoryMovement -> uno quedaba en unit_cost=0) y leia un current_stock_liquidated
+    stale (el promedio dependia del orden de las lineas). Casos reales: Costa #1074
+    y #1295. Estos tests son el candado de regresion."""
+
+    def _create_and_liquidate(self, client, org_headers, supplier_id, warehouse_id, lines):
+        purchase_data = {
+            "supplier_id": str(supplier_id),
+            "date": datetime.now(timezone.utc).isoformat(),
+            "lines": lines,
+            "auto_liquidate": False,
+        }
+        resp = client.post("/api/v1/purchases", json=purchase_data, headers=org_headers)
+        assert resp.status_code == 201, resp.text
+        purchase_id = resp.json()["id"]
+        resp = client.patch(
+            f"/api/v1/purchases/{purchase_id}/liquidate", json={}, headers=org_headers
+        )
+        assert resp.status_code == 200, resp.text
+        return purchase_id
+
+    def test_two_lines_same_material_both_movements_costed(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """Dos lineas del mismo material con precios distintos: cada movimiento
+        recibe SU costo (ninguno queda en 0) y el promedio es el ponderado."""
+        self._create_and_liquidate(
+            client, org_headers, test_supplier.id, test_warehouse.id,
+            lines=[
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 10.0, "warehouse_id": str(test_warehouse.id)},
+                {"material_id": str(test_material.id), "quantity": 300.0,
+                 "unit_price": 20.0, "warehouse_id": str(test_warehouse.id)},
+            ],
+        )
+
+        db_session.expire_all()
+        movements = db_session.query(InventoryMovement).filter(
+            InventoryMovement.material_id == test_material.id,
+            InventoryMovement.movement_type == "purchase",
+        ).all()
+        costs = sorted(float(m.unit_cost) for m in movements)
+        assert costs == [10.0, 20.0], "ningun movimiento debe quedar en unit_cost=0"
+
+        material = db_session.get(Material, test_material.id)
+        # Ponderado: (100*10 + 300*20) / 400 = 17.5
+        assert float(material.current_average_cost) == pytest.approx(17.5)
+        assert float(material.current_stock_liquidated) == pytest.approx(400.0)
+        # Invariante de stock
+        assert float(material.current_stock) == pytest.approx(
+            float(material.current_stock_transit) + float(material.current_stock_liquidated)
+        )
+
+    def test_multi_line_weighted_over_existing_liquidated_stock(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """Con stock liquidado previo, la 2a linea del mismo material debe promediar
+        contra el stock que YA incorporo la 1a linea (no el old_liquidated stale)."""
+        # Compra previa: 200 @ $10 -> avg 10, liquidated 200
+        self._create_and_liquidate(
+            client, org_headers, test_supplier.id, test_warehouse.id,
+            lines=[{"material_id": str(test_material.id), "quantity": 200.0,
+                    "unit_price": 10.0, "warehouse_id": str(test_warehouse.id)}],
+        )
+        # Compra multi-linea del mismo material: 100 @ $16 y 100 @ $22
+        self._create_and_liquidate(
+            client, org_headers, test_supplier.id, test_warehouse.id,
+            lines=[
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 16.0, "warehouse_id": str(test_warehouse.id)},
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 22.0, "warehouse_id": str(test_warehouse.id)},
+            ],
+        )
+
+        db_session.expire_all()
+        material = db_session.get(Material, test_material.id)
+        # Correcto: (200*10 + 100*16 + 100*22) / 400 = 14.5
+        # (con el bug del old_liquidated stale daba 15.33)
+        assert float(material.current_average_cost) == pytest.approx(14.5)
+        assert float(material.current_stock_liquidated) == pytest.approx(400.0)
+
+    def test_three_lines_same_material_all_costed(
+        self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
+    ):
+        """La cola de movimientos empareja correctamente con 3+ lineas del mismo material."""
+        self._create_and_liquidate(
+            client, org_headers, test_supplier.id, test_warehouse.id,
+            lines=[
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 10.0, "warehouse_id": str(test_warehouse.id)},
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 20.0, "warehouse_id": str(test_warehouse.id)},
+                {"material_id": str(test_material.id), "quantity": 100.0,
+                 "unit_price": 30.0, "warehouse_id": str(test_warehouse.id)},
+            ],
+        )
+
+        db_session.expire_all()
+        movements = db_session.query(InventoryMovement).filter(
+            InventoryMovement.material_id == test_material.id,
+            InventoryMovement.movement_type == "purchase",
+        ).all()
+        costs = sorted(float(m.unit_cost) for m in movements)
+        assert costs == [10.0, 20.0, 30.0], "los 3 movimientos deben tener su costo, ninguno en 0"
+
+        material = db_session.get(Material, test_material.id)
+        # (100*10 + 100*20 + 100*30) / 300 = 20
+        assert float(material.current_average_cost) == pytest.approx(20.0)
+        assert float(material.current_stock_liquidated) == pytest.approx(300.0)

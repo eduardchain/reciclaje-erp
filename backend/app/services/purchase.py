@@ -8,6 +8,7 @@ Supports 1-step and 2-step purchase workflows:
 Liquidation confirms prices, moves stock transit->liquidated, updates avg cost and supplier balance.
 Payment to supplier is a separate operation via MoneyMovement (type='payment_to_supplier').
 """
+from collections import defaultdict, deque
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Optional, List
@@ -440,19 +441,31 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if hasattr(effective_liq_date, "date"):
             effective_liq_date = effective_liq_date.date()
 
+        # Pre-cargar los movimientos de inventario de esta compra y agruparlos por
+        # firma fisica (material, bodega, cantidad) en colas. Una compra puede
+        # repetir el mismo material en varias lineas (distinto precio/calidad):
+        # con .first() todas esas lineas escribian el MISMO movimiento (uno quedaba
+        # en unit_cost=0 para siempre). La cantidad de la linea es inmutable al
+        # liquidar (line_updates solo cambia unit_price), asi que la firma empareja
+        # 1:1 linea<->movimiento de forma estable.
+        movements = db.query(InventoryMovement).filter(
+            InventoryMovement.reference_type == "purchase",
+            InventoryMovement.reference_id == purchase.id,
+            InventoryMovement.movement_type == "purchase",
+        ).all()
+        movements_by_key: dict = defaultdict(deque)
+        for mv in movements:
+            movements_by_key[(mv.material_id, mv.warehouse_id, mv.quantity)].append(mv)
+
         # Step 5 y 6: Actualizar InventoryMovement.unit_cost y recalcular costo promedio
         for line in purchase.lines:
             # Costo ajustado = precio + comision prorrateada
             line_commission = commission_prorate.get(line.id, Decimal("0"))
             adjusted_unit_cost = line.unit_price + (line_commission / line.quantity) if line.quantity > 0 else line.unit_price
 
-            # Actualizar costo en movimiento de inventario
-            inv_movement = db.query(InventoryMovement).filter(
-                InventoryMovement.reference_type == "purchase",
-                InventoryMovement.reference_id == purchase.id,
-                InventoryMovement.material_id == line.material_id,
-                InventoryMovement.movement_type == "purchase",
-            ).first()
+            # Actualizar costo en el movimiento de ESTA linea (no .first())
+            queue = movements_by_key.get((line.material_id, line.warehouse_id, line.quantity))
+            inv_movement = queue.popleft() if queue else None
             if inv_movement:
                 inv_movement.unit_cost = adjusted_unit_cost
 
@@ -461,6 +474,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             old_cost = material.current_average_cost
             old_liquidated_stock = material.current_stock_liquidated
             self._apply_cost_at_liquidation(material, line.quantity, adjusted_unit_cost)
+
+            # Reclasificar transito -> liquidado de ESTA linea AHORA (antes se hacia
+            # en batch al final): asi la siguiente linea del mismo material promedia
+            # contra el stock ya incorporado, no contra un old_liquidated stale que
+            # hacia el costo promedio dependiente del orden de las lineas.
+            material.current_stock_transit -= line.quantity
+            material.current_stock_liquidated += line.quantity
 
             material_cost_history_service.record_cost_change(
                 db=db,
@@ -479,9 +499,6 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 print(f"  💲 {material.code}: precio=${line.unit_price} + comision=${line_commission} = costo=${adjusted_unit_cost}, costo_prom=${material.current_average_cost}")
             else:
                 print(f"  💲 {material.code}: precio=${line.unit_price}, costo_prom=${material.current_average_cost}")
-
-        # Step 7: Mover stock de transito a liquidado
-        self._move_stock_transit_to_liquidated(db, purchase)
 
         # Step 8: Actualizar saldo del proveedor (deuda — solo materiales, sin comisiones)
         supplier = purchase.supplier
@@ -1160,9 +1177,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         Incorporar costo confirmado al promedio ponderado durante liquidacion.
 
         Usa current_stock_liquidated (NO current_stock) para que el stock en
-        transito de compras registradas no diluya el costo promedio.
-        Se llama ANTES de _move_stock_transit_to_liquidated, asi que
-        current_stock_liquidated aun tiene el valor pre-liquidacion.
+        transito de compras registradas no diluya el costo promedio. El caller
+        (liquidate) reclasifica transito->liquidado de la linea inmediatamente
+        despues de esta llamada, asi que current_stock_liquidated aun refleja el
+        stock previo a incorporar esta linea.
         """
         old_liquidated = material.current_stock_liquidated
         if old_liquidated <= 0:
@@ -1220,24 +1238,6 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         material.current_stock = new_stock
 
         print(f"    📊 {material.code}: stock {old_stock} → {new_stock}, cost ${old_cost} → ${material.current_average_cost}")
-
-    def _move_stock_transit_to_liquidated(
-        self,
-        db: Session,
-        purchase: Purchase
-    ) -> None:
-        """
-        Move stock from transit to liquidated when a purchase is liquidated.
-
-        This doesn't change total stock or average cost, just reclassifies it.
-        """
-        for line in purchase.lines:
-            material = db.get(Material, line.material_id)
-            if material:
-                material.current_stock_transit -= line.quantity
-                material.current_stock_liquidated += line.quantity
-                print(f"    📦 {material.code}: transit -{line.quantity}, liquidated +{line.quantity}")
-
 
     def _process_commissions(
         self,
