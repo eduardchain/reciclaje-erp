@@ -85,6 +85,68 @@ class FixedAssetDisposeRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
 
 
+class AssetRevaluationRequest(BaseModel):
+    """Revalorizar un activo fijo (alza = mejora capitalizable / baja = recuperacion).
+
+    Contrapartida XOR: cuenta (dinero sale/entra) o tercero (deuda a favor/en contra).
+    Sin campo de fecha: el evento es SIEMPRE hoy (anti back-dating, #62).
+    """
+    revaluation_type: str = Field(..., pattern="^(increase|decrease)$")
+    amount: Decimal = Field(..., gt=0)
+    months_extended: int = Field(0, ge=0, le=600)
+    source_account_id: Optional[UUID] = None
+    third_party_id: Optional[UUID] = None
+    reason: Optional[str] = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_revaluation(self):
+        has_account = self.source_account_id is not None
+        has_third_party = self.third_party_id is not None
+        if has_account == has_third_party:
+            raise ValueError(
+                "Debe especificar exactamente una contrapartida: cuenta O tercero"
+            )
+        if self.revaluation_type == "decrease" and self.months_extended > 0:
+            raise ValueError(
+                "months_extended solo aplica a revalorizaciones al alza (increase)"
+            )
+        return self
+
+
+class AssetRevaluationAnnulRequest(BaseModel):
+    """Anular una revalorizacion."""
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class AssetRevaluationResponse(BaseModel):
+    """Respuesta de una revalorizacion aplicada."""
+    id: UUID
+    revaluation_type: str
+    amount: float
+    months_extended: int
+    value_before: float
+    value_after: float
+    monthly_before: float
+    monthly_after: float
+    period: str
+    money_movement_id: UUID
+    reason: Optional[str] = None
+    applied_at: datetime
+    applied_by: Optional[UUID] = None
+    is_active: bool
+    annulled_at: Optional[datetime] = None
+    annulled_reason: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+    @field_serializer(
+        'amount', 'value_before', 'value_after',
+        'monthly_before', 'monthly_after',
+    )
+    def serialize_decimal(self, value: Decimal) -> float:
+        return float(value)
+
+
 class AssetDepreciationResponse(BaseModel):
     """Respuesta de una cuota de depreciación aplicada."""
     id: UUID
@@ -138,7 +200,9 @@ class FixedAssetResponse(BaseModel):
     # Campos calculados (set en endpoint)
     remaining_months: int = 0
     depreciation_progress: float = 0.0
+    revalued_total: float = 0.0  # Σ deltas firmados de revalorizaciones activas
     depreciations: List[AssetDepreciationResponse] = []
+    revaluations: List[AssetRevaluationResponse] = []
 
     model_config = {"from_attributes": True}
 

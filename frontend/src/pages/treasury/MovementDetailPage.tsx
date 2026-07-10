@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { ArrowLeft, XCircle, Paperclip, Eye, Trash2, Upload, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { useMoneyMovement, useAnnulMovement, useUpdateClassification, useUploadE
 import { usePermissions } from "@/hooks/usePermissions";
 import { EditClassificationModal } from "@/components/treasury/EditClassificationModal";
 import { formatCurrency, formatDate } from "@/utils/formatters";
+import { ROUTES } from "@/utils/constants";
 import apiClient from "@/services/api";
 
 const typeLabels: Record<string, string> = {
@@ -34,6 +35,10 @@ const typeLabels: Record<string, string> = {
   advance_collection: "Anticipo de Cliente",
   asset_payment: "Pago Activo Fijo",
   asset_purchase: "Compra Activo (Crédito)",
+  asset_revaluation_payment: "Revalorización Activo (Pago)",
+  asset_revaluation_credit: "Revalorización Activo (Crédito)",
+  asset_devaluation_collection: "Devaluación Activo (Reembolso)",
+  asset_devaluation_receivable: "Devaluación Activo (Por Cobrar)",
   expense_accrual: "Gasto Causado (Pasivo)",
   deferred_funding: "Pago Gasto Diferido",
   deferred_expense: "Cuota Gasto Diferido",
@@ -49,6 +54,10 @@ const typeLabels: Record<string, string> = {
 };
 
 const EDITABLE_EXPENSE_TYPES = ["expense", "expense_accrual", "provision_expense", "deferred_expense", "depreciation_expense"];
+
+// Movimientos que pertenecen a un activo fijo: se anulan desde el activo, no desde Tesorería (backend responde 422)
+const ASSET_OWNED_TYPES = ["asset_payment", "depreciation_expense", "asset_purchase", "asset_revaluation_payment", "asset_revaluation_credit", "asset_devaluation_collection", "asset_devaluation_receivable"];
+const REVALUATION_TYPES = ["asset_revaluation_payment", "asset_revaluation_credit", "asset_devaluation_collection", "asset_devaluation_receivable"];
 
 const statusBorderMap: Record<string, string> = {
   confirmed: "border-t-[3px] border-t-emerald-400",
@@ -111,7 +120,7 @@ export default function MovementDetailPage() {
               <Pencil className="h-4 w-4 mr-2" />Editar Clasificacion
             </Button>
           )}
-          {movement.status === "confirmed" && !["asset_payment", "depreciation_expense", "asset_purchase"].includes(movement.movement_type) && (
+          {movement.status === "confirmed" && !ASSET_OWNED_TYPES.includes(movement.movement_type) && (
             <Button variant="outline" onClick={() => setShowAnnul(true)} className="text-red-600 border-red-200 hover:bg-red-50">
               <XCircle className="h-4 w-4 mr-2" />Anular
             </Button>
@@ -121,6 +130,18 @@ export default function MovementDetailPage() {
           </Button>
         </div>
       </PageHeader>
+
+      {movement.status === "confirmed" && ASSET_OWNED_TYPES.includes(movement.movement_type) && (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800">
+          Este movimiento pertenece a un activo fijo y no se anula desde Tesorería.{" "}
+          {REVALUATION_TYPES.includes(movement.movement_type)
+            ? "Para revertirlo, usa «Anular» en la sección Revalorizaciones del detalle del activo — eso restaura el valor y la cuota de depreciación."
+            : "Se revierte cancelando el activo desde su detalle."}{" "}
+          <Link to={ROUTES.TREASURY_FIXED_ASSETS} className="font-medium underline underline-offset-2">
+            Ir a Activos Fijos
+          </Link>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card className={`shadow-sm ${statusBorderMap[movement.status] ?? ""}`}>

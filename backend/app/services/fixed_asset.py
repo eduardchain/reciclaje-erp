@@ -7,6 +7,8 @@ Flujo:
 3. apply_pending(): Aplicar depreciacion a TODOS los activos activos del mes
 4. dispose(): Dar de baja con depreciacion acelerada si queda valor
 5. update(): Editar activo (restringido si ya tiene depreciaciones)
+6. revalue(): Revalorizar al alza/baja con contrapartida cuenta o tercero
+7. annul_revaluation(): Anular revalorizacion (guard LIFO exacto)
 """
 from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
@@ -19,7 +21,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.fixed_asset import FixedAsset, AssetDepreciation
+from app.models.fixed_asset import FixedAsset, AssetDepreciation, AssetRevaluation
 from app.models.expense_category import ExpenseCategory
 from app.models.third_party import ThirdParty
 from app.models.money_movement import MoneyMovement
@@ -462,6 +464,305 @@ class CRUDFixedAsset:
         return asset
 
     # ------------------------------------------------------------------
+    # Revalorizacion (requerimiento D — mejora capitalizable / recuperacion)
+    # ------------------------------------------------------------------
+
+    def revalue(
+        self,
+        db: Session,
+        asset_id: UUID,
+        organization_id: UUID,
+        data,
+        user_id: Optional[UUID] = None,
+    ) -> FixedAsset:
+        """
+        Revalorizar un activo fijo al alza o a la baja.
+
+        La contrapartida SIEMPRE es una cuenta (dinero sale/entra) o un tercero
+        (deuda a favor/en contra) — cero efecto en P&L, cero patrimonio.
+        Alza: current_value += amount, opcionalmente extiende vida util.
+        Baja: current_value -= amount (nunca por debajo de salvage_value).
+        Recalcula la cuota: (valor_nuevo - salvage) / meses_restantes.
+        La fecha del evento es SIEMPRE hoy (sin input) — anti back-dating (#62).
+        """
+        asset = self.get(db, asset_id, organization_id)
+
+        if asset.status not in ("active", "fully_depreciated"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No se puede revalorizar: activo en estado '{asset.status}'",
+            )
+
+        is_increase = data.revaluation_type == "increase"
+        amount = data.amount
+        months_extended = data.months_extended if is_increase else 0
+
+        # Validaciones de negocio
+        if not is_increase:
+            depreciable = asset.current_value - asset.salvage_value
+            if depreciable <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El activo ya está en su valor residual — no hay valor que bajar",
+                )
+            if amount > depreciable:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"La baja (${amount}) supera el valor depreciable restante "
+                        f"(${depreciable}). El valor no puede caer bajo el residual."
+                    ),
+                )
+
+        # Contrapartida: cuenta XOR tercero (el schema ya valida el XOR)
+        account = None
+        third_party = None
+        if data.source_account_id:
+            account = mm_service._validate_account(
+                db, data.source_account_id, organization_id,
+                # Solo el alza saca dinero de la cuenta
+                require_funds=amount if is_increase else None,
+            )
+        else:
+            from app.services.third_party import third_party as tp_service
+            third_party = db.execute(
+                select(ThirdParty).where(
+                    ThirdParty.id == data.third_party_id,
+                    ThirdParty.organization_id == organization_id,
+                    ThirdParty.is_active == True,
+                )
+            ).scalar_one_or_none()
+            # Mismas reglas que el proveedor de activos (#32): todo menos provision/liability
+            if not third_party or not tp_service.has_behavior_type(
+                db, third_party.id,
+                ["material_supplier", "service_provider", "customer", "investor", "generic"],
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Tercero no encontrado",
+                )
+
+        # Snapshot + recalculo de cuota sobre meses restantes
+        value_before = asset.current_value
+        monthly_before = asset.monthly_depreciation
+        salvage = asset.salvage_value
+
+        if value_before > salvage and monthly_before > 0:
+            remaining_before = ceil(float((value_before - salvage) / monthly_before))
+        else:
+            remaining_before = 0
+        remaining_after = remaining_before + months_extended
+
+        value_after = value_before + amount if is_increase else value_before - amount
+
+        if value_after > salvage:
+            if remaining_after < 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "El activo no tiene meses restantes de depreciación. "
+                        "Especifique months_extended >= 1 para extender la vida útil."
+                    ),
+                )
+            monthly_after = (
+                (value_after - salvage) / Decimal(remaining_after)
+            ).quantize(Decimal("0.01"))
+        else:
+            # Baja que deja el valor exactamente en el residual
+            monthly_after = monthly_before
+
+        # Fecha del evento: SIEMPRE hoy (patron dispose) — anti back-dating
+        col_today = datetime.now(ZoneInfo("America/Bogota")).date()
+        period = col_today.strftime("%Y-%m")
+        movement_date = datetime.combine(col_today, time(12, 0), tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+
+        label = "alza" if is_increase else "baja"
+        # MM de contrapartida — el efecto de saldo lo aplica este metodo (patron create()).
+        # ⚠️ El signo debe coincidir EXACTO con los 4 sign maps derivados
+        # (reports as-of x2, endpoint statement x2) y los frozensets INFLOW/OUTFLOW.
+        if account:
+            mt = "asset_revaluation_payment" if is_increase else "asset_devaluation_collection"
+            movement = mm_service._create_movement(
+                db=db,
+                organization_id=organization_id,
+                movement_type=mt,
+                amount=amount,
+                account_id=data.source_account_id,
+                date=movement_date,
+                description=f"Revalorización activo ({label}): {asset.name}",
+                user_id=user_id,
+                third_party_id=None,
+                notes=data.reason,
+            )
+            account.current_balance += -amount if is_increase else amount
+        else:
+            mt = "asset_revaluation_credit" if is_increase else "asset_devaluation_receivable"
+            movement = mm_service._create_movement(
+                db=db,
+                organization_id=organization_id,
+                movement_type=mt,
+                amount=amount,
+                account_id=None,
+                date=movement_date,
+                description=f"Revalorización activo ({label}): {asset.name}",
+                user_id=user_id,
+                third_party_id=data.third_party_id,
+                notes=data.reason,
+            )
+            third_party.current_balance += -amount if is_increase else amount
+
+        db.flush()
+
+        revaluation = AssetRevaluation(
+            organization_id=organization_id,
+            fixed_asset_id=asset.id,
+            revaluation_type=data.revaluation_type,
+            amount=amount,
+            months_extended=months_extended,
+            value_before=value_before,
+            value_after=value_after,
+            monthly_before=monthly_before,
+            monthly_after=monthly_after,
+            period=period,
+            money_movement_id=movement.id,
+            reason=data.reason,
+            applied_at=now,
+            applied_by=user_id,
+        )
+        db.add(revaluation)
+
+        # Actualizar activo
+        asset.current_value = value_after
+        asset.monthly_depreciation = monthly_after
+        if months_extended:
+            asset.useful_life_months += months_extended
+
+        # Transiciones de estado
+        if is_increase and asset.status == "fully_depreciated" and value_after > salvage:
+            asset.status = "active"
+        elif not is_increase and value_after <= salvage:
+            asset.status = "fully_depreciated"
+
+        db.commit()
+        db.refresh(asset)
+        return asset
+
+    def annul_revaluation(
+        self,
+        db: Session,
+        asset_id: UUID,
+        revaluation_id: UUID,
+        organization_id: UUID,
+        reason: str,
+        user_id: Optional[UUID] = None,
+    ) -> FixedAsset:
+        """
+        Anular una revalorizacion, revirtiendo exactamente sus efectos.
+
+        Guard LIFO: solo se puede anular si NO existe ningun evento activo
+        POSTERIOR (depreciacion O revalorizacion). Sin esto, restaurar los
+        snapshots value_before/monthly_before pisaria el recalculo de eventos
+        posteriores, y el merge as-of (H1) leeria snapshots obsoletos.
+        A diferencia del guard retirado en Fase 5 (#66), aqui el ledger es
+        COMPLETO (todo evento que mueve current_value queda registrado) —
+        el bloqueo es exacto por construccion, no un falso permiso.
+        """
+        asset = self.get(db, asset_id, organization_id)
+
+        if asset.status not in ("active", "fully_depreciated"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No se puede anular revalorizaciones de un activo '{asset.status}'",
+            )
+
+        revaluation = db.execute(
+            select(AssetRevaluation).where(
+                AssetRevaluation.id == revaluation_id,
+                AssetRevaluation.fixed_asset_id == asset.id,
+                AssetRevaluation.organization_id == organization_id,
+            )
+        ).scalar_one_or_none()
+        if not revaluation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Revalorización no encontrada",
+            )
+        if not revaluation.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La revalorización ya está anulada",
+            )
+
+        # Guard LIFO: eventos activos posteriores
+        later_dep = db.execute(
+            select(func.count()).where(
+                AssetDepreciation.fixed_asset_id == asset.id,
+                AssetDepreciation.is_active == True,
+                AssetDepreciation.applied_at > revaluation.applied_at,
+            )
+        ).scalar() or 0
+        later_reval = db.execute(
+            select(func.count()).where(
+                AssetRevaluation.fixed_asset_id == asset.id,
+                AssetRevaluation.is_active == True,
+                AssetRevaluation.applied_at > revaluation.applied_at,
+            )
+        ).scalar() or 0
+        if later_dep or later_reval:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "No se puede anular: el activo tiene depreciaciones o "
+                    "revalorizaciones posteriores. Anule primero los eventos "
+                    "más recientes (o cancele el activo completo)."
+                ),
+            )
+
+        now = datetime.now(timezone.utc)
+        is_increase = revaluation.revaluation_type == "increase"
+
+        # Revertir el MM de contrapartida (efecto opuesto exacto)
+        movement = db.get(MoneyMovement, revaluation.money_movement_id)
+        if movement and movement.status == "confirmed":
+            if movement.account_id:
+                from app.models.money_account import MoneyAccount
+                acc = db.get(MoneyAccount, movement.account_id)
+                if acc:
+                    # payment saco dinero → devolver; collection metio → sacar
+                    acc.current_balance += movement.amount if is_increase else -movement.amount
+            elif movement.third_party_id:
+                tp = db.get(ThirdParty, movement.third_party_id)
+                if tp:
+                    # credit bajo su balance → subir; receivable subio → bajar
+                    tp.current_balance += movement.amount if is_increase else -movement.amount
+            movement.status = "annulled"
+            movement.annulled_at = now
+            movement.annulled_by = user_id
+            movement.annulled_reason = f"Anulación de revalorización: {reason}"
+
+        # Restaurar snapshots (exacto — garantizado por el guard LIFO)
+        asset.current_value = revaluation.value_before
+        asset.monthly_depreciation = revaluation.monthly_before
+        if revaluation.months_extended:
+            asset.useful_life_months -= revaluation.months_extended
+
+        # Transiciones de estado inversas
+        if asset.current_value <= asset.salvage_value:
+            asset.status = "fully_depreciated"
+        else:
+            asset.status = "active"
+
+        revaluation.is_active = False
+        revaluation.annulled_at = now
+        revaluation.annulled_by = user_id
+        revaluation.annulled_reason = reason
+
+        db.commit()
+        db.refresh(asset)
+        return asset
+
+    # ------------------------------------------------------------------
     # Update
     # ------------------------------------------------------------------
 
@@ -613,6 +914,37 @@ class CRUDFixedAsset:
                     mov.annulled_reason = f"Cancelacion de activo: {asset.name}"
             dep.is_active = False
 
+        # 1b. Revertir revalorizaciones activas (los efectos de saldo son sumas
+        # independientes — el orden no importa; el activo se cancela entero)
+        revaluations = db.execute(
+            select(AssetRevaluation).where(
+                AssetRevaluation.fixed_asset_id == asset.id,
+                AssetRevaluation.is_active == True,
+            )
+        ).scalars().all()
+
+        for reval in revaluations:
+            is_increase = reval.revaluation_type == "increase"
+            mov = db.get(MoneyMovement, reval.money_movement_id)
+            if mov and mov.status == "confirmed":
+                if mov.account_id:
+                    from app.models.money_account import MoneyAccount
+                    acc = db.get(MoneyAccount, mov.account_id)
+                    if acc:
+                        acc.current_balance += mov.amount if is_increase else -mov.amount
+                elif mov.third_party_id:
+                    tp = db.get(ThirdParty, mov.third_party_id)
+                    if tp:
+                        tp.current_balance += mov.amount if is_increase else -mov.amount
+                mov.status = "annulled"
+                mov.annulled_at = now
+                mov.annulled_by = user_id
+                mov.annulled_reason = f"Cancelacion de activo: {asset.name}"
+            reval.is_active = False
+            reval.annulled_at = now
+            reval.annulled_by = user_id
+            reval.annulled_reason = f"Cancelacion de activo: {asset.name}"
+
         # 2. Revertir movimiento de pago original
         if asset.purchase_movement_id:
             payment_mov = db.get(MoneyMovement, asset.purchase_movement_id)
@@ -658,6 +990,7 @@ class CRUDFixedAsset:
             select(FixedAsset)
             .options(
                 joinedload(FixedAsset.depreciations),
+                joinedload(FixedAsset.revaluations),
                 joinedload(FixedAsset.expense_category),
                 joinedload(FixedAsset.third_party),
             )
@@ -695,6 +1028,9 @@ class CRUDFixedAsset:
             base.options(
                 joinedload(FixedAsset.expense_category),
                 joinedload(FixedAsset.third_party),
+                # revalued_total se computa en _build_response también para el
+                # listado — sin eager load seria un lazy-load N+1 por activo
+                joinedload(FixedAsset.revaluations),
             )
             .order_by(FixedAsset.created_at.desc())
             .offset(skip)

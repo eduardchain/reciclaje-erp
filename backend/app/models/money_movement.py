@@ -81,6 +81,10 @@ VALID_MOVEMENT_TYPES = [
     "tp_transfer_in",           # Transferencia entre terceros (entrada): NO cuenta, dest.balance(+)
     "tp_adjustment_credit",     # Ajuste saldo tercero (credito): NO cuenta, tp.balance(+), P&L segun adjustment_class
     "tp_adjustment_debit",      # Ajuste saldo tercero (debito): NO cuenta, tp.balance(-), P&L segun adjustment_class
+    "asset_revaluation_payment",     # Revalorizacion activo al alza pagada: account(-), NO P&L (capex)
+    "asset_revaluation_credit",      # Revalorizacion activo al alza a credito: NO cuenta, supplier.balance(-)
+    "asset_devaluation_collection",  # Devaluacion activo con reembolso: account(+), NO P&L
+    "asset_devaluation_receivable",  # Devaluacion activo a cargo de tercero: NO cuenta, tp.balance(+)
 ]
 
 

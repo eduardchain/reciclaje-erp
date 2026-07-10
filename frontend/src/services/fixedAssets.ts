@@ -5,6 +5,7 @@ import type {
   FixedAssetCreate,
   FixedAssetUpdate,
   ApplyPendingResult,
+  AssetRevaluationCreate,
 } from "@/types/fixed-asset";
 
 interface FixedAssetFilters {
@@ -51,6 +52,19 @@ export const fixedAssetService = {
 
   cancel: async (id: string): Promise<FixedAsset> => {
     const response = await apiClient.post<FixedAsset>(`/api/v1/fixed-assets/${id}/cancel`);
+    return response.data;
+  },
+
+  revalue: async (id: string, data: AssetRevaluationCreate): Promise<FixedAsset> => {
+    const response = await apiClient.post<FixedAsset>(`/api/v1/fixed-assets/${id}/revalue`, data);
+    return response.data;
+  },
+
+  annulRevaluation: async (id: string, revaluationId: string, reason: string): Promise<FixedAsset> => {
+    const response = await apiClient.post<FixedAsset>(
+      `/api/v1/fixed-assets/${id}/revaluations/${revaluationId}/annul`,
+      { reason },
+    );
     return response.data;
   },
 };

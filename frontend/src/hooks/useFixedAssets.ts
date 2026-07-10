@@ -100,6 +100,36 @@ export function useCancelFixedAsset() {
   });
 }
 
+export function useRevalueAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof fixedAssetService.revalue>[1] }) =>
+      fixedAssetService.revalue(id, data),
+    onSuccess: () => {
+      invalidateAfterFixedAsset(queryClient);
+      toast.success("Revalorización aplicada");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al revalorizar el activo"));
+    },
+  });
+}
+
+export function useAnnulRevaluation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, revaluationId, reason }: { id: string; revaluationId: string; reason: string }) =>
+      fixedAssetService.annulRevaluation(id, revaluationId, reason),
+    onSuccess: () => {
+      invalidateAfterFixedAsset(queryClient);
+      toast.success("Revalorización anulada — efectos revertidos");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al anular la revalorización"));
+    },
+  });
+}
+
 export function useDisposeAsset() {
   const queryClient = useQueryClient();
   return useMutation({

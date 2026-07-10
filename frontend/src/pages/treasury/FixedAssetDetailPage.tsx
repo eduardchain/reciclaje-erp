@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, XCircle, Pencil } from "lucide-react";
+import { ArrowLeft, Play, XCircle, Pencil, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,10 +9,12 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { useFixedAsset, useDepreciateAsset, useDisposeAsset, useCancelFixedAsset } from "@/hooks/useFixedAssets";
+import { RevalueAssetModal } from "@/components/treasury/RevalueAssetModal";
+import { useFixedAsset, useDepreciateAsset, useDisposeAsset, useCancelFixedAsset, useAnnulRevaluation } from "@/hooks/useFixedAssets";
 import { formatCurrency } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import { MoneyMovementLink } from "@/components/shared/EntityLink";
+import type { AssetRevaluation } from "@/types/fixed-asset";
 
 const statusLabels: Record<string, string> = {
   active: "Activo",
@@ -35,10 +37,14 @@ export default function FixedAssetDetailPage() {
   const depreciate = useDepreciateAsset();
   const dispose = useDisposeAsset();
   const cancelAsset = useCancelFixedAsset();
+  const annulRevaluation = useAnnulRevaluation();
   const [showDepreciate, setShowDepreciate] = useState(false);
   const [showDispose, setShowDispose] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
+  const [showRevalue, setShowRevalue] = useState(false);
   const [disposeReason, setDisposeReason] = useState("");
+  const [annulTarget, setAnnulTarget] = useState<AssetRevaluation | null>(null);
+  const [annulReason, setAnnulReason] = useState("");
 
   if (isLoading) return <p className="text-center py-12 text-slate-400">Cargando...</p>;
   if (!asset) return <p className="text-center py-12 text-slate-400">Activo fijo no encontrado</p>;
@@ -46,6 +52,8 @@ export default function FixedAssetDetailPage() {
   const canDepreciate = asset.status === "active";
   const canDispose = !["disposed", "cancelled"].includes(asset.status);
   const canCancel = ["active", "fully_depreciated"].includes(asset.status);
+  const canRevalue = ["active", "fully_depreciated"].includes(asset.status);
+  const revaluations = asset.revaluations ?? [];
   const progress = Math.min(asset.depreciation_progress, 100);
   const remaining = asset.current_value - asset.salvage_value;
   const nextDepreciationAmount = remaining <= asset.monthly_depreciation ? remaining : asset.monthly_depreciation;
@@ -70,6 +78,11 @@ export default function FixedAssetDetailPage() {
           <CardContent className="p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Valor Actual</p>
             <p className="text-2xl font-bold text-emerald-600 tabular-nums">{formatCurrency(asset.current_value)}</p>
+            {asset.revalued_total !== 0 && (
+              <p className="text-xs text-indigo-600 mt-1 tabular-nums">
+                incluye {asset.revalued_total > 0 ? "+" : ""}{formatCurrency(asset.revalued_total)} revalorizado
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card className="shadow-sm">
@@ -172,7 +185,7 @@ export default function FixedAssetDetailPage() {
       </Card>
 
       {/* Acciones */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
           {asset.status !== "disposed" && (
             <Button variant="outline" onClick={() => navigate(`/treasury/fixed-assets/${asset.id}/edit`)}>
               <Pencil className="h-4 w-4 mr-2" />Editar
@@ -181,6 +194,11 @@ export default function FixedAssetDetailPage() {
           {canDepreciate && (
             <Button onClick={() => setShowDepreciate(true)} className="bg-emerald-600 hover:bg-emerald-700">
               <Play className="h-4 w-4 mr-2" />Aplicar Depreciacion
+            </Button>
+          )}
+          {canRevalue && (
+            <Button variant="outline" onClick={() => setShowRevalue(true)} className="text-indigo-600 hover:text-indigo-700">
+              <TrendingUp className="h-4 w-4 mr-2" />Revalorizar
             </Button>
           )}
           {canDispose && (
@@ -242,7 +260,146 @@ export default function FixedAssetDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Tabla de revalorizaciones */}
+      {revaluations.length > 0 && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+              Revalorizaciones ({revaluations.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {/* Desktop */}
+            <div className="hidden md:block overflow-x-auto">
+              <Table className="min-w-[820px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
+                    <TableHead className="text-right">Valor Despues</TableHead>
+                    <TableHead className="text-right">Cuota Despues</TableHead>
+                    <TableHead>Meses +</TableHead>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>Motivo</TableHead>
+                    <TableHead>Movimiento</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {revaluations.map((rev) => (
+                    <TableRow key={rev.id} className={rev.is_active ? "" : "opacity-50"}>
+                      <TableCell>
+                        <Badge variant="secondary" className={rev.revaluation_type === "increase" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}>
+                          {rev.revaluation_type === "increase" ? "Alza" : "Baja"}
+                        </Badge>
+                        {!rev.is_active && (
+                          <Badge variant="secondary" className="ml-1 bg-slate-100 text-slate-500">Anulada</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {rev.revaluation_type === "increase" ? "+" : "−"}{formatCurrency(rev.amount)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{formatCurrency(rev.value_after)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatCurrency(rev.monthly_after)}</TableCell>
+                      <TableCell className="tabular-nums">{rev.months_extended || "—"}</TableCell>
+                      <TableCell className="text-sm text-slate-500">
+                        {new Date(rev.applied_at).toLocaleDateString("es-CO")}
+                      </TableCell>
+                      <TableCell className="text-sm max-w-[160px] truncate" title={rev.reason ?? undefined}>
+                        {rev.reason || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <MoneyMovementLink id={rev.money_movement_id}>Ver</MoneyMovementLink>
+                      </TableCell>
+                      <TableCell>
+                        {rev.is_active && canRevalue && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-600 hover:text-red-700 h-7 px-2"
+                            onClick={() => { setAnnulTarget(rev); setAnnulReason(""); }}
+                          >
+                            Anular
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {/* Mobile cards */}
+            <div className="md:hidden space-y-2">
+              {revaluations.map((rev) => (
+                <div key={rev.id} className={`rounded-lg border border-slate-200 p-3 text-sm space-y-1 ${rev.is_active ? "" : "opacity-50"}`}>
+                  <div className="flex justify-between gap-3">
+                    <span>
+                      <Badge variant="secondary" className={rev.revaluation_type === "increase" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}>
+                        {rev.revaluation_type === "increase" ? "Alza" : "Baja"}
+                      </Badge>
+                      {!rev.is_active && (
+                        <Badge variant="secondary" className="ml-1 bg-slate-100 text-slate-500">Anulada</Badge>
+                      )}
+                    </span>
+                    <span className="font-medium tabular-nums">
+                      {rev.revaluation_type === "increase" ? "+" : "−"}{formatCurrency(rev.amount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3 text-slate-500">
+                    <span>Valor → {formatCurrency(rev.value_after)}</span>
+                    <span>{new Date(rev.applied_at).toLocaleDateString("es-CO")}</span>
+                  </div>
+                  <div className="flex justify-between gap-3 items-center">
+                    <MoneyMovementLink id={rev.money_movement_id}>Ver movimiento</MoneyMovementLink>
+                    {rev.is_active && canRevalue && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:text-red-700 h-7 px-2"
+                        onClick={() => { setAnnulTarget(rev); setAnnulReason(""); }}
+                      >
+                        Anular
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Dialogs */}
+      <RevalueAssetModal open={showRevalue} onOpenChange={setShowRevalue} asset={asset} />
+      <ConfirmDialog
+        open={annulTarget !== null}
+        onOpenChange={(open) => { if (!open) setAnnulTarget(null); }}
+        title="Anular Revalorización"
+        description={
+          annulTarget
+            ? `Se revertirá exactamente el efecto: valor ${formatCurrency(annulTarget.value_after)} → ${formatCurrency(annulTarget.value_before)}, cuota ${formatCurrency(annulTarget.monthly_after)} → ${formatCurrency(annulTarget.monthly_before)}, y la cuenta o tercero recupera el saldo. Solo se puede anular el evento más reciente del activo.`
+            : ""
+        }
+        confirmLabel="Anular Revalorización"
+        variant="destructive"
+        loading={annulRevaluation.isPending}
+        onConfirm={() => {
+          if (!annulTarget || !annulReason.trim()) return;
+          annulRevaluation.mutate(
+            { id: asset.id, revaluationId: annulTarget.id, reason: annulReason },
+            { onSuccess: () => setAnnulTarget(null) },
+          );
+        }}
+      >
+        <div className="mt-3">
+          <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Razón *</Label>
+          <Input
+            value={annulReason}
+            onChange={(e) => setAnnulReason(e.target.value)}
+            placeholder="Ej: Error de captura, monto incorrecto"
+          />
+        </div>
+      </ConfirmDialog>
       <ConfirmDialog
         open={showDepreciate}
         onOpenChange={setShowDepreciate}

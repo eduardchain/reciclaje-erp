@@ -184,6 +184,7 @@ class CashFlowInflows(BaseModel):
     capital_injections: float
     advance_collections: float = 0.0
     generic_collections: float = 0.0
+    asset_devaluation_collections: float = 0.0
     total: float
 
 
@@ -269,6 +270,8 @@ class BalanceDetailedItem(BaseModel):
     current_value: Optional[float] = None
     purchase_value: Optional[float] = None
     accumulated_depreciation: Optional[float] = None
+    # Σ deltas firmados de revalorizaciones activas del activo (alza − baja)
+    revalued_amount: Optional[float] = None
     investor_type: Optional[str] = None
     account_type: Optional[str] = None
     # Tercero/cuenta desactivado hoy pero con saldo al corte historico (solo as_of_date)

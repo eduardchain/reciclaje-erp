@@ -12,6 +12,36 @@ export interface AssetDepreciation {
   applied_by: string | null;
 }
 
+export type RevaluationType = "increase" | "decrease";
+
+export interface AssetRevaluation {
+  id: string;
+  revaluation_type: RevaluationType;
+  amount: number;
+  months_extended: number;
+  value_before: number;
+  value_after: number;
+  monthly_before: number;
+  monthly_after: number;
+  period: string;
+  money_movement_id: string;
+  reason: string | null;
+  applied_at: string;
+  applied_by: string | null;
+  is_active: boolean;
+  annulled_at: string | null;
+  annulled_reason: string | null;
+}
+
+export interface AssetRevaluationCreate {
+  revaluation_type: RevaluationType;
+  amount: number;
+  months_extended?: number;
+  source_account_id?: string | null;
+  third_party_id?: string | null;
+  reason?: string | null;
+}
+
 export interface FixedAsset {
   id: string;
   organization_id: string;
@@ -41,7 +71,9 @@ export interface FixedAsset {
   updated_at: string;
   remaining_months: number;
   depreciation_progress: number;
+  revalued_total: number;
   depreciations: AssetDepreciation[];
+  revaluations: AssetRevaluation[];
 }
 
 export interface FixedAssetCreate {

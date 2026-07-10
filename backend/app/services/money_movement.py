@@ -1029,12 +1029,16 @@ class CRUDMoneyMovement:
             )
 
         # Movimientos generados por Activos Fijos no se anulan desde Tesorería
-        ASSET_MOVEMENT_TYPES = {"asset_payment", "depreciation_expense", "asset_purchase"}
+        ASSET_MOVEMENT_TYPES = {
+            "asset_payment", "depreciation_expense", "asset_purchase",
+            "asset_revaluation_payment", "asset_revaluation_credit",
+            "asset_devaluation_collection", "asset_devaluation_receivable",
+        }
         if movement.movement_type in ASSET_MOVEMENT_TYPES:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="No se puede anular un movimiento generado por Activos Fijos. "
-                "Use la opcion Cancelar Activo desde el modulo de Activos Fijos.",
+                "Use Cancelar Activo o Anular Revalorización desde el modulo de Activos Fijos.",
             )
 
         now = datetime.now(timezone.utc)

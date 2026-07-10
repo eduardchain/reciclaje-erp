@@ -9,6 +9,8 @@ POST   /{id}/depreciate     — Aplicar UNA depreciacion
 POST   /apply-pending       — Aplicar depreciaciones pendientes (batch)
 POST   /{id}/cancel         — Cancelar activo (revertir todo)
 POST   /{id}/dispose        — Dar de baja
+POST   /{id}/revalue        — Revalorizar (alza/baja, contrapartida cuenta o tercero)
+POST   /{id}/revaluations/{rev_id}/annul — Anular revalorizacion (guard LIFO)
 """
 from typing import List
 from uuid import UUID
@@ -23,6 +25,9 @@ from app.schemas.fixed_asset import (
     FixedAssetResponse,
     FixedAssetDisposeRequest,
     AssetDepreciationResponse,
+    AssetRevaluationRequest,
+    AssetRevaluationAnnulRequest,
+    AssetRevaluationResponse,
     PaginatedFixedAssetResponse,
     ApplyPendingResult,
 )
@@ -50,6 +55,16 @@ def _build_response(asset, include_depreciations: bool = False) -> FixedAssetRes
     deps = []
     if include_depreciations and asset.depreciations:
         deps = [AssetDepreciationResponse.model_validate(d) for d in asset.depreciations]
+
+    revals = []
+    revalued_total = 0.0
+    revaluations = getattr(asset, "revaluations", None) or []
+    for r in revaluations:
+        if r.is_active:
+            delta = float(r.amount) if r.revaluation_type == "increase" else -float(r.amount)
+            revalued_total += delta
+    if include_depreciations and revaluations:
+        revals = [AssetRevaluationResponse.model_validate(r) for r in revaluations]
 
     return FixedAssetResponse(
         id=asset.id,
@@ -80,7 +95,9 @@ def _build_response(asset, include_depreciations: bool = False) -> FixedAssetRes
         updated_at=asset.updated_at,
         remaining_months=remaining_months,
         depreciation_progress=round(progress, 2),
+        revalued_total=revalued_total,
         depreciations=deps,
+        revaluations=revals,
     )
 
 
@@ -196,6 +213,46 @@ def cancel_asset(
         db=db,
         asset_id=asset_id,
         organization_id=ctx["organization_id"],
+        user_id=ctx["user_id"],
+    )
+    asset = fixed_asset.get(db, asset.id, ctx["organization_id"])
+    return _build_response(asset, include_depreciations=True)
+
+
+@router.post("/{asset_id}/revalue", response_model=FixedAssetResponse, status_code=201)
+def revalue_asset(
+    asset_id: UUID,
+    data: AssetRevaluationRequest,
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_permission("treasury.manage_fixed_assets")),
+):
+    """Revalorizar un activo fijo (alza/baja) con contrapartida cuenta o tercero."""
+    asset = fixed_asset.revalue(
+        db=db,
+        asset_id=asset_id,
+        organization_id=ctx["organization_id"],
+        data=data,
+        user_id=ctx["user_id"],
+    )
+    asset = fixed_asset.get(db, asset.id, ctx["organization_id"])
+    return _build_response(asset, include_depreciations=True)
+
+
+@router.post("/{asset_id}/revaluations/{revaluation_id}/annul", response_model=FixedAssetResponse)
+def annul_asset_revaluation(
+    asset_id: UUID,
+    revaluation_id: UUID,
+    data: AssetRevaluationAnnulRequest,
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_permission("treasury.manage_fixed_assets")),
+):
+    """Anular una revalorizacion (solo el evento mas reciente — guard LIFO)."""
+    asset = fixed_asset.annul_revaluation(
+        db=db,
+        asset_id=asset_id,
+        revaluation_id=revaluation_id,
+        organization_id=ctx["organization_id"],
+        reason=data.reason,
         user_id=ctx["user_id"],
     )
     asset = fixed_asset.get(db, asset.id, ctx["organization_id"])
