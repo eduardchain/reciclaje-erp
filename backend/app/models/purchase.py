@@ -88,7 +88,17 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         default=0,
         comment="Total purchase amount (sum of all line totals)",
     )
-    
+
+    cancellation_cost_adjustment: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+        comment="Ajuste de costo al cancelar compra liquidada (Fase 5 remocion "
+                "ponderada): diferencia entre lo que la compra metio al pool y lo "
+                "que la remocion pudo sacar. Entra al P&L por cancelled_at.",
+    )
+
     status: Mapped[str] = mapped_column(
         Enum("registered", "liquidated", "cancelled", name="purchase_status"),
         nullable=False,

@@ -27,7 +27,7 @@ from app.models.warehouse import Warehouse
 from app.schemas.material_transformation import MaterialTransformationCreate
 
 
-from app.services.inventory_costing import incorporate_into_pool
+from app.services.inventory_costing import incorporate_into_pool, remove_from_pool
 from app.services.material_cost_history import material_cost_history_service
 
 
@@ -338,10 +338,14 @@ class CRUDMaterialTransformation:
         user_id: Optional[UUID] = None,
     ) -> MaterialTransformation:
         """
-        Anular transformacion — revierte stock de origen y destinos.
+        Anular transformacion — revierte stock con conservacion de valor (Fase 5).
 
-        Revierte costo promedio de materiales destino usando historial.
-        Bloquea si hay operaciones posteriores de costo.
+        Nunca bloquea. Fuente: reingreso PONDERADO a source_unit_cost (el valor
+        que salio vuelve como valor, puede rellenar hueco). Destinos: remocion
+        PONDERADA de la contribucion real de cada linea (unit_cost +
+        cost_adjustment de relleno prorrateado, H1). La suma de diferencias va
+        a annul_cost_adjustment (P&L por annulled_at). El historial de costo es
+        append-only: se registra transformation_annulment por material afectado.
         """
         transformation = self._get_or_404(db, transformation_id, organization_id)
 
@@ -359,49 +363,36 @@ class CRUDMaterialTransformation:
         )
         transformation = db.scalar(stmt)
 
-        # Verificar que no hay operaciones posteriores de costo por material fuente
-        can_revert_src, blocking_src = material_cost_history_service.check_can_revert(
-            db=db,
-            material_id=transformation.source_material_id,
-            source_type="transformation_out",
-            source_id=transformation.id,
-        )
-        if not can_revert_src:
-            source_material = db.get(Material, transformation.source_material_id)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"No se puede anular: existen operaciones posteriores que afectaron "
-                       f"el costo de '{source_material.name}'. Cancele primero: {', '.join(blocking_src)}"
-            )
+        total_annul_adjustment = Decimal("0")
 
-        # Verificar que no hay operaciones posteriores de costo por cada material destino
-        for line in transformation.lines:
-            can_revert, blocking = material_cost_history_service.check_can_revert(
-                db=db,
-                material_id=line.destination_material_id,
-                source_type="transformation_in",
-                source_id=transformation.id,
-            )
-            if not can_revert:
-                dest_material = db.get(Material, line.destination_material_id)
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"No se puede anular: existen operaciones posteriores que afectaron "
-                           f"el costo de '{dest_material.name}'. Cancele primero: {', '.join(blocking)}"
-                )
-
-        # Revertir: restaurar stock y cost history del material de origen
+        # Fuente: reingreso ponderado del valor que salio (source_unit_cost es
+        # el avg del momento de la transformacion, persistido en la cabecera)
         source_material = db.get(Material, transformation.source_material_id)
+        old_liq = source_material.current_stock_liquidated
+        old_avg = source_material.current_average_cost
+        new_avg, adjustment = incorporate_into_pool(
+            liquidated=old_liq,
+            avg_cost=old_avg,
+            quantity=transformation.source_quantity,
+            unit_cost=transformation.source_unit_cost,
+        )
+        source_material.current_average_cost = new_avg
         source_material.current_stock_liquidated += transformation.source_quantity
         source_material.current_stock += transformation.source_quantity
-
-        # Revertir cost history del fuente
-        material_cost_history_service.revert_cost_change(
-            db=db,
-            material=source_material,
-            source_type="transformation_out",
-            source_id=transformation.id,
-        )
+        total_annul_adjustment += adjustment
+        # SIEMPRE registrar (ver nota H2: el original queda oculto en as-of)
+        material_cost_history_service.record_cost_change(
+                db=db,
+                material=source_material,
+                previous_cost=old_avg,
+                previous_stock=old_liq,
+                new_cost=new_avg,
+                new_stock=old_liq + transformation.source_quantity,
+                source_type="transformation_annulment",
+                source_id=transformation.id,
+                organization_id=organization_id,
+                transaction_date=datetime.now(timezone.utc).date(),
+            )
 
         self._create_inventory_movement(
             db=db,
@@ -416,19 +407,38 @@ class CRUDMaterialTransformation:
             notes=f"Anulacion transformacion #{transformation.transformation_number}: restaurar {source_material.name}",
         )
 
-        # Revertir: descontar stock y costo de cada material destino
+        # Destinos: remocion ponderada de la contribucion real de cada linea
         for line in transformation.lines:
             dest_material = db.get(Material, line.destination_material_id)
+
+            u_total = line.unit_cost
+            if line.quantity > 0:
+                u_total = line.unit_cost + (line.cost_adjustment / line.quantity)
+
+            old_liq = dest_material.current_stock_liquidated
+            old_avg = dest_material.current_average_cost
+            new_avg, adjustment = remove_from_pool(
+                liquidated=old_liq,
+                avg_cost=old_avg,
+                quantity=line.quantity,
+                unit_cost=u_total,
+            )
+            dest_material.current_average_cost = new_avg
             dest_material.current_stock_liquidated -= line.quantity
             dest_material.current_stock -= line.quantity
-
-            # Revertir costo promedio usando historial
-            material_cost_history_service.revert_cost_change(
-                db=db,
-                material=dest_material,
-                source_type="transformation_in",
-                source_id=transformation.id,
-            )
+            total_annul_adjustment += adjustment
+            material_cost_history_service.record_cost_change(
+                    db=db,
+                    material=dest_material,
+                    previous_cost=old_avg,
+                    previous_stock=old_liq,
+                    new_cost=new_avg,
+                    new_stock=old_liq - line.quantity,
+                    source_type="transformation_annulment",
+                    source_id=transformation.id,
+                    organization_id=organization_id,
+                    transaction_date=datetime.now(timezone.utc).date(),
+                )
 
             self._create_inventory_movement(
                 db=db,
@@ -442,6 +452,8 @@ class CRUDMaterialTransformation:
                 reference_id=transformation.id,
                 notes=f"Anulacion transformacion #{transformation.transformation_number}: revertir {dest_material.name}",
             )
+
+        transformation.annul_cost_adjustment = total_annul_adjustment
 
         # Marcar como anulada
         transformation.status = "annulled"

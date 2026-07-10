@@ -117,8 +117,10 @@ class TestPurchaseStress:
         cancelled = api_cancel_purchase(client, h, compra_1["id"])
         assert cancelled["status"] == "cancelled"
 
-        # Stock revertido, avg revertido
-        assert_material(client, h, ch_id, total=0, transit=0, liquidated=0, avg_cost=0)
+        # Stock revertido. Fase 5 (remocion ponderada): el avg queda en $50
+        # como remanente inocuo con stock 0 (la proxima entrada resetea via
+        # pool==0); antes el rewind lo devolvia a $0 — pool value $0 igual.
+        assert_material(client, h, ch_id, total=0, transit=0, liquidated=0, avg_cost=50)
         # Proveedor: liquidación revertida (+$5K), pago NO revertido → +$5K (nos debe)
         assert_tp_balance(client, h, sup_id, 5_000)
         # Cuenta: sin cambio (pago es MM separado)

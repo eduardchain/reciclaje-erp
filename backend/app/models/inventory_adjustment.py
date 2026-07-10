@@ -154,6 +154,16 @@ class InventoryAdjustment(Base, OrganizationMixin, TimestampMixin):
                 "pool negativo): COGS ya cargado vs costo real de entrada. Entra al P&L.",
     )
 
+    annul_cost_adjustment: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+        comment="Ajuste de costo al anular el ajuste (Fase 5 remocion/reingreso "
+                "ponderado). Entra al P&L por annulled_at aunque el ajuste este "
+                "annulled (es el efecto real de la anulacion).",
+    )
+
     # Razon y notas
     reason: Mapped[str] = mapped_column(
         Text,

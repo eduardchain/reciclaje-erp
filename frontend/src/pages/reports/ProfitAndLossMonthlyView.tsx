@@ -196,7 +196,7 @@ export default function ProfitAndLossMonthlyView() {
                    || Math.abs(d.totals.adjustment_net) > 0.01,
     },
     {
-      label: "Ajuste Costo por Sobreventa",
+      label: "Ajuste Costo por Sobreventa y Reversiones",
       value: (p) => p.oversell_cost_adjustment,
       cellClass: (v) => v >= 0 ? "text-emerald-700" : "text-red-700",
       visible: (d) => d.periods.some((p) => Math.abs(p.oversell_cost_adjustment) > 0.01)

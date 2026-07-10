@@ -300,7 +300,7 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
   rows.push(["Transformaciones (neto)", rec.transformation_net]);
   rows.push(["Ajustes de Inventario (neto)", rec.inventory_adjustment_net]);
   rows.push(["Ajustes de Terceros (neto)", rec.tp_adjustment_net]);
-  rows.push(["Ajuste Costo por Sobreventa", rec.oversell_cost_adjustment]);
+  rows.push(["Ajuste Costo por Sobreventa y Reversiones", rec.oversell_cost_adjustment]);
   rows.push(["= Utilidad Neta P&L", rec.pnl_net_profit]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -455,7 +455,7 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   if (data.transformation_profit !== 0) rows.push(["Gan/Perd Transformaciones", data.transformation_profit]);
   if (data.waste_loss > 0) rows.push(["Perdida por Merma", -data.waste_loss]);
   if (data.adjustment_net !== 0) rows.push(["Ajustes de Inventario", data.adjustment_net]);
-  if (data.oversell_cost_adjustment !== 0) rows.push(["Ajuste Costo por Sobreventa", data.oversell_cost_adjustment]);
+  if (data.oversell_cost_adjustment !== 0) rows.push(["Ajuste Costo por Sobreventa y Reversiones", data.oversell_cost_adjustment]);
   if (data.tp_adjustment_gain > 0) rows.push(["+ Ganancia Ajuste Terceros", data.tp_adjustment_gain]);
   if (data.tp_adjustment_loss > 0) rows.push(["- Perdida Ajuste Terceros", -data.tp_adjustment_loss]);
   rows.push(["Utilidad Bruta Total", data.total_gross_profit]);
@@ -521,7 +521,7 @@ export function exportPnlMonthlyExcel(
     pushRow("Ajustes de Inventario", (p) => p.adjustment_net);
   }
   if (data.periods.some((p) => Math.abs(p.oversell_cost_adjustment) > 0.01) || Math.abs(data.totals.oversell_cost_adjustment) > 0.01) {
-    pushRow("Ajuste Costo por Sobreventa", (p) => p.oversell_cost_adjustment);
+    pushRow("Ajuste Costo por Sobreventa y Reversiones", (p) => p.oversell_cost_adjustment);
   }
   if (data.periods.some((p) => p.tp_adjustment_gain > 0) || data.totals.tp_adjustment_gain > 0) {
     pushRow("+ Ganancia Ajuste Terceros", (p) => p.tp_adjustment_gain);

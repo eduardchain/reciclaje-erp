@@ -1817,11 +1817,14 @@ class TestCostHistory:
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
     ):
         """
-        Cancelar compra liquidada revierte el costo promedio al valor anterior.
+        Cancelar compra liquidada saca su valor del pool (remocion ponderada).
 
         1. Material empieza en costo=0, stock=0
         2. Compra 1: 1000kg @ $2000 → costo=$2000
-        3. Cancelar Compra 1 → costo vuelve a $0
+        3. Cancelar Compra 1 → pool 0; el avg queda en $2000 como remanente
+           inocuo (Fase 5: con stock 0 el avg es irrelevante — la proxima
+           entrada resetea via incorporate con pool==0). Antes el rewind lo
+           devolvia a $0; mismo valor de pool ($0) en ambos casos.
         """
         payload = {
             "supplier_id": str(test_supplier.id),
@@ -1851,7 +1854,8 @@ class TestCostHistory:
         assert response.status_code == 200
 
         db_session.refresh(test_material)
-        assert test_material.current_average_cost == Decimal("0.0000")
+        assert test_material.current_stock_liquidated == Decimal("0")
+        assert test_material.current_average_cost == Decimal("2000.0000")
 
     def test_cancel_most_recent_allowed(
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
@@ -1909,15 +1913,16 @@ class TestCostHistory:
         db_session.refresh(test_material)
         assert test_material.current_average_cost == Decimal("2000.0000")
 
-    def test_cancel_blocked_by_subsequent_purchase(
+    def test_cancel_earlier_purchase_weighted_removal(
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
     ):
         """
-        Cancelar compra bloqueada por operacion posterior.
+        Fase 5: cancelar una compra con operacion posterior YA NO bloquea —
+        remocion ponderada exacta (antes: HTTP 400 "Cancele primero").
 
         1. Compra 1: 1000kg @ $2000 → costo=$2000
         2. Compra 2: 1000kg @ $2400 → costo=$2200
-        3. Intentar cancelar Compra 1 → HTTP 400
+        3. Cancelar Compra 1 → 200; quedan 1000kg de la Compra 2 @ $2400
         """
         base_payload = {
             "supplier_id": str(test_supplier.id),
@@ -1949,18 +1954,23 @@ class TestCostHistory:
         r2 = client.post("/api/v1/purchases", json=payload2, headers=org_headers)
         assert r2.status_code == 201
 
-        # Intentar cancelar Compra 1 → debe fallar
+        # Cancelar Compra 1: remocion ponderada
+        # (2000x2200 - 1000x2000) / 1000 = 2400 — exactamente la Compra 2
         response = client.patch(
             f"/api/v1/purchases/{purchase1_id}/cancel",
             headers=org_headers,
         )
-        assert response.status_code == 400
-        assert "operaciones posteriores" in response.json()["detail"]
+        assert response.status_code == 200, response.text
+        db_session.expire_all()
+        db_session.refresh(test_material)
+        assert test_material.current_average_cost == Decimal("2400.0000")
+        assert test_material.current_stock_liquidated == Decimal("1000")
 
-    def test_cost_history_deleted_on_reversal(
+    def test_cost_history_append_only_on_cancel(
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
     ):
-        """Verificar que el registro de historial se elimina al revertir."""
+        """Fase 5: cancelar NO borra el historial — se agrega el registro de
+        la cancelacion (append-only). El de la liquidacion sobrevive."""
         payload = {
             "supplier_id": str(test_supplier.id),
             "date": datetime.utcnow().isoformat(),
@@ -1987,11 +1997,17 @@ class TestCostHistory:
         # Cancelar
         client.patch(f"/api/v1/purchases/{purchase_id}/cancel", headers=org_headers)
 
-        # Historial debe estar eliminado
-        count_after = db_session.query(MaterialCostHistory).filter(
+        # Append-only: la liquidacion sobrevive Y se agrego la cancelacion
+        liq_count = db_session.query(MaterialCostHistory).filter(
             MaterialCostHistory.source_id == purchase_id,
+            MaterialCostHistory.source_type == "purchase_liquidation",
         ).count()
-        assert count_after == 0
+        cancel_count = db_session.query(MaterialCostHistory).filter(
+            MaterialCostHistory.source_id == purchase_id,
+            MaterialCostHistory.source_type == "purchase_cancellation",
+        ).count()
+        assert liq_count == 1
+        assert cancel_count == 1
 
     def test_cancel_registered_no_history_check(
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
@@ -2134,20 +2150,23 @@ class TestImmediatePayment:
 
 class TestCancelBlockedByTransformationSameCost:
     """
-    Bug fix: transformacion posterior con mismo costo promedio
-    no creaba registro en MaterialCostHistory, permitiendo cancelar
-    la compra previa y corrompiendo el costo a $0.
+    Historia: el bug FE004 era que una transformacion posterior con mismo costo
+    no creaba MCH → el guard permitia cancelar la compra previa y el REWIND
+    corrompia el costo a $0. Fase 5 elimino guard y rewind: la cancelacion es
+    remocion PONDERADA — conserva valor por construccion sin importar la
+    transformacion posterior. El registro MCH de la transformacion se mantiene
+    (auditoria + valuacion as-of).
     """
 
-    def test_cancel_blocked_by_transformation_same_cost(
+    def test_cancel_after_transformation_same_cost_conserves(
         self, client, org_headers, test_supplier, test_material, test_warehouse, db_session
     ):
         """
-        Escenario del bug FE004:
+        Escenario (ex bug FE004, semantica Fase 5):
         1. Compra liquidada: 36kg @ $1200 → costo = $1200
         2. Transformacion: material destino recibe 100kg al mismo costo $1200
-           (costo no cambia → antes no se registraba en historial)
-        3. Intentar cancelar compra → debe BLOQUEAR (hay transformacion posterior)
+           (costo no cambia, pero SI registra historial)
+        3. Cancelar compra → 200, remocion ponderada exacta (100@1200 quedan)
         """
         # Crear material destino de la transformacion (distinto del source)
         dest_material = Material(
@@ -2243,13 +2262,17 @@ class TestCancelBlockedByTransformationSameCost:
         ).count()
         assert history_count == 1, "Transformacion debe registrar historial incluso si costo no cambia"
 
-        # 3. Intentar cancelar la compra → debe BLOQUEAR
+        # 3. Cancelar la compra (Fase 5: ya no bloquea — remocion ponderada).
+        # Pool 136@1.200, remover 36@1.200 → rama 1 exacta: quedan 100@1.200.
         response = client.patch(
             f"/api/v1/purchases/{purchase_id}/cancel",
             headers=org_headers,
         )
-        assert response.status_code == 400
-        assert "operaciones posteriores" in response.json()["detail"]
+        assert response.status_code == 200, response.text
+        db_session.expire_all()
+        db_session.refresh(test_material)
+        assert float(test_material.current_average_cost) == 1200
+        assert float(test_material.current_stock_liquidated) == 100
 
 
 class TestLiquidateMultiLineSameMaterial:

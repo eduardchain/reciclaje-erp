@@ -28,7 +28,7 @@ from app.models.third_party import ThirdParty
 from app.models.warehouse import Warehouse
 from app.schemas.purchase import PurchaseCreate, PurchaseUpdate, PurchaseFullUpdate
 from app.services.base import CRUDBase
-from app.services.inventory_costing import incorporate_into_pool
+from app.services.inventory_costing import incorporate_into_pool, remove_from_pool
 from app.services.material_cost_history import material_cost_history_service
 from app.services.money_movement import money_movement as mm_service
 
@@ -584,7 +584,12 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         4. Create reversal InventoryMovements (negative quantity)
         5. Revert Material.current_stock
         6. Revert Supplier.current_balance
-        7. Revert average cost using MaterialCostHistory (blocks if subsequent operations exist)
+        7. Remocion PONDERADA del costo promedio (Fase 5): saca del pool lo que
+           la compra metio (costo ajustado + fill adjustment, leido del
+           InventoryMovement), nunca bloquea, conserva valor por construccion.
+           La diferencia va a purchase.cancellation_cost_adjustment (P&L por
+           cancelled_at). El historial de costo es append-only: se registra
+           purchase_cancellation, no se borra la liquidacion.
 
         Args:
             db: Database session
@@ -632,22 +637,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
         was_liquidated = purchase.status == "liquidated"
 
-        # Step 2a: Si liquidada, verificar que no hay operaciones posteriores de costo
-        if was_liquidated:
-            for line in purchase.lines:
-                can_revert, blocking = material_cost_history_service.check_can_revert(
-                    db=db,
-                    material_id=line.material_id,
-                    source_type="purchase_liquidation",
-                    source_id=purchase.id,
-                )
-                if not can_revert:
-                    material = line.material
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"No se puede cancelar: existen operaciones posteriores que afectaron "
-                               f"el costo de '{material.name}'. Cancele primero: {', '.join(blocking)}"
-                    )
+        # Fase 5: ya NO hay guard check_can_revert (bloqueaba por MCH posterior
+        # pero era ciego a extracciones MCH-silenciosas — ventas liquidadas y
+        # decreases). La remocion ponderada conserva valor por construccion sin
+        # importar que paso despues, asi que cancelar siempre es valido.
 
         # Step 2b: Validate sufficient stock to reverse (para registered, estricto; para liquidated, permitir negativo con warning)
         if not was_liquidated:
@@ -668,17 +661,42 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # via MoneyMovement y debe anularse por separado si corresponde.
 
         # Step 5: Create reversal movements and revert stock
+        # Fase 5 (remocion ponderada): la remocion saca lo que la compra METIO
+        # realmente. Fuente H1: el costo ajustado por comision vive en el
+        # InventoryMovement (se escribio al liquidar), NO en la linea (que solo
+        # tiene unit_price crudo) — se lee via el mismo patron deque-por-firma
+        # de liquidate/QW-B, single source of truth sin recompute drift.
+        movements_by_key: dict = defaultdict(deque)
+        if was_liquidated:
+            purchase_movements = db.query(InventoryMovement).filter(
+                InventoryMovement.reference_type == "purchase",
+                InventoryMovement.reference_id == purchase.id,
+                InventoryMovement.movement_type == "purchase",
+            ).all()
+            for mv in purchase_movements:
+                movements_by_key[(mv.material_id, mv.warehouse_id, mv.quantity)].append(mv)
+
+        total_cancellation_adjustment = Decimal("0")
         for line in purchase.lines:
             material = line.material
 
-            # Create reversal movement
+            # Costo ajustado desde el movimiento de ESTA linea (fallback al
+            # precio crudo solo si el movimiento no existe — huerfanos/legacy)
+            adjusted_unit_cost = line.unit_price
+            if was_liquidated:
+                queue = movements_by_key.get((line.material_id, line.warehouse_id, line.quantity))
+                inv_movement = queue.popleft() if queue else None
+                if inv_movement is not None:
+                    adjusted_unit_cost = inv_movement.unit_cost
+
+            # Create reversal movement (unit_cost = ajustado, por auditoria)
             reversal = InventoryMovement(
                 organization_id=organization_id,
                 material_id=line.material_id,
                 warehouse_id=line.warehouse_id,
                 movement_type="purchase_reversal",
                 quantity=-line.quantity,  # Negative = out
-                unit_cost=line.unit_price,
+                unit_cost=adjusted_unit_cost,
                 reference_type="purchase",
                 reference_id=purchase.id,
                 date=purchase.date,
@@ -689,18 +707,51 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             # Revert stock del bucket correcto segun estado previo
             material.current_stock -= line.quantity
             if was_liquidated:
-                material.current_stock_liquidated -= line.quantity
-                # Revertir costo promedio usando historial
-                material_cost_history_service.revert_cost_change(
-                    db=db,
-                    material=material,
-                    source_type="purchase_liquidation",
-                    source_id=purchase.id,
+                # Contribucion REAL de la linea al pool: costo ajustado + el
+                # relleno de hueco que hizo al liquidar (H1) — si el fill sale
+                # del P&L (status cancelled), su valor tambien sale del pool.
+                u_total = adjusted_unit_cost
+                if line.quantity > 0:
+                    u_total = adjusted_unit_cost + (line.cost_adjustment / line.quantity)
+
+                old_liq = material.current_stock_liquidated
+                old_avg = material.current_average_cost
+                new_avg, adjustment = remove_from_pool(
+                    liquidated=old_liq,
+                    avg_cost=old_avg,
+                    quantity=line.quantity,
+                    unit_cost=u_total,
                 )
+                material.current_average_cost = new_avg
+                material.current_stock_liquidated -= line.quantity
+                total_cancellation_adjustment += adjustment
+                # Append-only: la cancelacion escribe su propio registro en el
+                # historial (no borra el de la liquidacion). SIEMPRE, incluso si
+                # el avg no cambio: el registro original queda oculto para la
+                # valuacion as-of (op cancelada, filtro H2) — sin este registro
+                # la cadena visible perderia el costo y as-of(hoy) != balance vivo.
+                material_cost_history_service.record_cost_change(
+                        db=db,
+                        material=material,
+                        previous_cost=old_avg,
+                        previous_stock=old_liq,
+                        new_cost=new_avg,
+                        new_stock=old_liq - line.quantity,
+                        source_type="purchase_cancellation",
+                        source_id=purchase.id,
+                        organization_id=organization_id,
+                        transaction_date=datetime.now(timezone.utc).date(),
+                    )
             else:
                 material.current_stock_transit -= line.quantity
 
             print(f"  ↩️  Reversed: {material.code} -{line.quantity} (new stock: {material.current_stock}, cost: {material.current_average_cost})")
+
+        if was_liquidated:
+            # != 0 solo si la remocion no pudo sacar exactamente lo que la compra
+            # metio (hubo extracciones intermedias o cruzo a hueco). P&L por
+            # cancelled_at (G3: puede caer en periodo distinto al de la compra).
+            purchase.cancellation_cost_adjustment = total_cancellation_adjustment
 
         # Step 6: Revert supplier balance (solo si estaba liquidada, ya que al crear no se modifica)
         supplier = db.get(ThirdParty, purchase.supplier_id)

@@ -481,11 +481,62 @@ class ReportService:
             )
         ))
 
+        # Reversiones ponderadas (Fase 5): diferencia entre lo que la operacion
+        # revertida habia metido/sacado del pool y lo que la remocion/reingreso
+        # pudo mover. Se cuentan aunque la operacion este cancelled/annulled
+        # (la reversion es un evento nuevo con efecto propio — mismo patron que
+        # cancellation_cost_adjustment de ventas). Fechadas por el momento de
+        # la reversion (cancelled_at / annulled_at).
+        rev_purchase_filters = [
+            Purchase.organization_id == organization_id,
+            Purchase.status == "cancelled",
+            Purchase.cancellation_cost_adjustment != 0,
+        ]
+        if has_dates:
+            rev_purchase_filters += [Purchase.cancelled_at >= dt_from, Purchase.cancelled_at < dt_to]
+        oversell_from_purchase_cancels = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(Purchase.cancellation_cost_adjustment), 0))
+                .where(*rev_purchase_filters)
+            )
+        ))
+
+        rev_adj_filters = [
+            InventoryAdjustment.organization_id == organization_id,
+            InventoryAdjustment.status == "annulled",
+            InventoryAdjustment.annul_cost_adjustment != 0,
+        ]
+        if has_dates:
+            rev_adj_filters += [InventoryAdjustment.annulled_at >= dt_from, InventoryAdjustment.annulled_at < dt_to]
+        oversell_from_adjustment_annuls = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(InventoryAdjustment.annul_cost_adjustment), 0))
+                .where(*rev_adj_filters)
+            )
+        ))
+
+        rev_trans_filters = [
+            MaterialTransformation.organization_id == organization_id,
+            MaterialTransformation.status == "annulled",
+            MaterialTransformation.annul_cost_adjustment != 0,
+        ]
+        if has_dates:
+            rev_trans_filters += [MaterialTransformation.annulled_at >= dt_from, MaterialTransformation.annulled_at < dt_to]
+        oversell_from_transformation_annuls = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(MaterialTransformation.annul_cost_adjustment), 0))
+                .where(*rev_trans_filters)
+            )
+        ))
+
         oversell_adjustment = (
             oversell_from_purchases
             + oversell_from_cancellations
             + oversell_from_adjustments
             + oversell_from_transformations
+            + oversell_from_purchase_cancels
+            + oversell_from_adjustment_annuls
+            + oversell_from_transformation_annuls
         )
 
         # 4. Ajustes de terceros (perdida/ganancia)
@@ -1890,7 +1941,66 @@ class ReportService:
         }
 
         # Costo promedio historico via MaterialCostHistory.transaction_date
-        # Ultimo registro con transaction_date <= corte
+        # Ultimo registro con transaction_date <= corte.
+        #
+        # Filtro Fase 5 (H2, MCH append-only): las reversiones ya NO borran el
+        # MCH original — un registro de una op luego-cancelada/anulada
+        # sobrevive, pero su costo NO debe verse en cortes donde la doctrina
+        # #41 dice "nunca existio" (el stock ya la excluye por status). El
+        # filtro es DUAL por nivel:
+        # - Camino principal (new_cost del ultimo <= corte): EXCLUIR MCH de
+        #   ops cancelled/annulled. Los source_types de reversion no matchean
+        #   ninguna rama del predicado → pasan (son eventos validos siempre;
+        #   su new_cost == avg vivo tras la reversion).
+        # - Fallback 1 (previous_cost del primer registro POSTERIOR al corte):
+        #   INVERTIDO — INCLUIR los de ops canceladas (entre el corte y ese
+        #   registro solo hubo eventos MCH-silenciosos, el avg no cambio →
+        #   su previous_cost == avg al corte, evidencia valida) y EXCLUIR los
+        #   de reversion Fase 5 (su ORIGINAL oculto movio el avg antes → su
+        #   previous_cost incluye actividad de una op que "nunca existio").
+        #   EXCEPCION: sale_cancellation SI se incluye — la venta que revierte
+        #   nunca escribio MCH (extraccion silenciosa), asi que su
+        #   previous_cost es evidencia valida; ademas preserva exactamente el
+        #   comportamiento actual para datos existentes (unico tipo de
+        #   reversion que existe pre-Fase 5).
+        from app.models.inventory_adjustment import InventoryAdjustment as _IA
+        from app.models.material_transformation import MaterialTransformation as _MT
+
+        MCH_FASE5_REVERSAL_TYPES = [
+            "purchase_cancellation",
+            "adjustment_annulment",
+            "transformation_annulment",
+        ]
+        mch_source_is_cancelled = or_(
+            and_(
+                MaterialCostHistory.source_type == "purchase_liquidation",
+                exists(
+                    select(Purchase.id).where(
+                        Purchase.id == MaterialCostHistory.source_id,
+                        Purchase.status == "cancelled",
+                    )
+                ),
+            ),
+            and_(
+                MaterialCostHistory.source_type == "adjustment_increase",
+                exists(
+                    select(_IA.id).where(
+                        _IA.id == MaterialCostHistory.source_id,
+                        _IA.status == "annulled",
+                    )
+                ),
+            ),
+            and_(
+                MaterialCostHistory.source_type.in_(["transformation_in", "transformation_out"]),
+                exists(
+                    select(_MT.id).where(
+                        _MT.id == MaterialCostHistory.source_id,
+                        _MT.status == "annulled",
+                    )
+                ),
+            ),
+        )
+
         cost_by_mat: dict[UUID, Decimal] = {}
         if stock_by_mat:
             cost_rows = db.execute(
@@ -1902,6 +2012,7 @@ class ReportService:
                     MaterialCostHistory.organization_id == organization_id,
                     MaterialCostHistory.material_id.in_(list(stock_by_mat.keys())),
                     MaterialCostHistory.transaction_date <= cutoff_date,
+                    ~mch_source_is_cancelled,
                 ).order_by(
                     MaterialCostHistory.material_id,
                     MaterialCostHistory.transaction_date.desc(),
@@ -1912,7 +2023,9 @@ class ReportService:
                 if mat_id not in cost_by_mat:
                     cost_by_mat[mat_id] = Decimal(str(cost))
 
-            # Fallback 1: materiales sin historial al corte → previous_cost del primer registro posterior
+            # Fallback 1: materiales sin historial al corte → previous_cost del
+            # primer registro posterior (dualidad H2: sin reversiones, con
+            # ops canceladas — ver bloque de arriba)
             missing = [mid for mid in stock_by_mat if mid not in cost_by_mat]
             if missing:
                 fallback_rows = db.execute(
@@ -1923,6 +2036,7 @@ class ReportService:
                     .where(
                         MaterialCostHistory.organization_id == organization_id,
                         MaterialCostHistory.material_id.in_(missing),
+                        MaterialCostHistory.source_type.notin_(MCH_FASE5_REVERSAL_TYPES),
                     ).order_by(
                         MaterialCostHistory.material_id,
                         MaterialCostHistory.transaction_date.asc(),

@@ -151,6 +151,16 @@ class MaterialTransformation(Base, OrganizationMixin, TimestampMixin):
         comment="Notas adicionales",
     )
 
+    annul_cost_adjustment: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+        comment="Ajuste de costo al anular la transformacion (Fase 5 remocion "
+                "ponderada de destinos + reingreso ponderado de fuente). Entra al "
+                "P&L por annulled_at aunque la transformacion este annulled.",
+    )
+
     # Estado y auditoria de anulacion
     status: Mapped[str] = mapped_column(
         String(20),

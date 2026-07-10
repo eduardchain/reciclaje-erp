@@ -496,17 +496,36 @@ class TestOversellAtPurchaseLiquidation:
         # net = revenue (300x12.000) - COGS (300x10.000) + oversell 400K
         assert pnl["net_profit"] == pytest.approx(3600000 - 3000000 + 400000, abs=1)
 
-        # Round-trip: cancelar la compra que relleno → pool y P&L vuelven exactos
+        # Cancelar la compra que relleno (Fase 5: remocion ponderada, ya no
+        # rewind). La remocion saca qty x (8.000 + fill 400K/1.000) = 8.400.000
+        # de un pool de 6.400.000 → rama 3: el hueco resultante carga el avg
+        # vigente (8.000, NO los 10.000 pre-compra) y la diferencia +400.000 va
+        # a cancellation_cost_adjustment. El P&L del rango pierde el fill
+        # (status cancelled) pero gana el cancel-adj por cancelled_at (hoy,
+        # dentro del rango amplio): neto +400.000. Cuando una compra futura
+        # rellene el hueco a costo X, el total reconcilia a 200x(10.000-X) —
+        # exactamente como si esta compra nunca hubiera existido (G3: el P&L
+        # se redistribuye entre fechas, el total conserva).
         _cancel_purchase(client, org_headers, purchase["id"])
+        db_session.expire_all()
         db_session.refresh(ml_material)
-        assert ml_material.current_average_cost == Decimal("10000")
+        assert ml_material.current_average_cost == Decimal("8000")
         assert ml_material.current_stock_liquidated == Decimal("-200")
+        from app.models.purchase import Purchase as _P
+        assert db_session.get(_P, purchase["id"]).cancellation_cost_adjustment == Decimal("400000")
         pnl2 = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-06-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        ).json()
+        assert pnl2["oversell_cost_adjustment"] == pytest.approx(400000, abs=1)
+        # Y el mes original queda limpio (el fill se fue con la compra):
+        pnl_junio = client.get(
             "/api/v1/reports/profit-and-loss",
             params={"date_from": "2026-06-01", "date_to": "2026-06-30"},
             headers=org_headers,
         ).json()
-        assert pnl2["oversell_cost_adjustment"] == pytest.approx(0, abs=1)
+        assert pnl_junio["oversell_cost_adjustment"] == pytest.approx(0, abs=1)
 
     def test_commission_adjusted_cost_feeds_helper(
         self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material, ml_commissionist
@@ -616,13 +635,22 @@ class TestCancelSaleWeightedReentry:
         ).one()
         assert mch.previous_cost == Decimal("7800")
 
-        # check_can_revert: cancelar la compra ANTERIOR ahora bloquea (400)
+        # Fase 5: cancelar la compra ANTERIOR ya no bloquea (antes 400 por el
+        # MCH sale_cancellation posterior). La remocion ponderada recupera el
+        # estado EXACTO pre-compra: el reingreso trajo 800x9.000 y la remocion
+        # saca 300x7.000 → (200x9.000 + 800x9.000)/1.000 = 9.000. Con rewind
+        # habria corrompido (avg de vuelta a 9.000 pero descontando cantidad
+        # de un pool ya mezclado); ponderado lo hace legitimo.
         resp = client.patch(f"/api/v1/purchases/{purchase2['id']}/cancel", headers=org_headers)
-        assert resp.status_code == 400
-        assert "Cancelacion de venta" in resp.text
-
-        # Sin hueco (pool era positivo): adjustment de cancelacion = 0
+        assert resp.status_code == 200, resp.text
         db_session.expire_all()
+        db_session.refresh(ml_material)
+        assert ml_material.current_stock_liquidated == Decimal("1000")
+        assert abs(ml_material.current_average_cost - Decimal("9000")) < Decimal("0.01")
+        from app.models.purchase import Purchase as _P
+        assert db_session.get(_P, purchase2["id"]).cancellation_cost_adjustment == Decimal("0")
+
+        # Sin hueco (pool era positivo): adjustment de cancelacion de venta = 0
         sale_db = db_session.get(Sale, sale["id"])
         assert sale_db.cancellation_cost_adjustment == Decimal("0")
 
@@ -849,12 +877,26 @@ class TestOversellInventoryIncrease:
 
         assert _pnl_oversell(client, org_headers) == pytest.approx(400000, abs=1)
 
-        # Round-trip: anular el increase → pool y P&L vuelven exactos
+        # Anular el increase (Fase 5: remocion ponderada, ya no rewind). Saca
+        # 1.000 x (8.000 + fill 400K/1.000) = 8.400.000 de un pool de 6.400.000
+        # → rama 3: hueco -200 al avg vigente (8.000) y +400.000 a
+        # annul_cost_adjustment. En junio el P&L queda limpio (el fill del
+        # increase sale por status annulled); el annul-adj entra por
+        # annulled_at (hoy, fuera de la ventana de junio).
         _annul_adjustment(client, org_headers, adj["id"])
+        db_session.expire_all()
         db_session.refresh(ml_material)
-        assert ml_material.current_average_cost == Decimal("10000")
+        assert ml_material.current_average_cost == Decimal("8000")
         assert ml_material.current_stock_liquidated == Decimal("-200")
+        assert db_session.get(InventoryAdjustment, adj["id"]).annul_cost_adjustment == Decimal("400000")
         assert _pnl_oversell(client, org_headers) == pytest.approx(0, abs=1)
+        # Rango amplio (incluye annulled_at de hoy): el annul-adj aparece
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-06-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.json()["oversell_cost_adjustment"] == pytest.approx(400000, abs=1)
 
     def test_increase_partial_fill_keeps_prev_avg(
         self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
@@ -923,19 +965,34 @@ class TestOversellTransformationDestination:
 
         assert _pnl_oversell(client, org_headers) == pytest.approx(500000, abs=1)
 
-        # Anular: destino vuelve a -100 @ 10.000, fuente recupera 200 @ 5.000, P&L a 0
+        # Anular (Fase 5: remocion ponderada de destinos + reingreso ponderado
+        # de fuente). Destino: saca 200 x (5.000 + fill 500K/200) = 1.500.000
+        # de un pool de 500.000 → rama 3: hueco -100 al avg vigente (5.000) y
+        # +500.000 a annul_cost_adjustment. Fuente: recupera 200 @ 5.000 exacto
+        # (reingreso a su costo de salida sobre pool 0). Junio queda limpio
+        # (el fill sale por status annulled); el annul-adj entra por annulled_at.
         resp = client.post(
             f"{TRANS_URL}/{trans['id']}/annul",
             json={"reason": "Anulacion test PR-4"},
             headers=org_headers,
         )
         assert resp.status_code == 200, resp.text
+        db_session.expire_all()
         db_session.refresh(ml_material)
-        assert ml_material.current_average_cost == Decimal("10000")
+        assert ml_material.current_average_cost == Decimal("5000")
         assert ml_material.current_stock_liquidated == Decimal("-100")
         db_session.refresh(source)
         assert source.current_stock_liquidated == Decimal("200")
+        assert source.current_average_cost == Decimal("5000")
+        from app.models.material_transformation import MaterialTransformation as _MT
+        assert db_session.get(_MT, trans["id"]).annul_cost_adjustment == Decimal("500000")
         assert _pnl_oversell(client, org_headers) == pytest.approx(0, abs=1)
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-06-01", "date_to": "2026-12-31"},
+            headers=org_headers,
+        )
+        assert resp.json()["oversell_cost_adjustment"] == pytest.approx(500000, abs=1)
 
     def test_destination_average_cost_method_self_neutral(
         self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
@@ -996,14 +1053,14 @@ class TestInventoryStressWalk:
                               + cost_adjustment de ajustes confirmed)
         con tolerancia = $1 + $0.005 x kg (redondeo Numeric(15,2) de unit_cost).
 
-    Fuera del walk (documentado, pre-existente): las reversiones via MCH (anular
-    increase, cancelar compra liquidada) solo son exactas si NADA extrajo/reingreso
-    valor del pool despues sin dejar MCH — y bajo Modelo L las ventas liquidadas,
-    cancels sin cambio de avg y decreases son MCH-silenciosas (check_can_revert no
-    las ve). Por eso el walk invalida los candidatos a annul tras cada operacion
-    MCH-silenciosa (clear de confirmed_increases) y solo anula increases "limpios".
-    Anular un DECREASE tiene el mismo gap (reingresa al avg vigente, no al de la
-    salida) — documentado en el reporte QA, fuera de alcance de PR-4.
+    Fase 5 (remocion ponderada): el walk anula y cancela SIN restricciones — ya
+    no existe la regla de invalidacion de candidatos que PR-4 necesitaba (las
+    reversiones eran rewind via MCH, exactas solo sin extracciones intermedias).
+    Con remocion/reingreso ponderado la conservacion cierra por construccion
+    sin importar que paso entre medias — si este walk pasa sin la regla, el gap
+    de check_can_revert quedo cerrado de verdad. I5 gana los terminos de
+    reversion: cancellation_cost_adjustment de compras canceladas y
+    annul_cost_adjustment de ajustes anulados.
     """
 
     OPS = 60
@@ -1061,18 +1118,35 @@ class TestInventoryStressWalk:
         ia_cost_adj = db_session.query(
             sa_func.coalesce(sa_func.sum(IA.cost_adjustment), 0)
         ).filter(IA.material_id == material.id, IA.status == "confirmed").scalar()
+        # Fase 5: reversiones ponderadas — la diferencia que la remocion no pudo
+        # sacar (o el reingreso no pudo devolver) quedo reconocida en P&L
+        purchase_cancel_adj = db_session.query(
+            sa_func.coalesce(sa_func.sum(P.cancellation_cost_adjustment), 0)
+        ).filter(
+            P.status == "cancelled",
+            P.id.in_(
+                db_session.query(PurchaseLine.purchase_id).filter(
+                    PurchaseLine.material_id == material.id
+                )
+            ),
+        ).scalar()
+        ia_annul_adj = db_session.query(
+            sa_func.coalesce(sa_func.sum(IA.annul_cost_adjustment), 0)
+        ).filter(IA.material_id == material.id, IA.status == "annulled").scalar()
 
         pool_value = material.current_stock_liquidated * material.current_average_cost
         expected = (
             Decimal(str(in_total)) - Decimal(str(cogs_total))
             + Decimal(str(purchase_adj)) + Decimal(str(cancel_adj))
             + Decimal(str(ia_value)) + Decimal(str(ia_cost_adj))
+            + Decimal(str(purchase_cancel_adj)) + Decimal(str(ia_annul_adj))
         )
         tolerance = Decimal("1") + tol_qty * Decimal("0.005")
         assert abs(pool_value - expected) <= tolerance, (
             f"Conservacion rota: pool={pool_value} vs esperado={expected} "
             f"(in={in_total} cogs={cogs_total} adj_compras={purchase_adj} adj_cancels={cancel_adj} "
-            f"aj_inv={ia_value} aj_inv_cost={ia_cost_adj}, tol={tolerance})"
+            f"aj_inv={ia_value} aj_inv_cost={ia_cost_adj} "
+            f"cxl_compras={purchase_cancel_adj} annul_aj={ia_annul_adj}, tol={tolerance})"
         )
 
     def test_random_walk_all_invariants_hold(
@@ -1090,8 +1164,7 @@ class TestInventoryStressWalk:
         saw_hole = False
         counts = {
             "pc": 0, "pl": 0, "sc": 0, "sl": 0, "s_cxl": 0,
-            "p_cxl": 0, "p_cxl_blocked": 0,
-            "ai": 0, "ad": 0, "aa": 0, "aa_blocked": 0,
+            "p_cxl": 0, "ai": 0, "ad": 0, "aa": 0,
         }
 
         for _ in range(self.OPS):
@@ -1126,24 +1199,18 @@ class TestInventoryStressWalk:
                 liquidated_sales.append(sid)
                 tol_qty += Decimal("400")
                 counts["sl"] += 1
-                confirmed_increases.clear()  # extraccion MCH-silenciosa: revert ya no es exacto
             elif action == "sale_cancel" and liquidated_sales:
                 sid = liquidated_sales.pop(rng.randrange(len(liquidated_sales)))
                 _cancel_sale(client, org_headers, sid)
                 tol_qty += Decimal("400")
                 counts["s_cxl"] += 1
-                confirmed_increases.clear()  # reingreso posiblemente MCH-silencioso
             elif action == "purchase_cancel" and liquidated_purchases:
                 pid = liquidated_purchases.pop(rng.randrange(len(liquidated_purchases)))
+                # Fase 5: nunca bloquea (remocion ponderada, sin guard)
                 resp = client.patch(f"/api/v1/purchases/{pid}/cancel", headers=org_headers)
-                # 400 = bloqueada por check_can_revert (MCH posterior) — valido
-                assert resp.status_code in (200, 400), resp.text
-                if resp.status_code == 200:
-                    counts["p_cxl"] += 1
-                    confirmed_increases.clear()  # el cancel rebobino el pool
-                else:
-                    counts["p_cxl_blocked"] += 1
-                    liquidated_purchases.append(pid)  # sigue liquidada
+                assert resp.status_code == 200, resp.text
+                tol_qty += Decimal("400")
+                counts["p_cxl"] += 1
             elif action == "adj_increase":
                 qty = rng.randrange(30, 300, 10)
                 cost = rng.randrange(1000, 12000, 100)
@@ -1155,21 +1222,17 @@ class TestInventoryStressWalk:
                 qty = rng.randrange(30, 250, 10)
                 _decrease(client, org_headers, ml_material, ml_warehouse, qty)
                 counts["ad"] += 1
-                confirmed_increases.clear()  # extraccion MCH-silenciosa: revert ya no es exacto
             elif action == "adj_annul" and confirmed_increases:
                 aid = confirmed_increases.pop(rng.randrange(len(confirmed_increases)))
+                # Fase 5: nunca bloquea (remocion ponderada, sin guard)
                 resp = client.post(
                     f"{ADJ_URL}/{aid}/annul",
                     json={"reason": "Anulacion walk"},
                     headers=org_headers,
                 )
-                # 400 = bloqueado por check_can_revert (MCH posterior) — valido
-                assert resp.status_code in (200, 400), resp.text
-                if resp.status_code == 200:
-                    counts["aa"] += 1
-                else:
-                    counts["aa_blocked"] += 1
-                    confirmed_increases.append(aid)  # sigue confirmado
+                assert resp.status_code == 200, resp.text
+                tol_qty += Decimal("300")
+                counts["aa"] += 1
 
             self._invariants(db_session, ml_material, tol_qty)
             if ml_material.current_stock_liquidated < 0:
@@ -1181,6 +1244,8 @@ class TestInventoryStressWalk:
         assert counts["s_cxl"] + counts["p_cxl"] >= 1, counts
         assert counts["ai"] >= 2, counts
         assert counts["ad"] >= 2, counts
+        # Fase 5: al menos una reversion ponderada real (cancel o annul)
+        assert counts["p_cxl"] + counts["aa"] >= 1, counts
         assert saw_hole, f"El walk nunca paso por oversell — ajustar semilla/pesos: {counts}"
 
         # Cierre: liquidar todo lo pendiente y verificar una ultima vez
@@ -1190,3 +1255,384 @@ class TestInventoryStressWalk:
             _liquidate_sale(client, org_headers, sid)
             tol_qty += Decimal("400")
         self._invariants(db_session, ml_material, tol_qty)
+
+
+# ============================================================================
+# Fase 5 (PR-5): remocion ponderada en reversiones — plan
+# docs/planes/plan-fase5-remocion-ponderada.md
+# ============================================================================
+
+from app.services.inventory_costing import remove_from_pool
+
+
+def _removal_equation_holds(liq, avg, qty, cost):
+    """Ecuacion de conservacion del helper de remocion:
+    pool_after == pool_before - qty*cost + adjustment. Exacta en las 3 ramas.
+    """
+    new_avg, adj = remove_from_pool(liq, avg, qty, cost)
+    pool_after = (liq - qty) * new_avg
+    assert pool_after == liq * avg - qty * cost + adj, (
+        f"Ecuacion rota: {pool_after} != {liq * avg} - {qty * cost} + {adj}"
+    )
+    return new_avg, adj
+
+
+class TestRemoveFromPool:
+    """Unitarios puros del helper espejo (plan §3, sin BD)."""
+
+    def test_clean_removal_leak_case(self):
+        # El caso de la fuga (§1 del plan): pool 150@8.000, remover 100@6.000
+        new_avg, adj = _removal_equation_holds(
+            Decimal("150"), Decimal("8000"), Decimal("100"), Decimal("6000")
+        )
+        assert new_avg == Decimal("12000")  # el valor queda EN el inventario
+        assert adj == Decimal("0")
+
+    def test_clean_removal_is_inverse_of_incorporate(self):
+        # incorporate ∘ remove == identidad cuando nada paso entre medias
+        liq, avg = Decimal("1100"), (Decimal("100") * Decimal("10000") + Decimal("1000") * Decimal("8000")) / Decimal("1100")
+        new_avg, adj = _removal_equation_holds(liq, avg, Decimal("1000"), Decimal("8000"))
+        assert abs(new_avg - Decimal("10000")) < Decimal("0.0001")
+        assert adj == Decimal("0")
+
+    def test_insufficient_value_avg_stays(self):
+        # Rama 2: pool 150@5.000 (=750.000), remover 100@10.000 (=1.000.000)
+        new_avg, adj = _removal_equation_holds(
+            Decimal("150"), Decimal("5000"), Decimal("100"), Decimal("10000")
+        )
+        assert new_avg == Decimal("5000")  # queda — evita avg negativo y stock a $0
+        assert adj == Decimal("500000")
+
+    def test_removal_into_hole(self):
+        # Rama 3: pool 20@10.000, remover 100@8.000 → hueco -80 al avg vigente
+        new_avg, adj = _removal_equation_holds(
+            Decimal("20"), Decimal("10000"), Decimal("100"), Decimal("8000")
+        )
+        assert new_avg == Decimal("10000")
+        assert adj == Decimal("-200000")
+
+    def test_exact_empty_boundary(self):
+        # Remocion exacta del pool completo al mismo costo: adj 0, avg remanente
+        new_avg, adj = _removal_equation_holds(
+            Decimal("100"), Decimal("2000"), Decimal("100"), Decimal("2000")
+        )
+        assert (new_avg, adj) == (Decimal("2000"), Decimal("0"))
+
+
+class TestFase5WeightedRemoval:
+    """End-to-end de los caminos de reversion (plan §4 + §9)."""
+
+    def test_leak_case_now_conserves(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        """LA secuencia de la fuga (plan §1): increase → decrease → annul del
+        increase. Antes: guard permitia el rewind y $100.000 se evaporaban
+        (pool quedaba en 50x10.000=500.000). Ahora: remocion ponderada deja
+        50@12.000=600.000 — el valor que las salidas baratas no se llevaron
+        queda EN el inventario, nada en P&L (rama 1, adj 0)."""
+        from app.models.inventory_adjustment import InventoryAdjustment
+
+        _create_purchase(client, org_headers, ml_supplier, ml_warehouse, ml_material, 100, 10000, auto=True)
+        adj = _increase(client, org_headers, ml_material, ml_warehouse, 100, 6000)
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("8000")
+        _decrease(client, org_headers, ml_material, ml_warehouse, 50)  # sale a 8.000, sin MCH
+
+        # Annul del increase: antes el guard lo permitia (sin MCH posterior) y
+        # el rewind corrompia; ahora la remocion ponderada conserva.
+        _annul_adjustment(client, org_headers, adj["id"])
+
+        db_session.expire_all()
+        db_session.refresh(ml_material)
+        assert ml_material.current_stock_liquidated == Decimal("50")
+        assert ml_material.current_average_cost == Decimal("12000")
+        adj_db = db_session.get(InventoryAdjustment, adj["id"])
+        assert adj_db.annul_cost_adjustment == Decimal("0")
+        # Append-only: el MCH del increase sigue existiendo + hay registro del annul
+        assert db_session.query(MaterialCostHistory).filter(
+            MaterialCostHistory.source_type == "adjustment_increase",
+            MaterialCostHistory.source_id == adj["id"],
+        ).count() == 1
+        assert db_session.query(MaterialCostHistory).filter(
+            MaterialCostHistory.source_type == "adjustment_annulment",
+            MaterialCostHistory.source_id == adj["id"],
+        ).count() == 1
+
+    def test_h1_cancel_with_commission_and_fill(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material, ml_commissionist
+    ):
+        """H1: la remocion saca la contribucion REAL — costo ajustado por
+        comision (leido del InventoryMovement) + fill adjustment prorrateado.
+        Con el precio crudo, el valor de la comision quedaria en el pool."""
+        from app.models.purchase import Purchase as _P
+
+        _seed_hole(client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material, 50, 150)
+        # Pool -100@10.000. Compra 200@8.000 + comision fija 40.000 → adjusted 8.200
+        resp = client.post(
+            "/api/v1/purchases",
+            json={
+                "supplier_id": str(ml_supplier.id),
+                "date": DOC_DATE,
+                "lines": [{
+                    "material_id": str(ml_material.id),
+                    "quantity": 200,
+                    "unit_price": 8000,
+                    "warehouse_id": str(ml_warehouse.id),
+                }],
+                "commissions": [{
+                    "third_party_id": str(ml_commissionist.id),
+                    "concept": "Comision intermediario",
+                    "commission_type": "fixed",
+                    "commission_value": 40000,
+                }],
+                "auto_liquidate": False,
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        purchase_id = resp.json()["id"]
+        _liquidate_purchase(client, org_headers, purchase_id)
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("8200")  # fill 180.000
+
+        # Cancelar: u_total = 8.200 + 180.000/200 = 9.100. remove(100@8.200, 200, 9.100)
+        # → rama 3: avg queda 8.200, adj = 200x(9.100-8.200) = 180.000
+        _cancel_purchase(client, org_headers, purchase_id)
+        db_session.expire_all()
+        db_session.refresh(ml_material)
+        assert ml_material.current_stock_liquidated == Decimal("-100")
+        assert ml_material.current_average_cost == Decimal("8200")
+        assert db_session.get(_P, purchase_id).cancellation_cost_adjustment == Decimal("180000")
+
+    def test_cancel_earlier_purchase_now_allowed(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        """El caso del 79%: cancelar una compra con MCH posterior (otra compra
+        liquidada despues) antes daba 400; ahora remocion ponderada exacta."""
+        p1 = _create_purchase(client, org_headers, ml_supplier, ml_warehouse, ml_material, 1000, 2000, auto=True)
+        _create_purchase(client, org_headers, ml_supplier, ml_warehouse, ml_material, 1000, 2400, auto=True)
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("2200")
+
+        _cancel_purchase(client, org_headers, p1["id"])  # antes: 400 "Cancele primero"
+        db_session.expire_all()
+        db_session.refresh(ml_material)
+        assert ml_material.current_stock_liquidated == Decimal("1000")
+        assert ml_material.current_average_cost == Decimal("2400")
+
+    def test_cancel_purchase_after_transformation_out(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        """Decision #40 superseded: cancelar la compra de un material ya
+        transformado antes bloqueaba (transformation_out MCH); ahora pasa y
+        conserva (el hueco proyectado avisa via warning PR-3)."""
+        purchase = _create_purchase(client, org_headers, ml_supplier, ml_warehouse, ml_material, 200, 10000, auto=True)
+        dest = _mk_material(db_session, ml_material.organization_id, "ML-DEST40")
+        _create_transformation(
+            client, org_headers, ml_material, ml_warehouse, 150,
+            [{
+                "destination_material_id": str(dest.id),
+                "destination_warehouse_id": str(ml_warehouse.id),
+                "quantity": 150,
+            }],
+        )
+        db_session.refresh(ml_material)
+        assert ml_material.current_stock_liquidated == Decimal("50")
+
+        data = _cancel_purchase(client, org_headers, purchase["id"])  # antes: 400
+        assert data["status"] == "cancelled"
+        assert data.get("warnings"), "Esperaba warning de hueco proyectado (PR-3)"
+        db_session.refresh(ml_material)
+        assert ml_material.current_stock_liquidated == Decimal("-150")
+        # Remocion 200@10.000 de pool 50@10.000 → rama 3: avg queda, adj 0
+        assert ml_material.current_average_cost == Decimal("10000")
+
+    def test_annul_decrease_weighted_reentry(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        """El primo hermano: anular un decrease reingresaba al avg VIGENTE (si
+        el avg se movio entre medias, fugaba valor). Ahora reingresa al
+        unit_cost de la salida (adjustment.unit_cost) ponderado."""
+        from app.models.inventory_adjustment import InventoryAdjustment
+
+        _create_purchase(client, org_headers, ml_supplier, ml_warehouse, ml_material, 100, 10000, auto=True)
+        dec = _decrease(client, org_headers, ml_material, ml_warehouse, 50)  # sale a 10.000
+        # Compra barata mueve el avg: (50x10.000 + 50x2.000)/100 = 6.000
+        _create_purchase(client, org_headers, ml_supplier, ml_warehouse, ml_material, 50, 2000, auto=True)
+        db_session.refresh(ml_material)
+        assert ml_material.current_average_cost == Decimal("6000")
+
+        # Annul del decrease: reingresa 50 @ 10.000 (su costo de salida)
+        # → (100x6.000 + 50x10.000)/150 = 7.333,33 — con el avg vigente
+        # habria reingresado a 6.000 y perdido 200.000.
+        _annul_adjustment(client, org_headers, dec["id"])
+        db_session.expire_all()
+        db_session.refresh(ml_material)
+        assert ml_material.current_stock_liquidated == Decimal("150")
+        assert abs(ml_material.current_average_cost - Decimal("7333.3333")) < Decimal("0.01")
+        assert db_session.get(InventoryAdjustment, dec["id"]).annul_cost_adjustment == Decimal("0")
+        # Conservacion manual: 100x10.000 + 50x2.000 - 50x10.000 + 50x10.000 = 1.100.000
+        value = ml_material.current_stock_liquidated * ml_material.current_average_cost
+        assert abs(value - Decimal("1100000")) <= Decimal("1")
+
+
+class TestFase5AsOfH2:
+    """H2: el MCH append-only no debe reescribir cortes historicos (#41/#61).
+    Se prueba directo contra _get_inventory_as_of (la funcion bajo test)."""
+
+    def _inventory_as_of(self, db_session, org_id, as_of):
+        from datetime import date as _date, datetime as _dt, time as _time, timedelta as _td, timezone as _tz
+        from app.services.reports import report_service
+        cutoff_dt = _dt.combine(as_of + _td(days=1), _time.min, tzinfo=_tz.utc)
+        return report_service._get_inventory_as_of(db_session, org_id, cutoff_dt)
+
+    def test_golden_three_cuts_and_live_parity(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        """Liquidar → vender → cancelar. Cortes: antes (nada), entre (doctrina
+        #41: la compra cancelada nunca existio), despues (== balance vivo,
+        gracias al MCH de cancelacion incondicional)."""
+        from datetime import date as _date
+
+        org_id = ml_material.organization_id
+        # Compra 100@10.000 el 2-jun (auto → liquidated_at 2-jun)
+        resp = client.post(
+            "/api/v1/purchases",
+            json={
+                "supplier_id": str(ml_supplier.id),
+                "date": "2026-06-02T12:00:00",
+                "lines": [{
+                    "material_id": str(ml_material.id),
+                    "quantity": 100,
+                    "unit_price": 10000,
+                    "warehouse_id": str(ml_warehouse.id),
+                }],
+                "auto_liquidate": True,
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        purchase_id = resp.json()["id"]
+        # Venta 60 el 3-jun, liquidada (liquidated_at 3-jun)
+        resp = client.post(
+            "/api/v1/sales",
+            json={
+                "customer_id": str(ml_customer.id),
+                "warehouse_id": str(ml_warehouse.id),
+                "date": "2026-06-03T12:00:00",
+                "lines": [{"material_id": str(ml_material.id), "quantity": 60, "unit_price": 12000}],
+                "commissions": [],
+                "auto_liquidate": True,
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.text
+
+        # Cancelar la compra HOY (cancelled_at = hoy; adj 0 → avg no cambia,
+        # pero el MCH purchase_cancellation se escribe IGUAL — sin el, la
+        # cadena visible pierde el costo y as-of(hoy) != vivo)
+        _cancel_purchase(client, org_headers, purchase_id)
+        db_session.expire_all()
+        db_session.refresh(ml_material)
+        assert ml_material.current_stock_liquidated == Decimal("-60")
+        assert ml_material.current_average_cost == Decimal("10000")
+
+        # Corte ANTES (1-jun): sin stock ni costo
+        inv = self._inventory_as_of(db_session, org_id, _date(2026, 6, 1))
+        assert ml_material.id not in inv
+
+        # Corte ENTRE (5-jun): la compra "nunca existio" → stock = -60 (solo
+        # la venta), costo = 0 (el MCH de la liquidacion esta oculto y el
+        # fallback 1 toma su previous_cost = 0, el avg pre-compra)
+        inv = self._inventory_as_of(db_session, org_id, _date(2026, 6, 5))
+        stock, cost = inv[ml_material.id]
+        assert stock == Decimal("-60")
+        assert cost == Decimal("0")
+
+        # Corte DESPUES (hoy): == balance vivo
+        from datetime import datetime as _dt, timezone as _tz
+        inv = self._inventory_as_of(db_session, org_id, _dt.now(_tz.utc).date())
+        stock, cost = inv[ml_material.id]
+        assert stock == Decimal("-60")
+        assert cost == Decimal("10000")
+
+    def test_fallback1_dedicated_cancelled_op_previous_cost(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        """Dedicado a Fallback 1 (exigido por QA): material cuyo UNICO MCH
+        relevante al corte es de una op cancelada — fuerza el fallback. Su
+        previous_cost (avg pre-op) es evidencia valida; el previous_cost de un
+        MCH posterior NO-cancelado (contaminado por la op 'que nunca existio')
+        seria incorrecto."""
+        from datetime import date as _date
+
+        org_id = ml_material.organization_id
+        # 2-jun: decrease 30 (stock -30, SIN MCH — por eso el corte caera a fallback)
+        resp = client.post(
+            f"{ADJ_URL}/decrease",
+            json={
+                "material_id": str(ml_material.id),
+                "warehouse_id": str(ml_warehouse.id),
+                "quantity": 30,
+                "date": "2026-06-02T12:00:00",
+                "reason": "Decrease pre-corte H2",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        # 3-jun: compra 100@10.000 liquidada (MCH purchase_liquidation 3-jun)
+        resp = client.post(
+            "/api/v1/purchases",
+            json={
+                "supplier_id": str(ml_supplier.id),
+                "date": "2026-06-03T12:00:00",
+                "lines": [{
+                    "material_id": str(ml_material.id),
+                    "quantity": 100,
+                    "unit_price": 10000,
+                    "warehouse_id": str(ml_warehouse.id),
+                }],
+                "auto_liquidate": True,
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        purchase_id = resp.json()["id"]
+        # 6-jun: increase 50@6.000 (MCH adjustment_increase 6-jun — su
+        # previous_cost YA incluye la compra: evidencia contaminada para 5-jun)
+        resp = client.post(
+            f"{ADJ_URL}/increase",
+            json={
+                "material_id": str(ml_material.id),
+                "warehouse_id": str(ml_warehouse.id),
+                "quantity": 50,
+                "unit_cost": 6000,
+                "date": "2026-06-06T12:00:00",
+                "reason": "Increase post-corte H2",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        # HOY: cancelar la compra
+        _cancel_purchase(client, org_headers, purchase_id)
+
+        # Corte 5-jun: stock = -30 (decrease; compra cancelada excluida).
+        # Costo: sin MCH visible <= 5-jun → Fallback 1. El primer MCH posterior
+        # es el purchase_liquidation del 3-jun?? No: transaction_date 3-jun ES
+        # <= 5-jun pero esta OCULTO en el camino principal (op cancelada). En
+        # fallback 1 los MCH de ops canceladas SI cuentan → toma su
+        # previous_cost = 0 (avg pre-compra, doctrina exacta). Si el filtro
+        # fuera uniforme (excluirlo tambien del fallback), tomaria el
+        # previous_cost del increase del 6-jun — contaminado por la compra.
+        inv = self._inventory_as_of(db_session, org_id, _date(2026, 6, 5))
+        stock, cost = inv[ml_material.id]
+        assert stock == Decimal("-30")
+        assert cost == Decimal("0")
+
+        # Corte HOY: == vivo (el MCH de la cancelacion es el ultimo visible)
+        from datetime import datetime as _dt, timezone as _tz
+        db_session.refresh(ml_material)
+        inv = self._inventory_as_of(db_session, org_id, _dt.now(_tz.utc).date())
+        stock, cost = inv[ml_material.id]
+        assert stock == ml_material.current_stock_liquidated
+        assert cost == ml_material.current_average_cost

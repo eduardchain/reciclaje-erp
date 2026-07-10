@@ -1,18 +1,24 @@
 """
 Servicio de historial de costo de materiales.
 
-Registra cambios al costo promedio y permite reversion precisa.
-Bloquea cancelacion/anulacion si hay operaciones posteriores que
-afectaron el costo del mismo material.
+Registro APPEND-ONLY de cambios al costo promedio (Fase 5): las reversiones
+(cancelar compra liquidada, anular ajuste/transformacion) ya NO rebobinan el
+costo borrando el registro original — hacen remocion/reingreso PONDERADO
+(services/inventory_costing.py) y escriben su propio registro con source_type
+de reversion (purchase_cancellation | adjustment_annulment |
+transformation_annulment | sale_cancellation). Consecuencia: el ultimo
+registro de un material SIEMPRE refleja su costo vigente (invariante I4, sin
+excepciones), y el historial es una linea de tiempo completa para auditoria
+y para la valuacion historica as-of (#41, con el filtro de ops canceladas de
+Fase 5 — ver reports._get_inventory_as_of).
 
-Solo previous_cost se usa en reversal. previous_stock/new_stock son auditoria.
+previous_stock/new_stock son auditoria.
 """
 from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.models.material_cost_history import MaterialCostHistory
@@ -35,10 +41,14 @@ class MaterialCostHistoryService:
         transaction_date: Optional[date] = None,
     ) -> Optional[MaterialCostHistory]:
         """
-        Registra un cambio de costo en el historial.
-        Siempre crea registro, incluso si el costo no cambio,
-        porque check_can_revert() depende de la EXISTENCIA del registro
-        para detectar operaciones posteriores y bloquear cancelaciones.
+        Registra un cambio de costo en el historial (append-only).
+
+        Los caminos operativos (liquidacion de compra, ajuste increase,
+        transformacion) registran SIEMPRE, incluso si el costo no cambio —
+        el registro documenta la operacion en la linea de tiempo del costo y
+        la valuacion as-of (#41) lee new_cost del ultimo registro al corte.
+        Las reversiones (Fase 5) y el reingreso de cancelacion de venta (#65)
+        registran solo si el promedio cambio.
         """
         history = MaterialCostHistory(
             organization_id=organization_id,
@@ -68,84 +78,13 @@ class MaterialCostHistoryService:
             MaterialCostHistory.source_id == source_id,
         ).first()
 
-    def check_can_revert(
-        self,
-        db: Session,
-        material_id: UUID,
-        source_type: str,
-        source_id: UUID,
-    ) -> tuple[bool, list[str]]:
-        """
-        Verifica si se puede revertir un cambio de costo.
-
-        Returns:
-            (can_revert, blocking_descriptions)
-            - (True, []) si se puede revertir
-            - (False, [...]) si hay operaciones posteriores bloqueantes
-        """
-        history = self.get_history_record(db, material_id, source_type, source_id)
-
-        if not history:
-            # No hubo cambio de costo registrado → se puede cancelar sin revertir
-            return True, []
-
-        # Buscar operaciones posteriores del mismo material
-        # Ordenar por created_at + id como tiebreaker
-        subsequent = db.query(MaterialCostHistory).filter(
-            MaterialCostHistory.material_id == material_id,
-            MaterialCostHistory.created_at > history.created_at,
-        ).filter(
-            # Excluir la operacion misma
-            ~(
-                (MaterialCostHistory.source_type == source_type)
-                & (MaterialCostHistory.source_id == source_id)
-            )
-        ).order_by(
-            MaterialCostHistory.created_at.asc(),
-            MaterialCostHistory.id.asc(),
-        ).all()
-
-        if subsequent:
-            blocking = []
-            source_labels = {
-                "purchase_liquidation": "Liquidacion compra",
-                "adjustment_increase": "Ajuste aumento",
-                "transformation_in": "Transformacion (entrada)",
-                "transformation_out": "Transformacion (salida)",
-                "sale_cancellation": "Cancelacion de venta",
-            }
-            for op in subsequent:
-                label = source_labels.get(op.source_type, op.source_type)
-                date_str = op.created_at.strftime("%d/%m/%Y %H:%M")
-                blocking.append(f"{label} (ID: {str(op.source_id)[:8]}..., Fecha: {date_str})")
-            return False, blocking
-
-        return True, []
-
-    def revert_cost_change(
-        self,
-        db: Session,
-        material: Material,
-        source_type: str,
-        source_id: UUID,
-    ) -> bool:
-        """
-        Revierte un cambio de costo restaurando el valor anterior.
-        Elimina el registro de historial.
-
-        IMPORTANTE: Llamar check_can_revert() primero para validar.
-
-        Returns:
-            True si se revirtio, False si no habia registro.
-        """
-        history = self.get_history_record(db, material.id, source_type, source_id)
-
-        if not history:
-            return False
-
-        material.current_average_cost = history.previous_cost
-        db.delete(history)
-        return True
+    # NOTA Fase 5: check_can_revert() y revert_cost_change() fueron RETIRADOS.
+    # El guard bloqueaba por MCH posterior pero era ciego a extracciones
+    # MCH-silenciosas (ventas liquidadas, decreases) → daba falsos permisos y
+    # el rewind fugaba valor. Las reversiones ahora usan remocion/reingreso
+    # ponderado (services/inventory_costing.py) que conserva valor por
+    # construccion y nunca bloquea. Plan:
+    # docs/planes/plan-fase5-remocion-ponderada.md
 
 
 # Singleton

@@ -575,9 +575,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 material.current_stock_liquidated += line.quantity
                 total_cancellation_adjustment += adjustment
                 if new_avg != old_avg:
-                    # El cambio de promedio queda en el historial: audita el
-                    # reingreso y hace que check_can_revert bloquee reverts de
-                    # compras anteriores (serian invalidos tras mover el avg).
+                    # El cambio de promedio queda en el historial (append-only):
+                    # audita el reingreso. Desde Fase 5 ya no hay rol bloqueante
+                    # (las reversiones son ponderadas, no rewind).
                     material_cost_history_service.record_cost_change(
                         db=db,
                         material=material,

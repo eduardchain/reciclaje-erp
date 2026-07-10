@@ -35,7 +35,7 @@ from app.schemas.inventory_adjustment import (
 )
 
 
-from app.services.inventory_costing import incorporate_into_pool
+from app.services.inventory_costing import incorporate_into_pool, remove_from_pool
 from app.services.material_cost_history import material_cost_history_service
 
 
@@ -371,11 +371,17 @@ class CRUDInventoryAdjustment:
         user_id: Optional[UUID] = None,
     ) -> InventoryAdjustment:
         """
-        Anular ajuste — revierte cambios de stock y costo promedio.
+        Anular ajuste — revierte stock y costo con conservacion de valor (Fase 5).
 
-        Crea un InventoryMovement de tipo adjustment_reversal.
-        Si fue ajuste tipo increase, revierte costo promedio usando historial.
-        Bloquea si hay operaciones posteriores de costo.
+        Crea un InventoryMovement de tipo adjustment_reversal. El costo promedio
+        se revierte por remocion/reingreso PONDERADO (nunca bloquea):
+        - El ajuste habia METIDO stock (quantity > 0): remocion ponderada de su
+          contribucion real (unit_cost + cost_adjustment de relleno prorrateado).
+        - El ajuste habia SACADO stock (quantity < 0): reingreso ponderado al
+          unit_cost persistido (el avg del momento de la salida — NO el vigente,
+          que re-valuaba el reingreso en silencio).
+        La diferencia va a annul_cost_adjustment (P&L por annulled_at). El
+        historial de costo es append-only: se registra adjustment_annulment.
         """
         adjustment = self._get_or_404(db, adjustment_id, organization_id)
 
@@ -387,32 +393,50 @@ class CRUDInventoryAdjustment:
 
         material = db.get(Material, adjustment.material_id)
 
-        # Si fue increase, verificar que no hay operaciones posteriores de costo
-        if adjustment.adjustment_type == "increase":
-            can_revert, blocking = material_cost_history_service.check_can_revert(
-                db=db,
-                material_id=adjustment.material_id,
-                source_type="adjustment_increase",
-                source_id=adjustment.id,
+        # Remocion/reingreso ponderado segun el signo del delta original
+        qty = adjustment.quantity
+        old_liq = material.current_stock_liquidated
+        old_avg = material.current_average_cost
+        annul_adjustment = Decimal("0")
+        if qty > 0:
+            # Contribucion real de la entrada: unit_cost + fill adjustment (H1)
+            u_total = adjustment.unit_cost + (adjustment.cost_adjustment / qty)
+            new_avg, annul_adjustment = remove_from_pool(
+                liquidated=old_liq,
+                avg_cost=old_avg,
+                quantity=qty,
+                unit_cost=u_total,
             )
-            if not can_revert:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"No se puede anular: existen operaciones posteriores que afectaron "
-                           f"el costo de '{material.name}'. Cancele primero: {', '.join(blocking)}"
-                )
+        elif qty < 0:
+            new_avg, annul_adjustment = incorporate_into_pool(
+                liquidated=old_liq,
+                avg_cost=old_avg,
+                quantity=-qty,
+                unit_cost=adjustment.unit_cost,
+            )
+        else:
+            new_avg = old_avg
 
-        # Revertir cambio de stock (restar el delta que fue aplicado)
-        material.current_stock_liquidated -= adjustment.quantity
-        material.current_stock -= adjustment.quantity
+        material.current_average_cost = new_avg
+        material.current_stock_liquidated -= qty
+        material.current_stock -= qty
+        adjustment.annul_cost_adjustment = annul_adjustment
 
-        # Revertir costo promedio si fue increase
-        if adjustment.adjustment_type == "increase":
-            material_cost_history_service.revert_cost_change(
+        # SIEMPRE registrar (aunque el avg no cambie): el MCH original del
+        # increase queda oculto para la valuacion as-of (op anulada, filtro H2)
+        # — sin este registro la cadena visible perderia el costo vigente.
+        if qty != 0:
+            material_cost_history_service.record_cost_change(
                 db=db,
                 material=material,
-                source_type="adjustment_increase",
+                previous_cost=old_avg,
+                previous_stock=old_liq,
+                new_cost=new_avg,
+                new_stock=old_liq - qty,
+                source_type="adjustment_annulment",
                 source_id=adjustment.id,
+                organization_id=organization_id,
+                transaction_date=datetime.now(timezone.utc).date(),
             )
 
         # Crear movimiento de reversal
