@@ -12,6 +12,7 @@ Cancelacion:
 - registered: revierte stock solamente
 - liquidated: revierte stock + saldo cliente + comisiones pagadas
 """
+from collections import defaultdict, deque
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Optional, List
@@ -389,11 +390,41 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         sale.liquidated_by = user_id
         sale.liquidated_at = liquidation_date or sale.date
 
-        # Step 5b: Move stock from transit to liquidated (confirmar salida)
+        # Step 5b: Finalizar COGS al promedio vigente (Modelo L, decision #64).
+        # El costo de la venta se fija en SU liquidacion, no en el registro: el
+        # unit_cost capturado al registrar es provisional (compras liquidadas entre
+        # registro y liquidacion ya movieron el promedio). Extraer al promedio no
+        # cambia el promedio, por eso NO se crea MaterialCostHistory aqui.
+        # Pre-cargar movimientos y emparejar por firma (material, cantidad) con
+        # colas — mismo patron que compra multi-linea. La venta es mono-bodega
+        # (sale.warehouse_id), la firma no necesita bodega.
+        movements = db.query(InventoryMovement).filter(
+            InventoryMovement.reference_type == "sale",
+            InventoryMovement.reference_id == sale.id,
+            InventoryMovement.movement_type == "sale",
+        ).all()
+        movements_by_key: dict = defaultdict(deque)
+        for mv in movements:
+            movements_by_key[(mv.material_id, mv.quantity)].append(mv)
+
+        # Step 5c: Move stock from transit to liquidated (confirmar salida)
         stmt_lines = select(SaleLine).where(SaleLine.sale_id == sale.id)
         sale_lines = db.scalars(stmt_lines).all()
         for line in sale_lines:
             material = db.get(Material, line.material_id)
+
+            # COGS final = promedio vigente al liquidar. Fallback al ultimo costo
+            # conocido si el material aun no tiene promedio (mismo criterio que create).
+            final_cost = material.current_average_cost
+            if final_cost == 0:
+                final_cost = self._get_last_known_cost(db, material.id, organization_id)
+            line.unit_cost = final_cost
+
+            queue = movements_by_key.get((line.material_id, -line.quantity))
+            inv_movement = queue.popleft() if queue else None
+            if inv_movement:
+                inv_movement.unit_cost = final_cost
+
             material.current_stock_transit += line.quantity      # devolver de transit
             material.current_stock_liquidated -= line.quantity   # confirmar en liquidated
 
