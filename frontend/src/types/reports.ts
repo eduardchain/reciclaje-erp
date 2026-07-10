@@ -597,3 +597,25 @@ export interface ExpenseDetailResponse {
   total_allocated: number;
   total_count: number;
 }
+
+// Dinero Inactivo (R1)
+export interface InactiveBalanceItem {
+  third_party_id: string;
+  third_party_name: string;
+  third_party_type: string; // customer | material_supplier | service_provider | liability | investor | provision | generic
+  section: string;
+  amount_inactive: number;
+  days_inactive: number;
+  last_activity_date: string | null;
+  has_movements: boolean;
+  phone: string | null;
+}
+
+export interface InactiveBalancesResponse {
+  as_of: string;
+  min_days: number;
+  min_amount: number;
+  total_inactive_balance: number;
+  item_count: number;
+  items: InactiveBalanceItem[];
+}

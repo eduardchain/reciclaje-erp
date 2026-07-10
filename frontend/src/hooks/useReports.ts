@@ -92,6 +92,13 @@ export function useBalanceDetailed(asOfDate?: string) {
   });
 }
 
+export function useInactiveBalances(params: { min_days: number; min_amount: number }) {
+  return useQuery({
+    queryKey: ["reports", "inactive-balances", params],
+    queryFn: () => reportsService.getInactiveBalances(params),
+  });
+}
+
 export function useProfitabilityByBU(params: DateRange) {
   return useQuery({
     queryKey: ["reports", "profitability-bu", params],

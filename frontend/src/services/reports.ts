@@ -15,6 +15,7 @@ import type {
   ProfitabilityByBUResponse,
   RealCostByMaterialResponse,
   ExpensesReportResponse,
+  InactiveBalancesResponse,
   ExpensesGroupBy,
   ExpenseDetailResponse,
   DpFilter,
@@ -67,6 +68,9 @@ export const reportsService = {
 
   getBalanceDetailed: (params?: { as_of_date?: string }) =>
     get<BalanceDetailedResponse>("/api/v1/reports/balance-detailed", params),
+
+  getInactiveBalances: (params: { min_days: number; min_amount: number }) =>
+    get<InactiveBalancesResponse>("/api/v1/reports/inactive-balances", params),
 
   getProfitabilityByBU: (params: DateRange) =>
     get<ProfitabilityByBUResponse>("/api/v1/reports/profitability-by-business-unit", params),

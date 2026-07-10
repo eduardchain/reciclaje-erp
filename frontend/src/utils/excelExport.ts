@@ -10,6 +10,7 @@ import type {
   SalesReportResponse,
   MarginAnalysisResponse,
   ThirdPartyBalancesResponse,
+  InactiveBalancesResponse,
   ProfitabilityByBUResponse,
   RealCostByMaterialResponse,
   ExpensesReportResponse,
@@ -1142,4 +1143,36 @@ export function exportDoubleEntriesDetailExcel(
   XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle");
 
   XLSX.writeFile(wb, "ecobalance_doble-partidas.xlsx");
+}
+
+// Dinero Inactivo (R1) — respeta el tab activo (items ya vienen filtrados)
+export function exportInactiveBalancesExcel(data: InactiveBalancesResponse, contextLabel?: string) {
+  const TYPE_LABEL: Record<string, string> = {
+    customer: "Cliente", material_supplier: "Proveedor", service_provider: "Servicio",
+    provision: "Provisión", investor: "Inversionista", liability: "Pasivo", generic: "Genérico",
+  };
+  const rows: (string | number | null)[][] = [];
+  rows.push(["Dinero Inactivo"]);
+  rows.push([`Umbral: ${data.min_days} días sin movimiento${data.min_amount > 0 ? ` · desde $${data.min_amount.toLocaleString("es-CO")}` : ""}`]);
+  if (contextLabel) rows.push([`Tipo: ${contextLabel}`]);
+  const total = data.items.reduce((s, i) => s + i.amount_inactive, 0);
+  rows.push(["Total parado", total]);
+  rows.push([]);
+  rows.push(["Tercero", "Tipo", "Dias inactivos", "Monto", "Ultima actividad", "Telefono"]);
+  for (const it of data.items) {
+    rows.push([
+      it.third_party_name,
+      TYPE_LABEL[it.third_party_type] ?? it.third_party_type,
+      it.days_inactive,
+      it.amount_inactive,
+      it.has_movements && it.last_activity_date ? it.last_activity_date.slice(0, 10) : "Sin movimientos",
+      it.phone ?? "",
+    ]);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 32 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 16 }];
+  applyCurrencyFormat(ws, [1, 3]); // total (col 1, solo su fila numérica) + montos (col 3)
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Dinero Inactivo");
+  XLSX.writeFile(wb, `dinero_inactivo_${data.as_of.slice(0, 10)}.xlsx`);
 }

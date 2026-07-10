@@ -315,6 +315,43 @@ class BalanceDetailedResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Dinero Inactivo (R1 — saldos a favor sin movimiento en N dias)
+# ---------------------------------------------------------------------------
+
+class InactiveBalanceItem(BaseModel):
+    third_party_id: str
+    third_party_name: str
+    # behavior_type derivado de la seccion (para tabs): customer | material_supplier |
+    # service_provider | liability | investor | provision | generic
+    third_party_type: str
+    section: str  # seccion de _classify_third_party (para el label)
+    amount_inactive: float  # abs() en provision_funds; balance tal cual en el resto
+    days_inactive: int
+    last_activity_date: Optional[date] = None  # None cuando cae al fallback created_at
+    has_movements: bool  # False = nunca tuvo eventos → dias desde creacion/migracion
+    phone: Optional[str] = None  # para llamar directo desde el panel
+
+    @field_serializer("last_activity_date")
+    def serialize_last_activity(self, v: Optional[date], _info) -> Optional[str]:
+        if v is None:
+            return None
+        return f"{v.year:04d}-{v.month:02d}-{v.day:02d}T12:00:00Z"
+
+
+class InactiveBalancesResponse(BaseModel):
+    as_of: date
+    min_days: int
+    min_amount: float
+    total_inactive_balance: float
+    item_count: int
+    items: list[InactiveBalanceItem]
+
+    @field_serializer("as_of")
+    def serialize_as_of(self, v: date, _info) -> str:
+        return f"{v.year:04d}-{v.month:02d}-{v.day:02d}T12:00:00Z"
+
+
+# ---------------------------------------------------------------------------
 # Purchase Report (Section 19.1)
 # ---------------------------------------------------------------------------
 
