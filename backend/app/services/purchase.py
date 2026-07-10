@@ -573,10 +573,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         organization_id: UUID,
         user_id: Optional[UUID] = None,
         annul_linked_payments: bool = False,
-    ) -> Purchase:
+    ) -> tuple[Purchase, list[str]]:
         """
         Cancel a purchase and reverse all effects.
-        
+
         Workflow:
         1. Validate purchase exists and can be cancelled
         2. Validate sufficient stock to reverse
@@ -585,15 +585,19 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         5. Revert Material.current_stock
         6. Revert Supplier.current_balance
         7. Revert average cost using MaterialCostHistory (blocks if subsequent operations exist)
-        
+
         Args:
             db: Database session
             purchase_id: Purchase UUID
             organization_id: Organization UUID
-            
+
         Returns:
-            Cancelled Purchase
-            
+            (Cancelled Purchase, warnings). Warnings no bloqueantes (PR-3 #65,
+            filosofia "avisar, no bloquear"): la cancelacion de una compra cuyo
+            material ya fue vendido deja el stock liquidado negativo — el sistema
+            queda consistente (la Fase 2 maneja el hueco al rellenarse) pero el
+            operador debe saberlo.
+
         Raises:
             HTTPException: 400 if already cancelled, paid, or insufficient stock
             HTTPException: 404 if not found
@@ -735,13 +739,27 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 mov.annulled_reason = f"Cancelación compra #{purchase.purchase_number}"
                 print(f"  📝 Pago #{mov.movement_number} anulado (cancelación compra)")
 
+        # Step 8: warnings de hueco proyectado (una vez por material, estado FINAL)
+        warnings: list[str] = []
+        if was_liquidated:
+            seen: dict = {}
+            for line in purchase.lines:
+                seen[line.material_id] = line.material
+            for material in seen.values():
+                if material.current_stock_liquidated < 0:
+                    warnings.append(
+                        f"El stock liquidado de {material.code} queda negativo tras la "
+                        f"cancelación: {float(material.current_stock_liquidated):g} "
+                        f"{material.default_unit or 'kg'} (el material ya fue vendido)"
+                    )
+
         print(f"❌ Cancelled purchase #{purchase.purchase_number}")
         print(f"   Supplier balance: {supplier.current_balance} (debt reduced by ${purchase.total_amount})")
-        
+
         db.commit()
         db.refresh(purchase)
-        
-        return purchase
+
+        return purchase, warnings
     
     def get_linked_payment_total(
         self, db: Session, purchase_id: UUID, organization_id: UUID

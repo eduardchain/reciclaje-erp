@@ -89,9 +89,11 @@ export function useCancelPurchase() {
   return useMutation({
     mutationFn: ({ id, annulLinkedPayments }: { id: string; annulLinkedPayments?: boolean }) =>
       purchaseService.cancel(id, annulLinkedPayments ?? false),
-    onSuccess: () => {
+    onSuccess: (data) => {
       invalidateAfterPurchaseLiquidateOrCancel(queryClient);
       toast.success("Compra cancelada exitosamente");
+      // Warnings no bloqueantes (#65 PR-3): ej. stock liquidado queda negativo
+      (data?.warnings ?? []).forEach((w) => toast.warning(w, { duration: 8000 }));
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al cancelar la compra"));

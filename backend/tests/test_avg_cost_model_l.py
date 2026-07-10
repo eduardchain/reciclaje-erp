@@ -679,6 +679,38 @@ class TestCancelSaleWeightedReentry:
         ).count() == 0
 
 
+class TestCancelPurchaseHoleWarning:
+    """PR-3 (#65): cancelar compra cuyo material ya fue vendido AVISA (no bloquea)."""
+
+    def test_cancel_projecting_hole_returns_warning(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        purchase = _create_purchase(client, org_headers, ml_supplier, ml_warehouse, ml_material, 100, 10000, auto=True)
+        sale = _create_sale(client, org_headers, ml_customer, ml_warehouse, ml_material, 80, 12000)
+        _liquidate_sale(client, org_headers, sale["id"])
+        # Pool: 20 @ 10.000. Cancelar la compra deja -80 (venta ya salio)
+
+        data = _cancel_purchase(client, org_headers, purchase["id"])
+        assert data["status"] == "cancelled"
+        assert data.get("warnings"), "Esperaba warning de stock liquidado negativo"
+        assert "ML-COBRE" in data["warnings"][0]
+        assert "-80" in data["warnings"][0]
+
+        db_session.refresh(ml_material)
+        assert ml_material.current_stock_liquidated == Decimal("-80")
+
+    def test_cancel_without_hole_no_warning(
+        self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
+    ):
+        # Dos compras: cancelar una con stock de sobra no avisa
+        _create_purchase(client, org_headers, ml_supplier, ml_warehouse, ml_material, 500, 9000, auto=True)
+        purchase2 = _create_purchase(client, org_headers, ml_supplier, ml_warehouse, ml_material, 100, 9000, auto=True)
+
+        data = _cancel_purchase(client, org_headers, purchase2["id"])
+        assert data["status"] == "cancelled"
+        assert not data.get("warnings")
+
+
 # ============================================================================
 # Stress test: random walk determinista con invariantes globales
 # ============================================================================

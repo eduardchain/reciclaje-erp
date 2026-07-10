@@ -617,20 +617,22 @@ async def cancel_purchase(
 ) -> PurchaseResponse:
     """Cancel a purchase and reverse effects."""
     try:
-        purchase = purchase_service.cancel(
+        purchase, warnings = purchase_service.cancel(
             db=db,
             purchase_id=purchase_id,
             organization_id=org_context["organization_id"],
             user_id=org_context["user_id"],
             annul_linked_payments=annul_linked_payments,
         )
-        
+
         response_data = _enrich_purchase_response(purchase, db)
-        
+        if warnings:
+            response_data["warnings"] = warnings
+
         logger.info(
             f"Purchase #{purchase.purchase_number} cancelled by user {org_context['user_id']}"
         )
-        
+
         return PurchaseResponse(**response_data)
     
     except HTTPException:
