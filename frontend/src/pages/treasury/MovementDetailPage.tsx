@@ -39,6 +39,14 @@ const typeLabels: Record<string, string> = {
   asset_revaluation_credit: "Revalorización Activo (Crédito)",
   asset_devaluation_collection: "Devaluación Activo (Reembolso)",
   asset_devaluation_receivable: "Devaluación Activo (Por Cobrar)",
+  obligation_disbursement: "Desembolso Obligación",
+  obligation_interest_accrual: "Interés Causado (Obligación)",
+  obligation_interest_payment: "Pago Intereses Obligación",
+  obligation_capital_payment: "Abono Capital Obligación",
+  loan_disbursement: "Desembolso Préstamo",
+  loan_interest_accrual: "Interés Causado (Préstamo)",
+  loan_interest_collection: "Recaudo Intereses Préstamo",
+  loan_capital_collection: "Recaudo Capital Préstamo",
   expense_accrual: "Gasto Causado (Pasivo)",
   deferred_funding: "Pago Gasto Diferido",
   deferred_expense: "Cuota Gasto Diferido",
@@ -58,6 +66,8 @@ const EDITABLE_EXPENSE_TYPES = ["expense", "expense_accrual", "provision_expense
 // Movimientos que pertenecen a un activo fijo: se anulan desde el activo, no desde Tesorería (backend responde 422)
 const ASSET_OWNED_TYPES = ["asset_payment", "depreciation_expense", "asset_purchase", "asset_revaluation_payment", "asset_revaluation_credit", "asset_devaluation_collection", "asset_devaluation_receivable"];
 const REVALUATION_TYPES = ["asset_revaluation_payment", "asset_revaluation_credit", "asset_devaluation_collection", "asset_devaluation_receivable"];
+// Movimientos de obligaciones financieras: se anulan desde la obligación (backend responde 422)
+const OBLIGATION_TYPES = ["obligation_disbursement", "obligation_interest_accrual", "obligation_interest_payment", "obligation_capital_payment", "loan_disbursement", "loan_interest_accrual", "loan_interest_collection", "loan_capital_collection"];
 
 const statusBorderMap: Record<string, string> = {
   confirmed: "border-t-[3px] border-t-emerald-400",
@@ -120,7 +130,7 @@ export default function MovementDetailPage() {
               <Pencil className="h-4 w-4 mr-2" />Editar Clasificacion
             </Button>
           )}
-          {movement.status === "confirmed" && !ASSET_OWNED_TYPES.includes(movement.movement_type) && (
+          {movement.status === "confirmed" && !ASSET_OWNED_TYPES.includes(movement.movement_type) && !OBLIGATION_TYPES.includes(movement.movement_type) && (
             <Button variant="outline" onClick={() => setShowAnnul(true)} className="text-red-600 border-red-200 hover:bg-red-50">
               <XCircle className="h-4 w-4 mr-2" />Anular
             </Button>
@@ -139,6 +149,21 @@ export default function MovementDetailPage() {
             : "Se revierte cancelando el activo desde su detalle."}{" "}
           <Link to={ROUTES.TREASURY_FIXED_ASSETS} className="font-medium underline underline-offset-2">
             Ir a Activos Fijos
+          </Link>
+        </div>
+      )}
+
+      {movement.status === "confirmed" && OBLIGATION_TYPES.includes(movement.movement_type) && (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800">
+          Este movimiento pertenece a una obligación financiera y no se anula desde Tesorería.
+          Anúlalo desde el detalle de la obligación — eso revierte capital/intereses pendientes con las validaciones del módulo.{" "}
+          <Link
+            to={movement.financial_obligation_id
+              ? ROUTES.TREASURY_OBLIGATION_DETAIL.replace(":id", movement.financial_obligation_id)
+              : ROUTES.TREASURY_OBLIGATIONS}
+            className="font-medium underline underline-offset-2"
+          >
+            Ir a la Obligación
           </Link>
         </div>
       )}

@@ -79,6 +79,14 @@ export default function ProfitAndLossPeriodView() {
                 value={formatCurrency(data.service_income)}
                 valueClass="text-emerald-700"
               />
+              {(data.interest_income ?? 0) !== 0 && (
+                <DrillRow
+                  to="/treasury?tab=loan_interest_accrual&status=confirmed"
+                  label="Ingresos Financieros (Intereses)"
+                  value={formatCurrency(data.interest_income)}
+                  valueClass="text-emerald-700"
+                />
+              )}
               <DrillRow
                 to="/double-entries?tab=liquidated&date_field=liquidated_at"
                 label={`Utilidad Pasa Mano (${data.double_entry_count} operaciones)`}
@@ -149,6 +157,7 @@ export default function ProfitAndLossPeriodView() {
                   expense_accrual: "Gastos Causados (Pasivos)",
                   deferred_expense: "Gastos Diferidos",
                   depreciation_expense: "Depreciación de Activos",
+                  obligation_interest_accrual: "Gastos Financieros (Intereses)",
                 };
                 const urls: Record<string, string> = {
                   expense: "/treasury?tab=expense&status=confirmed",
@@ -156,8 +165,9 @@ export default function ProfitAndLossPeriodView() {
                   expense_accrual: "/treasury?tab=expense_accrual&status=confirmed",
                   deferred_expense: "/treasury?tab=deferred_expense&status=confirmed",
                   depreciation_expense: "/treasury?tab=depreciation_expense&status=confirmed",
+                  obligation_interest_accrual: "/treasury?tab=obligation_interest_accrual&status=confirmed",
                 };
-                const order = ["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense"];
+                const order = ["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "obligation_interest_accrual"];
                 const sources = order.filter((s) => bySource[s] > 0);
                 if (sources.length >= 1) {
                   return sources.map((s) => (

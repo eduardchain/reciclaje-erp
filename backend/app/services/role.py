@@ -84,6 +84,8 @@ PERMISSIONS_CATALOG = [
     ("treasury.view_statements", "Ver Terceros", "treasury", "Permite ver estados de cuenta de terceros", 90),
     ("treasury.edit_classification", "Editar Clasificacion Gastos", "treasury", "Editar categoria y UN en movimientos de gasto", 92),
     ("treasury.adjust_balances", "Ajustar Saldos de Terceros", "treasury", "Permite ajustar saldos de terceros (perdida/ganancia)", 93),
+    ("treasury.view_obligations", "Ver Obligaciones Financieras", "treasury", "Permite ver obligaciones financieras (prestamos por pagar/cobrar)", 94),
+    ("treasury.manage_obligations", "Gestionar Obligaciones Financieras", "treasury", "Permite crear obligaciones, causar intereses, registrar pagos y anular", 95),
 
     # Reportes
     ("reports.view", "Ver Reportes", "reports", "Permite ver reportes financieros", 100),
@@ -151,6 +153,7 @@ SYSTEM_ROLES = {
             "treasury.view_accounts",
             "treasury.edit_classification",
             "treasury.adjust_balances",
+            "treasury.view_obligations", "treasury.manage_obligations",
             "reports.view_expenses",
         ],
     },
@@ -184,6 +187,7 @@ SYSTEM_ROLES = {
             "treasury.view_dashboard", "treasury.view_movements", "treasury.view_accounts",
             "treasury.view_provisions", "treasury.view_liabilities",
             "treasury.view_scheduled", "treasury.view_fixed_assets", "treasury.view_statements",
+            "treasury.view_obligations",
             "reports.view", "reports.export",
             "reports.view_dashboard", "reports.view_pnl", "reports.view_cashflow",
             "reports.view_balance", "reports.view_purchases", "reports.view_sales",

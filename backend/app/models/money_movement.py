@@ -36,6 +36,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Index,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
     from app.models.sale import Sale
     from app.models.user import User
     from app.models.business_unit import BusinessUnit
+    from app.models.financial_obligation import FinancialObligation
 
 
 # Tipos de movimiento validos
@@ -85,6 +87,14 @@ VALID_MOVEMENT_TYPES = [
     "asset_revaluation_credit",      # Revalorizacion activo al alza a credito: NO cuenta, supplier.balance(-)
     "asset_devaluation_collection",  # Devaluacion activo con reembolso: account(+), NO P&L
     "asset_devaluation_receivable",  # Devaluacion activo a cargo de tercero: NO cuenta, tp.balance(+)
+    "obligation_disbursement",       # Nos prestan (entra el prestamo): account(+), tp.balance(-)
+    "obligation_interest_accrual",   # Interes causado por pagar: NO cuenta, tp.balance(-), P&L gasto
+    "obligation_interest_payment",   # Pago de intereses: account(-), tp.balance(+)
+    "obligation_capital_payment",    # Abono a capital: account(-), tp.balance(+)
+    "loan_disbursement",             # Prestamos nosotros (sale el prestamo): account(-), tp.balance(+)
+    "loan_interest_accrual",         # Interes causado por cobrar: NO cuenta, tp.balance(+), P&L ingreso financiero
+    "loan_interest_collection",      # Recaudo de intereses: account(+), tp.balance(-)
+    "loan_capital_collection",       # Recaudo de capital: account(+), tp.balance(-)
 ]
 
 
@@ -173,6 +183,20 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
         ForeignKey("sales.id", ondelete="SET NULL"),
         nullable=True,
         comment="Venta vinculada (para cobros a cliente)",
+    )
+
+    financial_obligation_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("financial_obligations.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Obligacion financiera vinculada (tipos obligation_* / loan_*)",
+    )
+
+    obligation_period: Mapped[Optional[str]] = mapped_column(
+        String(7),
+        nullable=True,
+        comment='"YYYY-MM" causado — SOLO causaciones de interes (indice parcial de idempotencia)',
     )
 
     # Autorreferencia para pares de transferencia
@@ -313,6 +337,11 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
         uselist=False,
     )
 
+    financial_obligation: Mapped[Optional["FinancialObligation"]] = relationship(
+        "FinancialObligation",
+        foreign_keys=[financial_obligation_id],
+    )
+
     # --- Table constraints e indexes compuestos ---
     __table_args__ = (
         UniqueConstraint(
@@ -325,6 +354,19 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
         Index("ix_money_movements_org_account", "organization_id", "account_id"),
         Index("ix_money_movements_org_third_party", "organization_id", "third_party_id"),
         Index("ix_money_movements_org_status", "organization_id", "status"),
+        # Idempotencia de causacion de intereses: 1 causacion confirmada por
+        # (obligacion, periodo). Anular libera el slot para recausar — espejo
+        # del uq_asset_depreciation_period pero como indice parcial.
+        Index(
+            "uq_obligation_accrual_period",
+            "financial_obligation_id",
+            "obligation_period",
+            unique=True,
+            postgresql_where=text(
+                "movement_type IN ('obligation_interest_accrual', 'loan_interest_accrual') "
+                "AND status = 'confirmed'"
+            ),
+        ),
     )
 
     def __repr__(self) -> str:

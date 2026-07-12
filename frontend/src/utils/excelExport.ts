@@ -298,6 +298,7 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
   rows.push([]);
   rows.push(["Conciliacion con Estado de Resultados"]);
   rows.push(["Ingresos por Servicios", rec.service_income]);
+  rows.push(["Ingresos Financieros (Intereses)", rec.interest_income ?? 0]);
   rows.push(["Transformaciones (neto)", rec.transformation_net]);
   rows.push(["Ajustes de Inventario (neto)", rec.inventory_adjustment_net]);
   rows.push(["Ajustes de Terceros (neto)", rec.tp_adjustment_net]);
@@ -452,6 +453,7 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   rows.push(["Costo de Ventas (COGS)", data.cost_of_goods_sold]);
   rows.push(["Utilidad Bruta Ventas", data.gross_profit_sales]);
   rows.push(["Ingresos por Servicios", data.service_income]);
+  if ((data.interest_income ?? 0) !== 0) rows.push(["Ingresos Financieros (Intereses)", data.interest_income]);
   rows.push(["Utilidad Pasa Mano", data.double_entry_profit]);
   if (data.transformation_profit !== 0) rows.push(["Gan/Perd Transformaciones", data.transformation_profit]);
   if (data.waste_loss > 0) rows.push(["Perdida por Merma", -data.waste_loss]);
@@ -510,6 +512,9 @@ export function exportPnlMonthlyExcel(
   pushRow("Costo de Ventas (COGS)", (p) => p.cost_of_goods_sold, { prefix: "-" });
   pushRow("Utilidad Bruta Ventas", (p) => p.gross_profit_sales, { bold: true });
   pushRow("Ingresos por Servicios", (p) => p.service_income);
+  if (data.periods.some((p) => Math.abs(p.interest_income ?? 0) > 0.01) || Math.abs(data.totals.interest_income ?? 0) > 0.01) {
+    pushRow("Ingresos Financieros (Intereses)", (p) => p.interest_income ?? 0);
+  }
   pushRow("Utilidad Pasa Mano", (p) => p.double_entry_profit);
 
   if (data.periods.some((p) => Math.abs(p.transformation_profit) > 0.01) || Math.abs(data.totals.transformation_profit) > 0.01) {
@@ -600,6 +605,9 @@ export function exportCashFlowExcel(data: CashFlowResponse) {
   if (data.inflows.advance_collections > 0) rows.push(["Anticipos de Clientes", data.inflows.advance_collections]);
   if (data.inflows.generic_collections > 0) rows.push(["Cobros Genericos", data.inflows.generic_collections]);
   if (data.inflows.asset_devaluation_collections > 0) rows.push(["Devaluacion de Activos (Reembolso)", data.inflows.asset_devaluation_collections]);
+  if ((data.inflows.obligation_disbursements ?? 0) > 0) rows.push(["Desembolsos de Obligaciones", data.inflows.obligation_disbursements]);
+  if ((data.inflows.loan_interest_collections ?? 0) > 0) rows.push(["Recaudo Intereses Prestamos", data.inflows.loan_interest_collections]);
+  if ((data.inflows.loan_capital_collections ?? 0) > 0) rows.push(["Recaudo Capital Prestamos", data.inflows.loan_capital_collections]);
   rows.push(["Total Ingresos", data.total_inflows]);
   rows.push([]);
   rows.push(["EGRESOS", ""]);
@@ -612,6 +620,9 @@ export function exportCashFlowExcel(data: CashFlowResponse) {
   if (data.outflows.advance_payments > 0) rows.push(["Anticipos a Proveedores", data.outflows.advance_payments]);
   if (data.outflows.asset_payments > 0) rows.push(["Activos Fijos", data.outflows.asset_payments]);
   if (data.outflows.generic_payments > 0) rows.push(["Pagos Genericos", data.outflows.generic_payments]);
+  if ((data.outflows.loan_disbursements ?? 0) > 0) rows.push(["Prestamos Otorgados", data.outflows.loan_disbursements]);
+  if ((data.outflows.obligation_interest_payments ?? 0) > 0) rows.push(["Pago Intereses Obligaciones", data.outflows.obligation_interest_payments]);
+  if ((data.outflows.obligation_capital_payments ?? 0) > 0) rows.push(["Abonos Capital Obligaciones", data.outflows.obligation_capital_payments]);
   rows.push(["Total Egresos", data.total_outflows]);
   rows.push([]);
   rows.push(["Flujo Neto", data.net_flow]);

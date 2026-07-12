@@ -77,6 +77,14 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "tp_adjustment_debit": -1,       # Ajuste debito: saldo baja (hacia cero desde positivo)
     "asset_revaluation_credit": -1,     # Revalorizacion activo alza a credito: le debemos (balance baja)
     "asset_devaluation_receivable": 1,  # Devaluacion activo a cargo del tercero: nos debe (balance sube)
+    "obligation_disbursement": -1,      # Nos prestan: les debemos mas (balance baja)
+    "obligation_interest_accrual": -1,  # Interes causado por pagar: debemos mas (balance baja)
+    "obligation_interest_payment": 1,   # Pago de intereses: debemos menos (balance sube)
+    "obligation_capital_payment": 1,    # Abono a capital: debemos menos (balance sube)
+    "loan_disbursement": 1,             # Prestamos nosotros: nos debe mas (balance sube)
+    "loan_interest_accrual": 1,         # Interes causado por cobrar: nos debe mas (balance sube)
+    "loan_interest_collection": -1,     # Recaudo de intereses: nos debe menos (balance baja)
+    "loan_capital_collection": -1,      # Recaudo de capital: nos debe menos (balance baja)
 }
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -100,8 +108,15 @@ ACCOUNT_BALANCE_DIRECTION = {
     "collection_from_generic": 1,    # Cobro a generico: entra dinero
     "asset_revaluation_payment": -1,    # Revalorizacion activo alza pagada: sale dinero
     "asset_devaluation_collection": 1,  # Devaluacion activo con reembolso: entra dinero
+    "obligation_disbursement": 1,       # Nos prestan: entra el prestamo
+    "obligation_interest_payment": -1,  # Pago de intereses: sale dinero
+    "obligation_capital_payment": -1,   # Abono a capital: sale dinero
+    "loan_disbursement": -1,            # Prestamos nosotros: sale el prestamo
+    "loan_interest_collection": 1,      # Recaudo de intereses: entra dinero
+    "loan_capital_collection": 1,       # Recaudo de capital: entra dinero
     # expense_accrual: NO toca cuenta (account_id=None)
     # deferred_expense: NO toca cuenta (account_id=None)
+    # obligation_interest_accrual / loan_interest_accrual: NO tocan cuenta
 }
 
 

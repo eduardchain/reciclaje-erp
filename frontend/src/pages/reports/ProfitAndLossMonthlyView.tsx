@@ -23,9 +23,10 @@ const EXPENSE_SOURCE_LABELS: Record<string, string> = {
   expense_accrual: "Gastos Causados (Pasivos)",
   deferred_expense: "Gastos Diferidos",
   depreciation_expense: "Depreciación de Activos",
+  obligation_interest_accrual: "Gastos Financieros (Intereses)",
 };
 
-const EXPENSE_SOURCE_ORDER = ["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense"];
+const EXPENSE_SOURCE_ORDER = ["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "obligation_interest_accrual"];
 
 const EXPENSE_SOURCE_URL_TAB: Record<string, string> = {
   expense: "expense",
@@ -33,6 +34,7 @@ const EXPENSE_SOURCE_URL_TAB: Record<string, string> = {
   expense_accrual: "expense_accrual",
   deferred_expense: "deferred_expense",
   depreciation_expense: "depreciation_expense",
+  obligation_interest_accrual: "obligation_interest_accrual",
 };
 
 interface PnlPeriodLike {
@@ -162,6 +164,13 @@ export default function ProfitAndLossMonthlyView() {
       drillUrl: (p) => withDateRange("/treasury?tab=service_income&status=confirmed", p.period_from, p.period_to),
       value: (p) => p.service_income,
       cellClass: () => "text-emerald-700",
+    },
+    {
+      label: "Ingresos Financieros (Intereses)",
+      drillUrl: (p) => withDateRange("/treasury?tab=loan_interest_accrual&status=confirmed", p.period_from, p.period_to),
+      value: (p) => p.interest_income ?? 0,
+      cellClass: () => "text-emerald-700",
+      visible: (d) => d.periods.some((p) => Math.abs(p.interest_income ?? 0) > 0.01) || Math.abs(d.totals.interest_income ?? 0) > 0.01,
     },
     {
       label: "Utilidad Pasa Mano",

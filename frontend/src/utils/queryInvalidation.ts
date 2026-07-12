@@ -63,6 +63,12 @@ export const invalidateAfterInventoryChange = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["reports"] });
 };
 
+// Obligaciones financieras (plan F): mueven cuentas, terceros y P&L
+export const invalidateAfterObligation = (qc: QueryClient) => {
+  qc.invalidateQueries({ queryKey: ["financial-obligations"] });
+  invalidateAfterTreasury(qc);
+};
+
 export const invalidateAfterFixedAsset = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["fixed-assets"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });

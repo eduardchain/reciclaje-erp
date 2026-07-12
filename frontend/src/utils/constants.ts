@@ -44,6 +44,7 @@ export const ROUTES = {
   TREASURY_FIXED_ASSETS_NEW: "/treasury/fixed-assets/new",
   TREASURY_PROFIT_DISTRIBUTION: "/treasury/profit-distribution",
   TREASURY_BATCH_EXPENSES: "/treasury/batch-expenses",
+  TREASURY_OBLIGATIONS: "/treasury/obligations",
 
   // Inventario
   INVENTORY: "/inventory",
@@ -104,6 +105,7 @@ export const ROUTES = {
   DOUBLE_ENTRY_EDIT: "/double-entries/:id/edit",
   DOUBLE_ENTRY_LIQUIDATE: "/double-entries/:id/liquidate",
   TREASURY_MOVEMENT_DETAIL: "/treasury/:id",
+  TREASURY_OBLIGATION_DETAIL: "/treasury/obligations/:id",
   TREASURY_FIXED_ASSET_DETAIL: "/treasury/fixed-assets/:id",
   TREASURY_FIXED_ASSET_EDIT: "/treasury/fixed-assets/:id/edit",
   TREASURY_SCHEDULED_DETAIL: "/treasury/scheduled-expenses/:id",

@@ -347,6 +347,7 @@ class MoneyMovementResponse(BaseModel):
     purchase_id: Optional[UUID] = None
     sale_id: Optional[UUID] = None
     transfer_pair_id: Optional[UUID] = None
+    financial_obligation_id: Optional[UUID] = None
 
     # Asignacion a Unidad de Negocio
     business_unit_id: Optional[UUID] = None

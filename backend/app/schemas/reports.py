@@ -102,6 +102,10 @@ class ProfitAndLossResponse(BaseModel):
     sales_count: int
     service_income: float
 
+    # Ingresos financieros: intereses causados de prestamos por cobrar
+    # (loan_interest_accrual, plan F). Espejo de service_income.
+    interest_income: float = 0.0
+
     # Costo de ventas (metodo directo)
     cost_of_goods_sold: float
 
@@ -185,6 +189,9 @@ class CashFlowInflows(BaseModel):
     advance_collections: float = 0.0
     generic_collections: float = 0.0
     asset_devaluation_collections: float = 0.0
+    obligation_disbursements: float = 0.0
+    loan_interest_collections: float = 0.0
+    loan_capital_collections: float = 0.0
     total: float
 
 
@@ -199,6 +206,9 @@ class CashFlowOutflows(BaseModel):
     advance_payments: float = 0.0
     asset_payments: float = 0.0
     generic_payments: float = 0.0
+    loan_disbursements: float = 0.0
+    obligation_interest_payments: float = 0.0
+    obligation_capital_payments: float = 0.0
     total: float
 
 
@@ -647,11 +657,12 @@ class DoubleEntryProfitability(BaseModel):
 class PnlReconciliation(BaseModel):
     """Conciliacion con el Estado de Resultados (plan A.2 §3.7).
 
-    Las 5 lineas del P&L no atribuibles a ninguna UN. Promesa contractual:
-    grand_total_net + estas 5 lineas == pnl_net_profit (tolerancia $1).
+    Las 6 lineas del P&L no atribuibles a ninguna UN. Promesa contractual:
+    grand_total_net + estas 6 lineas == pnl_net_profit (tolerancia $1).
     Guardrail: test_reconciliation_residual_zero.
     """
     service_income: float = 0
+    interest_income: float = 0  # Intereses de prestamos por cobrar (plan F)
     transformation_net: float = 0  # transformation_profit - waste_loss
     inventory_adjustment_net: float = 0
     tp_adjustment_net: float = 0  # gain - loss
