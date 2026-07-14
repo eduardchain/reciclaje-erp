@@ -218,8 +218,8 @@ class TestInterestEngine:
         """Evento el dia 31 → dia 30 (1 dia con el saldo nuevo)."""
         events = [(1, D("30000000")), (31, D("20000000"))]
         amount, _ = compute_monthly_interest(events, RATE_2)
-        # 30M × 2% × 29/30 + 20M × 2% × 1/30 = 580.000 + 13.333,33
-        assert amount == D("593333.33")
+        # 30M × 2% × 29/30 + 20M × 2% × 1/30 = 580.000 + 13.333,33 → peso entero
+        assert amount == D("593333")
 
     def test_february_day_28_keeps_virtual_days(self):
         """En febrero el dia 28 es el dia 28: quedan 3 dias (28-30) con saldo nuevo."""
@@ -232,8 +232,9 @@ class TestInterestEngine:
         """Varios abonos el mes; el mismo dia se netean al ultimo saldo."""
         events = [(1, D("20000000")), (10, D("15000000")), (20, D("5000000"))]
         amount, _ = compute_monthly_interest(events, RATE_2)
-        # 20M×2%×9/30 + 15M×2%×10/30 + 5M×2%×11/30 = 120.000 + 100.000 + 36.666,67
-        assert amount == D("256666.67")
+        # 20M×2%×9/30 + 15M×2%×10/30 + 5M×2%×11/30 = 120.000 + 100.000
+        # + 36.666,67 → 256.666,67 → peso entero HALF_UP = 256.667
+        assert amount == D("256667")
 
         # build_capital_events netea dos abonos del dia 16 (-6M y -4M)
         built = build_capital_events(
@@ -256,12 +257,25 @@ class TestInterestEngine:
         assert zero_breakdown == "capital $0 todo el mes"
 
     def test_quantize_on_total_not_per_tramo(self):
-        """El redondeo es sobre el TOTAL: 3 tramos de 0,1666... suman 0,50 (no 0,51)."""
-        events = [(1, D("50")), (11, D("50")), (21, D("50"))]
+        """El redondeo es sobre el TOTAL: 3 tramos de $16.666,67 suman $50.000 (no $50.001)."""
+        events = [(1, D("5000000")), (11, D("5000000")), (21, D("5000000"))]
         amount, _ = compute_monthly_interest(events, D("1.00"))
-        # 50 × 1% × 10/30 = 0,1666... por tramo; total exacto = 0,50
-        # (quantize por tramo daria 0,17 × 3 = 0,51)
-        assert amount == D("0.50")
+        # 5M × 1% × 10/30 = 16.666,67 por tramo; total exacto = 50.000
+        # (redondeo por tramo daria 16.667 × 3 = 50.001)
+        assert amount == D("50000")
+
+    def test_rounds_to_whole_peso(self):
+        """La causacion es en pesos ENTEROS (HALF_UP): $86.666,67 → $86.667.
+
+        Guardrail del caso reportado en pruebas de usuario: con centavos, el
+        pendiente era impagable desde la UI (inputs de pesos enteros) y la
+        obligacion no se podia sanear.
+        """
+        # 10M × 2% × 13/30 = 86.666,666... → 86.667
+        events = [(1, D("10000000")), (14, D("0"))]
+        amount, _ = compute_monthly_interest(events, RATE_2)
+        assert amount == D("86667")
+        assert amount == amount.to_integral_value()
 
 
 # ===========================================================================
@@ -1038,6 +1052,294 @@ class TestIntegrations:
         )
         items = resp.json()["items"]
         assert not any(i["third_party_id"] == str(tp.id) for i in items)
+
+
+def _today_bogota():
+    return datetime.now(BOGOTA)
+
+
+def _ind_preview(client, headers, obligation_id):
+    resp = client.get(f"{URL}/{obligation_id}/accrue-preview", headers=headers)
+    assert resp.status_code == 200, resp.json()
+    return resp.json()
+
+
+def _ind_accrue(client, headers, obligation_id, category_id=None, tranche=False, expect=200):
+    body = {"include_current_tranche": tranche}
+    if category_id:
+        body["expense_category_id"] = str(category_id)
+    resp = client.post(f"{URL}/{obligation_id}/accrue", json=body, headers=headers)
+    assert resp.status_code == expect, resp.json()
+    return resp.json()
+
+
+class TestIndividualAccrue:
+    """Causacion individual por obligacion + tramo de cierre del mes en curso.
+
+    El tramo usa capital $9M @ 2% → $6.000/dia exactos (cero ambiguedad de
+    redondeo). Los tests de tramo hacen branch si hoy es dia 1 en Bogota
+    (payoff mismo dia = 0 dias devengados → no hay tramo que causar).
+    """
+
+    def _payoff_today(self, client, org_headers, db, org_id, name, direction="payable"):
+        """Obligacion con payoff hoy: desembolso $9M dia 1 del mes en curso,
+        abono/recaudo total hoy → capital $0, tramo = $6.000 × (dia−1)."""
+        tp = _obligation_tp(db, org_id, name)
+        acc = _account(db, org_id, f"Caja {name}", balance=50_000_000)
+        ob = _create_obligation(
+            client, org_headers, tp.id, direction=direction,
+            account_id=acc.id, amount=9_000_000, date=f"{_period(0)}-01",
+        )
+        _action(client, org_headers, ob["id"], "capital-payment",
+                amount=9_000_000, account_id=acc.id,
+                date=_today_bogota().strftime("%Y-%m-%d"))
+        return tp, acc, ob
+
+    def test_individual_accrues_only_this_obligation(
+        self, client, org_headers, db_session, test_organization
+    ):
+        """Causar UNA obligacion no toca las demas; el batch queda con el resto."""
+        org_id = test_organization.id
+        tp_a = _obligation_tp(db_session, org_id, "Individual A")
+        tp_b = _obligation_tp(db_session, org_id, "Individual B")
+        acc = _account(db_session, org_id, "Caja Individual")
+        cat = _expense_cat(db_session, org_id)
+        ob_a = _create_obligation(client, org_headers, tp_a.id, direction="payable",
+                                  account_id=acc.id, amount=10_000_000, date=_date_in(2, 1))
+        ob_b = _create_obligation(client, org_headers, tp_b.id, direction="payable",
+                                  account_id=acc.id, amount=5_000_000, date=_date_in(1, 1))
+
+        preview = _ind_preview(client, org_headers, ob_a["id"])
+        assert [i["period"] for i in preview["items"]] == [_period(2), _period(1)]
+        assert all(float(i["amount"]) == 200_000 for i in preview["items"])
+        assert preview["current_tranche"] is None  # capital vigente > 0
+        assert preview["has_payable"] is True
+
+        result = _ind_accrue(client, org_headers, ob_a["id"], category_id=cat.id)
+        assert result["created_count"] == 2
+        assert float(result["total_payable"]) == 400_000
+
+        ob_a_f = _get_obligation(client, org_headers, ob_a["id"])
+        assert float(ob_a_f["pending_interest"]) == 400_000
+        assert ob_a_f["last_accrued_period"] == _period(1)
+        ob_b_f = _get_obligation(client, org_headers, ob_b["id"])
+        assert float(ob_b_f["pending_interest"]) == 0
+        assert ob_b_f["last_accrued_period"] is None
+
+        # El batch global ya solo ofrece la obligacion B
+        pending = _pending(client, org_headers)
+        assert {i["obligation_id"] for i in pending["items"]} == {ob_b["id"]}
+
+    def test_individual_accrue_requires_category_for_payable(
+        self, client, org_headers, db_session, test_organization
+    ):
+        org_id = test_organization.id
+        tp = _obligation_tp(db_session, org_id, "Sin Categoria Ind")
+        acc = _account(db_session, org_id, "Caja SCI")
+        ob = _create_obligation(client, org_headers, tp.id, direction="payable",
+                                account_id=acc.id, amount=10_000_000, date=_date_in(1, 1))
+        result = _ind_accrue(client, org_headers, ob["id"], expect=400)
+        assert "categoría" in result["detail"]
+
+    def test_individual_accrue_nothing_pending(
+        self, client, org_headers, db_session, test_organization
+    ):
+        """Sin vencidos y sin flag de tramo → 400 con mensaje claro."""
+        org_id = test_organization.id
+        tp = _obligation_tp(db_session, org_id, "Nada Pendiente")
+        acc = _account(db_session, org_id, "Caja NP")
+        cat = _expense_cat(db_session, org_id)
+        ob = _create_obligation(client, org_headers, tp.id, direction="payable",
+                                account_id=acc.id, amount=10_000_000,
+                                date=f"{_period(0)}-01")
+        result = _ind_accrue(client, org_headers, ob["id"], category_id=cat.id, expect=400)
+        assert "No hay intereses pendientes" in result["detail"]
+
+    def test_tranche_requires_zero_capital(
+        self, client, org_headers, db_session, test_organization
+    ):
+        """Con capital vigente el tramo NO se ofrece ni se puede causar."""
+        org_id = test_organization.id
+        tp = _obligation_tp(db_session, org_id, "Capital Vivo")
+        acc = _account(db_session, org_id, "Caja CV")
+        cat = _expense_cat(db_session, org_id)
+        ob = _create_obligation(client, org_headers, tp.id, direction="payable",
+                                account_id=acc.id, amount=10_000_000, date=_date_in(1, 1))
+        preview = _ind_preview(client, org_headers, ob["id"])
+        assert preview["current_tranche"] is None
+        result = _ind_accrue(client, org_headers, ob["id"], category_id=cat.id,
+                             tranche=True, expect=400)
+        assert "capital en $0" in result["detail"]
+
+    def test_closing_tranche_math_and_freeze(
+        self, client, org_headers, db_session, test_organization
+    ):
+        """Payoff hoy: tramo = $6.000 × (dia−1); tras causarlo, el retro guard
+        congela los movimientos de capital del mes (composicion gratis)."""
+        org_id = test_organization.id
+        day = _today_bogota().day
+        cat = _expense_cat(db_session, org_id)
+        tp, acc, ob = self._payoff_today(client, org_headers, db_session, org_id, "Tramo Math")
+
+        preview = _ind_preview(client, org_headers, ob["id"])
+        if day == 1:
+            assert preview["current_tranche"] is None
+            _ind_accrue(client, org_headers, ob["id"], category_id=cat.id,
+                        tranche=True, expect=400)
+            return
+        expected = D(6_000 * (day - 1))
+        tranche = preview["current_tranche"]
+        assert tranche is not None and tranche["period"] == _period(0)
+        assert D(str(tranche["amount"])) == expected
+
+        result = _ind_accrue(client, org_headers, ob["id"], category_id=cat.id, tranche=True)
+        assert result["created_count"] == 1
+        assert D(str(result["total_payable"])) == expected
+        ob_f = _get_obligation(client, org_headers, ob["id"])
+        assert D(str(ob_f["pending_interest"])) == expected
+        assert ob_f["last_accrued_period"] == _period(0)
+
+        # Freeze: desembolso adicional fechado hoy (mes ya causado) → 400
+        resp = _action(client, org_headers, ob["id"], "disbursement",
+                       amount=1_000_000, account_id=acc.id,
+                       date=_today_bogota().strftime("%Y-%m-%d"), expect=400)
+        assert "ya tiene intereses causados" in resp["detail"]
+
+        # Summary: la proyeccion del mes en curso NO duplica el tramo causado
+        # (el monto ya vive en pendientes)
+        resp = client.get(f"{URL}/summary", headers=org_headers)
+        assert resp.status_code == 200
+        payable = resp.json()["payable"]
+        assert float(payable["current_month_projection"]) == 0
+        assert D(str(payable["total_pending_interest"])) == expected
+
+    def test_tranche_twice_blocked(
+        self, client, org_headers, db_session, test_organization
+    ):
+        org_id = test_organization.id
+        day = _today_bogota().day
+        if day == 1:
+            return  # sin tramo posible el dia 1 — cubierto por math_and_freeze
+        cat = _expense_cat(db_session, org_id)
+        tp, acc, ob = self._payoff_today(client, org_headers, db_session, org_id, "Tramo Doble")
+        _ind_accrue(client, org_headers, ob["id"], category_id=cat.id, tranche=True)
+        result = _ind_accrue(client, org_headers, ob["id"], category_id=cat.id,
+                             tranche=True, expect=400)
+        assert "ya está causado" in result["detail"]
+
+    def test_annul_tranche_frees_period_and_reaccrues_same(
+        self, client, org_headers, db_session, test_organization
+    ):
+        """Anular el tramo libera el mes en curso y se puede re-causar identico."""
+        org_id = test_organization.id
+        day = _today_bogota().day
+        if day == 1:
+            return
+        cat = _expense_cat(db_session, org_id)
+        tp, acc, ob = self._payoff_today(client, org_headers, db_session, org_id, "Tramo Anul")
+        first = _ind_accrue(client, org_headers, ob["id"], category_id=cat.id, tranche=True)
+
+        accrual = db_session.execute(
+            select(MoneyMovement).where(
+                MoneyMovement.financial_obligation_id == ob["id"],
+                MoneyMovement.movement_type == "obligation_interest_accrual",
+                MoneyMovement.status == "confirmed",
+            )
+        ).scalar_one()
+        assert "tramo de cierre" in accrual.description
+        _annul(client, org_headers, accrual.id)
+
+        ob_f = _get_obligation(client, org_headers, ob["id"])
+        assert float(ob_f["pending_interest"]) == 0
+        assert ob_f["last_accrued_period"] is None
+
+        again = _ind_accrue(client, org_headers, ob["id"], category_id=cat.id, tranche=True)
+        assert again["total_payable"] == first["total_payable"]
+
+    def test_settle_after_tranche_paid(
+        self, client, org_headers, db_session, test_organization
+    ):
+        """Flujo payoff completo: causar tramo → pagar intereses → liquidar."""
+        org_id = test_organization.id
+        day = _today_bogota().day
+        cat = _expense_cat(db_session, org_id)
+        tp, acc, ob = self._payoff_today(client, org_headers, db_session, org_id, "Payoff Full")
+        if day > 1:
+            _ind_accrue(client, org_headers, ob["id"], category_id=cat.id, tranche=True)
+            _action(client, org_headers, ob["id"], "interest-payment",
+                    amount=6_000 * (day - 1), account_id=acc.id,
+                    date=_today_bogota().strftime("%Y-%m-%d"))
+        resp = client.post(f"{URL}/{ob['id']}/settle", headers=org_headers)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "settled"
+        # Tercero en 0: el ciclo completo cerro redondo
+        db_session.expire_all()
+        tp_f = db_session.get(ThirdParty, tp.id)
+        assert tp_f.current_balance == 0
+
+    def test_batch_next_month_skips_tranche_period(
+        self, client, org_headers, db_session, test_organization, monkeypatch
+    ):
+        """Anti doble conteo: el batch del mes siguiente NO re-ofrece el periodo
+        ya causado como tramo de cierre (la gemela sin tramo SI aparece)."""
+        org_id = test_organization.id
+        day = _today_bogota().day
+        cat = _expense_cat(db_session, org_id)
+        tp1, acc1, ob1 = self._payoff_today(client, org_headers, db_session, org_id, "Con Tramo")
+        if day > 1:
+            _ind_accrue(client, org_headers, ob1["id"], category_id=cat.id, tranche=True)
+        tp2, acc2, ob2 = self._payoff_today(client, org_headers, db_session, org_id, "Gemela")
+
+        import app.services.financial_obligation as fo_mod
+        from app.services.financial_obligation import financial_obligation as svc
+        next_p = _period(-1)  # viajar al mes siguiente
+        monkeypatch.setattr(fo_mod, "_current_period", lambda: next_p)
+
+        db_session.expire_all()
+        pending = svc.get_pending_accruals(db_session, org_id)
+        offered = {(str(i.obligation_id), i.period) for i in pending.items}
+        if day > 1:
+            assert (ob2["id"], _period(0)) in offered      # gemela: julio pendiente
+            assert (ob1["id"], _period(0)) not in offered  # tramo causado: sin duplicado
+        else:
+            assert (ob1["id"], _period(0)) not in offered
+            assert (ob2["id"], _period(0)) not in offered
+
+    def test_receivable_tranche_mirror(
+        self, client, org_headers, db_session, test_organization
+    ):
+        """Espejo receivable: tramo sin categoria de gasto (es ingreso financiero)."""
+        org_id = test_organization.id
+        day = _today_bogota().day
+        if day == 1:
+            return
+        tp, acc, ob = self._payoff_today(
+            client, org_headers, db_session, org_id, "Prestamo Tramo",
+            direction="receivable",
+        )
+        result = _ind_accrue(client, org_headers, ob["id"], tranche=True)
+        assert D(str(result["total_receivable"])) == D(6_000 * (day - 1))
+        accrual = db_session.execute(
+            select(MoneyMovement).where(
+                MoneyMovement.financial_obligation_id == ob["id"],
+                MoneyMovement.movement_type == "loan_interest_accrual",
+                MoneyMovement.status == "confirmed",
+            )
+        ).scalar_one()
+        assert accrual.expense_category_id is None
+
+    def test_individual_accrue_rbac(self, client, org_headers2):
+        """Viewer: preview OK (view), causar 403 (manage)."""
+        from uuid import uuid4
+        fake = uuid4()
+        resp = client.get(f"{URL}/{fake}/accrue-preview", headers=org_headers2)
+        assert resp.status_code == 404  # paso el permiso de view, recurso no existe
+        resp = client.post(
+            f"{URL}/{fake}/accrue",
+            json={"include_current_tranche": False},
+            headers=org_headers2,
+        )
+        assert resp.status_code == 403
 
 
 # ===========================================================================

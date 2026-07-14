@@ -1,9 +1,11 @@
 import apiClient from "./api";
 import type { MoneyMovementResponse } from "@/types/money-movement";
 import type {
+  AccruePreviewResponse,
   AccrueResultResponse,
   FinancialObligationCreate,
   FinancialObligationResponse,
+  ObligationAccrueRequest,
   ObligationMovementCreate,
   ObligationSummaryResponse,
   PendingAccrualsResponse,
@@ -50,6 +52,16 @@ export const financialObligationService = {
   accruePending: async (expenseCategoryId?: string): Promise<AccrueResultResponse> => {
     const body = expenseCategoryId ? { expense_category_id: expenseCategoryId } : {};
     const response = await apiClient.post<AccrueResultResponse>(`${BASE}/accrue-pending`, body);
+    return response.data;
+  },
+
+  getAccruePreview: async (id: string): Promise<AccruePreviewResponse> => {
+    const response = await apiClient.get<AccruePreviewResponse>(`${BASE}/${id}/accrue-preview`);
+    return response.data;
+  },
+
+  accrueObligation: async (id: string, data: ObligationAccrueRequest): Promise<AccrueResultResponse> => {
+    const response = await apiClient.post<AccrueResultResponse>(`${BASE}/${id}/accrue`, data);
     return response.data;
   },
 

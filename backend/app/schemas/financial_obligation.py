@@ -72,6 +72,17 @@ class AccruePendingRequest(BaseModel):
     )
 
 
+class ObligationAccrueRequest(BaseModel):
+    """Causacion individual de una obligacion (vencidos + tramo de cierre opcional)."""
+    expense_category_id: Optional[UUID] = Field(
+        None, description="Categoria de gasto para intereses por pagar (ej: Intereses)"
+    )
+    include_current_tranche: bool = Field(
+        False,
+        description="Causar tambien el tramo del mes en curso (solo con capital en $0)",
+    )
+
+
 class ObligationAnnulRequest(BaseModel):
     reason: str = Field(..., min_length=5, max_length=500, description="Razon de la anulacion")
 
@@ -113,6 +124,13 @@ class PendingAccrualsResponse(BaseModel):
     items: list[PendingAccrualItem]
     total_payable: Decimal
     total_receivable: Decimal
+    has_payable: bool
+
+
+class AccruePreviewResponse(BaseModel):
+    """Preview de causacion de UNA obligacion: vencidos + tramo de cierre disponible."""
+    items: list[PendingAccrualItem]
+    current_tranche: Optional[PendingAccrualItem] = None
     has_payable: bool
 
 

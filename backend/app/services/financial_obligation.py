@@ -38,8 +38,10 @@ from app.models.third_party_category import (
 )
 from app.schemas.financial_obligation import (
     AccruePendingRequest,
+    AccruePreviewResponse,
     AccrueResultResponse,
     FinancialObligationCreate,
+    ObligationAccrueRequest,
     ObligationDirectionSummary,
     ObligationMovementCreate,
     ObligationSummaryResponse,
@@ -130,6 +132,12 @@ def _last_day_noon_utc(period: str) -> datetime:
     year, month = int(period[:4]), int(period[5:7])
     last_day = calendar.monthrange(year, month)[1]
     return datetime(year, month, last_day, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _today_noon_utc() -> datetime:
+    """Hoy (Bogota) a mediodia UTC — fecha del MM del tramo de cierre (#62, sin back-dating)."""
+    today = datetime.now(_BOGOTA_TZ)
+    return datetime(today.year, today.month, today.day, 12, 0, 0, tzinfo=timezone.utc)
 
 
 class FinancialObligationService:
@@ -617,50 +625,90 @@ class FinancialObligationService:
         ).scalars().all()
         return set(rows)
 
-    def _pending_items(
-        self, db: Session, organization_id: UUID
-    ) -> list[tuple[FinancialObligation, PendingAccrualItem]]:
-        """Periodos cerrados sin causar, por obligacion activa, con monto calculado.
+    def _accrual_start(self, obligation: FinancialObligation) -> str:
+        start = obligation.accrual_start_period
+        if obligation.disbursement_date:
+            start = max(start, _period_of(obligation.disbursement_date))
+        return start
+
+    def _pending_items_for(
+        self, db: Session, obligation: FinancialObligation
+    ) -> list[PendingAccrualItem]:
+        """Periodos cerrados sin causar de UNA obligacion, con monto calculado.
 
         Solo periodos VENCIDOS (< mes actual Bogota) — nunca el mes en curso.
         Capital $0 todo el mes → se salta (no genera MM ni aparece en preview).
         """
         current = _current_period()
+        accrued = self._accrued_periods(db, obligation)
+        movements = self._capital_movements(db, obligation)
+        initial = self._initial_capital(obligation, movements)
+
+        items: list[PendingAccrualItem] = []
+        period = self._accrual_start(obligation)
+        while period < current:
+            if period not in accrued:
+                events = self._events_for_period(
+                    obligation, movements, initial, period
+                )
+                amount, breakdown = compute_monthly_interest(
+                    events, obligation.monthly_rate
+                )
+                if amount > 0:
+                    items.append(
+                        PendingAccrualItem(
+                            obligation_id=obligation.id,
+                            third_party_name=obligation.third_party.name,
+                            direction=obligation.direction,
+                            period=period,
+                            amount=amount,
+                            breakdown=breakdown,
+                        )
+                    )
+            period = _next_period(period)
+        return items
+
+    def _current_tranche_item(
+        self, db: Session, obligation: FinancialObligation
+    ) -> Optional[PendingAccrualItem]:
+        """Tramo de cierre: interes del mes EN CURSO, disponible solo con capital $0.
+
+        Con capital en $0 el calculo es exacto por construccion — los dias
+        restantes del mes no pueden devengar nada. Con capital vigente NO se
+        ofrece (los dias futuros del mes quedarian sin contar y el indice de
+        idempotencia impediria re-causar el periodo).
+        """
+        if obligation.capital_balance != 0:
+            return None
+        current = _current_period()
+        if self._accrual_start(obligation) > current:
+            return None
+        if current in self._accrued_periods(db, obligation):
+            return None
+        movements = self._capital_movements(db, obligation)
+        initial = self._initial_capital(obligation, movements)
+        events = self._events_for_period(obligation, movements, initial, current)
+        amount, breakdown = compute_monthly_interest(events, obligation.monthly_rate)
+        if amount <= 0:
+            return None
+        return PendingAccrualItem(
+            obligation_id=obligation.id,
+            third_party_name=obligation.third_party.name,
+            direction=obligation.direction,
+            period=current,
+            amount=amount,
+            breakdown=breakdown,
+        )
+
+    def _pending_items(
+        self, db: Session, organization_id: UUID
+    ) -> list[tuple[FinancialObligation, PendingAccrualItem]]:
+        """Periodos vencidos sin causar de todas las obligaciones activas."""
         obligations = self.get_list(db, organization_id, status_filter="active")
         results: list[tuple[FinancialObligation, PendingAccrualItem]] = []
-
         for obligation in obligations:
-            start = obligation.accrual_start_period
-            if obligation.disbursement_date:
-                start = max(start, _period_of(obligation.disbursement_date))
-            accrued = self._accrued_periods(db, obligation)
-            movements = self._capital_movements(db, obligation)
-            initial = self._initial_capital(obligation, movements)
-
-            period = start
-            while period < current:
-                if period not in accrued:
-                    events = self._events_for_period(
-                        obligation, movements, initial, period
-                    )
-                    amount, breakdown = compute_monthly_interest(
-                        events, obligation.monthly_rate
-                    )
-                    if amount > 0:
-                        results.append(
-                            (
-                                obligation,
-                                PendingAccrualItem(
-                                    obligation_id=obligation.id,
-                                    third_party_name=obligation.third_party.name,
-                                    direction=obligation.direction,
-                                    period=period,
-                                    amount=amount,
-                                    breakdown=breakdown,
-                                ),
-                            )
-                        )
-                period = _next_period(period)
+            for item in self._pending_items_for(db, obligation):
+                results.append((obligation, item))
 
         # Orden cronologico global (las causaciones se crean en este orden)
         results.sort(key=lambda pair: (pair[1].period, pair[1].third_party_name))
@@ -711,40 +759,178 @@ class FinancialObligationService:
         total_payable = ZERO
         total_receivable = ZERO
         for obligation, item in pending:
-            movement_type = ACCRUAL_TYPE[obligation.direction]
-            movement = money_movement_service._create_movement(
-                db=db,
-                organization_id=organization_id,
-                movement_type=movement_type,
-                amount=item.amount,
-                account_id=None,
-                date=_last_day_noon_utc(item.period),
-                description=f"Intereses {item.period}: {item.breakdown}",
-                third_party_id=obligation.third_party_id,
-                expense_category_id=(
-                    data.expense_category_id
-                    if obligation.direction == "payable"
-                    else None
-                ),
-                user_id=user_id,
-                financial_obligation_id=obligation.id,
-                obligation_period=item.period,
+            self._create_accrual(
+                db, obligation, item, data.expense_category_id, user_id,
+                _last_day_noon_utc(item.period),
             )
-            self._apply_effects(
-                movement_type, item.amount, None, obligation.third_party
-            )
-            obligation.pending_interest += item.amount
-            if (
-                obligation.last_accrued_period is None
-                or item.period > obligation.last_accrued_period
-            ):
-                obligation.last_accrued_period = item.period
-
             created += 1
             if obligation.direction == "payable":
                 total_payable += item.amount
             else:
                 total_receivable += item.amount
+
+        db.commit()
+        return AccrueResultResponse(
+            created_count=created,
+            total_payable=total_payable,
+            total_receivable=total_receivable,
+        )
+
+    def _create_accrual(
+        self,
+        db: Session,
+        obligation: FinancialObligation,
+        item: PendingAccrualItem,
+        expense_category_id: Optional[UUID],
+        user_id: Optional[UUID],
+        mm_date: datetime,
+        closing: bool = False,
+    ) -> None:
+        """Crear el MM de causacion y aplicar efectos/contadores (usa flush)."""
+        movement_type = ACCRUAL_TYPE[obligation.direction]
+        label = (
+            f"Intereses {item.period} (tramo de cierre): {item.breakdown}"
+            if closing
+            else f"Intereses {item.period}: {item.breakdown}"
+        )
+        money_movement_service._create_movement(
+            db=db,
+            organization_id=obligation.organization_id,
+            movement_type=movement_type,
+            amount=item.amount,
+            account_id=None,
+            date=mm_date,
+            description=label,
+            third_party_id=obligation.third_party_id,
+            expense_category_id=(
+                expense_category_id
+                if obligation.direction == "payable"
+                else None
+            ),
+            user_id=user_id,
+            financial_obligation_id=obligation.id,
+            obligation_period=item.period,
+        )
+        self._apply_effects(
+            movement_type, item.amount, None, obligation.third_party
+        )
+        obligation.pending_interest += item.amount
+        if (
+            obligation.last_accrued_period is None
+            or item.period > obligation.last_accrued_period
+        ):
+            obligation.last_accrued_period = item.period
+
+    # ==================================================================
+    # Causacion individual + tramo de cierre
+    # ==================================================================
+
+    def get_accrue_preview(
+        self, db: Session, organization_id: UUID, obligation_id: UUID
+    ) -> AccruePreviewResponse:
+        """Vencidos + tramo de cierre disponible de UNA obligacion.
+
+        Alimenta el dialog de causacion individual y el aviso pre-settle
+        (liquidar con intereses sin causar = condonarlos, eleccion explicita).
+        """
+        obligation = self.get(db, obligation_id, organization_id)
+        if obligation.status != "active":
+            return AccruePreviewResponse(
+                items=[], current_tranche=None, has_payable=False
+            )
+        items = self._pending_items_for(db, obligation)
+        tranche = self._current_tranche_item(db, obligation)
+        has_payable = obligation.direction == "payable" and bool(items or tranche)
+        return AccruePreviewResponse(
+            items=items, current_tranche=tranche, has_payable=has_payable
+        )
+
+    def accrue_obligation(
+        self,
+        db: Session,
+        organization_id: UUID,
+        obligation_id: UUID,
+        data: ObligationAccrueRequest,
+        user_id: Optional[UUID] = None,
+    ) -> AccrueResultResponse:
+        """Causacion individual: vencidos de ESTA obligacion + tramo de cierre opcional.
+
+        El tramo del mes en curso exige capital $0 (con capital vigente los
+        dias restantes seguirian devengando y el periodo quedaria sub-contado
+        sin poder re-causarse). Tras causarlo, el retro guard congela
+        automaticamente los movimientos de capital del mes — para revivir la
+        obligacion se anula el tramo desde el modulo (libera el periodo).
+        """
+        obligation = self._get_active(db, obligation_id, organization_id)
+        items = self._pending_items_for(db, obligation)
+
+        tranche: Optional[PendingAccrualItem] = None
+        if data.include_current_tranche:
+            if obligation.capital_balance != 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "El tramo del mes en curso solo se puede causar con el "
+                        "capital en $0: con capital vigente, los días restantes "
+                        "del mes seguirían generando intereses"
+                    ),
+                )
+            if _current_period() in self._accrued_periods(db, obligation):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El mes en curso ya está causado",
+                )
+            tranche = self._current_tranche_item(db, obligation)
+            if tranche is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "No hay intereses del mes en curso para causar "
+                        "(el capital estuvo en $0 todo el mes)"
+                    ),
+                )
+
+        if not items and not tranche:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No hay intereses pendientes de causar en esta obligación",
+            )
+        if obligation.direction == "payable" and not data.expense_category_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Hay intereses por pagar pendientes: seleccione la categoría "
+                    "de gasto (ej: Intereses)"
+                ),
+            )
+        if data.expense_category_id:
+            money_movement_service._validate_expense_category(
+                db, data.expense_category_id, organization_id
+            )
+
+        created = 0
+        total_payable = ZERO
+        total_receivable = ZERO
+        for item in items:
+            self._create_accrual(
+                db, obligation, item, data.expense_category_id, user_id,
+                _last_day_noon_utc(item.period),
+            )
+            created += 1
+            if obligation.direction == "payable":
+                total_payable += item.amount
+            else:
+                total_receivable += item.amount
+        if tranche:
+            self._create_accrual(
+                db, obligation, tranche, data.expense_category_id, user_id,
+                _today_noon_utc(), closing=True,
+            )
+            created += 1
+            if obligation.direction == "payable":
+                total_payable += tranche.amount
+            else:
+                total_receivable += tranche.amount
 
         db.commit()
         return AccrueResultResponse(
@@ -930,9 +1116,12 @@ class FinancialObligationService:
                 weighted = ZERO
 
             # Proyeccion del mes en curso: eventos registrados hasta hoy,
-            # el capital vigente corre hasta el dia 30
+            # el capital vigente corre hasta el dia 30. Si el mes ya se causo
+            # (tramo de cierre) el monto vive en pendientes — no duplicar.
             projection = ZERO
             for obligation in obligations:
+                if current in self._accrued_periods(db, obligation):
+                    continue
                 movements = self._capital_movements(db, obligation)
                 initial = self._initial_capital(obligation, movements)
                 events = self._events_for_period(

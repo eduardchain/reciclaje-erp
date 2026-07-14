@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { ArrowLeft, Banknote, CalendarClock, HandCoins, Landmark, Lock, XCircle } from "lucide-react";
+import {
+  AlertTriangle, ArrowLeft, Banknote, CalendarCheck, CalendarClock, HandCoins, Landmark, Lock, XCircle,
+} from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -17,8 +19,9 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { MoneyInput } from "@/components/shared/MoneyInput";
+import { Checkbox } from "@/components/ui/checkbox";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useMoneyAccounts } from "@/hooks/useMasterData";
+import { useMoneyAccounts, useExpenseCategoriesFlat } from "@/hooks/useMasterData";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
 import {
   useFinancialObligation,
@@ -26,10 +29,13 @@ import {
   useObligationMovement,
   useSettleObligation,
   useAnnulObligationMovement,
+  useAccruePreview,
+  useAccrueObligation,
 } from "@/hooks/useFinancialObligations";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { periodLabel } from "./ObligationsPage";
 import type { MoneyMovementResponse } from "@/types/money-movement";
+import type { AccruePreviewResponse } from "@/types/financial-obligation";
 
 const MOVEMENT_LABELS: Record<string, string> = {
   obligation_disbursement: "Desembolso",
@@ -81,9 +87,13 @@ function ActionDialog({
               <Label>Monto</Label>
               <MoneyInput value={amount} onChange={setAmount} min={0} />
               {maxAmount !== undefined && (
-                <p className={`text-xs ${overMax ? "text-red-600" : "text-slate-500"}`}>
-                  Máximo: {formatCurrency(maxAmount)}
-                </p>
+                <button
+                  type="button"
+                  className={`block text-left text-xs ${overMax ? "text-red-600" : "text-indigo-600"} hover:underline`}
+                  onClick={() => setAmount(maxAmount)}
+                >
+                  Máximo: {formatCurrency(maxAmount)} — usar
+                </button>
               )}
             </div>
             <div className="space-y-1.5">
@@ -168,6 +178,230 @@ function AnnulMovementDialog({
   );
 }
 
+function AccrueObligationDialog({
+  open, onOpenChange, obligationId, isPayable, preview, isLoading, initialTranche,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  obligationId: string;
+  isPayable: boolean;
+  preview: AccruePreviewResponse | undefined;
+  isLoading: boolean;
+  initialTranche: boolean;
+}) {
+  const [categoryId, setCategoryId] = useState("");
+  const [includeTranche, setIncludeTranche] = useState(false);
+  const { data: categories } = useExpenseCategoriesFlat();
+  const mutation = useAccrueObligation();
+
+  // El pre-check del tramo depende de por donde se abrio (boton vs pre-cierre)
+  useEffect(() => {
+    if (open) setIncludeTranche(initialTranche);
+  }, [open, initialTranche]);
+
+  const items = preview?.items ?? [];
+  const tranche = preview?.current_tranche ?? null;
+  const willAccrueTranche = !!tranche && includeTranche;
+  const somethingToAccrue = items.length > 0 || willAccrueTranche;
+  const needsCategory = isPayable && somethingToAccrue;
+  const canSubmit = somethingToAccrue && (!needsCategory || !!categoryId);
+  const total =
+    items.reduce((sum, i) => sum + Number(i.amount), 0) +
+    (willAccrueTranche ? Number(tranche!.amount) : 0);
+
+  const handleSubmit = () => {
+    mutation.mutate(
+      {
+        id: obligationId,
+        data: {
+          include_current_tranche: willAccrueTranche,
+          ...(needsCategory ? { expense_category_id: categoryId } : {}),
+        },
+      },
+      { onSuccess: () => { setCategoryId(""); onOpenChange(false); } }
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Causar Intereses de esta Obligación</DialogTitle></DialogHeader>
+        {isLoading ? (
+          <p className="py-6 text-center text-sm text-slate-500">Calculando períodos pendientes…</p>
+        ) : !items.length && !tranche ? (
+          <p className="py-6 text-center text-sm text-slate-500">
+            No hay intereses pendientes de causar. El mes en curso se causa cuando termine
+            (o como tramo de cierre si el capital queda en $0).
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {items.length > 0 && (
+              <div className="max-h-56 overflow-y-auto rounded-lg border divide-y">
+                {items.map((item) => (
+                  <div key={item.period} className="p-2.5 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{periodLabel(item.period)}</span>
+                      <span className="font-semibold whitespace-nowrap">{formatCurrency(Number(item.amount))}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-400 break-words">{item.breakdown}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {tranche && (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 space-y-1.5">
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="include-tranche"
+                    checked={includeTranche}
+                    onCheckedChange={(v) => setIncludeTranche(!!v)}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <Label htmlFor="include-tranche" className="font-medium cursor-pointer">
+                      Causar también el tramo del mes en curso ({periodLabel(tranche.period)}):{" "}
+                      <span className="font-semibold">{formatCurrency(Number(tranche.amount))}</span>
+                    </Label>
+                    <p className="mt-0.5 text-xs text-slate-500 break-words">{tranche.breakdown}</p>
+                    <p className="mt-1 text-xs text-indigo-700">
+                      Disponible porque el capital está en $0 — los días que corrieron este mes.
+                      Útil para cobrar todo antes de cerrar la obligación.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-lg bg-slate-50 p-2.5 text-sm flex items-center justify-between">
+              <span className="text-slate-600">Total a causar</span>
+              <span className="font-semibold">{formatCurrency(total)}</span>
+            </div>
+
+            {needsCategory && (
+              <div className="space-y-1.5">
+                <Label>Categoría de gasto para intereses por pagar *</Label>
+                <Select value={categoryId} onValueChange={setCategoryId}>
+                  <SelectTrigger><SelectValue placeholder="Seleccione la categoría (ej: Intereses)" /></SelectTrigger>
+                  <SelectContent>
+                    {(categories?.items ?? []).map((cat: any) => (
+                      <SelectItem key={cat.id} value={cat.id}>{cat.display_name ?? cat.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <p className="text-xs text-slate-500">
+              La causación registra el interés en el P&L (devengo) sin mover dinero.
+              El pago se registra aparte con "{isPayable ? "Pagar" : "Recaudar"} Intereses".
+            </p>
+          </div>
+        )}
+        <DialogFooter className="gap-2">
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button className="w-full sm:w-auto" disabled={!canSubmit || mutation.isPending} onClick={handleSubmit}>
+            <CalendarCheck className="h-4 w-4 mr-2" />Causar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SettleChoiceDialog({
+  open, onOpenChange, preview, isPayable, onAccrueFirst, onForgive, isSettling,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  preview: AccruePreviewResponse | undefined;
+  isPayable: boolean;
+  onAccrueFirst: () => void;
+  onForgive: () => void;
+  isSettling: boolean;
+}) {
+  const [choice, setChoice] = useState<null | "accrue" | "forgive">(null);
+
+  useEffect(() => {
+    if (open) setChoice(null); // eleccion consciente en cada apertura, sin default (#63)
+  }, [open]);
+
+  const items = preview?.items ?? [];
+  const tranche = preview?.current_tranche ?? null;
+  const total =
+    items.reduce((sum, i) => sum + Number(i.amount), 0) + Number(tranche?.amount ?? 0);
+  const verb = isPayable ? "pagar" : "cobrar";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Cerrar Obligación — intereses sin causar</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>
+                Esta obligación tiene <span className="font-semibold">{formatCurrency(total)}</span> de
+                intereses sin causar:
+                <ul className="mt-1 list-disc pl-4 text-xs space-y-0.5">
+                  {items.map((i) => (
+                    <li key={i.period}>{periodLabel(i.period)} (vencido): {formatCurrency(Number(i.amount))}</li>
+                  ))}
+                  {tranche && (
+                    <li>Tramo del mes en curso ({periodLabel(tranche.period)}): {formatCurrency(Number(tranche.amount))}</li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <label className="flex items-start gap-2 rounded-lg border p-3 cursor-pointer hover:bg-slate-50">
+            <input
+              type="radio"
+              name="settle-choice"
+              className="mt-1"
+              checked={choice === "accrue"}
+              onChange={() => setChoice("accrue")}
+            />
+            <span className="text-sm">
+              <span className="font-medium">Causar los intereses primero</span>
+              <span className="block text-xs text-slate-500">
+                Abre la causación de esta obligación. Después de {verb} los intereses, podrá cerrarla.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 rounded-lg border p-3 cursor-pointer hover:bg-slate-50">
+            <input
+              type="radio"
+              name="settle-choice"
+              className="mt-1"
+              checked={choice === "forgive"}
+              onChange={() => setChoice("forgive")}
+            />
+            <span className="text-sm">
+              <span className="font-medium">Cerrar sin causarlos (condonar {formatCurrency(total)})</span>
+              <span className="block text-xs text-slate-500">
+                Los intereses no se registran ni se {verb === "pagar" ? "pagan" : "cobran"}. La obligación
+                queda cerrada y no acepta más movimientos. No se puede deshacer.
+              </span>
+            </span>
+          </label>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button
+            className="w-full sm:w-auto"
+            variant={choice === "forgive" ? "destructive" : "default"}
+            disabled={choice === null || isSettling}
+            onClick={() => (choice === "accrue" ? onAccrueFirst() : onForgive())}
+          >
+            {choice === "forgive" ? "Cerrar Obligación" : "Continuar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function ObligationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const handleBack = useReturnToBack();
@@ -176,10 +410,14 @@ export default function ObligationDetailPage() {
 
   const { data: obligation, isLoading } = useFinancialObligation(id!);
   const { data: statement } = useObligationStatement(id!);
+  const { data: accruePreview, isLoading: previewLoading } = useAccruePreview(id!, canManage);
   const settleMutation = useSettleObligation();
 
   const [action, setAction] = useState<null | { kind: ActionKind; title: string; max?: number }>(null);
   const [showSettle, setShowSettle] = useState(false);
+  const [showSettleChoice, setShowSettleChoice] = useState(false);
+  const [showAccrue, setShowAccrue] = useState(false);
+  const [accrueWithTranche, setAccrueWithTranche] = useState(false);
   const [annulTarget, setAnnulTarget] = useState<MoneyMovementResponse | null>(null);
 
   if (isLoading || !obligation) {
@@ -190,6 +428,17 @@ export default function ObligationDetailPage() {
   const isActive = obligation.status === "active";
   const capital = Number(obligation.capital_balance);
   const pending = Number(obligation.pending_interest);
+
+  const overdueCount = accruePreview?.items?.length ?? 0;
+  const unaccruedTotal =
+    (accruePreview?.items ?? []).reduce((sum, i) => sum + Number(i.amount), 0) +
+    Number(accruePreview?.current_tranche?.amount ?? 0);
+
+  const handleSettleClick = () => {
+    // Cerrar con intereses sin causar = condonarlos — eleccion explicita (#63)
+    if (unaccruedTotal > 0) setShowSettleChoice(true);
+    else setShowSettle(true);
+  };
 
   const actions = [
     {
@@ -220,7 +469,7 @@ export default function ObligationDetailPage() {
       >
         <div className="flex flex-wrap items-center gap-2">
           {canManage && isActive && capital === 0 && pending === 0 && (
-            <Button variant="outline" className="w-full sm:w-auto" onClick={() => setShowSettle(true)}>
+            <Button variant="outline" className="w-full sm:w-auto" onClick={handleSettleClick}>
               <Lock className="h-4 w-4 mr-2" />Cerrar Obligación
             </Button>
           )}
@@ -266,6 +515,14 @@ export default function ObligationDetailPage() {
 
       {canManage && isActive && (
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={() => { setAccrueWithTranche(false); setShowAccrue(true); }}
+          >
+            <CalendarCheck className="h-4 w-4 mr-2" />
+            Causar Intereses{overdueCount > 0 ? ` (${overdueCount})` : ""}
+          </Button>
           {actions.map((a) => (
             <Button
               key={a.kind}
@@ -382,6 +639,30 @@ export default function ObligationDetailPage() {
         open={!!annulTarget}
         onOpenChange={(v) => !v && setAnnulTarget(null)}
         movement={annulTarget}
+      />
+      <AccrueObligationDialog
+        open={showAccrue}
+        onOpenChange={setShowAccrue}
+        obligationId={obligation.id}
+        isPayable={isPayable}
+        preview={accruePreview}
+        isLoading={previewLoading}
+        initialTranche={accrueWithTranche}
+      />
+      <SettleChoiceDialog
+        open={showSettleChoice}
+        onOpenChange={setShowSettleChoice}
+        preview={accruePreview}
+        isPayable={isPayable}
+        isSettling={settleMutation.isPending}
+        onAccrueFirst={() => {
+          setShowSettleChoice(false);
+          setAccrueWithTranche(true);
+          setShowAccrue(true);
+        }}
+        onForgive={() =>
+          settleMutation.mutate(obligation.id, { onSuccess: () => setShowSettleChoice(false) })
+        }
       />
       <ConfirmDialog
         open={showSettle}

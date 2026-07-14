@@ -5,6 +5,7 @@ import { getApiErrorMessage } from "@/utils/formatters";
 import { invalidateAfterObligation } from "@/utils/queryInvalidation";
 import type {
   FinancialObligationCreate,
+  ObligationAccrueRequest,
   ObligationMovementCreate,
 } from "@/types/financial-obligation";
 
@@ -77,6 +78,29 @@ export function useAccruePending() {
           ? `${result.created_count} causación(es) de intereses creadas`
           : "No había períodos pendientes por causar"
       );
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al causar intereses"));
+    },
+  });
+}
+
+export function useAccruePreview(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["financial-obligations", "accrue-preview", id],
+    queryFn: () => financialObligationService.getAccruePreview(id),
+    enabled: enabled && !!id,
+  });
+}
+
+export function useAccrueObligation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ObligationAccrueRequest }) =>
+      financialObligationService.accrueObligation(id, data),
+    onSuccess: (result) => {
+      invalidateAfterObligation(queryClient);
+      toast.success(`${result.created_count} causación(es) de intereses creadas`);
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al causar intereses"));

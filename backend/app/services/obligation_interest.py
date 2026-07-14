@@ -13,10 +13,11 @@ MoneyMovements confirmados y delega aca la matematica (unit-testeable).
 Ejemplo canonico del cliente: deben $20M al 2% mensual, abonan $10M el dia 16
 → 20M × 2% × 15/30 + 10M × 2% × 15/30 = $200.000 + $100.000 = $300.000.
 """
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 DAYS_BASE = 30
 TWO_PLACES = Decimal("0.01")
+WHOLE_PESO = Decimal("1")
 _ZERO = Decimal("0")
 
 
@@ -68,12 +69,15 @@ def compute_monthly_interest(
     capital_events: [(dia_efectivo 1..30, capital_vigente_desde_ese_dia)].
     Cada tramo corre del dia del evento (inclusive) hasta el dia anterior al
     siguiente evento; el ultimo llega al dia 30. Interes = Σ saldo_tramo ×
-    (rate/100) × dias_tramo/30, quantize 0.01 sobre el TOTAL (no por tramo).
+    (rate/100) × dias_tramo/30, redondeado a PESO ENTERO (HALF_UP) sobre el
+    TOTAL (no por tramo). Peso entero porque la operacion es en COP sin
+    centavos: un pendiente de $86.666,67 seria impagable desde la UI (inputs
+    de pesos enteros) y dejaria la obligacion imposible de sanear.
 
     Retorna (monto, desglose humano "$X × Nd + $Y × Md @ R%").
     """
     if not capital_events:
-        return _ZERO.quantize(TWO_PLACES), "sin capital"
+        return _ZERO.quantize(WHOLE_PESO), "sin capital"
 
     # Normalizar: clamp de dia + colapsar mismo dia (gana el ultimo) + ordenar
     by_day: dict[int, Decimal] = {}
@@ -101,7 +105,7 @@ def compute_monthly_interest(
         )
         parts.append(f"{_fmt_money(capital)} × {tramo_days}d")
 
-    amount = total.quantize(TWO_PLACES)
+    amount = total.quantize(WHOLE_PESO, rounding=ROUND_HALF_UP)
     if not parts:
         return amount, "capital $0 todo el mes"
 

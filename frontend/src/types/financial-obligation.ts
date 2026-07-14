@@ -66,6 +66,18 @@ export interface AccrueResultResponse {
   total_receivable: string;
 }
 
+// Causación individual (vencidos + tramo de cierre del mes en curso)
+export interface AccruePreviewResponse {
+  items: PendingAccrualItem[];
+  current_tranche: PendingAccrualItem | null;
+  has_payable: boolean;
+}
+
+export interface ObligationAccrueRequest {
+  expense_category_id?: string;
+  include_current_tranche: boolean;
+}
+
 export interface ObligationDirectionSummary {
   direction: ObligationDirection;
   count: number;

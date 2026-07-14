@@ -15,9 +15,11 @@ from app.api.deps import get_db, require_permission
 from app.models.financial_obligation import FinancialObligation
 from app.schemas.financial_obligation import (
     AccruePendingRequest,
+    AccruePreviewResponse,
     AccrueResultResponse,
     FinancialObligationCreate,
     FinancialObligationResponse,
+    ObligationAccrueRequest,
     ObligationAnnulRequest,
     ObligationMovementCreate,
     ObligationSummaryResponse,
@@ -90,6 +92,16 @@ def get_obligation_statement(
     return [MoneyMovementResponse.model_validate(m) for m in movements]
 
 
+@router.get("/{obligation_id}/accrue-preview", response_model=AccruePreviewResponse)
+def get_accrue_preview(
+    obligation_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_permission("treasury.view_obligations")),
+):
+    """Preview individual: vencidos sin causar + tramo de cierre (si capital $0)."""
+    return service.get_accrue_preview(db, ctx["organization_id"], obligation_id)
+
+
 # ======================================================================
 # Escritura
 # ======================================================================
@@ -115,6 +127,19 @@ def accrue_pending(
     """Batch de causacion (patron depreciacion #21). Idempotente, solo meses vencidos."""
     return service.accrue_pending(
         db, ctx["organization_id"], data, user_id=ctx["user_id"]
+    )
+
+
+@router.post("/{obligation_id}/accrue", response_model=AccrueResultResponse)
+def accrue_obligation(
+    obligation_id: UUID,
+    data: ObligationAccrueRequest,
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_permission("treasury.manage_obligations")),
+):
+    """Causacion individual: vencidos de esta obligacion + tramo de cierre opcional."""
+    return service.accrue_obligation(
+        db, ctx["organization_id"], obligation_id, data, user_id=ctx["user_id"]
     )
 
 
