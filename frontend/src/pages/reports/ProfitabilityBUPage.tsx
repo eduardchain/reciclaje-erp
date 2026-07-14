@@ -201,6 +201,7 @@ function PasaManoCard({
           {reconExpanded && (
             <div className="mt-1 pl-4 border-l-2 border-slate-100">
               <Line label="Ingresos por Servicios" value={reconciliation.service_income} />
+              <Line label="Ingresos Financieros (Intereses)" value={reconciliation.interest_income ?? 0} />
               <Line label="Transformaciones (neto)" value={reconciliation.transformation_net} />
               <Line label="Ajustes de Inventario (neto)" value={reconciliation.inventory_adjustment_net} />
               <Line label="Ajustes de Terceros (neto)" value={reconciliation.tp_adjustment_net} />

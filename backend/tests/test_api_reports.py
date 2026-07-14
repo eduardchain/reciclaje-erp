@@ -2990,11 +2990,18 @@ class TestDpPctGeneralExpenses:
             value_difference=Decimal("25000"), cost_distribution="average_cost",
             reason="Desarmado test A.2", status="confirmed",
         ))
+        # Ingresos financieros (plan F): interes causado de prestamo por cobrar +45K
+        db_session.add(MoneyMovement(
+            organization_id=org_id, movement_number=965, date=now,
+            movement_type="loan_interest_accrual", amount=Decimal("45000"),
+            description="Intereses prestamo test", status="confirmed",
+        ))
         db_session.commit()
 
         data = self._get_report(client, org_headers)
         rec = data["pnl_reconciliation"]
         assert rec["service_income"] == pytest.approx(150000, abs=1)
+        assert rec["interest_income"] == pytest.approx(45000, abs=1)
         assert rec["transformation_net"] == pytest.approx(20000, abs=1)
         assert rec["inventory_adjustment_net"] == pytest.approx(12000, abs=1)
         assert rec["tp_adjustment_net"] == pytest.approx(30000, abs=1)
@@ -3005,6 +3012,7 @@ class TestDpPctGeneralExpenses:
             rec["pnl_net_profit"]
             - data["grand_total_net"]
             - rec["service_income"]
+            - rec["interest_income"]
             - rec["transformation_net"]
             - rec["inventory_adjustment_net"]
             - rec["tp_adjustment_net"]

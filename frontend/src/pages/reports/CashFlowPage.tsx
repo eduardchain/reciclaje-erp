@@ -40,6 +40,15 @@ export default function CashFlowPage() {
               {data.inflows.asset_devaluation_collections > 0 && (
                 <div className="flex justify-between"><span>Devaluación de Activos (Reembolso)</span><span>{formatCurrency(data.inflows.asset_devaluation_collections)}</span></div>
               )}
+              {(data.inflows.obligation_disbursements ?? 0) > 0 && (
+                <div className="flex justify-between"><span>Desembolsos de Obligaciones</span><span>{formatCurrency(data.inflows.obligation_disbursements)}</span></div>
+              )}
+              {(data.inflows.loan_interest_collections ?? 0) > 0 && (
+                <div className="flex justify-between"><span>Recaudo Intereses Préstamos</span><span>{formatCurrency(data.inflows.loan_interest_collections)}</span></div>
+              )}
+              {(data.inflows.loan_capital_collections ?? 0) > 0 && (
+                <div className="flex justify-between"><span>Recaudo Capital Préstamos</span><span>{formatCurrency(data.inflows.loan_capital_collections)}</span></div>
+              )}
               <Separator />
               <div className="flex justify-between font-bold text-emerald-700"><span>Total Ingresos</span><span>{formatCurrency(data.total_inflows)}</span></div>
             </CardContent>
@@ -66,6 +75,15 @@ export default function CashFlowPage() {
               )}
               {data.outflows.generic_payments > 0 && (
                 <div className="flex justify-between"><span>Pagos a Terceros Genéricos</span><span>{formatCurrency(data.outflows.generic_payments)}</span></div>
+              )}
+              {(data.outflows.loan_disbursements ?? 0) > 0 && (
+                <div className="flex justify-between"><span>Préstamos Otorgados</span><span>{formatCurrency(data.outflows.loan_disbursements)}</span></div>
+              )}
+              {(data.outflows.obligation_interest_payments ?? 0) > 0 && (
+                <div className="flex justify-between"><span>Pago Intereses Obligaciones</span><span>{formatCurrency(data.outflows.obligation_interest_payments)}</span></div>
+              )}
+              {(data.outflows.obligation_capital_payments ?? 0) > 0 && (
+                <div className="flex justify-between"><span>Abonos Capital Obligaciones</span><span>{formatCurrency(data.outflows.obligation_capital_payments)}</span></div>
               )}
               <Separator />
               <div className="flex justify-between font-bold text-red-700"><span>Total Egresos</span><span>{formatCurrency(data.total_outflows)}</span></div>

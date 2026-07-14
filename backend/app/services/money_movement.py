@@ -1041,6 +1041,22 @@ class CRUDMoneyMovement:
                 "Use Cancelar Activo o Anular Revalorización desde el modulo de Activos Fijos.",
             )
 
+        # Movimientos de Obligaciones Financieras tampoco (patron #67): la
+        # anulacion vive en el modulo, que revierte contadores (capital/
+        # pendientes) y aplica los guards retroactivos del plan F §5.
+        OBLIGATION_MOVEMENT_TYPES = {
+            "obligation_disbursement", "obligation_interest_accrual",
+            "obligation_interest_payment", "obligation_capital_payment",
+            "loan_disbursement", "loan_interest_accrual",
+            "loan_interest_collection", "loan_capital_collection",
+        }
+        if movement.movement_type in OBLIGATION_MOVEMENT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No se puede anular un movimiento generado por Obligaciones "
+                "Financieras. Anúlelo desde el detalle de la obligación.",
+            )
+
         now = datetime.now(timezone.utc)
 
         # Revertir efectos del movimiento
@@ -1450,6 +1466,8 @@ class CRUDMoneyMovement:
         notes: Optional[str] = None,
         business_unit_id: Optional[UUID] = None,
         applicable_business_unit_ids: Optional[list] = None,
+        financial_obligation_id: Optional[UUID] = None,
+        obligation_period: Optional[str] = None,
     ) -> MoneyMovement:
         """Crear registro de movimiento en BD (sin commit, sin aplicar efectos)."""
         # Guard: la UN de sistema (Pasa Mano) no acepta asignacion compartida.
@@ -1479,6 +1497,8 @@ class CRUDMoneyMovement:
             created_by=user_id,
             business_unit_id=business_unit_id,
             applicable_business_unit_ids=applicable_business_unit_ids,
+            financial_obligation_id=financial_obligation_id,
+            obligation_period=obligation_period,
         )
         db.add(movement)
         db.flush()

@@ -109,6 +109,13 @@ ACCOUNT_BALANCE_DIRECTION = {
     "collection_from_generic": 1,
     "asset_revaluation_payment": -1,     # Revalorizacion alza pagada: sale dinero
     "asset_devaluation_collection": 1,   # Devaluacion con reembolso: entra dinero
+    "obligation_disbursement": 1,        # Nos prestan: entra el prestamo
+    "obligation_interest_payment": -1,   # Pago de intereses: sale dinero
+    "obligation_capital_payment": -1,    # Abono a capital: sale dinero
+    "loan_disbursement": -1,             # Prestamos nosotros: sale el prestamo
+    "loan_interest_collection": 1,       # Recaudo de intereses: entra dinero
+    "loan_capital_collection": 1,        # Recaudo de capital: entra dinero
+    # obligation_interest_accrual / loan_interest_accrual: NO tocan cuenta
 }
 
 # Direccion del efecto en el balance del tercero por tipo de movimiento.
@@ -136,6 +143,14 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "tp_adjustment_debit": -1,       # Ajuste debito: saldo baja
     "asset_revaluation_credit": -1,     # Revalorizacion alza a credito: le debemos
     "asset_devaluation_receivable": 1,  # Devaluacion a cargo del tercero: nos debe
+    "obligation_disbursement": -1,      # Nos prestan: les debemos mas
+    "obligation_interest_accrual": -1,  # Interes causado por pagar: debemos mas
+    "obligation_interest_payment": 1,   # Pago de intereses: debemos menos
+    "obligation_capital_payment": 1,    # Abono a capital: debemos menos
+    "loan_disbursement": 1,             # Prestamos nosotros: nos debe mas
+    "loan_interest_accrual": 1,         # Interes causado por cobrar: nos debe mas
+    "loan_interest_collection": -1,     # Recaudo de intereses: nos debe menos
+    "loan_capital_collection": -1,      # Recaudo de capital: nos debe menos
 }
 
 # Tipos de money_movement que representan inflows a cuentas
@@ -147,6 +162,9 @@ INFLOW_TYPES = frozenset([
     "advance_collection",
     "collection_from_generic",
     "asset_devaluation_collection",  # Devaluacion de activo con reembolso: entra dinero
+    "obligation_disbursement",       # Nos prestan: entra el prestamo
+    "loan_interest_collection",      # Recaudo de intereses de prestamo
+    "loan_capital_collection",       # Recaudo de capital de prestamo
 ])
 
 # Tipos de money_movement que representan outflows de cuentas
@@ -162,6 +180,9 @@ OUTFLOW_TYPES = frozenset([
     "deferred_funding",   # Pago inicial gasto diferido: sale dinero de cuenta
     "payment_to_generic", # Pago a tercero generico: sale dinero de cuenta
     "asset_revaluation_payment",  # Revalorizacion de activo al alza pagada: sale dinero
+    "loan_disbursement",          # Prestamos nosotros: sale el prestamo
+    "obligation_interest_payment",  # Pago de intereses de obligacion
+    "obligation_capital_payment",   # Abono a capital de obligacion
 ])
 # Nota: provision_expense NO va aqui — no afecta cuentas de dinero
 
@@ -257,12 +278,19 @@ class ReportService:
             cast(DoubleEntry.date, DateTime) + timedelta(hours=12),
         )
         branches = [
-            # 1. Movimientos de tesoreria (incluye commission_accrual, pagos, cobros, anticipos)
+            # 1. Movimientos de tesoreria (incluye commission_accrual, pagos, cobros, anticipos).
+            # EXCLUYE las causaciones de interes de obligaciones (plan F): son batch,
+            # no actividad real del tercero — sin la exclusion, un deudor de prestamo
+            # moroso JAMAS apareceria inactivo (la causacion mensual le resetearia el
+            # reloj). Pagos/recaudos/desembolsos SI cuentan.
             select(MoneyMovement.third_party_id.label("tp"), MoneyMovement.date.label("dt"))
             .where(
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.status == "confirmed",
                 MoneyMovement.third_party_id.isnot(None),
+                MoneyMovement.movement_type.notin_(
+                    ["obligation_interest_accrual", "loan_interest_accrual"]
+                ),
             ),
             # 2. Compras liquidadas standalone
             select(Purchase.supplier_id.label("tp"), Purchase.liquidated_at.label("dt"))
@@ -766,7 +794,7 @@ class ReportService:
         mm_filters = [
             MoneyMovement.organization_id == organization_id,
             self._active_at_cutoff(MoneyMovement.status, "confirmed"),
-            MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "service_income"]),
+            MoneyMovement.movement_type.in_(["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "obligation_interest_accrual", "service_income", "loan_interest_accrual"]),
         ]
         if has_dates:
             mm_filters += [MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to]
@@ -790,6 +818,7 @@ class ReportService:
         ).all()
 
         service_income = Decimal("0")
+        interest_income = Decimal("0")
         operating_expenses = Decimal("0")
         expenses_by_cat: list[ExpenseCategoryBreakdown] = []
 
@@ -797,7 +826,11 @@ class ReportService:
             total_dec = Decimal(str(total))
             if mt == "service_income":
                 service_income += total_dec
-            elif mt in ("expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense"):
+            elif mt == "loan_interest_accrual":
+                # Ingresos financieros (plan F): espejo filtro-por-filtro de
+                # service_income — misma query, mismos cortes as-of
+                interest_income += total_dec
+            elif mt in ("expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "obligation_interest_accrual"):
                 operating_expenses += total_dec
                 expenses_by_cat.append(ExpenseCategoryBreakdown(
                     category_id=cat_id,
@@ -845,7 +878,7 @@ class ReportService:
 
         # Calculos
         gross_profit_sales = sales_revenue - cogs
-        total_gross_profit = gross_profit_sales + de_profit + service_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss + oversell_adjustment
+        total_gross_profit = gross_profit_sales + de_profit + service_income + interest_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss + oversell_adjustment
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
         return {
@@ -862,6 +895,7 @@ class ReportService:
             "tp_adjustment_loss": tp_adj_loss,
             "tp_adjustment_gain": tp_adj_gain,
             "service_income": service_income,
+            "interest_income": interest_income,
             "operating_expenses": operating_expenses,
             "commissions_paid": commissions_paid,
             "commissions_paid_sales": commissions_paid_sales,
@@ -1004,6 +1038,7 @@ class ReportService:
             sales_revenue=float(r["sales_revenue"]),
             sales_count=r["sales_count"],
             service_income=float(r["service_income"]),
+            interest_income=float(r["interest_income"]),
             cost_of_goods_sold=float(r["cogs"]),
             gross_profit_sales=float(r["gross_profit_sales"]),
             gross_margin_sales=self._safe_pct(r["gross_profit_sales"], r["sales_revenue"]),
@@ -1074,6 +1109,9 @@ class ReportService:
         capital_injections = mm_map.get("capital_injection", Decimal("0"))
         advance_collections = mm_map.get("advance_collection", Decimal("0"))
         asset_devaluation_collections = mm_map.get("asset_devaluation_collection", Decimal("0"))
+        obligation_disbursements = mm_map.get("obligation_disbursement", Decimal("0"))
+        loan_interest_collections = mm_map.get("loan_interest_collection", Decimal("0"))
+        loan_capital_collections = mm_map.get("loan_capital_collection", Decimal("0"))
 
         supplier_payments = mm_map.get("payment_to_supplier", Decimal("0"))
         expenses = mm_map.get("expense", Decimal("0"))
@@ -1089,11 +1127,16 @@ class ReportService:
         )
         generic_payments = mm_map.get("payment_to_generic", Decimal("0"))
         generic_collections = mm_map.get("collection_from_generic", Decimal("0"))
+        loan_disbursements = mm_map.get("loan_disbursement", Decimal("0"))
+        obligation_interest_payments = mm_map.get("obligation_interest_payment", Decimal("0"))
+        obligation_capital_payments = mm_map.get("obligation_capital_payment", Decimal("0"))
 
         total_inflows = (
             customer_collections + service_income
             + capital_injections + advance_collections
             + generic_collections + asset_devaluation_collections
+            + obligation_disbursements + loan_interest_collections
+            + loan_capital_collections
         )
         total_outflows = (
             supplier_payments + expenses
@@ -1101,6 +1144,8 @@ class ReportService:
             + provision_deposits + deferred_fundings
             + advance_payments + asset_payments
             + generic_payments
+            + loan_disbursements + obligation_interest_payments
+            + obligation_capital_payments
         )
         net_flow = total_inflows - total_outflows
 
@@ -1140,6 +1185,9 @@ class ReportService:
                 advance_collections=float(advance_collections),
                 generic_collections=float(generic_collections),
                 asset_devaluation_collections=float(asset_devaluation_collections),
+                obligation_disbursements=float(obligation_disbursements),
+                loan_interest_collections=float(loan_interest_collections),
+                loan_capital_collections=float(loan_capital_collections),
                 total=float(total_inflows),
             ),
             total_inflows=float(total_inflows),
@@ -1154,6 +1202,9 @@ class ReportService:
                 advance_payments=float(advance_payments),
                 asset_payments=float(asset_payments),
                 generic_payments=float(generic_payments),
+                loan_disbursements=float(loan_disbursements),
+                obligation_interest_payments=float(obligation_interest_payments),
+                obligation_capital_payments=float(obligation_capital_payments),
                 total=float(total_outflows),
             ),
             total_outflows=float(total_outflows),
@@ -3749,6 +3800,9 @@ class ReportService:
     EXPENSE_MOVEMENT_TYPES = [
         "expense", "provision_expense", "expense_accrual",
         "deferred_expense", "depreciation_expense",
+        # Interes causado de obligaciones (plan F): gasto financiero por
+        # categoria. loan_interest_accrual NO entra (es ingreso, linea propia).
+        "obligation_interest_accrual",
     ]
 
     # ==================================================================
@@ -4247,7 +4301,7 @@ class ReportService:
             ),
         )
 
-        # 9. Conciliacion con P&L (§3.7 plan A.2): las 4 lineas del P&L que NO
+        # 9. Conciliacion con P&L (§3.7 plan A.2): las 6 lineas del P&L que NO
         # son atribuibles a ninguna UN. Se derivan de LA MISMA funcion que
         # alimenta el tab P&L (`_calculate_profit`) — paridad por construccion,
         # cambios futuros al P&L se propagan solos. Guardrail:
@@ -4258,6 +4312,7 @@ class ReportService:
         pnl = self._calculate_profit(db, organization_id, date_from, date_to)
         reconciliation = PnlReconciliation(
             service_income=float(pnl["service_income"]),
+            interest_income=float(pnl["interest_income"]),
             transformation_net=float(pnl["transformation_profit"] - pnl["waste_loss"]),
             inventory_adjustment_net=float(pnl["adjustment_net"]),
             tp_adjustment_net=float(pnl["tp_adjustment_gain"] - pnl["tp_adjustment_loss"]),

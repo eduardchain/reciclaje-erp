@@ -31,7 +31,15 @@ export type MoneyMovementType =
   | "tp_transfer_out"
   | "tp_transfer_in"
   | "tp_adjustment_credit"
-  | "tp_adjustment_debit";
+  | "tp_adjustment_debit"
+  | "obligation_disbursement"
+  | "obligation_interest_accrual"
+  | "obligation_interest_payment"
+  | "obligation_capital_payment"
+  | "loan_disbursement"
+  | "loan_interest_accrual"
+  | "loan_interest_collection"
+  | "loan_capital_collection";
 
 export type MovementStatus = "confirmed" | "annulled";
 
@@ -50,6 +58,7 @@ export interface MoneyMovementResponse extends BaseEntity {
   expense_category_name: string | null;
   purchase_id: string | null;
   sale_id: string | null;
+  financial_obligation_id?: string | null;
   transfer_pair_id: string | null;
   business_unit_id: string | null;
   business_unit_name: string | null;

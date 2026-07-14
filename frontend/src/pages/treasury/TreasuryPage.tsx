@@ -36,6 +36,10 @@ const INFLOW_TYPES = new Set<MoneyMovementType>([
   "collection_from_generic",
   "tp_transfer_in",
   "tp_adjustment_credit",
+  "obligation_disbursement",
+  "loan_interest_accrual",
+  "loan_interest_collection",
+  "loan_capital_collection",
 ]);
 
 const PAGE_SIZE = 20;
@@ -60,6 +64,14 @@ const typeLabels: Record<MoneyMovementType, string> = {
   asset_revaluation_credit: "Revalorización Activo (Crédito)",
   asset_devaluation_collection: "Devaluación Activo (Reembolso)",
   asset_devaluation_receivable: "Devaluación Activo (Por Cobrar)",
+  obligation_disbursement: "Desembolso Obligación",
+  obligation_interest_accrual: "Interés Causado (Obligación)",
+  obligation_interest_payment: "Pago Intereses Obligación",
+  obligation_capital_payment: "Abono Capital Obligación",
+  loan_disbursement: "Desembolso Préstamo",
+  loan_interest_accrual: "Interés Causado (Préstamo)",
+  loan_interest_collection: "Recaudo Intereses Préstamo",
+  loan_capital_collection: "Recaudo Capital Préstamo",
   expense_accrual: "Gasto Causado (Pasivo)",
   deferred_funding: "Pago Gasto Diferido",
   deferred_expense: "Cuota Gasto Diferido",
@@ -92,6 +104,14 @@ const typeColors: Record<string, string> = {
   asset_revaluation_credit: "bg-indigo-100 text-indigo-800",
   asset_devaluation_collection: "bg-indigo-100 text-indigo-800",
   asset_devaluation_receivable: "bg-indigo-100 text-indigo-800",
+  obligation_disbursement: "bg-sky-100 text-sky-800",
+  obligation_interest_accrual: "bg-sky-100 text-sky-800",
+  obligation_interest_payment: "bg-sky-100 text-sky-800",
+  obligation_capital_payment: "bg-sky-100 text-sky-800",
+  loan_disbursement: "bg-sky-100 text-sky-800",
+  loan_interest_accrual: "bg-sky-100 text-sky-800",
+  loan_interest_collection: "bg-sky-100 text-sky-800",
+  loan_capital_collection: "bg-sky-100 text-sky-800",
   expense_accrual: "bg-rose-100 text-rose-800",
   deferred_funding: "bg-indigo-100 text-indigo-800",
   deferred_expense: "bg-cyan-100 text-cyan-800",
@@ -274,6 +294,8 @@ export default function TreasuryPage() {
             <TabsTrigger value="deferred_expense">Diferidos</TabsTrigger>
             <TabsTrigger value="depreciation_expense">Depreciación</TabsTrigger>
             <TabsTrigger value="commission_accrual">Comisiones</TabsTrigger>
+            <TabsTrigger value="obligation_interest_accrual">Int. Obligaciones</TabsTrigger>
+            <TabsTrigger value="loan_interest_accrual">Int. Préstamos</TabsTrigger>
             <TabsTrigger value="tp_adjustment">Aj. Terceros</TabsTrigger>
           </TabsList>
         </div>

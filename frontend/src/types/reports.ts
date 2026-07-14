@@ -70,6 +70,7 @@ export interface ProfitAndLossResponse {
   sales_revenue: number;
   sales_count: number;
   service_income: number;
+  interest_income: number;
   cost_of_goods_sold: number;
   gross_profit_sales: number;
   gross_margin_sales: number;
@@ -118,6 +119,9 @@ export interface CashFlowInflows {
   capital_injections: number;
   advance_collections: number;
   generic_collections: number;
+  obligation_disbursements: number;
+  loan_interest_collections: number;
+  loan_capital_collections: number;
   asset_devaluation_collections: number;
   total: number;
 }
@@ -133,6 +137,9 @@ export interface CashFlowOutflows {
   advance_payments: number;
   asset_payments: number;
   generic_payments: number;
+  loan_disbursements: number;
+  obligation_interest_payments: number;
+  obligation_capital_payments: number;
   total: number;
 }
 
@@ -499,9 +506,10 @@ export interface DoubleEntryProfitability {
 }
 
 // Conciliacion con P&L: lineas no atribuibles a UN.
-// grand_total_net + estas 5 lineas == pnl_net_profit
+// grand_total_net + estas 6 lineas == pnl_net_profit
 export interface PnlReconciliation {
   service_income: number;
+  interest_income: number;
   transformation_net: number;
   inventory_adjustment_net: number;
   tp_adjustment_net: number;
