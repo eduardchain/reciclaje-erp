@@ -183,7 +183,7 @@ export default function DoubleEntryDetailPage() {
                 </TableHeader>
                 <TableBody>
                   {de.commissions.map((c) => (
-                    <TableRow key={c.id}><TableCell>{c.third_party_name}</TableCell><TableCell><Badge variant="outline">{CHARGE_TYPE_LABELS[c.charge_type] ?? "Comisión"}</Badge></TableCell><TableCell>{c.concept}</TableCell><TableCell className="text-right font-medium">{formatCurrency(c.commission_amount)}</TableCell></TableRow>
+                    <TableRow key={c.id}><TableCell><ThirdPartyLink id={c.third_party_id}>{c.third_party_name}</ThirdPartyLink></TableCell><TableCell><Badge variant="outline">{CHARGE_TYPE_LABELS[c.charge_type] ?? "Comisión"}</Badge></TableCell><TableCell>{c.concept}</TableCell><TableCell className="text-right font-medium">{formatCurrency(c.commission_amount)}</TableCell></TableRow>
                   ))}
                 </TableBody>
               </Table>

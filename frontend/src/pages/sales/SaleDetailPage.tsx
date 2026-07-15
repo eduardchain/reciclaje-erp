@@ -239,7 +239,7 @@ export default function SaleDetailPage() {
                 <TableBody>
                   {sale.commissions.map((c) => (
                     <TableRow key={c.id}>
-                      <TableCell className="font-medium">{c.third_party_name}</TableCell>
+                      <TableCell className="font-medium"><ThirdPartyLink id={c.third_party_id}>{c.third_party_name}</ThirdPartyLink></TableCell>
                       <TableCell><Badge variant="outline">{CHARGE_TYPE_LABELS[c.charge_type] ?? "Comisión"}</Badge></TableCell>
                       <TableCell>{c.concept}</TableCell>
                       <TableCell>{c.commission_type === "percentage" ? "Porcentaje" : c.commission_type === "per_kg" ? "Por Kilo" : "Fijo"}</TableCell>

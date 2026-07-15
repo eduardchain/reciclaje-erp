@@ -248,7 +248,7 @@ export default function PurchaseDetailPage() {
                 <TableBody>
                   {purchase.commissions.map((comm) => (
                     <TableRow key={comm.id}>
-                      <TableCell className="font-medium">{comm.third_party_name}</TableCell>
+                      <TableCell className="font-medium"><ThirdPartyLink id={comm.third_party_id}>{comm.third_party_name}</ThirdPartyLink></TableCell>
                       <TableCell><Badge variant="outline">{CHARGE_TYPE_LABELS[comm.charge_type] ?? "Comisión"}</Badge></TableCell>
                       <TableCell>{comm.concept}</TableCell>
                       <TableCell>{comm.commission_type === "percentage" ? "Porcentaje" : comm.commission_type === "per_kg" ? "Por Kilo" : "Fijo"}</TableCell>
