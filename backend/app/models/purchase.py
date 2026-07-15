@@ -346,12 +346,18 @@ class PurchaseLine(Base, TimestampMixin):
         return self.quantity * self.unit_price
 
 
+# Labels es-CO por tipo de cargo — canonico, compartido compra/venta
+# (consumido por services/sale.py y endpoints/money_movements.py)
+CHARGE_TYPE_LABELS = {"commission": "Comisión", "freight": "Flete", "bonus": "Bono"}
+
+
 class PurchaseCommission(Base, TimestampMixin):
     """
-    Comision de compra pagada a intermediarios (comisionistas).
+    Cargo de compra (comision o flete) pagado a terceros.
 
-    A diferencia de ventas, la comision de compra se prorratea al costo
-    del material (no aparece en P&L como gasto directo).
+    A diferencia de ventas, el cargo de compra se prorratea al costo
+    del material (no aparece en P&L como gasto directo). `charge_type`
+    distingue que ES (comision | flete); `commission_type` como se calcula.
     """
     __tablename__ = "purchase_commissions"
 
@@ -382,6 +388,14 @@ class PurchaseCommission(Base, TimestampMixin):
         Enum("percentage", "fixed", "per_kg", name="commission_type", create_type=False),
         nullable=False,
         comment="percentage (del total de compra) o fixed",
+    )
+
+    charge_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="commission",
+        server_default="commission",
+        comment="Que ES el cargo: commission | freight (ortogonal a commission_type)",
     )
 
     commission_value: Mapped[Decimal] = mapped_column(

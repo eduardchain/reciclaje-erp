@@ -775,3 +775,222 @@ class TestPerKgCommission:
 
         # total_quantity = 300 + 200 = 500 kg × $10/kg = $5,000
         assert data["commissions"][0]["commission_amount"] == 5000.0
+
+
+class TestPurchaseCharges:
+    """Cargos de compra (plan bonos-fletes): charge_type commission|freight.
+
+    El flete viaja por el MISMO tunel del prorrateo al costo (#30) — estos
+    tests verifican que la etiqueta persiste y que la mecanica no cambio.
+    """
+
+    def _payload(self, supplier, material, warehouse, commissions, auto_liquidate=True):
+        return {
+            "supplier_id": str(supplier.id),
+            "date": "2026-03-14T12:00:00",
+            "lines": [
+                {
+                    "material_id": str(material.id),
+                    "quantity": 100,
+                    "unit_price": 50,
+                    "warehouse_id": str(warehouse.id),
+                }
+            ],
+            "commissions": commissions,
+            "auto_liquidate": auto_liquidate,
+        }
+
+    def test_freight_prorates_to_cost(
+        self, client, org_headers, db_session,
+        test_supplier, test_commission_recipient, test_material, test_warehouse,
+    ):
+        """Flete fijo $300: costo promedio sube a $53.00 y el transportador queda en -$300."""
+        payload = self._payload(
+            test_supplier, test_material, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Flete Cartagena",
+                "commission_type": "fixed",
+                "commission_value": 300,
+                "charge_type": "freight",
+            }],
+        )
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        data = response.json()
+        assert data["commissions"][0]["charge_type"] == "freight"
+        assert data["commissions"][0]["commission_amount"] == 300.0
+
+        # (5000 + 300) / 100 = 53.00 — mismo prorrateo que una comision
+        db_session.refresh(test_material)
+        assert abs(test_material.current_average_cost - Decimal("53.00")) < Decimal("0.01")
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("-300.00")
+
+        # El flete de compra NO crea accrual (va al costo, no al P&L)
+        accruals = db_session.query(MoneyMovement).filter(
+            MoneyMovement.movement_type == "commission_accrual",
+        ).count()
+        assert accruals == 0
+
+    def test_mixed_commission_and_freight_same_purchase(
+        self, client, org_headers, db_session,
+        test_supplier, test_commission_recipient, test_commission_recipient2,
+        test_material, test_warehouse,
+    ):
+        """Comision $50 + flete $100 en la misma compra: costo = (5000+150)/100 = 51.50."""
+        payload = self._payload(
+            test_supplier, test_material, test_warehouse,
+            [
+                {
+                    "third_party_id": str(test_commission_recipient.id),
+                    "concept": "Intermediacion",
+                    "commission_type": "fixed",
+                    "commission_value": 50,
+                    "charge_type": "commission",
+                },
+                {
+                    "third_party_id": str(test_commission_recipient2.id),
+                    "concept": "Flete bodega",
+                    "commission_type": "fixed",
+                    "commission_value": 100,
+                    "charge_type": "freight",
+                },
+            ],
+        )
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        by_type = {c["charge_type"]: c for c in response.json()["commissions"]}
+        assert set(by_type) == {"commission", "freight"}
+
+        db_session.refresh(test_material)
+        assert abs(test_material.current_average_cost - Decimal("51.50")) < Decimal("0.01")
+        db_session.refresh(test_commission_recipient2)
+        assert test_commission_recipient2.current_balance == Decimal("-100.00")
+
+    def test_bonus_rejected_on_purchase(
+        self, client, org_headers,
+        test_supplier, test_commission_recipient, test_material, test_warehouse,
+    ):
+        """charge_type 'bonus' no existe en compras → 422 (Literal del schema)."""
+        payload = self._payload(
+            test_supplier, test_material, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Bono",
+                "commission_type": "fixed",
+                "commission_value": 100,
+                "charge_type": "bonus",
+            }],
+        )
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 422
+
+    def test_freight_recipient_requires_service_provider(
+        self, client, org_headers, db_session, test_organization,
+        test_supplier, test_material, test_warehouse,
+    ):
+        """Receptor sin behavior service_provider → 400 con el copy generalizado (#32)."""
+        outsider = ThirdParty(
+            id=uuid4(), name="Transportador Sin Categoria",
+            current_balance=Decimal("0"), organization_id=test_organization.id,
+            is_active=True,
+        )
+        db_session.add(outsider)
+        db_session.commit()
+
+        payload = self._payload(
+            test_supplier, test_material, test_warehouse,
+            [{
+                "third_party_id": str(outsider.id),
+                "concept": "Flete",
+                "commission_type": "fixed",
+                "commission_value": 100,
+                "charge_type": "freight",
+            }],
+        )
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 400
+        assert "receptor del cargo" in response.json()["detail"].lower()
+
+    def test_cancel_reverts_freight_balance(
+        self, client, org_headers, db_session,
+        test_supplier, test_commission_recipient, test_material, test_warehouse,
+    ):
+        """Cancelar la compra liquidada devuelve el saldo del transportador a $0."""
+        payload = self._payload(
+            test_supplier, test_material, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Flete",
+                "commission_type": "fixed",
+                "commission_value": 300,
+                "charge_type": "freight",
+            }],
+        )
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        purchase_id = response.json()["id"]
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("-300.00")
+
+        resp = client.patch(
+            f"/api/v1/purchases/{purchase_id}/cancel",
+            params={"reason": "Prueba cancelacion flete"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("0.00")
+
+    def test_edit_preserves_charge_type(
+        self, client, org_headers,
+        test_supplier, test_commission_recipient, test_material, test_warehouse,
+    ):
+        """El revert-and-reapply del edit (#8) reconstruye el cargo con su tipo."""
+        payload = self._payload(
+            test_supplier, test_material, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Flete",
+                "commission_type": "fixed",
+                "commission_value": 200,
+                "charge_type": "freight",
+            }],
+            auto_liquidate=False,
+        )
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        purchase_id = response.json()["id"]
+
+        update = {
+            "commissions": [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Flete actualizado",
+                "commission_type": "fixed",
+                "commission_value": 250,
+                "charge_type": "freight",
+            }],
+        }
+        resp = client.patch(f"/api/v1/purchases/{purchase_id}", json=update, headers=org_headers)
+        assert resp.status_code == 200
+        comm = resp.json()["commissions"][0]
+        assert comm["charge_type"] == "freight"
+        assert comm["commission_amount"] == 250.0
+
+    def test_default_charge_type_is_commission(
+        self, client, org_headers,
+        test_supplier, test_commission_recipient, test_material, test_warehouse,
+    ):
+        """Request SIN charge_type (compat) → responde 'commission'."""
+        payload = self._payload(
+            test_supplier, test_material, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Intermediacion",
+                "commission_type": "fixed",
+                "commission_value": 50,
+            }],
+        )
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        assert response.json()["commissions"][0]["charge_type"] == "commission"

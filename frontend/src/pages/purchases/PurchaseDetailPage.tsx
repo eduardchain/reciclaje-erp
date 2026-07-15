@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { ArrowLeft, CreditCard, XCircle, Pencil, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -21,6 +22,7 @@ import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
+import { CHARGE_TYPE_LABELS } from "@/utils/constants";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
 
@@ -228,16 +230,17 @@ export default function PurchaseDetailPage() {
       {purchase.commissions?.length > 0 && canViewPrices && (
         <Card className="shadow-sm">
           <CardHeader>
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones</CardTitle>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones y Cargos</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="rounded-lg border border-slate-200/80 overflow-x-auto">
-              <Table className="min-w-[560px]">
+              <Table className="min-w-[640px]">
                 <TableHeader>
                   <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Comisionista</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Receptor</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Cargo</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Concepto</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Tipo</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Cálculo</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Valor</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Monto</TableHead>
                   </TableRow>
@@ -246,6 +249,7 @@ export default function PurchaseDetailPage() {
                   {purchase.commissions.map((comm) => (
                     <TableRow key={comm.id}>
                       <TableCell className="font-medium">{comm.third_party_name}</TableCell>
+                      <TableCell><Badge variant="outline">{CHARGE_TYPE_LABELS[comm.charge_type] ?? "Comisión"}</Badge></TableCell>
                       <TableCell>{comm.concept}</TableCell>
                       <TableCell>{comm.commission_type === "percentage" ? "Porcentaje" : comm.commission_type === "per_kg" ? "Por Kilo" : "Fijo"}</TableCell>
                       <TableCell className="text-right tabular-nums">

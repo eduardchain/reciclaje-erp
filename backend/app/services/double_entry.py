@@ -331,9 +331,11 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         liq_dt = liquidation_date or double_entry.date
 
         # Step 5: Pagar comisiones (crear MoneyMovements + actualizar balances)
+        from app.models.purchase import CHARGE_TYPE_LABELS
         commissions = db.scalars(select(SaleCommission).where(SaleCommission.sale_id == sale.id)).all()
         for commission in commissions:
             recipient = db.get(ThirdParty, commission.third_party_id)
+            charge_label = CHARGE_TYPE_LABELS.get(commission.charge_type, "Comisión")
             mm_service._create_movement(
                 db=db,
                 organization_id=organization_id,
@@ -341,7 +343,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                 amount=commission.commission_amount,
                 account_id=None,
                 date=liq_dt,
-                description=f"Comisión DP #{double_entry.double_entry_number} - {commission.concept}",
+                description=f"{charge_label} DP #{double_entry.double_entry_number} - {commission.concept}",
                 third_party_id=commission.third_party_id,
                 sale_id=sale.id,
                 user_id=user_id,
@@ -826,7 +828,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             if not tp_service.has_behavior_type(db, recipient.id, ["service_provider"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"El comisionista '{recipient.name}' debe ser proveedor de servicios",
+                    detail=f"El receptor del cargo '{recipient.name}' debe ser proveedor de servicios",
                 )
             commission_amount = self._calculate_commission(
                 comm_data.commission_type, comm_data.commission_value, sale_total, total_quantity
@@ -836,6 +838,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                 third_party_id=comm_data.third_party_id,
                 concept=comm_data.concept,
                 commission_type=comm_data.commission_type,
+                charge_type=comm_data.charge_type,
                 commission_value=comm_data.commission_value,
                 commission_amount=commission_amount,
             ))

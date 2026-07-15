@@ -33,7 +33,7 @@ function createEmptyLine(): LineFormData {
   return { _key: ++lineKeyCounter, material_id: "", quantity: 0, purchase_unit_price: 0, sale_unit_price: 0 };
 }
 function createEmptyCommission(): CommissionFormData {
-  return { _key: ++commKeyCounter, third_party_id: "", concept: "", commission_type: "percentage", commission_value: 0 };
+  return { _key: ++commKeyCounter, third_party_id: "", concept: "", commission_type: "percentage", commission_value: 0, charge_type: "commission" };
 }
 
 export default function DoubleEntryCreatePage() {
@@ -266,8 +266,8 @@ export default function DoubleEntryCreatePage() {
       {/* Comisiones */}
       <Card className="shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones (Opcional)</CardTitle>
-          <Button variant="outline" size="sm" onClick={() => setCommissions((p) => [...p, createEmptyCommission()])}><Plus className="h-4 w-4 mr-1" />Agregar</Button>
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones y Cargos (Opcional)</CardTitle>
+          <Button variant="outline" size="sm" onClick={() => setCommissions((p) => [...p, createEmptyCommission()])}><Plus className="h-4 w-4 mr-1" />Agregar Cargo</Button>
         </CardHeader>
         {commissions.length > 0 && (
           <CardContent className="space-y-0">
@@ -279,18 +279,22 @@ export default function DoubleEntryCreatePage() {
                 onDelete={() => setCommissions((p) => p.filter((c) => c._key !== comm._key))}
               >
                 <div className="md:col-span-3">
-                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Comisionista</Label>
-                  <EntitySelect value={comm.third_party_id} onChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, third_party_id: v } : c))} options={payableProviders.map((t) => ({ id: t.id, label: t.name }))} placeholder="Comisionista..." />
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Receptor</Label>
+                  <EntitySelect value={comm.third_party_id} onChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, third_party_id: v } : c))} options={payableProviders.map((t) => ({ id: t.id, label: t.name }))} placeholder="Receptor..." />
                 </div>
-                <div className="md:col-span-3">
+                <div className="md:col-span-2">
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cargo</Label>
+                  <Select value={comm.charge_type ?? "commission"} onValueChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, charge_type: v as "commission" | "freight" | "bonus" } : c))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="commission">Comisión</SelectItem><SelectItem value="freight">Flete</SelectItem><SelectItem value="bonus">Bono</SelectItem></SelectContent></Select>
+                </div>
+                <div className="md:col-span-2">
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Concepto</Label>
                   <Input value={comm.concept} onChange={(e) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, concept: e.target.value } : c))} />
                 </div>
                 <div className="md:col-span-2">
-                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Tipo</Label>
+                  <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cálculo</Label>
                   <Select value={comm.commission_type} onValueChange={(v) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, commission_type: v as "percentage" | "fixed" | "per_kg" } : c))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">Porcentaje</SelectItem><SelectItem value="fixed">Fijo</SelectItem><SelectItem value="per_kg">Por Kilo</SelectItem></SelectContent></Select>
                 </div>
-                <div className="md:col-span-3">
+                <div className="md:col-span-2">
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Valor</Label>
                   <Input type="number" min={0} value={comm.commission_value || ""} onChange={(e) => setCommissions((p) => p.map((c) => c._key === comm._key ? { ...c, commission_value: parseFloat(e.target.value) || 0 } : c))} />
                 </div>

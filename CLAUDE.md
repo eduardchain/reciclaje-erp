@@ -202,9 +202,9 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 | Materials | `/api/v1/materials/` | CRUD + categories + business units, stock tracking |
 | Third Parties | `/api/v1/third-parties/` | Category-based roles via behavior_type (material_supplier/service_provider/customer/investor/generic/provision/liability), balance tracking |
 | Third Party Categories | `/api/v1/third-party-categories/` | Hierarchical categories (max 2 levels), behavior_type enum, CRUD + flat list |
-| Purchases | `/api/v1/purchases/` | 3-step workflow, full edit (revert-and-reapply), auto-liquidate, immediate payment |
-| Sales | `/api/v1/sales/` | 2-step workflow, commissions, received_quantity, full edit, immediate collection |
-| Double Entries | `/api/v1/double-entries/` | 2-step, edit registered, price adjustments at liquidation, commissions |
+| Purchases | `/api/v1/purchases/` | 3-step workflow, full edit (revert-and-reapply), auto-liquidate, immediate payment, cargos comisión/flete prorrateados al costo (#70) |
+| Sales | `/api/v1/sales/` | 2-step workflow, comisiones y cargos (flete/bono #70), received_quantity, full edit, immediate collection |
+| Double Entries | `/api/v1/double-entries/` | 2-step, edit registered, price adjustments at liquidation, comisiones y cargos (flete/bono #70) |
 | Treasury | `/api/v1/money-movements/`, `/api/v1/profit-distributions/`, `/api/v1/financial-obligations/` | 39 types, annulment with audit, unified account statement, evidence upload, PDF/Excel export, profit distribution, obligaciones financieras bidireccionales con motor de interés 30/360 (#69) |
 | Fixed Assets | `/api/v1/fixed-assets/` | Monthly depreciation, apply-pending batch, dispose, revaluation up/down with account or third-party counterpart (#67), pay from account OR credit from supplier |
 | Inventory | `/api/v1/inventory/` | Stock, movements, adjustments (4 types), transformations (3 cost methods), transfers, transit, valuation |
@@ -215,7 +215,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 1094 tests (20 integration; 6 fallos pre-existentes conocidos: 5×405 en organizations/auth_with_org y `test_update_insufficient_stock_fails` — ver nota decisión #54).
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 1115 tests (20 integration; 6 fallos pre-existentes conocidos: 5×405 en organizations/auth_with_org y `test_update_insufficient_stock_fails` — ver nota decisión #54).
 
 ### Database
 
@@ -403,3 +403,5 @@ Numeradas secuencialmente. Solo agregar al final con el siguiente numero.
 - **MovementHistoryPage**: Filters Material + Warehouse al backend. Con `material_id`: muestra `balance_after` y `avg_cost_after` (running balance iterativo).
 - **TransitPage**: KpiCards + bottleneck alerts + 2 DataTables (compras/ventas pendientes).
 - **AdjustmentCreatePage**: Lee `material_id` de URL search params para pre-seleccionar material.
+
+70. **Cargos de operación — fletes y bonos como comisiones tipadas (`charge_type`, requerimiento B)**: Columna `charge_type` String(20) `server_default='commission'` en `purchase_commissions` (`commission|freight`) y `sale_commissions` (`commission|freight|bonus`) — migración `c45cbce9f391`; validación por `Literal` en schemas Base (no enum de BD; ortogonal a `commission_type` que es el CÓMO se calcula). **D1 — CERO tipos MM nuevos**: los cargos viajan por la mecánica existente → flete de compra se **prorratea al costo del material** por el túnel de #30 (`adjusted_unit_cost`, lo lee también la remoción #66 H1; sin MM — el cargo aparece como evento sintético en el estado de cuenta del receptor); cargos de venta y de cruces DP viajan en `commission_accrual` (#23) con descripción parametrizada por `CHARGE_TYPE_LABELS` (canónico en `models/purchase.py`, espejo en `utils/constants.ts`): "Flete venta #N", "Bono DP #N". Terna de signos, conciliación #59, drill-down #49 y panel #68 intactos por construcción. **DP amarrado** (respuestas cliente 2026-07-15, supersede el gasto-a-UN de #58 como única vía): las comisiones DP son `SaleCommission` de la venta interna → la misma columna cubre; reportes sin tocar (sección Pasa Mano ya separa por `double_entry_id`). **Regla operativa anti doble registro** (no forzada en código, comunicar al cliente): flete de un cruce va amarrado al cruce; gasto-directo-a-UN Pasa Mano solo para costos DP sin cruce concreto. Receptor de cualquier cargo debe ser `service_provider` (#32, copy "receptor del cargo"). Campo API `commissions_paid_sales` intacto (compat) — labels UI "Comisiones y Cargos (Ventas)" / "(Pasa Mano)". Pago vía `commission_payment` existente. Asimetría heredada correcta: per_kg de venta usa `received_quantity`, de compra la cantidad original. Sin desglose por charge_type en P&L (cliente aceptó línea combinada); histórico queda `commission` vía server_default. PDFs venta/DP con columna "Cargo". 21 tests (`TestPurchaseCharges` 7, `TestSaleCharges` 8, `TestDoubleEntryCharges` 6). Plan: `docs/planes/plan-bonos-fletes.md` (v2 QA-aprobado).

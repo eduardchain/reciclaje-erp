@@ -17,11 +17,14 @@ from app.utils.dates import BusinessDate
 
 
 class PurchaseCommissionBase(BaseModel):
-    """Base schema para comision de compra."""
-    third_party_id: UUID = Field(..., description="UUID del comisionista")
-    concept: str = Field(..., max_length=255, description="Concepto de la comision")
+    """Base schema para cargo de compra (comision o flete)."""
+    third_party_id: UUID = Field(..., description="UUID del receptor del cargo")
+    concept: str = Field(..., max_length=255, description="Concepto del cargo")
     commission_type: Literal["percentage", "fixed", "per_kg"] = Field(..., description="'percentage', 'fixed' o 'per_kg'")
     commission_value: Decimal = Field(..., gt=0, description="Porcentaje (0-100) o monto fijo")
+    charge_type: Literal["commission", "freight"] = Field(
+        "commission", description="Tipo de cargo: comision o flete (ambos prorratean al costo)"
+    )
 
 
 class PurchaseCommissionCreate(PurchaseCommissionBase):

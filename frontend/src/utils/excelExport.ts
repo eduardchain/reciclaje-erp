@@ -280,7 +280,7 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
   rows.push(["Ventas Pasa Mano", de.sales_total]);
   rows.push(["Compras Pasa Mano", de.purchases_total]);
   rows.push(["Margen Bruto", de.gross_profit]);
-  rows.push(["Comisiones", -de.commissions]);
+  rows.push(["Comisiones y Cargos", -de.commissions]);
   rows.push(["Gastos Directos", -de.direct_expenses]);
   for (const d of de.direct_expenses_detail) {
     rows.push(["  " + d.category_name, -d.amount]);
@@ -467,7 +467,7 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   for (const cat of data.expenses_by_category) {
     rows.push([`  ${cat.category_name}`, cat.total_amount]);
   }
-  rows.push(["Comisiones Pagadas", data.commissions_paid]);
+  rows.push(["Comisiones y Cargos Pagados", data.commissions_paid]);
   rows.push([]);
   rows.push(["Utilidad Neta", data.net_profit]);
   rows.push(["Margen Neto", `${data.net_margin.toFixed(1)}%`]);
@@ -566,8 +566,8 @@ export function exportPnlMonthlyExcel(
   }
 
   pushRow("Total Gastos Operacionales", (p) => p.operating_expenses, { prefix: "-", bold: true });
-  pushRow("Comisiones de Ventas", (p) => p.commissions_paid_sales, { prefix: "-", indent: true });
-  pushRow("Comisiones de Pasa Mano", (p) => p.commissions_paid_dp, { prefix: "-", indent: true });
+  pushRow("Comisiones y Cargos (Ventas)", (p) => p.commissions_paid_sales, { prefix: "-", indent: true });
+  pushRow("Comisiones y Cargos (Pasa Mano)", (p) => p.commissions_paid_dp, { prefix: "-", indent: true });
   pushRow("Total Comisiones", (p) => p.commissions_paid, { prefix: "-", bold: true });
   pushRow("Utilidad Neta", (p) => p.net_profit, { bold: true });
 

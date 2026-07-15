@@ -1037,3 +1037,192 @@ class TestDoubleEntryKpiSums:
         assert body["total_purchase_cost_sum"] == 8000.0, "sum debe excluir DPs canceladas"
         assert body["total_sale_amount_sum"] == 10000.0
         assert body["total_profit_sum"] == 2000.0
+
+
+class TestDoubleEntryCharges:
+    """Cargos en cruces DP (plan bonos-fletes §11): commission | freight | bonus.
+
+    Las comisiones DP son SaleCommission de la venta interna — la columna
+    charge_type de v1 las cubre sin migración nueva. El accrual nace al
+    liquidar con label parametrizado ("Flete DP #N", "Bono DP #N") y cae en
+    la sección Pasa Mano de Rentabilidad por UN (join double_entry_id, #58).
+    """
+
+    def _accruals(self, db_session, dp_id):
+        from uuid import UUID
+        from sqlalchemy import select
+        sale_id = db_session.execute(
+            select(Sale.id).where(Sale.double_entry_id == UUID(dp_id))
+        ).scalar_one()
+        return db_session.execute(
+            select(MoneyMovement).where(
+                MoneyMovement.sale_id == sale_id,
+                MoneyMovement.movement_type == "commission_accrual",
+            )
+        ).scalars().all()
+
+    def test_dp_freight_and_bonus_records_and_accruals(
+        self, client, org_headers, db_session,
+        test_supplier, test_customer, test_material, test_commission_recipient,
+    ):
+        """Flete $2/kg × 100 kg + bono fijo $300: records con charge_type al
+        crear; al liquidar, 2 accruals con su label y receptor -$500."""
+        payload = _create_payload(
+            test_supplier.id, test_customer.id, test_material.id,
+            quantity=100.0, purchase_price=80.0, sale_price=100.0,
+            commissions=[
+                {"third_party_id": str(test_commission_recipient.id), "concept": "Flete cruce",
+                 "commission_type": "per_kg", "commission_value": 2.0, "charge_type": "freight"},
+                {"third_party_id": str(test_commission_recipient.id), "concept": "Bono cruce",
+                 "commission_type": "fixed", "commission_value": 300, "charge_type": "bonus"},
+            ],
+        )
+        resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+        assert resp.status_code == 201
+        data = resp.json()
+        by_type = {c["charge_type"]: c for c in data["commissions"]}
+        assert by_type["freight"]["commission_amount"] == 200.0
+        assert by_type["bonus"]["commission_amount"] == 300.0
+
+        # Registrada: sin accruals todavia (efectos solo al liquidar)
+        assert self._accruals(db_session, data["id"]) == []
+
+        liq = client.patch(
+            f"/api/v1/double-entries/{data['id']}/liquidate", json={}, headers=org_headers,
+        )
+        assert liq.status_code == 200
+
+        accruals = self._accruals(db_session, data["id"])
+        assert len(accruals) == 2
+        prefixes = sorted(m.description.split(" DP #")[0] for m in accruals)
+        assert prefixes == ["Bono", "Flete"]
+        assert sum(m.amount for m in accruals) == Decimal("500.00")
+
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("-500.00")
+
+    def test_dp_charges_lower_pasamano_net(
+        self, client, org_headers,
+        test_supplier, test_customer, test_material, test_commission_recipient,
+    ):
+        """Rentabilidad por UN: el cargo DP cae en pasamano.commissions y baja
+        la neta (gross $2.000 - bono $300 = $1.700)."""
+        payload = _create_payload(
+            test_supplier.id, test_customer.id, test_material.id,
+            quantity=100.0, purchase_price=80.0, sale_price=100.0,
+            commissions=[
+                {"third_party_id": str(test_commission_recipient.id), "concept": "Bono cruce",
+                 "commission_type": "fixed", "commission_value": 300, "charge_type": "bonus"},
+            ],
+        )
+        resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+        assert resp.status_code == 201
+        client.patch(
+            f"/api/v1/double-entries/{resp.json()['id']}/liquidate", json={}, headers=org_headers,
+        ).raise_for_status()
+
+        from datetime import timedelta
+        report = client.get(
+            "/api/v1/reports/profitability-by-business-unit",
+            params={
+                "date_from": (date.today() - timedelta(days=1)).isoformat(),
+                "date_to": (date.today() + timedelta(days=1)).isoformat(),
+            },
+            headers=org_headers,
+        )
+        assert report.status_code == 200
+        de = report.json()["double_entry"]
+        assert de["gross_profit"] == 2000.0
+        assert de["commissions"] == 300.0
+        assert de["net_profit"] == pytest.approx(1700.0, abs=0.01)
+
+    def test_cancel_dp_annuls_charge_accruals(
+        self, client, org_headers, db_session,
+        test_supplier, test_customer, test_material, test_commission_recipient,
+    ):
+        """Cancelar DP liquidada anula los accruals de cargos y restaura el
+        balance del receptor (mismo camino que comisiones, #23)."""
+        payload = _create_payload(
+            test_supplier.id, test_customer.id, test_material.id,
+            quantity=100.0, purchase_price=80.0, sale_price=100.0,
+            commissions=[
+                {"third_party_id": str(test_commission_recipient.id), "concept": "Flete cruce",
+                 "commission_type": "fixed", "commission_value": 250, "charge_type": "freight"},
+            ],
+        )
+        resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+        dp_id = resp.json()["id"]
+        client.patch(
+            f"/api/v1/double-entries/{dp_id}/liquidate", json={}, headers=org_headers,
+        ).raise_for_status()
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("-250.00")
+
+        cancel = client.patch(
+            f"/api/v1/double-entries/{dp_id}/cancel",
+            json={"reason": "error de captura"},
+            headers=org_headers,
+        )
+        assert cancel.status_code == 200
+
+        accruals = self._accruals(db_session, dp_id)
+        assert len(accruals) == 1
+        assert accruals[0].status == "annulled"
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("0.00")
+
+    def test_dp_default_charge_type_commission(
+        self, client, org_headers, db_session,
+        test_supplier, test_customer, test_material, test_commission_recipient,
+    ):
+        """Compat: sin charge_type el cargo es comision y el accrual conserva
+        el label 'Comisión DP #N' historico."""
+        payload = _create_payload(
+            test_supplier.id, test_customer.id, test_material.id,
+            quantity=100.0, purchase_price=80.0, sale_price=100.0,
+            commissions=[
+                {"third_party_id": str(test_commission_recipient.id), "concept": "Comercial",
+                 "commission_type": "percentage", "commission_value": 1.0},
+            ],
+        )
+        resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+        assert resp.status_code == 201
+        assert resp.json()["commissions"][0]["charge_type"] == "commission"
+
+        client.patch(
+            f"/api/v1/double-entries/{resp.json()['id']}/liquidate", json={}, headers=org_headers,
+        ).raise_for_status()
+        accruals = self._accruals(db_session, resp.json()["id"])
+        assert accruals[0].description.startswith("Comisión DP #")
+
+    def test_dp_invalid_charge_type_422(
+        self, client, org_headers,
+        test_supplier, test_customer, test_material, test_commission_recipient,
+    ):
+        """charge_type fuera del Literal (commission|freight|bonus) → 422."""
+        payload = _create_payload(
+            test_supplier.id, test_customer.id, test_material.id,
+            commissions=[
+                {"third_party_id": str(test_commission_recipient.id), "concept": "Peaje",
+                 "commission_type": "fixed", "commission_value": 100, "charge_type": "toll"},
+            ],
+        )
+        resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+        assert resp.status_code == 422
+
+    def test_dp_charge_recipient_requires_service_provider(
+        self, client, org_headers,
+        test_supplier, test_customer, test_material,
+    ):
+        """Regla #32 con copy generalizado: receptor sin service_provider → 400
+        'receptor del cargo' (test_supplier solo es material_supplier)."""
+        payload = _create_payload(
+            test_supplier.id, test_customer.id, test_material.id,
+            commissions=[
+                {"third_party_id": str(test_supplier.id), "concept": "Flete cruce",
+                 "commission_type": "fixed", "commission_value": 100, "charge_type": "freight"},
+            ],
+        )
+        resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+        assert resp.status_code == 400
+        assert "receptor del cargo" in resp.json()["detail"]

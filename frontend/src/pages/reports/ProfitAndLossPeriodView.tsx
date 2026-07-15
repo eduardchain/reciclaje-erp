@@ -186,14 +186,14 @@ export default function ProfitAndLossPeriodView() {
               <div className="flex justify-between text-sm font-medium"><span>Total Gastos Operacionales</span><span className="font-medium text-red-600">-{formatCurrency(data.operating_expenses)}</span></div>
               <DrillRow
                 to="/treasury?tab=commission_accrual&status=confirmed&commission_source=sale"
-                label="Comisiones de Ventas"
+                label="Comisiones y Cargos (Ventas)"
                 value={`-${formatCurrency(data.commissions_paid_sales)}`}
                 valueClass="text-red-600"
                 indent
               />
               <DrillRow
                 to="/treasury?tab=commission_accrual&status=confirmed&commission_source=double_entry"
-                label="Comisiones de Pasa Mano"
+                label="Comisiones y Cargos (Pasa Mano)"
                 value={`-${formatCurrency(data.commissions_paid_dp)}`}
                 valueClass="text-red-600"
                 indent
