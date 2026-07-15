@@ -392,9 +392,9 @@ export default function ProfitAndLossMonthlyView() {
                     </td>
                   </tr>
 
-                  {/* Comisiones de Ventas */}
+                  {/* Comisiones y Cargos (Ventas) */}
                   <tr className="hover:bg-slate-50">
-                    <td className="sticky left-0 bg-white z-10 py-1.5 px-3 pl-7 text-slate-600">Comisiones de Ventas</td>
+                    <td className="sticky left-0 bg-white z-10 py-1.5 px-3 pl-7 text-slate-600">Comisiones y Cargos (Ventas)</td>
                     {data.periods.map((p, i) => (
                       <td key={i} className="text-right py-1.5 px-3 tabular-nums text-red-600">
                         {p.commissions_paid_sales > 0 ? (
@@ -413,9 +413,9 @@ export default function ProfitAndLossMonthlyView() {
                     </td>
                   </tr>
 
-                  {/* Comisiones de Pasa Mano */}
+                  {/* Comisiones y Cargos (Pasa Mano) */}
                   <tr className="hover:bg-slate-50">
-                    <td className="sticky left-0 bg-white z-10 py-1.5 px-3 pl-7 text-slate-600">Comisiones de Pasa Mano</td>
+                    <td className="sticky left-0 bg-white z-10 py-1.5 px-3 pl-7 text-slate-600">Comisiones y Cargos (Pasa Mano)</td>
                     {data.periods.map((p, i) => (
                       <td key={i} className="text-right py-1.5 px-3 tabular-nums text-red-600">
                         {p.commissions_paid_dp > 0 ? (

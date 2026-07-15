@@ -1215,7 +1215,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             if not tp_service.has_behavior_type(db, recipient.id, ["service_provider"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"El comisionista '{recipient.name}' debe ser proveedor de servicios",
+                    detail=f"El receptor del cargo '{recipient.name}' debe ser proveedor de servicios",
                 )
 
             # Calcular total_quantity para per_kg si no viene como parametro
@@ -1238,6 +1238,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 third_party_id=comm_data.third_party_id,
                 concept=comm_data.concept,
                 commission_type=comm_data.commission_type,
+                charge_type=comm_data.charge_type,
                 commission_value=comm_data.commission_value,
                 commission_amount=commission_amount,
             )
@@ -1326,6 +1327,10 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             # desalineada del revenue y reescribiendo saldos historicos del
             # comisionista en liquidaciones tardias. liquidate() asigna
             # liquidated_at ANTES de llamar aca; fallback defensivo a sale.date.
+            # Label por tipo de cargo (D5 plan bonos-fletes): con un solo MM type
+            # (commission_accrual), la descripcion es el diferenciador visible
+            from app.models.purchase import CHARGE_TYPE_LABELS
+            charge_label = CHARGE_TYPE_LABELS.get(commission.charge_type, "Comisión")
             mm_service._create_movement(
                 db=db,
                 organization_id=sale.organization_id,
@@ -1333,7 +1338,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 amount=commission.commission_amount,
                 account_id=None,
                 date=sale.liquidated_at or sale.date,
-                description=f"Comisión venta #{sale.sale_number} - {commission.concept}",
+                description=f"{charge_label} venta #{sale.sale_number} - {commission.concept}",
                 third_party_id=commission.third_party_id,
                 sale_id=sale.id,
             )

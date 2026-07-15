@@ -4,6 +4,7 @@ import type { SaleResponse } from "@/types/sale";
 import type { DoubleEntryResponse } from "@/types/double-entry";
 import type { BalanceSheetResponse, BalanceDetailedResponse } from "@/types/reports";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
+import { CHARGE_TYPE_LABELS } from "@/utils/constants";
 
 export interface AccountStatementExportData {
   thirdPartyName: string;
@@ -281,21 +282,22 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string, options?: { 
     y += 6;
   }
 
-  // Comisiones (solo si puede ver profit)
+  // Comisiones y cargos (solo si puede ver profit)
   if (showProfit && sale.commissions.length > 0) {
     y += 6;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("Comisiones", 14, y);
+    doc.text("Comisiones y Cargos", 14, y);
     y += 6;
 
     doc.setFillColor(245, 245, 245);
     doc.rect(14, y - 4, pageWidth - 28, 8, "F");
     doc.setFontSize(9);
-    doc.text("Comisionista", 14, y);
-    doc.text("Concepto", 70, y);
-    doc.text("Tipo", 120, y);
-    doc.text("Valor", 150, y, { align: "right" });
+    doc.text("Receptor", 14, y);
+    doc.text("Cargo", 60, y);
+    doc.text("Concepto", 84, y);
+    doc.text("Cálculo", 126, y);
+    doc.text("Valor", 154, y, { align: "right" });
     doc.text("Monto", pageWidth - 14, y, { align: "right" });
     y += 7;
 
@@ -305,10 +307,11 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string, options?: { 
         doc.addPage();
         y = 20;
       }
-      doc.text(comm.third_party_name.substring(0, 28), 14, y);
-      doc.text(comm.concept.substring(0, 24), 70, y);
-      doc.text(comm.commission_type === "percentage" ? "%" : "Fijo", 120, y);
-      doc.text(String(comm.commission_value), 150, y, { align: "right" });
+      doc.text(comm.third_party_name.substring(0, 22), 14, y);
+      doc.text(CHARGE_TYPE_LABELS[comm.charge_type] ?? "Comisión", 60, y);
+      doc.text(comm.concept.substring(0, 20), 84, y);
+      doc.text(comm.commission_type === "percentage" ? "%" : comm.commission_type === "per_kg" ? "Por Kg" : "Fijo", 126, y);
+      doc.text(String(comm.commission_value), 154, y, { align: "right" });
       doc.text(formatCurrency(comm.commission_amount), pageWidth - 14, y, { align: "right" });
       y += 6;
     }
@@ -441,21 +444,22 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string, 
     y += 6;
   }
 
-  // Comisiones
+  // Comisiones y cargos
   if (showProfit && de.commissions.length > 0) {
     y += 6;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("Comisiones", 14, y);
+    doc.text("Comisiones y Cargos", 14, y);
     y += 6;
 
     doc.setFillColor(245, 245, 245);
     doc.rect(14, y - 4, pageWidth - 28, 8, "F");
     doc.setFontSize(9);
-    doc.text("Comisionista", 14, y);
-    doc.text("Concepto", 70, y);
-    doc.text("Tipo", 120, y);
-    doc.text("Valor", 150, y, { align: "right" });
+    doc.text("Receptor", 14, y);
+    doc.text("Cargo", 60, y);
+    doc.text("Concepto", 84, y);
+    doc.text("Cálculo", 126, y);
+    doc.text("Valor", 154, y, { align: "right" });
     doc.text("Monto", pageWidth - 14, y, { align: "right" });
     y += 7;
 
@@ -465,10 +469,11 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string, 
         doc.addPage();
         y = 20;
       }
-      doc.text(comm.third_party_name.substring(0, 28), 14, y);
-      doc.text(comm.concept.substring(0, 24), 70, y);
-      doc.text(comm.commission_type === "percentage" ? "%" : "Fijo", 120, y);
-      doc.text(String(comm.commission_value), 150, y, { align: "right" });
+      doc.text(comm.third_party_name.substring(0, 22), 14, y);
+      doc.text(CHARGE_TYPE_LABELS[comm.charge_type] ?? "Comisión", 60, y);
+      doc.text(comm.concept.substring(0, 20), 84, y);
+      doc.text(comm.commission_type === "percentage" ? "%" : comm.commission_type === "per_kg" ? "Por Kg" : "Fijo", 126, y);
+      doc.text(String(comm.commission_value), 154, y, { align: "right" });
       doc.text(formatCurrency(comm.commission_amount), pageWidth - 14, y, { align: "right" });
       y += 6;
     }

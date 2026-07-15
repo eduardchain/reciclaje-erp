@@ -119,3 +119,10 @@ export function buildRoute(template: string, params: Record<string, string>): st
     template
   );
 }
+
+// Labels es-CO por tipo de cargo de operación (comisiones/fletes/bonos)
+export const CHARGE_TYPE_LABELS: Record<string, string> = {
+  commission: "Comisión",
+  freight: "Flete",
+  bonus: "Bono",
+};

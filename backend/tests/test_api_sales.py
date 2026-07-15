@@ -2000,3 +2000,261 @@ class TestCancelSaleWithLinkedCollection:
         # La caja no se movió por el cobro (Step 7 solo toca los 'confirmed')
         db_session.refresh(test_money_account)
         assert float(test_money_account.current_balance) == pytest.approx(account_before)
+
+
+class TestSaleCharges:
+    """Cargos de venta (plan bonos-fletes): commission | freight | bonus.
+
+    Todos viajan por el commission_accrual de #23 — bajan el margen de la
+    venta, se causan al liquidar y se pagan via commission_payment.
+    """
+
+    def _sale_payload(self, customer, material, warehouse, commissions, auto_liquidate=True):
+        return {
+            "customer_id": str(customer.id),
+            "warehouse_id": str(warehouse.id),
+            "date": "2026-03-20T12:00:00",
+            "lines": [
+                {
+                    "material_id": str(material.id),
+                    "quantity": 100.0,
+                    "unit_price": 100.0,
+                }
+            ],
+            "commissions": commissions,
+            "auto_liquidate": auto_liquidate,
+        }
+
+    def test_bonus_accrual_description_and_pnl(
+        self, client, org_headers, db_session,
+        test_customer, test_material_with_stock, test_warehouse, test_commission_recipient,
+    ):
+        """Bono 2% de $10.000: accrual 'Bono venta...', vendedor -$200, P&L +$200."""
+        payload = self._sale_payload(
+            test_customer, test_material_with_stock, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Bono vendedor Juan",
+                "commission_type": "percentage",
+                "commission_value": 2.0,
+                "charge_type": "bonus",
+            }],
+        )
+        response = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        data = response.json()
+        assert data["commissions"][0]["charge_type"] == "bonus"
+        assert data["commissions"][0]["commission_amount"] == 200.0
+
+        from sqlalchemy import select
+        from app.models.money_movement import MoneyMovement
+        accrual = db_session.execute(
+            select(MoneyMovement).where(
+                MoneyMovement.sale_id == data["id"],
+                MoneyMovement.movement_type == "commission_accrual",
+            )
+        ).scalar_one()
+        assert accrual.description.startswith("Bono venta")
+        assert accrual.amount == Decimal("200.00")
+
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("-200.00")
+
+        # P&L del mes: el bono entra a la linea de comisiones (D1 del plan)
+        resp = client.get(
+            "/api/v1/reports/profit-and-loss",
+            params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["commissions_paid_sales"] == 200.0
+
+    def test_freight_per_kg(
+        self, client, org_headers, db_session,
+        test_customer, test_material_with_stock, test_warehouse, test_commission_recipient,
+    ):
+        """Flete $2/kg × 100 kg = $200 con label 'Flete venta...'."""
+        payload = self._sale_payload(
+            test_customer, test_material_with_stock, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Flete entrega cliente",
+                "commission_type": "per_kg",
+                "commission_value": 2.0,
+                "charge_type": "freight",
+            }],
+        )
+        response = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        assert response.json()["commissions"][0]["commission_amount"] == 200.0
+
+        from sqlalchemy import select
+        from app.models.money_movement import MoneyMovement
+        accrual = db_session.execute(
+            select(MoneyMovement).where(
+                MoneyMovement.sale_id == response.json()["id"],
+                MoneyMovement.movement_type == "commission_accrual",
+            )
+        ).scalar_one()
+        assert accrual.description.startswith("Flete venta")
+
+    def test_mixed_charges_three_accruals(
+        self, client, org_headers, db_session,
+        test_customer, test_material_with_stock, test_warehouse, test_commission_recipient,
+    ):
+        """Comision 1% + bono fijo $100 + flete $1/kg en la misma venta: 3 accruals con su label."""
+        payload = self._sale_payload(
+            test_customer, test_material_with_stock, test_warehouse,
+            [
+                {"third_party_id": str(test_commission_recipient.id), "concept": "Comercial",
+                 "commission_type": "percentage", "commission_value": 1.0, "charge_type": "commission"},
+                {"third_party_id": str(test_commission_recipient.id), "concept": "Bono meta",
+                 "commission_type": "fixed", "commission_value": 100, "charge_type": "bonus"},
+                {"third_party_id": str(test_commission_recipient.id), "concept": "Flete",
+                 "commission_type": "per_kg", "commission_value": 1.0, "charge_type": "freight"},
+            ],
+        )
+        response = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        assert response.status_code == 201
+
+        from sqlalchemy import select
+        from app.models.money_movement import MoneyMovement
+        accruals = db_session.execute(
+            select(MoneyMovement).where(
+                MoneyMovement.sale_id == response.json()["id"],
+                MoneyMovement.movement_type == "commission_accrual",
+            )
+        ).scalars().all()
+        prefixes = sorted(m.description.split(" venta")[0] for m in accruals)
+        assert prefixes == ["Bono", "Comisión", "Flete"]
+        # 1% de 10.000 + 100 + 1×100 = 100 + 100 + 100
+        assert sum(m.amount for m in accruals) == Decimal("300.00")
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("-300.00")
+
+    def test_cancel_annuls_charge_accruals(
+        self, client, org_headers, db_session,
+        test_customer, test_material_with_stock, test_warehouse, test_commission_recipient,
+    ):
+        """Cancelar la venta anula los accruals de cargos y devuelve el saldo del receptor."""
+        payload = self._sale_payload(
+            test_customer, test_material_with_stock, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Bono", "commission_type": "fixed",
+                "commission_value": 150, "charge_type": "bonus",
+            }],
+        )
+        response = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        sale_id = response.json()["id"]
+
+        resp = client.patch(
+            f"/api/v1/sales/{sale_id}/cancel",
+            params={"reason": "Prueba cancelacion cargos"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+
+        from sqlalchemy import select
+        from app.models.money_movement import MoneyMovement
+        accrual = db_session.execute(
+            select(MoneyMovement).where(
+                MoneyMovement.sale_id == sale_id,
+                MoneyMovement.movement_type == "commission_accrual",
+            )
+        ).scalar_one()
+        assert accrual.status == "annulled"
+        db_session.expire_all()
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("0.00")
+
+    def test_invalid_charge_type_422(
+        self, client, org_headers,
+        test_customer, test_material_with_stock, test_warehouse, test_commission_recipient,
+    ):
+        payload = self._sale_payload(
+            test_customer, test_material_with_stock, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "X", "commission_type": "fixed",
+                "commission_value": 10, "charge_type": "propina",
+            }],
+        )
+        response = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        assert response.status_code == 422
+
+    def test_statement_shows_charge_label(
+        self, client, org_headers,
+        test_customer, test_material_with_stock, test_warehouse, test_commission_recipient,
+    ):
+        """El estado de cuenta del receptor muestra 'Bono venta...' (D5)."""
+        payload = self._sale_payload(
+            test_customer, test_material_with_stock, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Bono trimestre", "commission_type": "fixed",
+                "commission_value": 120, "charge_type": "bonus",
+            }],
+        )
+        response = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        assert response.status_code == 201
+
+        resp = client.get(
+            f"/api/v1/money-movements/third-party/{test_commission_recipient.id}",
+            params={"date_from": "2026-03-01"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        descriptions = [i["description"] for i in resp.json()["items"]]
+        assert any(d.startswith("Bono venta") for d in descriptions)
+
+    def test_charge_paid_via_commission_payment(
+        self, client, org_headers, db_session,
+        test_customer, test_material_with_stock, test_warehouse,
+        test_commission_recipient, test_money_account,
+    ):
+        """P4: el cargo se paga por el flujo de comisiones existente, sin cambio."""
+        payload = self._sale_payload(
+            test_customer, test_material_with_stock, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Flete", "commission_type": "fixed",
+                "commission_value": 250, "charge_type": "freight",
+            }],
+        )
+        response = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("-250.00")
+
+        resp = client.post(
+            "/api/v1/money-movements/commission-payment",
+            json={
+                "third_party_id": str(test_commission_recipient.id),
+                "amount": 250,
+                "account_id": str(test_money_account.id),
+                "date": "2026-03-25T12:00:00",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201
+        db_session.expire_all()
+        db_session.refresh(test_commission_recipient)
+        assert test_commission_recipient.current_balance == Decimal("0.00")
+
+    def test_default_charge_type_commission_compat(
+        self, client, org_headers,
+        test_customer, test_material_with_stock, test_warehouse, test_commission_recipient,
+    ):
+        """Request sin charge_type (DP y clientes viejos) → 'commission' con label clasico."""
+        payload = self._sale_payload(
+            test_customer, test_material_with_stock, test_warehouse,
+            [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Comisión clasica", "commission_type": "fixed",
+                "commission_value": 80,
+            }],
+        )
+        response = client.post("/api/v1/sales", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        assert response.json()["commissions"][0]["charge_type"] == "commission"

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { ArrowLeft, CreditCard, XCircle, Pencil, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -16,6 +17,7 @@ import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { WarningsList } from "@/components/shared/WarningsList";
 import { useSale, useCancelSale } from "@/hooks/useSales";
 import { formatCurrency, formatDate, formatDateTime, formatWeight, formatPercentage } from "@/utils/formatters";
+import { CHARGE_TYPE_LABELS } from "@/utils/constants";
 import { useAuthStore } from "@/stores/authStore";
 import { exportSalePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -220,15 +222,16 @@ export default function SaleDetailPage() {
       {/* Comisiones */}
       {canViewPrices && sale.commissions.length > 0 && (
         <Card className="shadow-sm">
-          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones y Cargos</CardTitle></CardHeader>
           <CardContent>
             <div className="rounded-lg border border-slate-200/80 overflow-x-auto">
-              <Table className="min-w-[560px]">
+              <Table className="min-w-[640px]">
                 <TableHeader>
                   <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Comisionista</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Receptor</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Cargo</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Concepto</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Tipo</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Cálculo</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Valor</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Monto</TableHead>
                   </TableRow>
@@ -236,7 +239,8 @@ export default function SaleDetailPage() {
                 <TableBody>
                   {sale.commissions.map((c) => (
                     <TableRow key={c.id}>
-                      <TableCell className="font-medium">{c.third_party_name}</TableCell>
+                      <TableCell className="font-medium"><ThirdPartyLink id={c.third_party_id}>{c.third_party_name}</ThirdPartyLink></TableCell>
+                      <TableCell><Badge variant="outline">{CHARGE_TYPE_LABELS[c.charge_type] ?? "Comisión"}</Badge></TableCell>
                       <TableCell>{c.concept}</TableCell>
                       <TableCell>{c.commission_type === "percentage" ? "Porcentaje" : c.commission_type === "per_kg" ? "Por Kilo" : "Fijo"}</TableCell>
                       <TableCell className="text-right tabular-nums">

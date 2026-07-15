@@ -293,7 +293,7 @@ export default function TreasuryPage() {
             <TabsTrigger value="expense_accrual">Causaciones</TabsTrigger>
             <TabsTrigger value="deferred_expense">Diferidos</TabsTrigger>
             <TabsTrigger value="depreciation_expense">Depreciación</TabsTrigger>
-            <TabsTrigger value="commission_accrual">Comisiones</TabsTrigger>
+            <TabsTrigger value="commission_accrual">Comisiones y Cargos</TabsTrigger>
             <TabsTrigger value="obligation_interest_accrual">Int. Obligaciones</TabsTrigger>
             <TabsTrigger value="loan_interest_accrual">Int. Préstamos</TabsTrigger>
             <TabsTrigger value="tp_adjustment">Aj. Terceros</TabsTrigger>

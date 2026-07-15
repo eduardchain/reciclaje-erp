@@ -437,6 +437,14 @@ class SaleCommission(Base, TimestampMixin):
         nullable=False,
         comment="percentage (of sale total) or fixed amount"
     )
+
+    charge_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="commission",
+        server_default="commission",
+        comment="Que ES el cargo: commission | freight | bonus (ortogonal a commission_type)",
+    )
     
     commission_value: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),

@@ -139,7 +139,7 @@ function PasaManoCard({
               <Line label="Margen Bruto" value={de.gross_profit} bold />
             </div>
             <div>
-              <Line label="Comisiones" value={de.commissions} negative />
+              <Line label="Comisiones y Cargos" value={de.commissions} negative />
               <ExpenseLine
                 label="Gastos Directos"
                 total={de.direct_expenses}

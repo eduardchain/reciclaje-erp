@@ -2,11 +2,14 @@ import type { BaseEntity, PaginatedResponse } from "./common";
 
 export type SaleStatus = "registered" | "liquidated" | "cancelled";
 
+export type SaleChargeType = "commission" | "freight" | "bonus";
+
 export interface SaleCommissionCreate {
   third_party_id: string;
   concept: string;
   commission_type: "percentage" | "fixed" | "per_kg";
   commission_value: number;
+  charge_type?: SaleChargeType; // default backend: commission (DP no lo envía)
 }
 
 export interface SaleCommissionResponse {
@@ -17,6 +20,7 @@ export interface SaleCommissionResponse {
   commission_type: "percentage" | "fixed" | "per_kg";
   commission_value: number;
   commission_amount: number;
+  charge_type: SaleChargeType;
   created_at: string;
   third_party_name: string;
 }

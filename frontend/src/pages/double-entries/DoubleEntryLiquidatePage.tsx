@@ -38,7 +38,7 @@ interface CommissionFormData extends SaleCommissionCreate {
 let commKeyCounter = 0;
 
 function createEmptyCommission(): CommissionFormData {
-  return { _key: ++commKeyCounter, third_party_id: "", concept: "", commission_type: "percentage", commission_value: 0 };
+  return { _key: ++commKeyCounter, third_party_id: "", concept: "", commission_type: "percentage", commission_value: 0, charge_type: "commission" };
 }
 
 export default function DoubleEntryLiquidatePage() {
@@ -86,6 +86,7 @@ export default function DoubleEntryLiquidatePage() {
             concept: c.concept,
             commission_type: c.commission_type,
             commission_value: c.commission_value,
+            charge_type: c.charge_type,
           })),
         );
       }
@@ -267,9 +268,9 @@ export default function DoubleEntryLiquidatePage() {
       {/* Comisiones */}
       <Card className="shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones</CardTitle>
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones y Cargos</CardTitle>
           <Button type="button" variant="outline" size="sm" onClick={addCommission}>
-            <Plus className="h-4 w-4 mr-1" /> Agregar
+            <Plus className="h-4 w-4 mr-1" /> Agregar Cargo
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -284,15 +285,26 @@ export default function DoubleEntryLiquidatePage() {
               onDelete={() => removeCommission(comm._key)}
             >
               <div className="md:col-span-3">
-                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Comisionista</Label>
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Receptor</Label>
                 <EntitySelect
                   value={comm.third_party_id}
                   onChange={(v) => updateCommission(comm._key, "third_party_id", v)}
                   options={payableProviders.map((tp) => ({ id: tp.id, label: tp.name }))}
-                  placeholder="Seleccionar..."
+                  placeholder="Receptor..."
                 />
               </div>
-              <div className="md:col-span-3">
+              <div className="md:col-span-2">
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cargo</Label>
+                <Select value={comm.charge_type ?? "commission"} onValueChange={(v) => updateCommission(comm._key, "charge_type", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="commission">Comisión</SelectItem>
+                    <SelectItem value="freight">Flete</SelectItem>
+                    <SelectItem value="bonus">Bono</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="md:col-span-2">
                 <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Concepto</Label>
                 <Input
                   value={comm.concept}
@@ -301,7 +313,7 @@ export default function DoubleEntryLiquidatePage() {
                 />
               </div>
               <div className="md:col-span-2">
-                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Tipo</Label>
+                <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cálculo</Label>
                 <Select value={comm.commission_type} onValueChange={(v) => updateCommission(comm._key, "commission_type", v)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -321,7 +333,7 @@ export default function DoubleEntryLiquidatePage() {
                   onChange={(e) => updateCommission(comm._key, "commission_value", parseFloat(e.target.value) || 0)}
                 />
               </div>
-              <div className="md:col-span-2 md:text-right flex md:block items-center justify-between">
+              <div className="md:col-span-1 md:text-right flex md:block items-center justify-between">
                 <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500 md:hidden", lineLabelClass(idx))}>Monto</Label>
                 <p className="md:h-10 md:flex md:items-center md:justify-end text-sm tabular-nums">{formatCurrency(commissionAmounts[idx] ?? 0)}</p>
               </div>

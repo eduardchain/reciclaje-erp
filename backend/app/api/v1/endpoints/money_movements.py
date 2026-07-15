@@ -846,7 +846,7 @@ def get_by_third_party(
     from sqlalchemy import select as sa_select
     from sqlalchemy.orm import joinedload
 
-    from app.models.purchase import Purchase, PurchaseCommission, PurchaseLine
+    from app.models.purchase import CHARGE_TYPE_LABELS, Purchase, PurchaseCommission, PurchaseLine
     from app.models.sale import Sale, SaleCommission, SaleLine
     from app.models.double_entry import DoubleEntry, DoubleEntryLine
 
@@ -987,11 +987,12 @@ def get_by_third_party(
         )
     )
     for comm, purch in db.execute(purch_comm_query).all():
+        _charge_label = CHARGE_TYPE_LABELS.get(comm.charge_type, "Comisión")
         _evt(purch.liquidated_at, purch.liquidated_at, 0,
              id=f"purch-commission-{comm.id}", date=purch.liquidated_at.isoformat(),
              document_date=purch.date.isoformat(),
              event_type="purchase_commission",
-             description=f"Comision Compra #{purch.purchase_number}: {comm.concept}",
+             description=f"{_charge_label} Compra #{purch.purchase_number}: {comm.concept}",
              amount=float(comm.commission_amount), direction=-1,
              status="confirmed" if purch.status == "liquidated" else "cancelled",
              reference_number=None, movement_number=None,

@@ -1387,7 +1387,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             if not tp_service.has_behavior_type(db, recipient.id, ["service_provider"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"El comisionista '{recipient.name}' debe ser proveedor de servicios",
+                    detail=f"El receptor del cargo '{recipient.name}' debe ser proveedor de servicios",
                 )
 
             # Calcular total_quantity para per_kg si no viene como parametro
@@ -1406,6 +1406,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 third_party_id=comm_data.third_party_id,
                 concept=comm_data.concept,
                 commission_type=comm_data.commission_type,
+                charge_type=comm_data.charge_type,
                 commission_value=comm_data.commission_value,
                 commission_amount=commission_amount,
             )

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { ArrowLeft, FileText, XCircle, Pencil, CheckCircle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,7 @@ import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { useDoubleEntry, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 import { exportDoubleEntryPDF } from "@/utils/pdfExport";
+import { CHARGE_TYPE_LABELS } from "@/utils/constants";
 import { useAuthStore } from "@/stores/authStore";
 import { usePermissions } from "@/hooks/usePermissions";
 
@@ -167,20 +169,21 @@ export default function DoubleEntryDetailPage() {
       {/* Comisiones */}
       {de.commissions.length > 0 && (
         <Card className="shadow-sm">
-          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisiones y Cargos</CardTitle></CardHeader>
           <CardContent>
             <div className="rounded-lg border border-slate-200/80 overflow-hidden">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Comisionista</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Receptor</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Cargo</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Concepto</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Monto</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {de.commissions.map((c) => (
-                    <TableRow key={c.id}><TableCell>{c.third_party_name}</TableCell><TableCell>{c.concept}</TableCell><TableCell className="text-right font-medium">{formatCurrency(c.commission_amount)}</TableCell></TableRow>
+                    <TableRow key={c.id}><TableCell><ThirdPartyLink id={c.third_party_id}>{c.third_party_name}</ThirdPartyLink></TableCell><TableCell><Badge variant="outline">{CHARGE_TYPE_LABELS[c.charge_type] ?? "Comisión"}</Badge></TableCell><TableCell>{c.concept}</TableCell><TableCell className="text-right font-medium">{formatCurrency(c.commission_amount)}</TableCell></TableRow>
                   ))}
                 </TableBody>
               </Table>
