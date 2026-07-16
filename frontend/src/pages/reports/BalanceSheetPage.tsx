@@ -49,6 +49,9 @@ export default function BalanceSheetPage() {
                 {data.assets.investor_receivable > 0 && (
                   <div className="flex justify-between"><span>CxC Inversionistas</span><span>{formatCurrency(data.assets.investor_receivable)}</span></div>
                 )}
+                {data.assets.loans_receivable > 0 && (
+                  <div className="flex justify-between"><span>Préstamos por Cobrar</span><span>{formatCurrency(data.assets.loans_receivable)}</span></div>
+                )}
                 {data.assets.provision_funds > 0 && (
                   <div className="flex justify-between"><span>Fondos en Provisiones</span><span>{formatCurrency(data.assets.provision_funds)}</span></div>
                 )}
@@ -68,6 +71,9 @@ export default function BalanceSheetPage() {
               <CardContent className="space-y-2 text-sm">
                 <div className="flex justify-between"><span>Cuentas por Pagar</span><span>{formatCurrency(data.liabilities.accounts_payable)}</span></div>
                 <div className="flex justify-between"><span>Deuda Inversionistas</span><span>{formatCurrency(data.liabilities.investor_debt)}</span></div>
+                {data.liabilities.obligations_payable > 0 && (
+                  <div className="flex justify-between"><span>Obligaciones Financieras</span><span>{formatCurrency(data.liabilities.obligations_payable)}</span></div>
+                )}
                 {data.liabilities.liability_debt > 0 && (
                   <div className="flex justify-between"><span>Pasivos</span><span>{formatCurrency(data.liabilities.liability_debt)}</span></div>
                 )}

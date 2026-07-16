@@ -57,7 +57,7 @@ def _get_role_info(db: Session, organization_id: UUID, user: User) -> dict | Non
 
 
 @router.get(
-    "/",
+    "",
     response_model=list[OrganizationResponse],
     summary="List user's organizations",
 )

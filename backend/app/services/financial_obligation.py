@@ -213,7 +213,7 @@ class FinancialObligationService:
 
         Mismo criterio de _classify_third_party (#31): nombre de categoria
         contiene "obligaci" — asi el saldo cae en investors_obligations /
-        investor_receivable en los balances.
+        loans_receivable en los balances.
         """
         tp = money_movement_service._validate_third_party(
             db, third_party_id, organization_id, require_behavior=["investor"]

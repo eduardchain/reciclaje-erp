@@ -246,6 +246,7 @@ class BalanceSheetAssets(BaseModel):
     inventory: float
     advances: float = 0.0
     investor_receivable: float = 0.0
+    loans_receivable: float = 0.0  # prestamos activos (obligaciones receivable, split de CxC Inversionistas)
     prepaid_expenses: float = 0.0
     provision_funds: float = 0.0
     fixed_assets: float = 0.0
@@ -255,6 +256,7 @@ class BalanceSheetAssets(BaseModel):
 class BalanceSheetLiabilities(BaseModel):
     accounts_payable: float
     investor_debt: float
+    obligations_payable: float = 0.0  # obligaciones financieras payable (split de Deuda Inversionistas, #73)
     liability_debt: float = 0.0
     service_provider_payable: float = 0.0
     customer_advances: float = 0.0

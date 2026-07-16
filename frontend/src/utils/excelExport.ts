@@ -134,7 +134,7 @@ export function exportAccountStatementExcel(data: AccountStatementExportData) {
 const ASSET_ORDER = [
   "cash_and_bank", "inventory_liquidated",
   "customers_receivable", "supplier_advances", "service_provider_advances",
-  "liability_advances", "investor_receivable",
+  "liability_advances", "investor_receivable", "loans_receivable",
   "provision_funds", "prepaid_expenses", "fixed_assets",
 ];
 
@@ -645,6 +645,7 @@ export function exportBalanceSheetExcel(data: BalanceSheetResponse) {
   rows.push(["Inventario", data.assets.inventory]);
   rows.push(["Anticipos", data.assets.advances]);
   if (data.assets.investor_receivable > 0) rows.push(["CxC Inversionistas", data.assets.investor_receivable]);
+  if (data.assets.loans_receivable > 0) rows.push(["Préstamos por Cobrar", data.assets.loans_receivable]);
   if (data.assets.prepaid_expenses > 0) rows.push(["Gastos Prepagados", data.assets.prepaid_expenses]);
   if (data.assets.provision_funds > 0) rows.push(["Fondos Provision", data.assets.provision_funds]);
   if (data.assets.fixed_assets > 0) rows.push(["Activos Fijos", data.assets.fixed_assets]);
@@ -653,6 +654,7 @@ export function exportBalanceSheetExcel(data: BalanceSheetResponse) {
   rows.push(["PASIVOS", ""]);
   rows.push(["Cuentas por Pagar", data.liabilities.accounts_payable]);
   rows.push(["Deuda Inversionistas", data.liabilities.investor_debt]);
+  if (data.liabilities.obligations_payable > 0) rows.push(["Obligaciones Financieras", data.liabilities.obligations_payable]);
   if (data.liabilities.liability_debt > 0) rows.push(["Pasivos", data.liabilities.liability_debt]);
   if (data.liabilities.customer_advances > 0) rows.push(["Anticipos Clientes", data.liabilities.customer_advances]);
   if (data.liabilities.provision_obligations > 0) rows.push(["Obligaciones Provision", data.liabilities.provision_obligations]);

@@ -936,7 +936,7 @@ class TestIntegrations:
         assert cf["outflows"]["obligation_capital_payments"] == 2_000_000
 
     def test_balance_detailed_sections_no_regression(self, client, org_headers, db_session, test_organization):
-        """payable → investors_obligations (pasivo); receivable → investor_receivable (activo)."""
+        """payable → investors_obligations (pasivo); receivable → loans_receivable (activo, split)."""
         org_id = test_organization.id
         tp_pay = _obligation_tp(db_session, org_id, "Int Bal Pay")
         tp_loan = _obligation_tp(db_session, org_id, "Int Bal Loan")
@@ -954,8 +954,102 @@ class TestIntegrations:
         data = resp.json()
         pay_items = data["liabilities"]["investors_obligations"]["items"]
         assert any(i["id"] == str(tp_pay.id) for i in pay_items)
-        loan_items = data["assets"]["investor_receivable"]["items"]
+        # Split: el prestamo va a linea propia, NO a CxC Inversionistas
+        loan_items = data["assets"]["loans_receivable"]["items"]
         assert any(i["id"] == str(tp_loan.id) for i in loan_items)
+        inv_items = data["assets"].get("investor_receivable", {}).get("items", [])
+        assert not any(i["id"] == str(tp_loan.id) for i in inv_items)
+
+    def test_loans_split_invariant_total_assets(self, client, org_headers, db_session, test_organization):
+        """Split loans_receivable + obligations_payable: lineas propias sin alterar totales.
+
+        Invariante QA: total == suma de TODOS los componentes del response —
+        si el split perdiera o duplicara una obligacion, revienta. Los socios
+        (investor sin categoria de obligaciones) se quedan en CxC Inversionistas
+        / Deuda Inversionistas segun signo.
+        """
+        org_id = test_organization.id
+        tp_loan = _obligation_tp(db_session, org_id, "Split Loan TP")
+        tp_pay = _obligation_tp(db_session, org_id, "Split Pay TP")
+        # Socios: investor SIN categoria "obligaci..." (categoria propia por nombre —
+        # el lookup generico por behavior_type reusaria la de Obligaciones)
+        socio_cat = ThirdPartyCategory(
+            organization_id=org_id, name="Socios", behavior_type="investor"
+        )
+        db_session.add(socio_cat)
+        db_session.flush()
+        socio = ThirdParty(
+            name="Split Socio TP", organization_id=org_id,
+            current_balance=D("5000000"), initial_balance=D("5000000"),
+        )
+        socio_deuda = ThirdParty(
+            name="Split Socio Deuda TP", organization_id=org_id,
+            current_balance=D("-3000000"), initial_balance=D("-3000000"),
+        )
+        db_session.add_all([socio, socio_deuda])
+        db_session.flush()
+        db_session.add_all([
+            ThirdPartyCategoryAssignment(third_party_id=socio.id, category_id=socio_cat.id),
+            ThirdPartyCategoryAssignment(third_party_id=socio_deuda.id, category_id=socio_cat.id),
+        ])
+        db_session.commit()
+        acc = _account(db_session, org_id, "Caja Split", balance=100_000_000)
+        _create_obligation(
+            client, org_headers, tp_loan.id, direction="receivable",
+            account_id=acc.id, amount=12_000_000, date=_date_in(0, 1),
+        )
+        _create_obligation(
+            client, org_headers, tp_pay.id, direction="payable",
+            account_id=acc.id, amount=20_000_000, date=_date_in(0, 1),
+        )
+
+        resp = client.get("/api/v1/reports/balance-sheet", headers=org_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assets = data["assets"]
+        assert assets["loans_receivable"] == 12_000_000.0
+        assert assets["investor_receivable"] == 5_000_000.0
+        # Invariante activo: el total es la suma exacta de sus componentes
+        components = (
+            assets["cash_and_bank"] + assets["accounts_receivable"] + assets["inventory"]
+            + assets["advances"] + assets["investor_receivable"] + assets["loans_receivable"]
+            + assets["prepaid_expenses"] + assets["provision_funds"] + assets["fixed_assets"]
+        )
+        assert abs(assets["total"] - components) < 0.01
+
+        # Lado pasivo (split espejo): obligacion payable en linea propia,
+        # socio con deuda sigue en Deuda Inversionistas
+        liab = data["liabilities"]
+        assert liab["obligations_payable"] == 20_000_000.0
+        assert liab["investor_debt"] == 3_000_000.0
+        liab_components = (
+            liab["accounts_payable"] + liab["investor_debt"] + liab["obligations_payable"]
+            + liab["liability_debt"] + liab["service_provider_payable"]
+            + liab["customer_advances"] + liab["provision_obligations"] + liab["generic_payable"]
+        )
+        assert abs(liab["total"] - liab_components) < 0.01
+
+        # As-of hoy (path historico _classify_tp_by_balance): mismo split ambos lados
+        from datetime import date as date_cls
+        resp = client.get(
+            "/api/v1/reports/balance-sheet",
+            params={"as_of_date": date_cls.today().isoformat()},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        asof = resp.json()
+        assert asof["assets"]["loans_receivable"] == 12_000_000.0
+        assert asof["liabilities"]["obligations_payable"] == 20_000_000.0
+
+        # Panel #68: el prestamo sigue apareciendo (seccion nueva mapeada a investor)
+        resp = client.get(
+            "/api/v1/reports/inactive-balances",
+            params={"min_days": 0},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+        names = [i["third_party_name"] for i in resp.json()["items"]]
+        assert "Split Loan TP" in names
 
     def test_balance_as_of_snapshot(self, client, org_headers, db_session, test_organization):
         """as_of ANTES del abono muestra el saldo pre-abono (mapas de signos as-of)."""

@@ -926,6 +926,7 @@ export function exportBalanceSheetPDF(data: BalanceSheetResponse, orgName?: stri
     ["Inventario", data.assets.inventory],
     ["Anticipos", data.assets.advances],
     ["CxC Inversionistas", data.assets.investor_receivable],
+    ["Préstamos por Cobrar", data.assets.loans_receivable],
     ["Gastos Prepagados", data.assets.prepaid_expenses],
     ["Fondos de Provisión", data.assets.provision_funds],
     ["Activos Fijos", data.assets.fixed_assets],
@@ -960,6 +961,7 @@ export function exportBalanceSheetPDF(data: BalanceSheetResponse, orgName?: stri
   const liabilityItems: [string, number][] = [
     ["Cuentas por Pagar", data.liabilities.accounts_payable],
     ["Deuda Inversionistas", data.liabilities.investor_debt],
+    ["Obligaciones Financieras", data.liabilities.obligations_payable],
     ["Pasivos", data.liabilities.liability_debt],
     ["Proveedores Servicios", data.liabilities.service_provider_payable],
     ["Anticipos de Clientes", data.liabilities.customer_advances],
@@ -1028,7 +1030,7 @@ export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?
   const ASSET_ORDER = [
     "cash_and_bank", "inventory_liquidated",
     "customers_receivable", "supplier_advances", "service_provider_advances",
-    "liability_advances", "investor_receivable",
+    "liability_advances", "investor_receivable", "loans_receivable",
     "provision_funds", "prepaid_expenses", "generic_receivable", "fixed_assets",
   ];
 
