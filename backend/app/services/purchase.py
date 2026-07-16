@@ -1141,12 +1141,15 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             query = query.filter(Purchase.date < date_to)
 
         if search:
-            # Search in: purchase_number (as text), supplier name, notes
+            # Search in: purchase_number (as text), supplier name, notes,
+            # vehicle_plate, invoice_number — paridad con el search de ventas
             query = query.join(Purchase.supplier).filter(
                 or_(
                     cast(Purchase.purchase_number, String).ilike(f"%{search}%"),
                     ThirdParty.name.ilike(f"%{search}%"),
-                    Purchase.notes.ilike(f"%{search}%")
+                    Purchase.notes.ilike(f"%{search}%"),
+                    Purchase.vehicle_plate.ilike(f"%{search}%"),
+                    Purchase.invoice_number.ilike(f"%{search}%")
                 )
             )
 

@@ -25,8 +25,9 @@ import { LinkedPaymentChoice, type AnnulChoice } from "@/components/shared/Linke
 import { OperationListCard } from "@/components/shared/OperationListCard";
 import { usePurchases, usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
 import { purchaseService } from "@/services/purchases";
-import { toast } from "sonner";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
+import { formatLinesTotalQuantity } from "@/utils/operationLines";
+import { fetchAllPages } from "@/utils/fetchAllPages";
 import { ROUTES } from "@/utils/constants";
 import type { PurchaseResponse } from "@/types/purchase";
 import type { MetricCard } from "@/types/reports";
@@ -168,6 +169,17 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
       cell: ({ row }) => <ThirdPartyLink id={row.original.supplier_id}>{row.original.supplier_name}</ThirdPartyLink>,
     },
     {
+      id: "vehicle_plate",
+      header: "PLACA",
+      meta: { hideOnMobile: true },
+      cell: ({ row }) =>
+        row.original.vehicle_plate ? (
+          <span className="text-xs uppercase whitespace-nowrap">{row.original.vehicle_plate}</span>
+        ) : (
+          <span className="text-slate-300">—</span>
+        ),
+    },
+    {
       id: "items",
       header: "DETALLE",
       meta: { hideOnMobile: true },
@@ -179,6 +191,16 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
             </div>
           ))}
         </div>
+      ),
+    },
+    {
+      id: "total_quantity",
+      header: "CANT. TOTAL",
+      meta: { hideOnMobile: true },
+      cell: ({ row }) => (
+        <span className="text-xs font-medium tabular-nums whitespace-nowrap text-slate-700">
+          {formatLinesTotalQuantity(row.original.lines)}
+        </span>
       ),
     },
     ...(canViewPrices ? [{
@@ -279,20 +301,19 @@ export default function PurchasesPage() {
 
   const currentUrl = location.pathname + location.search;
 
-  const handleExportAll = async () => {
-    const all = await purchaseService.getAll({
-      skip: 0,
-      limit: 1000,
-      status: status === "all" ? undefined : status,
-      search: search || undefined,
-      date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
-    });
-    if (all.total > all.items.length) {
-      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
-    }
-    return all.items;
-  };
+  // Export completo: pagina en lotes de 1000 (cap del backend por request)
+  // hasta cubrir el total filtrado — sin el tope efectivo de 1000 filas.
+  const handleExportAll = () =>
+    fetchAllPages((skip, limit) =>
+      purchaseService.getAll({
+        skip,
+        limit,
+        status: status === "all" ? undefined : status,
+        search: search || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+      }),
+    );
 
   return (
     <div className="space-y-4">
@@ -378,13 +399,15 @@ export default function PurchasesPage() {
             statusBadge={<StatusBadge status={p.status} />}
             cancelled={p.status === "cancelled"}
             actions={<ActionsCell purchase={p} />}
+            plate={p.vehicle_plate}
+            totalQuantity={p.lines.length > 0 ? formatLinesTotalQuantity(p.lines) : undefined}
             description={p.lines.length > 0 ? p.lines.map((l) => `${l.material_code} ${formatWeight(l.quantity, l.material_unit)}`).join(" · ") : undefined}
             extras={p.double_entry_id ? <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium">Pasa Mano</span> : undefined}
           />
         )}
         toolbar={
           <ResponsiveFilterBar>
-            <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar compra..." />
+            <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar por #, proveedor, placa o factura..." />
             <DateRangePicker
               dateFrom={dateFrom}
               dateTo={dateTo}

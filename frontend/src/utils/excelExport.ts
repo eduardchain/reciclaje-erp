@@ -22,6 +22,7 @@ import type { PurchaseResponse } from "@/types/purchase";
 import type { SaleResponse } from "@/types/sale";
 import type { DoubleEntryResponse } from "@/types/double-entry";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
+import { totalLinesQuantity } from "@/utils/operationLines";
 import { applyCurrencyFormat } from "@/utils/excelHelpers";
 
 const docDateOf = (m: { date: string; document_date?: string | null }): string | null =>
@@ -912,8 +913,10 @@ export function exportPurchasesDetailExcel(
   const wb = XLSX.utils.book_new();
 
   // --- Hoja Resumen (1 fila por compra) ---
+  // "Cantidad Total" es numerica sumable (sin sufijo de unidad); la unidad
+  // por linea vive en la hoja Detalle (decision #54).
   const resumenHeader = [
-    "#", "Factura", "Fecha", "Proveedor", "Detalle",
+    "#", "Factura", "Fecha", "Proveedor", "Placa", "Detalle", "Cantidad Total",
     ...(canViewPrices ? ["Total"] : []),
     "Pasa Mano", "Estado",
   ];
@@ -922,18 +925,21 @@ export function exportPurchasesDetailExcel(
     p.invoice_number || "",
     formatDate(p.date),
     p.supplier_name,
+    p.vehicle_plate || "—",
     materialsText(p.lines),
+    totalLinesQuantity(p.lines),
     ...(canViewPrices ? [num(p.total_amount)] : []),
     p.double_entry_id ? "Sí" : "No",
     opStatus(p.status),
   ]);
   const wsResumen = XLSX.utils.aoa_to_sheet([resumenHeader, ...resumenRows]);
   wsResumen["!cols"] = [
-    { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 40 },
+    { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 10 }, { wch: 40 }, { wch: 14 },
     ...(canViewPrices ? [{ wch: 16 }] : []),
     { wch: 10 }, { wch: 12 },
   ];
-  if (canViewPrices) applyCurrencyFormat(wsResumen, [5]);
+  applyNumberFormat(wsResumen, [6], WEIGHT_FMT);
+  if (canViewPrices) applyCurrencyFormat(wsResumen, [7]);
   XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen");
 
   // --- Hoja Detalle (1 fila por material) ---
@@ -980,8 +986,10 @@ export function exportSalesDetailExcel(
   const wb = XLSX.utils.book_new();
 
   // --- Hoja Resumen (1 fila por venta) ---
+  // "Cantidad Total" suma `quantity` original (NO received_quantity, decision
+  // #18), numerica sumable sin sufijo de unidad (decision #54).
   const resumenHeader = [
-    "#", "Factura", "Fecha", "Cliente", "Detalle",
+    "#", "Factura", "Fecha", "Cliente", "Placa", "Detalle", "Cantidad Total",
     ...(canViewPrices ? ["Total"] : []),
     ...(canViewProfit ? ["COGS", "Utilidad Bruta"] : []),
     "Pasa Mano", "Estado",
@@ -994,7 +1002,9 @@ export function exportSalesDetailExcel(
       s.invoice_number || "",
       formatDate(s.date),
       s.customer_name,
+      s.vehicle_plate || "—",
       materialsText(s.lines),
+      totalLinesQuantity(s.lines),
       ...(canViewPrices ? [total] : []),
       ...(canViewProfit ? [total - profit, profit] : []),
       s.double_entry_id ? "Sí" : "No",
@@ -1002,16 +1012,17 @@ export function exportSalesDetailExcel(
     ];
   });
   const wsResumen = XLSX.utils.aoa_to_sheet([resumenHeader, ...resumenRows]);
-  const baseCols = [{ wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 40 }];
+  const baseCols = [{ wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 10 }, { wch: 40 }, { wch: 14 }];
   wsResumen["!cols"] = [
     ...baseCols,
     ...(canViewPrices ? [{ wch: 16 }] : []),
     ...(canViewProfit ? [{ wch: 16 }, { wch: 16 }] : []),
     { wch: 10 }, { wch: 12 },
   ];
+  applyNumberFormat(wsResumen, [6], WEIGHT_FMT);
   {
     const currencyCols: number[] = [];
-    let idx = 5;
+    let idx = 7;
     if (canViewPrices) currencyCols.push(idx++);
     if (canViewProfit) { currencyCols.push(idx++, idx++); }
     if (currencyCols.length) applyCurrencyFormat(wsResumen, currencyCols);
