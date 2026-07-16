@@ -44,6 +44,13 @@ const INFLOW_TYPES = new Set<MoneyMovementType>([
 
 const PAGE_SIZE = 20;
 
+// Labels del badge de rubro del P&L (drill-down P&L por rubros)
+const PNL_SECTION_BADGE_LABELS: Record<string, string> = {
+  operativo: "Operativo",
+  financiero: "Financieros",
+  depreciacion: "Depreciación",
+};
+
 const typeLabels: Record<MoneyMovementType, string> = {
   payment_to_supplier: "Pago Proveedor",
   collection_from_client: "Cobro Cliente",
@@ -155,6 +162,8 @@ export default function TreasuryPage() {
   const statusFromUrl = searchParams.get("status") || undefined;
   const adjustmentClassFromUrl = searchParams.get("adjustment_class") as "gain" | "loss" | null;
   const commissionSourceFromUrl = searchParams.get("commission_source") as "sale" | "double_entry" | null;
+  // Rubro del P&L (drill-down P&L por rubros)
+  const pnlSectionFromUrl = searchParams.get("pnl_section") as "operativo" | "financiero" | "depreciacion" | null;
   const sortField = searchParams.get("sort") || "";
   const sortDesc = searchParams.get("dir") !== "asc";
   const sorting: SortingState = sortField ? [{ id: sortField, desc: sortDesc }] : [];
@@ -207,6 +216,7 @@ export default function TreasuryPage() {
     status: statusFromUrl,
     adjustment_class: adjustmentClassFromUrl || undefined,
     commission_source: commissionSourceFromUrl || undefined,
+    pnl_section: pnlSectionFromUrl || undefined,
     sort_by: sortField || undefined,
     sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
   });
@@ -238,6 +248,7 @@ export default function TreasuryPage() {
       status: statusFromUrl,
       adjustment_class: adjustmentClassFromUrl || undefined,
       commission_source: commissionSourceFromUrl || undefined,
+      pnl_section: pnlSectionFromUrl || undefined,
     });
     if (all.total > all.items.length) {
       toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
@@ -279,7 +290,7 @@ export default function TreasuryPage() {
         </div>
       )}
 
-      <Tabs value={typeFilter} onValueChange={(v) => setParam({ tab: v, page: null, search: null, status: null, adjustment_class: null, commission_source: null })}>
+      <Tabs value={typeFilter} onValueChange={(v) => setParam({ tab: v, page: null, search: null, status: null, adjustment_class: null, commission_source: null, pnl_section: null })}>
         <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
           <TabsList className="inline-flex w-max sm:flex sm:w-auto sm:flex-wrap sm:h-auto">
             <TabsTrigger value="all">Todos</TabsTrigger>
@@ -302,7 +313,7 @@ export default function TreasuryPage() {
       </Tabs>
 
       {/* Filtros activos del drill-down de P&L */}
-      {(statusFromUrl || adjustmentClassFromUrl || commissionSourceFromUrl || hasUrlDateOverride) && (
+      {(statusFromUrl || adjustmentClassFromUrl || commissionSourceFromUrl || pnlSectionFromUrl || hasUrlDateOverride) && (
         <div className="flex items-center gap-2 flex-wrap">
           {hasUrlDateOverride && (
             <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-1 rounded border border-indigo-200">
@@ -338,6 +349,12 @@ export default function TreasuryPage() {
             <span className="inline-flex items-center gap-1 bg-violet-50 text-violet-700 text-xs px-2 py-1 rounded border border-violet-200">
               Origen: Pasa Mano
               <button onClick={() => setParam({ commission_source: null })} className="hover:bg-violet-100 rounded px-1">×</button>
+            </span>
+          )}
+          {pnlSectionFromUrl && (
+            <span className="inline-flex items-center gap-1 bg-sky-50 text-sky-700 text-xs px-2 py-1 rounded border border-sky-200">
+              Sección: {PNL_SECTION_BADGE_LABELS[pnlSectionFromUrl] ?? pnlSectionFromUrl}
+              <button onClick={() => setParam({ pnl_section: null })} className="hover:bg-sky-100 rounded px-1">×</button>
             </span>
           )}
         </div>

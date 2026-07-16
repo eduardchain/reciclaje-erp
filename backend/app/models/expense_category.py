@@ -91,6 +91,18 @@ class ExpenseCategory(Base, TimestampMixin, OrganizationMixin):
         ),
     )
 
+    pnl_section: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="operativo",
+        server_default="operativo",
+        comment=(
+            "Seccion del P&L por rubros: operativo | financiero. Solo categorias "
+            "raiz; hijas heredan en lectura. Depreciacion NO es configurable "
+            "(la asigna el source_type depreciation_expense)."
+        ),
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False,
     )

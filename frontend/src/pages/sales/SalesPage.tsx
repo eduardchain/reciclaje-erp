@@ -25,8 +25,9 @@ import { LinkedPaymentChoice, type AnnulChoice } from "@/components/shared/Linke
 import { OperationListCard } from "@/components/shared/OperationListCard";
 import { useSales, useSale, useCancelSale } from "@/hooks/useSales";
 import { saleService } from "@/services/sales";
-import { toast } from "sonner";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
+import { formatLinesTotalQuantity } from "@/utils/operationLines";
+import { fetchAllPages } from "@/utils/fetchAllPages";
 import { ROUTES } from "@/utils/constants";
 import type { SaleResponse } from "@/types/sale";
 import type { MetricCard } from "@/types/reports";
@@ -168,17 +169,43 @@ function getColumns(canViewPrices: boolean, canViewProfit: boolean, showCogs: bo
       cell: ({ row }) => <ThirdPartyLink id={row.original.customer_id}>{row.original.customer_name}</ThirdPartyLink>,
     },
     {
+      id: "vehicle_plate",
+      header: "PLACA",
+      meta: { hideOnMobile: true },
+      cell: ({ row }) =>
+        row.original.vehicle_plate ? (
+          <span className="text-xs uppercase whitespace-nowrap">{row.original.vehicle_plate}</span>
+        ) : (
+          <span className="text-slate-300">—</span>
+        ),
+    },
+    {
       id: "items",
       header: "DETALLE",
       meta: { hideOnMobile: true },
       cell: ({ row }) => (
         <div className="space-y-0.5">
-          {row.original.lines.map((line) => (
-            <div key={line.id} className="text-xs text-slate-600">
+          {row.original.lines.slice(0, 3).map((line) => (
+            <div key={line.id} className="text-xs text-slate-600 whitespace-nowrap">
               {line.material_code} - {formatWeight(line.quantity, line.material_unit)}{canViewPrices ? ` x ${formatCurrency(line.unit_price)}` : ""}
             </div>
           ))}
+          {row.original.lines.length > 3 && (
+            <div className="text-xs text-slate-400 whitespace-nowrap">
+              +{row.original.lines.length - 3} materiales más
+            </div>
+          )}
         </div>
+      ),
+    },
+    {
+      id: "total_quantity",
+      header: "CANT. TOTAL",
+      meta: { hideOnMobile: true },
+      cell: ({ row }) => (
+        <span className="text-xs font-medium tabular-nums whitespace-nowrap text-slate-700">
+          {formatLinesTotalQuantity(row.original.lines)}
+        </span>
       ),
     },
     ...(canViewPrices ? [
@@ -359,22 +386,21 @@ export default function SalesPage() {
 
   const currentUrl = location.pathname + location.search;
 
-  const handleExportAll = async () => {
-    const all = await saleService.getAll({
-      skip: 0,
-      limit: 1000,
-      status: status === "all" ? undefined : status,
-      search: search || undefined,
-      date_from: effectiveDateFrom || undefined,
-      date_to: effectiveDateTo || undefined,
-      dp_filter: dpFilter === "all" ? undefined : dpFilter,
-      date_field: dateField === "date" ? undefined : dateField,
-    });
-    if (all.total > all.items.length) {
-      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
-    }
-    return all.items;
-  };
+  // Export completo: pagina en lotes de 1000 (cap del backend por request)
+  // hasta cubrir el total filtrado — sin el tope efectivo de 1000 filas.
+  const handleExportAll = () =>
+    fetchAllPages((skip, limit) =>
+      saleService.getAll({
+        skip,
+        limit,
+        status: status === "all" ? undefined : status,
+        search: search || undefined,
+        date_from: effectiveDateFrom || undefined,
+        date_to: effectiveDateTo || undefined,
+        dp_filter: dpFilter === "all" ? undefined : dpFilter,
+        date_field: dateField === "date" ? undefined : dateField,
+      }),
+    );
 
   return (
     <div className="space-y-4">
@@ -522,6 +548,8 @@ export default function SalesPage() {
             statusBadge={<StatusBadge status={s.status} />}
             cancelled={s.status === "cancelled"}
             actions={<ActionsCell sale={s} />}
+            plate={s.vehicle_plate}
+            totalQuantity={s.lines.length > 0 ? formatLinesTotalQuantity(s.lines) : undefined}
             description={s.lines.length > 0 ? s.lines.map((l) => `${l.material_code} ${formatWeight(l.quantity, l.material_unit)}`).join(" · ") : undefined}
             extras={
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -540,7 +568,7 @@ export default function SalesPage() {
         )}
         toolbar={
           <ResponsiveFilterBar>
-            <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar venta..." />
+            <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar por #, cliente, placa o factura..." />
             <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
           </ResponsiveFilterBar>
         }

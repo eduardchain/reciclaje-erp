@@ -14,6 +14,10 @@ interface OperationListCardProps {
   actions?: ReactNode;
   cancelled?: boolean;
   invoiceNumber?: string | null;
+  /** Placa del vehiculo — se muestra en la linea meta solo si viene (opcional, los DP no la pasan). */
+  plate?: string | null;
+  /** Cantidad total ya formateada (ej. "1.500 kg") — se muestra en la linea meta solo si viene. */
+  totalQuantity?: string | null;
 }
 
 export function OperationListCard({
@@ -28,6 +32,8 @@ export function OperationListCard({
   actions,
   cancelled = false,
   invoiceNumber,
+  plate,
+  totalQuantity,
 }: OperationListCardProps) {
   return (
     <div
@@ -65,7 +71,7 @@ export function OperationListCard({
         </div>
       </div>
 
-      {/* Linea 2: meta (fecha · description · invoice) */}
+      {/* Linea 2: meta (fecha · placa · cant. total · description · invoice) */}
       <div
         className={cn(
           "mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500 leading-tight",
@@ -73,6 +79,18 @@ export function OperationListCard({
         )}
       >
         <span className="shrink-0">{formatDate(date)}</span>
+        {plate && (
+          <>
+            <span className="text-slate-300 shrink-0">·</span>
+            <span className="shrink-0 uppercase">{plate}</span>
+          </>
+        )}
+        {totalQuantity && (
+          <>
+            <span className="text-slate-300 shrink-0">·</span>
+            <span className="shrink-0 font-medium text-slate-600 tabular-nums">Cant: {totalQuantity}</span>
+          </>
+        )}
         {description && (
           <>
             <span className="text-slate-300 shrink-0">·</span>

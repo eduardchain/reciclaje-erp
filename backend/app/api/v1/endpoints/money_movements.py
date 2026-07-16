@@ -651,6 +651,7 @@ def list_money_movements(
     search: Optional[str] = Query(None, description="Buscar en descripcion o referencia"),
     adjustment_class: Optional[str] = Query(None, pattern="^(gain|loss)$", description="Filtra tp_adjustment por clase P&L: gain o loss"),
     commission_source: Optional[str] = Query(None, pattern="^(sale|double_entry)$", description="Filtra commission_accrual por origen: sale (venta regular) o double_entry (Pasa Mano)"),
+    pnl_section: Optional[str] = Query(None, pattern="^(operativo|financiero|depreciacion)$", description="Filtra gastos por seccion del P&L por rubros (restringe implicitamente a tipos de gasto)"),
     sort_by: Optional[str] = Query(None, description="Columna a ordenar (allowlist en service, fallback silencioso a 'date')"),
     sort_dir: str = Query("desc", regex="^(asc|desc)$", description="Direccion: asc | desc"),
     org_context: dict = Depends(require_permission("treasury.view_movements")),
@@ -682,6 +683,7 @@ def list_money_movements(
         created_by_filter=created_by_filter,
         adjustment_class=adjustment_class,
         commission_source=commission_source,
+        pnl_section=pnl_section,
         sort_by=sort_by,
         sort_dir=sort_dir,
     )

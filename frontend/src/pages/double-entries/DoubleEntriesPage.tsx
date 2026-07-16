@@ -23,7 +23,6 @@ import { KpiCard } from "@/components/shared/KpiCard";
 import { OperationListCard } from "@/components/shared/OperationListCard";
 import { useDoubleEntries, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
 import { doubleEntryService } from "@/services/doubleEntries";
-import { toast } from "sonner";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatPercentage } from "@/utils/formatters";
 import { exportDoubleEntryPDF } from "@/utils/pdfExport";
@@ -33,6 +32,7 @@ import type { DoubleEntryResponse } from "@/types/double-entry";
 import type { MetricCard } from "@/types/reports";
 import { usePermissions } from "@/hooks/usePermissions";
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { fetchAllPages } from "@/utils/fetchAllPages";
 
 const PAGE_SIZE = 20;
 
@@ -228,21 +228,20 @@ export default function DoubleEntriesPage() {
 
   const currentUrl = location.pathname + location.search;
 
-  const handleExportAll = async () => {
-    const all = await doubleEntryService.getAll({
-      skip: 0,
-      limit: 1000,
-      status: status === "all" ? undefined : status,
-      search: search || undefined,
-      date_from: effectiveDateFrom || undefined,
-      date_to: effectiveDateTo || undefined,
-      date_field: dateField === "date" ? undefined : dateField,
-    });
-    if (all.total > all.items.length) {
-      toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
-    }
-    return all.items;
-  };
+  // Export completo: pagina en lotes de 1000 (cap del backend por request)
+  // hasta cubrir el total filtrado — sin el tope efectivo de 1000 filas.
+  const handleExportAll = () =>
+    fetchAllPages((skip, limit) =>
+      doubleEntryService.getAll({
+        skip,
+        limit,
+        status: status === "all" ? undefined : status,
+        search: search || undefined,
+        date_from: effectiveDateFrom || undefined,
+        date_to: effectiveDateTo || undefined,
+        date_field: dateField === "date" ? undefined : dateField,
+      }),
+    );
 
   return (
     <div className="space-y-4">

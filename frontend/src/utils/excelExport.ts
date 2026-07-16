@@ -22,6 +22,7 @@ import type { PurchaseResponse } from "@/types/purchase";
 import type { SaleResponse } from "@/types/sale";
 import type { DoubleEntryResponse } from "@/types/double-entry";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
+import { totalLinesQuantity } from "@/utils/operationLines";
 import { applyCurrencyFormat } from "@/utils/excelHelpers";
 
 const docDateOf = (m: { date: string; document_date?: string | null }): string | null =>
@@ -453,7 +454,6 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   rows.push(["Costo de Ventas (COGS)", data.cost_of_goods_sold]);
   rows.push(["Utilidad Bruta Ventas", data.gross_profit_sales]);
   rows.push(["Ingresos por Servicios", data.service_income]);
-  if ((data.interest_income ?? 0) !== 0) rows.push(["Ingresos Financieros (Intereses)", data.interest_income]);
   rows.push(["Utilidad Pasa Mano", data.double_entry_profit]);
   if (data.transformation_profit !== 0) rows.push(["Gan/Perd Transformaciones", data.transformation_profit]);
   if (data.waste_loss > 0) rows.push(["Perdida por Merma", -data.waste_loss]);
@@ -461,13 +461,18 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   if (data.oversell_cost_adjustment !== 0) rows.push(["Ajuste Costo por Sobreventa y Reversiones", data.oversell_cost_adjustment]);
   if (data.tp_adjustment_gain > 0) rows.push(["+ Ganancia Ajuste Terceros", data.tp_adjustment_gain]);
   if (data.tp_adjustment_loss > 0) rows.push(["- Perdida Ajuste Terceros", -data.tp_adjustment_loss]);
-  rows.push(["Utilidad Bruta Total", data.total_gross_profit]);
+  // GAP-1 QA: subtotal bruto SIN intereses — la cascada suma leyendo de arriba abajo
+  rows.push(["Utilidad Bruta Total", data.gross_profit_before_financial]);
   rows.push([]);
-  rows.push(["Gastos Operativos", data.operating_expenses]);
-  for (const cat of data.expenses_by_category) {
-    rows.push([`  ${cat.category_name}`, cat.total_amount]);
-  }
-  rows.push(["Comisiones y Cargos Pagados", data.commissions_paid]);
+  rows.push(["Comisiones y Cargos (Ventas)", data.commissions_paid_sales]);
+  rows.push(["Comisiones y Cargos (Pasa Mano)", data.commissions_paid_dp]);
+  // Rubros de gasto: una linea por rubro, SIN desglose por fuente ni categoria
+  // (el detalle por categoria vive en el Reporte de Gastos). Paridad pantalla/Excel (#51).
+  rows.push(["Gastos Operativos", data.expenses_operating]);
+  if (data.expenses_depreciation !== 0) rows.push(["Depreciación de Activos", data.expenses_depreciation]);
+  rows.push(["Utilidad Operacional", data.operating_result]);
+  if ((data.interest_income ?? 0) !== 0) rows.push(["Ingresos Financieros (Intereses)", data.interest_income]);
+  if (data.expenses_financial !== 0) rows.push(["Gastos Financieros", data.expenses_financial]);
   rows.push([]);
   rows.push(["Utilidad Neta", data.net_profit]);
   rows.push(["Margen Neto", `${data.net_margin.toFixed(1)}%`]);
@@ -512,9 +517,6 @@ export function exportPnlMonthlyExcel(
   pushRow("Costo de Ventas (COGS)", (p) => p.cost_of_goods_sold, { prefix: "-" });
   pushRow("Utilidad Bruta Ventas", (p) => p.gross_profit_sales, { bold: true });
   pushRow("Ingresos por Servicios", (p) => p.service_income);
-  if (data.periods.some((p) => Math.abs(p.interest_income ?? 0) > 0.01) || Math.abs(data.totals.interest_income ?? 0) > 0.01) {
-    pushRow("Ingresos Financieros (Intereses)", (p) => p.interest_income ?? 0);
-  }
   pushRow("Utilidad Pasa Mano", (p) => p.double_entry_profit);
 
   if (data.periods.some((p) => Math.abs(p.transformation_profit) > 0.01) || Math.abs(data.totals.transformation_profit) > 0.01) {
@@ -536,39 +538,31 @@ export function exportPnlMonthlyExcel(
     pushRow("- Perdida Ajuste Terceros", (p) => p.tp_adjustment_loss, { prefix: "-" });
   }
 
-  pushRow("Utilidad Bruta Total", (p) => p.total_gross_profit, { bold: true });
+  // GAP-1 QA: subtotal bruto SIN intereses (mismo campo que el tab Periodo)
+  pushRow("Utilidad Bruta Total", (p) => p.gross_profit_before_financial, { bold: true });
 
-  // Gastos por source_type
-  const sumExpensesBySource = (period: { expenses_by_category?: { source_type: string; total_amount: number }[] }) => {
-    const out: Record<string, number> = {};
-    for (const c of period.expenses_by_category || []) {
-      out[c.source_type] = (out[c.source_type] || 0) + c.total_amount;
-    }
-    return out;
-  };
-  const sourceLabels: Record<string, string> = {
-    expense: "Gastos Directos",
-    provision_expense: "Gastos desde Provisiones",
-    expense_accrual: "Gastos Causados (Pasivos)",
-    deferred_expense: "Gastos Diferidos",
-    depreciation_expense: "Depreciación de Activos",
-  };
-  const order = ["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense"];
-  const bySourceByPeriod = data.periods.map(sumExpensesBySource);
-  const bySourceTotal = sumExpensesBySource(data.totals);
-  for (const s of order) {
-    const anyPositive = bySourceByPeriod.some((m) => (m[s] || 0) > 0) || (bySourceTotal[s] || 0) > 0;
-    if (!anyPositive) continue;
-    const cells: (string | number)[] = [`  ${sourceLabels[s]}`];
-    for (let i = 0; i < data.periods.length; i++) cells.push(-(bySourceByPeriod[i][s] || 0));
-    cells.push(-(bySourceTotal[s] || 0));
-    rows.push(cells);
+  // Comisiones — linea propia entre bruta y gastos (D2)
+  pushRow("Comisiones y Cargos (Ventas)", (p) => p.commissions_paid_sales, { prefix: "-" });
+  pushRow("Comisiones y Cargos (Pasa Mano)", (p) => p.commissions_paid_dp, { prefix: "-" });
+
+  // Rubros de gasto: una linea por rubro, SIN desglose por fuente ni categoria
+  // (el detalle por categoria vive en el Reporte de Gastos). Paridad pantalla/Excel (#51).
+  pushRow("Gastos Operativos", (p) => p.expenses_operating, { prefix: "-" });
+  if (data.periods.some((p) => p.expenses_depreciation !== 0) || data.totals.expenses_depreciation !== 0) {
+    pushRow("Depreciación de Activos", (p) => p.expenses_depreciation, { prefix: "-" });
   }
 
-  pushRow("Total Gastos Operacionales", (p) => p.operating_expenses, { prefix: "-", bold: true });
-  pushRow("Comisiones y Cargos (Ventas)", (p) => p.commissions_paid_sales, { prefix: "-", indent: true });
-  pushRow("Comisiones y Cargos (Pasa Mano)", (p) => p.commissions_paid_dp, { prefix: "-", indent: true });
-  pushRow("Total Comisiones", (p) => p.commissions_paid, { prefix: "-", bold: true });
+  pushRow("Utilidad Operacional", (p) => p.operating_result, { bold: true });
+
+  // Ingresos Financieros — unica aparicion, despues de Utilidad Operacional (GAP-1)
+  if (data.periods.some((p) => Math.abs(p.interest_income ?? 0) > 0.01) || Math.abs(data.totals.interest_income ?? 0) > 0.01) {
+    pushRow("Ingresos Financieros (Intereses)", (p) => p.interest_income ?? 0);
+  }
+
+  if (data.periods.some((p) => p.expenses_financial !== 0) || data.totals.expenses_financial !== 0) {
+    pushRow("Gastos Financieros", (p) => p.expenses_financial, { prefix: "-" });
+  }
+
   pushRow("Utilidad Neta", (p) => p.net_profit, { bold: true });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -919,8 +913,10 @@ export function exportPurchasesDetailExcel(
   const wb = XLSX.utils.book_new();
 
   // --- Hoja Resumen (1 fila por compra) ---
+  // "Cantidad Total" es numerica sumable (sin sufijo de unidad); la unidad
+  // por linea vive en la hoja Detalle (decision #54).
   const resumenHeader = [
-    "#", "Factura", "Fecha", "Proveedor", "Detalle",
+    "#", "Factura", "Fecha", "Proveedor", "Placa", "Detalle", "Cantidad Total",
     ...(canViewPrices ? ["Total"] : []),
     "Pasa Mano", "Estado",
   ];
@@ -929,18 +925,21 @@ export function exportPurchasesDetailExcel(
     p.invoice_number || "",
     formatDate(p.date),
     p.supplier_name,
+    p.vehicle_plate || "—",
     materialsText(p.lines),
+    totalLinesQuantity(p.lines),
     ...(canViewPrices ? [num(p.total_amount)] : []),
     p.double_entry_id ? "Sí" : "No",
     opStatus(p.status),
   ]);
   const wsResumen = XLSX.utils.aoa_to_sheet([resumenHeader, ...resumenRows]);
   wsResumen["!cols"] = [
-    { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 40 },
+    { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 10 }, { wch: 40 }, { wch: 14 },
     ...(canViewPrices ? [{ wch: 16 }] : []),
     { wch: 10 }, { wch: 12 },
   ];
-  if (canViewPrices) applyCurrencyFormat(wsResumen, [5]);
+  applyNumberFormat(wsResumen, [6], WEIGHT_FMT);
+  if (canViewPrices) applyCurrencyFormat(wsResumen, [7]);
   XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen");
 
   // --- Hoja Detalle (1 fila por material) ---
@@ -987,8 +986,10 @@ export function exportSalesDetailExcel(
   const wb = XLSX.utils.book_new();
 
   // --- Hoja Resumen (1 fila por venta) ---
+  // "Cantidad Total" suma `quantity` original (NO received_quantity, decision
+  // #18), numerica sumable sin sufijo de unidad (decision #54).
   const resumenHeader = [
-    "#", "Factura", "Fecha", "Cliente", "Detalle",
+    "#", "Factura", "Fecha", "Cliente", "Placa", "Detalle", "Cantidad Total",
     ...(canViewPrices ? ["Total"] : []),
     ...(canViewProfit ? ["COGS", "Utilidad Bruta"] : []),
     "Pasa Mano", "Estado",
@@ -1001,7 +1002,9 @@ export function exportSalesDetailExcel(
       s.invoice_number || "",
       formatDate(s.date),
       s.customer_name,
+      s.vehicle_plate || "—",
       materialsText(s.lines),
+      totalLinesQuantity(s.lines),
       ...(canViewPrices ? [total] : []),
       ...(canViewProfit ? [total - profit, profit] : []),
       s.double_entry_id ? "Sí" : "No",
@@ -1009,16 +1012,17 @@ export function exportSalesDetailExcel(
     ];
   });
   const wsResumen = XLSX.utils.aoa_to_sheet([resumenHeader, ...resumenRows]);
-  const baseCols = [{ wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 40 }];
+  const baseCols = [{ wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 10 }, { wch: 40 }, { wch: 14 }];
   wsResumen["!cols"] = [
     ...baseCols,
     ...(canViewPrices ? [{ wch: 16 }] : []),
     ...(canViewProfit ? [{ wch: 16 }, { wch: 16 }] : []),
     { wch: 10 }, { wch: 12 },
   ];
+  applyNumberFormat(wsResumen, [6], WEIGHT_FMT);
   {
     const currencyCols: number[] = [];
-    let idx = 5;
+    let idx = 7;
     if (canViewPrices) currencyCols.push(idx++);
     if (canViewProfit) { currencyCols.push(idx++, idx++); }
     if (currencyCols.length) applyCurrencyFormat(wsResumen, currencyCols);

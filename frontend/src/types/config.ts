@@ -36,6 +36,8 @@ export interface ExpenseCategoryResponse extends BaseEntity {
   default_business_unit_name: string | null;
   // % de gastos GENERALES atribuido a la UN Pasa Mano (solo raiz indirecta; hijas heredan)
   double_entry_general_pct: number | string;
+  // Rubro del P&L (solo raiz; hijas heredan en lectura; backend rechaza "financiero" en hija)
+  pnl_section: "operativo" | "financiero";
 }
 
 export interface ExpenseCategoryCreate {
@@ -46,6 +48,7 @@ export interface ExpenseCategoryCreate {
   default_business_unit_id?: string | null;
   default_applicable_business_unit_ids?: string[] | null;
   double_entry_general_pct?: number;
+  pnl_section?: "operativo" | "financiero";
 }
 
 export interface ExpenseCategoryUpdate {
@@ -56,6 +59,7 @@ export interface ExpenseCategoryUpdate {
   default_business_unit_id?: string | null;
   default_applicable_business_unit_ids?: string[] | null;
   double_entry_general_pct?: number;
+  pnl_section?: "operativo" | "financiero";
 }
 
 export interface ExpenseCategoryFlat {

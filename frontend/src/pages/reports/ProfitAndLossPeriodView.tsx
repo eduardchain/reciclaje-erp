@@ -10,6 +10,7 @@ import { FileSpreadsheet, ChevronRight } from "lucide-react";
 import { useProfitAndLoss } from "@/hooks/useReports";
 import { formatCurrency } from "@/utils/formatters";
 import { exportPnlExcel } from "@/utils/excelExport";
+import { PNL_EXPENSE_DRILL_URLS } from "@/utils/pnlSections";
 
 interface DrillRowProps {
   to: string;
@@ -79,14 +80,6 @@ export default function ProfitAndLossPeriodView() {
                 value={formatCurrency(data.service_income)}
                 valueClass="text-emerald-700"
               />
-              {(data.interest_income ?? 0) !== 0 && (
-                <DrillRow
-                  to="/treasury?tab=loan_interest_accrual&status=confirmed"
-                  label="Ingresos Financieros (Intereses)"
-                  value={formatCurrency(data.interest_income)}
-                  valueClass="text-emerald-700"
-                />
-              )}
               <DrillRow
                 to="/double-entries?tab=liquidated&date_field=liquidated_at"
                 label={`Utilidad Pasa Mano (${data.double_entry_count} operaciones)`}
@@ -142,63 +135,70 @@ export default function ProfitAndLossPeriodView() {
                 />
               )}
               <Separator />
-              <div className="flex justify-between font-medium"><span>Utilidad Bruta Total</span><span className={data.total_gross_profit >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.total_gross_profit)}</span></div>
+              {/* GAP-1 QA: subtotal bruto SIN intereses — cada subtotal impreso
+                  suma exactamente las filas visibles que lo preceden. */}
+              <div className="flex justify-between font-medium"><span>Utilidad Bruta Total</span><span className={data.gross_profit_before_financial >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.gross_profit_before_financial)}</span></div>
             </div>
 
+            {/* Deducciones: comisiones (linea propia, D2) + una linea por rubro
+                de gasto — sin desglose por fuente (causado o pagado da igual);
+                el detalle por categoria vive en el Reporte de Gastos. */}
             <div className="space-y-2">
-              {(() => {
-                const bySource: Record<string, number> = {};
-                data.expenses_by_category.forEach((c) => {
-                  bySource[c.source_type] = (bySource[c.source_type] || 0) + c.total_amount;
-                });
-                const labels: Record<string, string> = {
-                  expense: "Gastos Directos",
-                  provision_expense: "Gastos desde Provisiones",
-                  expense_accrual: "Gastos Causados (Pasivos)",
-                  deferred_expense: "Gastos Diferidos",
-                  depreciation_expense: "Depreciación de Activos",
-                  obligation_interest_accrual: "Gastos Financieros (Intereses)",
-                };
-                const urls: Record<string, string> = {
-                  expense: "/treasury?tab=expense&status=confirmed",
-                  provision_expense: "/treasury?tab=provision_expense&status=confirmed",
-                  expense_accrual: "/treasury?tab=expense_accrual&status=confirmed",
-                  deferred_expense: "/treasury?tab=deferred_expense&status=confirmed",
-                  depreciation_expense: "/treasury?tab=depreciation_expense&status=confirmed",
-                  obligation_interest_accrual: "/treasury?tab=obligation_interest_accrual&status=confirmed",
-                };
-                const order = ["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "obligation_interest_accrual"];
-                const sources = order.filter((s) => bySource[s] > 0);
-                if (sources.length >= 1) {
-                  return sources.map((s) => (
-                    <DrillRow
-                      key={s}
-                      to={urls[s]}
-                      label={labels[s]}
-                      value={`-${formatCurrency(bySource[s])}`}
-                      valueClass="text-red-600"
-                      indent
-                    />
-                  ));
-                }
-                return null;
-              })()}
-              <div className="flex justify-between text-sm font-medium"><span>Total Gastos Operacionales</span><span className="font-medium text-red-600">-{formatCurrency(data.operating_expenses)}</span></div>
               <DrillRow
                 to="/treasury?tab=commission_accrual&status=confirmed&commission_source=sale"
                 label="Comisiones y Cargos (Ventas)"
                 value={`-${formatCurrency(data.commissions_paid_sales)}`}
                 valueClass="text-red-600"
-                indent
               />
               <DrillRow
                 to="/treasury?tab=commission_accrual&status=confirmed&commission_source=double_entry"
                 label="Comisiones y Cargos (Pasa Mano)"
                 value={`-${formatCurrency(data.commissions_paid_dp)}`}
                 valueClass="text-red-600"
-                indent
               />
-              <div className="flex justify-between text-sm font-medium"><span>Total Comisiones</span><span className="font-medium text-red-600">-{formatCurrency(data.commissions_paid)}</span></div>
+              <DrillRow
+                to={PNL_EXPENSE_DRILL_URLS.operativo}
+                label="Gastos Operativos"
+                value={`-${formatCurrency(data.expenses_operating)}`}
+                valueClass="text-red-600"
+              />
+              {data.expenses_depreciation !== 0 && (
+                <DrillRow
+                  to={PNL_EXPENSE_DRILL_URLS.depreciacion}
+                  label="Depreciación de Activos"
+                  value={`-${formatCurrency(data.expenses_depreciation)}`}
+                  valueClass="text-red-600"
+                />
+              )}
+              <Separator />
+              {/* UTILIDAD OPERACIONAL (D4) */}
+              <div className="flex justify-between font-medium"><span>Utilidad Operacional</span><span className={data.operating_result >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.operating_result)}</span></div>
+            </div>
+
+            {/* Ingresos Financieros (unica aparicion, GAP-1) + Gastos Financieros */}
+            {((data.interest_income ?? 0) !== 0 || data.expenses_financial !== 0) && (
+              <div className="space-y-2">
+                {(data.interest_income ?? 0) !== 0 && (
+                  <DrillRow
+                    to="/treasury?tab=loan_interest_accrual&status=confirmed"
+                    label="Ingresos Financieros (Intereses)"
+                    value={formatCurrency(data.interest_income)}
+                    valueClass="text-emerald-700"
+                  />
+                )}
+                {data.expenses_financial !== 0 && (
+                  <DrillRow
+                    to={PNL_EXPENSE_DRILL_URLS.financiero}
+                    label="Gastos Financieros"
+                    value={`-${formatCurrency(data.expenses_financial)}`}
+                    valueClass="text-red-600"
+                  />
+                )}
+              </div>
+            )}
+
+            {/* UTILIDAD NETA (valor intacto) */}
+            <div className="space-y-2">
               <Separator />
               <div className="flex justify-between text-lg font-bold"><span>Utilidad Neta</span><span className={data.net_profit >= 0 ? "text-emerald-700" : "text-red-700"}>{formatCurrency(data.net_profit)} ({data.net_margin.toFixed(1)}%)</span></div>
             </div>

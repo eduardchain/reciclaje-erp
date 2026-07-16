@@ -575,12 +575,41 @@ class TestListPurchases:
             params={"search": "Test Supplier"},
             headers=org_headers,
         )
-        
+
         # Assert
         assert response.status_code == 200
         data = response.json()
         assert data["total"] >= 1
-    
+
+    def test_list_purchases_search_by_plate_and_invoice(
+        self,
+        client,
+        org_headers,
+        test_purchase,
+    ):
+        """Search de compras cubre vehicle_plate e invoice_number (paridad con ventas)."""
+        resp = client.patch(
+            f"/api/v1/purchases/{test_purchase.id}",
+            json={"vehicle_plate": "WXY-987", "invoice_number": "FV-55021"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200
+
+        for term in ("WXY-987", "wxy", "FV-55021"):
+            response = client.get(
+                "/api/v1/purchases", params={"search": term}, headers=org_headers,
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total"] == 1, f"search '{term}' no encontro la compra"
+            assert data["items"][0]["vehicle_plate"] == "WXY-987"
+
+        # Un termino que no matchea nada sigue vacio
+        response = client.get(
+            "/api/v1/purchases", params={"search": "ZZZ-000"}, headers=org_headers,
+        )
+        assert response.json()["total"] == 0
+
     def test_list_purchases_pagination(
         self,
         client,
