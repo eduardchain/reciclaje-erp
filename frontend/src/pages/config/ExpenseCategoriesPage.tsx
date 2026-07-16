@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataTable } from "@/components/shared/DataTable";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { BusinessUnitAllocationSelector } from "@/components/shared/BusinessUnitAllocationSelector";
@@ -17,7 +18,15 @@ import type { ExpenseCategoryResponse } from "@/types/config";
 
 function getColumns(buNames: Record<string, string>): ColumnDef<ExpenseCategoryResponse, unknown>[] {
   return [
-    { accessorKey: "name", header: "Nombre", cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
+    { accessorKey: "name", header: "Nombre", cell: ({ row }) => (
+      <span className="font-medium flex items-center gap-1.5 flex-wrap">
+        {row.original.name}
+        {/* Solo en raices: hijas heredan la seccion del padre en lectura */}
+        {!row.original.parent_id && row.original.pnl_section === "financiero" && (
+          <Badge variant="outline" className="bg-sky-50 text-sky-700">Financiero</Badge>
+        )}
+      </span>
+    ) },
     { accessorKey: "parent_name", header: "Categoria Padre", cell: ({ row }) => row.original.parent_name ?? "-" },
     { accessorKey: "description", header: "Descripcion", cell: ({ row }) => row.original.description ?? "-" },
     { accessorKey: "is_direct_expense", header: "Asignacion UN", cell: ({ row }) => {
@@ -65,6 +74,7 @@ export default function ExpenseCategoriesPage() {
   const [isDirect, setIsDirect] = useState(false);
   const [parentId, setParentId] = useState("");
   const [dpPct, setDpPct] = useState("");
+  const [pnlSection, setPnlSection] = useState<"operativo" | "financiero">("operativo");
   const [buAllocationType, setBuAllocationType] = useState<"direct" | "shared" | "general">("general");
   const [buDirectId, setBuDirectId] = useState("");
   const [buSharedIds, setBuSharedIds] = useState<string[]>([]);
@@ -86,6 +96,7 @@ export default function ExpenseCategoriesPage() {
     setParentId(item?.parent_id ?? "");
     const pct = Number(item?.double_entry_general_pct ?? 0);
     setDpPct(pct > 0 ? String(pct) : "");
+    setPnlSection(item?.pnl_section === "financiero" ? "financiero" : "operativo");
     // Cargar default BU
     if (item?.default_business_unit_id) {
       setBuAllocationType("direct");
@@ -119,6 +130,9 @@ export default function ExpenseCategoriesPage() {
     // (evita 422 al cambiar a directa una categoria que tenia %)
     payload.double_entry_general_pct =
       !parentId && !isDirect ? Number(dpPct) || 0 : 0;
+    // Seccion P&L: solo raiz. En hijas se manda "operativo" explicito
+    // (backend rechaza 422 si llega "financiero" en una subcategoria)
+    payload.pnl_section = !parentId ? pnlSection : "operativo";
     const opts = { onSuccess: () => setDialogOpen(false) };
     if (editItem) { update.mutate({ id: editItem.id, data: payload }, opts); }
     else { create.mutate(payload as never, opts); }
@@ -156,8 +170,24 @@ export default function ExpenseCategoriesPage() {
                 <Switch checked={isDirect} onCheckedChange={setIsDirect} />
               </div>
             )}
+            {!parentId && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Sección en el P&L</Label>
+                <Select value={pnlSection} onValueChange={(v) => setPnlSection(v as "operativo" | "financiero")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="operativo">Operativo</SelectItem>
+                    <SelectItem value="financiero">Financiero</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-slate-400 mt-1">
+                  Financiero: los gastos de esta categoria aparecen bajo "Gastos Financieros"
+                  en el Estado de Resultados (después de la Utilidad Operacional).
+                </p>
+              </div>
+            )}
             {parentId && (
-              <p className="text-xs text-slate-400">El tipo de gasto (directo/indirecto) y el % Pasa Mano se heredan de la categoria padre.</p>
+              <p className="text-xs text-slate-400">El tipo de gasto (directo/indirecto), el % Pasa Mano y la sección del P&L se heredan de la categoria padre.</p>
             )}
             {!parentId && !isDirect && (
               <div>

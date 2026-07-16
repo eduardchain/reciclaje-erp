@@ -20,7 +20,7 @@ from typing import Optional, List, Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, func, text, or_, cast, String
+from sqlalchemy import select, func, text, or_, and_, false, cast, String
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.money_movement import MoneyMovement, VALID_MOVEMENT_TYPES
@@ -1243,6 +1243,7 @@ class CRUDMoneyMovement:
         created_by_filter: Optional[UUID] = None,
         adjustment_class: Optional[str] = None,
         commission_source: Optional[str] = None,
+        pnl_section: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_dir: str = "desc",
     ) -> tuple[List[MoneyMovement], int, Decimal]:
@@ -1254,6 +1255,12 @@ class CRUDMoneyMovement:
           - "sale": comisiones de ventas regulares (Sale.double_entry_id IS NULL o sale_id NULL)
           - "double_entry": comisiones de DPs (Sale.double_entry_id IS NOT NULL)
           Replica el split del P&L "Comisiones Pagadas".
+        pnl_section: "operativo" | "financiero" | "depreciacion" — filtra con el MISMO
+          clasificador del P&L por rubros (drill-down #49: paridad por construccion).
+          Restriccion implicita a EXPENSE_MOVEMENT_TYPES (N1 QA): el param significa
+          "seccion de gasto del P&L"; sin ella un transfer sin categoria matchearia
+          'operativo'. Precedencia fuente-gana: depreciation_expense siempre
+          depreciacion, obligation_interest_accrual siempre financiero.
 
         Returns:
             Tuple of (movements, total_count, total_amount_sum).
@@ -1300,6 +1307,48 @@ class CRUDMoneyMovement:
                         MoneyMovement.sale_id.in_(non_dp_sale_ids),
                     )
                 )
+        if pnl_section:
+            # Clasificador del P&L por rubros (plan pnl-por-rubros). Import lazy
+            # para no acoplar el modulo en frio (reports no importa este service).
+            from app.services.reports import report_service
+
+            query = query.where(
+                MoneyMovement.movement_type.in_(report_service.EXPENSE_MOVEMENT_TYPES)
+            )
+            section_map = report_service._get_pnl_section_by_category(db, organization_id)
+            fin_cat_ids = [
+                UUID(cid) for cid, sec in section_map.items() if sec == "financiero"
+            ]
+            if pnl_section == "depreciacion":
+                query = query.where(MoneyMovement.movement_type == "depreciation_expense")
+            elif pnl_section == "financiero":
+                by_category = (
+                    and_(
+                        MoneyMovement.movement_type != "depreciation_expense",
+                        MoneyMovement.expense_category_id.in_(fin_cat_ids),
+                    )
+                    if fin_cat_ids
+                    else false()
+                )
+                query = query.where(
+                    or_(
+                        MoneyMovement.movement_type == "obligation_interest_accrual",
+                        by_category,
+                    )
+                )
+            else:  # operativo
+                query = query.where(
+                    MoneyMovement.movement_type.notin_(
+                        ["depreciation_expense", "obligation_interest_accrual"]
+                    )
+                )
+                if fin_cat_ids:
+                    query = query.where(
+                        or_(
+                            MoneyMovement.expense_category_id.is_(None),
+                            MoneyMovement.expense_category_id.notin_(fin_cat_ids),
+                        )
+                    )
         if account_id:
             query = query.where(MoneyMovement.account_id == account_id)
         if third_party_id:

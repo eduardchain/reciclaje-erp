@@ -16,39 +16,11 @@ import type {
   ProfitAndLossMonthlyPeriod,
   ProfitAndLossResponse,
 } from "@/types/reports";
-
-const EXPENSE_SOURCE_LABELS: Record<string, string> = {
-  expense: "Gastos Directos",
-  provision_expense: "Gastos desde Provisiones",
-  expense_accrual: "Gastos Causados (Pasivos)",
-  deferred_expense: "Gastos Diferidos",
-  depreciation_expense: "Depreciación de Activos",
-  obligation_interest_accrual: "Gastos Financieros (Intereses)",
-};
-
-const EXPENSE_SOURCE_ORDER = ["expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "obligation_interest_accrual"];
-
-const EXPENSE_SOURCE_URL_TAB: Record<string, string> = {
-  expense: "expense",
-  provision_expense: "provision_expense",
-  expense_accrual: "expense_accrual",
-  deferred_expense: "deferred_expense",
-  depreciation_expense: "depreciation_expense",
-  obligation_interest_accrual: "obligation_interest_accrual",
-};
+import { PNL_EXPENSE_DRILL_URLS } from "@/utils/pnlSections";
 
 interface PnlPeriodLike {
   period_from: string;
   period_to: string;
-  expenses_by_category: ProfitAndLossResponse["expenses_by_category"];
-}
-
-function sumExpensesBySource(p: PnlPeriodLike): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const c of p.expenses_by_category) {
-    out[c.source_type] = (out[c.source_type] || 0) + c.total_amount;
-  }
-  return out;
 }
 
 interface CellLinkProps {
@@ -166,13 +138,6 @@ export default function ProfitAndLossMonthlyView() {
       cellClass: () => "text-emerald-700",
     },
     {
-      label: "Ingresos Financieros (Intereses)",
-      drillUrl: (p) => withDateRange("/treasury?tab=loan_interest_accrual&status=confirmed", p.period_from, p.period_to),
-      value: (p) => p.interest_income ?? 0,
-      cellClass: () => "text-emerald-700",
-      visible: (d) => d.periods.some((p) => Math.abs(p.interest_income ?? 0) > 0.01) || Math.abs(d.totals.interest_income ?? 0) > 0.01,
-    },
-    {
       label: "Utilidad Pasa Mano",
       countLabel: "operaciones",
       countSelector: (p) => "double_entry_count" in p ? p.double_entry_count : 0,
@@ -227,8 +192,9 @@ export default function ProfitAndLossMonthlyView() {
       visible: (d) => d.periods.some((p) => p.tp_adjustment_loss > 0) || d.totals.tp_adjustment_loss > 0,
     },
     {
+      // GAP-1 QA: subtotal bruto SIN intereses (mismo campo que el tab Periodo)
       label: "Utilidad Bruta Total",
-      value: (p) => p.total_gross_profit,
+      value: (p) => p.gross_profit_before_financial,
       bold: true,
       separatorAbove: true,
       cellClass: (v) => v >= 0 ? "text-emerald-700" : "text-red-700",
@@ -337,64 +303,17 @@ export default function ProfitAndLossMonthlyView() {
                             const v = row.value(data.totals);
                             const text = row.prefix === "-" ? `-${formatCurrency(Math.abs(v))}` : formatCurrency(v);
                             if (row.subtotal || !row.drillUrl) return text;
-                            return <CellLink to={row.drillUrl({ period_from: data.range_from, period_to: data.range_to, expenses_by_category: data.totals.expenses_by_category })} valueClass={row.cellClass ? row.cellClass(v) : ""}>{text}</CellLink>;
+                            return <CellLink to={row.drillUrl({ period_from: data.range_from, period_to: data.range_to })} valueClass={row.cellClass ? row.cellClass(v) : ""}>{text}</CellLink>;
                           })()}
                         </td>
                       </tr>
                     );
                   })}
 
-                  {/* Gastos operacionales agregados por source_type */}
-                  {(() => {
-                    const bySourceByPeriod = data.periods.map(sumExpensesBySource);
-                    const bySourceTotal = sumExpensesBySource(data.totals);
-                    const sourcesPresent = EXPENSE_SOURCE_ORDER.filter((s) =>
-                      bySourceByPeriod.some((m) => (m[s] || 0) > 0) || (bySourceTotal[s] || 0) > 0,
-                    );
-                    return sourcesPresent.map((s) => (
-                      <tr key={`exp-${s}`} className="hover:bg-slate-50">
-                        <td className="sticky left-0 bg-white z-10 py-1.5 px-3 pl-7 text-slate-600">
-                          {EXPENSE_SOURCE_LABELS[s]}
-                        </td>
-                        {data.periods.map((p, pIdx) => {
-                          const v = bySourceByPeriod[pIdx][s] || 0;
-                          const drill = withDateRange(`/treasury?tab=${EXPENSE_SOURCE_URL_TAB[s]}&status=confirmed`, p.period_from, p.period_to);
-                          return (
-                            <td key={pIdx} className="text-right py-1.5 px-3 tabular-nums text-red-600">
-                              {v > 0 ? (
-                                <CellLink to={drill} valueClass="text-red-600">{`-${formatCurrency(v)}`}</CellLink>
-                              ) : "-"}
-                            </td>
-                          );
-                        })}
-                        <td className="text-right py-1.5 px-3 tabular-nums border-l text-red-600">
-                          {(() => {
-                            const v = bySourceTotal[s] || 0;
-                            const drill = withDateRange(`/treasury?tab=${EXPENSE_SOURCE_URL_TAB[s]}&status=confirmed`, data.range_from, data.range_to);
-                            return v > 0 ? (
-                              <CellLink to={drill} valueClass="text-red-600">{`-${formatCurrency(v)}`}</CellLink>
-                            ) : "-";
-                          })()}
-                        </td>
-                      </tr>
-                    ));
-                  })()}
-
-                  <tr className="border-t">
-                    <td className="sticky left-0 bg-white z-10 py-1.5 px-3 font-semibold">Total Gastos Operacionales</td>
-                    {data.periods.map((p, i) => (
-                      <td key={i} className="text-right py-1.5 px-3 tabular-nums font-semibold text-red-600">
-                        -{formatCurrency(p.operating_expenses)}
-                      </td>
-                    ))}
-                    <td className="text-right py-1.5 px-3 tabular-nums font-semibold text-red-600 border-l">
-                      -{formatCurrency(data.totals.operating_expenses)}
-                    </td>
-                  </tr>
-
+                  {/* Comisiones — linea propia entre bruta y gastos (D2) */}
                   {/* Comisiones y Cargos (Ventas) */}
                   <tr className="hover:bg-slate-50">
-                    <td className="sticky left-0 bg-white z-10 py-1.5 px-3 pl-7 text-slate-600">Comisiones y Cargos (Ventas)</td>
+                    <td className="sticky left-0 bg-white z-10 py-1.5 px-3">Comisiones y Cargos (Ventas)</td>
                     {data.periods.map((p, i) => (
                       <td key={i} className="text-right py-1.5 px-3 tabular-nums text-red-600">
                         {p.commissions_paid_sales > 0 ? (
@@ -415,7 +334,7 @@ export default function ProfitAndLossMonthlyView() {
 
                   {/* Comisiones y Cargos (Pasa Mano) */}
                   <tr className="hover:bg-slate-50">
-                    <td className="sticky left-0 bg-white z-10 py-1.5 px-3 pl-7 text-slate-600">Comisiones y Cargos (Pasa Mano)</td>
+                    <td className="sticky left-0 bg-white z-10 py-1.5 px-3">Comisiones y Cargos (Pasa Mano)</td>
                     {data.periods.map((p, i) => (
                       <td key={i} className="text-right py-1.5 px-3 tabular-nums text-red-600">
                         {p.commissions_paid_dp > 0 ? (
@@ -434,18 +353,95 @@ export default function ProfitAndLossMonthlyView() {
                     </td>
                   </tr>
 
-                  {/* Total Comisiones */}
-                  <tr>
-                    <td className="sticky left-0 bg-white z-10 py-1.5 px-3 font-semibold">Total Comisiones</td>
-                    {data.periods.map((p, i) => (
-                      <td key={i} className="text-right py-1.5 px-3 tabular-nums font-semibold text-red-600">
-                        -{formatCurrency(p.commissions_paid)}
-                      </td>
-                    ))}
-                    <td className="text-right py-1.5 px-3 tabular-nums font-semibold text-red-600 border-l">
-                      -{formatCurrency(data.totals.commissions_paid)}
-                    </td>
-                  </tr>
+                  {/* Rubros de gasto — una linea por rubro, SIN desglose por fuente
+                      (causado o pagado da igual). Escalera final del P&L por rubros. */}
+                  {(() => {
+                    type PeriodOrTotals = ProfitAndLossMonthlyPeriod | ProfitAndLossResponse;
+                    const anyNonZero = (selector: (p: PeriodOrTotals) => number) =>
+                      data.periods.some((p) => selector(p) !== 0) || selector(data.totals) !== 0;
+                    const interestVisible = data.periods.some((p) => Math.abs(p.interest_income ?? 0) > 0.01) || Math.abs(data.totals.interest_income ?? 0) > 0.01;
+
+                    const rubroRow = (
+                      key: string,
+                      label: string,
+                      selector: (p: PeriodOrTotals) => number,
+                      drillBase: string,
+                    ) => (
+                      <tr key={key} className="hover:bg-slate-50">
+                        <td className="sticky left-0 bg-white z-10 py-1.5 px-3">{label}</td>
+                        {data.periods.map((p, i) => {
+                          const v = selector(p);
+                          return (
+                            <td key={i} className="text-right py-1.5 px-3 tabular-nums text-red-600">
+                              {v > 0 ? (
+                                <CellLink to={withDateRange(drillBase, p.period_from, p.period_to)} valueClass="text-red-600">
+                                  -{formatCurrency(v)}
+                                </CellLink>
+                              ) : "-"}
+                            </td>
+                          );
+                        })}
+                        <td className="text-right py-1.5 px-3 tabular-nums border-l text-red-600">
+                          {selector(data.totals) > 0 ? (
+                            <CellLink to={withDateRange(drillBase, data.range_from, data.range_to)} valueClass="text-red-600">
+                              -{formatCurrency(selector(data.totals))}
+                            </CellLink>
+                          ) : "-"}
+                        </td>
+                      </tr>
+                    );
+
+                    return (
+                      <>
+                        {/* Gastos Operativos (siempre visible) */}
+                        {rubroRow("exp-operativo", "Gastos Operativos", (p) => p.expenses_operating, PNL_EXPENSE_DRILL_URLS.operativo)}
+
+                        {/* Depreciacion de Activos */}
+                        {anyNonZero((p) => p.expenses_depreciation) &&
+                          rubroRow("exp-depreciacion", "Depreciación de Activos", (p) => p.expenses_depreciation, PNL_EXPENSE_DRILL_URLS.depreciacion)}
+
+                        {/* UTILIDAD OPERACIONAL (D4) */}
+                        <tr className="border-t">
+                          <td className="sticky left-0 bg-white z-10 py-1.5 px-3 font-semibold">Utilidad Operacional</td>
+                          {data.periods.map((p, i) => (
+                            <td key={i} className={`text-right py-1.5 px-3 tabular-nums font-semibold ${p.operating_result >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                              {formatCurrency(p.operating_result)}
+                            </td>
+                          ))}
+                          <td className={`text-right py-1.5 px-3 tabular-nums font-semibold border-l ${data.totals.operating_result >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                            {formatCurrency(data.totals.operating_result)}
+                          </td>
+                        </tr>
+
+                        {/* Ingresos Financieros — unica aparicion (GAP-1) */}
+                        {interestVisible && (
+                          <tr className="hover:bg-slate-50">
+                            <td className="sticky left-0 bg-white z-10 py-1.5 px-3">Ingresos Financieros (Intereses)</td>
+                            {data.periods.map((p, i) => (
+                              <td key={i} className="text-right py-1.5 px-3 tabular-nums text-emerald-700">
+                                {(p.interest_income ?? 0) !== 0 ? (
+                                  <CellLink to={withDateRange("/treasury?tab=loan_interest_accrual&status=confirmed", p.period_from, p.period_to)} valueClass="text-emerald-700">
+                                    {formatCurrency(p.interest_income ?? 0)}
+                                  </CellLink>
+                                ) : "-"}
+                              </td>
+                            ))}
+                            <td className="text-right py-1.5 px-3 tabular-nums border-l text-emerald-700">
+                              {(data.totals.interest_income ?? 0) !== 0 ? (
+                                <CellLink to={withDateRange("/treasury?tab=loan_interest_accrual&status=confirmed", data.range_from, data.range_to)} valueClass="text-emerald-700">
+                                  {formatCurrency(data.totals.interest_income ?? 0)}
+                                </CellLink>
+                              ) : "-"}
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Gastos Financieros */}
+                        {anyNonZero((p) => p.expenses_financial) &&
+                          rubroRow("exp-financiero", "Gastos Financieros", (p) => p.expenses_financial, PNL_EXPENSE_DRILL_URLS.financiero)}
+                      </>
+                    );
+                  })()}
 
                   {/* Utilidad Neta */}
                   <tr className="border-t">

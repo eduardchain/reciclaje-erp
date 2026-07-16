@@ -16,6 +16,7 @@ interface MovementFilters {
   search?: string;
   adjustment_class?: "gain" | "loss";
   commission_source?: "sale" | "double_entry";
+  pnl_section?: "operativo" | "financiero" | "depreciacion";
   sort_by?: string;
   sort_dir?: "asc" | "desc";
 }

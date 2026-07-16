@@ -36,6 +36,8 @@ interface MovementFilters {
   search?: string;
   adjustment_class?: "gain" | "loss";
   commission_source?: "sale" | "double_entry";
+  // Rubro del P&L (drill-down por rubros): restringe a tipos de gasto del P&L
+  pnl_section?: "operativo" | "financiero" | "depreciacion";
   sort_by?: string;
   sort_dir?: "asc" | "desc";
 }

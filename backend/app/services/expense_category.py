@@ -85,6 +85,25 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
                 detail="El % Pasa Mano solo aplica a categorias de gasto indirecto (los gastos generales de una categoria directa no se prorratean)",
             )
 
+    @staticmethod
+    def _validate_pnl_section(
+        section: Optional[str],
+        parent_id: Optional[UUID],
+    ) -> None:
+        """La seccion del P&L solo se configura en categorias raiz.
+
+        Las subcategorias heredan la seccion del padre en LECTURA (patron #59).
+        A diferencia del % Pasa Mano, las categorias directas SI pueden ser
+        financieras (ej. interes de un credito de maquinaria).
+        """
+        if section in (None, "operativo"):
+            return
+        if parent_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="La seccion del P&L se configura en la categoria padre (las subcategorias la heredan)",
+            )
+
     def create(
         self,
         db: Session,
@@ -125,6 +144,12 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
             is_direct=obj_data.get("is_direct_expense", False),
         )
 
+        # Seccion P&L: solo categorias raiz (hijas heredan en lectura)
+        self._validate_pnl_section(
+            obj_data.get("pnl_section"),
+            parent_id=obj_data.get("parent_id"),
+        )
+
         obj_data["organization_id"] = organization_id
         db_obj = self.model(**obj_data)
         db.add(db_obj)
@@ -160,6 +185,9 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
                 # el del padre en lectura). Sin esto quedaria un pct huerfano en
                 # DB que resurge si se re-promueve a raiz.
                 update_data["double_entry_general_pct"] = Decimal("0")
+                # Mismo reset para la seccion P&L: la hija hereda la del padre
+                # en lectura; un valor propio huerfano resurgiria al re-promover.
+                update_data["pnl_section"] = "operativo"
 
             # Si tiene hijos, no puede convertirse en subcategoria
             if new_parent_id is not None:
@@ -201,6 +229,10 @@ class CRUDExpenseCategory(CRUDBase[ExpenseCategory, ExpenseCategoryCreate, Expen
         )
         merged_is_direct = update_data.get("is_direct_expense", db_obj.is_direct_expense)
         self._validate_dp_pct(merged_pct, parent_id=merged_parent, is_direct=merged_is_direct)
+
+        # Seccion P&L: validar el estado RESULTANTE (mismo patron que el pct)
+        merged_section = update_data.get("pnl_section", db_obj.pnl_section)
+        self._validate_pnl_section(merged_section, parent_id=merged_parent)
 
         for field, value in update_data.items():
             setattr(db_obj, field, value)

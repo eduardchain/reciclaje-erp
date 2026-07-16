@@ -91,6 +91,7 @@ class ExpenseCategoryBreakdown(BaseModel):
     is_direct_expense: bool
     total_amount: float
     source_type: str = "expense"  # expense, provision_expense, expense_accrual, deferred_expense
+    pnl_section: str = "operativo"  # operativo | financiero | depreciacion (plan pnl-por-rubros)
 
 
 class ProfitAndLossResponse(BaseModel):
@@ -143,6 +144,17 @@ class ProfitAndLossResponse(BaseModel):
     commissions_paid: float
     commissions_paid_sales: float = 0.0
     commissions_paid_dp: float = 0.0
+
+    # P&L por rubros (plan pnl-por-rubros): split del pool de gastos + subtotales
+    # de la escalera. operating_expenses se MANTIENE como total de los 3 (compat).
+    # gross_profit_before_financial = total_gross_profit - interest_income (GAP-1
+    # QA: es lo que se MUESTRA como "Utilidad Bruta Total" para que la cascada
+    # visible cierre; total_gross_profit queda intacto para consumidores existentes).
+    expenses_operating: float = 0.0
+    expenses_depreciation: float = 0.0
+    expenses_financial: float = 0.0
+    gross_profit_before_financial: float = 0.0
+    operating_result: float = 0.0
 
     # Utilidad neta
     net_profit: float

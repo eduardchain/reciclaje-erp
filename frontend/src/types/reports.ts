@@ -56,12 +56,18 @@ export interface DashboardResponse {
 
 // --- P&L ---
 
+// Rubro del P&L (plan P&L por rubros): la fuente gana sobre la categoria
+// (depreciation_expense → depreciacion, obligation_interest_accrual → financiero,
+// resto por pnl_section de la categoria raiz).
+export type PnlSection = "operativo" | "financiero" | "depreciacion";
+
 export interface ExpenseCategoryBreakdown {
   category_id: string | null;
   category_name: string;
   is_direct_expense: boolean;
   total_amount: number;
   source_type: string; // expense, provision_expense, expense_accrual, deferred_expense
+  pnl_section: PnlSection;
 }
 
 export interface ProfitAndLossResponse {
@@ -85,6 +91,14 @@ export interface ProfitAndLossResponse {
   tp_adjustment_gain: number;
   total_gross_profit: number;
   operating_expenses: number;
+  // Split del pool de gastos por rubro (op + dep + fin == operating_expenses)
+  expenses_operating: number;
+  expenses_depreciation: number;
+  expenses_financial: number;
+  // Subtotal bruto MOSTRADO: total_gross_profit − interest_income (GAP-1 QA)
+  gross_profit_before_financial: number;
+  // gross_profit_before_financial − commissions_paid − op − dep
+  operating_result: number;
   commissions_paid: number;
   commissions_paid_sales: number;
   commissions_paid_dp: number;

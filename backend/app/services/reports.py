@@ -820,7 +820,16 @@ class ReportService:
         service_income = Decimal("0")
         interest_income = Decimal("0")
         operating_expenses = Decimal("0")
+        expenses_operating = Decimal("0")
+        expenses_depreciation = Decimal("0")
+        expenses_financial = Decimal("0")
         expenses_by_cat: list[ExpenseCategoryBreakdown] = []
+
+        # Clasificador P&L por rubros (plan pnl-por-rubros): la FUENTE gana
+        # sobre el mapeo de categoria — depreciation_expense es siempre
+        # depreciacion (el modulo de activos es la fuente de verdad) y
+        # obligation_interest_accrual siempre financiero (modulo F).
+        section_map = self._get_pnl_section_by_category(db, organization_id)
 
         for mt, cat_id, cat_name, is_direct, total in mm_rows:
             total_dec = Decimal(str(total))
@@ -832,12 +841,25 @@ class ReportService:
                 interest_income += total_dec
             elif mt in ("expense", "provision_expense", "expense_accrual", "deferred_expense", "depreciation_expense", "obligation_interest_accrual"):
                 operating_expenses += total_dec
+                if mt == "depreciation_expense":
+                    section = "depreciacion"
+                elif mt == "obligation_interest_accrual":
+                    section = "financiero"
+                else:
+                    section = section_map.get(str(cat_id), "operativo") if cat_id else "operativo"
+                if section == "depreciacion":
+                    expenses_depreciation += total_dec
+                elif section == "financiero":
+                    expenses_financial += total_dec
+                else:
+                    expenses_operating += total_dec
                 expenses_by_cat.append(ExpenseCategoryBreakdown(
                     category_id=cat_id,
                     category_name=cat_name or "Sin categoria",
                     is_direct_expense=bool(is_direct),
                     total_amount=float(total_dec),
                     source_type=mt,
+                    pnl_section=section,
                 ))
 
         # Comisiones causadas (commission_accrual) — split por origen:
@@ -881,6 +903,17 @@ class ReportService:
         total_gross_profit = gross_profit_sales + de_profit + service_income + interest_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss + oversell_adjustment
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
+        # Subtotales del P&L por rubros (GAP-1 QA): la escalera VISIBLE cierra
+        # porque cada subtotal suma exactamente las filas que lo preceden.
+        # Identidades (asserts del test golden):
+        #   expenses_operating + expenses_depreciation + expenses_financial == operating_expenses
+        #   net_profit == operating_result + interest_income - expenses_financial
+        gross_profit_before_financial = total_gross_profit - interest_income
+        operating_result = (
+            gross_profit_before_financial - commissions_paid
+            - expenses_operating - expenses_depreciation
+        )
+
         return {
             "sales_revenue": sales_revenue,
             "sales_count": sales_count,
@@ -904,6 +937,11 @@ class ReportService:
             "gross_profit_sales": gross_profit_sales,
             "total_gross_profit": total_gross_profit,
             "net_profit": net_profit,
+            "expenses_operating": expenses_operating,
+            "expenses_depreciation": expenses_depreciation,
+            "expenses_financial": expenses_financial,
+            "gross_profit_before_financial": gross_profit_before_financial,
+            "operating_result": operating_result,
         }
 
     # ------------------------------------------------------------------
@@ -1053,6 +1091,11 @@ class ReportService:
             tp_adjustment_gain=float(r["tp_adjustment_gain"]),
             total_gross_profit=float(r["total_gross_profit"]),
             operating_expenses=float(r["operating_expenses"]),
+            expenses_operating=float(r["expenses_operating"]),
+            expenses_depreciation=float(r["expenses_depreciation"]),
+            expenses_financial=float(r["expenses_financial"]),
+            gross_profit_before_financial=float(r["gross_profit_before_financial"]),
+            operating_result=float(r["operating_result"]),
             commissions_paid=float(r["commissions_paid"]),
             commissions_paid_sales=float(r["commissions_paid_sales"]),
             commissions_paid_dp=float(r["commissions_paid_dp"]),
@@ -3866,6 +3909,33 @@ class ReportService:
             key = str(bu_id) if bu_id else "unassigned"
             result[key] = Decimal(str(total))
         return result
+
+    def _get_pnl_section_by_category(
+        self, db: Session, organization_id: UUID,
+    ) -> dict[str, str]:
+        """Seccion P&L efectiva por categoria de gasto (plan pnl-por-rubros).
+
+        Herencia en LECTURA: una subcategoria usa la seccion de su padre (la
+        propia esta forzada a 'operativo' por el service de categorias). A
+        diferencia del % Pasa Mano, TODAS las categorias entran al mapa (las
+        directas tambien pueden ser financieras) y NO se filtra is_active (N3
+        QA: los gastos historicos bajo categorias desactivadas conservan su
+        seccion). Key: str(category_id).
+        """
+        rows = db.execute(
+            select(
+                ExpenseCategory.id,
+                ExpenseCategory.parent_id,
+                ExpenseCategory.pnl_section,
+            ).where(ExpenseCategory.organization_id == organization_id)
+        ).all()
+        own: dict[str, str] = {
+            str(r.id): (r.pnl_section or "operativo") for r in rows
+        }
+        return {
+            str(r.id): (own.get(str(r.parent_id), "operativo") if r.parent_id else own[str(r.id)])
+            for r in rows
+        }
 
     def _get_dp_pct_by_category(
         self, db: Session, organization_id: UUID,
