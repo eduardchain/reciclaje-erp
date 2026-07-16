@@ -99,7 +99,7 @@ Materiales de E0 verificados en la réplica: SAC tiene 7 materiales en `unidad` 
 
 ## 5. Pendientes del ciclo (no bloquean este informe)
 
-- **H2 (ratificación de Daniel)**: diferimiento de `transfers` a E3 — no bloqueó código (solo quita trabajo), **SÍ debe resolverse antes del deploy del viernes 2026-07-24**.
+- **H2 — RATIFICADA por Daniel 2026-07-16**: diferimiento de `transfers` a E3 confirmado. Nada bloquea el deploy del viernes 2026-07-24.
 - **Viernes post-deploy**: encender SOLO `kg_ledger_enabled: true` en la org SAC vía system PATCH **con el payload completo** (semántica REPLACE, D3) + demo con guion §9.
 - **H4 al cierre**: conteos de permisos en CLAUDE.md #25/#26 (se actualizan en el commit de E1: catálogo real 78 → **84**).
 - Deploy solo vía `/deploy` (regla); commit a develop tras GO de QA + pruebas de Daniel.
