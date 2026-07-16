@@ -59,6 +59,7 @@ def list_all_organizations(
             is_active=org.is_active,
             member_count=member_counts.get(org.id, 0),
             created_at=org.created_at,
+            settings=org.settings,
         )
         for org in orgs
     ]
@@ -106,6 +107,7 @@ def create_system_organization(
         is_active=org.is_active,
         member_count=member_count,
         created_at=org.created_at,
+        settings=org.settings,
     )
 
 
@@ -142,6 +144,7 @@ def update_system_organization(
         is_active=org.is_active,
         member_count=member_count,
         created_at=org.created_at,
+        settings=org.settings,
     )
 
 

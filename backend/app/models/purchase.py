@@ -129,6 +129,16 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         comment="Additional notes or observations",
     )
 
+    # --- Columna SAC E1 (Migracion B, D10) — header de sede, inerte hasta E2 ---
+    # Exigida por v0.5 §12.2.3 (obligatoria para SAC, inmutable post-registro);
+    # simetrica con sales.warehouse_id. La logica que la puebla es de E2.
+    warehouse_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("warehouses.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Sede de recepcion (header) — NULL para clientes existentes",
+    )
+
     # Audit and traceability fields
     vehicle_plate: Mapped[Optional[str]] = mapped_column(
         String(20),

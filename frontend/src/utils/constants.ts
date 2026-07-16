@@ -85,6 +85,9 @@ export const ROUTES = {
   CONFIG_EXPENSE_CATEGORIES: "/config/expense-categories",
   CONFIG_PRICE_LISTS: "/config/price-lists",
   CONFIG_THIRD_PARTY_CATEGORIES: "/config/third-party-categories",
+  CONFIG_TARIFFS: "/config/tariffs",
+  CONFIG_FORMULAS: "/config/formulas",
+  CONFIG_FLEET: "/config/fleet",
 
   // Admin
   ADMIN_ROLES: "/admin/roles",

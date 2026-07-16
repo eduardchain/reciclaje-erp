@@ -1,8 +1,44 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 import re
+
+
+class OrgSettingsPayload(BaseModel):
+    """Payload tipado de organization.settings (SAC E1, D3).
+
+    SOLO tipos JSON-NATIVOS (bool/int/float/list[int]) — el write path es
+    model_dump() python-mode + json.dumps default del engine (sin
+    json_serializer): un Decimal aqui revienta con 500 (H1 QA). PROHIBIDO
+    Decimal en este payload; transfer_tolerance_pct es float (porcentaje de
+    configuracion, no dinero).
+
+    Semantica REPLACE del JSONB completo: el PATCH de sistema persiste
+    exactamente las claves enviadas — un payload con subset BORRA el resto.
+    El operador manda siempre el dict completo (runbook post-deploy E1).
+    Claves ausentes/null -> get_org_setting retorna el default.
+
+    strict=True: sin coercion lax ("yes" NO es bool, "30" NO es int) — ni
+    claves desconocidas ni tipos basura llegan al JSONB (D3).
+    """
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kg_ledger_enabled: bool | None = None
+    two_step_transfers_enabled: bool | None = None
+    internal_maquila_enabled: bool | None = None
+    transfer_tolerance_pct: float | None = Field(
+        None, ge=0, le=1,
+        description="Tolerancia despachado vs recibido en traslados (0.05 = 5%)",
+    )
+    intersede_stale_days: int | None = Field(
+        None, ge=1,
+        description="Dias sin movimiento para alertar saldo intersede huerfano",
+    )
+    aging_buckets: list[int] | None = Field(
+        None,
+        description="Cortes de antiguedad para cartera y deuda kg (ej [30,60,90])",
+    )
 
 
 class OrganizationBase(BaseModel):
@@ -41,6 +77,7 @@ class OrganizationResponse(OrganizationBase):
     is_active: bool = True
     created_at: datetime
     member_role: str | None = None  # User's role display name in this organization
+    settings: dict | None = None  # Flags/parametros SAC (D3) — model_validate lo propaga solo
 
     class Config:
         from_attributes = True

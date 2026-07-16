@@ -27,6 +27,13 @@ from .profit_distribution import ProfitDistribution, ProfitDistributionLine
 from .permission import Permission
 from .role import Role, RolePermission
 from .third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
+from .kg_ledger import KgLedgerAccount, KgLedgerMovement, KgLedgerReconciliationSeal
+from .service_tariff import ServiceTariff
+from .material_conversion_formula import MaterialConversionFormula
+from .inbound_order import InboundOrder, InboundOrderLine
+from .plant_process import FurnaceCharge, CrucibleCharge
+from .exception_task import DiscrepancyTask, DailyOkSeal
+from .fleet import Driver, Vehicle
 
 __all__ = [
     "Base",
@@ -68,4 +75,17 @@ __all__ = [
     "RolePermission",
     "ThirdPartyCategory",
     "ThirdPartyCategoryAssignment",
+    "KgLedgerAccount",
+    "KgLedgerMovement",
+    "KgLedgerReconciliationSeal",
+    "ServiceTariff",
+    "MaterialConversionFormula",
+    "InboundOrder",
+    "InboundOrderLine",
+    "FurnaceCharge",
+    "CrucibleCharge",
+    "DiscrepancyTask",
+    "DailyOkSeal",
+    "Driver",
+    "Vehicle",
 ]

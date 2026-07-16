@@ -293,6 +293,33 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
         comment="Clasificacion P&L para tp_adjustment: loss o gain",
     )
 
+    # --- Columnas SAC E1 (Migracion B, D10) — inertes hasta E2/E3, NULL para clientes existentes ---
+    warehouse_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("warehouses.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Dimension gerencial persistida (sede) — ortogonal al 3-tier de UN (v0.5 §11.2.1)",
+    )
+
+    tariff_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("service_tariffs.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Tarifa aplicada en causaciones automaticas (trazabilidad)",
+    )
+
+    source_type: Mapped[Optional[str]] = mapped_column(
+        String(40),
+        nullable=True,
+        comment="Origen de causacion automatica: transfer | crucible_discharge | sale | willard_monthly_freight",
+    )
+
+    source_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        nullable=True,
+        comment="FK polimorfico al documento origen (sin FK fisica)",
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -354,6 +381,8 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
         Index("ix_money_movements_org_account", "organization_id", "account_id"),
         Index("ix_money_movements_org_third_party", "organization_id", "third_party_id"),
         Index("ix_money_movements_org_status", "organization_id", "status"),
+        Index("ix_money_movements_org_warehouse", "organization_id", "warehouse_id"),
+        Index("ix_money_movements_source", "source_type", "source_id"),
         # Idempotencia de causacion de intereses: 1 causacion confirmada por
         # (obligacion, periodo). Anular libera el slot para recausar — espejo
         # del uq_asset_depreciation_period pero como indice parcial.

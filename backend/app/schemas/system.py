@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.organization import OrgSettingsPayload
+
 
 # --- Organizaciones ---
 
@@ -15,12 +17,18 @@ class SystemOrgCreate(BaseModel):
 
 
 class SystemOrgUpdate(BaseModel):
-    """Actualizar organizacion desde panel de sistema."""
+    """Actualizar organizacion desde panel de sistema.
+
+    `settings` (SAC E1, D3): payload tipado con semantica REPLACE — el PATCH
+    persiste exactamente las claves enviadas y borra las demas; mandar
+    SIEMPRE el dict completo. Escritura solo superuser (guard del router).
+    """
     name: str | None = Field(None, min_length=2, max_length=255)
     max_users: int | None = Field(None, ge=1, le=1000)
     subscription_plan: str | None = None
     subscription_status: str | None = None
     is_active: bool | None = None
+    settings: OrgSettingsPayload | None = None
 
 
 class SystemOrgResponse(BaseModel):
@@ -34,6 +42,7 @@ class SystemOrgResponse(BaseModel):
     is_active: bool
     member_count: int = 0
     created_at: datetime
+    settings: dict | None = None
 
     class Config:
         from_attributes = True

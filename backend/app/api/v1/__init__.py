@@ -10,6 +10,7 @@ from .endpoints import (
     profit_distributions, financial_obligations,
     inventory_adjustments, material_transformations, inventory_views,
     reports,
+    service_tariffs, material_conversion_formulas, fleet,
 )
 
 api_router = APIRouter()
@@ -39,3 +40,8 @@ api_router.include_router(material_transformations.router, prefix="/inventory/tr
 api_router.include_router(inventory_views.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(system.router, prefix="/system", tags=["system"])
+# SAC E1 (plan-sac-e1-configuracion.md §4.3-§4.5)
+api_router.include_router(service_tariffs.router, prefix="/service-tariffs", tags=["sac-config"])
+api_router.include_router(material_conversion_formulas.router, prefix="/material-conversion-formulas", tags=["sac-config"])
+api_router.include_router(fleet.drivers_router, prefix="/drivers", tags=["sac-config"])
+api_router.include_router(fleet.vehicles_router, prefix="/vehicles", tags=["sac-config"])

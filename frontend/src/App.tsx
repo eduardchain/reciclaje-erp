@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import Layout from "@/components/layout/Layout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { PermissionGate } from "@/components/auth/PermissionGate";
+import { FlagGate } from "@/components/auth/FlagGate";
 import { SuperuserGate } from "@/components/auth/SuperuserGate";
 import Dashboard from "@/pages/Dashboard";
 import Login from "@/pages/Login";
@@ -80,6 +81,9 @@ const BusinessUnitsPage = lazy(() => import("@/pages/config/BusinessUnitsPage"))
 const ExpenseCategoriesPage = lazy(() => import("@/pages/config/ExpenseCategoriesPage"));
 const PriceListsPage = lazy(() => import("@/pages/config/PriceListsPage"));
 const ThirdPartyCategoriesPage = lazy(() => import("@/pages/config/ThirdPartyCategoriesPage"));
+const TariffsPage = lazy(() => import("@/pages/config/TariffsPage"));
+const FormulasPage = lazy(() => import("@/pages/config/FormulasPage"));
+const FleetPage = lazy(() => import("@/pages/config/FleetPage"));
 const RolesPage = lazy(() => import("@/pages/admin/RolesPage"));
 const RoleEditPage = lazy(() => import("@/pages/admin/RoleEditPage"));
 const UsersPage = lazy(() => import("@/pages/admin/UsersPage"));
@@ -98,6 +102,16 @@ const queryClient = new QueryClient({
 
 function P({ permission, children }: { permission: string | string[]; children: React.ReactNode }) {
   return <PermissionGate permission={permission}>{children}</PermissionGate>;
+}
+
+// Guard compuesto flag+permiso para rutas SAC (D12): sin el flag, un admin de
+// otra org deep-linkea la ruta por el bypass de permisos de admin.
+function FP({ flag, permission, children }: { flag: string; permission: string | string[]; children: React.ReactNode }) {
+  return (
+    <FlagGate flag={flag}>
+      <PermissionGate permission={permission}>{children}</PermissionGate>
+    </FlagGate>
+  );
 }
 
 function App() {
@@ -189,6 +203,9 @@ function App() {
               <Route path={ROUTES.CONFIG_EXPENSE_CATEGORIES} element={<P permission="treasury.manage_expenses"><ExpenseCategoriesPage /></P>} />
               <Route path={ROUTES.CONFIG_PRICE_LISTS} element={<P permission="materials.view_prices"><PriceListsPage /></P>} />
               <Route path={ROUTES.CONFIG_THIRD_PARTY_CATEGORIES} element={<P permission="third_parties.create"><ThirdPartyCategoriesPage /></P>} />
+              <Route path={ROUTES.CONFIG_TARIFFS} element={<FP flag="kg_ledger_enabled" permission="tariffs.view"><TariffsPage /></FP>} />
+              <Route path={ROUTES.CONFIG_FORMULAS} element={<FP flag="kg_ledger_enabled" permission="formulas.view"><FormulasPage /></FP>} />
+              <Route path={ROUTES.CONFIG_FLEET} element={<FP flag="kg_ledger_enabled" permission="config.view_fleet"><FleetPage /></FP>} />
               {/* Admin */}
               <Route path={ROUTES.ADMIN_ROLES} element={<P permission="admin.manage_roles"><RolesPage /></P>} />
               <Route path="/admin/roles/:id" element={<P permission="admin.manage_roles"><RoleEditPage /></P>} />

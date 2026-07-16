@@ -47,6 +47,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { useAuthStore } from "@/stores/authStore";
 
 interface NavChild {
@@ -55,6 +56,10 @@ interface NavChild {
   icon: React.ReactNode;
   permission?: string | string[];
   superuserOnly?: boolean;
+  // Feature flag de la org (SAC E1, D12): la entrada solo aparece si el flag
+  // esta encendido. Las entradas SIN orgFlag JAMAS dependen del query de
+  // settings (regla de no-regresion §5.1 del plan E1).
+  orgFlag?: string;
 }
 
 interface NavItem {
@@ -182,6 +187,9 @@ const orgNavItems: NavItem[] = [
       { name: "Cat. Gastos", path: ROUTES.CONFIG_EXPENSE_CATEGORIES, icon: <Tag className="w-4 h-4" />, permission: "treasury.manage_expenses" },
       { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" />, permission: "materials.view_prices" },
       { name: "Cat. Terceros", path: ROUTES.CONFIG_THIRD_PARTY_CATEGORIES, icon: <Users className="w-4 h-4" />, permission: "third_parties.create" },
+      { name: "Tarifas", path: ROUTES.CONFIG_TARIFFS, icon: <Receipt className="w-4 h-4" />, permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
+      { name: "Formulas", path: ROUTES.CONFIG_FORMULAS, icon: <Calculator className="w-4 h-4" />, permission: "formulas.view", orgFlag: "kg_ledger_enabled" },
+      { name: "Conductores y Vehiculos", path: ROUTES.CONFIG_FLEET, icon: <Truck className="w-4 h-4" />, permission: "config.view_fleet", orgFlag: "kg_ledger_enabled" },
     ],
   },
   {
@@ -206,6 +214,7 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [collapsedDesktop, setCollapsedDesktop] = useState(false);
   const { hasPermission, hasAnyPermission, isLoading } = usePermissions();
+  const { flagEnabled } = useOrgSettings();
   const user = useAuthStore((s) => s.user);
   const organizationId = useAuthStore((s) => s.organizationId);
   const isSuperuser = user?.is_superuser ?? false;
@@ -229,11 +238,16 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
       return hasPermission(perm);
     };
 
+    // Regla de no-regresion (plan E1 §5.1): SOLO las entradas CON orgFlag
+    // consultan flagEnabled — en loading/error/settings NULL se ocultan ellas
+    // y el resto del sidebar se renderiza identico a hoy.
+    const checkFlag = (flag?: string) => !flag || flagEnabled(flag);
+
     const filtered = orgNavItems
       .map((item) => {
         if (item.children) {
           const filteredChildren = item.children.filter(
-            (child) => checkPerm(child.permission)
+            (child) => checkPerm(child.permission) && checkFlag(child.orgFlag)
           );
           if (filteredChildren.length === 0) return null;
           return { ...item, children: filteredChildren };
@@ -244,7 +258,7 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
       .filter(Boolean) as NavItem[];
 
     return filtered;
-  }, [isLoading, hasPermission, hasAnyPermission, isSystemMode, isSuperuser]);
+  }, [isLoading, hasPermission, hasAnyPermission, isSystemMode, isSuperuser, flagEnabled]);
 
   const toggleExpand = (name: string) => {
     setExpanded((prev) => ({ ...prev, [name]: !prev[name] }));
