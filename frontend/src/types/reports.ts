@@ -177,6 +177,7 @@ export interface BalanceSheetAssets {
   inventory: number;
   advances: number;
   investor_receivable: number;
+  loans_receivable: number;
   prepaid_expenses: number;
   provision_funds: number;
   fixed_assets: number;
@@ -186,6 +187,7 @@ export interface BalanceSheetAssets {
 export interface BalanceSheetLiabilities {
   accounts_payable: number;
   investor_debt: number;
+  obligations_payable: number;
   liability_debt: number;
   service_provider_payable: number;
   customer_advances: number;

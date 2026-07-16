@@ -369,6 +369,7 @@ class ReportService:
         "service_provider_advances": "service_provider",
         "liability_advances": "liability",
         "investor_receivable": "investor",
+        "loans_receivable": "investor",
         "provision_funds": "provision",
         "generic_receivable": "generic",
     }
@@ -1322,8 +1323,8 @@ class ReportService:
 
         ASSET_SECTIONS = {
             "customers_receivable", "supplier_advances", "service_provider_advances",
-            "liability_advances", "investor_receivable", "provision_funds",
-            "prepaid_expenses", "generic_receivable",
+            "liability_advances", "investor_receivable", "loans_receivable",
+            "provision_funds", "prepaid_expenses", "generic_receivable",
         }
         LIABILITY_SECTIONS = {
             "suppliers_payable", "service_provider_payable", "liability_debt",
@@ -1348,22 +1349,25 @@ class ReportService:
         advances = (tp_buckets["supplier_advances"] + tp_buckets["service_provider_advances"]
                     + tp_buckets["liability_advances"] + tp_buckets["generic_receivable"])
         investor_receivable = tp_buckets["investor_receivable"]
+        loans_receivable = tp_buckets["loans_receivable"]
         prepaid_expenses = tp_buckets["prepaid_expenses"]
         provision_funds = tp_buckets["provision_funds"]
 
         total_assets = (cash_and_bank + accounts_receivable + inventory + advances
-                        + investor_receivable + prepaid_expenses + provision_funds + fixed_assets_value)
+                        + investor_receivable + loans_receivable + prepaid_expenses + provision_funds + fixed_assets_value)
 
         accounts_payable = tp_buckets["suppliers_payable"]
-        investor_debt = (tp_buckets["investors_partners"] + tp_buckets["investors_obligations"]
-                        + tp_buckets["investors_legacy"])
+        # Simetrico al split del activo (#73): obligaciones financieras payable
+        # en linea propia del General; socios + legacy siguen en Deuda Inversionistas
+        investor_debt = tp_buckets["investors_partners"] + tp_buckets["investors_legacy"]
+        obligations_payable = tp_buckets["investors_obligations"]
         liability_debt = tp_buckets["liability_debt"]
         service_provider_payable = tp_buckets["service_provider_payable"]
         customer_advances = tp_buckets["customer_advances"]
         provision_obligations = tp_buckets["provision_obligations"]
         generic_payable = tp_buckets["generic_payable"]
 
-        total_liabilities = accounts_payable + investor_debt + liability_debt + service_provider_payable + customer_advances + provision_obligations + generic_payable
+        total_liabilities = accounts_payable + investor_debt + obligations_payable + liability_debt + service_provider_payable + customer_advances + provision_obligations + generic_payable
         equity = total_assets - total_liabilities
 
         # Desglose patrimonio: utilidad acumulada y distribuida
@@ -1379,6 +1383,7 @@ class ReportService:
                 inventory=float(inventory),
                 advances=float(advances),
                 investor_receivable=float(investor_receivable),
+                loans_receivable=float(loans_receivable),
                 prepaid_expenses=float(prepaid_expenses),
                 provision_funds=float(provision_funds),
                 fixed_assets=float(fixed_assets_value),
@@ -1388,6 +1393,7 @@ class ReportService:
             liabilities=BalanceSheetLiabilities(
                 accounts_payable=float(accounts_payable),
                 investor_debt=float(investor_debt),
+                obligations_payable=float(obligations_payable),
                 liability_debt=float(liability_debt),
                 service_provider_payable=float(service_provider_payable),
                 customer_advances=float(customer_advances),
@@ -1436,8 +1442,8 @@ class ReportService:
 
         ASSET_SECTIONS = {
             "customers_receivable", "supplier_advances", "service_provider_advances",
-            "liability_advances", "investor_receivable", "provision_funds",
-            "prepaid_expenses", "generic_receivable",
+            "liability_advances", "investor_receivable", "loans_receivable",
+            "provision_funds", "prepaid_expenses", "generic_receivable",
         }
         LIABILITY_SECTIONS = {
             "suppliers_payable", "service_provider_payable", "liability_debt",
@@ -1463,23 +1469,26 @@ class ReportService:
         advances = (tp_buckets["supplier_advances"] + tp_buckets["service_provider_advances"]
                     + tp_buckets["liability_advances"] + tp_buckets["generic_receivable"])
         investor_receivable = tp_buckets["investor_receivable"]
+        loans_receivable = tp_buckets["loans_receivable"]
         prepaid_expenses = tp_buckets["prepaid_expenses"]
         provision_funds = tp_buckets["provision_funds"]
 
         total_assets = (cash_and_bank + accounts_receivable + inventory + advances
-                        + investor_receivable + prepaid_expenses + provision_funds + fixed_assets_value)
+                        + investor_receivable + loans_receivable + prepaid_expenses + provision_funds + fixed_assets_value)
 
         accounts_payable = tp_buckets["suppliers_payable"]
-        investor_debt = (tp_buckets["investors_partners"] + tp_buckets["investors_obligations"]
-                        + tp_buckets["investors_legacy"])
+        # Simetrico al split del activo (#73): obligaciones financieras payable
+        # en linea propia del General; socios + legacy siguen en Deuda Inversionistas
+        investor_debt = tp_buckets["investors_partners"] + tp_buckets["investors_legacy"]
+        obligations_payable = tp_buckets["investors_obligations"]
         liability_debt = tp_buckets["liability_debt"]
         service_provider_payable = tp_buckets["service_provider_payable"]
         customer_advances = tp_buckets["customer_advances"]
         provision_obligations = tp_buckets["provision_obligations"]
         generic_payable = tp_buckets["generic_payable"]
 
-        total_liabilities = (accounts_payable + investor_debt + liability_debt
-                             + service_provider_payable + customer_advances
+        total_liabilities = (accounts_payable + investor_debt + obligations_payable
+                             + liability_debt + service_provider_payable + customer_advances
                              + provision_obligations + generic_payable)
         equity = total_assets - total_liabilities
 
@@ -1498,6 +1507,7 @@ class ReportService:
                 inventory=float(inventory),
                 advances=float(advances),
                 investor_receivable=float(investor_receivable),
+                loans_receivable=float(loans_receivable),
                 prepaid_expenses=float(prepaid_expenses),
                 provision_funds=float(provision_funds),
                 fixed_assets=float(fixed_assets_value),
@@ -1507,6 +1517,7 @@ class ReportService:
             liabilities=BalanceSheetLiabilities(
                 accounts_payable=float(accounts_payable),
                 investor_debt=float(investor_debt),
+                obligations_payable=float(obligations_payable),
                 liability_debt=float(liability_debt),
                 service_provider_payable=float(service_provider_payable),
                 customer_advances=float(customer_advances),
@@ -1647,6 +1658,7 @@ class ReportService:
             "service_provider_advances": [],
             "liability_advances": [],
             "investor_receivable": [],
+            "loans_receivable": [],
             "provision_funds": [],
             "prepaid_expenses": [],
             "generic_receivable": [],
@@ -1683,6 +1695,7 @@ class ReportService:
             ("service_provider_advances", "Anticipos a Proveedores Servicios", tp_buckets["service_provider_advances"]),
             ("liability_advances", "Anticipos a Pasivos", tp_buckets["liability_advances"]),
             ("investor_receivable", "CxC Inversionistas", tp_buckets["investor_receivable"]),
+            ("loans_receivable", "Préstamos por Cobrar", tp_buckets["loans_receivable"]),
             ("provision_funds", "Fondos en Provisiones", tp_buckets["provision_funds"]),
             ("prepaid_expenses", "Gastos Prepagados", tp_buckets["prepaid_expenses"]),
             ("generic_receivable", "Otras Cuentas por Cobrar", tp_buckets["generic_receivable"]),
@@ -1815,7 +1828,7 @@ class ReportService:
         tp_buckets: dict[str, list[BalanceDetailedItem]] = {
             "customers_receivable": [], "supplier_advances": [],
             "service_provider_advances": [], "liability_advances": [],
-            "investor_receivable": [], "provision_funds": [],
+            "investor_receivable": [], "loans_receivable": [], "provision_funds": [],
             "prepaid_expenses": [], "generic_receivable": [],
             "suppliers_payable": [], "service_provider_payable": [],
             "liability_debt": [], "investors_partners": [],
@@ -1845,6 +1858,7 @@ class ReportService:
             ("service_provider_advances", "Anticipos a Proveedores Servicios", tp_buckets["service_provider_advances"]),
             ("liability_advances", "Anticipos a Pasivos", tp_buckets["liability_advances"]),
             ("investor_receivable", "CxC Inversionistas", tp_buckets["investor_receivable"]),
+            ("loans_receivable", "Préstamos por Cobrar", tp_buckets["loans_receivable"]),
             ("provision_funds", "Fondos en Provisiones", tp_buckets["provision_funds"]),
             ("prepaid_expenses", "Gastos Prepagados", tp_buckets["prepaid_expenses"]),
             ("generic_receivable", "Otras Cuentas por Cobrar", tp_buckets["generic_receivable"]),
@@ -1918,6 +1932,11 @@ class ReportService:
             if "customer" in behavior_types:
                 return "customers_receivable"
             if "investor" in behavior_types:
+                # Simetrico al lado pasivo: la categoria "obligaci..." marca al
+                # tercero de obligaciones (modulo F la exige por construccion) —
+                # un prestamo que hicimos va a linea propia, no a CxC Inversionistas
+                if any("obligaci" in n.lower() for n in category_names):
+                    return "loans_receivable"
                 return "investor_receivable"
             if "material_supplier" in behavior_types:
                 return "supplier_advances"
@@ -1956,6 +1975,7 @@ class ReportService:
         "service_provider_advances": ["service_provider"],
         "liability_advances": ["liability"],
         "investor_receivable": ["investor"],
+        "loans_receivable": ["investor"],
         "suppliers_payable": ["material_supplier"],
         "service_provider_payable": ["service_provider"],
         "liability_debt": ["liability"],
@@ -2619,6 +2639,9 @@ class ReportService:
             if "customer" in behavior_types:
                 return "customers_receivable"
             if "investor" in behavior_types:
+                # Espejo del split en _classify_third_party (prestamos a linea propia)
+                if any("obligaci" in n.lower() for n in category_names):
+                    return "loans_receivable"
                 return "investor_receivable"
             if "material_supplier" in behavior_types:
                 return "supplier_advances"
