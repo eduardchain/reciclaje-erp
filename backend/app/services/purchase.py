@@ -902,18 +902,16 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Step 3: Si hay lineas nuevas, hacer revert+reapply
         warnings: list[str] = []
         if obj_in.lines is not None:
-            # 3a. Bloquear si revertir deja stock negativo (decision #8: compras
-            # bloquean, ventas avisan). Espejo del guard de cancel() — editar y
-            # cancelar revierten el mismo stock transit de la compra registrada.
+            # 3a. Detectar stock negativo al revertir (warning, no bloquea —
+            # decision #76: inventario negativo es valido en toda la app)
             for line in purchase.lines:
                 material = line.material
                 if material.current_stock < line.quantity:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=(
-                            f"No se puede editar: stock insuficiente para {material.code}. "
-                            f"Actual: {material.current_stock}, Requerido: {line.quantity}"
-                        ),
+                    resulting = material.current_stock - line.quantity
+                    warnings.append(
+                        f"Stock negativo para {material.code} tras revertir. "
+                        f"Actual: {material.current_stock}, Requerido: {line.quantity}, "
+                        f"Resultante: {resulting}"
                     )
 
             # 3b. Revertir efectos de lineas actuales
