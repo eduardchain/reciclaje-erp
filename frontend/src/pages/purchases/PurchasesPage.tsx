@@ -185,11 +185,16 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
       meta: { hideOnMobile: true },
       cell: ({ row }) => (
         <div className="space-y-0.5">
-          {row.original.lines.map((line) => (
-            <div key={line.id} className="text-xs text-slate-600">
+          {row.original.lines.slice(0, 3).map((line) => (
+            <div key={line.id} className="text-xs text-slate-600 whitespace-nowrap">
               {line.material_code} - {formatWeight(line.quantity, line.material_unit)}{canViewPrices ? ` x ${formatCurrency(line.unit_price)}` : ""}
             </div>
           ))}
+          {row.original.lines.length > 3 && (
+            <div className="text-xs text-slate-400 whitespace-nowrap">
+              +{row.original.lines.length - 3} materiales más
+            </div>
+          )}
         </div>
       ),
     },
