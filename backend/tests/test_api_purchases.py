@@ -1315,11 +1315,17 @@ class TestUpdatePurchase:
         db_session.commit()
         db_session.refresh(test_purchase)
 
-    def test_update_insufficient_stock_fails(
+    def test_update_insufficient_stock_warns(
         self, client, org_headers, db_session,
         test_purchase, test_material, test_warehouse
     ):
-        """Si no hay stock suficiente para revertir, falla."""
+        """Revertir con stock insuficiente AVISA sin bloquear (decision #76).
+
+        El inventario negativo es valido en toda la app (ventas, ajustes,
+        transformaciones) — editar una compra cuyo material ya esta en
+        negativo no puede bloquear al usuario (incidente prod 2026-07-16:
+        con stock -17885 ni la factura se podia corregir).
+        """
         # Forzar stock bajo (como si ya se hubiera vendido parte)
         test_material.current_stock = Decimal("10.0000")
         test_material.current_stock_transit = Decimal("10.0000")
@@ -1340,8 +1346,13 @@ class TestUpdatePurchase:
             headers=org_headers,
         )
 
-        assert response.status_code == 400
-        assert "stock insuficiente" in response.json()["detail"].lower()
+        assert response.status_code == 200
+        data = response.json()
+        warnings = data.get("warnings") or []
+        assert any("Stock negativo" in w for w in warnings)
+        # El revert+reapply se aplico: la linea nueva quedo persistida
+        assert len(data["lines"]) == 1
+        assert float(data["lines"][0]["quantity"]) == 50
 
 
 class TestLiquidateWithPriceUpdates:
