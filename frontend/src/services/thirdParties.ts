@@ -1,5 +1,11 @@
 import apiClient from "./api";
-import type { ThirdPartyResponse, ThirdPartyCreate, ThirdPartyUpdate } from "@/types/third-party";
+import type {
+  ThirdPartyResponse,
+  ThirdPartyCreate,
+  ThirdPartyUpdate,
+  RetentionEntityResponse,
+  RetentionEntityCreate,
+} from "@/types/third-party";
 import type { PaginatedResponse } from "@/types/common";
 
 interface ThirdPartyFilters {
@@ -64,8 +70,24 @@ export const thirdPartyService = {
     return response.data;
   },
 
-  getLiabilities: async (filters: Omit<ThirdPartyFilters, "role"> = {}): Promise<PaginatedResponse<ThirdPartyResponse>> => {
+  getLiabilities: async (
+    filters: (Omit<ThirdPartyFilters, "role"> & { include_system?: boolean }) = {}
+  ): Promise<PaginatedResponse<ThirdPartyResponse>> => {
+    // include_system=true (SAC E2 D9): incluye entidades sistema "[Retenciones] X"
+    // — necesario en el selector de Pago de Pasivo para poder pagarlas.
     const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties/liabilities", { params: filters });
+    return response.data;
+  },
+
+  // Entidades "[Retenciones] X" estructuradas (addendum paquete UX) — endpoints
+  // flag-gated (kg_ledger_enabled): NO llamar sin gate en el consumidor (F2 QA).
+  getRetentionEntities: async (): Promise<RetentionEntityResponse[]> => {
+    const response = await apiClient.get<RetentionEntityResponse[]>("/api/v1/third-parties/retention-entities");
+    return response.data;
+  },
+
+  createRetentionEntity: async (data: RetentionEntityCreate): Promise<RetentionEntityResponse> => {
+    const response = await apiClient.post<RetentionEntityResponse>("/api/v1/third-parties/retention-entities", data);
     return response.data;
   },
 

@@ -261,3 +261,31 @@ def require_any_permission(*perms: str):
         return org_context
 
     return checker
+
+
+def require_org_flag(flag_key: str):
+    """
+    Factory que retorna un Depends que exige un feature flag de organizacion
+    encendido (organization.settings JSONB, plan SAC E2 D10). 403 si esta
+    apagado/NULL — INCLUSO para admins: el flag es de la org, no del usuario
+    (sin el, un admin de otra org podria operar modulos SAC via API cruda).
+
+    Costo: db.get() con identity map — ~0 en requests que ya cargan la org.
+
+    Uso (a nivel de router — gatea el modulo completo):
+        router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])
+    """
+    from app.utils.org_settings import get_org_setting
+
+    async def checker(
+        db: Session = Depends(get_db),
+        org_context: dict = Depends(get_required_org_context),
+    ) -> dict:
+        if not get_org_setting(db, org_context["organization_id"], flag_key):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Modulo no habilitado para esta organizacion",
+            )
+        return org_context
+
+    return checker

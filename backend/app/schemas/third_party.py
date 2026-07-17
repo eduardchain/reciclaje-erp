@@ -3,7 +3,7 @@ Pydantic schemas for ThirdParty model.
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, EmailStr, field_serializer, model_validator
@@ -101,3 +101,23 @@ class ThirdPartyResponse(ThirdPartyBase):
 class ThirdPartyBalanceUpdate(BaseModel):
     """Schema for updating third party balance."""
     amount_delta: float = Field(..., description="Amount to add (positive) or subtract (negative)")
+
+
+# --- Entidades de retencion (addendum §8 paquete UX; SAC E2 D9) --- #
+
+class RetentionEntityCreate(BaseModel):
+    """Solo ICA es creable manualmente (una entidad por municipio) —
+    ReteFuente/ReteIVA son singleton auto-creados al liquidar."""
+    retention_type: Literal["ica"]
+    municipality: str = Field(..., min_length=1, max_length=60)
+
+
+class RetentionEntityResponse(BaseModel):
+    """Fila estructurada del hogar de retenciones (grupo en Pasivos +
+    selector de municipio al liquidar)."""
+    id: UUID
+    retention_type: str
+    municipality: Optional[str] = None
+    name: str
+    current_balance: float
+    is_active: bool

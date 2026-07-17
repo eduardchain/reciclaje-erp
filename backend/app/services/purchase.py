@@ -124,7 +124,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         db: Session,
         obj_in: PurchaseCreate,
         organization_id: UUID,
-        user_id: Optional[UUID] = None
+        user_id: Optional[UUID] = None,
+        commit: bool = True,
     ) -> Purchase:
         """
         Create purchase with lines, inventory movements, and balance updates.
@@ -158,6 +159,15 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="La fecha de la compra no puede ser futura"
+            )
+
+        # SAC E2 D7: commit=False compone la compra dentro de una transaccion
+        # mayor (inbound); auto_liquidate commitea internamente y romperia la
+        # atomicidad — combinacion prohibida por construccion.
+        if not commit and obj_in.auto_liquidate:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="auto_liquidate no es compatible con creacion componible (commit=False)",
             )
 
         # Step 1: Generate next purchase_number with lock
@@ -194,7 +204,17 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Step 3: Create Purchase
         # Check if this is a double-entry purchase (skip inventory movements)
         is_double_entry = hasattr(obj_in, 'double_entry_id') and obj_in.double_entry_id is not None
-        
+
+        # SAC E2 D11: bodega de cabecera opcional — valida y fuerza las lineas
+        header_warehouse_id = getattr(obj_in, 'warehouse_id', None)
+        if header_warehouse_id is not None and not is_double_entry:
+            header_wh = db.get(Warehouse, header_warehouse_id)
+            if not header_wh or header_wh.organization_id != organization_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Bodega de cabecera no encontrada"
+                )
+
         purchase = Purchase(
             organization_id=organization_id,
             purchase_number=purchase_number,
@@ -207,6 +227,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             invoice_number=getattr(obj_in, 'invoice_number', None),
             created_by=user_id,
             double_entry_id=obj_in.double_entry_id if is_double_entry else None,
+            warehouse_id=header_warehouse_id if not is_double_entry else None,
         )
         db.add(purchase)
         db.flush()  # Get purchase.id before creating lines
@@ -220,6 +241,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         total_amount = Decimal("0.00")
         
         for line_data in obj_in.lines:
+            # SAC E2 D11: la cabecera fuerza el warehouse de todas las lineas
+            if header_warehouse_id is not None and not is_double_entry:
+                line_data.warehouse_id = header_warehouse_id
+
             # Validate material
             material = db.get(Material, line_data.material_id)
             if not material or material.organization_id != organization_id:
@@ -227,7 +252,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Material {line_data.material_id} no encontrado"
                 )
-            
+
             # Validate warehouse (skip for double-entry)
             if not is_double_entry:
                 if not line_data.warehouse_id:
@@ -307,9 +332,14 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 payment_account_id=obj_in.payment_account_id,
                 commissions_data=obj_in.commissions if obj_in.commissions else None,
             )
-        
-        db.commit()
-        db.refresh(purchase)
+
+        # SAC E2 D7: commit=False deja la compra en la transaccion del caller
+        # (inbound) — el default preserva el comportamiento actual byte a byte
+        if commit:
+            db.commit()
+            db.refresh(purchase)
+        else:
+            db.flush()
 
         return purchase, warnings
 
@@ -324,6 +354,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         payment_account_id: Optional[UUID] = None,
         commissions_data: Optional[List] = None,
         liquidation_date: Optional[datetime] = None,
+        retentions_data: Optional[List] = None,
     ) -> Purchase:
         """
         Liquidar compra registrada (cambiar status a 'liquidated').
@@ -517,6 +548,16 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             recipient.current_balance -= comm.commission_amount
             print(f"  💼 Comision '{comm.concept}': ${comm.commission_amount} → {recipient.name} (saldo: {recipient.current_balance})")
 
+        # Step 8c (SAC E2 D9): retenciones — bloques compensatorios ADITIVOS
+        # tras el credito estandar: proveedor +Σret (queda acreditado NETO),
+        # entidad de retencion −amount (pasivo total conservado al peso).
+        # Cero P&L, cero costo de material. Ausente = camino actual intacto.
+        total_retentions = Decimal("0")
+        if retentions_data:
+            total_retentions = self._apply_retentions(
+                db, purchase, retentions_data, supplier, organization_id
+            )
+
         # Step 9: Cambiar status
         purchase.status = "liquidated"
         purchase.liquidated_by = user_id
@@ -526,6 +567,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
         # Step 10 (opcional): Pago inmediato
         if immediate_payment and payment_account_id:
+            # SAC E2 D9: con retenciones se paga el NETO (total − Σret).
+            # Sin retenciones, net == total — camino actual byte a byte.
+            net_payment = purchase.total_amount - total_retentions
             account = db.execute(
                 select(MoneyAccount).where(
                     MoneyAccount.id == payment_account_id,
@@ -538,17 +582,17 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Cuenta de pago no encontrada",
                 )
-            if account.current_balance < purchase.total_amount:
+            if account.current_balance < net_payment:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Fondos insuficientes. Disponible: ${account.current_balance}, Requerido: ${purchase.total_amount}",
+                    detail=f"Fondos insuficientes. Disponible: ${account.current_balance}, Requerido: ${net_payment}",
                 )
 
             mm_service._create_movement(
                 db=db,
                 organization_id=organization_id,
                 movement_type="payment_to_supplier",
-                amount=purchase.total_amount,
+                amount=net_payment,
                 account_id=payment_account_id,
                 date=purchase.liquidated_at,
                 description=f"Pago compra #{purchase.purchase_number}",
@@ -557,9 +601,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 user_id=user_id,
             )
 
-            account.current_balance -= purchase.total_amount
-            supplier.current_balance += purchase.total_amount
-            print(f"  💳 Pago inmediato: ${purchase.total_amount} desde {account.name}")
+            account.current_balance -= net_payment
+            supplier.current_balance += net_payment
+            print(f"  💳 Pago inmediato: ${net_payment} desde {account.name}")
 
         db.commit()
         db.refresh(purchase)
@@ -573,6 +617,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         organization_id: UUID,
         user_id: Optional[UUID] = None,
         annul_linked_payments: bool = False,
+        commit: bool = True,
+        from_inbound: bool = False,
     ) -> tuple[Purchase, list[str]]:
         """
         Cancel a purchase and reverse all effects.
@@ -628,7 +674,24 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No se puede cancelar una compra de doble partida. Cancele la doble partida."
             )
-        
+
+        # SAC E2 D7b: compra derivada de orden de recepcion — se anula desde la
+        # orden (espejo patron #67); evita orden confirmed apuntando a compra
+        # cancelada. El edit SI se permite (flujo Erwin §7.2).
+        if not from_inbound:
+            from app.models.inbound_order import InboundOrder
+            linked_number = db.execute(
+                select(InboundOrder.order_number).where(
+                    InboundOrder.purchase_id == purchase_id,
+                    InboundOrder.status != "annulled",
+                )
+            ).scalar_one_or_none()
+            if linked_number is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Anule desde la orden de recepción #{linked_number}",
+                )
+
         if purchase.status == "cancelled":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -764,6 +827,20 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 recipient.current_balance += comm.commission_amount
                 print(f"  ↩️  Comision revertida: ${comm.commission_amount} → {recipient.name}")
 
+            # Step 6c (SAC E2 D9): revertir bloques compensatorios de retenciones
+            # — inverso exacto de la liquidacion; reverted_at = auditoria sin
+            # delete fisico. Compatible con annul_linked_payments (#63): el pago
+            # enlazado fue NETO → su reversa usa el monto del movimiento.
+            for ret in (purchase.retentions or []):
+                if ret.reverted_at is not None:
+                    continue
+                supplier.current_balance -= ret.amount
+                entity = db.get(ThirdParty, ret.third_party_id)
+                if entity:
+                    entity.current_balance += ret.amount
+                ret.reverted_at = datetime.now(timezone.utc)
+                print(f"  ↩️  Retencion revertida: ${ret.amount} ({ret.retention_type})")
+
         # Step 7: opcional — anular pagos inmediatos enlazados (payment_to_supplier con purchase_id).
         # Simétrico a ventas (decisión #63): revierte el efecto del pago: caja +amount, proveedor
         # -amount. Solo confirmed (no re-anula un pago ya anulado; no-op seguro si no hay ninguno).
@@ -807,8 +884,12 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         print(f"❌ Cancelled purchase #{purchase.purchase_number}")
         print(f"   Supplier balance: {supplier.current_balance} (debt reduced by ${purchase.total_amount})")
 
-        db.commit()
-        db.refresh(purchase)
+        # SAC E2 D7: commit=False compone dentro de la transaccion del inbound
+        if commit:
+            db.commit()
+            db.refresh(purchase)
+        else:
+            db.flush()
 
         return purchase, warnings
     
@@ -940,6 +1021,21 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             # 3e. Crear nuevas lineas
             new_total = Decimal("0.00")
             for line_data in obj_in.lines:
+                # SAC E2 D11: con bodega de cabecera, las lineas nuevas del full
+                # edit heredan o validan contra ella (sin esto el revert-reapply
+                # dejaria header W con movimientos en W')
+                if purchase.warehouse_id is not None:
+                    if line_data.warehouse_id is None:
+                        line_data.warehouse_id = purchase.warehouse_id
+                    elif line_data.warehouse_id != purchase.warehouse_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=(
+                                "La compra tiene bodega de cabecera — todas las lineas "
+                                "deben usar esa bodega"
+                            ),
+                        )
+
                 # Validar material
                 material = db.get(Material, line_data.material_id)
                 if not material or material.organization_id != organization_id:
@@ -1219,6 +1315,64 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             Purchase.organization_id == organization_id
         ).order_by(Purchase.date.desc()).offset(skip).limit(limit).all()
     
+    # ------------------------------------------------------------------ #
+    # Retenciones (SAC E2 D9)                                             #
+    # La logica get-or-create + matching H4 vive en                       #
+    # services/retention_entities.py (addendum §8: la comparten estos     #
+    # bloques de liquidacion y los endpoints GET/POST /retention-entities)#
+    # ------------------------------------------------------------------ #
+
+    def _apply_retentions(
+        self, db: Session, purchase: Purchase, retentions_data: List,
+        supplier: ThirdParty, organization_id: UUID,
+    ) -> Decimal:
+        """Bloques compensatorios ADITIVOS (D9): tras el credito estandar
+        (−total), proveedor +Σret y entidad de retencion −amount cada una —
+        pasivo total conservado. Cero P&L, cero costo de material."""
+        from app.utils.org_settings import get_org_setting
+        from app.models.purchase_retention import PurchaseRetention
+
+        # Guard de flag: sin el, una org no-SAC podria crear terceros sistema
+        # indelebles via API cruda (D9/D10)
+        if not get_org_setting(db, organization_id, "kg_ledger_enabled"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Retenciones: modulo no habilitado para esta organizacion",
+            )
+
+        total = sum(Decimal(str(r.amount)) for r in retentions_data)
+        if total >= purchase.total_amount:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"La suma de retenciones (${total}) debe ser menor al "
+                    f"total de la compra (${purchase.total_amount})"
+                ),
+            )
+
+        from app.services.retention_entities import resolve_retention_entity
+
+        for r in retentions_data:
+            entity = resolve_retention_entity(
+                db, organization_id, r.retention_type, r.municipality
+            )
+            db.add(PurchaseRetention(
+                organization_id=organization_id,
+                purchase_id=purchase.id,
+                third_party_id=entity.id,
+                retention_type=r.retention_type,
+                municipality=r.municipality.strip() if r.municipality else None,
+                rate=r.rate,
+                base=r.base,
+                amount=r.amount,
+            ))
+            entity.current_balance -= r.amount
+            print(f"  🧾 Retencion {r.retention_type}: ${r.amount} → {entity.name}")
+
+        supplier.current_balance += total  # compensatorio: queda acreditado NETO
+        db.flush()
+        return total
+
     def _generate_purchase_number(self, db: Session, organization_id: UUID) -> int:
         """
         Generate next sequential purchase_number for organization.

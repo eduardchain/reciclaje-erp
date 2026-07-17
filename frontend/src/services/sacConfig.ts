@@ -7,6 +7,9 @@ import type {
   MaterialConversionFormulaCreate,
   MaterialConversionFormulaListResponse,
   MaterialConversionFormulaResponse,
+  MaterialKgProfileListResponse,
+  MaterialKgProfileResponse,
+  MaterialKgProfileUpsert,
   ServiceTariffCreate,
   ServiceTariffListResponse,
   ServiceTariffResponse,
@@ -70,6 +73,29 @@ export const sacConfigService = {
   ): Promise<MaterialConversionFormulaResponse> => {
     const response = await apiClient.post<MaterialConversionFormulaResponse>(
       "/api/v1/material-conversion-formulas",
+      data
+    );
+    return response.data;
+  },
+
+  // --- Clasificacion Willard del material (material_kg_profile, CC-005) ---
+  getKgProfiles: async (filters?: {
+    compra_regular?: boolean;
+    willard_world?: string;
+  }): Promise<MaterialKgProfileListResponse> => {
+    const response = await apiClient.get<MaterialKgProfileListResponse>(
+      "/api/v1/material-kg-profiles",
+      { params: filters ?? {} }
+    );
+    return response.data;
+  },
+
+  upsertKgProfile: async (
+    materialId: string,
+    data: MaterialKgProfileUpsert
+  ): Promise<MaterialKgProfileResponse> => {
+    const response = await apiClient.put<MaterialKgProfileResponse>(
+      `/api/v1/material-kg-profiles/${materialId}`,
       data
     );
     return response.data;

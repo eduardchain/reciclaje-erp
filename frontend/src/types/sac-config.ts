@@ -6,9 +6,10 @@ export type TariffCode =
   | "maquila_intersede_cv_jm"
   | "maquila_crisol"
   | "flete_willard_bog_baq"
-  | "flete_willard_planta_planta";
+  | "flete_willard_planta_planta"
+  | "comision_green_loop"; // SAC E2 (D7): $100/kg material recolectado en ruta
 
-export type TariffUnit = "per_kg_lead" | "per_kg_battery" | "per_unit";
+export type TariffUnit = "per_kg_lead" | "per_kg_battery" | "per_unit" | "per_kg_material";
 
 export const TARIFF_CODE_LABELS: Record<TariffCode, string> = {
   maquila_willard: "Maquila Willard",
@@ -16,12 +17,14 @@ export const TARIFF_CODE_LABELS: Record<TariffCode, string> = {
   maquila_crisol: "Maquila Crisol",
   flete_willard_bog_baq: "Flete Willard BOG→BAQ",
   flete_willard_planta_planta: "Flete Willard Planta→Planta",
+  comision_green_loop: "Comisión Green Loop",
 };
 
 export const TARIFF_UNIT_LABELS: Record<TariffUnit, string> = {
   per_kg_lead: "por kg de plomo",
   per_kg_battery: "por kg de bateria",
   per_unit: "por unidad",
+  per_kg_material: "por kg de material",
 };
 
 // D11a — espejo de CANONICAL_UNIT_BY_CODE del backend (la UI preselecciona
@@ -32,6 +35,7 @@ export const CANONICAL_UNIT_BY_CODE: Record<TariffCode, TariffUnit> = {
   maquila_crisol: "per_kg_lead",
   flete_willard_bog_baq: "per_kg_battery",
   flete_willard_planta_planta: "per_kg_lead",
+  comision_green_loop: "per_kg_material",
 };
 
 export interface ServiceTariffResponse {
@@ -59,19 +63,22 @@ export interface ServiceTariffListResponse {
 }
 
 // --- Formulas de conversion ---
+// CC-001/002: sin subtipo escurrido/pinza (son materiales distintos) y sin
+// scrap_with_terminal_to_lead. El tipo se deriva de la unidad del material.
 
-export type FormulaType =
-  | "battery_to_lead"
-  | "drosses_to_lead"
-  | "scrap_with_terminal_to_lead";
-
-export type WillardSubtype = "escurrido" | "pinza";
+export type FormulaType = "battery_to_lead" | "drosses_to_lead";
 
 export const FORMULA_TYPE_LABELS: Record<FormulaType, string> = {
   battery_to_lead: "Bateria → plomo (kg/unidad)",
   drosses_to_lead: "Dross → plomo (% de plomo)",
-  scrap_with_terminal_to_lead: "Scrap con borne → plomo",
 };
+
+/** Deriva el tipo de formula de la unidad del material (sin eleccion del usuario). */
+export function formulaTypeForUnit(unit: string | null | undefined): FormulaType {
+  return (unit ?? "kg").trim().toLowerCase() === "unidad"
+    ? "battery_to_lead"
+    : "drosses_to_lead";
+}
 
 export interface MaterialConversionFormulaResponse {
   id: string;
@@ -82,7 +89,6 @@ export interface MaterialConversionFormulaResponse {
   material_unit: string | null;
   formula_type: FormulaType;
   parameters: Record<string, unknown>;
-  willard_account_subtype: WillardSubtype | null;
   notes: string | null;
   created_by: string;
   created_by_name: string | null;
@@ -93,12 +99,37 @@ export interface MaterialConversionFormulaCreate {
   material_id: string;
   formula_type: FormulaType;
   parameters: Record<string, unknown>;
-  willard_account_subtype?: WillardSubtype | null;
   notes?: string | null;
 }
 
 export interface MaterialConversionFormulaListResponse {
   items: MaterialConversionFormulaResponse[];
+  total: number;
+}
+
+// --- Clasificacion Willard del material (material_kg_profile, CC-005) ---
+
+export type WillardWorld = "none" | "postconsumo" | "drosses";
+
+export interface MaterialKgProfileResponse {
+  id: string;
+  organization_id: string;
+  material_id: string;
+  material_code: string | null;
+  material_name: string | null;
+  material_unit: string | null;
+  compra_regular: boolean;
+  willard_world: WillardWorld;
+  created_at: string;
+}
+
+export interface MaterialKgProfileUpsert {
+  compra_regular: boolean;
+  willard_world: WillardWorld;
+}
+
+export interface MaterialKgProfileListResponse {
+  items: MaterialKgProfileResponse[];
   total: number;
 }
 

@@ -69,6 +69,20 @@ export const invalidateAfterObligation = (qc: QueryClient) => {
   invalidateAfterTreasury(qc);
 };
 
+// Recepcion (SAC E2, D17): tipos Willard mueven inventario + cuentas kg;
+// tipos purchase/ruta derivan una Purchase registrada (transito)
+export const invalidateAfterInboundOrder = (qc: QueryClient) => {
+  qc.invalidateQueries({ queryKey: ["inbound-orders"] });
+  qc.invalidateQueries({ queryKey: ["kg-ledger"] });
+  qc.invalidateQueries({ queryKey: ["purchases"] });
+  invalidateInventory(qc);
+};
+
+// Movimiento manual kg / anulacion (SAC E2, D17): solo toca el ledger kg
+export const invalidateAfterKgMovement = (qc: QueryClient) => {
+  qc.invalidateQueries({ queryKey: ["kg-ledger"] });
+};
+
 export const invalidateAfterFixedAsset = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["fixed-assets"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });

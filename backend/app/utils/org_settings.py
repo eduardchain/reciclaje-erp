@@ -30,6 +30,9 @@ SETTING_DEFAULTS: dict = {
     "transfer_tolerance_pct": 0.05,
     "intersede_stale_days": 30,
     "aging_buckets": [30, 60, 90],
+    # SAC E2 (D12): centros de distribucion Willard — "extensible sin migracion"
+    # (v0.5 §6.5); pereira/medellin se agregan por system PATCH al confirmarse
+    "willard_distribution_centers": ["baq", "bog", "monteria", "santa_marta", "motocosta"],
 }
 
 

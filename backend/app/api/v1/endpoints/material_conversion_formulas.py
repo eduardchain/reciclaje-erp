@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_permission
+from app.api.deps import require_org_flag, get_db, require_permission
 from app.schemas.material_conversion_formula import (
     MaterialConversionFormulaCreate,
     MaterialConversionFormulaListResponse,
@@ -17,14 +17,13 @@ from app.schemas.material_conversion_formula import (
 )
 from app.services.material_conversion_formula import material_conversion_formula
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])  # H2 QA E2: re-gate por flag
 
 
 @router.get("", response_model=MaterialConversionFormulaListResponse)
 def list_conversion_formulas(
     material_id: Optional[UUID] = Query(None),
     formula_type: Optional[str] = Query(None),
-    willard_account_subtype: Optional[str] = Query(None),
     org_context: dict = Depends(require_permission("formulas.view")),
     db: Session = Depends(get_db),
 ):
@@ -34,7 +33,6 @@ def list_conversion_formulas(
         organization_id=org_context["organization_id"],
         material_id=material_id,
         formula_type=formula_type,
-        willard_account_subtype=willard_account_subtype,
     )
     return MaterialConversionFormulaListResponse(items=items, total=len(items))
 
@@ -45,7 +43,7 @@ def get_current_formulas(
     org_context: dict = Depends(require_permission("formulas.view")),
     db: Session = Depends(get_db),
 ):
-    """Formula vigente por (material, sub-cuenta) — el caso SEC retorna 2 filas."""
+    """Formula vigente por material (una por material)."""
     items = material_conversion_formula.get_current(
         db=db,
         organization_id=org_context["organization_id"],

@@ -13,6 +13,8 @@ const SETTING_DEFAULTS: Record<string, unknown> = {
   transfer_tolerance_pct: 0.05,
   intersede_stale_days: 30,
   aging_buckets: [30, 60, 90],
+  // SAC E2 (D12) — espejo del backend
+  willard_distribution_centers: ["baq", "bog", "monteria", "santa_marta", "motocosta"],
 };
 
 /**

@@ -6,6 +6,7 @@ import type {
   DriverCreate,
   DriverUpdate,
   MaterialConversionFormulaCreate,
+  MaterialKgProfileUpsert,
   ServiceTariffCreate,
   VehicleCreate,
   VehicleUpdate,
@@ -69,6 +70,28 @@ export function useCreateFormula() {
       qc.invalidateQueries({ queryKey: ["conversion-formulas"] });
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al registrar formula")),
+  });
+}
+
+// --- Clasificacion Willard del material (material_kg_profile, CC-005) ---
+
+export function useKgProfiles(filters?: { compra_regular?: boolean; willard_world?: string }) {
+  return useQuery({
+    queryKey: ["kg-profiles", "list", filters ?? {}],
+    queryFn: () => sacConfigService.getKgProfiles(filters),
+  });
+}
+
+export function useUpsertKgProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ materialId, data }: { materialId: string; data: MaterialKgProfileUpsert }) =>
+      sacConfigService.upsertKgProfile(materialId, data),
+    onSuccess: () => {
+      toast.success("Clasificacion guardada");
+      qc.invalidateQueries({ queryKey: ["kg-profiles"] });
+    },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al guardar clasificacion")),
   });
 }
 

@@ -7,12 +7,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_permission, get_db
+from app.api.deps import require_org_flag, require_permission, get_db
 from app.schemas.third_party import (
     ThirdPartyCreate,
     ThirdPartyUpdate,
     ThirdPartyResponse,
-    ThirdPartyBalanceUpdate
+    ThirdPartyBalanceUpdate,
+    RetentionEntityCreate,
+    RetentionEntityResponse,
 )
 from app.services.base import PaginatedResponse
 from app.services.third_party import third_party
@@ -169,6 +171,7 @@ def list_liabilities(
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
     sort_order: str = Query("asc", regex="^(asc|desc)$"),
+    include_system: bool = Query(False, description="Incluir entidades sistema '[Retenciones] X' (SAC E2 D9) para pagarlas via payment_to_supplier"),
     org_context: tuple = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db)
 ):
@@ -185,7 +188,8 @@ def list_liabilities(
         is_active=is_active,
         search=search,
         sort_by=sort_by,
-        sort_order=sort_order
+        sort_order=sort_order,
+        include_system=include_system,
     )
 
 
@@ -249,6 +253,57 @@ def list_generic_third_parties(
         db=db, organization_id=org_id,
         skip=skip, limit=limit, is_active=is_active,
         search=search, sort_by=sort_by, sort_order=sort_order,
+    )
+
+
+# --- Entidades de retencion (addendum §8; SAC E2 D9) --- #
+# Rutas ESTATICAS: declaradas antes de /{third_party_id} para no ser capturadas.
+
+@router.get(
+    "/retention-entities",
+    response_model=list[RetentionEntityResponse],
+    dependencies=[Depends(require_org_flag("kg_ledger_enabled"))],
+)
+def list_retention_entities_endpoint(
+    org_context: tuple = Depends(require_permission("third_parties.view")),
+    db: Session = Depends(get_db),
+):
+    """Hogar de las entidades '[Retenciones] X' (grupo en Pasivos + selector
+    de municipio ICA al liquidar). Lista estructurada con saldo — el formato
+    canonico de nombres lo parsea su modulo dueño."""
+    from app.services.retention_entities import list_retention_entities
+    return list_retention_entities(db, org_context["organization_id"])
+
+
+@router.post(
+    "/retention-entities",
+    response_model=RetentionEntityResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_org_flag("kg_ledger_enabled"))],
+)
+def create_retention_entity_endpoint(
+    data: RetentionEntityCreate,
+    org_context: tuple = Depends(require_permission("third_parties.create")),
+    db: Session = Depends(get_db),
+):
+    """Pre-crear la entidad ICA de un municipio (get-or-create idempotente,
+    matching H4 — 'bogota' == 'Bogotá' devuelven la MISMA entidad). Solo ICA:
+    ReteFuente/ReteIVA nacen solos al liquidar. Alimenta el selector de
+    municipio de la liquidacion (mata el typo-duplicado desde la UI)."""
+    from app.services.retention_entities import ICA_PREFIX, resolve_retention_entity
+
+    org_id = org_context["organization_id"]
+    entity = resolve_retention_entity(db, org_id, data.retention_type, data.municipality)
+    db.commit()
+    db.refresh(entity)
+    municipality = entity.name[len(ICA_PREFIX):] if entity.name.startswith(ICA_PREFIX) else None
+    return RetentionEntityResponse(
+        id=entity.id,
+        retention_type=data.retention_type,
+        municipality=municipality,
+        name=entity.name,
+        current_balance=float(entity.current_balance),
+        is_active=entity.is_active,
     )
 
 

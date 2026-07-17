@@ -11,36 +11,26 @@ Append-only: solo Create y Response, sin Update.
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Literal, Optional, Union
+from typing import Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
+# CC-002: se elimino scrap_with_terminal_to_lead — scrap-con-borne es un
+# material mas con su % (drosses_to_lead). Quedan 2 formas segun la unidad.
 FormulaType = Literal[
     "battery_to_lead",
     "drosses_to_lead",
-    "scrap_with_terminal_to_lead",
     "custom",
 ]
 
-def _lowercase_str(v):
-    """D6: willard_account_subtype input case-insensitive -> persiste lower."""
-    return v.strip().lower() if isinstance(v, str) else v
-
-
-WillardSubtype = Annotated[Literal["escurrido", "pinza"], BeforeValidator(_lowercase_str)]
-
 # D11c — coherencia formula_type <-> Material.default_unit (Anexo D opera
-# battery sobre unidades fisicas; drosses y scrap sobre kg)
+# battery sobre unidades fisicas; drosses sobre kg). Con 2 tipos, el tipo es
+# funcion de la unidad: unidad -> battery_to_lead; kg -> drosses_to_lead.
 EXPECTED_UNIT_BY_FORMULA_TYPE: dict = {
     "battery_to_lead": "unidad",
     "drosses_to_lead": "kg",
-    "scrap_with_terminal_to_lead": "kg",
 }
-
-# D11d — el subtype discrimina FORMULAS dentro de la cuenta Willard Drosses
-# (caso SEC); sobre battery_to_lead multiplicaria vigencias fantasma
-SUBTYPE_ALLOWED_FORMULA_TYPES = ("drosses_to_lead", "scrap_with_terminal_to_lead")
 
 
 class BatteryToLeadParams(BaseModel):
@@ -53,36 +43,26 @@ class BatteryToLeadParams(BaseModel):
 
 
 class DrossesToLeadParams(BaseModel):
-    """Porcentaje de plomo del dross (0-1]."""
+    """Porcentaje de plomo del dross (0-1]. Cubre scrap-con-borne (CC-002)."""
     model_config = ConfigDict(extra="forbid")
 
     lead_percentage: Decimal = Field(..., gt=0, le=1)
 
 
-class ScrapWithTerminalParams(BaseModel):
-    """Factor de scrap + peso de borne (kg absolutos, v0.5 Anexo D / D6b)."""
-    model_config = ConfigDict(extra="forbid")
-
-    scrap_factor: Decimal = Field(..., gt=0, le=1)
-    terminal_weight_kg: Decimal = Field(..., ge=0)
-    material_reference: Optional[str] = None
-
-
 PARAMS_MODEL_BY_TYPE = {
     "battery_to_lead": BatteryToLeadParams,
     "drosses_to_lead": DrossesToLeadParams,
-    "scrap_with_terminal_to_lead": ScrapWithTerminalParams,
 }
 
-FormulaParams = Union[BatteryToLeadParams, DrossesToLeadParams, ScrapWithTerminalParams]
+FormulaParams = Union[BatteryToLeadParams, DrossesToLeadParams]
 
 
 class MaterialConversionFormulaCreate(BaseModel):
-    """Crear nueva version de formula (append-only)."""
+    """Crear nueva version de formula (append-only). formula_type lo auto-deriva
+    el frontend de la unidad del material; el servicio valida coherencia."""
     material_id: UUID
     formula_type: FormulaType
     parameters: dict
-    willard_account_subtype: Optional[WillardSubtype] = None
     notes: Optional[str] = Field(None, max_length=500)
 
     _parsed_params: Optional[FormulaParams] = PrivateAttr(default=None)
@@ -119,7 +99,6 @@ class MaterialConversionFormulaResponse(BaseModel):
     material_unit: Optional[str] = None
     formula_type: str
     parameters: dict
-    willard_account_subtype: Optional[str] = None
     notes: Optional[str] = None
     created_by: UUID
     created_by_name: Optional[str] = None

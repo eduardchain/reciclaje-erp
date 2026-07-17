@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_permission
+from app.api.deps import require_org_flag, get_db, require_permission
 from app.schemas.fleet import (
     DriverCreate,
     DriverResponse,
@@ -21,8 +21,8 @@ from app.schemas.fleet import (
 from app.services.base import PaginatedResponse
 from app.services.fleet import driver, vehicle
 
-drivers_router = APIRouter()
-vehicles_router = APIRouter()
+drivers_router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])  # H2 QA E2: re-gate por flag
+vehicles_router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])  # H2 QA E2: re-gate por flag
 
 
 # --------------------------------------------------------------------------

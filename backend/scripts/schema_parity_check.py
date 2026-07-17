@@ -95,9 +95,30 @@ E1_MARKERS = (
 
 
 def snapshot(engine):
-    """Snapshot del schema public: columnas, indices y constraints por tabla."""
-    snap = {"columns": defaultdict(dict), "indexes": defaultdict(dict), "constraints": defaultdict(dict)}
+    """Snapshot del schema public: columnas, indices, constraints y enums."""
+    snap = {
+        "columns": defaultdict(dict),
+        "indexes": defaultdict(dict),
+        "constraints": defaultdict(dict),
+        "enums": defaultdict(dict),
+    }
     with engine.connect() as conn:
+        # Extension E2 (plan-sac-e2 D3): labels de pg_enum — el gate era ciego aqui
+        # y los ALTER TYPE ADD VALUE de E2 son los primeros valores nuevos post-gate.
+        # Se comparan como SET ordenado alfabeticamente (ADD VALUE appendea al final:
+        # el orden fisico difiere legitimamente entre dev-migrado y create_all).
+        rows = conn.execute(text(
+            "SELECT t.typname, e.enumlabel FROM pg_enum e "
+            "JOIN pg_type t ON t.oid = e.enumtypid "
+            "JOIN pg_namespace n ON n.oid = t.typnamespace "
+            "WHERE n.nspname='public' ORDER BY t.typname, e.enumlabel"
+        )).fetchall()
+        enum_labels = defaultdict(list)
+        for typname, label in rows:
+            enum_labels[typname].append(label)
+        for typname, labels in enum_labels.items():
+            snap["enums"]["(enums)"][typname] = ", ".join(sorted(labels))
+
         rows = conn.execute(text(
             "SELECT table_name, column_name, data_type, character_maximum_length, "
             "       numeric_precision, numeric_scale, is_nullable "
@@ -185,6 +206,7 @@ def main():
     problems += diff_section("columna", dev_snap["columns"], test_snap["columns"])
     problems += diff_section("indice", dev_snap["indexes"], test_snap["indexes"])
     problems += diff_section("constraint", dev_snap["constraints"], test_snap["constraints"])
+    problems += diff_section("enum", dev_snap["enums"], test_snap["enums"])
 
     # Visibilidad H3: los indices especiales verbatim en ambos lados
     print("=== Indices foco H3 (verbatim, ambos lados identicos si no aparecen en el diff) ===")

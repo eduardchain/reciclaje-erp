@@ -756,6 +756,24 @@ class ReportService:
             )
         ))
 
+        # SAC E2 D8 — 8a fuente: anulacion de ordenes de recepcion Willard.
+        # Solo lado annul (D2: la entrada es identidad, adjustment 0 al confirmar
+        # por construccion — el confirm-side NO existe). Fechada por annulled_at.
+        from app.models.inbound_order import InboundOrder as _IO
+        rev_inbound_filters = [
+            _IO.organization_id == organization_id,
+            _IO.status == "annulled",
+            _IO.annul_cost_adjustment != 0,
+        ]
+        if has_dates:
+            rev_inbound_filters += [_IO.annulled_at >= dt_from, _IO.annulled_at < dt_to]
+        oversell_from_inbound_annuls = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(_IO.annul_cost_adjustment), 0))
+                .where(*rev_inbound_filters)
+            )
+        ))
+
         oversell_adjustment = (
             oversell_from_purchases
             + oversell_from_cancellations
@@ -764,6 +782,7 @@ class ReportService:
             + oversell_from_purchase_cancels
             + oversell_from_adjustment_annuls
             + oversell_from_transformation_annuls
+            + oversell_from_inbound_annuls
         )
 
         # 4. Ajustes de terceros (perdida/ganancia)
@@ -2307,11 +2326,13 @@ class ReportService:
         #   reversion que existe pre-Fase 5).
         from app.models.inventory_adjustment import InventoryAdjustment as _IA
         from app.models.material_transformation import MaterialTransformation as _MT
+        from app.models.inbound_order import InboundOrder as _IOrd
 
         MCH_FASE5_REVERSAL_TYPES = [
             "purchase_cancellation",
             "adjustment_annulment",
             "transformation_annulment",
+            "inbound_annulment",  # SAC E2 D8 (extension H2)
         ]
         mch_source_is_cancelled = or_(
             and_(
@@ -2338,6 +2359,17 @@ class ReportService:
                     select(_MT.id).where(
                         _MT.id == MaterialCostHistory.source_id,
                         _MT.status == "annulled",
+                    )
+                ),
+            ),
+            # SAC E2 D8 (extension H2): recepciones Willard de ordenes anuladas
+            # — su checkpoint de avg no debe verse en cortes (doctrina #41)
+            and_(
+                MaterialCostHistory.source_type == "inbound_receipt",
+                exists(
+                    select(_IOrd.id).where(
+                        _IOrd.id == MaterialCostHistory.source_id,
+                        _IOrd.status == "annulled",
                     )
                 ),
             ),

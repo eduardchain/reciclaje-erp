@@ -2,7 +2,7 @@
 Tests SAC E1 — Configuracion (plan-sac-e1-configuracion.md §8).
 
 Cubre: ServiceTariff (append-only, D11a, tiebreaker), MaterialConversionFormula
-(Anexo D por formula_type, caso SEC, D11b/c/d, normalizacion subtype),
+(Anexo D por formula_type, 2 tipos, una vigente por material — CC-001/002),
 Driver/Vehicle (D14 placa activa), y constraints de modelos (CHECKs +
 UNIQUE NULLS NOT DISTINCT de kg_ledger_accounts, delta_kg != 0) — validos
 contra el schema de create_all porque los constraints viven en los modelos (D13).
@@ -16,7 +16,6 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.security import get_password_hash, create_access_token
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
-from app.models.material_conversion_formula import MaterialConversionFormula
 from app.models.service_tariff import ServiceTariff
 from app.models.third_party import ThirdParty
 from app.models.user import User, OrganizationMember
@@ -40,6 +39,21 @@ CANONICAL = {
 # ---------------------------------------------------------------------------
 # Fixtures / helpers locales
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _enable_kg_ledger_flag(db_session, test_organization, test_organization2):
+    """Enciende kg_ledger_enabled en ambas orgs de test.
+
+    Desde E2 (H2 QA: re-gate de los routers E1 por flag), /service-tariffs,
+    /material-conversion-formulas y /drivers|/vehicles responden 403 con el
+    flag apagado — estos tests ejercitan la FUNCIONALIDAD, no el gate (el
+    gate tiene sus propios tests en test_sac_e2_*). JSONB sin MutableDict:
+    reasignar el dict completo (regla D3-E1).
+    """
+    for org in (test_organization, test_organization2):
+        org.settings = {"kg_ledger_enabled": True}
+    db_session.commit()
+
 
 @pytest.fixture
 def org2_admin_headers(db_session, test_organization2):
@@ -98,14 +112,12 @@ def _post_tariff(client, headers, code="maquila_willard", price="2097.00", unit=
 
 
 def _post_formula(client, headers, material_id, ftype="drosses_to_lead",
-                  params=None, subtype=None, notes=None):
+                  params=None, notes=None):
     body = {
         "material_id": str(material_id),
         "formula_type": ftype,
         "parameters": params if params is not None else {"lead_percentage": 0.53},
     }
-    if subtype is not None:
-        body["willard_account_subtype"] = subtype
     if notes:
         body["notes"] = notes
     return client.post(FORMULAS_URL, headers=headers, json=body)
@@ -267,44 +279,31 @@ class TestMaterialConversionFormula:
         assert resp.status_code == 201, resp.text
         assert resp.json()["parameters"] == {"lead_percentage": 0.53}
 
-    def test_create_scrap_formula(self, client, org_headers, db_session, test_organization):
+    def test_scrap_type_rejected_422(self, client, org_headers, db_session, test_organization):
+        """CC-002: scrap_with_terminal_to_lead se elimino — scrap-con-borne es
+        un material mas con su % (drosses_to_lead)."""
         mat = _mat(db_session, test_organization.id, "SEC", unit="kg")
         resp = _post_formula(
             client, org_headers, mat.id, "scrap_with_terminal_to_lead",
             {"scrap_factor": 0.56, "terminal_weight_kg": 50},
-            subtype="escurrido",
         )
-        assert resp.status_code == 201, resp.text
-        assert resp.json()["parameters"] == {"scrap_factor": 0.56, "terminal_weight_kg": 50.0}
+        assert resp.status_code == 422
 
-    def test_sec_dual_subtypes_current_returns_both(
+    def test_current_one_vigente_per_material(
         self, client, org_headers, db_session, test_organization
     ):
-        """Caso SEC (§6.4): dos formulas vigentes sobre el MISMO material,
-        discriminadas por subtype; una nueva version solo reemplaza la suya."""
-        mat = _mat(db_session, test_organization.id, "SEC", unit="kg")
-        _post_formula(client, org_headers, mat.id, "scrap_with_terminal_to_lead",
-                      {"scrap_factor": 0.56, "terminal_weight_kg": 50}, subtype="escurrido")
-        _post_formula(client, org_headers, mat.id, "scrap_with_terminal_to_lead",
-                      {"scrap_factor": 0.59, "terminal_weight_kg": 50}, subtype="pinza")
+        """CC-001: una sola formula vigente por material (sin subtipo). Una nueva
+        version reemplaza la vigente; el historico las conserva todas."""
+        mat = _mat(db_session, test_organization.id, "SECO-PINZA", unit="kg")
+        _post_formula(client, org_headers, mat.id, "drosses_to_lead", {"lead_percentage": 0.56})
+        _post_formula(client, org_headers, mat.id, "drosses_to_lead", {"lead_percentage": 0.59})
 
         current = client.get(f"{FORMULAS_URL}/current", headers=org_headers).json()
-        assert current["total"] == 2
-        by_subtype = {i["willard_account_subtype"]: i for i in current["items"]}
-        assert by_subtype["escurrido"]["parameters"]["scrap_factor"] == 0.56
-        assert by_subtype["pinza"]["parameters"]["scrap_factor"] == 0.59
+        assert current["total"] == 1
+        assert current["items"][0]["parameters"]["lead_percentage"] == 0.59  # la mas reciente
 
-        # Nueva version de escurrido — pinza queda intacta
-        _post_formula(client, org_headers, mat.id, "scrap_with_terminal_to_lead",
-                      {"scrap_factor": 0.57, "terminal_weight_kg": 50}, subtype="escurrido")
-        current = client.get(f"{FORMULAS_URL}/current", headers=org_headers).json()
-        assert current["total"] == 2
-        by_subtype = {i["willard_account_subtype"]: i for i in current["items"]}
-        assert by_subtype["escurrido"]["parameters"]["scrap_factor"] == 0.57
-        assert by_subtype["pinza"]["parameters"]["scrap_factor"] == 0.59
-
-        # Historico completo: 3 versiones
-        assert client.get(FORMULAS_URL, headers=org_headers).json()["total"] == 3
+        # Historico completo: 2 versiones
+        assert client.get(FORMULAS_URL, headers=org_headers).json()["total"] == 2
 
     def test_invalid_parameters_422(self, client, org_headers, db_session, test_organization):
         mat_kg = _mat(db_session, test_organization.id, "DROSS-X", unit="kg")
@@ -332,7 +331,8 @@ class TestMaterialConversionFormula:
     def test_unit_incoherence_422_all_types(
         self, client, org_headers, db_session, test_organization
     ):
-        """D11c: battery->unidad, drosses->kg, scrap->kg."""
+        """D11c: battery->unidad, drosses->kg. El tipo se deriva de la unidad;
+        el servicio rechaza el incoherente."""
         mat_kg = _mat(db_session, test_organization.id, "CHATARRA", unit="kg")
         mat_un = _mat(db_session, test_organization.id, "BAT-U", unit="unidad")
 
@@ -342,55 +342,6 @@ class TestMaterialConversionFormula:
 
         resp = _post_formula(client, org_headers, mat_un.id, "drosses_to_lead",
                              {"lead_percentage": 0.5})
-        assert resp.status_code == 422
-
-        resp = _post_formula(client, org_headers, mat_un.id, "scrap_with_terminal_to_lead",
-                             {"scrap_factor": 0.5, "terminal_weight_kg": 10})
-        assert resp.status_code == 422
-
-    def test_subtype_on_battery_422(self, client, org_headers, db_session, test_organization):
-        """D11d: subtype solo discrimina drosses/scrap — sobre battery crearia
-        vigencias fantasma por (material, subtype)."""
-        mat = _mat(db_session, test_organization.id, "BAT-S", unit="unidad")
-        resp = _post_formula(client, org_headers, mat.id, "battery_to_lead",
-                             {"kg_lead_per_unit": 2.5}, subtype="escurrido")
-        assert resp.status_code == 422
-
-    def test_subtype_uppercase_normalizes_to_lower(
-        self, client, org_headers, db_session, test_organization
-    ):
-        """D6: input case-insensitive -> persiste lower."""
-        mat = _mat(db_session, test_organization.id, "SEC-UP", unit="kg")
-        resp = _post_formula(client, org_headers, mat.id, "scrap_with_terminal_to_lead",
-                             {"scrap_factor": 0.56, "terminal_weight_kg": 50},
-                             subtype="ESCURRIDO")
-        assert resp.status_code == 201, resp.text
-        assert resp.json()["willard_account_subtype"] == "escurrido"
-
-        db_session.expire_all()
-        row = db_session.execute(
-            select(MaterialConversionFormula).where(
-                MaterialConversionFormula.material_id == mat.id
-            )
-        ).scalar_one()
-        assert row.willard_account_subtype == "escurrido"
-
-    def test_sec_rule_no_mixing_null_and_subtype_422(
-        self, client, org_headers, db_session, test_organization
-    ):
-        """Regla SEC: un material usa subtypes O no los usa — mezclar es ambiguo."""
-        mat = _mat(db_session, test_organization.id, "DROSS-M", unit="kg")
-        _post_formula(client, org_headers, mat.id, "drosses_to_lead",
-                      {"lead_percentage": 0.5}, subtype="escurrido")
-        resp = _post_formula(client, org_headers, mat.id, "drosses_to_lead",
-                             {"lead_percentage": 0.6})  # sin subtype -> mezcla
-        assert resp.status_code == 422
-
-        mat2 = _mat(db_session, test_organization.id, "DROSS-N", unit="kg")
-        _post_formula(client, org_headers, mat2.id, "drosses_to_lead",
-                      {"lead_percentage": 0.5})  # sin subtype
-        resp = _post_formula(client, org_headers, mat2.id, "drosses_to_lead",
-                             {"lead_percentage": 0.6}, subtype="pinza")  # mezcla inversa
         assert resp.status_code == 422
 
     def test_material_other_org_404(

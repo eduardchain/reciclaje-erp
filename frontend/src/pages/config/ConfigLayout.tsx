@@ -16,7 +16,7 @@ const tabs = [
   { value: ROUTES.CONFIG_PRICE_LISTS, label: "Precios", permission: "materials.view_prices" },
   { value: ROUTES.CONFIG_THIRD_PARTY_CATEGORIES, label: "Cat. Terceros", permission: "third_parties.create" },
   { value: ROUTES.CONFIG_TARIFFS, label: "Tarifas", permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
-  { value: ROUTES.CONFIG_FORMULAS, label: "Formulas", permission: "formulas.view", orgFlag: "kg_ledger_enabled" },
+  { value: ROUTES.CONFIG_FORMULAS, label: "Materiales (kg)", permission: "formulas.view", orgFlag: "kg_ledger_enabled" },
   { value: ROUTES.CONFIG_FLEET, label: "Conductores y Vehiculos", permission: "config.view_fleet", orgFlag: "kg_ledger_enabled" },
 ];
 

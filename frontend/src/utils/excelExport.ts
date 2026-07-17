@@ -1193,3 +1193,44 @@ export function exportInactiveBalancesExcel(data: InactiveBalancesResponse, cont
   XLSX.utils.book_append_sheet(wb, ws, "Dinero Inactivo");
   XLSX.writeFile(wb, `dinero_inactivo_${data.as_of.slice(0, 10)}.xlsx`);
 }
+
+// --- Materiales (kg) — catálogo SAC con clasificación y factor (paquete UX W2) ---
+
+export interface MaterialKgExportRow {
+  code: string;
+  name: string;
+  unit: string;
+  category: string;
+  businessUnit: string;
+  classification: string;
+  alsoCompra: boolean;
+  factor: string;
+  since: string;
+  by: string;
+  description: string;
+}
+
+export function exportMaterialsKgExcel(rows: MaterialKgExportRow[]) {
+  const data: (string | number | null)[][] = [];
+  data.push(["Materiales (kg) — Catálogo con clasificación y factores"]);
+  data.push([`Generado: ${formatDate(new Date().toISOString())}`]);
+  data.push([]);
+  data.push([
+    "Código", "Nombre", "Unidad", "Categoría", "Unidad de Negocio",
+    "Clasificación", "También Compra", "Factor Vigente", "Desde", "Por", "Descripción",
+  ]);
+  for (const r of rows) {
+    data.push([
+      r.code, r.name, r.unit, r.category, r.businessUnit,
+      r.classification, r.alsoCompra ? "Sí" : "", r.factor, r.since, r.by, r.description,
+    ]);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws["!cols"] = [
+    { wch: 12 }, { wch: 28 }, { wch: 8 }, { wch: 16 }, { wch: 22 },
+    { wch: 22 }, { wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 30 },
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Materiales (kg)");
+  XLSX.writeFile(wb, "materiales_kg.xlsx");
+}

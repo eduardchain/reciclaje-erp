@@ -66,6 +66,8 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None) -> dict:
             }
             for comm in (purchase.commissions or [])
         ],
+        # SAC E2 D9 — vacio para compras sin retenciones (clientes actuales)
+        "retentions": list(purchase.retentions or []),
         "created_by_name": None,
         "liquidated_by_name": None,
         "cancelled_by_name": None,
@@ -564,6 +566,7 @@ async def liquidate_purchase(
             payment_account_id=liquidate_data.payment_account_id,
             commissions_data=liquidate_data.commissions,
             liquidation_date=liquidate_data.liquidation_date,
+            retentions_data=liquidate_data.retentions,
         )
         
         response_data = _enrich_purchase_response(purchase, db)

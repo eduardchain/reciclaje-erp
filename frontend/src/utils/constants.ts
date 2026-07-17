@@ -30,6 +30,14 @@ export const ROUTES = {
   DOUBLE_ENTRIES: "/double-entries",
   DOUBLE_ENTRIES_NEW: "/double-entries/new",
 
+  // SAC E2 — Recepcion y Plomo (kg), gated por flag kg_ledger_enabled
+  INBOUND: "/inbound",
+  INBOUND_NEW: "/inbound/new",
+  INBOUND_DETAIL: "/inbound/:id",
+  INBOUND_EDIT: "/inbound/:id/edit",
+  KG_LEDGER: "/kg-ledger",
+  KG_LEDGER_ACCOUNT: "/kg-ledger/:id",
+
   // Tesoreria
   TREASURY: "/treasury",
   TREASURY_NEW: "/treasury/new",

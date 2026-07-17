@@ -36,6 +36,7 @@ import {
   Sheet,
   Receipt,
   Landmark,
+  PackageOpen,
 } from "lucide-react";
 import { cn } from "@/utils";
 import { ROUTES } from "@/utils/constants";
@@ -70,6 +71,14 @@ interface NavItem {
   permission?: string;
   children?: NavChild[];
   superuserOnly?: boolean;
+  // Feature flag de la org (SAC E2, plan §5): NavItem hoja gated por flag.
+  // Regla de no-regresion: las entradas SIN orgFlag jamas tocan el query de settings.
+  orgFlag?: string;
+  // Inverso (paquete UX W1): la entrada se OCULTA si el flag esta encendido.
+  // Degradacion segura: en loading/error flagEnabled=false → visible (status
+  // quo para orgs sin flag). Uso: "Materiales" general se oculta en SAC, cuyo
+  // reemplazo es Config → Materiales (kg); la ruta /materials queda viva.
+  hideWhenOrgFlag?: string;
 }
 
 const systemNavItems: NavItem[] = [
@@ -109,6 +118,20 @@ const orgNavItems: NavItem[] = [
     path: ROUTES.DOUBLE_ENTRIES,
     icon: <ArrowLeftRight className="w-5 h-5" />,
     permission: "double_entries.view",
+  },
+  {
+    name: "Recepción",
+    path: ROUTES.INBOUND,
+    icon: <PackageOpen className="w-5 h-5" />,
+    permission: "purchases.view",
+    orgFlag: "kg_ledger_enabled",
+  },
+  {
+    name: "Plomo (kg)",
+    path: ROUTES.KG_LEDGER,
+    icon: <Scale className="w-5 h-5" />,
+    permission: "kg_ledger.view",
+    orgFlag: "kg_ledger_enabled",
   },
   {
     name: "Tesoreria",
@@ -174,6 +197,9 @@ const orgNavItems: NavItem[] = [
     path: ROUTES.MATERIALS,
     icon: <Boxes className="w-5 h-5" />,
     permission: "materials.view",
+    // W1: en SAC el catalogo vive en Config → Materiales (kg) — esta entrada
+    // duplicaria el alta de materiales (ruido, C1). Ruta /materials sigue viva.
+    hideWhenOrgFlag: "kg_ledger_enabled",
   },
   {
     name: "Configuracion",
@@ -188,7 +214,7 @@ const orgNavItems: NavItem[] = [
       { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" />, permission: "materials.view_prices" },
       { name: "Cat. Terceros", path: ROUTES.CONFIG_THIRD_PARTY_CATEGORIES, icon: <Users className="w-4 h-4" />, permission: "third_parties.create" },
       { name: "Tarifas", path: ROUTES.CONFIG_TARIFFS, icon: <Receipt className="w-4 h-4" />, permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
-      { name: "Formulas", path: ROUTES.CONFIG_FORMULAS, icon: <Calculator className="w-4 h-4" />, permission: "formulas.view", orgFlag: "kg_ledger_enabled" },
+      { name: "Materiales (kg)", path: ROUTES.CONFIG_FORMULAS, icon: <Calculator className="w-4 h-4" />, permission: "formulas.view", orgFlag: "kg_ledger_enabled" },
       { name: "Conductores y Vehiculos", path: ROUTES.CONFIG_FLEET, icon: <Truck className="w-4 h-4" />, permission: "config.view_fleet", orgFlag: "kg_ledger_enabled" },
     ],
   },
@@ -242,6 +268,8 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
     // consultan flagEnabled — en loading/error/settings NULL se ocultan ellas
     // y el resto del sidebar se renderiza identico a hoy.
     const checkFlag = (flag?: string) => !flag || flagEnabled(flag);
+    // W1: ocultar-si-flag — solo la consulta la entrada que lo declara
+    const checkHide = (flag?: string) => !flag || !flagEnabled(flag);
 
     const filtered = orgNavItems
       .map((item) => {
@@ -252,7 +280,7 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
           if (filteredChildren.length === 0) return null;
           return { ...item, children: filteredChildren };
         }
-        if (!checkPerm(item.permission)) return null;
+        if (!checkPerm(item.permission) || !checkFlag(item.orgFlag) || !checkHide(item.hideWhenOrgFlag)) return null;
         return item;
       })
       .filter(Boolean) as NavItem[];

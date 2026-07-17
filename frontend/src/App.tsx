@@ -81,6 +81,12 @@ const BusinessUnitsPage = lazy(() => import("@/pages/config/BusinessUnitsPage"))
 const ExpenseCategoriesPage = lazy(() => import("@/pages/config/ExpenseCategoriesPage"));
 const PriceListsPage = lazy(() => import("@/pages/config/PriceListsPage"));
 const ThirdPartyCategoriesPage = lazy(() => import("@/pages/config/ThirdPartyCategoriesPage"));
+const KgLedgerPage = lazy(() => import("@/pages/kg-ledger/KgLedgerPage"));
+const KgAccountStatementPage = lazy(() => import("@/pages/kg-ledger/KgAccountStatementPage"));
+const InboundOrdersPage = lazy(() => import("@/pages/inbound/InboundOrdersPage"));
+const InboundCreatePage = lazy(() => import("@/pages/inbound/InboundCreatePage"));
+const InboundDetailPage = lazy(() => import("@/pages/inbound/InboundDetailPage"));
+const InboundEditPage = lazy(() => import("@/pages/inbound/InboundEditPage"));
 const TariffsPage = lazy(() => import("@/pages/config/TariffsPage"));
 const FormulasPage = lazy(() => import("@/pages/config/FormulasPage"));
 const FleetPage = lazy(() => import("@/pages/config/FleetPage"));
@@ -139,6 +145,13 @@ function App() {
               <Route path={ROUTES.SALE_EDIT} element={<P permission="sales.edit"><SaleEditPage /></P>} />
               <Route path={ROUTES.SALE_LIQUIDATE} element={<P permission="sales.liquidate"><SaleLiquidatePage /></P>} />
               <Route path={ROUTES.SALE_DETAIL} element={<P permission="sales.view"><SaleDetailPage /></P>} />
+              {/* SAC E2: Recepcion + Plomo (kg) — gated flag + permiso */}
+              <Route path={ROUTES.INBOUND} element={<FP flag="kg_ledger_enabled" permission="purchases.view"><InboundOrdersPage /></FP>} />
+              <Route path={ROUTES.INBOUND_NEW} element={<FP flag="kg_ledger_enabled" permission="purchases.create"><InboundCreatePage /></FP>} />
+              <Route path={ROUTES.INBOUND_EDIT} element={<FP flag="kg_ledger_enabled" permission="purchases.edit"><InboundEditPage /></FP>} />
+              <Route path={ROUTES.INBOUND_DETAIL} element={<FP flag="kg_ledger_enabled" permission="purchases.view"><InboundDetailPage /></FP>} />
+              <Route path={ROUTES.KG_LEDGER} element={<FP flag="kg_ledger_enabled" permission="kg_ledger.view"><KgLedgerPage /></FP>} />
+              <Route path={ROUTES.KG_LEDGER_ACCOUNT} element={<FP flag="kg_ledger_enabled" permission="kg_ledger.view"><KgAccountStatementPage /></FP>} />
               {/* Doble Partida */}
               <Route path={ROUTES.DOUBLE_ENTRIES} element={<P permission="double_entries.view"><DoubleEntriesPage /></P>} />
               <Route path={ROUTES.DOUBLE_ENTRIES_NEW} element={<P permission="double_entries.create"><DoubleEntryCreatePage /></P>} />

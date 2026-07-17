@@ -11,6 +11,7 @@ from .warehouse import Warehouse
 from .business_unit import BusinessUnit
 from .money_account import MoneyAccount
 from .purchase import Purchase, PurchaseLine
+from .purchase_retention import PurchaseRetention
 from .sale import Sale, SaleLine, SaleCommission
 from .inventory_movement import InventoryMovement
 from .double_entry import DoubleEntry, DoubleEntryLine
@@ -30,6 +31,7 @@ from .third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignme
 from .kg_ledger import KgLedgerAccount, KgLedgerMovement, KgLedgerReconciliationSeal
 from .service_tariff import ServiceTariff
 from .material_conversion_formula import MaterialConversionFormula
+from .material_kg_profile import MaterialKgProfile
 from .inbound_order import InboundOrder, InboundOrderLine
 from .plant_process import FurnaceCharge, CrucibleCharge
 from .exception_task import DiscrepancyTask, DailyOkSeal
@@ -80,8 +82,10 @@ __all__ = [
     "KgLedgerReconciliationSeal",
     "ServiceTariff",
     "MaterialConversionFormula",
+    "MaterialKgProfile",
     "InboundOrder",
     "InboundOrderLine",
+    "PurchaseRetention",
     "FurnaceCharge",
     "CrucibleCharge",
     "DiscrepancyTask",

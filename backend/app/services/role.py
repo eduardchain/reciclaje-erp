@@ -118,6 +118,9 @@ PERMISSIONS_CATALOG = [
     ("tariffs.manage", "Gestionar Tarifas", "tariffs", "Permite crear nuevas tarifas de servicio (append-only)", 141),
     ("formulas.view", "Ver Formulas de Conversion", "formulas", "Permite ver formulas de conversion de materiales", 142),
     ("formulas.manage", "Gestionar Formulas de Conversion", "formulas", "Permite crear nuevas formulas de conversion (append-only)", 143),
+    ("kg_ledger.view", "Ver Cuentas en Kg", "kg_ledger", "Permite ver saldos, movimientos y estados de cuenta del KgLedger", 144),
+    ("kg_ledger.manage", "Gestionar Cuentas en Kg", "kg_ledger", "Permite crear y editar la metadata de cuentas KgLedger", 145),
+    ("kg_ledger.manage_adjustments", "Ajustes Manuales de Kg", "kg_ledger", "Permite crear y anular movimientos manuales del KgLedger (auditados)", 146),
 
     # Administracion
     ("admin.manage_users", "Gestionar Usuarios", "admin", "Permite invitar y gestionar usuarios", 200),
@@ -220,6 +223,7 @@ MODULE_DISPLAY_NAMES = {
     "config": "Configuracion",
     "tariffs": "Tarifas",
     "formulas": "Formulas de Conversion",
+    "kg_ledger": "Cuentas en Kg",
     "admin": "Administracion",
 }
 

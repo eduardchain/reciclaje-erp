@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from app.models.money_account import MoneyAccount
     from app.models.material import Material
     from app.models.warehouse import Warehouse
+    from app.models.purchase_retention import PurchaseRetention
 
 
 class Purchase(Base, OrganizationMixin, TimestampMixin):
@@ -218,6 +219,15 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         back_populates="purchase",
         cascade="all, delete-orphan",
         order_by="PurchaseCommission.created_at",
+    )
+
+    # SAC E2 (D9): retenciones tributarias aplicadas al liquidar — vacio para
+    # los 3 clientes existentes (data-gated, cero efecto sin payload)
+    retentions: Mapped[List["PurchaseRetention"]] = relationship(
+        "PurchaseRetention",
+        back_populates="purchase",
+        cascade="all, delete-orphan",
+        order_by="PurchaseRetention.created_at",
     )
 
     double_entry: Mapped[Optional["DoubleEntry"]] = relationship(

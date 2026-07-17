@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Literal, Optional, List
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from app.utils.dates import BusinessDate
 
@@ -114,6 +114,9 @@ class PurchaseCreate(PurchaseBase):
     Payment to supplier is a separate operation via MoneyMovement.
     """
     lines: List[PurchaseLineCreate] = Field(..., min_length=1, description="Purchase lines (at least 1)")
+    # SAC E2 D11: bodega de cabecera opcional — si presente, fuerza el warehouse
+    # de TODAS las lineas (recepcion unificada); ausente = comportamiento actual
+    warehouse_id: Optional[UUID] = Field(None, description="Bodega header (fuerza las lineas, D11)")
     commissions: List[PurchaseCommissionCreate] = Field(default_factory=list, description="Comisiones opcionales")
     auto_liquidate: bool = Field(False, description="Auto-liquidate after creation (1-step workflow)")
     immediate_payment: bool = Field(False, description="Pagar de contado al liquidar (solo con auto_liquidate)")
@@ -197,6 +200,8 @@ class PurchaseResponse(PurchaseBase):
     # Nested lines and commissions
     lines: List[PurchaseLineResponse] = Field(..., description="Purchase lines")
     commissions: List[PurchaseCommissionResponse] = Field(default_factory=list, description="Comisiones de compra")
+    # SAC E2 D9 — retenciones aplicadas en la liquidacion (vacio para los 3 clientes actuales)
+    retentions: List["PurchaseRetentionResponse"] = Field(default_factory=list, description="Retenciones tributarias")
     
     # Double-entry link
     double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
@@ -218,6 +223,43 @@ class PurchaseLiquidateLineUpdate(BaseModel):
     unit_price: Decimal = Field(..., gt=0, description="Precio unitario (debe ser > 0)")
 
 
+class PurchaseRetentionCreate(BaseModel):
+    """Retencion tributaria al liquidar (SAC E2 D9 — data-gated: ausente = cero efecto).
+
+    Fase 1 = captura manual por monto (la tabla de tasas llega del contador).
+    ICA es POR MUNICIPIO (Johana 2026-07-16): municipality obligatorio en ica,
+    prohibido en retefuente/reteiva.
+    """
+    retention_type: Literal["retefuente", "reteiva", "ica"]
+    municipality: Optional[str] = Field(None, min_length=1, max_length=60)
+    rate: Optional[Decimal] = Field(None, gt=0, description="Tasa informativa")
+    base: Optional[Decimal] = Field(None, gt=0, description="Base informativa")
+    amount: Decimal = Field(..., gt=0)
+
+    @model_validator(mode="after")
+    def validate_municipality(self):
+        if self.retention_type == "ica":
+            if not (self.municipality and self.municipality.strip()):
+                raise ValueError("municipality es obligatorio en retenciones ICA (una entidad por municipio)")
+        elif self.municipality is not None:
+            raise ValueError("municipality solo aplica a retenciones ICA")
+        return self
+
+
+class PurchaseRetentionResponse(BaseModel):
+    """Retencion persistida (detalle de compra)."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    third_party_id: UUID
+    retention_type: str
+    municipality: Optional[str] = None
+    rate: Optional[Decimal] = None
+    base: Optional[Decimal] = None
+    amount: Decimal
+    reverted_at: Optional[datetime] = None
+
+
 class PurchaseLiquidateRequest(BaseModel):
     """Schema for liquidating a purchase (confirmar precios, mover stock, actualizar saldo proveedor)."""
     lines: Optional[List[PurchaseLiquidateLineUpdate]] = Field(None, description="Actualizacion opcional de precios por linea")
@@ -225,6 +267,11 @@ class PurchaseLiquidateRequest(BaseModel):
     immediate_payment: bool = Field(False, description="Crear pago inmediato al liquidar")
     payment_account_id: Optional[UUID] = Field(None, description="Cuenta para pago inmediato")
     liquidation_date: Optional[BusinessDate] = Field(None, description="Fecha de liquidacion (default: fecha del documento)")
+    # SAC E2 D9: data-gated — ausente/vacio = camino actual byte a byte;
+    # presente exige flag kg_ledger_enabled (422 en servicio)
+    retentions: Optional[List[PurchaseRetentionCreate]] = Field(
+        None, description="Retenciones tributarias (proveedor recibe neto; requiere kg_ledger_enabled)"
+    )
 
     @model_validator(mode="after")
     def validate_immediate_payment(self):

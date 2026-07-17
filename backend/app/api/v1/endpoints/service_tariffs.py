@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_permission
+from app.api.deps import require_org_flag, get_db, require_permission
 from app.schemas.service_tariff import (
     ServiceTariffCreate,
     ServiceTariffListResponse,
@@ -18,7 +18,7 @@ from app.schemas.service_tariff import (
 )
 from app.services.service_tariff import service_tariff
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])  # H2 QA E2: re-gate por flag
 
 
 @router.get("", response_model=ServiceTariffListResponse)

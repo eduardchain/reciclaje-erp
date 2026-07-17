@@ -39,6 +39,12 @@ class OrgSettingsPayload(BaseModel):
         None,
         description="Cortes de antiguedad para cartera y deuda kg (ej [30,60,90])",
     )
+    # SAC E2 (D12): lista de centros de distribucion Willard — "extensible sin
+    # migracion" (v0.5 §6.5); el inbound valida pertenencia contra esta lista
+    willard_distribution_centers: list[str] | None = Field(
+        None,
+        description="Centros de distribucion Willard validos en la recepcion (ej ['baq','bog','monteria'])",
+    )
 
 
 class OrganizationBase(BaseModel):

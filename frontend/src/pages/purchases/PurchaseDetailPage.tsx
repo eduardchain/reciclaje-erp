@@ -23,6 +23,7 @@ import { usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
 import { CHARGE_TYPE_LABELS } from "@/utils/constants";
+import { RETENTION_TYPE_LABELS } from "@/types/purchase";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
 
@@ -279,6 +280,62 @@ export default function PurchaseDetailPage() {
                   <span>Costo Total Inventario</span>
                   <span className="tabular-nums">
                     {formatCurrency(purchase.total_amount + purchase.commissions.reduce((s, c) => s + c.commission_amount, 0))}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Retenciones aplicadas (SAC D9 — vacío para orgs sin flag) */}
+      {purchase.retentions?.length > 0 && canViewPrices && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Retenciones Aplicadas</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-lg border border-slate-200/80 overflow-x-auto">
+              <Table className="min-w-[480px]">
+                <TableHeader>
+                  <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Tipo</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Municipio</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Monto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {purchase.retentions.map((ret) => (
+                    <TableRow key={ret.id} className={ret.reverted_at ? "opacity-60" : ""}>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5">
+                          <ThirdPartyLink id={ret.third_party_id}>
+                            {RETENTION_TYPE_LABELS[ret.retention_type] ?? ret.retention_type}
+                          </ThirdPartyLink>
+                          {ret.reverted_at && (
+                            <Badge variant="outline" className="bg-rose-100 text-rose-800">Revertida</Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-slate-600">{ret.municipality ?? "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">{formatCurrency(ret.amount)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 mt-3">
+              <div className="max-w-sm ml-auto space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">Total Retenciones</span>
+                  <span className="tabular-nums text-rose-600">
+                    −{formatCurrency(purchase.retentions.reduce((s, r) => s + (r.reverted_at ? 0 : r.amount), 0))}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm font-semibold">
+                  <span>Neto Acreditado al Proveedor</span>
+                  <span className="tabular-nums">
+                    {formatCurrency(purchase.total_amount - purchase.retentions.reduce((s, r) => s + (r.reverted_at ? 0 : r.amount), 0))}
                   </span>
                 </div>
               </div>

@@ -1,5 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { thirdPartyService } from "@/services/thirdParties";
+import { getApiErrorMessage } from "@/utils/formatters";
+import type { RetentionEntityCreate } from "@/types/third-party";
 import { materialService } from "@/services/materials";
 import { warehouseService } from "@/services/warehouses";
 import { moneyAccountService } from "@/services/moneyAccounts";
@@ -97,10 +100,44 @@ export function useProvisions(search?: string, is_active?: boolean) {
   });
 }
 
-export function useLiabilities(search?: string, is_active?: boolean) {
+export function useLiabilities(search?: string, is_active?: boolean, includeSystem?: boolean) {
+  // includeSystem (SAC E2 D9): suma las entidades "[Retenciones] X" — usar SOLO
+  // en selectores de PAGO (sus saldos nacen de liquidaciones, no de causaciones).
   return useQuery({
-    queryKey: ["third-parties", "liabilities", search, is_active],
-    queryFn: () => thirdPartyService.getLiabilities({ search, limit: 500, is_active }),
+    queryKey: ["third-parties", "liabilities", search, is_active, includeSystem ?? false],
+    queryFn: () =>
+      thirdPartyService.getLiabilities({
+        search,
+        limit: 500,
+        is_active,
+        ...(includeSystem ? { include_system: true } : {}),
+      }),
+  });
+}
+
+export function useRetentionEntities(enabled: boolean) {
+  // F2 QA: el endpoint es flag-gated (kg_ledger_enabled) y este hook vive en
+  // páginas COMPARTIDAS con las orgs prod (LiabilitiesPage, Liquidate) — pasar
+  // SIEMPRE enabled=flagEnabled("kg_ledger_enabled"): sin flag, cero requests.
+  return useQuery({
+    queryKey: ["third-parties", "retention-entities"],
+    queryFn: () => thirdPartyService.getRetentionEntities(),
+    enabled,
+  });
+}
+
+export function useCreateRetentionEntity() {
+  // POST idempotente (matching sin acentos/casing en backend): repetir un
+  // municipio existente devuelve la MISMA entidad — sin riesgo de duplicados.
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: RetentionEntityCreate) => thirdPartyService.createRetentionEntity(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["third-parties"] });
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al crear el municipio ICA"));
+    },
   });
 }
 

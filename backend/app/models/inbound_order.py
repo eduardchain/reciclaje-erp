@@ -28,6 +28,7 @@ from app.models.base import Base, GUID, OrganizationMixin, TimestampMixin
 if TYPE_CHECKING:
     from app.models.fleet import Driver, Vehicle
     from app.models.material import Material
+    from app.models.purchase import Purchase
     from app.models.third_party import ThirdParty
     from app.models.warehouse import Warehouse
 
@@ -48,7 +49,8 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
     inbound_type: Mapped[str] = mapped_column(
         String(24),
         nullable=False,
-        comment="purchase | postconsumo_baterias | drosses | ruta | reventa",
+        comment="purchase | willard (CC-004: colapso 4->2; el ruteo kg es por-linea "
+        "segun willard_world del material)",
     )
 
     warehouse_id: Mapped[UUID] = mapped_column(
@@ -85,12 +87,6 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
         comment="Informativo (v0.5 §6.5)",
     )
 
-    willard_account_subtype: Mapped[Optional[str]] = mapped_column(
-        String(16),
-        nullable=True,
-        comment="escurrido | pinza — obligatorio si el material es SEC (v0.5 §6.4)",
-    )
-
     goes_directly_to_jm: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -103,6 +99,22 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
         nullable=False,
         default="draft",
         comment="draft | confirmed | annulled",
+    )
+
+    # SAC E2 (espejo migracion e8f1a2b3c4d5)
+    purchase_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("purchases.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Purchase(registered) derivada para tipos purchase/ruta (D7)",
+    )
+
+    annul_cost_adjustment: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default="0",
+        comment="Diferencia de remocion ponderada al anular (D8, patron #66) — 8a fuente linea P&L oversell",
     )
 
     annulled_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
@@ -126,6 +138,7 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
     third_party: Mapped["ThirdParty"] = relationship("ThirdParty", foreign_keys=[third_party_id])
     driver: Mapped[Optional["Driver"]] = relationship("Driver", foreign_keys=[driver_id])
     vehicle: Mapped[Optional["Vehicle"]] = relationship("Vehicle", foreign_keys=[vehicle_id])
+    purchase: Mapped[Optional["Purchase"]] = relationship("Purchase", foreign_keys=[purchase_id])
     lines: Mapped[list["InboundOrderLine"]] = relationship(
         "InboundOrderLine",
         back_populates="inbound_order",
@@ -161,6 +174,19 @@ class InboundOrderLine(Base, OrganizationMixin, TimestampMixin):
         String(10),
         nullable=True,
         comment="Snapshot de la unidad al capturar (kg | unidad)",
+    )
+
+    # SAC E2 (espejo migracion e8f1a2b3c4d5)
+    unit_price: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Precio de captura opcional (tipos purchase; el definitivo lo fija la liquidacion §7.2)",
+    )
+
+    unit_cost: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Snapshot del costo promedio de entrada (tipos Willard, D8 — la reversa exacta lee de aca)",
     )
 
     scale_weight_kg: Mapped[Optional[Decimal]] = mapped_column(

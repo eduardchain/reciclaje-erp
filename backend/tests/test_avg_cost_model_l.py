@@ -1051,7 +1051,16 @@ class TestInventoryStressWalk:
                             + ajustes_inventario_in/out (qty x unit_cost, confirmed)
                             + ajustes_oversell (compras activas + cancels
                               + cost_adjustment de ajustes confirmed)
+                            + recepciones Willard confirmadas (qty x unit_cost
+                              snapshot — identidad D2, SAC E2)
+                            + annul_cost_adjustment de ordenes inbound (TODAS:
+                              anuladas y confirmadas-editadas — el residuo de
+                              edicion D18 vive en el header)
         con tolerancia = $1 + $0.005 x kg (redondeo Numeric(15,2) de unit_cost).
+
+    I6 (SAC E2). LIBRO KG: saldo de la cuenta kg == 0.53 x Σ(qty de lineas de
+        ordenes drosses confirmadas) — el libro paralelo cierra contra el
+        documento fuente, no contra si mismo.
 
     Fase 5 (remocion ponderada): el walk anula y cancela SIN restricciones — ya
     no existe la regla de invalidacion de candidatos que PR-4 necesitaba (las
@@ -1134,37 +1143,127 @@ class TestInventoryStressWalk:
             sa_func.coalesce(sa_func.sum(IA.annul_cost_adjustment), 0)
         ).filter(IA.material_id == material.id, IA.status == "annulled").scalar()
 
+        # SAC E2: recepciones Willard — valor entrado a identidad (snapshot) de
+        # ordenes confirmadas + residuo de remocion (annul_cost_adjustment de
+        # TODAS las ordenes: anuladas y confirmadas-editadas, D8/D18)
+        from app.models.inbound_order import InboundOrder as IO, InboundOrderLine as IOL
+        inbound_value = db_session.query(
+            sa_func.coalesce(sa_func.sum(IOL.quantity * IOL.unit_cost), 0)
+        ).join(IO, IOL.inbound_order_id == IO.id).filter(
+            IOL.material_id == material.id, IO.status == "confirmed",
+            IOL.unit_cost.isnot(None),
+        ).scalar()
+        inbound_annul_adj = db_session.query(
+            sa_func.coalesce(sa_func.sum(IO.annul_cost_adjustment), 0)
+        ).filter(
+            IO.id.in_(
+                db_session.query(IOL.inbound_order_id).filter(
+                    IOL.material_id == material.id
+                )
+            )
+        ).scalar()
+
         pool_value = material.current_stock_liquidated * material.current_average_cost
         expected = (
             Decimal(str(in_total)) - Decimal(str(cogs_total))
             + Decimal(str(purchase_adj)) + Decimal(str(cancel_adj))
             + Decimal(str(ia_value)) + Decimal(str(ia_cost_adj))
             + Decimal(str(purchase_cancel_adj)) + Decimal(str(ia_annul_adj))
+            + Decimal(str(inbound_value)) + Decimal(str(inbound_annul_adj))
         )
         tolerance = Decimal("1") + tol_qty * Decimal("0.005")
         assert abs(pool_value - expected) <= tolerance, (
             f"Conservacion rota: pool={pool_value} vs esperado={expected} "
             f"(in={in_total} cogs={cogs_total} adj_compras={purchase_adj} adj_cancels={cancel_adj} "
             f"aj_inv={ia_value} aj_inv_cost={ia_cost_adj} "
-            f"cxl_compras={purchase_cancel_adj} annul_aj={ia_annul_adj}, tol={tolerance})"
+            f"cxl_compras={purchase_cancel_adj} annul_aj={ia_annul_adj} "
+            f"inbound={inbound_value} inbound_annul={inbound_annul_adj}, tol={tolerance})"
+        )
+
+        # I6 — libro kg contra documento fuente (solo si el walk creo inbounds)
+        from app.models.kg_ledger import KgLedgerMovement as KGM
+        kg_balance = db_session.query(
+            sa_func.coalesce(sa_func.sum(KGM.delta_kg), 0)
+        ).filter(KGM.status == "confirmed").scalar()
+        expected_kg = db_session.query(
+            sa_func.coalesce(sa_func.sum(IOL.quantity), 0)
+        ).join(IO, IOL.inbound_order_id == IO.id).filter(
+            IOL.material_id == material.id, IO.status == "confirmed",
+            IO.inbound_type == "willard",
+        ).scalar()
+        expected_kg = (Decimal(str(expected_kg)) * Decimal("0.53"))
+        assert abs(Decimal(str(kg_balance)) - expected_kg) <= Decimal("0.01"), (
+            f"Libro kg descuadrado: {kg_balance} vs {expected_kg}"
         )
 
     def test_random_walk_all_invariants_hold(
         self, client, org_headers, db_session, ml_supplier, ml_customer, ml_warehouse, ml_material
     ):
         import random
+        from datetime import datetime as _dt, timezone as _tz
         rng = random.Random(20260710)  # semilla fija → reproducible
+
+        # Setup SAC E2: flag + formula drosses + cuenta kg (las acciones
+        # inbound del walk ejercitan identidad D2 + remocion D8 + edicion D18)
+        from app.models.organization import Organization
+        org = db_session.get(Organization, ml_material.organization_id)
+        org.settings = {"kg_ledger_enabled": True}
+        db_session.commit()
+        resp = client.post(
+            "/api/v1/material-conversion-formulas",
+            headers=org_headers,
+            json={
+                "material_id": str(ml_material.id),
+                "formula_type": "drosses_to_lead",
+                "parameters": {"lead_percentage": 0.53},
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        # Clasificacion Willard (CC-005): rutea la linea al libro drosses
+        resp = client.put(
+            f"/api/v1/material-kg-profiles/{ml_material.id}",
+            headers=org_headers,
+            json={"compra_regular": False, "willard_world": "drosses"},
+        )
+        assert resp.status_code == 200, resp.text
+        resp = client.post(
+            "/api/v1/kg-ledger/accounts",
+            headers=org_headers,
+            json={
+                "code": "WALK-DROSS",
+                "display_name": "Willard Drosses Walk",
+                "account_type": "willard_drosses",
+                "third_party_id": str(ml_supplier.id),
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        _today = _dt.now(_tz.utc).date().isoformat()
+
+        def _inbound_create(qty):
+            return client.post(
+                "/api/v1/inbound-orders",
+                headers=org_headers,
+                json={
+                    "inbound_type": "willard",
+                    "warehouse_id": str(ml_warehouse.id),
+                    "third_party_id": str(ml_supplier.id),
+                    "date": _today,
+                    "lines": [{"material_id": str(ml_material.id), "quantity": str(qty)}],
+                },
+            )
 
         pending_purchases: list[str] = []
         liquidated_purchases: list[str] = []
         pending_sales: list[str] = []
         liquidated_sales: list[str] = []
         confirmed_increases: list[str] = []
+        confirmed_inbounds: list[str] = []
         tol_qty = Decimal("0")  # kg acumulados que pasaron por redondeo 2-dec
         saw_hole = False
         counts = {
             "pc": 0, "pl": 0, "sc": 0, "sl": 0, "s_cxl": 0,
             "p_cxl": 0, "ai": 0, "ad": 0, "aa": 0,
+            "ic": 0, "ia": 0, "ie": 0,
         }
 
         for _ in range(self.OPS):
@@ -1173,8 +1272,9 @@ class TestInventoryStressWalk:
                     "purchase_create", "purchase_liq", "sale_create", "sale_liq",
                     "sale_cancel", "purchase_cancel",
                     "adj_increase", "adj_decrease", "adj_annul",
+                    "inbound_create", "inbound_annul", "inbound_edit",
                 ],
-                weights=[20, 17, 20, 17, 5, 5, 6, 6, 4],
+                weights=[18, 15, 18, 15, 5, 5, 6, 6, 4, 8, 4, 3],
             )[0]
 
             if action == "purchase_create":
@@ -1233,6 +1333,35 @@ class TestInventoryStressWalk:
                 assert resp.status_code == 200, resp.text
                 tol_qty += Decimal("300")
                 counts["aa"] += 1
+            elif action == "inbound_create":
+                qty = rng.randrange(20, 200, 10)
+                resp = _inbound_create(qty)
+                assert resp.status_code == 201, resp.text
+                confirmed_inbounds.append(resp.json()["id"])
+                tol_qty += Decimal("200")
+                counts["ic"] += 1
+            elif action == "inbound_annul" and confirmed_inbounds:
+                oid = confirmed_inbounds.pop(rng.randrange(len(confirmed_inbounds)))
+                resp = client.post(
+                    f"/api/v1/inbound-orders/{oid}/annul",
+                    json={"reason": "Anulacion walk"},
+                    headers=org_headers,
+                )
+                assert resp.status_code == 200, resp.text
+                tol_qty += Decimal("200")
+                counts["ia"] += 1
+            elif action == "inbound_edit" and confirmed_inbounds:
+                # D18: revert-and-reapply — remocion al snapshot + re-entrada hoy
+                oid = rng.choice(confirmed_inbounds)
+                qty = rng.randrange(20, 200, 10)
+                resp = client.patch(
+                    f"/api/v1/inbound-orders/{oid}",
+                    json={"lines": [{"material_id": str(ml_material.id), "quantity": str(qty)}]},
+                    headers=org_headers,
+                )
+                assert resp.status_code == 200, resp.text
+                tol_qty += Decimal("400")
+                counts["ie"] += 1
 
             self._invariants(db_session, ml_material, tol_qty)
             if ml_material.current_stock_liquidated < 0:
@@ -1246,6 +1375,9 @@ class TestInventoryStressWalk:
         assert counts["ad"] >= 2, counts
         # Fase 5: al menos una reversion ponderada real (cancel o annul)
         assert counts["p_cxl"] + counts["aa"] >= 1, counts
+        # SAC E2: el walk ejercita de verdad el inbound (identidad + reversa/edicion)
+        assert counts["ic"] >= 2, counts
+        assert counts["ia"] + counts["ie"] >= 1, counts
         assert saw_hole, f"El walk nunca paso por oversell — ajustar semilla/pesos: {counts}"
 
         # Cierre: liquidar todo lo pendiente y verificar una ultima vez

@@ -1,9 +1,8 @@
 """Servicio de MaterialConversionFormula (SAC E1, v0.5 §6.4/§12.1.2, plan §4.4).
 
 Append-only puro (patron PriceList, decision #35). La vigente es
-max(created_at, id) por (material_id, willard_account_subtype) — el subtype
-discrimina FORMULAS dentro de la cuenta Willard Drosses (caso SEC: escurrido
-56% + pinza 59% sobre el MISMO material, nunca cuentas separadas).
+max(created_at, id) por material_id (un factor por material — el subtipo
+escurrido/pinza se elimino, CC-001: son materiales distintos).
 """
 from typing import Optional
 from uuid import UUID
@@ -17,7 +16,6 @@ from app.models.material_conversion_formula import MaterialConversionFormula
 from app.models.user import User
 from app.schemas.material_conversion_formula import (
     EXPECTED_UNIT_BY_FORMULA_TYPE,
-    SUBTYPE_ALLOWED_FORMULA_TYPES,
     MaterialConversionFormulaCreate,
     MaterialConversionFormulaResponse,
 )
@@ -57,48 +55,11 @@ class MaterialConversionFormulaService:
                 f"Corrige la unidad del material o el tipo de formula",
             )
 
-        # D11d — subtype solo donde discrimina formulas (drosses/scrap): sobre
-        # battery_to_lead crearia vigencias fantasma por (material, subtype)
-        if (
-            obj_in.willard_account_subtype
-            and obj_in.formula_type not in SUBTYPE_ALLOWED_FORMULA_TYPES
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"willard_account_subtype no aplica a '{obj_in.formula_type}' "
-                f"(solo {' / '.join(SUBTYPE_ALLOWED_FORMULA_TYPES)})",
-            )
-
-        # Regla SEC — un material usa subtypes O no los usa; mezclar NULL con
-        # no-NULL crea dos "vigentes" ambiguas para el mismo material
-        existing_subtypes = set(
-            db.execute(
-                select(MaterialConversionFormula.willard_account_subtype)
-                .where(
-                    MaterialConversionFormula.organization_id == organization_id,
-                    MaterialConversionFormula.material_id == obj_in.material_id,
-                )
-                .distinct()
-            ).scalars().all()
-        )
-        if existing_subtypes:
-            has_null = None in existing_subtypes
-            new_is_null = obj_in.willard_account_subtype is None
-            if has_null != new_is_null:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"El material {material.code} ya tiene formulas "
-                    f"{'SIN' if has_null else 'CON'} sub-cuenta (escurrido/pinza) — "
-                    f"no se puede mezclar. Mantén el mismo esquema o registra el "
-                    f"cambio con una nueva version consistente",
-                )
-
         db_obj = MaterialConversionFormula(
             organization_id=organization_id,
             material_id=obj_in.material_id,
             formula_type=obj_in.formula_type,
             parameters=obj_in.canonical_parameters,
-            willard_account_subtype=obj_in.willard_account_subtype,
             notes=obj_in.notes,
             created_by=user_id,
         )
@@ -113,7 +74,6 @@ class MaterialConversionFormulaService:
         organization_id: UUID,
         material_id: Optional[UUID] = None,
         formula_type: Optional[str] = None,
-        willard_account_subtype: Optional[str] = None,
     ) -> list[MaterialConversionFormulaResponse]:
         """Historico completo (mas reciente primero) con filtros opcionales."""
         query = self._joined_query(organization_id)
@@ -121,11 +81,6 @@ class MaterialConversionFormulaService:
             query = query.where(MaterialConversionFormula.material_id == material_id)
         if formula_type:
             query = query.where(MaterialConversionFormula.formula_type == formula_type)
-        if willard_account_subtype:
-            query = query.where(
-                MaterialConversionFormula.willard_account_subtype
-                == willard_account_subtype.strip().lower()
-            )
         query = query.order_by(
             MaterialConversionFormula.created_at.desc(),
             MaterialConversionFormula.id.desc(),
@@ -141,16 +96,12 @@ class MaterialConversionFormulaService:
         organization_id: UUID,
         material_id: Optional[UUID] = None,
     ) -> list[MaterialConversionFormulaResponse]:
-        """Formula vigente por (material, subtype) — DISTINCT ON con tiebreaker id."""
+        """Formula vigente por material — DISTINCT ON con tiebreaker id."""
         query = (
             self._joined_query(organization_id)
-            .distinct(
-                MaterialConversionFormula.material_id,
-                MaterialConversionFormula.willard_account_subtype,
-            )
+            .distinct(MaterialConversionFormula.material_id)
             .order_by(
                 MaterialConversionFormula.material_id,
-                MaterialConversionFormula.willard_account_subtype,
                 MaterialConversionFormula.created_at.desc(),
                 MaterialConversionFormula.id.desc(),
             )

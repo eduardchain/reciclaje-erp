@@ -22,6 +22,7 @@ import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
 import type { PurchaseLineCreate, PurchaseCommissionCreate } from "@/types/purchase";
 
 interface LineFormData extends PurchaseLineCreate {
@@ -75,6 +76,12 @@ export default function PurchaseCreatePage() {
   const canLiquidate = hasPermission("purchases.liquidate");
   const canViewPrices = hasPermission("purchases.view_prices");
   const canEditPrices = hasPermission("purchases.edit_prices");
+  // SAC E2 (D11): con el flag encendido, la bodega es de cabecera (obligatoria)
+  // y las lineas la heredan — el selector por linea se oculta. Flag apagado =
+  // formulario identico a hoy (no-regresion, 3 orgs actuales).
+  const { flagEnabled } = useOrgSettings();
+  const kgHeaderWarehouse = flagEnabled("kg_ledger_enabled");
+  const [headerWarehouseId, setHeaderWarehouseId] = useState("");
 
   const [supplierId, setSupplierId] = useState("");
   const [date, setDate] = useState(toLocalDateInput());
@@ -144,6 +151,7 @@ export default function PurchaseCreatePage() {
     supplierId &&
     date &&
     !isFutureDate &&
+    (!kgHeaderWarehouse || headerWarehouseId !== "") &&
     lines.length > 0 &&
     lines.every((l) => l.material_id && l.quantity > 0 && l.unit_price >= 0) &&
     (!autoLiquidate || lines.every((l) => l.unit_price > 0)) &&
@@ -155,6 +163,8 @@ export default function PurchaseCreatePage() {
       {
         supplier_id: supplierId,
         date,
+        // Solo con flag encendido — sin el, el payload es byte-identico a hoy
+        ...(kgHeaderWarehouse ? { warehouse_id: headerWarehouseId } : {}),
         vehicle_plate: vehiclePlate || null,
         invoice_number: invoiceNumber || null,
         notes: notes || null,
@@ -242,6 +252,18 @@ export default function PurchaseCreatePage() {
                 <p className="text-xs text-red-500 mt-0.5">La fecha no puede ser futura</p>
               )}
             </div>
+            {kgHeaderWarehouse && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bodega *</Label>
+                <EntitySelect
+                  value={headerWarehouseId}
+                  onChange={setHeaderWarehouseId}
+                  options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                  placeholder="Bodega de destino..."
+                />
+                <p className="text-xs text-slate-400 mt-0.5">Todas las líneas entran a esta bodega.</p>
+              </div>
+            )}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa Vehiculo</Label>
               <Input
@@ -289,7 +311,13 @@ export default function PurchaseCreatePage() {
               onDelete={() => removeLine(line._key)}
               disableDelete={lines.length === 1}
             >
-              <div className={canViewPrices ? "md:col-span-3" : "md:col-span-4"}>
+              <div
+                className={
+                  kgHeaderWarehouse
+                    ? canViewPrices ? "md:col-span-6" : "md:col-span-8"
+                    : canViewPrices ? "md:col-span-3" : "md:col-span-4"
+                }
+              >
                 <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Material *</Label>
                 <EntitySelect
                   value={line.material_id}
@@ -298,6 +326,8 @@ export default function PurchaseCreatePage() {
                   placeholder="Material..."
                 />
               </div>
+              {/* Con bodega de cabecera (flag SAC), las lineas la heredan — selector por linea oculto */}
+              {!kgHeaderWarehouse && (
               <div className={canViewPrices ? "md:col-span-3" : "md:col-span-4"}>
                 <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Bodega</Label>
                 <EntitySelect
@@ -307,6 +337,7 @@ export default function PurchaseCreatePage() {
                   placeholder="Bodega..."
                 />
               </div>
+              )}
               <div className={canViewPrices ? "md:col-span-2" : "md:col-span-3"}>
                 <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Cantidad{unitSuffix(line.material_id)} *</Label>
                 <MoneyInput

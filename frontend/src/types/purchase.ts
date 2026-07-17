@@ -25,6 +25,33 @@ export interface PurchaseCommissionResponse {
   third_party_name: string;
 }
 
+// SAC E2 D9 — retenciones tributarias al liquidar (solo con flag kg_ledger_enabled)
+export type RetentionType = "retefuente" | "reteiva" | "ica";
+
+export const RETENTION_TYPE_LABELS: Record<RetentionType, string> = {
+  retefuente: "ReteFuente",
+  reteiva: "ReteIVA",
+  ica: "ICA",
+};
+
+export interface PurchaseRetentionCreate {
+  retention_type: RetentionType;
+  /** Obligatorio en ICA (una entidad por municipio), prohibido en las demás */
+  municipality?: string | null;
+  amount: number;
+}
+
+export interface PurchaseRetentionResponse {
+  id: string;
+  third_party_id: string;
+  retention_type: RetentionType;
+  municipality: string | null;
+  rate: number | null;
+  base: number | null;
+  amount: number;
+  reverted_at: string | null;
+}
+
 export interface PurchaseLineCreate {
   material_id: string;
   quantity: number;
@@ -53,6 +80,8 @@ export interface PurchaseCreate {
   notes?: string | null;
   vehicle_plate?: string | null;
   invoice_number?: string | null;
+  /** Bodega header (SAC E2 D11, solo con flag kg_ledger_enabled): fuerza la bodega de todas las lineas */
+  warehouse_id?: string | null;
   lines: PurchaseLineCreate[];
   commissions?: PurchaseCommissionCreate[];
   auto_liquidate?: boolean;
@@ -93,6 +122,8 @@ export interface PurchaseResponse extends BaseEntity {
   payment_account_name: string | null;
   lines: PurchaseLineResponse[];
   commissions: PurchaseCommissionResponse[];
+  /** SAC E2 D9 — vacío para orgs sin flag */
+  retentions: PurchaseRetentionResponse[];
   linked_payment_total: number | null;
   warnings?: string[];
 }
@@ -115,6 +146,8 @@ export interface PurchaseLiquidateLineUpdate {
 export interface PurchaseLiquidateRequest {
   lines?: PurchaseLiquidateLineUpdate[];
   commissions?: PurchaseCommissionCreate[];
+  /** SAC E2 D9 — AUSENTE (no []) para orgs sin flag: payload byte-idéntico al actual */
+  retentions?: PurchaseRetentionCreate[];
   immediate_payment?: boolean;
   payment_account_id?: string;
   liquidation_date?: string;

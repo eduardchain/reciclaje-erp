@@ -15,10 +15,12 @@ import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { cn } from "@/utils";
 import { usePurchase, useLiquidatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { usePayableProviders, useMoneyAccounts } from "@/hooks/useMasterData";
+import { usePayableProviders, useMoneyAccounts, useRetentionEntities, useCreateRetentionEntity } from "@/hooks/useMasterData";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
-import type { PurchaseCommissionCreate } from "@/types/purchase";
+import { RETENTION_TYPE_LABELS, type PurchaseCommissionCreate, type RetentionType } from "@/types/purchase";
 
 interface LiquidationLine {
   line_id: string;
@@ -41,6 +43,20 @@ function createEmptyCommission(): CommissionFormData {
   return { _key: ++commKeyCounter, third_party_id: "", concept: "", commission_type: "percentage", commission_value: 0, charge_type: "commission" };
 }
 
+// SAC E2 D9 — retenciones tributarias (solo con flag kg_ledger_enabled)
+interface RetentionFormData {
+  _key: number;
+  retention_type: RetentionType;
+  municipality: string;
+  amount: number;
+}
+
+let retKeyCounter = 0;
+
+function createEmptyRetention(): RetentionFormData {
+  return { _key: ++retKeyCounter, retention_type: "retefuente", municipality: "", amount: 0 };
+}
+
 export default function PurchaseLiquidatePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -50,8 +66,41 @@ export default function PurchaseLiquidatePage() {
   const { data: payableData } = usePayableProviders();
   const payableProviders = payableData?.items ?? [];
 
+  const { getSetting } = useOrgSettings();
+  // Gating D9: sin flag no se muestra la sección y el payload no lleva retentions
+  const retentionsEnabled = getSetting("kg_ledger_enabled") === true;
+
+  // Municipios ICA desde las entidades existentes (F2: enabled=flag → cero
+  // requests para orgs sin SAC). Selector cerrado mata el typo-duplicado.
+  const { data: retentionEntities } = useRetentionEntities(retentionsEnabled);
+  const icaMunicipalities = useMemo(
+    () =>
+      (retentionEntities ?? [])
+        .filter((r) => r.retention_type === "ica" && r.is_active && r.municipality)
+        .map((r) => r.municipality as string),
+    [retentionEntities],
+  );
+  const createRetentionEntity = useCreateRetentionEntity();
+  const [addIcaForKey, setAddIcaForKey] = useState<number | null>(null);
+  const [newMunicipality, setNewMunicipality] = useState("");
+  const handleAddMunicipality = () => {
+    createRetentionEntity.mutate(
+      { retention_type: "ica", municipality: newMunicipality.trim() },
+      {
+        onSuccess: (created) => {
+          if (addIcaForKey !== null && created.municipality) {
+            updateRetention(addIcaForKey, "municipality", created.municipality);
+          }
+          setAddIcaForKey(null);
+          setNewMunicipality("");
+        },
+      },
+    );
+  };
+
   const [lines, setLines] = useState<LiquidationLine[]>([]);
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
+  const [retentions, setRetentions] = useState<RetentionFormData[]>([]);
   const [immediatePayment, setImmediatePayment] = useState(false);
   const [paymentAccountId, setPaymentAccountId] = useState("");
   const [liquidationDate, setLiquidationDate] = useState("");
@@ -119,6 +168,18 @@ export default function PurchaseLiquidatePage() {
     setCommissions((prev) => prev.map((c) => (c._key === key ? { ...c, [field]: value } : c)));
   };
 
+  const updateRetention = (key: number, field: keyof Omit<RetentionFormData, "_key">, value: string | number) => {
+    setRetentions((prev) =>
+      prev.map((r) => {
+        if (r._key !== key) return r;
+        const next = { ...r, [field]: value };
+        // municipality solo aplica a ICA (el backend 422 si viaja en otras)
+        if (field === "retention_type" && value !== "ica") next.municipality = "";
+        return next;
+      })
+    );
+  };
+
   const total = lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
   const totalQuantity = lines.reduce((sum, l) => sum + (l.quantity || 0), 0);
   const totalComm = useMemo(() => commissions.reduce((sum, c) => {
@@ -138,9 +199,16 @@ export default function PurchaseLiquidatePage() {
   }, [lines, commissions, total, totalComm]);
   const allPricesValid = lines.every((l) => l.unit_price > 0);
   const selectedAccount = accounts.find((a) => a.id === paymentAccountId);
+  // D9: el proveedor queda acreditado (y el pago inmediato paga) por el NETO
+  const totalRet = retentions.reduce((sum, r) => sum + (r.amount || 0), 0);
+  const netTotal = total - totalRet;
+  const retentionsValid =
+    retentions.every((r) => r.amount > 0 && (r.retention_type !== "ica" || !!r.municipality.trim())) &&
+    (totalRet === 0 || totalRet < total);
   const canSubmit = allPricesValid && lines.length > 0
-    && (!immediatePayment || (paymentAccountId && (!selectedAccount || selectedAccount.current_balance >= total)))
+    && (!immediatePayment || (paymentAccountId && (!selectedAccount || selectedAccount.current_balance >= netTotal)))
     && commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0)
+    && retentionsValid
     && !!liquidationDate;
 
   const handleSubmit = () => {
@@ -156,6 +224,16 @@ export default function PurchaseLiquidatePage() {
           commissions: commissions
             .filter((c) => c.third_party_id && c.commission_value > 0)
             .map(({ _key, ...rest }) => rest),
+          // D9: AUSENTE (no []) sin filas — payload byte-idéntico para orgs sin flag
+          ...(retentionsEnabled && retentions.length > 0
+            ? {
+                retentions: retentions.map((r) => ({
+                  retention_type: r.retention_type,
+                  ...(r.retention_type === "ica" ? { municipality: r.municipality.trim() } : {}),
+                  amount: r.amount,
+                })),
+              }
+            : {}),
           ...(immediatePayment && paymentAccountId
             ? { immediate_payment: true, payment_account_id: paymentAccountId }
             : {}),
@@ -369,6 +447,86 @@ export default function PurchaseLiquidatePage() {
         )}
       </Card>
 
+      {/* Retenciones (SAC D9 — solo con flag) */}
+      {retentionsEnabled && (
+        <Card className="shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Retenciones (Opcional)</CardTitle>
+            <Button variant="outline" size="sm" onClick={() => setRetentions((p) => [...p, createEmptyRetention()])}>
+              <Plus className="h-4 w-4 mr-1" />Agregar Retención
+            </Button>
+          </CardHeader>
+          {retentions.length > 0 && (
+            <CardContent className="space-y-0">
+              {retentions.map((ret, idx) => (
+                <FormLineGrid
+                  key={ret._key}
+                  isFirst={idx === 0}
+                  isLast={idx === retentions.length - 1}
+                  onDelete={() => setRetentions((p) => p.filter((r) => r._key !== ret._key))}
+                >
+                  <div className="md:col-span-3">
+                    <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Tipo *</Label>
+                    <Select value={ret.retention_type} onValueChange={(v) => updateRetention(ret._key, "retention_type", v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(RETENTION_TYPE_LABELS) as RetentionType[]).map((t) => (
+                          <SelectItem key={t} value={t}>{RETENTION_TYPE_LABELS[t]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {ret.retention_type === "ica" && (
+                    <div className="md:col-span-4">
+                      <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Municipio *</Label>
+                      <Select
+                        value={ret.municipality || undefined}
+                        onValueChange={(v) => {
+                          if (v === "__add__") {
+                            setNewMunicipality("");
+                            setAddIcaForKey(ret._key);
+                          } else {
+                            updateRetention(ret._key, "municipality", v);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className={!ret.municipality.trim() ? "border-red-300" : ""}>
+                          <SelectValue placeholder="Seleccionar municipio..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {icaMunicipalities.map((m) => (
+                            <SelectItem key={m} value={m}>{m}</SelectItem>
+                          ))}
+                          <SelectItem value="__add__" className="text-indigo-600 font-medium">
+                            + Agregar municipio…
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  <div className={ret.retention_type === "ica" ? "md:col-span-3" : "md:col-span-4"}>
+                    <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Monto *</Label>
+                    <MoneyInput
+                      value={ret.amount}
+                      onChange={(v) => updateRetention(ret._key, "amount", v)}
+                      decimals={2}
+                      placeholder="0"
+                      className={ret.amount <= 0 ? "border-red-300" : ""}
+                    />
+                  </div>
+                </FormLineGrid>
+              ))}
+              <div className="bg-slate-50 rounded-lg p-3 mt-2 text-xs text-slate-500 space-y-1">
+                <p>El proveedor queda acreditado por el <strong>neto</strong> (total − retenciones); cada retención crea deuda con su entidad [Retenciones] para el pago mensual de impuestos.</p>
+                {totalRet > 0 && totalRet >= total && (
+                  <p className="text-red-500 font-medium">La suma de retenciones ({formatCurrency(totalRet)}) debe ser menor al total ({formatCurrency(total)}).</p>
+                )}
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
       {/* Resumen Financiero */}
       <Card className="shadow-sm bg-slate-50/50">
         <CardHeader>
@@ -393,17 +551,38 @@ export default function PurchaseLiquidatePage() {
               <span className="text-slate-600 font-semibold">Costo Total Inventario</span>
               <span className="font-bold tabular-nums text-base">{formatCurrency(total + totalComm)}</span>
             </div>
-            {totalComm > 0 && (
+            {totalRet > 0 && (
+            <>
+            <div className="border-t border-slate-200 pt-2" />
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">(−) Retenciones</span>
+              <span className="font-medium tabular-nums text-rose-600">−{formatCurrency(totalRet)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600 font-semibold">Neto al Proveedor</span>
+              <span className="font-bold tabular-nums">{formatCurrency(netTotal)}</span>
+            </div>
+            </>
+            )}
+            {(totalComm > 0 || totalRet > 0) && (
             <>
             <div className="border-t border-dashed border-slate-200 pt-2" />
             <div className="flex justify-between text-xs text-slate-500">
               <span>CxP Proveedor</span>
-              <span className="tabular-nums">{formatCurrency(total)}</span>
+              <span className="tabular-nums">{formatCurrency(netTotal)}</span>
             </div>
+            {totalComm > 0 && (
             <div className="flex justify-between text-xs text-slate-500">
               <span>CxP Comisionistas</span>
               <span className="tabular-nums">{formatCurrency(totalComm)}</span>
             </div>
+            )}
+            {totalRet > 0 && (
+            <div className="flex justify-between text-xs text-slate-500">
+              <span>CxP Entidades de Retención</span>
+              <span className="tabular-nums">{formatCurrency(totalRet)}</span>
+            </div>
+            )}
             </>
             )}
           </div>
@@ -433,7 +612,10 @@ export default function PurchaseLiquidatePage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Registrar pago inmediato</Label>
-              <p className="text-xs text-slate-500 mt-1">Crea el pago al proveedor automaticamente al liquidar.</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Crea el pago al proveedor automaticamente al liquidar.
+                {totalRet > 0 && <> Se paga el <strong>neto</strong>: {formatCurrency(netTotal)}.</>}
+              </p>
             </div>
             <Switch checked={immediatePayment} onCheckedChange={setImmediatePayment} />
           </div>
@@ -446,8 +628,8 @@ export default function PurchaseLiquidatePage() {
                 options={accounts.map((a) => ({ id: a.id, label: `${a.name} (${formatCurrency(a.current_balance)})` }))}
                 placeholder="Seleccionar cuenta..."
               />
-              {selectedAccount && selectedAccount.current_balance < total && (
-                <p className="text-xs text-red-500">Fondos insuficientes. Disponible: {formatCurrency(selectedAccount.current_balance)}, Requerido: {formatCurrency(total)}</p>
+              {selectedAccount && selectedAccount.current_balance < netTotal && (
+                <p className="text-xs text-red-500">Fondos insuficientes. Disponible: {formatCurrency(selectedAccount.current_balance)}, Requerido: {formatCurrency(netTotal)}</p>
               )}
             </div>
           )}
@@ -470,6 +652,40 @@ export default function PurchaseLiquidatePage() {
           </Button>
         </div>
       </div>
+
+      {/* Modal: Agregar municipio ICA (desde el selector de retención) */}
+      <Dialog open={addIcaForKey !== null} onOpenChange={(open) => { if (!open) setAddIcaForKey(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Agregar Municipio ICA</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Municipio *</Label>
+              <Input
+                value={newMunicipality}
+                onChange={(e) => setNewMunicipality(e.target.value)}
+                maxLength={60}
+                placeholder="Ej: Barranquilla"
+                autoFocus
+              />
+              <p className="text-xs text-slate-500 mt-1.5">
+                Crea la entidad "[Retenciones] ICA {newMunicipality.trim() || "…"}" y la selecciona en esta retención. Si el municipio ya existe (con o sin tildes), se reutiliza — no se duplica.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setAddIcaForKey(null)}>Cancelar</Button>
+            <Button
+              onClick={handleAddMunicipality}
+              disabled={!newMunicipality.trim() || createRetentionEntity.isPending}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {createRetentionEntity.isPending ? "Agregando..." : "Agregar"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

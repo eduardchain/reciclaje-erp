@@ -93,6 +93,9 @@ class InventoryMovement(Base, OrganizationMixin, TimestampMixin):
             "sale_reversal",
             "transformation",
             "adjustment_reversal",
+            # SAC E2 (espejo migracion e8f1a2b3c4d5, D3/D13-E1 paridad):
+            "inbound_receipt",
+            "inbound_reversal",
             name="inventory_movement_type",
         ),
         nullable=False,
@@ -120,6 +123,8 @@ class InventoryMovement(Base, OrganizationMixin, TimestampMixin):
             "adjustment",
             "transfer",
             "transformation",
+            # SAC E2 (espejo migracion e8f1a2b3c4d5):
+            "inbound",
             name="inventory_reference_type",
         ),
         nullable=True,

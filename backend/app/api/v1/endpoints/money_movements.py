@@ -1011,6 +1011,82 @@ def get_by_third_party(
                  source="purchase_commission", source_id=str(comm.id), source_number=purch.purchase_number,
                  **_null_ops)
 
+    # 2c. Retenciones de compras (SAC E2 D9) — eventos sinteticos, patron #70.
+    # Sin ellos el saldo corrido diverge del vivo (clase de bug #55): el evento
+    # compra carga −total al proveedor pero la liquidacion lo acredito NETO.
+    from app.models.purchase_retention import PurchaseRetention
+    _RET_LABELS = {"retefuente": "ReteFuente", "reteiva": "ReteIVA", "ica": "ICA"}
+
+    def _ret_label(ret) -> str:
+        label = _RET_LABELS.get(ret.retention_type, ret.retention_type)
+        return f"{label} {ret.municipality}" if ret.municipality else label
+
+    # Lado PROVEEDOR: +amount compensatorio en liquidated_at
+    ret_supplier_query = (
+        sa_select(PurchaseRetention, Purchase)
+        .join(Purchase, PurchaseRetention.purchase_id == Purchase.id)
+        .where(
+            Purchase.organization_id == org_id,
+            Purchase.supplier_id == third_party_id,
+            Purchase.status.in_(["liquidated", "cancelled"]),
+            Purchase.liquidated_at.isnot(None),
+        )
+    )
+    for ret, purch in db.execute(ret_supplier_query).all():
+        _evt(purch.liquidated_at, purch.liquidated_at, 0,
+             id=f"purch-retention-sup-{ret.id}", date=purch.liquidated_at.isoformat(),
+             document_date=purch.date.isoformat(),
+             event_type="purchase_retention",
+             description=f"Retencion {_ret_label(ret)} Compra #{purch.purchase_number}",
+             amount=float(ret.amount), direction=1,
+             status="confirmed" if purch.status == "liquidated" else "cancelled",
+             reference_number=None, movement_number=None,
+             source="purchase_retention", source_id=str(ret.id), source_number=purch.purchase_number,
+             **_null_ops)
+        if purch.status == "cancelled" and purch.cancelled_at:
+            _evt(purch.liquidated_at, purch.cancelled_at, 2,
+                 id=f"purch-ret-sup-cancel-{ret.id}", date=purch.liquidated_at.isoformat(),
+                 document_date=purch.date.isoformat(),
+                 event_type="purchase_retention_cancellation",
+                 description=f"Retencion {_ret_label(ret)} Compra #{purch.purchase_number} cancelada (reversa)",
+                 amount=float(ret.amount), direction=-1,
+                 status="annulled", reference_number=None, movement_number=None,
+                 source="purchase_retention", source_id=str(ret.id), source_number=purch.purchase_number,
+                 **_null_ops)
+
+    # Lado ENTIDAD "[Retenciones] X": −amount (le debemos la retencion a la DIAN/municipio)
+    ret_entity_query = (
+        sa_select(PurchaseRetention, Purchase)
+        .join(Purchase, PurchaseRetention.purchase_id == Purchase.id)
+        .where(
+            Purchase.organization_id == org_id,
+            PurchaseRetention.third_party_id == third_party_id,
+            Purchase.status.in_(["liquidated", "cancelled"]),
+            Purchase.liquidated_at.isnot(None),
+        )
+    )
+    for ret, purch in db.execute(ret_entity_query).all():
+        _evt(purch.liquidated_at, purch.liquidated_at, 0,
+             id=f"purch-retention-ent-{ret.id}", date=purch.liquidated_at.isoformat(),
+             document_date=purch.date.isoformat(),
+             event_type="purchase_retention",
+             description=f"Retencion {_ret_label(ret)} Compra #{purch.purchase_number}",
+             amount=float(ret.amount), direction=-1,
+             status="confirmed" if purch.status == "liquidated" else "cancelled",
+             reference_number=None, movement_number=None,
+             source="purchase_retention", source_id=str(ret.id), source_number=purch.purchase_number,
+             **_null_ops)
+        if purch.status == "cancelled" and purch.cancelled_at:
+            _evt(purch.liquidated_at, purch.cancelled_at, 2,
+                 id=f"purch-ret-ent-cancel-{ret.id}", date=purch.liquidated_at.isoformat(),
+                 document_date=purch.date.isoformat(),
+                 event_type="purchase_retention_cancellation",
+                 description=f"Retencion {_ret_label(ret)} Compra #{purch.purchase_number} cancelada (reversa)",
+                 amount=float(ret.amount), direction=1,
+                 status="annulled", reference_number=None, movement_number=None,
+                 source="purchase_retention", source_id=str(ret.id), source_number=purch.purchase_number,
+                 **_null_ops)
+
     # 3. Ventas liquidadas (standalone, no doble partida)
     # Cliente: balance += total_amount al liquidar
     sale_query = sa_select(Sale).where(
