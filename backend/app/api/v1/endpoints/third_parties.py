@@ -4,7 +4,7 @@ API endpoints for Third Party operations.
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_org_flag, require_permission, get_db
@@ -13,8 +13,9 @@ from app.schemas.third_party import (
     ThirdPartyUpdate,
     ThirdPartyResponse,
     ThirdPartyBalanceUpdate,
-    RetentionEntityCreate,
-    RetentionEntityResponse,
+    RetentionConfigCreate,
+    RetentionConfigUpdate,
+    RetentionRowResponse,
 )
 from app.services.base import PaginatedResponse
 from app.services.third_party import third_party
@@ -256,54 +257,124 @@ def list_generic_third_parties(
     )
 
 
-# --- Entidades de retencion (addendum §8; SAC E2 D9) --- #
+# --- Retenciones: catalogo + entidades (SAC E2 D9 + v2 CC-006) --- #
 # Rutas ESTATICAS: declaradas antes de /{third_party_id} para no ser capturadas.
 
 @router.get(
     "/retention-entities",
-    response_model=list[RetentionEntityResponse],
+    response_model=list[RetentionRowResponse],
     dependencies=[Depends(require_org_flag("kg_ledger_enabled"))],
 )
-def list_retention_entities_endpoint(
+def list_retention_rows_endpoint(
     org_context: tuple = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db),
 ):
-    """Hogar de las entidades '[Retenciones] X' (grupo en Pasivos + selector
-    de municipio ICA al liquidar). Lista estructurada con saldo — el formato
-    canonico de nombres lo parsea su modulo dueño."""
-    from app.services.retention_entities import list_retention_entities
-    return list_retention_entities(db, org_context["organization_id"])
+    """GET unificado del tab Retenciones + selector de la liquidacion:
+    UNIÓN de configs (tarifas) y entidades '[Retenciones] X' (saldos),
+    matcheadas por nombre canonico normalizado (D-v2-1)."""
+    from app.services.retention_entities import list_retention_rows
+    return list_retention_rows(db, org_context["organization_id"])
 
 
 @router.post(
-    "/retention-entities",
-    response_model=RetentionEntityResponse,
+    "/retention-configs",
+    response_model=RetentionRowResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_org_flag("kg_ledger_enabled"))],
 )
-def create_retention_entity_endpoint(
-    data: RetentionEntityCreate,
+def create_retention_config_endpoint(
+    data: RetentionConfigCreate,
     org_context: tuple = Depends(require_permission("third_parties.create")),
     db: Session = Depends(get_db),
 ):
-    """Pre-crear la entidad ICA de un municipio (get-or-create idempotente,
-    matching H4 — 'bogota' == 'Bogotá' devuelven la MISMA entidad). Solo ICA:
-    ReteFuente/ReteIVA nacen solos al liquidar. Alimenta el selector de
-    municipio de la liquidacion (mata el typo-duplicado desde la UI)."""
-    from app.services.retention_entities import ICA_PREFIX, resolve_retention_entity
+    """Crear una tarifa del catalogo. Colision por (tipo, municipio, concepto)
+    normalizados H4 → 409 con el config_id existente en el detail (editar esa,
+    no duplicar — dos configs con OTRO % serian ambiguedad de tarifa)."""
+    from app.models.retention_config import RetentionConfig
+    from app.services.retention_entities import find_active_config
 
     org_id = org_context["organization_id"]
-    entity = resolve_retention_entity(db, org_id, data.retention_type, data.municipality)
-    db.commit()
-    db.refresh(entity)
-    municipality = entity.name[len(ICA_PREFIX):] if entity.name.startswith(ICA_PREFIX) else None
-    return RetentionEntityResponse(
-        id=entity.id,
+    existing = find_active_config(
+        db, org_id, data.retention_type, data.municipality, data.concept
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Ya existe una tarifa activa para esa combinación "
+                f"({existing.rate_pct}%). Edítela en vez de crear otra. "
+                f"[config_id={existing.id}]"
+            ),
+        )
+    cfg = RetentionConfig(
+        organization_id=org_id,
         retention_type=data.retention_type,
-        municipality=municipality,
-        name=entity.name,
-        current_balance=float(entity.current_balance),
-        is_active=entity.is_active,
+        municipality=data.municipality.strip() if data.municipality else None,
+        concept=data.concept.strip() if data.concept else None,
+        rate_pct=data.rate_pct,
+        is_active=True,
+    )
+    db.add(cfg)
+    db.commit()
+    db.refresh(cfg)
+    return RetentionRowResponse(
+        config_id=cfg.id,
+        entity_id=None,
+        retention_type=cfg.retention_type,
+        municipality=cfg.municipality,
+        concept=cfg.concept,
+        rate_pct=float(cfg.rate_pct),
+        name=None,
+        current_balance=0.0,
+        is_active=cfg.is_active,
+    )
+
+
+@router.patch(
+    "/retention-configs/{config_id}",
+    response_model=RetentionRowResponse,
+    dependencies=[Depends(require_org_flag("kg_ledger_enabled"))],
+)
+def update_retention_config_endpoint(
+    config_id: UUID,
+    data: RetentionConfigUpdate,
+    org_context: tuple = Depends(require_permission("third_parties.create")),
+    db: Session = Depends(get_db),
+):
+    """Editar tarifa (%) o activar/desactivar. In-place: el % usado en cada
+    liquidacion queda auditado en purchase_retentions.rate/base."""
+    from app.models.retention_config import RetentionConfig
+    from app.services.retention_entities import find_active_config
+
+    org_id = org_context["organization_id"]
+    cfg = db.get(RetentionConfig, config_id)
+    if cfg is None or cfg.organization_id != org_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tarifa no encontrada")
+    if data.rate_pct is not None:
+        cfg.rate_pct = data.rate_pct
+    if data.is_active is not None:
+        if data.is_active and not cfg.is_active:
+            clash = find_active_config(
+                db, org_id, cfg.retention_type, cfg.municipality, cfg.concept
+            )
+            if clash is not None and clash.id != cfg.id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Ya hay otra tarifa activa para esa combinación ({clash.rate_pct}%). [config_id={clash.id}]",
+                )
+        cfg.is_active = data.is_active
+    db.commit()
+    db.refresh(cfg)
+    return RetentionRowResponse(
+        config_id=cfg.id,
+        entity_id=None,
+        retention_type=cfg.retention_type,
+        municipality=cfg.municipality,
+        concept=cfg.concept,
+        rate_pct=float(cfg.rate_pct),
+        name=None,
+        current_balance=0.0,
+        is_active=cfg.is_active,
     )
 
 

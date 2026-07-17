@@ -103,21 +103,40 @@ class ThirdPartyBalanceUpdate(BaseModel):
     amount_delta: float = Field(..., description="Amount to add (positive) or subtract (negative)")
 
 
-# --- Entidades de retencion (addendum §8 paquete UX; SAC E2 D9) --- #
+# --- Retenciones: catalogo + entidades (SAC E2 D9 + v2 CC-006) --- #
 
-class RetentionEntityCreate(BaseModel):
-    """Solo ICA es creable manualmente (una entidad por municipio) —
-    ReteFuente/ReteIVA son singleton auto-creados al liquidar."""
-    retention_type: Literal["ica"]
-    municipality: str = Field(..., min_length=1, max_length=60)
+class RetentionConfigCreate(BaseModel):
+    """Tarifa configurada: tipo + municipio (solo ica) + concepto opcional (F3)
+    + %. El monto al liquidar se pre-calcula con rate_pct y es editable."""
+    retention_type: Literal["retefuente", "reteiva", "ica"]
+    municipality: Optional[str] = Field(None, min_length=1, max_length=60)
+    concept: Optional[str] = Field(None, min_length=1, max_length=60)
+    rate_pct: Decimal = Field(..., gt=0, le=100)
+
+    @model_validator(mode="after")
+    def _municipality_iff_ica(self):
+        if self.retention_type == "ica" and not (self.municipality or "").strip():
+            raise ValueError("El municipio es obligatorio para ICA")
+        if self.retention_type != "ica" and self.municipality is not None:
+            raise ValueError("El municipio solo aplica para ICA")
+        return self
 
 
-class RetentionEntityResponse(BaseModel):
-    """Fila estructurada del hogar de retenciones (grupo en Pasivos +
-    selector de municipio al liquidar)."""
-    id: UUID
+class RetentionConfigUpdate(BaseModel):
+    rate_pct: Optional[Decimal] = Field(None, gt=0, le=100)
+    is_active: Optional[bool] = None
+
+
+class RetentionRowResponse(BaseModel):
+    """Fila del GET unificado (plan v2 D-v2-1): config y/o entidad.
+    entity_id NULL = config sin uso aún (sin Pagar/Estado);
+    config_id NULL = entidad sin tarifa configurada (sin precálculo)."""
+    config_id: Optional[UUID] = None
+    entity_id: Optional[UUID] = None
     retention_type: str
     municipality: Optional[str] = None
-    name: str
+    concept: Optional[str] = None
+    rate_pct: Optional[float] = None
+    name: Optional[str] = None
     current_balance: float
     is_active: bool

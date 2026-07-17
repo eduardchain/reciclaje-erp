@@ -3,8 +3,9 @@ import type {
   ThirdPartyResponse,
   ThirdPartyCreate,
   ThirdPartyUpdate,
-  RetentionEntityResponse,
-  RetentionEntityCreate,
+  RetentionRow,
+  RetentionConfigCreate,
+  RetentionConfigUpdate,
 } from "@/types/third-party";
 import type { PaginatedResponse } from "@/types/common";
 
@@ -79,15 +80,20 @@ export const thirdPartyService = {
     return response.data;
   },
 
-  // Entidades "[Retenciones] X" estructuradas (addendum paquete UX) — endpoints
-  // flag-gated (kg_ledger_enabled): NO llamar sin gate en el consumidor (F2 QA).
-  getRetentionEntities: async (): Promise<RetentionEntityResponse[]> => {
-    const response = await apiClient.get<RetentionEntityResponse[]>("/api/v1/third-parties/retention-entities");
+  // Retenciones v2 (CC-006): GET unificado configs+entidades + CRUD de tarifas.
+  // Endpoints flag-gated (kg_ledger_enabled): NO llamar sin gate (F2 QA).
+  getRetentionRows: async (): Promise<RetentionRow[]> => {
+    const response = await apiClient.get<RetentionRow[]>("/api/v1/third-parties/retention-entities");
     return response.data;
   },
 
-  createRetentionEntity: async (data: RetentionEntityCreate): Promise<RetentionEntityResponse> => {
-    const response = await apiClient.post<RetentionEntityResponse>("/api/v1/third-parties/retention-entities", data);
+  createRetentionConfig: async (data: RetentionConfigCreate): Promise<RetentionRow> => {
+    const response = await apiClient.post<RetentionRow>("/api/v1/third-parties/retention-configs", data);
+    return response.data;
+  },
+
+  updateRetentionConfig: async (configId: string, data: RetentionConfigUpdate): Promise<RetentionRow> => {
+    const response = await apiClient.patch<RetentionRow>(`/api/v1/third-parties/retention-configs/${configId}`, data);
     return response.data;
   },
 

@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Receipt, Power, PowerOff, Landmark } from "lucide-react";
+import { Plus, Receipt, Power, PowerOff } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -19,7 +18,7 @@ import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { BusinessUnitAllocationSelector } from "@/components/shared/BusinessUnitAllocationSelector";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { useLiabilities, useExpenseCategoriesFlat, useThirdPartyCategoriesFlat, useRetentionEntities, useCreateRetentionEntity } from "@/hooks/useMasterData";
+import { useLiabilities, useExpenseCategoriesFlat, useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
 import { useDeactivateThirdParty, useReactivateThirdParty } from "@/hooks/useCrudData";
 import { useCreateMovement } from "@/hooks/useMoneyMovements";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -28,8 +27,7 @@ import { thirdPartyService } from "@/services/thirdParties";
 import { getApiErrorMessage, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import type { ThirdPartyCreate } from "@/types/third-party";
-import type { ThirdPartyResponse, RetentionEntityResponse } from "@/types/third-party";
-import { RETENTION_TYPE_LABELS } from "@/types/purchase";
+import type { ThirdPartyResponse } from "@/types/third-party";
 
 export default function LiabilitiesPage() {
   const navigate = useNavigate();
@@ -42,35 +40,6 @@ export default function LiabilitiesPage() {
   const { data: liabilityCatsData } = useThirdPartyCategoriesFlat("liability");
   const liabilityCategories = liabilityCatsData?.items ?? [];
   const liabilityCategoryId = liabilityCategories.length > 0 ? liabilityCategories[0].id : null;
-
-  // Grupo Retenciones (addendum paquete UX) — SOLO con kg_ledger_enabled.
-  // F2 QA: enabled=kgMode → para las orgs prod esta página no genera NINGÚN
-  // request nuevo y se renderiza idéntica a hoy.
-  const { flagEnabled } = useOrgSettings();
-  const kgMode = flagEnabled("kg_ledger_enabled");
-  const { data: retentionData } = useRetentionEntities(kgMode);
-  const createRetention = useCreateRetentionEntity();
-  const [showAddIca, setShowAddIca] = useState(false);
-  const [newMunicipality, setNewMunicipality] = useState("");
-  const retLabel = (r: RetentionEntityResponse) =>
-    r.retention_type === "ica" ? `ICA — ${r.municipality ?? ""}` : RETENTION_TYPE_LABELS[r.retention_type];
-  const retRows = (retentionData ?? []).filter(
-    (r) =>
-      (showInactive || r.is_active) &&
-      (!search || retLabel(r).toLowerCase().includes(search.toLowerCase())),
-  );
-  const handleAddIca = () => {
-    createRetention.mutate(
-      { retention_type: "ica", municipality: newMunicipality.trim() },
-      {
-        onSuccess: (created) => {
-          toast.success(`Entidad lista: ${created.name}`);
-          setShowAddIca(false);
-          setNewMunicipality("");
-        },
-      },
-    );
-  };
 
   const canDelete = hasPermission("third_parties.delete");
   const deactivateMutation = useDeactivateThirdParty();
@@ -317,107 +286,6 @@ export default function LiabilitiesPage() {
         </CardContent>
       </Card>
 
-      {/* Grupo Retenciones (solo orgs con kg_ledger_enabled) */}
-      {kgMode && (
-        <Card className="shadow-sm">
-          <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 space-y-0">
-            <div>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Landmark className="h-4 w-4 text-indigo-600" />Retenciones
-              </CardTitle>
-              <p className="text-sm text-slate-500 mt-1">
-                Deuda acumulada por retenciones aplicadas al liquidar compras — para el pago mensual de impuestos.
-              </p>
-            </div>
-            {hasPermission("third_parties.create") && (
-              <Button variant="outline" size="sm" className="w-full sm:w-auto shrink-0" onClick={() => setShowAddIca(true)}>
-                <Plus className="h-4 w-4 mr-1" />Agregar Municipio ICA
-              </Button>
-            )}
-          </CardHeader>
-          <CardContent className="p-0">
-            {retRows.length === 0 ? (
-              <p className="text-sm text-slate-400 py-6 px-6">
-                Sin entidades de retención aún. ReteFuente y ReteIVA se crean solas al liquidar una compra con retención; los municipios ICA se agregan aquí para el selector de la liquidación.
-              </p>
-            ) : (
-              <>
-                <Table className="hidden md:table">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Entidad</TableHead>
-                      <TableHead className="text-right">Saldo Contable</TableHead>
-                      <TableHead className="text-right">Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {retRows.map((r) => (
-                      <TableRow key={r.id}>
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2">
-                            {retLabel(r)}
-                            <Badge variant="outline" className="text-xs text-indigo-600 border-indigo-200">Sistema</Badge>
-                            {!r.is_active && <Badge variant="secondary" className="text-xs">Inactivo</Badge>}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <MoneyDisplay amount={r.current_balance} />
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            {hasPermission("treasury.create_movements") && r.is_active && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => navigate(`${ROUTES.TREASURY_NEW}?type=liability_payment&third_party_id=${r.id}`)}
-                              >
-                                Pagar
-                              </Button>
-                            )}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${r.id}&returnTo=/treasury/liabilities`)}
-                            >
-                              Estado de Cuenta
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-
-                {/* Mobile: cards */}
-                <div className="md:hidden space-y-2 p-3">
-                  {retRows.map((r) => (
-                    <div key={r.id} className="rounded-md border bg-white p-3 shadow-sm">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0 flex-1 flex items-center gap-2">
-                          <span className="font-medium truncate">{retLabel(r)}</span>
-                          <Badge variant="outline" className="text-[10px] shrink-0 text-indigo-600 border-indigo-200">Sistema</Badge>
-                        </div>
-                        <MoneyDisplay amount={r.current_balance} className="text-sm shrink-0" />
-                      </div>
-                      <div className="mt-3 grid grid-cols-2 gap-1.5">
-                        {hasPermission("treasury.create_movements") && r.is_active && (
-                          <Button variant="outline" size="sm" className="w-full" onClick={() => navigate(`${ROUTES.TREASURY_NEW}?type=liability_payment&third_party_id=${r.id}`)}>
-                            Pagar
-                          </Button>
-                        )}
-                        <Button variant="outline" size="sm" className="w-full" onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${r.id}&returnTo=/treasury/liabilities`)}>
-                          Estado
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       {/* Modal: Crear pasivo */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent>
@@ -501,40 +369,6 @@ export default function LiabilitiesPage() {
               className="bg-emerald-600 hover:bg-emerald-700"
             >
               {createAccrual.isPending ? "Causando..." : "Causar Gasto"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal: Agregar municipio ICA */}
-      <Dialog open={showAddIca} onOpenChange={setShowAddIca}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Agregar Municipio ICA</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Municipio *</Label>
-              <Input
-                value={newMunicipality}
-                onChange={(e) => setNewMunicipality(e.target.value)}
-                maxLength={60}
-                placeholder="Ej: Barranquilla"
-                autoFocus
-              />
-              <p className="text-xs text-slate-500 mt-1.5">
-                Crea la entidad "[Retenciones] ICA {newMunicipality.trim() || "…"}" y queda disponible en el selector de municipio al liquidar compras. Si el municipio ya existe (con o sin tildes), se reutiliza — no se duplica.
-              </p>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setShowAddIca(false)}>Cancelar</Button>
-            <Button
-              onClick={handleAddIca}
-              disabled={!newMunicipality.trim() || createRetention.isPending}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              {createRetention.isPending ? "Agregando..." : "Agregar"}
             </Button>
           </div>
         </DialogContent>

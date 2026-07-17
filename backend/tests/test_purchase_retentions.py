@@ -140,6 +140,25 @@ class TestRetentionLiquidation:
         total_liability = supplier.current_balance + sum(e.current_balance for e in entities)
         assert total_liability == Decimal("-1000000.00")
 
+    def test_rate_base_passthrough_persisted(
+        self, client, org_headers, db_session, supplier, material, warehouse
+    ):
+        """v2 (CC-006): el precálculo del frontend viaja como rate/base y queda
+        auditado en purchase_retentions; amount sigue siendo la fuente de verdad
+        aunque rate×base no cuadre (el usuario puede editar el monto)."""
+        p = _create_purchase(client, org_headers, supplier, material, warehouse)  # $1.000.000
+        resp = _liquidate(client, org_headers, p["id"], retentions=[
+            {"retention_type": "retefuente", "amount": "20000",  # editado (≠ 2.5%)
+             "rate": "2.5", "base": "1000000"},
+        ])
+        assert resp.status_code == 200, resp.text
+        row = db_session.execute(
+            select(PurchaseRetention).where(PurchaseRetention.purchase_id == p["id"])
+        ).scalar_one()
+        assert row.rate == Decimal("2.5")
+        assert row.base == Decimal("1000000")
+        assert row.amount == Decimal("20000.00")  # NO recalculado server-side
+
     def test_flag_off_422(
         self, client, org_headers, db_session, test_organization,
         supplier, material, warehouse,

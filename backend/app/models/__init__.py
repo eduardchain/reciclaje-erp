@@ -32,6 +32,7 @@ from .kg_ledger import KgLedgerAccount, KgLedgerMovement, KgLedgerReconciliation
 from .service_tariff import ServiceTariff
 from .material_conversion_formula import MaterialConversionFormula
 from .material_kg_profile import MaterialKgProfile
+from .retention_config import RetentionConfig
 from .inbound_order import InboundOrder, InboundOrderLine
 from .plant_process import FurnaceCharge, CrucibleCharge
 from .exception_task import DiscrepancyTask, DailyOkSeal
@@ -83,6 +84,7 @@ __all__ = [
     "ServiceTariff",
     "MaterialConversionFormula",
     "MaterialKgProfile",
+    "RetentionConfig",
     "InboundOrder",
     "InboundOrderLine",
     "PurchaseRetention",

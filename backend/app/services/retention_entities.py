@@ -112,27 +112,110 @@ def resolve_retention_entity(
     return tp
 
 
-def list_retention_entities(db: Session, organization_id: UUID) -> list[dict]:
-    """Lista estructurada para el GET: parsea el formato canónico PROPIO.
-    Orden: retefuente, reteiva, luego ICA por municipio asc. Nombres que no
-    matchean el formato se omiten (defensivo — no deberían existir)."""
+def _parse_entity(tp: ThirdParty) -> Optional[tuple[str, Optional[str]]]:
+    """Nombre canónico → (tipo, municipio). None si no matchea el formato."""
     type_by_name = {v: k for k, v in RETENTION_ENTITY_NAMES.items()}
-    rows: list[dict] = []
+    if tp.name in type_by_name:
+        return type_by_name[tp.name], None
+    if tp.name.startswith(ICA_PREFIX):
+        return "ica", tp.name[len(ICA_PREFIX):]
+    return None
+
+
+_TYPE_ORDER = {"retefuente": 0, "reteiva": 1, "ica": 2}
+
+
+def list_retention_rows(db: Session, organization_id: UUID) -> list[dict]:
+    """GET unificado (plan v2 D-v2-1): UNIÓN de configs y entidades matcheadas
+    por (tipo, municipio-normalizado). Filas:
+    - config + entidad → completa (config_id, entity_id, %, saldo).
+    - config sin entidad (aún sin uso) → entity_id NULL, saldo 0.0 — visible
+      desde el día uno (resuelve el pre-crear ReteFuente/ReteIVA).
+    - entidad sin config (pre-v2 / manual vieja) → config_id NULL, sin %.
+    Varias configs del mismo tipo (conceptos F3) comparten UNA entidad — el
+    acreedor es uno, la tarifa varía; cada fila muestra el saldo de SU entidad."""
+    from app.models.retention_config import RetentionConfig
+
+    entities: dict[tuple[str, Optional[str]], ThirdParty] = {}
     for tp in _retention_candidates(db, organization_id):
-        if tp.name in type_by_name:
-            rtype, municipality = type_by_name[tp.name], None
-        elif tp.name.startswith(ICA_PREFIX):
-            rtype, municipality = "ica", tp.name[len(ICA_PREFIX):]
-        else:
-            continue
+        parsed = _parse_entity(tp)
+        if parsed:
+            rtype, municipality = parsed
+            entities[(rtype, normalize_entity_name(municipality) if municipality else None)] = tp
+
+    configs = list(db.execute(
+        select(RetentionConfig).where(
+            RetentionConfig.organization_id == organization_id,
+        )
+    ).scalars().all())
+
+    rows: list[dict] = []
+    matched_keys: set[tuple[str, Optional[str]]] = set()
+    for cfg in configs:
+        key = (
+            cfg.retention_type,
+            normalize_entity_name(cfg.municipality) if cfg.municipality else None,
+        )
+        tp = entities.get(key)
+        if tp is not None:
+            matched_keys.add(key)
         rows.append({
-            "id": tp.id,
+            "config_id": cfg.id,
+            "entity_id": tp.id if tp is not None else None,
+            "retention_type": cfg.retention_type,
+            "municipality": cfg.municipality,
+            "concept": cfg.concept,
+            "rate_pct": float(cfg.rate_pct),
+            "name": tp.name if tp is not None else None,
+            "current_balance": float(tp.current_balance) if tp is not None else 0.0,
+            "is_active": cfg.is_active,
+        })
+
+    for key, tp in entities.items():
+        if key in matched_keys:
+            continue
+        rtype, _ = key
+        parsed = _parse_entity(tp)
+        rows.append({
+            "config_id": None,
+            "entity_id": tp.id,
             "retention_type": rtype,
-            "municipality": municipality,
+            "municipality": parsed[1] if parsed else None,
+            "concept": None,
+            "rate_pct": None,
             "name": tp.name,
             "current_balance": float(tp.current_balance),
             "is_active": tp.is_active,
         })
-    order = {"retefuente": 0, "reteiva": 1, "ica": 2}
-    rows.sort(key=lambda r: (order[r["retention_type"]], (r["municipality"] or "").lower()))
+
+    rows.sort(key=lambda r: (
+        _TYPE_ORDER[r["retention_type"]],
+        (r["municipality"] or "").lower(),
+        (r["concept"] or ""),  # NULL (general) primero
+    ))
     return rows
+
+
+def _norm_or_none(value: Optional[str]) -> Optional[str]:
+    return normalize_entity_name(value) if value else None
+
+
+def find_active_config(
+    db: Session, organization_id: UUID, retention_type: str,
+    municipality: Optional[str], concept: Optional[str],
+):
+    """Config activa que colisiona por (tipo, municipio, concepto) normalizados
+    H4 — la unicidad vive en servicio (D14), no en BD."""
+    from app.models.retention_config import RetentionConfig
+
+    target = (_norm_or_none(municipality), _norm_or_none(concept))
+    for cfg in db.execute(
+        select(RetentionConfig).where(
+            RetentionConfig.organization_id == organization_id,
+            RetentionConfig.retention_type == retention_type,
+            RetentionConfig.is_active == True,  # noqa: E712
+        )
+    ).scalars():
+        if (_norm_or_none(cfg.municipality), _norm_or_none(cfg.concept)) == target:
+            return cfg
+    return None

@@ -1,21 +1,23 @@
 """
-Tests endpoints de entidades de retencion (paquete UX addendum §8).
+Tests retenciones: catálogo configurable v2 (CC-006) + GET unificado.
 
-Cubre: GET lista estructurada (tipos parseados + municipio + balance, orden
-canonico, entidades ajenas al formato excluidas), POST ICA idempotente con
-matching H4 ('bogota' == 'Bogotá' → misma entidad), POST retefuente → 422
-(solo ica es creable a mano), flag gating (403 sin kg_ledger_enabled incluso
-admin), RBAC (viewer lee, no crea) y aislamiento multi-org.
+Cubre: CRUD de configs (crear los 3 tipos, concept F3, dup H4 → 409 con
+config_id, validaciones municipio/rate → 422, PATCH rate, soft delete y
+reactivación con colisión), GET unificado D-v2-1 (config+entidad matcheadas,
+config sin entidad = visible con saldo 0, entidad huérfana sin config),
+flag gating (403 sin kg_ledger_enabled incluso admin), RBAC (viewer lee,
+no crea) y aislamiento multi-org.
 
-El get-or-create compartido con la liquidacion (F3) lo guardan los 16 tests
-de tests/test_purchase_retentions.py — aca solo se prueba la capa endpoint.
+El get-or-create compartido con la liquidación (F3 del addendum) lo guardan
+los 16 tests de tests/test_purchase_retentions.py — acá solo la capa catálogo.
 """
 import pytest
 
 from app.services.retention_entities import resolve_retention_entity
 from tests.conftest import create_third_party_with_category
 
-URL = "/api/v1/third-parties/retention-entities"
+ROWS_URL = "/api/v1/third-parties/retention-entities"
+CONFIGS_URL = "/api/v1/third-parties/retention-configs"
 
 
 @pytest.fixture(autouse=True)
@@ -25,101 +27,166 @@ def _enable_flag(db_session, test_organization, test_organization2):
     db_session.commit()
 
 
-class TestRetentionEntities:
-    def test_list_structured_and_ordered(
+def _post_config(client, headers, **body):
+    return client.post(CONFIGS_URL, headers=headers, json=body)
+
+
+class TestRetentionConfigs:
+    def test_create_all_types_and_concept(self, client, org_headers):
+        r1 = _post_config(client, org_headers, retention_type="retefuente", rate_pct=2.5)
+        assert r1.status_code == 201, r1.text
+        assert r1.json()["rate_pct"] == 2.5
+        assert r1.json()["entity_id"] is None  # config sin uso aún
+        assert r1.json()["current_balance"] == 0.0
+
+        r2 = _post_config(
+            client, org_headers, retention_type="retefuente",
+            concept="Servicios", rate_pct=4,
+        )
+        assert r2.status_code == 201, r2.text  # F3: mismo tipo, concepto distinto
+        assert r2.json()["concept"] == "Servicios"
+
+        r3 = _post_config(
+            client, org_headers, retention_type="ica",
+            municipality="Barranquilla", rate_pct=0.7,
+        )
+        assert r3.status_code == 201, r3.text
+        assert r3.json()["municipality"] == "Barranquilla"
+
+    def test_duplicate_h4_409_with_config_id(self, client, org_headers):
+        r1 = _post_config(
+            client, org_headers, retention_type="ica",
+            municipality="Bogotá", rate_pct=1,
+        )
+        assert r1.status_code == 201
+        # Mismo municipio sin tilde/casing → colisión H4, aunque el % sea otro
+        r2 = _post_config(
+            client, org_headers, retention_type="ica",
+            municipality="bogota", rate_pct=2,
+        )
+        assert r2.status_code == 409, r2.text
+        assert r1.json()["config_id"] in r2.json()["detail"]  # QA: detail trae el id
+
+    def test_validation_422(self, client, org_headers):
+        # ica sin municipio
+        assert _post_config(
+            client, org_headers, retention_type="ica", rate_pct=1
+        ).status_code == 422
+        # municipio en tipo no-ica
+        assert _post_config(
+            client, org_headers, retention_type="reteiva",
+            municipality="Cali", rate_pct=1,
+        ).status_code == 422
+        # rate fuera de rango
+        for bad_rate in (0, -1, 101):
+            assert _post_config(
+                client, org_headers, retention_type="retefuente", rate_pct=bad_rate
+            ).status_code == 422, f"rate {bad_rate}"
+
+    def test_patch_rate_and_soft_delete(self, client, org_headers):
+        created = _post_config(
+            client, org_headers, retention_type="reteiva", rate_pct=15
+        ).json()
+        cid = created["config_id"]
+
+        resp = client.patch(f"{CONFIGS_URL}/{cid}", headers=org_headers, json={"rate_pct": 19})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["rate_pct"] == 19.0
+
+        resp = client.patch(f"{CONFIGS_URL}/{cid}", headers=org_headers, json={"is_active": False})
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is False
+
+        # Desactivada libera el slot: crear otra reteiva pasa
+        r2 = _post_config(client, org_headers, retention_type="reteiva", rate_pct=5)
+        assert r2.status_code == 201
+        # Reactivar la vieja ahora colisiona con la nueva → 409
+        resp = client.patch(f"{CONFIGS_URL}/{cid}", headers=org_headers, json={"is_active": True})
+        assert resp.status_code == 409, resp.text
+
+    def test_patch_other_org_404(self, client, org_headers, org_headers2):
+        created = _post_config(
+            client, org_headers, retention_type="retefuente", rate_pct=2.5
+        ).json()
+        resp = client.patch(
+            f"{CONFIGS_URL}/{created['config_id']}",
+            headers=org_headers2, json={"rate_pct": 9},
+        )
+        assert resp.status_code in (403, 404)  # viewer sin create → 403; admin ajeno → 404
+
+
+class TestUnifiedRows:
+    def test_config_matches_entity_and_orphans(
         self, client, org_headers, db_session, test_organization
     ):
-        """GET parsea el formato canonico: tipo + municipio + balance, orden
-        retefuente → reteiva → ica por municipio. Entidades sistema de OTRO
-        formato ([Prepago]) y terceros normales NO aparecen."""
+        """Los 3 sabores de fila: config+entidad, config sola, entidad sola."""
         org_id = test_organization.id
-        # Seed via servicio compartido (mismo camino que la liquidacion)
+        # Entidad nacida "al liquidar" (servicio compartido) para ICA Soledad
         resolve_retention_entity(db_session, org_id, "ica", "Soledad")
-        resolve_retention_entity(db_session, org_id, "retefuente", None)
-        resolve_retention_entity(db_session, org_id, "ica", "Barranquilla")
-        # Ruido: system entity de otro modulo + tercero normal
+        # Entidad huérfana (sin config): ReteIVA
+        resolve_retention_entity(db_session, org_id, "reteiva", None)
+        db_session.commit()
+
+        # Config que matchea la entidad (H4: sin tilde) + config sin entidad
+        _post_config(client, org_headers, retention_type="ica",
+                     municipality="soledad", rate_pct=0.5)
+        _post_config(client, org_headers, retention_type="retefuente", rate_pct=2.5)
+
+        rows = client.get(ROWS_URL, headers=org_headers).json()
+        by_key = {(r["retention_type"], r["municipality"]): r for r in rows}
+
+        matched = by_key[("ica", "soledad")]  # display de la config
+        assert matched["config_id"] is not None
+        assert matched["entity_id"] is not None  # matcheó la entidad "Soledad"
+        assert matched["name"] == "[Retenciones] ICA Soledad"
+        assert matched["rate_pct"] == 0.5
+
+        config_only = by_key[("retefuente", None)]
+        assert config_only["config_id"] is not None
+        assert config_only["entity_id"] is None
+        assert config_only["current_balance"] == 0.0
+
+        orphan = by_key[("reteiva", None)]
+        assert orphan["config_id"] is None
+        assert orphan["entity_id"] is not None
+        assert orphan["rate_pct"] is None
+
+    def test_excludes_non_retention_entities(
+        self, client, org_headers, db_session, test_organization
+    ):
         from app.models.third_party import ThirdParty
         db_session.add(ThirdParty(
-            name="[Prepago] Seguro Todo Riesgo", organization_id=org_id,
+            name="[Prepago] Seguro", organization_id=test_organization.id,
             is_system_entity=True, is_active=True,
         ))
         create_third_party_with_category(
-            db_session, org_id, "Proveedor Normal", "material_supplier"
+            db_session, test_organization.id, "Proveedor Normal", "material_supplier"
         )
         db_session.commit()
+        assert client.get(ROWS_URL, headers=org_headers).json() == []
 
-        resp = client.get(URL, headers=org_headers)
-        assert resp.status_code == 200, resp.text
-        rows = resp.json()
-        assert [(r["retention_type"], r["municipality"]) for r in rows] == [
-            ("retefuente", None),
-            ("ica", "Barranquilla"),
-            ("ica", "Soledad"),
-        ]
-        assert all(r["current_balance"] == 0.0 for r in rows)
-        assert all(r["is_active"] for r in rows)
-        assert rows[0]["name"] == "[Retenciones] ReteFuente"
-        assert rows[1]["name"] == "[Retenciones] ICA Barranquilla"
+    def test_org_isolation(self, client, org_headers, org_headers2):
+        _post_config(client, org_headers, retention_type="retefuente", rate_pct=2.5)
+        assert len(client.get(ROWS_URL, headers=org_headers).json()) == 1
+        assert client.get(ROWS_URL, headers=org_headers2).json() == []
 
-    def test_post_ica_idempotent_h4(self, client, org_headers):
-        """POST ICA crea; repetir sin acentos/casing devuelve la MISMA entidad
-        (matching H4) y conserva el display bonito de la primera vez."""
-        r1 = client.post(URL, headers=org_headers, json={
-            "retention_type": "ica", "municipality": "Bogotá",
-        })
-        assert r1.status_code == 201, r1.text
-        assert r1.json()["name"] == "[Retenciones] ICA Bogotá"
-        assert r1.json()["municipality"] == "Bogotá"
 
-        r2 = client.post(URL, headers=org_headers, json={
-            "retention_type": "ica", "municipality": "bogota",
-        })
-        assert r2.status_code == 201, r2.text
-        assert r2.json()["id"] == r1.json()["id"]
-        assert r2.json()["municipality"] == "Bogotá"  # display original, no el input
-
-        rows = client.get(URL, headers=org_headers).json()
-        assert len([r for r in rows if r["retention_type"] == "ica"]) == 1
-
-    def test_post_non_ica_422(self, client, org_headers):
-        """Solo ICA es creable a mano — ReteFuente/ReteIVA nacen al liquidar."""
-        for rtype in ("retefuente", "reteiva", "otra"):
-            resp = client.post(URL, headers=org_headers, json={
-                "retention_type": rtype, "municipality": "Barranquilla",
-            })
-            assert resp.status_code == 422, f"{rtype}: {resp.text}"
-
-    def test_post_blank_municipality_422(self, client, org_headers):
-        resp = client.post(URL, headers=org_headers, json={
-            "retention_type": "ica", "municipality": "",
-        })
-        assert resp.status_code == 422
-
+class TestGatingAndRBAC:
     def test_flag_off_403(self, client, org_headers, db_session, test_organization):
-        """Sin kg_ledger_enabled ambos endpoints responden 403 incluso a admin —
-        las 3 orgs prod no ven el modulo (regresion Costa)."""
         test_organization.settings = {}
         db_session.commit()
-        assert client.get(URL, headers=org_headers).status_code == 403
-        resp = client.post(URL, headers=org_headers, json={
-            "retention_type": "ica", "municipality": "Cali",
-        })
-        assert resp.status_code == 403
+        assert client.get(ROWS_URL, headers=org_headers).status_code == 403
+        assert _post_config(
+            client, org_headers, retention_type="retefuente", rate_pct=2.5
+        ).status_code == 403
+        assert client.patch(
+            f"{CONFIGS_URL}/00000000-0000-0000-0000-000000000000",
+            headers=org_headers, json={"rate_pct": 1},
+        ).status_code == 403
 
     def test_rbac_viewer_read_not_create(self, client, org_headers2):
-        """third_parties.view lee el grupo (F1); third_parties.create crea —
-        viewer no lo tiene."""
-        assert client.get(URL, headers=org_headers2).status_code == 200
-        resp = client.post(URL, headers=org_headers2, json={
-            "retention_type": "ica", "municipality": "Monteria",
-        })
+        assert client.get(ROWS_URL, headers=org_headers2).status_code == 200
+        resp = _post_config(
+            client, org_headers2, retention_type="retefuente", rate_pct=2.5
+        )
         assert resp.status_code == 403
-
-    def test_org_isolation(
-        self, client, org_headers, org_headers2, db_session, test_organization
-    ):
-        """Entidades de org1 no se filtran al GET de org2."""
-        resolve_retention_entity(db_session, test_organization.id, "ica", "Envigado")
-        db_session.commit()
-        assert len(client.get(URL, headers=org_headers).json()) == 1
-        assert client.get(URL, headers=org_headers2).json() == []

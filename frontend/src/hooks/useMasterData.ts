@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { thirdPartyService } from "@/services/thirdParties";
 import { getApiErrorMessage } from "@/utils/formatters";
-import type { RetentionEntityCreate } from "@/types/third-party";
+import type { RetentionConfigCreate, RetentionConfigUpdate } from "@/types/third-party";
 import { materialService } from "@/services/materials";
 import { warehouseService } from "@/services/warehouses";
 import { moneyAccountService } from "@/services/moneyAccounts";
@@ -115,28 +115,42 @@ export function useLiabilities(search?: string, is_active?: boolean, includeSyst
   });
 }
 
-export function useRetentionEntities(enabled: boolean) {
-  // F2 QA: el endpoint es flag-gated (kg_ledger_enabled) y este hook vive en
-  // páginas COMPARTIDAS con las orgs prod (LiabilitiesPage, Liquidate) — pasar
-  // SIEMPRE enabled=flagEnabled("kg_ledger_enabled"): sin flag, cero requests.
+export function useRetentionRows(enabled: boolean) {
+  // F2 QA: el endpoint es flag-gated (kg_ledger_enabled) y este hook vive
+  // tambien en una pagina COMPARTIDA con las orgs prod (PurchaseLiquidatePage)
+  // — pasar SIEMPRE enabled=flagEnabled("kg_ledger_enabled"): sin flag, cero requests.
   return useQuery({
     queryKey: ["third-parties", "retention-entities"],
-    queryFn: () => thirdPartyService.getRetentionEntities(),
+    queryFn: () => thirdPartyService.getRetentionRows(),
     enabled,
   });
 }
 
-export function useCreateRetentionEntity() {
-  // POST idempotente (matching sin acentos/casing en backend): repetir un
-  // municipio existente devuelve la MISMA entidad — sin riesgo de duplicados.
+export function useCreateRetentionConfig() {
+  // Colision (tipo, municipio, concepto) normalizados H4 → 409 con la tarifa
+  // existente en el detail (editarla, no duplicar).
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: RetentionEntityCreate) => thirdPartyService.createRetentionEntity(data),
+    mutationFn: (data: RetentionConfigCreate) => thirdPartyService.createRetentionConfig(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["third-parties"] });
     },
     onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, "Error al crear el municipio ICA"));
+      toast.error(getApiErrorMessage(error, "Error al crear la retención"));
+    },
+  });
+}
+
+export function useUpdateRetentionConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ configId, data }: { configId: string; data: RetentionConfigUpdate }) =>
+      thirdPartyService.updateRetentionConfig(configId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["third-parties"] });
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al actualizar la retención"));
     },
   });
 }

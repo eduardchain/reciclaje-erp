@@ -38,6 +38,7 @@ const AccountStatementPage = lazy(() => import("@/pages/treasury/AccountStatemen
 const TreasuryDashboardPage = lazy(() => import("@/pages/treasury/TreasuryDashboardPage"));
 const AccountMovementsPage = lazy(() => import("@/pages/treasury/AccountMovementsPage"));
 const LiabilitiesPage = lazy(() => import("@/pages/treasury/LiabilitiesPage"));
+const RetentionsPage = lazy(() => import("@/pages/treasury/RetentionsPage"));
 const ScheduledExpensesPage = lazy(() => import("@/pages/treasury/ScheduledExpensesPage"));
 const ScheduledExpenseCreatePage = lazy(() => import("@/pages/treasury/ScheduledExpenseCreatePage"));
 const ScheduledExpenseDetailPage = lazy(() => import("@/pages/treasury/ScheduledExpenseDetailPage"));
@@ -166,6 +167,7 @@ function App() {
               <Route path={ROUTES.TREASURY_DASHBOARD} element={<P permission="treasury.view_dashboard"><TreasuryDashboardPage /></P>} />
               <Route path={ROUTES.TREASURY_ACCOUNT_MOVEMENTS} element={<P permission="treasury.view_accounts"><AccountMovementsPage /></P>} />
               <Route path={ROUTES.TREASURY_LIABILITIES} element={<P permission="treasury.view_liabilities"><LiabilitiesPage /></P>} />
+              <Route path={ROUTES.TREASURY_RETENTIONS} element={<FP flag="kg_ledger_enabled" permission="third_parties.view"><RetentionsPage /></FP>} />
               <Route path={ROUTES.TREASURY_SCHEDULED} element={<P permission="treasury.view_scheduled"><ScheduledExpensesPage /></P>} />
               <Route path={ROUTES.TREASURY_SCHEDULED_NEW} element={<P permission="treasury.manage_expenses"><ScheduledExpenseCreatePage /></P>} />
               <Route path={ROUTES.TREASURY_SCHEDULED_DETAIL} element={<P permission="treasury.view_scheduled"><ScheduledExpenseDetailPage /></P>} />

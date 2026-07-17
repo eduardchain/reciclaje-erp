@@ -40,18 +40,33 @@ export interface ThirdPartyUpdate {
   category_ids?: string[];
 }
 
-// --- Entidades de retencion (addendum paquete UX; SAC E2 D9) --- //
+// --- Retenciones: catalogo v2 (CC-006) + entidades (SAC E2 D9) --- //
 
-export interface RetentionEntityResponse {
-  id: string;
-  retention_type: "retefuente" | "reteiva" | "ica";
+export type RetentionConfigType = "retefuente" | "reteiva" | "ica";
+
+// Fila del GET unificado: config (tarifa) y/o entidad (saldo).
+// entity_id null = config sin uso aun (sin Pagar/Estado);
+// config_id null = entidad sin tarifa configurada (sin precalculo).
+export interface RetentionRow {
+  config_id: string | null;
+  entity_id: string | null;
+  retention_type: RetentionConfigType;
   municipality: string | null;
-  name: string;
+  concept: string | null;
+  rate_pct: number | null;
+  name: string | null;
   current_balance: number;
   is_active: boolean;
 }
 
-export interface RetentionEntityCreate {
-  retention_type: "ica"; // solo ICA es creable a mano; ReteFuente/ReteIVA nacen al liquidar
-  municipality: string;
+export interface RetentionConfigCreate {
+  retention_type: RetentionConfigType;
+  municipality?: string; // obligatorio si ica
+  concept?: string; // opcional (F3: ReteFuente compras vs servicios...)
+  rate_pct: number;
+}
+
+export interface RetentionConfigUpdate {
+  rate_pct?: number;
+  is_active?: boolean;
 }

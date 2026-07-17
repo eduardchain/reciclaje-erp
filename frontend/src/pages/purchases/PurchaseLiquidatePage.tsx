@@ -15,12 +15,14 @@ import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { cn } from "@/utils";
 import { usePurchase, useLiquidatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { usePayableProviders, useMoneyAccounts, useRetentionEntities, useCreateRetentionEntity } from "@/hooks/useMasterData";
+import { usePayableProviders, useMoneyAccounts, useRetentionRows, useCreateRetentionConfig } from "@/hooks/useMasterData";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
-import { RETENTION_TYPE_LABELS, type PurchaseCommissionCreate, type RetentionType } from "@/types/purchase";
+import { RETENTION_TYPE_LABELS, type PurchaseCommissionCreate } from "@/types/purchase";
+import type { RetentionConfigType } from "@/types/third-party";
+import { retentionRowLabel } from "@/pages/treasury/RetentionsPage";
 
 interface LiquidationLine {
   line_id: string;
@@ -43,18 +45,20 @@ function createEmptyCommission(): CommissionFormData {
   return { _key: ++commKeyCounter, third_party_id: "", concept: "", commission_type: "percentage", commission_value: 0, charge_type: "commission" };
 }
 
-// SAC E2 D9 — retenciones tributarias (solo con flag kg_ledger_enabled)
+// SAC — retenciones por catálogo (v2 CC-006, solo con flag kg_ledger_enabled):
+// la fila referencia una config (tipo+municipio+concepto+%); el monto se
+// pre-calcula con el % y solo se guarda aparte si el usuario lo editó (touched).
 interface RetentionFormData {
   _key: number;
-  retention_type: RetentionType;
-  municipality: string;
-  amount: number;
+  config_id: string;
+  amount: number; // vigente solo cuando touched
+  touched: boolean;
 }
 
 let retKeyCounter = 0;
 
 function createEmptyRetention(): RetentionFormData {
-  return { _key: ++retKeyCounter, retention_type: "retefuente", municipality: "", amount: 0 };
+  return { _key: ++retKeyCounter, config_id: "", amount: 0, touched: false };
 }
 
 export default function PurchaseLiquidatePage() {
@@ -70,29 +74,41 @@ export default function PurchaseLiquidatePage() {
   // Gating D9: sin flag no se muestra la sección y el payload no lleva retentions
   const retentionsEnabled = getSetting("kg_ledger_enabled") === true;
 
-  // Municipios ICA desde las entidades existentes (F2: enabled=flag → cero
-  // requests para orgs sin SAC). Selector cerrado mata el typo-duplicado.
-  const { data: retentionEntities } = useRetentionEntities(retentionsEnabled);
-  const icaMunicipalities = useMemo(
-    () =>
-      (retentionEntities ?? [])
-        .filter((r) => r.retention_type === "ica" && r.is_active && r.municipality)
-        .map((r) => r.municipality as string),
-    [retentionEntities],
+  // Catálogo de retenciones (v2 CC-006; F2: enabled=flag → cero requests para
+  // orgs sin SAC). El selector cerrado + precálculo matan typo y digitación.
+  const { data: retentionRows } = useRetentionRows(retentionsEnabled);
+  const retentionConfigs = useMemo(
+    () => (retentionRows ?? []).filter((r) => r.config_id && r.is_active),
+    [retentionRows],
   );
-  const createRetentionEntity = useCreateRetentionEntity();
-  const [addIcaForKey, setAddIcaForKey] = useState<number | null>(null);
+  const configById = useMemo(
+    () => new Map(retentionConfigs.map((r) => [r.config_id as string, r])),
+    [retentionConfigs],
+  );
+  const createRetentionConfig = useCreateRetentionConfig();
+  const [addRetForKey, setAddRetForKey] = useState<number | null>(null);
+  const [newRetType, setNewRetType] = useState<RetentionConfigType>("retefuente");
   const [newMunicipality, setNewMunicipality] = useState("");
-  const handleAddMunicipality = () => {
-    createRetentionEntity.mutate(
-      { retention_type: "ica", municipality: newMunicipality.trim() },
+  const [newConcept, setNewConcept] = useState("");
+  const [newRate, setNewRate] = useState("");
+  const newRateNum = parseFloat(newRate);
+  const addRetValid =
+    !Number.isNaN(newRateNum) && newRateNum > 0 && newRateNum <= 100 &&
+    (newRetType !== "ica" || !!newMunicipality.trim());
+  const handleAddRetention = () => {
+    createRetentionConfig.mutate(
+      {
+        retention_type: newRetType,
+        ...(newRetType === "ica" ? { municipality: newMunicipality.trim() } : {}),
+        ...(newConcept.trim() ? { concept: newConcept.trim() } : {}),
+        rate_pct: newRateNum,
+      },
       {
         onSuccess: (created) => {
-          if (addIcaForKey !== null && created.municipality) {
-            updateRetention(addIcaForKey, "municipality", created.municipality);
+          if (addRetForKey !== null && created.config_id) {
+            selectRetentionConfig(addRetForKey, created.config_id);
           }
-          setAddIcaForKey(null);
-          setNewMunicipality("");
+          setAddRetForKey(null);
         },
       },
     );
@@ -168,15 +184,16 @@ export default function PurchaseLiquidatePage() {
     setCommissions((prev) => prev.map((c) => (c._key === key ? { ...c, [field]: value } : c)));
   };
 
-  const updateRetention = (key: number, field: keyof Omit<RetentionFormData, "_key">, value: string | number) => {
+  const selectRetentionConfig = (key: number, configId: string) => {
+    // Elegir config resetea el monto al precálculo (touched=false)
     setRetentions((prev) =>
-      prev.map((r) => {
-        if (r._key !== key) return r;
-        const next = { ...r, [field]: value };
-        // municipality solo aplica a ICA (el backend 422 si viaja en otras)
-        if (field === "retention_type" && value !== "ica") next.municipality = "";
-        return next;
-      })
+      prev.map((r) => (r._key === key ? { ...r, config_id: configId, touched: false, amount: 0 } : r)),
+    );
+  };
+
+  const setRetentionAmount = (key: number, value: number) => {
+    setRetentions((prev) =>
+      prev.map((r) => (r._key === key ? { ...r, amount: value, touched: true } : r)),
     );
   };
 
@@ -200,10 +217,19 @@ export default function PurchaseLiquidatePage() {
   const allPricesValid = lines.every((l) => l.unit_price > 0);
   const selectedAccount = accounts.find((a) => a.id === paymentAccountId);
   // D9: el proveedor queda acreditado (y el pago inmediato paga) por el NETO
-  const totalRet = retentions.reduce((sum, r) => sum + (r.amount || 0), 0);
+  // Precálculo: % de la config sobre el subtotal; editable (touched conserva
+  // el valor del usuario). El sugerido sigue vivo si cambian los precios.
+  const suggestedRetention = (configId: string) => {
+    const cfg = configById.get(configId);
+    if (!cfg || cfg.rate_pct == null) return 0;
+    return Math.round(total * cfg.rate_pct) / 100; // = total × pct/100 a 2 decimales
+  };
+  const effRetentionAmount = (r: RetentionFormData) =>
+    r.touched ? r.amount : suggestedRetention(r.config_id);
+  const totalRet = retentions.reduce((sum, r) => sum + effRetentionAmount(r), 0);
   const netTotal = total - totalRet;
   const retentionsValid =
-    retentions.every((r) => r.amount > 0 && (r.retention_type !== "ica" || !!r.municipality.trim())) &&
+    retentions.every((r) => !!r.config_id && effRetentionAmount(r) > 0) &&
     (totalRet === 0 || totalRet < total);
   const canSubmit = allPricesValid && lines.length > 0
     && (!immediatePayment || (paymentAccountId && (!selectedAccount || selectedAccount.current_balance >= netTotal)))
@@ -227,11 +253,18 @@ export default function PurchaseLiquidatePage() {
           // D9: AUSENTE (no []) sin filas — payload byte-idéntico para orgs sin flag
           ...(retentionsEnabled && retentions.length > 0
             ? {
-                retentions: retentions.map((r) => ({
-                  retention_type: r.retention_type,
-                  ...(r.retention_type === "ica" ? { municipality: r.municipality.trim() } : {}),
-                  amount: r.amount,
-                })),
+                retentions: retentions.map((r) => {
+                  const cfg = configById.get(r.config_id)!;
+                  return {
+                    retention_type: cfg.retention_type,
+                    ...(cfg.retention_type === "ica" && cfg.municipality
+                      ? { municipality: cfg.municipality }
+                      : {}),
+                    amount: effRetentionAmount(r),
+                    // Auditoría del precálculo ofrecido (F1: backend ya los persiste)
+                    ...(cfg.rate_pct != null ? { rate: cfg.rate_pct, base: total } : {}),
+                  };
+                }),
               }
             : {}),
           ...(immediatePayment && paymentAccountId
@@ -465,54 +498,60 @@ export default function PurchaseLiquidatePage() {
                   isLast={idx === retentions.length - 1}
                   onDelete={() => setRetentions((p) => p.filter((r) => r._key !== ret._key))}
                 >
-                  <div className="md:col-span-3">
-                    <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Tipo *</Label>
-                    <Select value={ret.retention_type} onValueChange={(v) => updateRetention(ret._key, "retention_type", v)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                  <div className="md:col-span-6">
+                    <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Retención *</Label>
+                    <Select
+                      value={ret.config_id || undefined}
+                      onValueChange={(v) => {
+                        if (v === "__add__") {
+                          setNewRetType("retefuente");
+                          setNewMunicipality("");
+                          setNewConcept("");
+                          setNewRate("");
+                          setAddRetForKey(ret._key);
+                        } else {
+                          selectRetentionConfig(ret._key, v);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className={!ret.config_id ? "border-red-300" : ""}>
+                        <SelectValue placeholder="Seleccionar retención..." />
+                      </SelectTrigger>
                       <SelectContent>
-                        {(Object.keys(RETENTION_TYPE_LABELS) as RetentionType[]).map((t) => (
-                          <SelectItem key={t} value={t}>{RETENTION_TYPE_LABELS[t]}</SelectItem>
+                        {retentionConfigs.map((cfg) => (
+                          <SelectItem key={cfg.config_id} value={cfg.config_id as string}>
+                            {retentionRowLabel(cfg)} ({cfg.rate_pct}%)
+                          </SelectItem>
                         ))}
+                        <SelectItem value="__add__" className="text-indigo-600 font-medium">
+                          + Agregar retención…
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  {ret.retention_type === "ica" && (
-                    <div className="md:col-span-4">
-                      <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Municipio *</Label>
-                      <Select
-                        value={ret.municipality || undefined}
-                        onValueChange={(v) => {
-                          if (v === "__add__") {
-                            setNewMunicipality("");
-                            setAddIcaForKey(ret._key);
-                          } else {
-                            updateRetention(ret._key, "municipality", v);
-                          }
-                        }}
-                      >
-                        <SelectTrigger className={!ret.municipality.trim() ? "border-red-300" : ""}>
-                          <SelectValue placeholder="Seleccionar municipio..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {icaMunicipalities.map((m) => (
-                            <SelectItem key={m} value={m}>{m}</SelectItem>
-                          ))}
-                          <SelectItem value="__add__" className="text-indigo-600 font-medium">
-                            + Agregar municipio…
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  <div className={ret.retention_type === "ica" ? "md:col-span-3" : "md:col-span-4"}>
+                  <div className="md:col-span-4">
                     <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Monto *</Label>
                     <MoneyInput
-                      value={ret.amount}
-                      onChange={(v) => updateRetention(ret._key, "amount", v)}
+                      value={effRetentionAmount(ret)}
+                      onChange={(v) => setRetentionAmount(ret._key, v)}
                       decimals={2}
                       placeholder="0"
-                      className={ret.amount <= 0 ? "border-red-300" : ""}
+                      className={effRetentionAmount(ret) <= 0 ? "border-red-300" : ""}
                     />
+                    {ret.config_id && ret.touched && effRetentionAmount(ret) !== suggestedRetention(ret.config_id) && (
+                      <button
+                        type="button"
+                        className="text-xs text-indigo-600 hover:underline mt-0.5"
+                        onClick={() => selectRetentionConfig(ret._key, ret.config_id)}
+                      >
+                        Sugerido: {formatCurrency(suggestedRetention(ret.config_id))} ({configById.get(ret.config_id)?.rate_pct}%)
+                      </button>
+                    )}
+                    {ret.config_id && !ret.touched && (
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {configById.get(ret.config_id)?.rate_pct}% de {formatCurrency(total)} — editable
+                      </p>
+                    )}
                   </div>
                 </FormLineGrid>
               ))}
@@ -653,35 +692,50 @@ export default function PurchaseLiquidatePage() {
         </div>
       </div>
 
-      {/* Modal: Agregar municipio ICA (desde el selector de retención) */}
-      <Dialog open={addIcaForKey !== null} onOpenChange={(open) => { if (!open) setAddIcaForKey(null); }}>
+      {/* Modal: Agregar retención al catálogo (desde el selector) */}
+      <Dialog open={addRetForKey !== null} onOpenChange={(open) => { if (!open) setAddRetForKey(null); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Agregar Municipio ICA</DialogTitle>
+            <DialogTitle>Agregar Retención</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Municipio *</Label>
-              <Input
-                value={newMunicipality}
-                onChange={(e) => setNewMunicipality(e.target.value)}
-                maxLength={60}
-                placeholder="Ej: Barranquilla"
-                autoFocus
-              />
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Impuesto *</Label>
+              <Select value={newRetType} onValueChange={(v) => { setNewRetType(v as RetentionConfigType); if (v !== "ica") setNewMunicipality(""); }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(RETENTION_TYPE_LABELS) as RetentionConfigType[]).map((t) => (
+                    <SelectItem key={t} value={t}>{RETENTION_TYPE_LABELS[t]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {newRetType === "ica" && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Municipio *</Label>
+                <Input value={newMunicipality} onChange={(e) => setNewMunicipality(e.target.value)} maxLength={60} placeholder="Ej: Barranquilla" />
+              </div>
+            )}
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Concepto (opcional)</Label>
+              <Input value={newConcept} onChange={(e) => setNewConcept(e.target.value)} maxLength={60} placeholder="Ej: Compras, Servicios..." />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">% Tarifa *</Label>
+              <Input type="number" min={0.01} max={100} step="0.01" value={newRate} onChange={(e) => setNewRate(e.target.value)} placeholder="Ej: 2.5" />
               <p className="text-xs text-slate-500 mt-1.5">
-                Crea la entidad "[Retenciones] ICA {newMunicipality.trim() || "…"}" y la selecciona en esta retención. Si el municipio ya existe (con o sin tildes), se reutiliza — no se duplica.
+                Queda en el catálogo (Tesorería → Retenciones) y se selecciona en esta fila con el monto pre-calculado — editable.
               </p>
             </div>
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setAddIcaForKey(null)}>Cancelar</Button>
+            <Button variant="outline" onClick={() => setAddRetForKey(null)}>Cancelar</Button>
             <Button
-              onClick={handleAddMunicipality}
-              disabled={!newMunicipality.trim() || createRetentionEntity.isPending}
+              onClick={handleAddRetention}
+              disabled={!addRetValid || createRetentionConfig.isPending}
               className="bg-emerald-600 hover:bg-emerald-700"
             >
-              {createRetentionEntity.isPending ? "Agregando..." : "Agregar"}
+              {createRetentionConfig.isPending ? "Agregando..." : "Agregar"}
             </Button>
           </div>
         </DialogContent>
