@@ -87,11 +87,21 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
         comment="Informativo (v0.5 §6.5)",
     )
 
+    # Columna INERTE desde Ciclo B (B4, Q-03: peso muerto) — fuera de schemas
+    # y UI; se conserva por la regla "migraciones sin DROP"
     goes_directly_to_jm: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
         comment="Drosses directo BOG->JM (v0.5 §7.3)",
+    )
+
+    # Ciclo B addendum (feedback pruebas Daniel): nota informativa de cabecera
+    # — captura libre en patio, editable en ambos tipos (sin efectos)
+    notes: Mapped[Optional[str]] = mapped_column(
+        String(1000),
+        nullable=True,
+        comment="Nota informativa de la captura en patio",
     )
 
     status: Mapped[str] = mapped_column(

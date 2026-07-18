@@ -34,7 +34,16 @@ class Warehouse(Base, TimestampMixin, OrganizationMixin):
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    
+
+    # SAC Ciclo B addendum (Q-12, feedback Daniel): una bodega recibe material
+    # de terceros salvo que se marque como interna (molino/transito). Default
+    # True = bodega nueva nace receptora ("¿y si mañana hay otra?" =
+    # autoservicio). Solo la Recepcion (SAC) lo consume; prod no cambia.
+    is_receiving: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, server_default="true",
+        comment="Recibe material de terceros (false = interna: molino/transito)",
+    )
+
     # Relationships
     inventory_movements: Mapped[list["InventoryMovement"]] = relationship(
         "InventoryMovement",

@@ -125,6 +125,9 @@ export interface PurchaseResponse extends BaseEntity {
   /** SAC E2 D9 — vacío para orgs sin flag */
   retentions: PurchaseRetentionResponse[];
   linked_payment_total: number | null;
+  /** SAC Ciclo B (B1) — origen inbound; null para compras manuales / orgs sin recepción */
+  inbound_order_id?: string | null;
+  inbound_order_number?: number | null;
   warnings?: string[];
 }
 

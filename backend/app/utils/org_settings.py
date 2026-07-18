@@ -33,6 +33,13 @@ SETTING_DEFAULTS: dict = {
     # SAC E2 (D12): centros de distribucion Willard — "extensible sin migracion"
     # (v0.5 §6.5); pereira/medellin se agregan por system PATCH al confirmarse
     "willard_distribution_centers": ["baq", "bog", "monteria", "santa_marta", "motocosta"],
+    # SAC Ciclo B (B2, F2 QA): sedes deterministas Willard — warehouse IDs como
+    # STR (JSON-nativo, H1). None = sin configurar -> la validacion no aplica.
+    # drosses: bodega unica obligatoria (Q-03/Q-05: siempre la planta Juan Mina).
+    # postconsumo: default del selector (Q-05: Circunvalar, editable entre sedes
+    # con cuenta willard_baterias — el frontend filtra por cuenta).
+    "willard_sede_drosses": None,
+    "willard_sede_postconsumo_default": None,
 }
 
 

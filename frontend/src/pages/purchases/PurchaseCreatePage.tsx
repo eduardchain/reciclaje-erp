@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { ArrowLeft, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,6 +83,16 @@ export default function PurchaseCreatePage() {
   const { flagEnabled } = useOrgSettings();
   const kgHeaderWarehouse = flagEnabled("kg_ledger_enabled");
   const [headerWarehouseId, setHeaderWarehouseId] = useState("");
+
+  // Ciclo B (B1): canal unico — con kg_ledger las compras se crean por
+  // Recepcion; un deep-link a esta pagina redirige (defensa en profundidad;
+  // el guard B3 del backend defiende el API)
+  useEffect(() => {
+    if (kgHeaderWarehouse) {
+      toast.info("En esta organización las compras se crean desde Recepción");
+      navigate(ROUTES.INBOUND_NEW, { replace: true });
+    }
+  }, [kgHeaderWarehouse, navigate]);
 
   const [supplierId, setSupplierId] = useState("");
   const [date, setDate] = useState(toLocalDateInput());

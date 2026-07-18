@@ -1219,11 +1219,14 @@ class TestInventoryStressWalk:
             },
         )
         assert resp.status_code == 201, resp.text
-        # Clasificacion Willard (CC-005): rutea la linea al libro drosses
+        # Clasificacion Willard (CC-005): rutea la linea al libro drosses.
+        # compra_regular=True — el walk ejercita AMBOS canales con el mismo
+        # material (escenario Q-04 "cuentas apartes"); con False seria
+        # Willard-puro y el guard B3 (Ciclo B) bloquearia las compras del walk.
         resp = client.put(
             f"/api/v1/material-kg-profiles/{ml_material.id}",
             headers=org_headers,
-            json={"compra_regular": False, "willard_world": "drosses"},
+            json={"compra_regular": True, "willard_world": "drosses"},
         )
         assert resp.status_code == 200, resp.text
         resp = client.post(

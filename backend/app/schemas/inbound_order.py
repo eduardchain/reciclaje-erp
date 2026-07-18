@@ -44,7 +44,9 @@ class InboundOrderCreate(BaseModel):
     driver_id: Optional[UUID] = None
     vehicle_id: Optional[UUID] = None
     willard_distribution_center: Optional[str] = Field(None, max_length=24)
-    goes_directly_to_jm: bool = False
+    # goes_directly_to_jm retirado (Ciclo B B4, Q-03: drosses SIEMPRE a la
+    # planta — peso muerto). extra="forbid" -> enviarlo da 422 (F1 QA).
+    notes: Optional[str] = Field(None, max_length=1000)
     lines: list[InboundOrderLineCreate] = Field(..., min_length=1)
 
     @field_validator("date")
@@ -65,7 +67,7 @@ class InboundOrderUpdate(BaseModel):
     driver_id: Optional[UUID] = None
     vehicle_id: Optional[UUID] = None
     willard_distribution_center: Optional[str] = Field(None, max_length=24)
-    goes_directly_to_jm: Optional[bool] = None
+    notes: Optional[str] = Field(None, max_length=1000)
     lines: Optional[list[InboundOrderLineCreate]] = Field(None, min_length=1)
 
     @field_validator("date")
@@ -115,7 +117,7 @@ class InboundOrderResponse(BaseModel):
     vehicle_id: Optional[UUID] = None
     vehicle_plate: Optional[str] = None
     willard_distribution_center: Optional[str] = None
-    goes_directly_to_jm: bool = False
+    notes: Optional[str] = None
     status: str
     purchase_id: Optional[UUID] = None
     purchase_number: Optional[int] = None

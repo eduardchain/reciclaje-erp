@@ -136,6 +136,16 @@ def mat_dross(db_session, test_organization, client, org_headers):
 
 
 @pytest.fixture
+def mat_regular(db_session, test_organization, client, org_headers):
+    """Material de compra regular (world=none, compra_regular=True) — los paths
+    tipo purchase lo usan desde Ciclo B (B3: mat_dross es Willard-puro y ya no
+    entra por compra)."""
+    mat = _mat(db_session, test_organization.id, "CHATARRA-REG", unit="kg")
+    _set_profile(client, org_headers, mat.id, compra_regular=True, willard_world="none")
+    return mat
+
+
+@pytest.fixture
 def kg_bat_account(client, org_headers, warehouse, willard_tp):
     resp = client.post(
         f"{KG_URL}/accounts",
@@ -301,45 +311,34 @@ class TestWillardCreate:
             warehouse_id=warehouse.id,
             third_party_id=willard_tp.id,
             lines=[{"material_id": str(mat_dross.id), "quantity": "1000"}],
-            goes_directly_to_jm=True,
         )
         assert resp.status_code == 201, resp.text
         body = resp.json()
         # 1000 kg x 0.53 = 530 kg plomo — cuenta org-wide
         assert Decimal(body["total_kg_lead"]) == Decimal("530")
-        assert body["goes_directly_to_jm"] is True
         movs = _kg_movs(db_session, body["id"], "confirmed")
         assert movs[0].source_type == "drosses_receipt"
 
-    def test_mixed_worlds_route_per_line(
+    def test_mixed_worlds_rejected_homogeneity(
         self, client, org_headers, db_session, warehouse, willard_tp,
         mat_bat, mat_dross, kg_bat_account, kg_dross_account,
     ):
-        """D1: una orden Willard con lineas de mundos distintos rutea CADA linea
-        a su cuenta segun willard_world del material (bateria->baterias por sede;
-        dross->drosses org-wide). Reemplaza el viejo subtipo de encabezado."""
+        """Ciclo B (B2, Q-10): una recepcion Willard es de UN solo mundo —
+        camion mixto = dos recepciones. Re-semantiza el viejo
+        test_mixed_worlds_route_per_line (D1 sigue vigente como MECANISMO de
+        ruteo por linea; lo que cambio es que una orden no mezcla mundos)."""
         resp = _inbound(
             client, org_headers,
             inbound_type="willard",
             warehouse_id=warehouse.id,
             third_party_id=willard_tp.id,
             lines=[
-                {"material_id": str(mat_bat.id), "quantity": "10"},    # 10 x 2.5 = 25
-                {"material_id": str(mat_dross.id), "quantity": "100"}, # 100 x 0.53 = 53
+                {"material_id": str(mat_bat.id), "quantity": "10"},
+                {"material_id": str(mat_dross.id), "quantity": "100"},
             ],
         )
-        assert resp.status_code == 201, resp.text
-        body = resp.json()
-        by_code = {l["material_code"]: Decimal(l["kg_lead"]) for l in body["lines"]}
-        assert by_code["BAT-GEN"] == Decimal("25")
-        assert by_code["JAMICHE"] == Decimal("53")
-
-        movs = _kg_movs(db_session, body["id"], "confirmed")
-        by_source = {m.source_type: m for m in movs}
-        assert by_source["postconsumo_receipt"].account_id.hex == kg_bat_account["id"].replace("-", "")
-        assert by_source["postconsumo_receipt"].delta_kg == Decimal("25")
-        assert by_source["drosses_receipt"].account_id.hex == kg_dross_account["id"].replace("-", "")
-        assert by_source["drosses_receipt"].delta_kg == Decimal("53")
+        assert resp.status_code == 422, resp.text
+        assert "dos recepciones" in resp.json()["detail"]
 
     def test_material_without_willard_profile_422(
         self, client, org_headers, db_session, test_organization,
@@ -448,7 +447,7 @@ class TestWillardCreate:
 # ---------------------------------------------------------------------------
 
 class TestPurchaseDerivation:
-    def _create_purchase_order(self, client, org_headers, warehouse, willard_tp, mat_dross,
+    def _create_purchase_order(self, client, org_headers, warehouse, willard_tp, material,
                                inbound_type="purchase", unit_price="1200", date_str=None):
         return _inbound(
             client, org_headers,
@@ -457,16 +456,16 @@ class TestPurchaseDerivation:
             third_party_id=willard_tp.id,
             date_str=date_str,
             lines=[{
-                "material_id": str(mat_dross.id),
+                "material_id": str(material.id),
                 "quantity": "500",
                 "unit_price": unit_price,
             }],
         )
 
     def test_purchase_type_derives_registered(
-        self, client, org_headers, db_session, warehouse, willard_tp, mat_dross,
+        self, client, org_headers, db_session, warehouse, willard_tp, mat_regular,
     ):
-        resp = self._create_purchase_order(client, org_headers, warehouse, willard_tp, mat_dross)
+        resp = self._create_purchase_order(client, org_headers, warehouse, willard_tp, mat_regular)
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body["purchase_id"] is not None
@@ -480,15 +479,18 @@ class TestPurchaseDerivation:
         ).json()
         assert purchase["status"] == "registered"
         assert purchase["lines"][0]["warehouse_id"] == str(warehouse.id)
+        # Ciclo B (B1): la derivada expone su origen
+        assert purchase["inbound_order_id"] == body["id"]
+        assert purchase["inbound_order_number"] == body["order_number"]
         db_session.expire_all()
-        mat = db_session.get(Material, mat_dross.id)
+        mat = db_session.get(Material, mat_regular.id)
         assert mat.current_stock_transit == 500
 
     def test_direct_cancel_of_derived_400(
-        self, client, org_headers, warehouse, willard_tp, mat_dross,
+        self, client, org_headers, warehouse, willard_tp, mat_regular,
     ):
         body = self._create_purchase_order(
-            client, org_headers, warehouse, willard_tp, mat_dross
+            client, org_headers, warehouse, willard_tp, mat_regular
         ).json()
         resp = client.patch(
             f"/api/v1/purchases/{body['purchase_id']}/cancel", headers=org_headers
@@ -497,10 +499,10 @@ class TestPurchaseDerivation:
         assert f"orden de recepción #{body['order_number']}" in resp.json()["detail"]
 
     def test_annul_order_cancels_registered_purchase(
-        self, client, org_headers, db_session, warehouse, willard_tp, mat_dross,
+        self, client, org_headers, db_session, warehouse, willard_tp, mat_regular,
     ):
         body = self._create_purchase_order(
-            client, org_headers, warehouse, willard_tp, mat_dross
+            client, org_headers, warehouse, willard_tp, mat_regular
         ).json()
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/annul",
@@ -514,18 +516,18 @@ class TestPurchaseDerivation:
         ).json()
         assert purchase["status"] == "cancelled"
         db_session.expire_all()
-        mat = db_session.get(Material, mat_dross.id)
+        mat = db_session.get(Material, mat_regular.id)
         assert mat.current_stock_transit == 0
 
     def test_annul_order_with_liquidated_purchase_400(
-        self, client, org_headers, warehouse, willard_tp, mat_dross,
+        self, client, org_headers, warehouse, willard_tp, mat_regular,
     ):
         # Fecha pasada para no chocar con el boundary UTC vs local de la
         # validacion de liquidacion de compras (date.today() local) — la orden
         # y la liquidacion comparten fecha en cualquier zona horaria.
         past = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
         body = self._create_purchase_order(
-            client, org_headers, warehouse, willard_tp, mat_dross, date_str=past
+            client, org_headers, warehouse, willard_tp, mat_regular, date_str=past
         ).json()
         liq = client.patch(
             f"/api/v1/purchases/{body['purchase_id']}/liquidate",
@@ -542,18 +544,18 @@ class TestPurchaseDerivation:
         assert "Cancele primero la compra" in resp.json()["detail"]
 
     def test_edit_derived_purchase_allowed(
-        self, client, org_headers, warehouse, willard_tp, mat_dross,
+        self, client, org_headers, warehouse, willard_tp, mat_regular,
     ):
         """D7b: el edit de la derivada se permite (flujo Erwin §7.2)."""
         body = self._create_purchase_order(
-            client, org_headers, warehouse, willard_tp, mat_dross
+            client, org_headers, warehouse, willard_tp, mat_regular
         ).json()
         resp = client.patch(
             f"/api/v1/purchases/{body['purchase_id']}",
             headers=org_headers,
             json={
                 "lines": [{
-                    "material_id": str(mat_dross.id),
+                    "material_id": str(mat_regular.id),
                     "warehouse_id": str(warehouse.id),
                     "quantity": 450,
                     "unit_price": 1300,
@@ -564,7 +566,7 @@ class TestPurchaseDerivation:
         assert resp.json()["lines"][0]["quantity"] == 450
 
     def test_supplier_behavior_enforced(
-        self, client, org_headers, db_session, test_organization, warehouse, mat_dross,
+        self, client, org_headers, db_session, test_organization, warehouse, mat_regular,
     ):
         generic_tp = create_third_party_with_category(
             db_session, test_organization.id, "Generico X", "generic"
@@ -575,14 +577,14 @@ class TestPurchaseDerivation:
             inbound_type="purchase",
             warehouse_id=warehouse.id,
             third_party_id=generic_tp.id,
-            lines=[{"material_id": str(mat_dross.id), "quantity": "10"}],
+            lines=[{"material_id": str(mat_regular.id), "quantity": "10"}],
         )
         assert resp.status_code == 400
         assert "proveedor de material" in resp.json()["detail"]
 
     def test_purchase_header_warehouse_forces_lines_direct_api(
         self, client, org_headers, db_session, test_organization,
-        warehouse, willard_tp, mat_dross,
+        warehouse, willard_tp, mat_regular,
     ):
         """D11 directo en /purchases: header fuerza lineas aunque difieran."""
         other_wh = create_warehouse(db_session, test_organization.id, "Bodega Otra")
@@ -595,7 +597,7 @@ class TestPurchaseDerivation:
                 "date": datetime.now(timezone.utc).date().isoformat(),
                 "warehouse_id": str(warehouse.id),
                 "lines": [{
-                    "material_id": str(mat_dross.id),
+                    "material_id": str(mat_regular.id),
                     "warehouse_id": str(other_wh.id),  # difiere -> forzada
                     "quantity": 100,
                     "unit_price": 900,
@@ -612,7 +614,7 @@ class TestPurchaseDerivation:
             headers=org_headers,
             json={
                 "lines": [{
-                    "material_id": str(mat_dross.id),
+                    "material_id": str(mat_regular.id),
                     "warehouse_id": str(other_wh.id),
                     "quantity": 100,
                     "unit_price": 900,
@@ -872,27 +874,31 @@ class TestEditD18:
         assert confirmed[0].transaction_date.date().isoformat() == new_date
 
     def test_edit_purchase_type_lines_422(
-        self, client, org_headers, warehouse, willard_tp, mat_dross,
+        self, client, org_headers, warehouse, willard_tp, mat_regular,
     ):
         body = _inbound(
             client, org_headers,
             inbound_type="purchase",
             warehouse_id=warehouse.id,
             third_party_id=willard_tp.id,
-            lines=[{"material_id": str(mat_dross.id), "quantity": "100", "unit_price": "900"}],
+            lines=[{"material_id": str(mat_regular.id), "quantity": "100", "unit_price": "900"}],
         ).json()
         resp = client.patch(
             f"{INBOUND_URL}/{body['id']}",
             headers=org_headers,
-            json={"lines": [{"material_id": str(mat_dross.id), "quantity": "90"}]},
+            json={"lines": [{"material_id": str(mat_regular.id), "quantity": "90"}]},
         )
         assert resp.status_code == 422
         assert "compra derivada" in resp.json()["detail"]
-        # Cabecera sin efectos SI se permite
+        # Cabecera sin efectos SI se permite (goes_directly_to_jm ya no existe
+        # — B4 Ciclo B; driver_id es el campo de cabecera editable)
+        drv = client.post(
+            "/api/v1/drivers", headers=org_headers, json={"name": "Pedro Conductor"}
+        ).json()
         resp = client.patch(
             f"{INBOUND_URL}/{body['id']}",
             headers=org_headers,
-            json={"goes_directly_to_jm": True},
+            json={"driver_id": drv["id"]},
         )
         assert resp.status_code == 200
 

@@ -15,6 +15,9 @@ const SETTING_DEFAULTS: Record<string, unknown> = {
   aging_buckets: [30, 60, 90],
   // SAC E2 (D12) — espejo del backend
   willard_distribution_centers: ["baq", "bog", "monteria", "santa_marta", "motocosta"],
+  // SAC Ciclo B (B2) — sedes deterministas Willard (warehouse IDs como str)
+  willard_sede_drosses: null,
+  willard_sede_postconsumo_default: null,
 };
 
 /**

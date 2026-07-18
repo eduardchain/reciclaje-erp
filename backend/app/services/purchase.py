@@ -205,6 +205,14 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Check if this is a double-entry purchase (skip inventory movements)
         is_double_entry = hasattr(obj_in, 'double_entry_id') and obj_in.double_entry_id is not None
 
+        # SAC Ciclo B (B3): material Willard-puro no entra por compra — cubre
+        # la compra manual Y la derivada de recepcion (ambas pasan por aca).
+        # DPs excluidas: no tocan inventario, no corrompen conciliacion kg.
+        if not is_double_entry:
+            self._guard_willard_pure_materials(
+                db, organization_id, [l.material_id for l in obj_in.lines]
+            )
+
         # SAC E2 D11: bodega de cabecera opcional — valida y fuerza las lineas
         header_warehouse_id = getattr(obj_in, 'warehouse_id', None)
         if header_warehouse_id is not None and not is_double_entry:
@@ -983,6 +991,11 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Step 3: Si hay lineas nuevas, hacer revert+reapply
         warnings: list[str] = []
         if obj_in.lines is not None:
+            # SAC Ciclo B (B3): mismo guard que create — sin el, se crearia con
+            # material valido y se editaria a Willard-puro (hueco de ruteo)
+            self._guard_willard_pure_materials(
+                db, organization_id, [l.material_id for l in obj_in.lines]
+            )
             # 3a. Detectar stock negativo al revertir (warning, no bloquea —
             # decision #76: inventario negativo es valido en toda la app)
             for line in purchase.lines:
@@ -1373,12 +1386,50 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         db.flush()
         return total
 
+    def _guard_willard_pure_materials(
+        self, db: Session, organization_id: UUID, material_ids: list
+    ) -> None:
+        """SAC Ciclo B (B3): un material Willard-puro (willard_world != 'none' y
+        compra_regular=False) NO entra por compra — se recibe como recepcion
+        Willard. Espejo simetrico del guard del path Willard (inbound_order.py,
+        que rechaza materiales no-Willard).
+
+        Solo aplica con kg_ledger_enabled: sin flag no hay perfiles -> inerte,
+        prod byte-identico (cero queries extra: get_org_setting usa el identity
+        map). Bloqueo 400, no warning: no es stock negativo (estado valido) —
+        es error de ruteo que corrompe la conciliacion kg, sin caso de negocio
+        valido (Q-04 Johana: "lo Willard nunca es compra").
+        """
+        from app.utils.org_settings import get_org_setting
+        if not get_org_setting(db, organization_id, "kg_ledger_enabled"):
+            return
+        from app.models.material_kg_profile import MaterialKgProfile
+        codes = db.execute(
+            select(Material.code)
+            .join(MaterialKgProfile, MaterialKgProfile.material_id == Material.id)
+            .where(
+                MaterialKgProfile.organization_id == organization_id,
+                MaterialKgProfile.material_id.in_(material_ids),
+                MaterialKgProfile.willard_world != "none",
+                MaterialKgProfile.compra_regular.is_(False),
+            )
+        ).scalars().all()
+        if codes:
+            listed = ", ".join(sorted(set(codes)))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"El material {listed} es Willard (postconsumo/drosses) y "
+                    "no se compra — recibalo como recepcion Willard"
+                ),
+            )
+
     def _generate_purchase_number(self, db: Session, organization_id: UUID) -> int:
         """
         Generate next sequential purchase_number for organization.
-        
+
         Uses PostgreSQL advisory locks to prevent race conditions in concurrent requests.
-        
+
         Returns:
             Next purchase number (1, 2, 3, ...)
         """

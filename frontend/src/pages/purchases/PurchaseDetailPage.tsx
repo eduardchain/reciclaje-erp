@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
-import { ArrowLeft, CreditCard, XCircle, Pencil, FileText } from "lucide-react";
+import { ArrowLeft, CreditCard, XCircle, Pencil, FileText, PackageOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -115,6 +115,23 @@ export default function PurchaseDetailPage() {
           </Button>
         </div>
       </PageHeader>
+
+      {/* Ciclo B (B1): origen inbound — trazabilidad del canal unico */}
+      {purchase.inbound_order_number != null && purchase.inbound_order_id && (
+        <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm text-indigo-800">
+          <PackageOpen className="h-4 w-4 shrink-0" />
+          <span>
+            Origen:{" "}
+            <Link
+              to={`/inbound/${purchase.inbound_order_id}`}
+              className="font-medium underline hover:text-indigo-900"
+            >
+              Recepción #{purchase.inbound_order_number}
+            </Link>{" "}
+            — esta compra fue derivada desde el patio.
+          </span>
+        </div>
+      )}
 
       {/* Info general */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

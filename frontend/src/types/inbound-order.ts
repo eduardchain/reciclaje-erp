@@ -30,7 +30,7 @@ export interface InboundOrderCreate {
   driver_id?: string | null;
   vehicle_id?: string | null;
   willard_distribution_center?: string | null;
-  goes_directly_to_jm?: boolean;
+  notes?: string | null;
   lines: InboundOrderLineCreate[];
 }
 
@@ -44,7 +44,7 @@ export interface InboundOrderUpdate {
   driver_id?: string;
   vehicle_id?: string;
   willard_distribution_center?: string;
-  goes_directly_to_jm?: boolean;
+  notes?: string | null;
   lines?: InboundOrderLineCreate[];
 }
 
@@ -78,7 +78,7 @@ export interface InboundOrderResponse {
   vehicle_id: string | null;
   vehicle_plate: string | null;
   willard_distribution_center: string | null;
-  goes_directly_to_jm: boolean;
+  notes: string | null;
   status: InboundOrderStatus;
   purchase_id: string | null;
   purchase_number: number | null;

@@ -17,7 +17,9 @@ class WarehouseBase(BaseModel):
 
 class WarehouseCreate(WarehouseBase):
     """Schema para crear una bodega."""
-    pass
+    # SAC Ciclo B (Q-12): True = recibe de terceros; las internas
+    # (molino/transito) se crean/marcan con False
+    is_receiving: bool = True
 
 
 class WarehouseUpdate(BaseModel):
@@ -25,6 +27,7 @@ class WarehouseUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=500)
     address: Optional[str] = Field(None, max_length=500)
+    is_receiving: Optional[bool] = None
 
 
 class WarehouseResponse(WarehouseBase):
@@ -32,6 +35,7 @@ class WarehouseResponse(WarehouseBase):
     id: UUID
     organization_id: UUID
     is_active: bool
+    is_receiving: bool = True
     created_at: datetime
     updated_at: datetime
 

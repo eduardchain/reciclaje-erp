@@ -206,6 +206,11 @@ class PurchaseResponse(PurchaseBase):
     # Double-entry link
     double_entry_id: Optional[UUID] = Field(None, description="Link to double-entry operation (if applicable)")
 
+    # SAC Ciclo B (B1): origen inbound — lookup inverso InboundOrder.purchase_id
+    # (solo en list y detail; None para compras manuales y orgs sin recepcion)
+    inbound_order_id: Optional[UUID] = Field(None, description="Recepcion de origen (si la compra fue derivada)")
+    inbound_order_number: Optional[int] = Field(None, description="Numero de la recepcion de origen")
+
     # Pago inmediato enlazado vivo (solo en detalle) — para el diálogo de cancelación (decisión #63)
     linked_payment_total: Optional[float] = Field(None, description="Suma de pagos inmediatos enlazados confirmados (payment_to_supplier con purchase_id). null/0 = ninguno")
 

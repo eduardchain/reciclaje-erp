@@ -108,7 +108,9 @@ class InboundOrderService:
             driver_id=obj_in.driver_id,
             vehicle_id=obj_in.vehicle_id,
             willard_distribution_center=obj_in.willard_distribution_center,
-            goes_directly_to_jm=obj_in.goes_directly_to_jm,
+            # goes_directly_to_jm retirado de la superficie (Ciclo B B4, Q-03) —
+            # la columna queda inerte con su server_default
+            notes=obj_in.notes,
             status="confirmed",
             created_by=user_id,
         )
@@ -183,10 +185,52 @@ class InboundOrderService:
     ) -> None:
         material_ids = [l.material_id for l in lines_in]
         worlds = self._load_kg_worlds(db, organization_id, material_ids)
+
+        # Ciclo B (B2): homogeneidad de mundo — una recepcion Willard es de UN
+        # solo mundo; camion mixto = DOS recepciones (Q-10, decision Daniel).
+        # El guard per-linea de world none/None sigue abajo (mensaje especifico).
+        real_worlds = {
+            w for w in (worlds.get(mid) for mid in material_ids)
+            if w and w != "none"
+        }
+        if len(real_worlds) > 1:
+            raise _err(
+                "Una recepcion Willard es de un solo mundo (drosses o postconsumo) "
+                "— separe el camion en dos recepciones"
+            )
+
+        # Ciclo B (B2): drosses van SIEMPRE a la planta (Q-03/Q-05). Solo valida
+        # si la org configuro willard_sede_drosses (None = compat, no valida).
+        if real_worlds == {"drosses"}:
+            jm_id = get_org_setting(db, organization_id, "willard_sede_drosses")
+            if jm_id is not None and str(order.warehouse_id) != str(jm_id):
+                jm_wh = db.get(Warehouse, UUID(str(jm_id)))
+                jm_name = jm_wh.name if jm_wh else "la bodega configurada"
+                raise _err(
+                    f"Los drosses se reciben en la planta ({jm_name}) — "
+                    "seleccione esa bodega"
+                )
+
         formulas = self._load_current_formulas(db, organization_id, material_ids)
         today = datetime.now(timezone.utc).date()
         # Cache de cuenta kg por mundo (la sede de baterias es fija: order.warehouse_id)
         account_by_world: dict[str, KgLedgerAccount] = {}
+
+        # Ciclo B addendum (feedback Daniel): el tercero de una recepcion
+        # Willard ES el titular de la cuenta kg (fijo en UI; aca defensa) —
+        # la cuenta esta amarrada a su tercero por CHECK del modelo
+        if real_worlds:
+            world0 = next(iter(real_worlds))
+            account0 = self._resolve_kg_account_for_world(
+                db, organization_id, world0, order.warehouse_id
+            )
+            account_by_world[world0] = account0
+            if account0.third_party_id and order.third_party_id != account0.third_party_id:
+                titular = db.get(ThirdParty, account0.third_party_id)
+                raise _err(
+                    "El tercero de una recepcion Willard es el titular de la "
+                    f"cuenta kg ({titular.name if titular else 'configurado en la cuenta'})"
+                )
 
         for line_in in lines_in:
             material = self._validate_material(db, line_in.material_id, organization_id)
@@ -458,7 +502,8 @@ class InboundOrderService:
 
         if not is_willard:
             # Tipos purchase: solo cabecera sin efectos — las lineas y la fecha
-            # viven en la compra derivada (D7b: doble verdad prohibida)
+            # viven en la compra derivada (D7b: doble verdad prohibida).
+            # notes NO se bloquea: es la nota de la CAPTURA (la compra tiene la suya)
             blocked = {"lines", "date", "willard_distribution_center"}
             offending = blocked & set(fields_set.keys())
             if offending:
@@ -534,8 +579,9 @@ class InboundOrderService:
             order.vehicle_id = obj_in.vehicle_id
         if obj_in.willard_distribution_center is not None:
             order.willard_distribution_center = obj_in.willard_distribution_center
-        if obj_in.goes_directly_to_jm is not None:
-            order.goes_directly_to_jm = obj_in.goes_directly_to_jm
+        if "notes" in fields_set:
+            # None explicito borra la nota (exclude_unset distingue ausente de null)
+            order.notes = obj_in.notes
 
         db.commit()
         db.refresh(order)
@@ -746,6 +792,13 @@ class InboundOrderService:
             raise _err("Bodega no encontrada", status.HTTP_404_NOT_FOUND)
         if not warehouse.is_active:
             raise _err("La bodega esta inactiva", status.HTTP_400_BAD_REQUEST)
+        # Q-12 (feedback Daniel): las bodegas internas (molino/transito) no
+        # reciben de terceros — el frontend las filtra; aca defensa
+        if not warehouse.is_receiving:
+            raise _err(
+                f"La bodega '{warehouse.name}' es interna (no recibe material "
+                "de terceros) — marquela como receptora en Configuracion si aplica"
+            )
         return warehouse
 
     def _validate_third_party(self, db: Session, tp_id: UUID, organization_id: UUID) -> ThirdParty:

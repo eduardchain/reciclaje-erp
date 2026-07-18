@@ -45,6 +45,16 @@ class OrgSettingsPayload(BaseModel):
         None,
         description="Centros de distribucion Willard validos en la recepcion (ej ['baq','bog','monteria'])",
     )
+    # SAC Ciclo B (B2): sedes deterministas Willard — warehouse IDs como STR
+    # (JSON-nativo H1; UUID no es tipo JSON). None = sin configurar -> no valida.
+    willard_sede_drosses: str | None = Field(
+        None,
+        description="Warehouse ID (str) de la planta de drosses — la recepcion drosses valida contra esta bodega (Q-03: Juan Mina)",
+    )
+    willard_sede_postconsumo_default: str | None = Field(
+        None,
+        description="Warehouse ID (str) default del selector en recepcion postconsumo (Q-05: Circunvalar); editable entre sedes con cuenta de baterias",
+    )
 
 
 class OrganizationBase(BaseModel):

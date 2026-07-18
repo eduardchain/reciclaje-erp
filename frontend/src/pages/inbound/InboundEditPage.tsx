@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Plus, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -20,7 +20,7 @@ import { PurchaseLink } from "@/components/shared/EntityLink";
 import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { useInboundOrder, useUpdateInboundOrder } from "@/hooks/useInboundOrders";
 import { useMaterials } from "@/hooks/useMasterData";
-import { useDrivers, useVehicles } from "@/hooks/useSacConfig";
+import { useDrivers, useKgProfiles, useVehicles } from "@/hooks/useSacConfig";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { toLocalDateInput, utcToLocalDateInput } from "@/utils/formatters";
 import { buildRoute, ROUTES } from "@/utils/constants";
@@ -62,6 +62,7 @@ export default function InboundEditPage() {
   const { data: materialsData } = useMaterials();
   const { data: driversData } = useDrivers();
   const { data: vehiclesData } = useVehicles();
+  const { data: profilesData } = useKgProfiles();
 
   const materials = materialsData?.items ?? [];
   const drivers = driversData?.items ?? [];
@@ -73,9 +74,24 @@ export default function InboundEditPage() {
   const [driverId, setDriverId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   const [willardCenter, setWillardCenter] = useState("none");
-  const [goesDirectly, setGoesDirectly] = useState(false);
+  const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([]);
   const [linesDirty, setLinesDirty] = useState(false);
+
+  // Ciclo B (B2): el mundo de la orden se deriva de sus lineas (homogeneas) —
+  // el picker de edicion queda filtrado a ese mundo
+  const worldById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of profilesData?.items ?? []) map.set(p.material_id, p.willard_world);
+    return map;
+  }, [profilesData]);
+  const orderWorld = useMemo(() => {
+    for (const l of order?.lines ?? []) {
+      const w = worldById.get(l.material_id);
+      if (w && w !== "none") return w;
+    }
+    return null;
+  }, [order, worldById]);
 
   useEffect(() => {
     if (order && !initialized) {
@@ -83,7 +99,7 @@ export default function InboundEditPage() {
       setDriverId(order.driver_id ?? "");
       setVehicleId(order.vehicle_id ?? "");
       setWillardCenter(order.willard_distribution_center ?? "none");
-      setGoesDirectly(order.goes_directly_to_jm);
+      setNotes(order.notes ?? "");
       setLines(
         order.lines.map((l) => ({
           _key: ++lineKeyCounter,
@@ -141,12 +157,11 @@ export default function InboundEditPage() {
       if (willardCenter !== "none" && willardCenter !== (order.willard_distribution_center ?? "none")) {
         payload.willard_distribution_center = willardCenter;
       }
-      if (goesDirectly !== order.goes_directly_to_jm) {
-        payload.goes_directly_to_jm = goesDirectly;
-      }
     }
     if (driverId && driverId !== (order.driver_id ?? "")) payload.driver_id = driverId;
     if (vehicleId && vehicleId !== (order.vehicle_id ?? "")) payload.vehicle_id = vehicleId;
+    // Nota de cabecera: editable en AMBOS tipos (informativa, sin efectos)
+    if (notes.trim() !== (order.notes ?? "")) payload.notes = notes.trim() || null;
     return payload;
   };
 
@@ -258,31 +273,29 @@ export default function InboundEditPage() {
               />
             </div>
             {isWillard && (
-              <>
-                <div>
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Centro de Distribución</Label>
-                  <Select value={willardCenter} onValueChange={setWillardCenter}>
-                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Sin centro</SelectItem>
-                      {willardCenters.map((c) => (
-                        <SelectItem key={c} value={c}>{willardCenterLabel(c)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="md:col-span-2 flex items-center gap-2">
-                  <Checkbox
-                    id="goes-jm-edit"
-                    checked={goesDirectly}
-                    onCheckedChange={(v) => setGoesDirectly(v === true)}
-                  />
-                  <Label htmlFor="goes-jm-edit" className="text-sm font-normal cursor-pointer">
-                    Va directamente a JM (informativo)
-                  </Label>
-                </div>
-              </>
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Centro de Distribución</Label>
+                <Select value={willardCenter} onValueChange={setWillardCenter}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin centro</SelectItem>
+                    {willardCenters.map((c) => (
+                      <SelectItem key={c} value={c}>{willardCenterLabel(c)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
+            <div className="md:col-span-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
+              <Textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                maxLength={1000}
+                rows={2}
+                placeholder="Observaciones de la captura (opcional)..."
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -324,7 +337,9 @@ export default function InboundEditPage() {
                   <EntitySelect
                     value={line.material_id}
                     onChange={(v) => updateLine(line._key, "material_id", v)}
-                    options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
+                    options={materials
+                      .filter((m) => !orderWorld || worldById.get(m.id) === orderWorld)
+                      .map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
                     placeholder="Material..."
                   />
                 </div>

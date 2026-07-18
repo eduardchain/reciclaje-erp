@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useDateFilter } from "@/stores/dateFilterStore";
-import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
+import { Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { Plus, ShoppingCart, Hash, Calculator, MoreHorizontal, Eye, Pencil, DollarSign, XCircle, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 import { exportPurchasesDetailExcel } from "@/utils/excelExport";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { useState } from "react";
@@ -149,7 +150,21 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
     {
       accessorKey: "purchase_number",
       header: "#",
-      cell: ({ row }) => <span className="font-medium">#{row.original.purchase_number}</span>,
+      cell: ({ row }) => (
+        <div>
+          <span className="font-medium">#{row.original.purchase_number}</span>
+          {row.original.inbound_order_number != null && row.original.inbound_order_id && (
+            <Link
+              to={`/inbound/${row.original.inbound_order_id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="block text-[10px] text-indigo-600 hover:text-indigo-800 hover:underline whitespace-nowrap"
+              title="Ver la recepción de origen"
+            >
+              Recepción #{row.original.inbound_order_number}
+            </Link>
+          )}
+        </div>
+      ),
     },
     {
       accessorKey: "invoice_number",
@@ -246,6 +261,8 @@ export default function PurchasesPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { hasPermission } = usePermissions();
+  const { flagEnabled } = useOrgSettings();
+  const inboundOnly = flagEnabled("kg_ledger_enabled");
   const canViewPrices = hasPermission("purchases.view_prices");
   const [searchParams, setSearchParams] = useSearchParams();
   const columns = useMemo(() => getColumns(canViewPrices), [canViewPrices]);
@@ -323,10 +340,18 @@ export default function PurchasesPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Compras" description="Gestion de compras de material">
-        {hasPermission("purchases.create") && (
+        {/* Ciclo B (B1): canal unico — con kg_ledger la unica puerta de creacion
+            es Recepcion; Compras queda como gestion/liquidacion */}
+        {hasPermission("purchases.create") && !inboundOnly && (
           <Button onClick={() => navigate(ROUTES.PURCHASES_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
             <Plus className="h-4 w-4 mr-2" />
             Nueva Compra
+          </Button>
+        )}
+        {hasPermission("purchases.create") && inboundOnly && (
+          <Button onClick={() => navigate(ROUTES.INBOUND_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
+            <Plus className="h-4 w-4 mr-2" />
+            Nueva Recepción
           </Button>
         )}
       </PageHeader>
@@ -407,7 +432,15 @@ export default function PurchasesPage() {
             plate={p.vehicle_plate}
             totalQuantity={p.lines.length > 0 ? formatLinesTotalQuantity(p.lines) : undefined}
             description={p.lines.length > 0 ? p.lines.map((l) => `${l.material_code} ${formatWeight(l.quantity, l.material_unit)}`).join(" · ") : undefined}
-            extras={p.double_entry_id ? <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium">Pasa Mano</span> : undefined}
+            extras={
+              p.double_entry_id ? (
+                <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium">Pasa Mano</span>
+              ) : p.inbound_order_number != null ? (
+                <span className="bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded font-medium">
+                  Recepción #{p.inbound_order_number}
+                </span>
+              ) : undefined
+            }
           />
         )}
         toolbar={

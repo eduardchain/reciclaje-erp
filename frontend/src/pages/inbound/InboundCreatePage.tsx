@@ -1,11 +1,18 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -18,8 +25,16 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { useCreateInboundOrder } from "@/hooks/useInboundOrders";
+import { useKgAccounts } from "@/hooks/useKgLedger";
 import { useMaterials, useSuppliers, useWarehouses } from "@/hooks/useMasterData";
-import { useCurrentFormulas, useDrivers, useKgProfiles, useVehicles } from "@/hooks/useSacConfig";
+import {
+  useCreateDriver,
+  useCreateVehicle,
+  useCurrentFormulas,
+  useDrivers,
+  useKgProfiles,
+  useVehicles,
+} from "@/hooks/useSacConfig";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { formatWeight, toLocalDateInput } from "@/utils/formatters";
 import { buildRoute, ROUTES } from "@/utils/constants";
@@ -99,7 +114,7 @@ export default function InboundCreatePage() {
 
   const suppliers = suppliersData?.items ?? [];
   const materials = materialsData?.items ?? [];
-  const warehouses = (warehousesData?.items ?? []) as { id: string; name: string }[];
+  const warehouses = (warehousesData?.items ?? []) as { id: string; name: string; is_receiving?: boolean }[];
   const drivers = driversData?.items ?? [];
   const vehicles = vehiclesData?.items ?? [];
   const formulas = formulasData?.items ?? [];
@@ -117,29 +132,176 @@ export default function InboundCreatePage() {
   }, [profilesData]);
 
   const [inboundType, setInboundType] = useState<InboundType>("purchase");
+  const [willardWorld, setWillardWorld] = useState<"" | "drosses" | "postconsumo">("");
   const [warehouseId, setWarehouseId] = useState("");
   const [thirdPartyId, setThirdPartyId] = useState("");
   const [date, setDate] = useState(toLocalDateInput());
   const [driverId, setDriverId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   const [willardCenter, setWillardCenter] = useState("none");
-  const [goesDirectly, setGoesDirectly] = useState(false);
+  const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
+
+  // Quick-create de conductor/vehiculo (feedback Daniel: "deben ser creados
+  // antes" era la friccion — ahora se crean en linea desde la captura)
+  const createDriver = useCreateDriver();
+  const createVehicle = useCreateVehicle();
+  const [driverDialogOpen, setDriverDialogOpen] = useState(false);
+  const [newDriverName, setNewDriverName] = useState("");
+  const [vehicleDialogOpen, setVehicleDialogOpen] = useState(false);
+  const [newVehiclePlate, setNewVehiclePlate] = useState("");
+
+  const handleQuickCreateDriver = () => {
+    const name = newDriverName.trim();
+    if (!name) return;
+    createDriver.mutate(
+      { name },
+      {
+        onSuccess: (d) => {
+          setDriverId(d.id);
+          setDriverDialogOpen(false);
+          setNewDriverName("");
+        },
+      }
+    );
+  };
+
+  const handleQuickCreateVehicle = () => {
+    const plate = newVehiclePlate.trim().toUpperCase();
+    if (!plate) return;
+    createVehicle.mutate(
+      { plate },
+      {
+        onSuccess: (v) => {
+          setVehicleId(v.id);
+          setVehicleDialogOpen(false);
+          setNewVehiclePlate("");
+        },
+      }
+    );
+  };
 
   const isWillard = WILLARD_INBOUND_TYPES.includes(inboundType);
   const isPurchaseType = PURCHASE_INBOUND_TYPES.includes(inboundType);
   const todayStr = toLocalDateInput();
   const isFutureDate = date ? date > todayStr : false;
 
-  // Willard: solo materiales de mundo Willard (postconsumo/drosses). Compra:
-  // materiales marcados compra_regular; los sin clasificar se muestran (normales).
+  // Ciclo B (B2): sedes deterministas Willard desde org settings
+  const sedeDrosses = (getSetting("willard_sede_drosses") as string | null) ?? null;
+  const sedePostconsumoDefault =
+    (getSetting("willard_sede_postconsumo_default") as string | null) ?? null;
+
+  // Mejora Daniel (B2): en postconsumo el selector SOLO lista bodegas con
+  // cuenta willard_baterias activa — la sede invalida es inalcanzable en UI
+  const { data: batAccounts } = useKgAccounts({ account_type: "willard_baterias" });
+  const { data: drossAccounts } = useKgAccounts({ account_type: "willard_drosses" });
+  const batWarehouseIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of batAccounts ?? []) {
+      if (a.is_active && a.warehouse_id) set.add(a.warehouse_id);
+    }
+    return set;
+  }, [batAccounts]);
+
+  // Feedback Daniel: el tercero de una recepcion Willard ES el titular de la
+  // cuenta kg — fijo e inamovible (como la sede en drosses). Se deriva de la
+  // cuenta del mundo elegido (postconsumo: la de la sede; drosses: org-wide).
+  const willardTitular = useMemo(() => {
+    if (!isWillard || !willardWorld) return null;
+    const pool = willardWorld === "drosses" ? drossAccounts : batAccounts;
+    const account = (pool ?? []).find(
+      (a) =>
+        a.is_active &&
+        (willardWorld === "drosses" ? !a.warehouse_id : a.warehouse_id === warehouseId)
+    );
+    if (!account?.third_party_id) return null;
+    return { id: account.third_party_id, name: account.third_party_name ?? "Willard" };
+  }, [isWillard, willardWorld, warehouseId, batAccounts, drossAccounts]);
+
+  // Y en compra regular, los terceros Willard NO aparecen (son de otro canal)
+  const willardTpIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of [...(batAccounts ?? []), ...(drossAccounts ?? [])]) {
+      if (a.is_active && a.third_party_id) set.add(a.third_party_id);
+    }
+    return set;
+  }, [batAccounts, drossAccounts]);
+  const supplierOptions = useMemo(
+    () => (isWillard ? suppliers : suppliers.filter((s) => !willardTpIds.has(s.id))),
+    [suppliers, isWillard, willardTpIds]
+  );
+
+  // Willard: el sub-selector de mundo filtra el picker (una recepcion = UN
+  // mundo, Q-10; sin mundo elegido no hay materiales). Compra: como siempre.
   const materialsForType = useMemo(() => {
     return materials.filter((m) => {
       const world = worldByMaterial.world.get(m.id) ?? "none";
-      if (isWillard) return world !== "none";
+      if (isWillard) return willardWorld !== "" && world === willardWorld;
       return worldByMaterial.compra.get(m.id) ?? true;
     });
-  }, [materials, worldByMaterial, isWillard]);
+  }, [materials, worldByMaterial, isWillard, willardWorld]);
+
+  // Q-12 (feedback Daniel): la Recepcion solo lista bodegas RECEPTORAS — las
+  // internas (molino/transito) se alimentan por Traslados, no por aca
+  const receivingWarehouses = useMemo(
+    () => warehouses.filter((w) => w.is_receiving !== false),
+    [warehouses]
+  );
+
+  // Bodega gobernada por el mundo: drosses -> planta bloqueada; postconsumo ->
+  // solo sedes receptoras con cuenta de baterias; compra -> receptoras
+  const drossesLocked = isWillard && willardWorld === "drosses" && !!sedeDrosses;
+  const warehouseOptions = useMemo(() => {
+    if (isWillard && willardWorld === "postconsumo") {
+      return receivingWarehouses.filter((w) => batWarehouseIds.has(w.id));
+    }
+    return receivingWarehouses;
+  }, [receivingWarehouses, isWillard, willardWorld, batWarehouseIds]);
+  const postconsumoSinSedes =
+    isWillard && willardWorld === "postconsumo" && !!batAccounts && batWarehouseIds.size === 0;
+
+  useEffect(() => {
+    if (!isWillard || !willardWorld) return;
+    if (willardWorld === "drosses") {
+      if (sedeDrosses) setWarehouseId(sedeDrosses);
+      return;
+    }
+    // postconsumo: conservar si es valida; default CV (setting) o primera valida
+    setWarehouseId((prev) => {
+      if (prev && batWarehouseIds.has(prev)) return prev;
+      if (sedePostconsumoDefault && batWarehouseIds.has(sedePostconsumoDefault)) {
+        return sedePostconsumoDefault;
+      }
+      return warehouseOptions[0]?.id ?? "";
+    });
+  }, [isWillard, willardWorld, sedeDrosses, sedePostconsumoDefault, batWarehouseIds, warehouseOptions]);
+
+  // Tercero fijo al titular (feedback Daniel) — se re-deriva si cambia el
+  // mundo o la sede; sin titular resoluble queda vacio (submit bloqueado)
+  useEffect(() => {
+    if (!isWillard) return;
+    setThirdPartyId(willardTitular?.id ?? "");
+  }, [isWillard, willardTitular]);
+
+  // Cambiar de tipo resetea la captura (tercero/mundo/lineas son de canales
+  // distintos — evita arrastrar valores invalidos entre tipos)
+  const selectInboundType = (v: InboundType) => {
+    setInboundType(v);
+    setWillardWorld("");
+    setThirdPartyId("");
+    setLines([createEmptyLine()]);
+  };
+
+  // Cambiar de mundo limpia las lineas que ya no aplican (homogeneidad en UI)
+  const selectWorld = (w: "drosses" | "postconsumo") => {
+    setWillardWorld(w);
+    setLines((prev) => {
+      const kept = prev.filter(
+        (l) => !l.material_id || worldByMaterial.world.get(l.material_id) === w
+      );
+      return kept.length ? kept : [createEmptyLine()];
+    });
+  };
 
   const unitSuffix = (materialId: string) => {
     const u = materials.find((m) => m.id === materialId)?.default_unit;
@@ -178,6 +340,8 @@ export default function InboundCreatePage() {
     !!thirdPartyId &&
     !!date &&
     !isFutureDate &&
+    (!isWillard || !!willardWorld) &&
+    !postconsumoSinSedes &&
     lines.length > 0 &&
     lines.every((l) => l.material_id && l.quantity > 0);
 
@@ -192,7 +356,7 @@ export default function InboundCreatePage() {
         driver_id: driverId || null,
         vehicle_id: vehicleId || null,
         willard_distribution_center: isWillard && willardCenter !== "none" ? willardCenter : null,
-        goes_directly_to_jm: isWillard ? goesDirectly : false,
+        notes: notes.trim() || null,
         lines: lines.map((l) => ({
           material_id: l.material_id,
           quantity: l.quantity,
@@ -225,7 +389,7 @@ export default function InboundCreatePage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo de Recepción *</Label>
-              <Select value={inboundType} onValueChange={(v) => setInboundType(v as InboundType)}>
+              <Select value={inboundType} onValueChange={(v) => selectInboundType(v as InboundType)}>
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {(Object.keys(INBOUND_TYPE_LABELS) as InboundType[]).map((t) => (
@@ -234,23 +398,65 @@ export default function InboundCreatePage() {
                 </SelectContent>
               </Select>
             </div>
+            {isWillard && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo Willard *</Label>
+                <Select
+                  value={willardWorld || undefined}
+                  onValueChange={(v) => selectWorld(v as "drosses" | "postconsumo")}
+                >
+                  <SelectTrigger className={cn("w-full", !willardWorld && "border-amber-300")}>
+                    <SelectValue placeholder="Drosses o Postconsumo..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="postconsumo">Baterías Postconsumo</SelectItem>
+                    <SelectItem value="drosses">Drosses</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Sede / Bodega *</Label>
               <EntitySelect
                 value={warehouseId}
                 onChange={setWarehouseId}
-                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-                placeholder="Bodega..."
+                options={warehouseOptions.map((w) => ({ id: w.id, label: w.name }))}
+                placeholder={
+                  isWillard && !willardWorld ? "Elija primero el mundo..." : "Bodega..."
+                }
+                disabled={drossesLocked || (isWillard && !willardWorld)}
               />
+              {drossesLocked && (
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Los drosses se reciben en la planta — bodega fija.
+                </p>
+              )}
+              {postconsumoSinSedes && (
+                <p className="text-xs text-red-500 mt-0.5">
+                  No hay bodegas con cuenta de baterías postconsumo. Créala en Plomo (kg).
+                </p>
+              )}
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero *</Label>
-              <EntitySelect
-                value={thirdPartyId}
-                onChange={setThirdPartyId}
-                options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
-                placeholder="Proveedor / tercero..."
-              />
+              {isWillard ? (
+                // Feedback Daniel: en Willard el tercero es el titular de la
+                // cuenta kg — fijo e inamovible (como la sede en drosses)
+                <Input
+                  value={
+                    willardTitular?.name ??
+                    (willardWorld ? "Sin cuenta kg para este tipo" : "Se fija al elegir el tipo")
+                  }
+                  disabled
+                />
+              ) : (
+                <EntitySelect
+                  value={thirdPartyId}
+                  onChange={setThirdPartyId}
+                  options={supplierOptions.map((s) => ({ id: s.id, label: s.name }))}
+                  placeholder="Proveedor / tercero..."
+                />
+              )}
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
@@ -265,28 +471,134 @@ export default function InboundCreatePage() {
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Conductor</Label>
-              <EntitySelect
-                value={driverId}
-                onChange={setDriverId}
-                options={drivers.map((d) => ({ id: d.id, label: d.name }))}
-                placeholder="Sin conductor..."
-              />
+              <div className="flex gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <EntitySelect
+                    value={driverId}
+                    onChange={setDriverId}
+                    options={drivers.map((d) => ({ id: d.id, label: d.name }))}
+                    placeholder="Sin conductor..."
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  title="Crear conductor"
+                  onClick={() => setDriverDialogOpen(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Vehículo</Label>
-              <EntitySelect
-                value={vehicleId}
-                onChange={setVehicleId}
-                options={vehicles.map((v) => ({
-                  id: v.id,
-                  label: v.display_name ? `${v.plate} - ${v.display_name}` : v.plate,
-                }))}
-                placeholder="Sin vehículo..."
+              <div className="flex gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <EntitySelect
+                    value={vehicleId}
+                    onChange={setVehicleId}
+                    options={vehicles.map((v) => ({
+                      id: v.id,
+                      label: v.display_name ? `${v.plate} - ${v.display_name}` : v.plate,
+                    }))}
+                    placeholder="Sin vehículo..."
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  title="Crear vehículo"
+                  onClick={() => setVehicleDialogOpen(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="md:col-span-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
+              <Textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                maxLength={1000}
+                rows={2}
+                placeholder="Observaciones de la captura (opcional)..."
               />
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Quick-create conductor / vehiculo (feedback Daniel) */}
+      <Dialog open={driverDialogOpen} onOpenChange={setDriverDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nuevo Conductor</DialogTitle>
+          </DialogHeader>
+          <div>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label>
+            <Input
+              value={newDriverName}
+              onChange={(e) => setNewDriverName(e.target.value)}
+              placeholder="Nombre del conductor..."
+              autoFocus
+              onKeyDown={(e) => e.key === "Enter" && handleQuickCreateDriver()}
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              Documento y teléfono se pueden completar después en Configuración → Flota.
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDriverDialogOpen(false)} className="w-full sm:w-auto">
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleQuickCreateDriver}
+              disabled={!newDriverName.trim() || createDriver.isPending}
+              className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"
+            >
+              {createDriver.isPending ? "Creando..." : "Crear y usar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={vehicleDialogOpen} onOpenChange={setVehicleDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nuevo Vehículo</DialogTitle>
+          </DialogHeader>
+          <div>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa *</Label>
+            <Input
+              value={newVehiclePlate}
+              onChange={(e) => setNewVehiclePlate(e.target.value.toUpperCase())}
+              placeholder="ABC123"
+              maxLength={10}
+              autoFocus
+              onKeyDown={(e) => e.key === "Enter" && handleQuickCreateVehicle()}
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              Tipo y descripción se pueden completar después en Configuración → Flota.
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setVehicleDialogOpen(false)} className="w-full sm:w-auto">
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleQuickCreateVehicle}
+              disabled={!newVehiclePlate.trim() || createVehicle.isPending}
+              className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"
+            >
+              {createVehicle.isPending ? "Creando..." : "Crear y usar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Seccion Willard */}
       {isWillard && (
@@ -307,16 +619,6 @@ export default function InboundCreatePage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="md:col-span-2 flex items-center gap-2">
-                <Checkbox
-                  id="goes-jm"
-                  checked={goesDirectly}
-                  onCheckedChange={(v) => setGoesDirectly(v === true)}
-                />
-                <Label htmlFor="goes-jm" className="text-sm font-normal cursor-pointer">
-                  Va directamente a JM (informativo)
-                </Label>
               </div>
             </div>
           </CardContent>

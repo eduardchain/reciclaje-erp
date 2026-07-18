@@ -84,7 +84,7 @@ def _enrich(
         vehicle_id=order.vehicle_id,
         vehicle_plate=order.vehicle.plate if order.vehicle else None,
         willard_distribution_center=order.willard_distribution_center,
-        goes_directly_to_jm=order.goes_directly_to_jm,
+        notes=order.notes,
         status=order.status,
         purchase_id=order.purchase_id,
         purchase_number=order.purchase.purchase_number if order.purchase else None,

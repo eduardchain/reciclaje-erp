@@ -124,14 +124,12 @@ export default function InboundDetailPage() {
             <InfoRow label="Conductor" value={order.driver_name ?? "—"} long />
             <InfoRow label="Vehículo" value={order.vehicle_plate ? order.vehicle_plate.toUpperCase() : "—"} />
             {isWillard && (
-              <>
-                <InfoRow
-                  label="Centro Willard"
-                  value={order.willard_distribution_center ? willardCenterLabel(order.willard_distribution_center) : "—"}
-                />
-                <InfoRow label="Directo a JM" value={order.goes_directly_to_jm ? "Sí" : "No"} />
-              </>
+              <InfoRow
+                label="Centro Willard"
+                value={order.willard_distribution_center ? willardCenterLabel(order.willard_distribution_center) : "—"}
+              />
             )}
+            {order.notes && <InfoRow label="Notas" value={order.notes} long />}
           </CardContent>
         </Card>
 
