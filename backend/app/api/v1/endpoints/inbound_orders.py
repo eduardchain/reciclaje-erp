@@ -124,7 +124,7 @@ def create_inbound_order(
 @router.get("", response_model=InboundOrderListResponse)
 def list_inbound_orders(
     inbound_type: Optional[str] = Query(None),
-    status_filter: Optional[str] = Query(None, alias="status", pattern="^(confirmed|annulled)$"),
+    status_filter: Optional[str] = Query(None, alias="status", pattern="^(draft|confirmed|annulled)$"),
     third_party_id: Optional[UUID] = Query(None),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
@@ -181,6 +181,25 @@ def update_inbound_order(
     )
     order = inbound_order_service.get(db, order.id, org_context["organization_id"])
     return _enrich_one(db, order, org_context["organization_id"], warnings)
+
+
+@router.post("/{order_id}/confirm", response_model=InboundOrderResponse)
+def confirm_inbound_order(
+    order_id: UUID,
+    org_context: dict = Depends(require_permission("purchases.liquidate")),
+    db: Session = Depends(get_db),
+):
+    """B.2: draft -> confirmed — los efectos (inventario D2 + kg D5 + MCH H1a)
+    nacen aca, por el MISMO camino del 1-paso previo. Solo tipos Willard
+    (una orden tipo compra se confirma liquidando su compra derivada)."""
+    order = inbound_order_service.confirm(
+        db,
+        order_id=order_id,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    order = inbound_order_service.get(db, order.id, org_context["organization_id"])
+    return _enrich_one(db, order, org_context["organization_id"])
 
 
 @router.post("/{order_id}/annul", response_model=InboundOrderResponse)

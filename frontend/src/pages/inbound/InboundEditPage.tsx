@@ -375,8 +375,9 @@ export default function InboundEditPage() {
               </FormLineGrid>
             ))}
             <p className="text-xs text-amber-600 mt-2">
-              Editar líneas o fecha re-emite los movimientos de inventario y kg (revert-and-reapply) —
-              los saldos quedan exactos con los valores nuevos.
+              {order.status === "draft"
+                ? "La recepción está Registrada — editar solo actualiza el documento; los efectos nacen al confirmar."
+                : "Editar líneas o fecha re-emite los movimientos de inventario y kg (revert-and-reapply) — los saldos quedan exactos con los valores nuevos."}
             </p>
           </CardContent>
         </Card>

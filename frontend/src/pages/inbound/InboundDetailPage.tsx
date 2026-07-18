@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Pencil } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,10 +20,11 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { PurchaseLink } from "@/components/shared/EntityLink";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useAnnulInboundOrder, useInboundOrder } from "@/hooks/useInboundOrders";
+import { useAnnulInboundOrder, useConfirmInboundOrder, useInboundOrder } from "@/hooks/useInboundOrders";
+import { useCurrentFormulas } from "@/hooks/useSacConfig";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { buildRoute, ROUTES } from "@/utils/constants";
-import { willardCenterLabel } from "./InboundCreatePage";
+import { estimateKgLead, willardCenterLabel } from "./InboundCreatePage";
 import {
   INBOUND_TYPE_LABELS,
   PURCHASE_INBOUND_TYPES,
@@ -31,6 +32,7 @@ import {
 } from "@/types/inbound-order";
 
 const statusBorderMap: Record<string, string> = {
+  draft: "border-t-[3px] border-t-amber-400",
   confirmed: "border-t-[3px] border-t-emerald-400",
   annulled: "border-t-[3px] border-t-rose-400",
 };
@@ -51,17 +53,28 @@ export default function InboundDetailPage() {
   const { hasPermission } = usePermissions();
   const canEdit = hasPermission("purchases.edit");
   const canCancel = hasPermission("purchases.cancel");
+  const canConfirm = hasPermission("purchases.liquidate");
 
   const { data: order, isLoading } = useInboundOrder(id!);
   const annulOrder = useAnnulInboundOrder();
+  const confirmOrder = useConfirmInboundOrder();
   const [annulOpen, setAnnulOpen] = useState(false);
   const [annulReason, setAnnulReason] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // B.2: kg estimados client-side para drafts (los definitivos nacen al confirmar)
+  const { data: formulasData } = useCurrentFormulas();
+  const formulas = formulasData?.items ?? [];
 
   if (isLoading) return <div className="p-8 text-center text-slate-500">Cargando...</div>;
   if (!order) return <div className="p-8 text-center text-slate-500">Recepción no encontrada</div>;
 
   const isWillard = WILLARD_INBOUND_TYPES.includes(order.inbound_type);
   const isPurchaseType = PURCHASE_INBOUND_TYPES.includes(order.inbound_type);
+  const isDraft = order.status === "draft";
+  const estimatedTotalKg = isDraft && isWillard
+    ? order.lines.reduce((acc, l) => acc + (estimateKgLead(formulas, l.material_id, l.quantity) ?? 0), 0)
+    : null;
 
   const confirmAnnul = () => {
     if (!annulReason.trim()) return;
@@ -81,7 +94,7 @@ export default function InboundDetailPage() {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Volver
         </Button>
-        {canEdit && order.status === "confirmed" && (
+        {canEdit && order.status !== "annulled" && (
           <Button
             variant="outline"
             onClick={() => navigate(buildRoute(ROUTES.INBOUND_EDIT, { id: order.id }))}
@@ -90,12 +103,32 @@ export default function InboundDetailPage() {
             Editar
           </Button>
         )}
-        {canCancel && order.status === "confirmed" && (
+        {isDraft && isWillard && canConfirm && (
+          <Button
+            onClick={() => setConfirmOpen(true)}
+            className="bg-emerald-600 hover:bg-emerald-700"
+          >
+            <CheckCircle2 className="h-4 w-4 mr-2" />
+            Confirmar Recepción
+          </Button>
+        )}
+        {canCancel && order.status !== "annulled" && (
           <Button variant="destructive" onClick={() => setAnnulOpen(true)}>
             Anular
           </Button>
         )}
       </PageHeader>
+
+      {isDraft && isWillard && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <Clock className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <span className="font-semibold">Registrada — pendiente de confirmar.</span>{" "}
+            El material entrará al inventario y moverá el libro kg al confirmar. Los kg mostrados
+            son estimados con la fórmula vigente; los definitivos se calculan al confirmar.
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Informacion general */}
@@ -141,11 +174,19 @@ export default function InboundDetailPage() {
           <CardContent className="space-y-2 text-sm">
             {isWillard && (
               <InfoRow
-                label="Total Kg Plomo"
+                label={isDraft ? "Kg Plomo (estimado)" : "Total Kg Plomo"}
                 value={
-                  <span className="font-semibold tabular-nums text-emerald-700">
-                    {order.total_kg_lead != null ? `+${formatWeight(order.total_kg_lead)}` : "—"}
-                  </span>
+                  isDraft ? (
+                    <span className="font-semibold tabular-nums text-amber-700">
+                      {estimatedTotalKg != null && estimatedTotalKg > 0
+                        ? `~${formatWeight(estimatedTotalKg)}`
+                        : "—"}
+                    </span>
+                  ) : (
+                    <span className="font-semibold tabular-nums text-emerald-700">
+                      {order.total_kg_lead != null ? `+${formatWeight(order.total_kg_lead)}` : "—"}
+                    </span>
+                  )
                 }
               />
             )}
@@ -214,9 +255,18 @@ export default function InboundDetailPage() {
                     </TableCell>
                     {isWillard && (
                       <TableCell className="text-right">
-                        <span className="font-medium tabular-nums text-emerald-700">
-                          {line.kg_lead != null ? `+${formatWeight(line.kg_lead)}` : "—"}
-                        </span>
+                        {isDraft ? (
+                          <span className="font-medium tabular-nums text-amber-700">
+                            {(() => {
+                              const est = estimateKgLead(formulas, line.material_id, line.quantity);
+                              return est != null ? `~${formatWeight(est)}` : "—";
+                            })()}
+                          </span>
+                        ) : (
+                          <span className="font-medium tabular-nums text-emerald-700">
+                            {line.kg_lead != null ? `+${formatWeight(line.kg_lead)}` : "—"}
+                          </span>
+                        )}
                       </TableCell>
                     )}
                     <TableCell className="text-sm text-slate-500 max-w-[220px]">
@@ -234,8 +284,28 @@ export default function InboundDetailPage() {
               </span>
             </div>
           )}
+          {isDraft && isWillard && estimatedTotalKg != null && estimatedTotalKg > 0 && (
+            <div className="bg-amber-50 rounded-lg p-3 mt-3 flex justify-end">
+              <span className="text-base font-bold tabular-nums text-amber-700">
+                Estimado: ~{formatWeight(estimatedTotalKg)}
+              </span>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* Confirmar (B.2) */}
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={`Confirmar Recepción #${order.order_number}`}
+        description="El material entra al inventario y mueve el libro kg con la fórmula vigente. Esta acción registra los efectos definitivos."
+        confirmLabel="Confirmar"
+        loading={confirmOrder.isPending}
+        onConfirm={() =>
+          confirmOrder.mutate(order.id, { onSuccess: () => setConfirmOpen(false) })
+        }
+      />
 
       {/* Anular */}
       <ConfirmDialog
@@ -244,7 +314,9 @@ export default function InboundDetailPage() {
         title={`Anular Recepción #${order.order_number}`}
         description={
           isWillard
-            ? "Se revertirán los movimientos de inventario y de la cuenta kg. Si el stock queda negativo, se avisará sin bloquear."
+            ? isDraft
+              ? "La recepción está Registrada y no ha movido inventario ni libro kg — solo se marcará como anulada."
+              : "Se revertirán los movimientos de inventario y de la cuenta kg. Si el stock queda negativo, se avisará sin bloquear."
             : order.purchase_status === "liquidated"
               ? `La compra derivada #${order.purchase_number} está liquidada — debe cancelarla primero en el módulo de compras.`
               : `Se cancelará también la compra derivada #${order.purchase_number ?? ""} (registrada) en el mismo acto.`

@@ -20,6 +20,7 @@ las ordenes anuladas desaparecen de TODOS los cortes); diferencia →
 """
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Optional
 from uuid import UUID
 
@@ -111,7 +112,9 @@ class InboundOrderService:
             # goes_directly_to_jm retirado de la superficie (Ciclo B B4, Q-03) —
             # la columna queda inerte con su server_default
             notes=obj_in.notes,
-            status="confirmed",
+            # B.2: willard nace "Registrada" (draft) — bandeja de Johana;
+            # tipo compra sigue confirmed (su 2-pasos vive en la Purchase derivada)
+            status="draft" if is_willard else "confirmed",
             created_by=user_id,
         )
         db.add(order)
@@ -119,9 +122,14 @@ class InboundOrderService:
 
         warnings: list[str] = []
         if is_willard:
-            self._apply_willard_effects(
-                db, order, obj_in.lines, organization_id, user_id
+            # B.2: capturar != confirmar — el draft valida TODO (fail-fast para
+            # David: un draft no puede nacer roto) pero NO mueve nada; los
+            # efectos (inventario D2 + kg D5 + MCH H1a) nacen al confirmar
+            self._validate_willard_capture(
+                db, organization_id, obj_in.warehouse_id,
+                obj_in.third_party_id, obj_in.lines,
             )
+            self._persist_mirror_lines(db, order, obj_in.lines, organization_id)
         else:
             # D7: derivar Purchase(registered) en la misma transaccion
             vehicle_plate = None
@@ -153,42 +161,113 @@ class InboundOrderService:
             order.purchase_id = purchase.id
             warnings.extend(p_warnings)
             # Lineas espejo del inbound (documento de captura)
-            for l in obj_in.lines:
-                material = db.get(Material, l.material_id)
-                db.add(
-                    InboundOrderLine(
-                        organization_id=organization_id,
-                        inbound_order_id=order.id,
-                        material_id=l.material_id,
-                        quantity=l.quantity,
-                        unit=material.default_unit or "kg",
-                        unit_price=l.unit_price,
-                        scale_weight_kg=l.scale_weight_kg,
-                        quality_notes=l.quality_notes,
-                    )
-                )
+            self._persist_mirror_lines(db, order, obj_in.lines, organization_id)
 
         db.commit()
         db.refresh(order)
         return order, warnings
 
+    def _persist_mirror_lines(
+        self, db: Session, order: InboundOrder, lines_in, organization_id: UUID
+    ) -> None:
+        """Lineas espejo del documento de captura — SIN unit_cost (el snapshot
+        D8 nace al confirmar, cuando _apply_willard_effects las recrea)."""
+        for l in lines_in:
+            material = db.get(Material, l.material_id)
+            db.add(
+                InboundOrderLine(
+                    organization_id=organization_id,
+                    inbound_order_id=order.id,
+                    material_id=l.material_id,
+                    quantity=l.quantity,
+                    unit=material.default_unit or "kg",
+                    unit_price=l.unit_price,
+                    scale_weight_kg=l.scale_weight_kg,
+                    quality_notes=l.quality_notes,
+                )
+            )
+
     # ------------------------------------------------------------------ #
-    # Efectos Willard (create + re-apply de edicion D18)                  #
+    # Confirmar recepcion Willard (B.2) — los efectos nacen aca           #
     # ------------------------------------------------------------------ #
-    def _apply_willard_effects(
+    def confirm(
         self,
         db: Session,
-        order: InboundOrder,
-        lines_in,
+        order_id: UUID,
         organization_id: UUID,
         user_id: UUID,
-    ) -> None:
+    ) -> InboundOrder:
+        """Draft -> confirmed: borra las lineas draft y re-aplica via
+        _apply_willard_effects (el MISMO camino de efectos del 1-paso previo:
+        inventario a identidad D2 + kg ledger D5 + MCH hoy H1a + snapshot de
+        formula/avg AL CONFIRMAR — si la formula cambio desde la captura,
+        aplica la vigente, #35)."""
+        order = self._get_or_404(db, order_id, organization_id)
+        if order.inbound_type not in WILLARD_INBOUND_TYPES:
+            raise _err(
+                "Una recepcion tipo Compra no se confirma aca — su flujo vive "
+                "en la compra derivada (liquidela desde Compras)",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if order.status == "annulled":
+            raise _err(
+                "La recepcion esta anulada", status.HTTP_400_BAD_REQUEST
+            )
+        if order.status == "confirmed":
+            raise _err(
+                "La recepcion ya esta confirmada", status.HTTP_400_BAD_REQUEST
+            )
+
+        # Re-validar lo que pudo cambiar entre captura y confirmacion
+        self._validate_warehouse(db, order.warehouse_id, organization_id)
+        self._validate_third_party(db, order.third_party_id, organization_id)
+
+        # Reconstruir lines_in desde las lineas draft persistidas (patron D18)
+        lines_in = [
+            SimpleNamespace(
+                material_id=l.material_id,
+                quantity=l.quantity,
+                unit_price=l.unit_price,
+                scale_weight_kg=l.scale_weight_kg,
+                quality_notes=l.quality_notes,
+            )
+            for l in order.lines
+        ]
+        # Borrar las draft — _apply_willard_effects las recrea con unit_cost
+        db.query(InboundOrderLine).filter(
+            InboundOrderLine.inbound_order_id == order.id
+        ).delete(synchronize_session=False)
+        db.flush()
+
+        self._apply_willard_effects(db, order, lines_in, organization_id, user_id)
+        order.status = "confirmed"
+        db.commit()
+        db.refresh(order)
+        return order
+
+    # ------------------------------------------------------------------ #
+    # Validacion de captura Willard (B.2) — camino UNICO                  #
+    # ------------------------------------------------------------------ #
+    def _validate_willard_capture(
+        self,
+        db: Session,
+        organization_id: UUID,
+        warehouse_id: UUID,
+        third_party_id: UUID,
+        lines_in,
+    ) -> tuple[dict, dict, dict]:
+        """Validaciones Willard — corren al CAPTURAR (fail-fast: un draft no
+        puede nacer roto) y al CONFIRMAR (via _apply_willard_effects, que las
+        consume — B.2 W2: una sola implementacion, cero divergencia).
+
+        Retorna (worlds, formulas, account_by_world) para que apply no
+        re-consulte.
+        """
         material_ids = [l.material_id for l in lines_in]
         worlds = self._load_kg_worlds(db, organization_id, material_ids)
 
         # Ciclo B (B2): homogeneidad de mundo — una recepcion Willard es de UN
         # solo mundo; camion mixto = DOS recepciones (Q-10, decision Daniel).
-        # El guard per-linea de world none/None sigue abajo (mensaje especifico).
         real_worlds = {
             w for w in (worlds.get(mid) for mid in material_ids)
             if w and w != "none"
@@ -203,7 +282,7 @@ class InboundOrderService:
         # si la org configuro willard_sede_drosses (None = compat, no valida).
         if real_worlds == {"drosses"}:
             jm_id = get_org_setting(db, organization_id, "willard_sede_drosses")
-            if jm_id is not None and str(order.warehouse_id) != str(jm_id):
+            if jm_id is not None and str(warehouse_id) != str(jm_id):
                 jm_wh = db.get(Warehouse, UUID(str(jm_id)))
                 jm_name = jm_wh.name if jm_wh else "la bodega configurada"
                 raise _err(
@@ -211,9 +290,7 @@ class InboundOrderService:
                     "seleccione esa bodega"
                 )
 
-        formulas = self._load_current_formulas(db, organization_id, material_ids)
-        today = datetime.now(timezone.utc).date()
-        # Cache de cuenta kg por mundo (la sede de baterias es fija: order.warehouse_id)
+        # Cache de cuenta kg por mundo (la sede de baterias es fija: warehouse_id)
         account_by_world: dict[str, KgLedgerAccount] = {}
 
         # Ciclo B addendum (feedback Daniel): el tercero de una recepcion
@@ -222,24 +299,24 @@ class InboundOrderService:
         if real_worlds:
             world0 = next(iter(real_worlds))
             account0 = self._resolve_kg_account_for_world(
-                db, organization_id, world0, order.warehouse_id
+                db, organization_id, world0, warehouse_id
             )
             account_by_world[world0] = account0
-            if account0.third_party_id and order.third_party_id != account0.third_party_id:
+            if account0.third_party_id and third_party_id != account0.third_party_id:
                 titular = db.get(ThirdParty, account0.third_party_id)
                 raise _err(
                     "El tercero de una recepcion Willard es el titular de la "
                     f"cuenta kg ({titular.name if titular else 'configurado en la cuenta'})"
                 )
 
+        formulas = self._load_current_formulas(db, organization_id, material_ids)
+
+        # Per-linea: material activo, mundo Willard, formula vigente
         for line_in in lines_in:
             material = self._validate_material(db, line_in.material_id, organization_id)
-            qty = Decimal(str(line_in.quantity))
-
-            # D1/CC-004: el mundo del material rutea la cuenta kg (no un subtipo
-            # de encabezado). Un material sin clasificacion Willard no puede
-            # recibirse aca — se recibe como Compra regular.
             world = worlds.get(line_in.material_id)
+            # D1/CC-004: el mundo del material rutea la cuenta kg. Un material
+            # sin clasificacion Willard se recibe como Compra regular.
             if world is None or world == "none":
                 raise _err(
                     f"El material {material.code} no es de mundo Willard "
@@ -248,18 +325,43 @@ class InboundOrderService:
                 )
             if world not in account_by_world:
                 account_by_world[world] = self._resolve_kg_account_for_world(
-                    db, organization_id, world, order.warehouse_id
+                    db, organization_id, world, warehouse_id
                 )
-            account = account_by_world[world]
-            kg_source = KG_SOURCE_BY_WORLD[world]
-            label = WORLD_LABELS[world]
-
-            formula = formulas.get(line_in.material_id)
-            if formula is None:
+            if formulas.get(line_in.material_id) is None:
                 raise _err(
                     f"No hay formula de conversion vigente para {material.code} — "
                     "creela primero en el maestro de materiales"
                 )
+
+        return worlds, formulas, account_by_world
+
+    # ------------------------------------------------------------------ #
+    # Efectos Willard (confirm B.2 + re-apply de edicion D18)             #
+    # ------------------------------------------------------------------ #
+    def _apply_willard_effects(
+        self,
+        db: Session,
+        order: InboundOrder,
+        lines_in,
+        organization_id: UUID,
+        user_id: UUID,
+    ) -> None:
+        # B.2 (W2): la validacion es el MISMO camino que la captura — aca se
+        # re-valida (formula/cuenta/material pueden cambiar entre captura y
+        # confirmacion) y se consumen los datos cargados
+        worlds, formulas, account_by_world = self._validate_willard_capture(
+            db, organization_id, order.warehouse_id, order.third_party_id, lines_in
+        )
+        today = datetime.now(timezone.utc).date()
+
+        for line_in in lines_in:
+            material = self._validate_material(db, line_in.material_id, organization_id)
+            qty = Decimal(str(line_in.quantity))
+            world = worlds[line_in.material_id]
+            account = account_by_world[world]
+            kg_source = KG_SOURCE_BY_WORLD[world]
+            label = WORLD_LABELS[world]
+            formula = formulas[line_in.material_id]
             delta_kg = self._compute_kg_lead(formula, qty)
 
             # D2: entrada a identidad — adjustment 0 y avg intacto por construccion
@@ -440,18 +542,21 @@ class InboundOrderService:
         user_id: UUID,
     ) -> tuple[InboundOrder, list[str]]:
         order = self._get_or_404(db, order_id, organization_id)
-        if order.status != "confirmed":
+        # B.2: draft y confirmed son anulables (draft = solo status, sin reversa)
+        if order.status == "annulled":
             raise _err(
-                f"No se puede anular: la orden esta en estado '{order.status}'",
+                "No se puede anular: la orden ya esta anulada",
                 status.HTTP_400_BAD_REQUEST,
             )
 
         warnings: list[str] = []
         if order.inbound_type in WILLARD_INBOUND_TYPES:
-            total_adj, warnings = self._revert_willard_effects(
-                db, order, organization_id, user_id, reason
-            )
-            order.annul_cost_adjustment = total_adj
+            # B.2: un draft no movio nada — anular es solo status + auditoria
+            if order.status == "confirmed":
+                total_adj, warnings = self._revert_willard_effects(
+                    db, order, organization_id, user_id, reason
+                )
+                order.annul_cost_adjustment = total_adj
         elif order.purchase_id is not None:
             from app.services.purchase import purchase as purchase_service
             purchase = order.purchase
@@ -530,12 +635,28 @@ class InboundOrderService:
 
         warnings: list[str] = []
         # Revert-and-reapply Willard cuando cambian lineas o fecha
-        # (la fecha mueve los eventos kg e inventario)
-        needs_reapply = is_willard and bool(
+        # (la fecha mueve los eventos kg e inventario) — SOLO confirmadas;
+        # un draft (B.2) no tiene efectos que revertir
+        willard_body_changed = is_willard and bool(
             {"lines", "date"} & set(fields_set.keys())
         )
+        needs_reapply = willard_body_changed and order.status == "confirmed"
+        if willard_body_changed and not needs_reapply:
+            # B.2: edicion simple del draft — validar la captura nueva y
+            # reemplazar las lineas espejo, cero movimientos
+            if obj_in.date is not None:
+                order.date = obj_in.date
+            if obj_in.lines is not None:
+                self._validate_willard_capture(
+                    db, organization_id, order.warehouse_id,
+                    order.third_party_id, obj_in.lines,
+                )
+                db.query(InboundOrderLine).filter(
+                    InboundOrderLine.inbound_order_id == order.id
+                ).delete(synchronize_session=False)
+                db.flush()
+                self._persist_mirror_lines(db, order, obj_in.lines, organization_id)
         if needs_reapply:
-            from types import SimpleNamespace
             old_lines = [
                 SimpleNamespace(
                     material_id=l.material_id,

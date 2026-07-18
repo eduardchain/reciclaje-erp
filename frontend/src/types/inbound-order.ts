@@ -2,7 +2,9 @@
 // Espejo de backend/app/schemas/inbound_order.py
 
 export type InboundType = "purchase" | "willard";
-export type InboundOrderStatus = "confirmed" | "annulled";
+// B.2: willard nace "draft" (Registrada) y se confirma desde el detalle;
+// tipos purchase nacen "confirmed" (su 2-pasos vive en la compra derivada)
+export type InboundOrderStatus = "draft" | "confirmed" | "annulled";
 
 export const INBOUND_TYPE_LABELS: Record<InboundType, string> = {
   purchase: "Compra regular",

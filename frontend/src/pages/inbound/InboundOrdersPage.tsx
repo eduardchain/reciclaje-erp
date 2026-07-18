@@ -60,10 +60,14 @@ export default function InboundOrdersPage() {
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
     inbound_type: typeFilter === "all" ? undefined : typeFilter,
-    status: statusFilter === "all" ? undefined : (statusFilter as "confirmed" | "annulled"),
+    status: statusFilter === "all" ? undefined : (statusFilter as "draft" | "confirmed" | "annulled"),
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
+
+  // B.2: bandeja — contador de recepciones willard pendientes de confirmar
+  const { data: pendingData } = useInboundOrders({ status: "draft", limit: 1 });
+  const pendingCount = pendingData?.total ?? 0;
 
   useScrollRestoration(!isLoading);
 
@@ -126,6 +130,15 @@ export default function InboundOrdersPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Recepción" description="Órdenes de entrada de material — captura en patio">
+        {pendingCount > 0 && statusFilter !== "draft" && (
+          <Button
+            variant="outline"
+            onClick={() => { setStatusFilter("draft"); setPage(0); }}
+            className="border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 w-full sm:w-auto"
+          >
+            Por confirmar: {pendingCount}
+          </Button>
+        )}
         {canCreate && (
           <Button
             onClick={() => navigate(ROUTES.INBOUND_NEW)}
@@ -188,6 +201,7 @@ export default function InboundOrdersPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="draft">Registradas</SelectItem>
                 <SelectItem value="confirmed">Confirmadas</SelectItem>
                 <SelectItem value="annulled">Anuladas</SelectItem>
               </SelectContent>

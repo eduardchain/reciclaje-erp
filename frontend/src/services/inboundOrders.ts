@@ -11,7 +11,7 @@ import type {
 
 export interface InboundOrderFilters {
   inbound_type?: string;
-  status?: "confirmed" | "annulled";
+  status?: "draft" | "confirmed" | "annulled";
   third_party_id?: string;
   date_from?: string;
   date_to?: string;
@@ -42,6 +42,14 @@ export const inboundOrderService = {
     const response = await apiClient.patch<InboundOrderResponse>(
       `/api/v1/inbound-orders/${id}`,
       data
+    );
+    return response.data;
+  },
+
+  // B.2: draft -> confirmed (efectos inventario + kg nacen aca)
+  confirm: async (id: string): Promise<InboundOrderResponse> => {
+    const response = await apiClient.post<InboundOrderResponse>(
+      `/api/v1/inbound-orders/${id}/confirm`
     );
     return response.data;
   },

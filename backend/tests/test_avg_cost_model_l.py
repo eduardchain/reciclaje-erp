@@ -1340,7 +1340,13 @@ class TestInventoryStressWalk:
                 qty = rng.randrange(20, 200, 10)
                 resp = _inbound_create(qty)
                 assert resp.status_code == 201, resp.text
-                confirmed_inbounds.append(resp.json()["id"])
+                oid = resp.json()["id"]
+                # B.2: capturar -> confirmar (los efectos willard nacen al confirmar)
+                resp = client.post(
+                    f"/api/v1/inbound-orders/{oid}/confirm", headers=org_headers
+                )
+                assert resp.status_code == 200, resp.text
+                confirmed_inbounds.append(oid)
                 tol_qty += Decimal("200")
                 counts["ic"] += 1
             elif action == "inbound_annul" and confirmed_inbounds:

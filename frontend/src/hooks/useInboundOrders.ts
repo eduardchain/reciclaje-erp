@@ -26,7 +26,12 @@ export function useCreateInboundOrder() {
     mutationFn: (data: InboundOrderCreate) => inboundOrderService.create(data),
     onSuccess: (order) => {
       invalidateAfterInboundOrder(qc);
-      toast.success(`Recepción #${order.order_number} creada`);
+      // B.2: willard nace draft — dejar claro que falta la confirmacion
+      toast.success(
+        order.status === "draft"
+          ? `Recepción #${order.order_number} registrada — pendiente de confirmar`
+          : `Recepción #${order.order_number} creada`
+      );
       (order.warnings ?? []).forEach((w) => toast.warning(w, { duration: 8000 }));
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al crear la recepción")),
@@ -45,6 +50,20 @@ export function useUpdateInboundOrder() {
     },
     onError: (e: unknown) =>
       toast.error(getApiErrorMessage(e, "Error al actualizar la recepción")),
+  });
+}
+
+export function useConfirmInboundOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => inboundOrderService.confirm(id),
+    onSuccess: (order) => {
+      // B.2: los efectos (inventario + kg) nacen aca — misma invalidacion que el create
+      invalidateAfterInboundOrder(qc);
+      toast.success(`Recepción #${order.order_number} confirmada`);
+    },
+    onError: (e: unknown) =>
+      toast.error(getApiErrorMessage(e, "Error al confirmar la recepción")),
   });
 }
 

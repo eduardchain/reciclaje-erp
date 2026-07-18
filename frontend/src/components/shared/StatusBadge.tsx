@@ -3,6 +3,7 @@ import { cn } from "@/utils";
 
 type Status =
   | "registered"
+  | "draft"
   | "liquidated"
   | "cancelled"
   | "confirmed"
@@ -13,6 +14,8 @@ type Status =
 
 const statusConfig: Record<Status, { label: string; className: string }> = {
   registered: { label: "Registrada", className: "bg-yellow-100 text-yellow-800 border-yellow-200" },
+  // B.2: recepcion willard capturada, pendiente de confirmar (mismo visual que compras registradas)
+  draft: { label: "Registrada", className: "bg-yellow-100 text-yellow-800 border-yellow-200" },
   liquidated: { label: "Liquidada", className: "bg-emerald-100 text-emerald-800 border-emerald-200" },
   cancelled: { label: "Cancelada", className: "bg-red-100 text-red-800 border-red-200" },
   confirmed: { label: "Confirmado", className: "bg-emerald-100 text-emerald-800 border-emerald-200" },

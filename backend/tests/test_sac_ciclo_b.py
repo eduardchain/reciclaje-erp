@@ -157,6 +157,13 @@ def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id, lin
     )
 
 
+def _confirm(client, headers, order_id):
+    """B.2: draft -> confirmed (los efectos willard nacen al confirmar)."""
+    resp = client.post(f"{INBOUND_URL}/{order_id}/confirm", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
 def _purchase(client, headers, *, supplier_id, material_id, warehouse_id, qty="100", price="1000"):
     return client.post(
         PURCHASES_URL, headers=headers,
@@ -238,7 +245,8 @@ class TestDrossesSedeDeterminista:
             lines=[{"material_id": str(mat_dross.id), "quantity": "100"}],
         )
         assert resp.status_code == 201, resp.text
-        assert Decimal(resp.json()["total_kg_lead"]) == Decimal("50")
+        body = _confirm(client, org_headers, resp.json()["id"])  # B.2: efectos al confirmar
+        assert Decimal(body["total_kg_lead"]) == Decimal("50")
 
     def test_drosses_no_setting_any_warehouse_ok(
         self, client, org_headers, wh_cv, supplier, mat_dross, kg_dross_account,
@@ -265,7 +273,8 @@ class TestDrossesSedeDeterminista:
             lines=[{"material_id": str(mat_willard_puro.id), "quantity": "10"}],
         )
         assert resp.status_code == 201, resp.text
-        assert Decimal(resp.json()["total_kg_lead"]) == Decimal("25")
+        body = _confirm(client, org_headers, resp.json()["id"])  # B.2: efectos al confirmar
+        assert Decimal(body["total_kg_lead"]) == Decimal("25")
 
 
 # ---------------------------------------------------------------------------

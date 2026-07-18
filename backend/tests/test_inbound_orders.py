@@ -200,6 +200,14 @@ def _kg_movs(db, order_id, status=None):
     return db.execute(q).scalars().all()
 
 
+def _confirm(client, headers, order_id):
+    """B.2: draft -> confirmed — los efectos willard nacen aca (re-semantizacion
+    mecanica del 1-paso previo, patron #73/#76)."""
+    resp = client.post(f"{INBOUND_URL}/{order_id}/confirm", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
 # ---------------------------------------------------------------------------
 # Tipos Willard — create (D2/D4/D5/D6)
 # ---------------------------------------------------------------------------
@@ -223,8 +231,11 @@ class TestWillardCreate:
         )
         assert resp.status_code == 201, resp.text
         body = resp.json()
-        assert body["status"] == "confirmed"
+        # B.2: la captura queda Registrada (draft) — los efectos nacen al confirmar
+        assert body["status"] == "draft"
         assert body["order_number"] == 1
+        body = _confirm(client, org_headers, body["id"])
+        assert body["status"] == "confirmed"
 
         # D2: identidad — avg intacto, stock liquidated sube
         db_session.expire_all()
@@ -289,6 +300,7 @@ class TestWillardCreate:
             lines=[{"material_id": str(mat_dross.id), "quantity": "5"}],
         )
         assert resp.status_code == 201, resp.text
+        _confirm(client, org_headers, resp.json()["id"])
 
         db_session.expire_all()
         mat = db_session.get(Material, mat_dross.id)
@@ -313,7 +325,7 @@ class TestWillardCreate:
             lines=[{"material_id": str(mat_dross.id), "quantity": "1000"}],
         )
         assert resp.status_code == 201, resp.text
-        body = resp.json()
+        body = _confirm(client, org_headers, resp.json()["id"])
         # 1000 kg x 0.53 = 530 kg plomo — cuenta org-wide
         assert Decimal(body["total_kg_lead"]) == Decimal("530")
         movs = _kg_movs(db_session, body["id"], "confirmed")
@@ -644,6 +656,7 @@ class TestWillardAnnul:
             date_str=order_date.isoformat(),
             lines=[{"material_id": str(mat_bat.id), "quantity": "10"}],
         ).json()
+        _confirm(client, org_headers, body["id"])
 
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/annul",
@@ -702,7 +715,8 @@ class TestWillardAnnul:
             warehouse_id=warehouse.id,
             third_party_id=willard_tp.id,
             lines=[{"material_id": str(mat_dross.id), "quantity": "50"}],
-        ).json()  # entra 50 @ 100 (identidad) -> pool 60 @ 100
+        ).json()
+        _confirm(client, org_headers, body["id"])  # entra 50 @ 100 (identidad) -> pool 60 @ 100
 
         _decrease(client, org_headers, mat_dross.id, warehouse.id, 55)  # pool 5 @ 100
         _seed_avg(client, org_headers, mat_dross.id, warehouse.id, 45, 20)  # pool 50 @ 28
@@ -772,6 +786,7 @@ class TestWillardAnnul:
             third_party_id=willard_tp.id,
             lines=[{"material_id": str(mat_bat.id), "quantity": "10"}],
         ).json()
+        _confirm(client, org_headers, body["id"])
         bs_with = client.get(
             BS_URL, headers=org_headers, params={"as_of_date": today}
         ).json()
@@ -803,6 +818,7 @@ class TestEditD18:
             third_party_id=willard_tp.id,
             lines=[{"material_id": str(mat_bat.id), "quantity": "10"}],
         ).json()
+        _confirm(client, org_headers, body["id"])
 
         resp = client.patch(
             f"{INBOUND_URL}/{body['id']}",
@@ -839,6 +855,7 @@ class TestEditD18:
             third_party_id=willard_tp.id,
             lines=[{"material_id": str(mat_bat.id), "quantity": "10"}],
         ).json()
+        _confirm(client, org_headers, body["id"])
         mov_ids_before = {m.id for m in _kg_movs(db_session, body["id"], "confirmed")}
 
         resp = client.patch(
@@ -863,6 +880,7 @@ class TestEditD18:
             third_party_id=willard_tp.id,
             lines=[{"material_id": str(mat_bat.id), "quantity": "10"}],
         ).json()
+        _confirm(client, org_headers, body["id"])
         new_date = (datetime.now(timezone.utc) - timedelta(days=3)).date().isoformat()
         resp = client.patch(
             f"{INBOUND_URL}/{body['id']}", headers=org_headers, json={"date": new_date}
@@ -921,6 +939,281 @@ class TestEditD18:
             json={"willard_distribution_center": "baq"},
         )
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# B.2 — Willard a 2 pasos: capturar (draft) -> confirmar (efectos)
+# ---------------------------------------------------------------------------
+
+class TestWillardTwoStep:
+    def _capture(self, client, org_headers, warehouse, willard_tp, material,
+                 qty="10", date_str=None):
+        resp = _inbound(
+            client, org_headers,
+            inbound_type="willard",
+            warehouse_id=warehouse.id,
+            third_party_id=willard_tp.id,
+            date_str=date_str,
+            lines=[{"material_id": str(material.id), "quantity": qty}],
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    def test_capture_draft_zero_effects(
+        self, client, org_headers, db_session, warehouse, willard_tp,
+        mat_bat, kg_bat_account,
+    ):
+        """B.2: la captura es SOLO documento — cero inventario, cero kg, cero MCH."""
+        _seed_avg(client, org_headers, mat_bat.id, warehouse.id, 100, 50)
+        db_session.refresh(mat_bat)
+        avg_before = mat_bat.current_average_cost
+        liq_before = mat_bat.current_stock_liquidated
+
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        assert body["status"] == "draft"
+        # Documento visible, efectos ausentes
+        assert body["lines"][0]["unit_cost"] is None  # snapshot D8 nace al confirmar
+        assert body["lines"][0]["kg_lead"] is None
+        assert body["total_kg_lead"] is None
+
+        db_session.expire_all()
+        mat = db_session.get(Material, mat_bat.id)
+        assert mat.current_average_cost == avg_before
+        assert mat.current_stock_liquidated == liq_before
+        assert _kg_movs(db_session, body["id"]) == []
+        movs = db_session.execute(
+            select(InventoryMovement).where(
+                InventoryMovement.reference_id == body["id"]
+            )
+        ).scalars().all()
+        assert movs == []
+        mch = db_session.execute(
+            select(MaterialCostHistory).where(
+                MaterialCostHistory.source_id == body["id"]
+            )
+        ).scalars().all()
+        assert mch == []
+
+    def test_confirm_effects_identical_to_one_step(
+        self, client, org_headers, db_session, warehouse, willard_tp,
+        mat_bat, kg_bat_account,
+    ):
+        """W1: el confirm produce EXACTAMENTE los efectos del 1-paso previo —
+        identidad D2, snapshot D8, kg D5, MCH HOY (H1a) e InventoryMovement en
+        la fecha de la ORDEN (D4) aunque la confirmacion sea dias despues
+        (simulado con orden backdateada)."""
+        _seed_avg(client, org_headers, mat_bat.id, warehouse.id, 100, 50)
+        db_session.refresh(mat_bat)
+        avg_before = mat_bat.current_average_cost
+        order_date = (datetime.now(timezone.utc) - timedelta(days=4)).date()
+
+        body = self._capture(
+            client, org_headers, warehouse, willard_tp, mat_bat,
+            date_str=order_date.isoformat(),
+        )
+        body = _confirm(client, org_headers, body["id"])
+        assert body["status"] == "confirmed"
+
+        # Identidad D2 + snapshot D8 + kg D5 (mismos asserts del happy 1-paso)
+        db_session.expire_all()
+        mat = db_session.get(Material, mat_bat.id)
+        assert mat.current_average_cost == avg_before
+        assert mat.current_stock_liquidated == 110
+        assert Decimal(body["lines"][0]["unit_cost"]) == Decimal("50.00")
+        assert Decimal(body["total_kg_lead"]) == Decimal("25")
+
+        # D4: la CANTIDAD vive en la fecha de negocio (orden), no en la del confirm
+        mov = db_session.execute(
+            select(InventoryMovement).where(
+                InventoryMovement.reference_id == body["id"],
+                InventoryMovement.movement_type == "inbound_receipt",
+            )
+        ).scalar_one()
+        assert mov.date.date() == order_date
+        kg = _kg_movs(db_session, body["id"], "confirmed")
+        assert len(kg) == 1
+        assert kg[0].transaction_date.date() == order_date
+
+        # H1a: MCH fechado HOY (dia de la confirmacion — checkpoint al escribir)
+        mch = db_session.execute(
+            select(MaterialCostHistory).where(
+                MaterialCostHistory.source_type == "inbound_receipt",
+                MaterialCostHistory.source_id == body["id"],
+            )
+        ).scalar_one()
+        assert mch.transaction_date == datetime.now(timezone.utc).date()
+        assert mch.previous_cost == mch.new_cost == avg_before
+
+    def test_confirm_twice_400(
+        self, client, org_headers, warehouse, willard_tp, mat_bat, kg_bat_account,
+    ):
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        _confirm(client, org_headers, body["id"])
+        resp = client.post(f"{INBOUND_URL}/{body['id']}/confirm", headers=org_headers)
+        assert resp.status_code == 400
+        assert "ya esta confirmada" in resp.json()["detail"]
+
+    def test_confirm_purchase_type_400(
+        self, client, org_headers, warehouse, willard_tp, mat_regular,
+    ):
+        body = _inbound(
+            client, org_headers,
+            inbound_type="purchase",
+            warehouse_id=warehouse.id,
+            third_party_id=willard_tp.id,
+            lines=[{"material_id": str(mat_regular.id), "quantity": "100",
+                    "unit_price": "900"}],
+        ).json()
+        resp = client.post(f"{INBOUND_URL}/{body['id']}/confirm", headers=org_headers)
+        assert resp.status_code == 400
+        assert "compra derivada" in resp.json()["detail"]
+
+    def test_confirm_annulled_400(
+        self, client, org_headers, warehouse, willard_tp, mat_bat, kg_bat_account,
+    ):
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        client.post(
+            f"{INBOUND_URL}/{body['id']}/annul", headers=org_headers,
+            json={"reason": "capturada por error"},
+        )
+        resp = client.post(f"{INBOUND_URL}/{body['id']}/confirm", headers=org_headers)
+        assert resp.status_code == 400
+        assert "anulada" in resp.json()["detail"]
+
+    def test_confirm_rbac_no_liquidate_403(
+        self, client, org_headers, org_headers2, warehouse, willard_tp,
+        mat_bat, kg_bat_account,
+    ):
+        """Viewer tiene purchases.view pero NO purchases.liquidate — el split
+        David captura / Johana confirma vive en ese permiso."""
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        resp = client.post(f"{INBOUND_URL}/{body['id']}/confirm", headers=org_headers2)
+        assert resp.status_code == 403
+
+    def test_draft_edit_simple_then_confirm(
+        self, client, org_headers, db_session, warehouse, willard_tp,
+        mat_bat, kg_bat_account,
+    ):
+        """Editar un draft es reemplazo simple (cero reversa, cero MCH); el
+        confirm posterior refleja las lineas NUEVAS."""
+        _seed_avg(client, org_headers, mat_bat.id, warehouse.id, 100, 50)
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        new_date = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
+        resp = client.patch(
+            f"{INBOUND_URL}/{body['id']}",
+            headers=org_headers,
+            json={
+                "lines": [{"material_id": str(mat_bat.id), "quantity": "7"}],
+                "date": new_date,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        assert out["status"] == "draft"
+        assert Decimal(out["lines"][0]["quantity"]) == Decimal("7")
+        # Sin efectos ni rastro de reversa
+        assert _kg_movs(db_session, body["id"]) == []
+        assert db_session.execute(
+            select(MaterialCostHistory).where(
+                MaterialCostHistory.source_id == body["id"]
+            )
+        ).scalars().all() == []
+
+        confirmed = _confirm(client, org_headers, body["id"])
+        assert Decimal(confirmed["total_kg_lead"]) == Decimal("17.5")  # 7 x 2.5
+        db_session.expire_all()
+        mat = db_session.get(Material, mat_bat.id)
+        assert mat.current_stock_liquidated == 107
+        kg = _kg_movs(db_session, body["id"], "confirmed")
+        assert len(kg) == 1 and kg[0].transaction_date.date().isoformat() == new_date
+
+    def test_draft_annul_no_reversal(
+        self, client, org_headers, db_session, warehouse, willard_tp,
+        mat_bat, kg_bat_account,
+    ):
+        """Anular un draft es solo status + auditoria — no movio nada, no
+        reversa nada (ni inbound_reversal ni MCH ni adjustment)."""
+        _seed_avg(client, org_headers, mat_bat.id, warehouse.id, 100, 50)
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        resp = client.post(
+            f"{INBOUND_URL}/{body['id']}/annul", headers=org_headers,
+            json={"reason": "camion devuelto"},
+        )
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        assert out["status"] == "annulled"
+        assert out["annulled_reason"] == "camion devuelto"
+
+        db_session.expire_all()
+        mat = db_session.get(Material, mat_bat.id)
+        assert mat.current_stock_liquidated == 100  # intacto
+        assert db_session.execute(
+            select(InventoryMovement).where(
+                InventoryMovement.reference_id == body["id"]
+            )
+        ).scalars().all() == []
+        assert db_session.execute(
+            select(MaterialCostHistory).where(
+                MaterialCostHistory.source_id == body["id"]
+            )
+        ).scalars().all() == []
+        from app.models.inbound_order import InboundOrder
+        order = db_session.get(InboundOrder, body["id"])
+        assert order.annul_cost_adjustment == 0
+
+    def test_formula_changed_between_capture_and_confirm(
+        self, client, org_headers, db_session, warehouse, willard_tp,
+        mat_bat, kg_bat_account,
+    ):
+        """#35 append-only: si la formula cambio entre captura y confirmacion,
+        el confirm aplica la VIGENTE al confirmar (el estimado de captura era
+        preview)."""
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        # Nueva version de la formula: 2.5 -> 3.0 kg/unidad
+        _post_formula(
+            client, org_headers, mat_bat.id, "battery_to_lead",
+            {"kg_lead_per_unit": 3.0},
+        )
+        confirmed = _confirm(client, org_headers, body["id"])
+        assert Decimal(confirmed["total_kg_lead"]) == Decimal("30")  # 10 x 3.0
+        kg = _kg_movs(db_session, body["id"], "confirmed")
+        assert kg[0].conversion_formula_snapshot["parameters"] == {"kg_lead_per_unit": 3.0}
+
+    def test_purchase_type_still_confirmed_on_create(
+        self, client, org_headers, warehouse, willard_tp, mat_regular,
+    ):
+        """El tipo compra queda intacto: nace confirmed y su 2-pasos vive en la
+        Purchase derivada (registered -> liquidar en Compras)."""
+        body = _inbound(
+            client, org_headers,
+            inbound_type="purchase",
+            warehouse_id=warehouse.id,
+            third_party_id=willard_tp.id,
+            lines=[{"material_id": str(mat_regular.id), "quantity": "100",
+                    "unit_price": "900"}],
+        ).json()
+        assert body["status"] == "confirmed"
+        assert body["purchase_status"] == "registered"
+
+    def test_draft_invisible_in_kg_and_balance(
+        self, client, org_headers, db_session, warehouse, willard_tp,
+        mat_bat, kg_bat_account,
+    ):
+        """Un draft no toca ni el saldo kg ni el balance — solo existe como
+        documento en la bandeja."""
+        _seed_avg(client, org_headers, mat_bat.id, warehouse.id, 100, 50)
+        today = datetime.now(timezone.utc).date().isoformat()
+        bs_before = client.get(
+            BS_URL, headers=org_headers, params={"as_of_date": today}
+        ).json()
+        self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        bs_after = client.get(
+            BS_URL, headers=org_headers, params={"as_of_date": today}
+        ).json()
+        assert bs_after["assets"]["inventory"] == bs_before["assets"]["inventory"]
+        accounts = client.get(f"{KG_URL}/accounts", headers=org_headers).json()
+        acc = next(a for a in accounts if a["id"] == kg_bat_account["id"])
+        assert Decimal(acc["current_balance_kg"]) == 0
 
 
 # ---------------------------------------------------------------------------
