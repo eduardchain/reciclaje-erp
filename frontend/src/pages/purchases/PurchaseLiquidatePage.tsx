@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, CheckCircle, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,6 +64,13 @@ function createEmptyRetention(): RetentionFormData {
 export default function PurchaseLiquidatePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // Ciclo C (W-C1): si se llega desde una Entrada, volver alla al terminar.
+  // Sin el param (las 3 orgs prod y el flujo Compras) el destino es EXACTO al
+  // de siempre: el detalle de la compra. Solo rutas internas (anti open-redirect).
+  const [searchParams] = useSearchParams();
+  const rawReturnTo = searchParams.get("returnTo");
+  const returnTo = rawReturnTo && rawReturnTo.startsWith("/") ? rawReturnTo : null;
+  const exitTo = returnTo ?? `/purchases/${id}`;
   const { data: purchase, isLoading } = usePurchase(id!);
   const { getSuggestedPrice } = usePriceSuggestions();
   const liquidate = useLiquidatePurchase();
@@ -167,12 +174,12 @@ export default function PurchaseLiquidatePage() {
     }
   }, [purchase, getSuggestedPrice, lines.length]);
 
-  // Redirigir si la compra no es liquidable
+  // Redirigir si la compra no es liquidable (honra returnTo — W-C1)
   useEffect(() => {
     if (purchase && (purchase.status !== "registered" || purchase.double_entry_id)) {
-      navigate(`/purchases/${id}`, { replace: true });
+      navigate(exitTo, { replace: true });
     }
-  }, [purchase, id, navigate]);
+  }, [purchase, id, navigate, exitTo]);
 
   const updatePrice = (lineId: string, price: number) => {
     setLines((prev) =>
@@ -275,7 +282,7 @@ export default function PurchaseLiquidatePage() {
       },
       {
         onSuccess: () => {
-          navigate(`/purchases/${id}`);
+          navigate(exitTo);
         },
       },
     );
@@ -300,7 +307,7 @@ export default function PurchaseLiquidatePage() {
         title={`Liquidar Compra #${purchase.purchase_number}`}
         description={`Proveedor: ${purchase.supplier_name} | Fecha: ${formatDate(purchase.date)}`}
       >
-        <Button variant="outline" onClick={() => navigate(`/purchases/${id}`)}>
+        <Button variant="outline" onClick={() => navigate(exitTo)}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Volver
         </Button>
@@ -678,7 +685,7 @@ export default function PurchaseLiquidatePage() {
       {/* Acciones */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-3 px-3 md:-mx-6 md:px-6 mt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
-          <Button variant="outline" onClick={() => navigate(`/purchases/${id}`)} className="w-full sm:w-auto">
+          <Button variant="outline" onClick={() => navigate(exitTo)} className="w-full sm:w-auto">
             Cancelar
           </Button>
           <Button

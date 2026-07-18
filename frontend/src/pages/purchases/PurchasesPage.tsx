@@ -158,9 +158,9 @@ function getColumns(canViewPrices: boolean): ColumnDef<PurchaseResponse, unknown
               to={`/inbound/${row.original.inbound_order_id}`}
               onClick={(e) => e.stopPropagation()}
               className="block text-[10px] text-indigo-600 hover:text-indigo-800 hover:underline whitespace-nowrap"
-              title="Ver la recepción de origen"
+              title="Ver la entrada de origen"
             >
-              Recepción #{row.original.inbound_order_number}
+              Entrada #{row.original.inbound_order_number}
             </Link>
           )}
         </div>
@@ -351,7 +351,7 @@ export default function PurchasesPage() {
         {hasPermission("purchases.create") && inboundOnly && (
           <Button onClick={() => navigate(ROUTES.INBOUND_NEW)} className="bg-emerald-600 hover:bg-emerald-700">
             <Plus className="h-4 w-4 mr-2" />
-            Nueva Recepción
+            Nueva Entrada
           </Button>
         )}
       </PageHeader>
@@ -437,7 +437,7 @@ export default function PurchasesPage() {
                 <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium">Pasa Mano</span>
               ) : p.inbound_order_number != null ? (
                 <span className="bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded font-medium">
-                  Recepción #{p.inbound_order_number}
+                  Entrada #{p.inbound_order_number}
                 </span>
               ) : undefined
             }

@@ -114,11 +114,11 @@ export default function InboundEditPage() {
   }, [order, initialized]);
 
   if (isLoading || !initialized) return <div className="p-8 text-center text-slate-500">Cargando...</div>;
-  if (!order) return <div className="p-8 text-center text-slate-500">Recepción no encontrada</div>;
+  if (!order) return <div className="p-8 text-center text-slate-500">Entrada no encontrada</div>;
   if (order.status === "annulled") {
     return (
       <div className="p-8 text-center text-slate-500">
-        Las recepciones anuladas no se pueden editar.
+        Las entradas anuladas no se pueden editar.
         <div className="mt-4">
           <Button variant="outline" onClick={() => navigate(buildRoute(ROUTES.INBOUND_DETAIL, { id: order.id }))}>
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -182,7 +182,7 @@ export default function InboundEditPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`Editar Recepción #${order.order_number}`}
+        title={`Editar Entrada #${order.order_number}`}
         description={INBOUND_TYPE_LABELS[order.inbound_type] ?? order.inbound_type}
       >
         <Button variant="outline" onClick={() => navigate(buildRoute(ROUTES.INBOUND_DETAIL, { id: order.id }))}>
@@ -219,7 +219,7 @@ export default function InboundEditPage() {
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
           <Info className="h-4 w-4 mt-0.5 shrink-0" />
           <span>
-            En recepciones tipo compra solo se editan conductor y vehículo — las líneas y la fecha se editan
+            En entradas tipo compra solo se editan conductor y vehículo — las líneas y la fecha se editan
             en la compra derivada{" "}
             {order.purchase_id ? (
               <PurchaseLink id={order.purchase_id}>#{order.purchase_number}</PurchaseLink>
@@ -376,7 +376,7 @@ export default function InboundEditPage() {
             ))}
             <p className="text-xs text-amber-600 mt-2">
               {order.status === "draft"
-                ? "La recepción está Registrada — editar solo actualiza el documento; los efectos nacen al confirmar."
+                ? "La entrada está Registrada — editar solo actualiza el documento; los efectos nacen al liquidar."
                 : "Editar líneas o fecha re-emite los movimientos de inventario y kg (revert-and-reapply) — los saldos quedan exactos con los valores nuevos."}
             </p>
           </CardContent>

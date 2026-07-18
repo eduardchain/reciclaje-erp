@@ -23,6 +23,9 @@ export const invalidateAfterPurchaseLiquidateOrCancel = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["purchases"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });
   qc.invalidateQueries({ queryKey: ["treasury-dashboard"] });
+  // Ciclo C: la entrada refleja el display_status de su compra (bandeja +
+  // badge sidebar). Key inofensiva en orgs sin flag (cero queries bajo ella).
+  qc.invalidateQueries({ queryKey: ["inbound-orders"] });
   invalidateInventory(qc);
   invalidateFinancial(qc);
 };

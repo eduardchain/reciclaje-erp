@@ -25,7 +25,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select, text
+from sqlalchemy import String as SAString, and_, cast, func, or_, select, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.inbound_order import InboundOrder, InboundOrderLine
@@ -720,17 +720,110 @@ class InboundOrderService:
         organization_id: UUID,
         inbound_type: Optional[str] = None,
         status_filter: Optional[str] = None,
+        display_status: Optional[str] = None,
+        search: Optional[str] = None,
+        sort: str = "newest",
+        willard_world: Optional[str] = None,
+        warehouse_id: Optional[UUID] = None,
         third_party_id: Optional[UUID] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[InboundOrder], int]:
+        from app.models.purchase import Purchase
+
         q = select(InboundOrder).where(InboundOrder.organization_id == organization_id)
         if inbound_type:
             q = q.where(InboundOrder.inbound_type == inbound_type)
         if status_filter:
             q = q.where(InboundOrder.status == status_filter)
+
+        # Ciclo C (C-1): estado DERIVADO unico — espejo SQL de display_status_of
+        # (test de paridad filtro==campo). Anulada gana: orden anulada O compra
+        # cancelada (incl. cancelada post-liquidacion desde Compras, #63).
+        if display_status:
+            q = q.outerjoin(Purchase, InboundOrder.purchase_id == Purchase.id)
+            is_willard = InboundOrder.inbound_type.in_(WILLARD_INBOUND_TYPES)
+            # NULL-safe (three-valued logic): para willard el outer join deja
+            # Purchase.* en NULL — negar un OR con NULL descartaria esas filas.
+            purchase_cancelled = and_(
+                Purchase.id.is_not(None), Purchase.status == "cancelled"
+            )
+            not_annulled = and_(
+                InboundOrder.status != "annulled",
+                or_(Purchase.id.is_(None), Purchase.status != "cancelled"),
+            )
+            if display_status == "annulled":
+                q = q.where(
+                    or_(InboundOrder.status == "annulled", purchase_cancelled)
+                )
+            elif display_status == "registered":
+                q = q.where(
+                    not_annulled,
+                    or_(
+                        and_(is_willard, InboundOrder.status == "draft"),
+                        Purchase.status == "registered",
+                    ),
+                )
+            elif display_status == "liquidated":
+                q = q.where(
+                    not_annulled,
+                    or_(
+                        and_(is_willard, InboundOrder.status == "confirmed"),
+                        Purchase.status == "liquidated",
+                    ),
+                )
+
+        # Ciclo C (C-2): buscador — #, placa, conductor, tercero, material
+        if search and search.strip():
+            like = f"%{search.strip()}%"
+            material_match = (
+                select(InboundOrderLine.id)
+                .join(Material, InboundOrderLine.material_id == Material.id)
+                .where(
+                    InboundOrderLine.inbound_order_id == InboundOrder.id,
+                    or_(Material.code.ilike(like), Material.name.ilike(like)),
+                )
+                .exists()
+            )
+            q = (
+                q.outerjoin(Driver, InboundOrder.driver_id == Driver.id)
+                .outerjoin(Vehicle, InboundOrder.vehicle_id == Vehicle.id)
+                .join(ThirdParty, InboundOrder.third_party_id == ThirdParty.id)
+                .where(
+                    or_(
+                        cast(InboundOrder.order_number, SAString).ilike(like),
+                        Vehicle.plate.ilike(like),
+                        Driver.name.ilike(like),
+                        ThirdParty.name.ilike(like),
+                        material_match,
+                    )
+                )
+            )
+
+        # Ciclo C (filtros pruebas Daniel): mundo willard — EXISTS sobre lineas
+        # con perfil de ese mundo. Restringido a tipo willard: un material
+        # "ambos canales" (Q-04, world+compra_regular) NO debe traer compras.
+        if willard_world:
+            world_match = (
+                select(InboundOrderLine.id)
+                .join(
+                    MaterialKgProfile,
+                    InboundOrderLine.material_id == MaterialKgProfile.material_id,
+                )
+                .where(
+                    InboundOrderLine.inbound_order_id == InboundOrder.id,
+                    MaterialKgProfile.organization_id == organization_id,
+                    MaterialKgProfile.willard_world == willard_world,
+                )
+                .exists()
+            )
+            q = q.where(
+                InboundOrder.inbound_type.in_(WILLARD_INBOUND_TYPES), world_match
+            )
+        if warehouse_id:
+            q = q.where(InboundOrder.warehouse_id == warehouse_id)
         if third_party_id:
             q = q.where(InboundOrder.third_party_id == third_party_id)
         if date_from:
@@ -739,6 +832,12 @@ class InboundOrderService:
             q = q.where(InboundOrder.date <= date_to)
 
         total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
+        # Ciclo C (C-3): oldest = FIFO para la bandeja de Johana
+        order_clause = (
+            InboundOrder.created_at.asc()
+            if sort == "oldest"
+            else InboundOrder.order_number.desc()
+        )
         orders = db.execute(
             q.options(
                 joinedload(InboundOrder.lines).joinedload(InboundOrderLine.material),
@@ -748,11 +847,85 @@ class InboundOrderService:
                 joinedload(InboundOrder.vehicle),
                 joinedload(InboundOrder.purchase),
             )
-            .order_by(InboundOrder.order_number.desc())
+            .order_by(order_clause)
             .offset(skip)
             .limit(limit)
         ).unique().scalars().all()
         return list(orders), total
+
+    @staticmethod
+    def display_status_of(order: InboundOrder) -> str:
+        """Ciclo C (C-1): estado UNICO visible — el usuario nunca ve el estado
+        tecnico de la orden vs el de la compra. Espejo Python del filtro SQL
+        de get_multi (test de paridad los amarra)."""
+        if order.status == "annulled":
+            return "annulled"
+        if order.inbound_type in WILLARD_INBOUND_TYPES:
+            return "registered" if order.status == "draft" else "liquidated"
+        p = order.purchase
+        if p is None:
+            return "registered"  # defensivo: derivada ausente
+        if p.status == "cancelled":
+            return "annulled"
+        if p.status == "liquidated":
+            return "liquidated"
+        return "registered"
+
+    def willard_confirm_audit(
+        self, db: Session, organization_id: UUID, order_ids: list[UUID]
+    ) -> dict[UUID, tuple[UUID, datetime]]:
+        """Ciclo C (C-5): quien liquido una willard = created_by del primer
+        KgLedgerMovement confirmado (decision de auditoria B.2)."""
+        if not order_ids:
+            return {}
+        rows = db.execute(
+            select(
+                KgLedgerMovement.source_id,
+                KgLedgerMovement.created_by,
+                KgLedgerMovement.created_at,
+            )
+            .where(
+                KgLedgerMovement.organization_id == organization_id,
+                KgLedgerMovement.source_id.in_(order_ids),
+                KgLedgerMovement.status == "confirmed",
+            )
+            .order_by(KgLedgerMovement.created_at.asc())
+        ).all()
+        audit: dict[UUID, tuple[UUID, datetime]] = {}
+        for source_id, created_by, created_at in rows:
+            audit.setdefault(source_id, (created_by, created_at))
+        return audit
+
+    def willard_worlds_by_order(
+        self, db: Session, organization_id: UUID, orders: list[InboundOrder]
+    ) -> dict[UUID, str]:
+        """Ciclo C (C-4): mundo de la orden willard (homogeneo por construccion
+        B2) — perfil del material de la primera linea. 1 query por pagina."""
+        material_ids = {
+            line.material_id
+            for o in orders
+            if o.inbound_type in WILLARD_INBOUND_TYPES
+            for line in o.lines
+        }
+        if not material_ids:
+            return {}
+        rows = db.execute(
+            select(MaterialKgProfile.material_id, MaterialKgProfile.willard_world).where(
+                MaterialKgProfile.organization_id == organization_id,
+                MaterialKgProfile.material_id.in_(material_ids),
+            )
+        ).all()
+        world_by_material = {mid: w for mid, w in rows if w and w != "none"}
+        result: dict[UUID, str] = {}
+        for o in orders:
+            if o.inbound_type not in WILLARD_INBOUND_TYPES:
+                continue
+            for line in o.lines:
+                world = world_by_material.get(line.material_id)
+                if world:
+                    result[o.id] = world
+                    break
+        return result
 
     def kg_deltas_by_movement(
         self, db: Session, organization_id: UUID, order_ids: list[UUID]

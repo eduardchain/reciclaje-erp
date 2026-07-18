@@ -12,6 +12,15 @@ import type {
 export interface InboundOrderFilters {
   inbound_type?: string;
   status?: "draft" | "confirmed" | "annulled";
+  /** Ciclo C: estado derivado unico (orden+compra) */
+  display_status?: "registered" | "liquidated" | "annulled";
+  /** Ciclo C: busca por #, placa, conductor, tercero o material */
+  search?: string;
+  /** Ciclo C: oldest = FIFO para la bandeja */
+  sort?: "newest" | "oldest";
+  /** Ciclo C: filtra entradas willard por mundo */
+  willard_world?: "postconsumo" | "drosses";
+  warehouse_id?: string;
   third_party_id?: string;
   date_from?: string;
   date_to?: string;

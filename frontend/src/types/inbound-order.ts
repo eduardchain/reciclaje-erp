@@ -66,6 +66,17 @@ export interface InboundOrderLineResponse {
   kg_lead: number | null;
 }
 
+/** Ciclo C: estado UNICO visible — deriva orden+compra (el usuario nunca ve
+ *  el estado tecnico). registered=Registrada, liquidated=Liquidada,
+ *  annulled=Anulada (incluye compras canceladas). */
+export type InboundDisplayStatus = "registered" | "liquidated" | "annulled";
+
+export const DISPLAY_STATUS_LABELS: Record<InboundDisplayStatus, string> = {
+  registered: "Registrada",
+  liquidated: "Liquidada",
+  annulled: "Anulada",
+};
+
 export interface InboundOrderResponse {
   id: string;
   order_number: number;
@@ -82,14 +93,22 @@ export interface InboundOrderResponse {
   willard_distribution_center: string | null;
   notes: string | null;
   status: InboundOrderStatus;
+  display_status: InboundDisplayStatus;
   purchase_id: string | null;
   purchase_number: number | null;
   purchase_status: string | null;
+  /** Mundo de la orden willard (drosses|postconsumo); null tipo compra */
+  willard_world: string | null;
   /** Suma de deltas kg emitidos (solo tipos Willard) */
   total_kg_lead: number | null;
   annulled_reason: string | null;
   annulled_at: string | null;
   created_at: string;
+  /** Ciclo C (C-5): quien hizo que */
+  created_by_name: string | null;
+  liquidated_by_name: string | null;
+  liquidated_at: string | null;
+  annulled_by_name: string | null;
   lines: InboundOrderLineResponse[];
   warnings: string[];
 }

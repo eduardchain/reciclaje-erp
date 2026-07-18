@@ -126,7 +126,7 @@ export default function PurchaseDetailPage() {
               to={`/inbound/${purchase.inbound_order_id}`}
               className="font-medium underline hover:text-indigo-900"
             >
-              Recepción #{purchase.inbound_order_number}
+              Entrada #{purchase.inbound_order_number}
             </Link>{" "}
             — esta compra fue derivada desde el patio.
           </span>

@@ -119,15 +119,30 @@ class InboundOrderResponse(BaseModel):
     willard_distribution_center: Optional[str] = None
     notes: Optional[str] = None
     status: str
+    display_status: str = Field(
+        "registered",
+        description=(
+            "Ciclo C: estado UNICO visible (registered|liquidated|annulled) — "
+            "deriva orden+compra, el usuario nunca ve el estado tecnico"
+        ),
+    )
     purchase_id: Optional[UUID] = None
     purchase_number: Optional[int] = None
     purchase_status: Optional[str] = None
+    willard_world: Optional[str] = Field(
+        None, description="Mundo de la orden willard (drosses|postconsumo); null tipo compra"
+    )
     total_kg_lead: Optional[Decimal] = Field(
         None, description="Suma de deltas kg emitidos (tipos Willard)"
     )
     annulled_reason: Optional[str] = None
     annulled_at: Optional[datetime] = None
     created_at: datetime
+    # Ciclo C (C-5): quien hizo que — capa de confianza del flujo a 2 personas
+    created_by_name: Optional[str] = None
+    liquidated_by_name: Optional[str] = None
+    liquidated_at: Optional[datetime] = None
+    annulled_by_name: Optional[str] = None
     lines: list[InboundOrderLineResponse] = []
     warnings: list[str] = []
 

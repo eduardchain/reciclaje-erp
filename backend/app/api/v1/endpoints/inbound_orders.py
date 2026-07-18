@@ -11,10 +11,12 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_org_flag, require_permission
 from app.models.inbound_order import InboundOrder
+from app.models.user import User
 from app.schemas.inbound_order import (
     InboundOrderAnnulRequest,
     InboundOrderCreate,
@@ -28,12 +30,40 @@ from app.services.inbound_order import inbound_order_service
 router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])
 
 
+def _page_context(db: Session, org_id: UUID, orders: list[InboundOrder]) -> dict:
+    """Ciclo C: mapas por pagina para el enrich — mundo willard (C-4),
+    auditoria de liquidacion willard (C-5) y nombres de usuarios (C-5).
+    3 queries por pagina, cero N+1."""
+    order_ids = [o.id for o in orders]
+    audit = inbound_order_service.willard_confirm_audit(db, org_id, order_ids)
+    worlds = inbound_order_service.willard_worlds_by_order(db, org_id, orders)
+    user_ids = set()
+    for o in orders:
+        user_ids.add(o.created_by)
+        if o.annulled_by:
+            user_ids.add(o.annulled_by)
+        if o.purchase is not None and o.purchase.liquidated_by:
+            user_ids.add(o.purchase.liquidated_by)
+    for liq_by, _liq_at in audit.values():
+        if liq_by:
+            user_ids.add(liq_by)
+    user_ids.discard(None)
+    names: dict = {}
+    if user_ids:
+        rows = db.execute(
+            select(User.id, User.full_name, User.email).where(User.id.in_(user_ids))
+        ).all()
+        names = {uid: (full_name or email) for uid, full_name, email in rows}
+    return {"audit": audit, "worlds": worlds, "names": names}
+
+
 def _enrich(
     db: Session,
     order: InboundOrder,
     kg_by_movement: dict,
     receipt_movements: list,
     warnings: Optional[list[str]] = None,
+    ctx: Optional[dict] = None,
 ) -> InboundOrderResponse:
     """Arma la response con lineas enriquecidas (#54) y kg emitidos por linea.
 
@@ -70,6 +100,21 @@ def _enrich(
             )
         )
 
+    # Ciclo C (C-5): quien liquido — compra: liquidated_by de la Purchase;
+    # willard: created_by del primer kg movement confirmado (auditoria B.2)
+    ctx = ctx or {}
+    names = ctx.get("names", {})
+    liquidated_by_name = None
+    liquidated_at = None
+    if order.purchase is not None:
+        liquidated_by_name = names.get(order.purchase.liquidated_by)
+        liquidated_at = order.purchase.liquidated_at
+    else:
+        w_audit = ctx.get("audit", {}).get(order.id)
+        if w_audit:
+            liquidated_by_name = names.get(w_audit[0])
+            liquidated_at = w_audit[1]
+
     return InboundOrderResponse(
         id=order.id,
         order_number=order.order_number,
@@ -86,13 +131,19 @@ def _enrich(
         willard_distribution_center=order.willard_distribution_center,
         notes=order.notes,
         status=order.status,
+        display_status=inbound_order_service.display_status_of(order),
         purchase_id=order.purchase_id,
         purchase_number=order.purchase.purchase_number if order.purchase else None,
         purchase_status=order.purchase.status if order.purchase else None,
+        willard_world=ctx.get("worlds", {}).get(order.id),
         total_kg_lead=total_kg,
         annulled_reason=order.annulled_reason,
         annulled_at=order.annulled_at,
         created_at=order.created_at,
+        created_by_name=names.get(order.created_by),
+        liquidated_by_name=liquidated_by_name,
+        liquidated_at=liquidated_at,
+        annulled_by_name=names.get(order.annulled_by),
         lines=lines,
         warnings=warnings or [],
     )
@@ -101,7 +152,8 @@ def _enrich(
 def _enrich_one(db: Session, order: InboundOrder, org_id: UUID, warnings=None) -> InboundOrderResponse:
     kg_map = inbound_order_service.kg_deltas_by_movement(db, org_id, [order.id])
     movs = inbound_order_service.receipt_movements(db, org_id, order.id)
-    return _enrich(db, order, kg_map, movs, warnings)
+    ctx = _page_context(db, org_id, [order])
+    return _enrich(db, order, kg_map, movs, warnings, ctx)
 
 
 @router.post("", response_model=InboundOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -125,6 +177,15 @@ def create_inbound_order(
 def list_inbound_orders(
     inbound_type: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status", pattern="^(draft|confirmed|annulled)$"),
+    display_status: Optional[str] = Query(
+        None,
+        pattern="^(registered|liquidated|annulled)$",
+        description="Ciclo C: estado derivado unico (orden+compra)",
+    ),
+    search: Optional[str] = Query(None, max_length=100),
+    sort: str = Query("newest", pattern="^(newest|oldest)$"),
+    willard_world: Optional[str] = Query(None, pattern="^(postconsumo|drosses)$"),
+    warehouse_id: Optional[UUID] = Query(None),
     third_party_id: Optional[UUID] = Query(None),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
@@ -139,6 +200,11 @@ def list_inbound_orders(
         organization_id=org_id,
         inbound_type=inbound_type,
         status_filter=status_filter,
+        display_status=display_status,
+        search=search,
+        sort=sort,
+        willard_world=willard_world,
+        warehouse_id=warehouse_id,
         third_party_id=third_party_id,
         date_from=datetime.combine(date_from, dt_time.min, tzinfo=timezone.utc) if date_from else None,
         date_to=datetime.combine(date_to, dt_time.max, tzinfo=timezone.utc) if date_to else None,
@@ -146,10 +212,11 @@ def list_inbound_orders(
         limit=limit,
     )
     kg_map = inbound_order_service.kg_deltas_by_movement(db, org_id, [o.id for o in orders])
+    ctx = _page_context(db, org_id, list(orders))
     items = []
     for o in orders:
         movs = inbound_order_service.receipt_movements(db, org_id, o.id)
-        items.append(_enrich(db, o, kg_map, movs))
+        items.append(_enrich(db, o, kg_map, movs, None, ctx))
     return InboundOrderListResponse(items=items, total=total)
 
 

@@ -12,6 +12,21 @@ export function useInboundOrders(filters: InboundOrderFilters = {}) {
   });
 }
 
+/**
+ * Ciclo C: contador de la bandeja (entradas por liquidar, ambos tipos).
+ * Vive en la familia ["inbound-orders"] — se refresca con la misma
+ * invalidacion del modulo Y con la de liquidar/cancelar compras (D17).
+ * W-C3: los callers solo lo montan bajo flag kg_ledger_enabled.
+ */
+export function usePendingEntriesCount(): number {
+  const { data } = useQuery({
+    queryKey: ["inbound-orders", "list", { display_status: "registered", limit: 1 }],
+    queryFn: () => inboundOrderService.getAll({ display_status: "registered", limit: 1 }),
+    staleTime: 30_000,
+  });
+  return data?.total ?? 0;
+}
+
 export function useInboundOrder(id: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["inbound-orders", "detail", id],
@@ -29,12 +44,12 @@ export function useCreateInboundOrder() {
       // B.2: willard nace draft — dejar claro que falta la confirmacion
       toast.success(
         order.status === "draft"
-          ? `Recepción #${order.order_number} registrada — pendiente de confirmar`
-          : `Recepción #${order.order_number} creada`
+          ? `Entrada #${order.order_number} registrada — pendiente de liquidar`
+          : `Entrada #${order.order_number} creada`
       );
       (order.warnings ?? []).forEach((w) => toast.warning(w, { duration: 8000 }));
     },
-    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al crear la recepción")),
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al crear la entrada")),
   });
 }
 
@@ -45,11 +60,11 @@ export function useUpdateInboundOrder() {
       inboundOrderService.update(id, data),
     onSuccess: (order) => {
       invalidateAfterInboundOrder(qc);
-      toast.success("Recepción actualizada");
+      toast.success("Entrada actualizada");
       (order.warnings ?? []).forEach((w) => toast.warning(w, { duration: 8000 }));
     },
     onError: (e: unknown) =>
-      toast.error(getApiErrorMessage(e, "Error al actualizar la recepción")),
+      toast.error(getApiErrorMessage(e, "Error al actualizar la entrada")),
   });
 }
 
@@ -60,10 +75,10 @@ export function useConfirmInboundOrder() {
     onSuccess: (order) => {
       // B.2: los efectos (inventario + kg) nacen aca — misma invalidacion que el create
       invalidateAfterInboundOrder(qc);
-      toast.success(`Recepción #${order.order_number} confirmada`);
+      toast.success(`Entrada #${order.order_number} liquidada`);
     },
     onError: (e: unknown) =>
-      toast.error(getApiErrorMessage(e, "Error al confirmar la recepción")),
+      toast.error(getApiErrorMessage(e, "Error al liquidar la entrada")),
   });
 }
 
@@ -74,12 +89,12 @@ export function useAnnulInboundOrder() {
       inboundOrderService.annul(id, reason),
     onSuccess: (order) => {
       invalidateAfterInboundOrder(qc);
-      toast.success("Recepción anulada");
+      toast.success("Entrada anulada");
       // Warnings no bloqueantes (D8): ej. stock queda negativo tras la reversa
       (order.warnings ?? []).forEach((w) => toast.warning(w, { duration: 8000 }));
     },
     onError: (e: unknown) =>
       // Ej: 400 "Cancele primero la compra #N" cuando la derivada esta liquidada
-      toast.error(getApiErrorMessage(e, "Error al anular la recepción")),
+      toast.error(getApiErrorMessage(e, "Error al anular la entrada")),
   });
 }

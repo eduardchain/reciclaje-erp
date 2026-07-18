@@ -50,7 +50,21 @@ import {
 } from "@/components/ui/tooltip";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { usePendingEntriesCount } from "@/hooks/useInboundOrders";
 import { useAuthStore } from "@/stores/authStore";
+
+
+// Ciclo C (W-C3): solo se monta dentro del item "Entradas", que existe
+// unicamente con kg_ledger_enabled — en orgs sin flag este query jamas corre
+function PendingEntriesBadge() {
+  const count = usePendingEntriesCount();
+  if (!count) return null;
+  return (
+    <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500/90 text-white text-[11px] font-semibold flex items-center justify-center tabular-nums">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
 
 interface NavChild {
   name: string;
@@ -80,6 +94,8 @@ interface NavItem {
   // quo para orgs sin flag). Uso: "Materiales" general se oculta en SAC, cuyo
   // reemplazo es Config → Materiales (kg); la ruta /materials queda viva.
   hideWhenOrgFlag?: string;
+  // Ciclo C: contador ambar de entradas por liquidar (solo item Entradas SAC)
+  pendingBadge?: boolean;
 }
 
 const systemNavItems: NavItem[] = [
@@ -107,11 +123,27 @@ const orgNavItems: NavItem[] = [
     icon: <ShoppingCart className="w-5 h-5" />,
     section: "OPERACIONES",
     permission: "purchases.view",
+    // Ciclo C: en SAC el canal es "Entradas" — las rutas /purchases siguen
+    // vivas (cara financiera), solo sale del menu
+    hideWhenOrgFlag: "kg_ledger_enabled",
+  },
+  {
+    // Ciclo C: modulo unico de entradas (ex "Recepción") — compras + willard
+    name: "Entradas",
+    path: ROUTES.INBOUND,
+    icon: <PackageOpen className="w-5 h-5" />,
+    section: "OPERACIONES",
+    permission: "purchases.view",
+    orgFlag: "kg_ledger_enabled",
+    pendingBadge: true,
   },
   {
     name: "Ventas",
     path: ROUTES.SALES,
     icon: <DollarSign className="w-5 h-5" />,
+    // Fallback de seccion cuando Compras esta oculta (SAC) — el dedupe de
+    // secciones consecutivas evita el doble header en orgs normales
+    section: "OPERACIONES",
     permission: "sales.view",
   },
   {
@@ -119,13 +151,6 @@ const orgNavItems: NavItem[] = [
     path: ROUTES.DOUBLE_ENTRIES,
     icon: <ArrowLeftRight className="w-5 h-5" />,
     permission: "double_entries.view",
-  },
-  {
-    name: "Recepción",
-    path: ROUTES.INBOUND,
-    icon: <PackageOpen className="w-5 h-5" />,
-    permission: "purchases.view",
-    orgFlag: "kg_ledger_enabled",
   },
   {
     name: "Plomo (kg)",
@@ -287,7 +312,19 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
       })
       .filter(Boolean) as NavItem[];
 
-    return filtered;
+    // Ciclo C: dedupe de secciones consecutivas — varios items declaran la
+    // misma seccion como fallback (ej. Compras oculta en SAC → Entradas o
+    // Ventas cargan "OPERACIONES"); solo el primero visible la renderiza
+    let lastSection: string | undefined;
+    return filtered.map((item) => {
+      if (!item.section) return item;
+      if (item.section === lastSection) {
+        const { section: _dropped, ...rest } = item;
+        return rest as NavItem;
+      }
+      lastSection = item.section;
+      return item;
+    });
   }, [isLoading, hasPermission, hasAnyPermission, isSystemMode, isSuperuser, flagEnabled]);
 
   const toggleExpand = (name: string) => {
@@ -445,8 +482,15 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
                     >
                       <span className={cn(active && "text-emerald-400")}>{item.icon}</span>
                       <span className="text-sm">{item.name}</span>
-                      {active && (
-                        <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      {item.pendingBadge ? (
+                        <span className="ml-auto flex items-center gap-1.5">
+                          <PendingEntriesBadge />
+                          {active && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                        </span>
+                      ) : (
+                        active && (
+                          <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        )
                       )}
                     </Link>
                   )}

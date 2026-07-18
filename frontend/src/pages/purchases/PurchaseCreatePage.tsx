@@ -89,7 +89,7 @@ export default function PurchaseCreatePage() {
   // el guard B3 del backend defiende el API)
   useEffect(() => {
     if (kgHeaderWarehouse) {
-      toast.info("En esta organización las compras se crean desde Recepción");
+      toast.info("En esta organización las compras se crean desde Entradas");
       navigate(ROUTES.INBOUND_NEW, { replace: true });
     }
   }, [kgHeaderWarehouse, navigate]);

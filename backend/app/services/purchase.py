@@ -683,10 +683,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 detail="No se puede cancelar una compra de doble partida. Cancele la doble partida."
             )
 
-        # SAC E2 D7b: compra derivada de orden de recepcion — se anula desde la
-        # orden (espejo patron #67); evita orden confirmed apuntando a compra
-        # cancelada. El edit SI se permite (flujo Erwin §7.2).
-        if not from_inbound:
+        # SAC E2 D7b: compra derivada REGISTRADA se anula desde la orden
+        # (par atomico, espejo patron #67). Ciclo C: una derivada LIQUIDADA si
+        # se cancela directo — con reversa y eleccion de pago enlazado (#63);
+        # antes esto era un deadlock (annul de orden tambien daba 400) y el
+        # estado "orden confirmada + compra cancelada" ya no confunde: el
+        # display_status derivado la muestra Anulada.
+        if not from_inbound and purchase.status == "registered":
             from app.models.inbound_order import InboundOrder
             linked_number = db.execute(
                 select(InboundOrder.order_number).where(

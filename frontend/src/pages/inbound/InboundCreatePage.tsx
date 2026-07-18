@@ -373,7 +373,7 @@ export default function InboundCreatePage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Nueva Recepción" description="Captura de entrada de material en patio">
+      <PageHeader title="Nueva Entrada" description="Captura de entrada de material en patio">
         <Button variant="outline" onClick={() => navigate(ROUTES.INBOUND)}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Volver
@@ -388,7 +388,7 @@ export default function InboundCreatePage() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo de Recepción *</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo de Entrada *</Label>
               <Select value={inboundType} onValueChange={(v) => selectInboundType(v as InboundType)}>
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -630,13 +630,13 @@ export default function InboundCreatePage() {
         <Info className="h-4 w-4 mt-0.5 shrink-0" />
         {isWillard ? (
           <span>
-            La recepción Willard entra el material al inventario (a costo promedio, sin efecto financiero)
+            La entrada Willard mete el material al inventario (a costo promedio, sin efecto financiero)
             y mueve la cuenta kg de cada línea según su clasificación (postconsumo → baterías por sede;
             drosses → drosses) y la fórmula vigente.
           </span>
         ) : (
           <span>
-            Esta recepción crea una <strong>Compra registrada</strong> (inventario en tránsito, sin tocar
+            Esta entrada crea una <strong>Compra registrada</strong> (inventario en tránsito, sin tocar
             cuentas kg). Los precios definitivos se fijan al liquidar la compra.
           </span>
         )}
@@ -752,7 +752,7 @@ export default function InboundCreatePage() {
             disabled={!canSubmit || createOrder.isPending}
             className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"
           >
-            {createOrder.isPending ? "Creando..." : "Crear Recepción"}
+            {createOrder.isPending ? "Creando..." : "Registrar Entrada"}
           </Button>
         </div>
       </div>
