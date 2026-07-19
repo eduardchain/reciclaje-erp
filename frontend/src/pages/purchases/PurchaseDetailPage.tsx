@@ -305,6 +305,36 @@ export default function PurchaseDetailPage() {
         </Card>
       )}
 
+      {/* Comisión de recolección (SAC Ciclo D — gasto causado, no prorratea al costo) */}
+      {purchase.collector_commission_total != null && canViewPrices && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisión de Recolección</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="text-sm">
+                <span className="text-slate-600">Recolector: </span>
+                {purchase.collector_id ? (
+                  <ThirdPartyLink id={purchase.collector_id}>
+                    <span className="font-medium">{purchase.collector_name}</span>
+                  </ThirdPartyLink>
+                ) : (
+                  <span className="font-medium">{purchase.collector_name ?? "—"}</span>
+                )}
+              </div>
+              <div className="text-sm font-semibold tabular-nums">
+                {formatCurrency(purchase.collector_commission_total)}
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              Causada como <strong>gasto</strong> (categoría "Comisiones de recolección") al liquidar —
+              no hace parte del costo del material ni del total a pagar al proveedor.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Retenciones aplicadas (SAC D9 — vacío para orgs sin flag) */}
       {purchase.retentions?.length > 0 && canViewPrices && (
         <Card className="shadow-sm">

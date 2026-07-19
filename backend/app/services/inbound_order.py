@@ -86,6 +86,11 @@ class InboundOrderService:
 
         is_willard = obj_in.inbound_type in WILLARD_INBOUND_TYPES
 
+        # Ciclo D: recolector en AMBOS tipos (en willard es informativo — la
+        # comision solo nace al liquidar compras regulares, correccion Daniel)
+        if obj_in.collector_id is not None:
+            self._validate_collector(db, obj_in.collector_id, organization_id)
+
         # D12: centro de distribucion Willard — pertenencia contra settings
         if obj_in.willard_distribution_center is not None:
             if not is_willard:
@@ -108,6 +113,7 @@ class InboundOrderService:
             date=obj_in.date,
             driver_id=obj_in.driver_id,
             vehicle_id=obj_in.vehicle_id,
+            collector_id=obj_in.collector_id,
             willard_distribution_center=obj_in.willard_distribution_center,
             # goes_directly_to_jm retirado de la superficie (Ciclo B B4, Q-03) —
             # la columna queda inerte con su server_default
@@ -633,6 +639,23 @@ class InboundOrderService:
         if obj_in.vehicle_id is not None:
             self._validate_org(db, Vehicle, obj_in.vehicle_id, organization_id, "Vehiculo")
 
+        # Ciclo D: collector_id editable (incl. None explicito para quitarlo)
+        # en ambos tipos. En willard es informativo (sin efectos) — editable
+        # siempre. En tipo compra se congela cuando la derivada ya no esta
+        # registered: al liquidar, la comision ya se definio (el MM existe);
+        # cambiarlo aqui seria cosmetico/engañoso. exclude_unset distingue
+        # ausente de null.
+        if "collector_id" in fields_set:
+            if order.purchase is not None and order.purchase.status != "registered":
+                raise _err(
+                    f"La compra derivada #{order.purchase.purchase_number} ya esta "
+                    f"{order.purchase.status} — la comision de recoleccion ya se definio; "
+                    "el recolector no se puede cambiar"
+                )
+            if obj_in.collector_id is not None:
+                self._validate_collector(db, obj_in.collector_id, organization_id)
+            order.collector_id = obj_in.collector_id
+
         warnings: list[str] = []
         # Revert-and-reapply Willard cuando cambian lineas o fecha
         # (la fecha mueve los eventos kg e inventario) — SOLO confirmadas;
@@ -843,6 +866,7 @@ class InboundOrderService:
                 joinedload(InboundOrder.lines).joinedload(InboundOrderLine.material),
                 joinedload(InboundOrder.warehouse),
                 joinedload(InboundOrder.third_party),
+                joinedload(InboundOrder.collector),
                 joinedload(InboundOrder.driver),
                 joinedload(InboundOrder.vehicle),
                 joinedload(InboundOrder.purchase),
@@ -970,6 +994,7 @@ class InboundOrderService:
                 joinedload(InboundOrder.lines).joinedload(InboundOrderLine.material),
                 joinedload(InboundOrder.warehouse),
                 joinedload(InboundOrder.third_party),
+                joinedload(InboundOrder.collector),
                 joinedload(InboundOrder.driver),
                 joinedload(InboundOrder.vehicle),
                 joinedload(InboundOrder.purchase),
@@ -1101,6 +1126,24 @@ class InboundOrderService:
             raise _err("Tercero no encontrado", status.HTTP_404_NOT_FOUND)
         if not tp.is_active:
             raise _err(f"El tercero '{tp.name}' esta inactivo", status.HTTP_400_BAD_REQUEST)
+        return tp
+
+    def _validate_collector(
+        self, db: Session, collector_id: UUID, organization_id: UUID
+    ) -> ThirdParty:
+        """Ciclo D (correccion Daniel 2026-07-18): el recolector se REGISTRA en
+        AMBOS tipos de entrada — Green Loop tambien recolecta willard (Q-02),
+        solo que ahi es informativo: la comision existe UNICAMENTE al liquidar
+        compras regulares (por construccion — willard no tiene liquidacion de
+        compra). Debe ser service_provider (#32 — si cobra comision, su saldo
+        clasifica en pasivos)."""
+        tp = self._validate_third_party(db, collector_id, organization_id)
+        from app.services.third_party import third_party as tp_service
+        if not tp_service.has_behavior_type(db, tp.id, ["service_provider"]):
+            raise _err(
+                "El recolector debe tener una categoria con comportamiento "
+                "'Proveedor de Servicios' (recibe comisiones)"
+            )
         return tp
 
     @staticmethod

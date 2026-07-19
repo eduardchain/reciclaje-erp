@@ -191,6 +191,9 @@ export default function InboundDetailPage() {
           <CardContent className="space-y-2 text-sm">
             <InfoRow label="Conductor" value={order.driver_name ?? "—"} long />
             <InfoRow label="Vehículo" value={order.vehicle_plate ? order.vehicle_plate.toUpperCase() : "—"} />
+            {order.collector_name && (
+              <InfoRow label="Recolector" value={order.collector_name} long />
+            )}
             {isWillard && (
               <InfoRow
                 label="Centro Willard"
@@ -247,6 +250,17 @@ export default function InboundDetailPage() {
                 />
                 {order.purchase_status && (
                   <InfoRow label="Estado Compra" value={<StatusBadge status={order.purchase_status} />} />
+                )}
+                {order.collector_commission_total != null && canViewPrices && (
+                  <InfoRow
+                    label="Comisión Recolección"
+                    value={
+                      <span className="font-semibold tabular-nums">
+                        {formatCurrency(order.collector_commission_total)}
+                        <span className="ml-1.5 font-normal text-xs text-slate-500">(gasto)</span>
+                      </span>
+                    }
+                  />
                 )}
               </>
             )}

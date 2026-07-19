@@ -31,6 +31,8 @@ export interface InboundOrderCreate {
   date: string;
   driver_id?: string | null;
   vehicle_id?: string | null;
+  /** Ciclo D: recolector por comisión (service_provider) — solo tipo compra */
+  collector_id?: string | null;
   willard_distribution_center?: string | null;
   notes?: string | null;
   lines: InboundOrderLineCreate[];
@@ -45,6 +47,8 @@ export interface InboundOrderUpdate {
   date?: string;
   driver_id?: string;
   vehicle_id?: string;
+  /** Ciclo D: editable (incl. null para quitar) solo mientras la compra derivada esté registered */
+  collector_id?: string | null;
   willard_distribution_center?: string;
   notes?: string | null;
   lines?: InboundOrderLineCreate[];
@@ -90,6 +94,11 @@ export interface InboundOrderResponse {
   driver_name: string | null;
   vehicle_id: string | null;
   vehicle_plate: string | null;
+  /** Ciclo D: recolector por comisión (solo tipo compra) */
+  collector_id: string | null;
+  collector_name: string | null;
+  /** Solo en GET de detalle: comisión de recolección causada (gasto) */
+  collector_commission_total?: number | null;
   willard_distribution_center: string | null;
   notes: string | null;
   status: InboundOrderStatus;

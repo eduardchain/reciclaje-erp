@@ -81,6 +81,17 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
         GUID(), ForeignKey("vehicles.id", ondelete="SET NULL"), nullable=True
     )
 
+    # SAC Ciclo D: recolector (service_provider) — se registra en AMBOS tipos
+    # (Green Loop tambien recolecta willard, Q-02). En willard es informativo;
+    # la comision existe SOLO al liquidar compras regulares y se causa como
+    # GASTO (expense_accrual) — jamas entra al prorrateo de costo #30.
+    collector_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("third_parties.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Recolector (service_provider) — informativo en willard; en compras la comision se causa como gasto al liquidar",
+    )
+
     willard_distribution_center: Mapped[Optional[str]] = mapped_column(
         String(24),
         nullable=True,
@@ -146,6 +157,7 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
     # --- Relationships ---
     warehouse: Mapped["Warehouse"] = relationship("Warehouse", foreign_keys=[warehouse_id])
     third_party: Mapped["ThirdParty"] = relationship("ThirdParty", foreign_keys=[third_party_id])
+    collector: Mapped[Optional["ThirdParty"]] = relationship("ThirdParty", foreign_keys=[collector_id])
     driver: Mapped[Optional["Driver"]] = relationship("Driver", foreign_keys=[driver_id])
     vehicle: Mapped[Optional["Vehicle"]] = relationship("Vehicle", foreign_keys=[vehicle_id])
     purchase: Mapped[Optional["Purchase"]] = relationship("Purchase", foreign_keys=[purchase_id])

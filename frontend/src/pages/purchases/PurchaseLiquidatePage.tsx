@@ -16,6 +16,7 @@ import { cn } from "@/utils";
 import { usePurchase, useLiquidatePurchase } from "@/hooks/usePurchases";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { usePayableProviders, useMoneyAccounts, useRetentionRows, useCreateRetentionConfig } from "@/hooks/useMasterData";
+import { useCurrentTariffs } from "@/hooks/useSacConfig";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { MoneyInput } from "@/components/shared/MoneyInput";
@@ -84,6 +85,8 @@ export default function PurchaseLiquidatePage() {
   // Catálogo de retenciones (v2 CC-006; F2: enabled=flag → cero requests para
   // orgs sin SAC). El selector cerrado + precálculo matan typo y digitación.
   const { data: retentionRows } = useRetentionRows(retentionsEnabled);
+  // Ciclo D: tarifa vigente comision_green_loop para pre-sugerir (F2: gated)
+  const { data: tariffsData } = useCurrentTariffs(retentionsEnabled);
   const retentionConfigs = useMemo(
     () => (retentionRows ?? []).filter((r) => r.config_id && r.is_active),
     [retentionRows],
@@ -124,6 +127,12 @@ export default function PurchaseLiquidatePage() {
   const [lines, setLines] = useState<LiquidationLine[]>([]);
   const [commissions, setCommissions] = useState<CommissionFormData[]>([]);
   const [retentions, setRetentions] = useState<RetentionFormData[]>([]);
+  // Ciclo D: comision de recoleccion — GASTO causado, no prorratea al costo (#30)
+  const [collectorRow, setCollectorRow] = useState(false);
+  const [collectorTpId, setCollectorTpId] = useState("");
+  const [collectorAmount, setCollectorAmount] = useState(0);
+  const [collectorTouched, setCollectorTouched] = useState(false);
+  const [collectorDismissed, setCollectorDismissed] = useState(false);
   const [immediatePayment, setImmediatePayment] = useState(false);
   const [paymentAccountId, setPaymentAccountId] = useState("");
   const [liquidationDate, setLiquidationDate] = useState("");
@@ -173,6 +182,16 @@ export default function PurchaseLiquidatePage() {
       }
     }
   }, [purchase, getSuggestedPrice, lines.length]);
+
+  // Ciclo D: pre-carga del recolector de la entrada — efecto propio que
+  // reacciona cuando collector_id LLEGA (robusto ante cache con shape viejo);
+  // "Quitar" marca dismissed para que el refetch no re-abra la fila
+  useEffect(() => {
+    if (purchase?.collector_id && !collectorRow && !collectorDismissed && !collectorTpId) {
+      setCollectorRow(true);
+      setCollectorTpId(purchase.collector_id);
+    }
+  }, [purchase?.collector_id, collectorRow, collectorDismissed, collectorTpId]);
 
   // Redirigir si la compra no es liquidable (honra returnTo — W-C1)
   useEffect(() => {
@@ -238,10 +257,21 @@ export default function PurchaseLiquidatePage() {
   const retentionsValid =
     retentions.every((r) => !!r.config_id && effRetentionAmount(r) > 0) &&
     (totalRet === 0 || totalRet < total);
+  // Ciclo D: sugerido = tarifa vigente comision_green_loop x kg de la compra
+  // (cantidad ORIGINAL, asimetria #70). El monto editado es la verdad (F1 #79).
+  const greenLoopTariff = (tariffsData?.items ?? []).find(
+    (t) => t.tariff_code === "comision_green_loop",
+  );
+  const suggestedCollector = greenLoopTariff
+    ? Math.round(totalQuantity * Number(greenLoopTariff.unit_price_cop) * 100) / 100
+    : 0;
+  const effCollectorAmount = collectorTouched ? collectorAmount : suggestedCollector;
+  const collectorValid = !collectorRow || (!!collectorTpId && effCollectorAmount > 0);
   const canSubmit = allPricesValid && lines.length > 0
     && (!immediatePayment || (paymentAccountId && (!selectedAccount || selectedAccount.current_balance >= netTotal)))
     && commissions.every((c) => c.third_party_id && c.concept && c.commission_value > 0)
     && retentionsValid
+    && collectorValid
     && !!liquidationDate;
 
   const handleSubmit = () => {
@@ -272,6 +302,16 @@ export default function PurchaseLiquidatePage() {
                     ...(cfg.rate_pct != null ? { rate: cfg.rate_pct, base: total } : {}),
                   };
                 }),
+              }
+            : {}),
+          // Ciclo D: AUSENTE sin fila — mismo data-gate D9 (orgs sin flag
+          // jamas lo envian: la seccion no se renderiza)
+          ...(retentionsEnabled && collectorRow && collectorTpId && effCollectorAmount > 0
+            ? {
+                collector_commission: {
+                  third_party_id: collectorTpId,
+                  amount: effCollectorAmount,
+                },
               }
             : {}),
           ...(immediatePayment && paymentAccountId
@@ -486,6 +526,93 @@ export default function PurchaseLiquidatePage() {
           </CardContent>
         )}
       </Card>
+
+      {/* Comision de recoleccion (SAC Ciclo D — gasto, no prorratea al costo) */}
+      {retentionsEnabled && (
+        <Card className="shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+              Comisión de Recolección {collectorRow ? "" : "(Opcional)"}
+            </CardTitle>
+            {collectorRow ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-red-500 hover:text-red-600"
+                onClick={() => {
+                  setCollectorRow(false);
+                  setCollectorTpId("");
+                  setCollectorAmount(0);
+                  setCollectorTouched(false);
+                  setCollectorDismissed(true);
+                }}
+              >
+                Quitar
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => setCollectorRow(true)}>
+                <Plus className="h-4 w-4 mr-1" />Agregar
+              </Button>
+            )}
+          </CardHeader>
+          {collectorRow && (
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Recolector *</Label>
+                  <EntitySelect
+                    value={collectorTpId}
+                    onChange={setCollectorTpId}
+                    options={payableProviders.map((tp) => ({ id: tp.id, label: tp.name }))}
+                    placeholder="Seleccionar recolector..."
+                  />
+                  {purchase.collector_name && collectorTpId === purchase.collector_id && (
+                    <p className="text-[11px] text-slate-400 mt-0.5">Capturado en la entrada</p>
+                  )}
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Monto *</Label>
+                  <MoneyInput
+                    value={effCollectorAmount}
+                    onChange={(v) => {
+                      setCollectorAmount(v);
+                      setCollectorTouched(true);
+                    }}
+                    decimals={2}
+                    placeholder="0"
+                    className={effCollectorAmount <= 0 ? "border-red-300" : ""}
+                  />
+                  {greenLoopTariff && collectorTouched && effCollectorAmount !== suggestedCollector ? (
+                    <button
+                      type="button"
+                      className="text-[11px] text-indigo-600 hover:underline mt-0.5"
+                      onClick={() => {
+                        setCollectorTouched(false);
+                        setCollectorAmount(0);
+                      }}
+                    >
+                      Sugerido: {formatCurrency(suggestedCollector)} — restaurar
+                    </button>
+                  ) : greenLoopTariff ? (
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Tarifa vigente: {formatCurrency(Number(greenLoopTariff.unit_price_cop))}/kg × {totalQuantity.toLocaleString()} kg
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-amber-600 mt-0.5">
+                      Sin tarifa comisión Green Loop vigente — ingrese el monto manualmente
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-md bg-indigo-50 border border-indigo-100 px-3 py-2 text-xs text-indigo-900">
+                Se causa como <strong>gasto</strong> (categoría "Comisiones de recolección") al liquidar —
+                no suma al costo del material ni al total a pagar al proveedor. El pago al recolector
+                se hace después desde Tesorería.
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {/* Retenciones (SAC D9 — solo con flag) */}
       {retentionsEnabled && (

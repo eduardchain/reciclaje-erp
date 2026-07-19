@@ -40,7 +40,9 @@ router = APIRouter()
 # ============================================================================
 
 def _inbound_origin_map(db: Session, purchase_ids: list, organization_id: UUID) -> dict:
-    """SAC Ciclo B (B1): purchase_id -> (inbound_order_id, order_number).
+    """SAC Ciclo B (B1): purchase_id -> (inbound_order_id, order_number,
+    collector_id, collector_name). Ciclo D suma el recolector al MISMO lookup
+    (outerjoin, cero queries extra) — la Liquidate page pre-carga la comision.
 
     Lookup por pagina (F3 QA): la query paginada de compras NO se toca —
     duplicar filas del listado es imposible por construccion (si un bug creara
@@ -51,14 +53,22 @@ def _inbound_origin_map(db: Session, purchase_ids: list, organization_id: UUID) 
         return {}
     from sqlalchemy import select
     from app.models.inbound_order import InboundOrder
+    from app.models.third_party import ThirdParty as TP
     rows = db.execute(
-        select(InboundOrder.purchase_id, InboundOrder.id, InboundOrder.order_number)
+        select(
+            InboundOrder.purchase_id,
+            InboundOrder.id,
+            InboundOrder.order_number,
+            InboundOrder.collector_id,
+            TP.name,
+        )
+        .outerjoin(TP, TP.id == InboundOrder.collector_id)
         .where(
             InboundOrder.organization_id == organization_id,
             InboundOrder.purchase_id.in_(purchase_ids),
         )
     ).all()
-    return {pid: (oid, num) for pid, oid, num in rows}
+    return {pid: (oid, num, cid, cname) for pid, oid, num, cid, cname in rows}
 
 
 def _enrich_purchase_response(purchase: Purchase, db: Session = None, inbound_map: dict = None) -> dict:
@@ -101,6 +111,9 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None, inbound_ma
         origin = inbound_map.get(purchase.id)
         data["inbound_order_id"] = origin[0] if origin else None
         data["inbound_order_number"] = origin[1] if origin else None
+        # SAC Ciclo D: recolector de la entrada (pre-carga de comision al liquidar)
+        data["collector_id"] = origin[2] if origin else None
+        data["collector_name"] = origin[3] if origin else None
 
     # Resolver nombres de usuarios de auditoria
     if db:
@@ -412,6 +425,11 @@ async def get_purchase_by_number(
     response_data["linked_payment_total"] = float(
         purchase_service.get_linked_payment_total(db, purchase.id, org_context["organization_id"])
     )
+    # Ciclo D (pruebas Daniel): costo de recoleccion visible en el detalle
+    cc_total = purchase_service.get_collector_commission_total(
+        db, purchase.id, org_context["organization_id"]
+    )
+    response_data["collector_commission_total"] = float(cc_total) if cc_total > 0 else None
     return PurchaseResponse(**response_data)
 
 
@@ -494,6 +512,11 @@ async def get_purchase(
     response_data["linked_payment_total"] = float(
         purchase_service.get_linked_payment_total(db, purchase.id, org_context["organization_id"])
     )
+    # Ciclo D (pruebas Daniel): costo de recoleccion visible en el detalle
+    cc_total = purchase_service.get_collector_commission_total(
+        db, purchase.id, org_context["organization_id"]
+    )
+    response_data["collector_commission_total"] = float(cc_total) if cc_total > 0 else None
     return PurchaseResponse(**response_data)
 
 
@@ -602,6 +625,7 @@ async def liquidate_purchase(
             commissions_data=liquidate_data.commissions,
             liquidation_date=liquidate_data.liquidation_date,
             retentions_data=liquidate_data.retentions,
+            collector_commission_data=liquidate_data.collector_commission,
         )
         
         response_data = _enrich_purchase_response(purchase, db)

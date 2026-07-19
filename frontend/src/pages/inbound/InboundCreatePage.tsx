@@ -26,7 +26,7 @@ import { MoneyInput } from "@/components/shared/MoneyInput";
 import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { useCreateInboundOrder } from "@/hooks/useInboundOrders";
 import { useKgAccounts } from "@/hooks/useKgLedger";
-import { useMaterials, useSuppliers, useWarehouses } from "@/hooks/useMasterData";
+import { useMaterials, usePayableProviders, useSuppliers, useWarehouses } from "@/hooks/useMasterData";
 import {
   useCreateDriver,
   useCreateVehicle,
@@ -105,6 +105,8 @@ export default function InboundCreatePage() {
   const { getSetting } = useOrgSettings();
 
   const { data: suppliersData } = useSuppliers();
+  // Ciclo D: recolectores por comision (service_provider) — solo tipo compra
+  const { data: collectorsData } = usePayableProviders();
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
   const { data: driversData } = useDrivers();
@@ -113,6 +115,7 @@ export default function InboundCreatePage() {
   const { data: profilesData } = useKgProfiles();
 
   const suppliers = suppliersData?.items ?? [];
+  const collectors = collectorsData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const warehouses = (warehousesData?.items ?? []) as { id: string; name: string; is_receiving?: boolean }[];
   const drivers = driversData?.items ?? [];
@@ -138,6 +141,7 @@ export default function InboundCreatePage() {
   const [date, setDate] = useState(toLocalDateInput());
   const [driverId, setDriverId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
+  const [collectorId, setCollectorId] = useState("");
   const [willardCenter, setWillardCenter] = useState("none");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
@@ -355,6 +359,7 @@ export default function InboundCreatePage() {
         date,
         driver_id: driverId || null,
         vehicle_id: vehicleId || null,
+        collector_id: collectorId || null,
         willard_distribution_center: isWillard && willardCenter !== "none" ? willardCenter : null,
         notes: notes.trim() || null,
         lines: lines.map((l) => ({
@@ -517,6 +522,22 @@ export default function InboundCreatePage() {
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Recolector{isWillard ? "" : " (comisión)"}
+              </Label>
+              <EntitySelect
+                value={collectorId}
+                onChange={setCollectorId}
+                options={collectors.map((c) => ({ id: c.id, label: c.name }))}
+                placeholder="Sin recolector..."
+              />
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {isWillard
+                  ? "Solo registro — la recolección Willard no genera comisión"
+                  : "Green Loop u otro recolector — la comisión se define al liquidar (va a gastos, no al costo)"}
+              </p>
             </div>
             <div className="md:col-span-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>

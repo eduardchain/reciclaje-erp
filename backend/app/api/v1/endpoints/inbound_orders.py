@@ -128,6 +128,9 @@ def _enrich(
         driver_name=order.driver.name if order.driver else None,
         vehicle_id=order.vehicle_id,
         vehicle_plate=order.vehicle.plate if order.vehicle else None,
+        # Ciclo D: recolector (FK NULL -> relationship None sin query)
+        collector_id=order.collector_id,
+        collector_name=order.collector.name if order.collector else None,
         willard_distribution_center=order.willard_distribution_center,
         notes=order.notes,
         status=order.status,
@@ -227,7 +230,16 @@ def get_inbound_order(
     db: Session = Depends(get_db),
 ):
     order = inbound_order_service.get(db, order_id, org_context["organization_id"])
-    return _enrich_one(db, order, org_context["organization_id"])
+    resp = _enrich_one(db, order, org_context["organization_id"])
+    # Ciclo D (pruebas Daniel): costo de recoleccion en la cara financiera —
+    # solo detalle (patron #63, sin N+1 en listados)
+    if order.purchase_id is not None:
+        from app.services.purchase import purchase as purchase_service
+        cc = purchase_service.get_collector_commission_total(
+            db, order.purchase_id, org_context["organization_id"]
+        )
+        resp.collector_commission_total = float(cc) if cc > 0 else None
+    return resp
 
 
 @router.patch("/{order_id}", response_model=InboundOrderResponse)

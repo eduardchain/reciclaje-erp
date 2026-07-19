@@ -43,6 +43,10 @@ class InboundOrderCreate(BaseModel):
     date: BusinessDate
     driver_id: Optional[UUID] = None
     vehicle_id: Optional[UUID] = None
+    # SAC Ciclo D: recolector (service_provider) — AMBOS tipos (Green Loop
+    # tambien recolecta willard, Q-02). En willard es informativo: la comision
+    # existe SOLO al liquidar compras regulares, como GASTO (jamas al costo #30).
+    collector_id: Optional[UUID] = None
     willard_distribution_center: Optional[str] = Field(None, max_length=24)
     # goes_directly_to_jm retirado (Ciclo B B4, Q-03: drosses SIEMPRE a la
     # planta — peso muerto). extra="forbid" -> enviarlo da 422 (F1 QA).
@@ -66,6 +70,10 @@ class InboundOrderUpdate(BaseModel):
     date: Optional[BusinessDate] = None
     driver_id: Optional[UUID] = None
     vehicle_id: Optional[UUID] = None
+    # Ciclo D: editable (incl. None explicito para quitar). Willard: siempre
+    # (informativo). Tipo compra: solo mientras la derivada este registered —
+    # tras liquidar, la comision ya se causo
+    collector_id: Optional[UUID] = None
     willard_distribution_center: Optional[str] = Field(None, max_length=24)
     notes: Optional[str] = Field(None, max_length=1000)
     lines: Optional[list[InboundOrderLineCreate]] = Field(None, min_length=1)
@@ -116,6 +124,11 @@ class InboundOrderResponse(BaseModel):
     driver_name: Optional[str] = None
     vehicle_id: Optional[UUID] = None
     vehicle_plate: Optional[str] = None
+    # Ciclo D: recolector — informativo en willard, con comision en compras
+    collector_id: Optional[UUID] = None
+    collector_name: Optional[str] = None
+    # Solo en GET de detalle (cara financiera): comision causada confirmed
+    collector_commission_total: Optional[float] = None
     willard_distribution_center: Optional[str] = None
     notes: Optional[str] = None
     status: str

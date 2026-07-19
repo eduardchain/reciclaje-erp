@@ -17,10 +17,12 @@ import type {
 
 // --- Tarifas ---
 
-export function useCurrentTariffs() {
+export function useCurrentTariffs(enabled = true) {
   return useQuery({
     queryKey: ["service-tariffs", "current"],
     queryFn: sacConfigService.getCurrentTariffs,
+    // F2: paginas compartidas gatean por flag — cero requests en orgs prod
+    enabled,
   });
 }
 
@@ -46,10 +48,12 @@ export function useCreateTariff() {
 
 // --- Formulas de conversion ---
 
-export function useCurrentFormulas(materialId?: string) {
+export function useCurrentFormulas(materialId?: string, enabled = true) {
   return useQuery({
     queryKey: ["conversion-formulas", "current", materialId ?? "all"],
     queryFn: () => sacConfigService.getCurrentFormulas(materialId),
+    // F2: paginas compartidas (StockPage) gatean por flag — cero requests en prod
+    enabled,
   });
 }
 

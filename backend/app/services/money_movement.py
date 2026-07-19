@@ -1517,6 +1517,14 @@ class CRUDMoneyMovement:
         applicable_business_unit_ids: Optional[list] = None,
         financial_obligation_id: Optional[UUID] = None,
         obligation_period: Optional[str] = None,
+        # SAC Ciclo D (D-01 QA, ruta a): firma opcional para movimientos SAC —
+        # columnas E2 sin uso hasta ahora. Ningun call site previo las pasa ->
+        # NULL exactamente como hoy (prod byte-identico). E3-E5 reusan este
+        # unico camino de escritura, sin pokes post-hoc por fuera del embudo.
+        source_type: Optional[str] = None,
+        source_id: Optional[UUID] = None,
+        tariff_id: Optional[UUID] = None,
+        warehouse_id: Optional[UUID] = None,
     ) -> MoneyMovement:
         """Crear registro de movimiento en BD (sin commit, sin aplicar efectos)."""
         # Guard: la UN de sistema (Pasa Mano) no acepta asignacion compartida.
@@ -1548,6 +1556,10 @@ class CRUDMoneyMovement:
             applicable_business_unit_ids=applicable_business_unit_ids,
             financial_obligation_id=financial_obligation_id,
             obligation_period=obligation_period,
+            source_type=source_type,
+            source_id=source_id,
+            tariff_id=tariff_id,
+            warehouse_id=warehouse_id,
         )
         db.add(movement)
         db.flush()

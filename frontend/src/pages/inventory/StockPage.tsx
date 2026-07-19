@@ -1,7 +1,7 @@
 import { useState, useMemo, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Package, DollarSign, Layers, Weight, ChevronRight, ArrowRightLeft, Loader2, ChevronsUpDown, FileSpreadsheet } from "lucide-react";
+import { Package, DollarSign, Layers, Weight, ChevronRight, ArrowRightLeft, Loader2, ChevronsUpDown, FileSpreadsheet, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,9 @@ import { cn } from "@/utils";
 import type { StockItem } from "@/types/inventory";
 import type { MetricCard } from "@/types/reports";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { useCurrentFormulas } from "@/hooks/useSacConfig";
+import { estimateKgLead } from "@/pages/inbound/InboundCreatePage";
 
 // --- Multi-select filter ---
 
@@ -341,6 +344,15 @@ export default function StockPage() {
 
   const { data, isLoading } = useStock();
 
+  // SAC (pruebas Daniel Ciclo D): "el total en kg de plomo que representan" —
+  // conversion client-side con la formula VIGENTE (misma que la recepcion,
+  // estimateKgLead). Solo materiales con formula; F2: cero requests sin flag.
+  const { getSetting } = useOrgSettings();
+  const kgLedgerEnabled = getSetting("kg_ledger_enabled") === true;
+  const { data: formulasData } = useCurrentFormulas(undefined, kgLedgerEnabled);
+  const formulas = useMemo(() => formulasData?.items ?? [], [formulasData]);
+  const showKgLead = kgLedgerEnabled && formulas.length > 0;
+
   // Derive filter options from loaded data
   const categoryOptions = useMemo<MultiSelectOption[]>(() => {
     if (!data?.items) return [];
@@ -377,18 +389,32 @@ export default function StockPage() {
     });
   }, [data, materialFilters, categoryFilters, warehouseFilters]);
 
+  // Kg plomo por material (stock total x formula vigente) — respeta filtros
+  const kgLeadByMaterial = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!showKgLead) return m;
+    for (const item of filteredItems) {
+      const est = estimateKgLead(formulas, item.material_id, item.current_stock_total);
+      if (est != null) m.set(item.material_id, est);
+    }
+    return m;
+  }, [showKgLead, formulas, filteredItems]);
+
   const kpis = useMemo(() => {
     const count = filteredItems.length;
     const totalValue = filteredItems.reduce((s, i) => s + i.total_value, 0);
     const transitStock = filteredItems.reduce((s, i) => s + i.current_stock_transit, 0);
     const totalStock = filteredItems.reduce((s, i) => s + i.current_stock_total, 0);
+    let kgLead = 0;
+    kgLeadByMaterial.forEach((v) => { kgLead += v; });
     return {
       count: { current_value: count, previous_value: 0, change_percentage: null } as MetricCard,
       value: { current_value: totalValue, previous_value: 0, change_percentage: null } as MetricCard,
       transit: { current_value: transitStock, previous_value: 0, change_percentage: null } as MetricCard,
       totalStock: { current_value: totalStock, previous_value: 0, change_percentage: null } as MetricCard,
+      kgLead: { current_value: kgLead, previous_value: 0, change_percentage: null } as MetricCard,
     };
-  }, [data, filteredItems]);
+  }, [data, filteredItems, kgLeadByMaterial]);
 
   const toggleExpand = (materialId: string) => {
     setExpandedMaterial(expandedMaterial === materialId ? null : materialId);
@@ -404,13 +430,13 @@ export default function StockPage() {
     });
   };
 
-  const colSpan = canViewValues ? 9 : 7;
+  const colSpan = (canViewValues ? 9 : 7) + (showKgLead ? 1 : 0);
 
   return (
     <div className="space-y-4">
       <PageHeader title="Inventario" description="Vista consolidada de stock">
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => exportStockExcel(filteredItems, canViewValues)} className="flex-1 sm:flex-none">
+          <Button variant="outline" size="sm" onClick={() => exportStockExcel(filteredItems, canViewValues, showKgLead ? kgLeadByMaterial : undefined)} className="flex-1 sm:flex-none">
             <FileSpreadsheet className="h-4 w-4 mr-2" />Excel
           </Button>
           <Button variant="outline" size="sm" onClick={() => navigate("/inventory/movements")} className="flex-1 sm:flex-none">Movimientos</Button>
@@ -429,6 +455,7 @@ export default function StockPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard label="Materiales" metric={kpis.count} icon={<Package className="h-4 w-4" />} accentColor="violet" formatValue={(n) => String(n)} />
           <KpiCard label="Stock Total" metric={kpis.totalStock} icon={<Weight className="h-4 w-4" />} accentColor="sky" formatValue={(n) => n.toFixed(2) + " kg"} />
+          {showKgLead && <KpiCard label="Plomo en Stock" metric={kpis.kgLead} icon={<Scale className="h-4 w-4" />} accentColor="indigo" formatValue={(n) => n.toFixed(2) + " kg"} />}
           {canViewValues && <KpiCard label="Valor Inventario" metric={kpis.value} icon={<DollarSign className="h-4 w-4" />} accentColor="emerald" />}
           <KpiCard label="Stock en Transito" metric={kpis.transit} icon={<Layers className="h-4 w-4" />} accentColor="amber" formatValue={(n) => n.toFixed(2) + " kg"} />
         </div>
@@ -506,6 +533,9 @@ export default function StockPage() {
                         Trans: {item.current_stock_transit.toFixed(2)}
                       </Badge>
                     )}
+                    {showKgLead && kgLeadByMaterial.has(item.material_id) && (
+                      <span><span className="text-slate-400">Plomo:</span> <span className="tabular-nums text-indigo-700">{kgLeadByMaterial.get(item.material_id)!.toFixed(2)} kg</span></span>
+                    )}
                     {canViewValues && <span><span className="text-slate-400">Costo:</span> <span className="tabular-nums">{formatCurrency(item.current_average_cost)}</span></span>}
                   </div>
                 </div>
@@ -537,6 +567,7 @@ export default function StockPage() {
               <TableHead className="text-right">Stock Liq.</TableHead>
               <TableHead className="text-right">Stock Trans.</TableHead>
               <TableHead className="text-right">Total</TableHead>
+              {showKgLead && <TableHead className="text-right">Kg Plomo</TableHead>}
               {canViewValues && <TableHead className="text-right">Costo Prom.</TableHead>}
               {canViewValues && <TableHead className="text-right">Valor Total</TableHead>}
             </TableRow>
@@ -584,6 +615,13 @@ export default function StockPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right font-medium tabular-nums">{item.current_stock_total.toFixed(2)}</TableCell>
+                    {showKgLead && (
+                      <TableCell className="text-right tabular-nums text-indigo-700">
+                        {kgLeadByMaterial.has(item.material_id)
+                          ? kgLeadByMaterial.get(item.material_id)!.toFixed(2)
+                          : <span className="text-slate-300">—</span>}
+                      </TableCell>
+                    )}
                     {canViewValues && <TableCell className="text-right">{formatCurrency(item.current_average_cost)}</TableCell>}
                     {canViewValues && <TableCell className="text-right font-medium">{formatCurrency(item.total_value)}</TableCell>}
                   </TableRow>

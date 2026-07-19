@@ -363,6 +363,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         commissions_data: Optional[List] = None,
         liquidation_date: Optional[datetime] = None,
         retentions_data: Optional[List] = None,
+        collector_commission_data: Optional[object] = None,
     ) -> Purchase:
         """
         Liquidar compra registrada (cambiar status a 'liquidated').
@@ -564,6 +565,16 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if retentions_data:
             total_retentions = self._apply_retentions(
                 db, purchase, retentions_data, supplier, organization_id
+            )
+
+        # Step 8d (SAC Ciclo D): comision de recolector como GASTO causado.
+        # NO entra al prorrateo #30 (Step 4c solo ve purchase.commissions —
+        # params disjuntos, W-D2). Fecha con el PARAMETRO (W-D5 trampa #61:
+        # purchase.liquidated_at se asigna recien en Step 9).
+        if collector_commission_data is not None:
+            self._apply_collector_commission(
+                db, purchase, collector_commission_data, organization_id,
+                user_id, liquidation_date or purchase.date,
             )
 
         # Step 9: Cambiar status
@@ -852,6 +863,30 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 ret.reverted_at = datetime.now(timezone.utc)
                 print(f"  ↩️  Retencion revertida: ${ret.amount} ({ret.retention_type})")
 
+            # Step 6d (SAC Ciclo D): auto-anular la comision de recolector
+            # causada al liquidar (patron commission_accrual #23 — sin eleccion
+            # #63: no hay caja de por medio). Filtro con source_type (D-02 QA):
+            # jamas anular un expense_accrual manual asociado a la compra.
+            # Solo confirmed → si ya se anulo a mano en Tesoreria, no-op seguro.
+            collector_accruals = db.scalars(
+                select(MoneyMovement).where(
+                    MoneyMovement.purchase_id == purchase_id,
+                    MoneyMovement.movement_type == "expense_accrual",
+                    MoneyMovement.source_type == "collector_commission",
+                    MoneyMovement.status == "confirmed",
+                )
+            ).all()
+            for mov in collector_accruals:
+                mov.status = "annulled"
+                mov.annulled_at = datetime.now(timezone.utc)
+                mov.annulled_by = user_id
+                mov.annulled_reason = f"Cancelación compra #{purchase.purchase_number}"
+                if mov.third_party_id:
+                    collector_tp = db.get(ThirdParty, mov.third_party_id)
+                    if collector_tp:
+                        collector_tp.current_balance += mov.amount
+                print(f"  ↩️  Comision recolector anulada: ${mov.amount} (MM #{mov.movement_number})")
+
         # Step 7: opcional — anular pagos inmediatos enlazados (payment_to_supplier con purchase_id).
         # Simétrico a ventas (decisión #63): revierte el efecto del pago: caja +amount, proveedor
         # -amount. Solo confirmed (no re-anula un pago ya anulado; no-op seguro si no hay ninguno).
@@ -917,6 +952,24 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 MoneyMovement.purchase_id == purchase_id,
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.movement_type == "payment_to_supplier",
+                MoneyMovement.status == "confirmed",
+            )
+        ).scalar_one()
+        return Decimal(str(total or 0))
+
+    def get_collector_commission_total(
+        self, db: Session, purchase_id: UUID, organization_id: UUID
+    ) -> Decimal:
+        """Ciclo D (pruebas Daniel): comision de recolector causada (confirmed)
+        de esta compra — para mostrarla en el detalle (patron #63: solo en los
+        GET de detalle, sin N+1 en listados). 0 si no hay o fue anulada
+        (condonada) — el detalle la oculta en ese caso."""
+        total = db.execute(
+            select(func.coalesce(func.sum(MoneyMovement.amount), 0)).where(
+                MoneyMovement.purchase_id == purchase_id,
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.movement_type == "expense_accrual",
+                MoneyMovement.source_type == "collector_commission",
                 MoneyMovement.status == "confirmed",
             )
         ).scalar_one()
@@ -1388,6 +1441,140 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         supplier.current_balance += total  # compensatorio: queda acreditado NETO
         db.flush()
         return total
+
+    COLLECTOR_CATEGORY_NAME = "Comisiones de recolección"
+
+    def _get_or_create_collector_category(self, db: Session, organization_id: UUID):
+        """Categoria sistema para comisiones de recolector (SAC Ciclo D).
+
+        Patron get-or-create #78 con normalize_entity_name (D-03 QA: un solo
+        normalizador NFKD en el repo). Nace INDIRECTA (decision Daniel: gasto
+        operativo general, NO entra al Costo Real por material) + pnl_section
+        default operativo; reclasificable en Config (retroactivo al leer, #4).
+        Limitacion aceptada (identica a entidades de retencion): renombrarla
+        en Config hace que el proximo uso cree una nueva.
+        """
+        from app.models.expense_category import ExpenseCategory
+        from app.services.retention_entities import normalize_entity_name
+
+        target = normalize_entity_name(self.COLLECTOR_CATEGORY_NAME)
+        candidates = db.execute(
+            select(ExpenseCategory).where(
+                ExpenseCategory.organization_id == organization_id,
+                ExpenseCategory.is_system_entity == True,  # noqa: E712
+                ExpenseCategory.is_active == True,  # noqa: E712
+            )
+        ).scalars().all()
+        for cat in candidates:
+            if normalize_entity_name(cat.name) == target:
+                return cat
+
+        cat = ExpenseCategory(
+            organization_id=organization_id,
+            name=self.COLLECTOR_CATEGORY_NAME,
+            description="Comisiones de recolectores (Green Loop y similares) causadas al liquidar compras",
+            is_direct_expense=False,
+            is_system_entity=True,
+        )
+        db.add(cat)
+        db.flush()
+        print(f"  📁 Categoria sistema creada: {cat.name}")
+        return cat
+
+    def _apply_collector_commission(
+        self,
+        db: Session,
+        purchase: Purchase,
+        cc,
+        organization_id: UUID,
+        user_id: Optional[UUID],
+        mm_date,
+    ) -> None:
+        """SAC Ciclo D: comision de recolector como GASTO causado (decision
+        Daniel 2026-07-17 — supersede el prorrateo #30 SOLO para recolectores).
+
+        Crea un expense_accrual (cuenta NULL, categoria sistema, saldo del
+        recolector −monto = le debemos) fechado en liquidated_at (#61). La
+        firma viaja en source_type='collector_commission' (D-01 ruta a).
+        JAMAS toca el costo del material: params disjuntos de commissions #30.
+        Data-gated D9: ausente = camino actual byte a byte; presente sin flag
+        kg_ledger_enabled → 422.
+        """
+        from app.utils.org_settings import get_org_setting
+
+        if not get_org_setting(db, organization_id, "kg_ledger_enabled"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Comision de recolector: modulo no habilitado para esta organizacion",
+            )
+
+        from app.services.third_party import third_party as tp_service
+        collector = db.get(ThirdParty, cc.third_party_id)
+        if not collector or collector.organization_id != organization_id or not collector.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Recolector no encontrado",
+            )
+        if not tp_service.has_behavior_type(db, collector.id, ["service_provider"]):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "El recolector debe tener una categoria con comportamiento "
+                    "'Proveedor de Servicios' (recibe comisiones)"
+                ),
+            )
+
+        category = self._get_or_create_collector_category(db, organization_id)
+
+        # Entrada de origen (si existe): descripcion + source_id
+        from app.models.inbound_order import InboundOrder
+        origin = db.execute(
+            select(InboundOrder.id, InboundOrder.order_number).where(
+                InboundOrder.purchase_id == purchase.id,
+                InboundOrder.status != "annulled",
+            )
+        ).first()
+        inbound_id, inbound_number = (origin[0], origin[1]) if origin else (None, None)
+
+        # Snapshot informativo de la tarifa vigente que sugirio el monto
+        # (el monto editado es la fuente de verdad — F1 #79)
+        from app.models.service_tariff import ServiceTariff
+        tariff_id = db.execute(
+            select(ServiceTariff.id)
+            .where(
+                ServiceTariff.organization_id == organization_id,
+                ServiceTariff.tariff_code == "comision_green_loop",
+            )
+            .order_by(ServiceTariff.created_at.desc(), ServiceTariff.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+        desc = f"Comisión recolección compra #{purchase.purchase_number}"
+        if inbound_number is not None:
+            desc += f" — Entrada #{inbound_number}"
+
+        mm_service._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="expense_accrual",
+            amount=cc.amount,
+            account_id=None,
+            date=mm_date,
+            description=desc,
+            user_id=user_id,
+            third_party_id=collector.id,
+            expense_category_id=category.id,
+            purchase_id=purchase.id,
+            source_type="collector_commission",
+            source_id=inbound_id,
+            tariff_id=tariff_id,
+            warehouse_id=purchase.warehouse_id,
+        )
+        collector.current_balance -= cc.amount
+        print(
+            f"  🚚 Comision recolector: ${cc.amount} → {collector.name} "
+            f"(gasto causado, saldo: {collector.current_balance})"
+        )
 
     def _guard_willard_pure_materials(
         self, db: Session, organization_id: UUID, material_ids: list

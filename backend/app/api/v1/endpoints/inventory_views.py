@@ -561,43 +561,71 @@ def list_movements(
             )
         ).all())
 
-        running_balance = Decimal("0")       # stock total (incluye transit)
-        running_valued_qty = Decimal("0")    # stock con costo confirmado (sin transit)
-        running_value = Decimal("0")
-        running_avg_cost = Decimal("0")
-
-        for mov in all_movs:
-            qty = mov.quantity
-            cost = mov.unit_cost or Decimal("0")
-
-            # Compras registradas (transit) tienen unit_cost=0 y no deben
-            # diluir el costo promedio — el costo se confirma en liquidacion
-            is_transit = (
-                mov.movement_type == "purchase"
-                and cost == 0
-                and qty > 0
+        # Costo promedio: leer del LIBRO real (MaterialCostHistory, append-only)
+        # en vez de reconstruirlo con una formula ingenua. La reconstruccion
+        # previa no sabia de Modelo L (#64-#66: el promedio solo se mueve al
+        # LIQUIDAR, con identidad willard D2 y remociones ponderadas) y las
+        # capturas SAC con precio rompian su heuristica de transito (cost==0)
+        # — mostraba promedios que nunca existieron (hallazgo pruebas Daniel,
+        # BAT-08). Dos niveles por movimiento:
+        #   1. Por FUENTE: si el movimiento tiene un registro MCH propio
+        #      (liquidacion de SU compra, SU recepcion, SU reversa), usa el
+        #      new_cost de ese registro — el efecto aparece EN su fila aunque
+        #      haya ocurrido despues (compra registrada hoy, liquidada manana).
+        #   2. Por TIEMPO: ultimo new_cost con created_at <= el del movimiento
+        #      (ventas/decreases no escriben MCH — el promedio no cambia, y el
+        #      lookup temporal lo refleja solo). Sin MCH previo -> None ("—").
+        # Transito puro (compra sin liquidar) cae al nivel 2: promedio intacto,
+        # exactamente lo que pasa en la realidad.
+        from app.models.material_cost_history import MaterialCostHistory
+        mch_rows = db.execute(
+            select(
+                MaterialCostHistory.created_at,
+                MaterialCostHistory.new_cost,
+                MaterialCostHistory.source_type,
+                MaterialCostHistory.source_id,
             )
+            .where(
+                MaterialCostHistory.organization_id == org_context["organization_id"],
+                MaterialCostHistory.material_id == material_id,
+            )
+            .order_by(MaterialCostHistory.created_at.asc())
+        ).all()
+        time_series = [(r.created_at, r.new_cost) for r in mch_rows]
+        by_source: dict = {}
+        for r in mch_rows:
+            if r.source_id is not None:
+                # Ultima fila gana: compras multi-linea escriben N registros —
+                # el promedio final tras TODA la operacion
+                by_source[(r.source_type, r.source_id)] = r.new_cost
 
-            if is_transit:
-                # Balance total sube, pero stock valorizado NO (no diluir avg)
-                running_balance += qty
-            elif qty > 0:  # Entrada con costo confirmado
-                running_value += qty * cost
-                running_balance += qty
-                running_valued_qty += qty
-                if running_valued_qty > 0:
-                    running_avg_cost = running_value / running_valued_qty
-            else:  # Salida (usa avg_cost actual, resta de stock valorizado)
-                exit_qty = abs(qty)
-                running_value -= exit_qty * running_avg_cost
-                running_balance += qty  # qty es negativo
-                running_valued_qty += qty  # qty es negativo
-                if running_valued_qty <= 0:
-                    running_value = Decimal("0")
-                    # Mantener ultimo costo conocido
+        MCH_SOURCE_BY_MOVEMENT = {
+            "purchase": "purchase_liquidation",
+            "purchase_reversal": "purchase_cancellation",
+            "inbound_receipt": "inbound_receipt",
+            "inbound_reversal": "inbound_annulment",
+            "sale_reversal": "sale_cancellation",
+        }
 
+        from bisect import bisect_right
+        mch_times = [t for t, _ in time_series]
+
+        def avg_after(mov) -> Optional[Decimal]:
+            src = MCH_SOURCE_BY_MOVEMENT.get(mov.movement_type)
+            if src and mov.reference_id is not None:
+                hit = by_source.get((src, mov.reference_id))
+                if hit is not None:
+                    return hit
+            idx = bisect_right(mch_times, mov.created_at)
+            if idx == 0:
+                return None  # sin historial de costo aun — honesto: "—"
+            return time_series[idx - 1][1]
+
+        running_balance = Decimal("0")  # stock total (incluye transit) — suma exacta
+        for mov in all_movs:
+            running_balance += mov.quantity
             balance_map[mov.id] = running_balance
-            avg_cost_map[mov.id] = running_avg_cost
+            avg_cost_map[mov.id] = avg_after(mov)
 
     items = []
     for mov in movements:
@@ -619,7 +647,11 @@ def list_movements(
             notes=mov.notes,
             created_at=mov.created_at,
             balance_after=float(balance_map[mov.id]) if mov.id in balance_map else None,
-            avg_cost_after=float(avg_cost_map[mov.id]) if mov.id in avg_cost_map else None,
+            avg_cost_after=(
+                float(avg_cost_map[mov.id])
+                if avg_cost_map.get(mov.id) is not None
+                else None
+            ),
         ))
 
     return PaginatedMovementResponse(

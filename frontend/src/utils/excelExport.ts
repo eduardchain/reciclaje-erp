@@ -778,13 +778,21 @@ export function exportMarginAnalysisExcel(data: MarginAnalysisResponse) {
 }
 
 
-export function exportStockExcel(items: StockItem[], canViewValues: boolean) {
+export function exportStockExcel(
+  items: StockItem[],
+  canViewValues: boolean,
+  // SAC: kg de plomo que representa el stock (formula vigente) — paridad con
+  // la columna en pantalla. Solo materiales con formula; undefined = sin columna
+  kgLeadByMaterial?: Map<string, number>,
+) {
+  const hasKgLead = kgLeadByMaterial !== undefined;
   const rows: (string | number)[][] = [];
   rows.push(["Inventario - Stock Consolidado"]);
   rows.push([`Generado: ${new Date().toLocaleDateString("es-CO")}`]);
   rows.push([]);
 
   const headers: string[] = ["Codigo", "Material", "Categoria", "Unidad", "Stock Liq.", "Stock Trans.", "Total"];
+  if (hasKgLead) headers.push("Kg Plomo");
   if (canViewValues) headers.push("Costo Prom.", "Valor Total");
   rows.push(headers);
 
@@ -798,6 +806,10 @@ export function exportStockExcel(items: StockItem[], canViewValues: boolean) {
       item.current_stock_transit,
       item.current_stock_total,
     ];
+    if (hasKgLead) {
+      const kg = kgLeadByMaterial!.get(item.material_id);
+      row.push(kg != null ? kg : "");
+    }
     if (canViewValues) {
       row.push(item.current_average_cost, item.total_value);
     }
@@ -811,6 +823,11 @@ export function exportStockExcel(items: StockItem[], canViewValues: boolean) {
     items.reduce((s, i) => s + i.current_stock_transit, 0),
     items.reduce((s, i) => s + i.current_stock_total, 0),
   ];
+  if (hasKgLead) {
+    let kgTotal = 0;
+    kgLeadByMaterial!.forEach((v) => { kgTotal += v; });
+    totalsRow.push(kgTotal);
+  }
   if (canViewValues) {
     totalsRow.push("", items.reduce((s, i) => s + i.total_value, 0));
   }
@@ -819,12 +836,15 @@ export function exportStockExcel(items: StockItem[], canViewValues: boolean) {
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [
     { wch: 12 }, { wch: 30 }, { wch: 20 }, { wch: 8 },
-    { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 },
+    { wch: 14 }, { wch: 14 }, { wch: 14 },
+    ...(hasKgLead ? [{ wch: 12 }] : []),
+    { wch: 14 }, { wch: 16 },
   ];
 
-  // Currency cols (only when canViewValues): 7 (Costo Prom), 8 (Valor Total)
+  // Currency cols (only when canViewValues) — shift si hay columna Kg Plomo
   if (canViewValues) {
-    applyCurrencyFormat(ws, [7, 8]);
+    const base = hasKgLead ? 8 : 7;
+    applyCurrencyFormat(ws, [base, base + 1]);
   }
 
   const wb = XLSX.utils.book_new();

@@ -128,6 +128,11 @@ export interface PurchaseResponse extends BaseEntity {
   /** SAC Ciclo B (B1) — origen inbound; null para compras manuales / orgs sin recepción */
   inbound_order_id?: string | null;
   inbound_order_number?: number | null;
+  /** SAC Ciclo D — recolector de la entrada de origen (pre-carga la comisión al liquidar) */
+  collector_id?: string | null;
+  collector_name?: string | null;
+  /** Solo en GET de detalle: comisión de recolección causada (gasto); null si no hay o fue anulada */
+  collector_commission_total?: number | null;
   warnings?: string[];
 }
 
@@ -146,11 +151,20 @@ export interface PurchaseLiquidateLineUpdate {
   unit_price: number;
 }
 
+/** SAC Ciclo D: comisión de recolector como GASTO (no prorratea al costo #30).
+ *  El monto editado es la fuente de verdad — la tarifa solo pre-sugiere. */
+export interface CollectorCommissionIn {
+  third_party_id: string;
+  amount: number;
+}
+
 export interface PurchaseLiquidateRequest {
   lines?: PurchaseLiquidateLineUpdate[];
   commissions?: PurchaseCommissionCreate[];
   /** SAC E2 D9 — AUSENTE (no []) para orgs sin flag: payload byte-idéntico al actual */
   retentions?: PurchaseRetentionCreate[];
+  /** SAC Ciclo D — mismo data-gate D9: AUSENTE para orgs sin flag */
+  collector_commission?: CollectorCommissionIn;
   immediate_payment?: boolean;
   payment_account_id?: string;
   liquidation_date?: string;

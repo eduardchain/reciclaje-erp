@@ -210,6 +210,15 @@ class PurchaseResponse(PurchaseBase):
     # (solo en list y detail; None para compras manuales y orgs sin recepcion)
     inbound_order_id: Optional[UUID] = Field(None, description="Recepcion de origen (si la compra fue derivada)")
     inbound_order_number: Optional[int] = Field(None, description="Numero de la recepcion de origen")
+    # SAC Ciclo D: recolector capturado en la entrada — la Liquidate page
+    # pre-carga la comision (tarifa comision_green_loop x kg, editable)
+    collector_id: Optional[UUID] = Field(None, description="Recolector de la entrada de origen")
+    collector_name: Optional[str] = Field(None, description="Nombre del recolector")
+    # Solo en GET de detalle (patron #63, sin N+1): comision causada confirmed;
+    # None si no hay o fue anulada (condonada)
+    collector_commission_total: Optional[float] = Field(
+        None, description="Comision de recoleccion causada (gasto) — solo detalle"
+    )
 
     # Pago inmediato enlazado vivo (solo en detalle) — para el diálogo de cancelación (decisión #63)
     linked_payment_total: Optional[float] = Field(None, description="Suma de pagos inmediatos enlazados confirmados (payment_to_supplier con purchase_id). null/0 = ninguno")
@@ -265,6 +274,18 @@ class PurchaseRetentionResponse(BaseModel):
     reverted_at: Optional[datetime] = None
 
 
+class CollectorCommissionIn(BaseModel):
+    """Comision de recolector al liquidar (SAC Ciclo D — data-gated D9).
+
+    NO es PurchaseCommission (#30): no se prorratea al costo. Se causa como
+    GASTO (expense_accrual, categoria sistema 'Comisiones de recoleccion').
+    El monto editado por Johana es la fuente de verdad — la tarifa
+    comision_green_loop solo pre-sugiere en el frontend (patron F1 #79).
+    """
+    third_party_id: UUID
+    amount: Decimal = Field(..., gt=0)
+
+
 class PurchaseLiquidateRequest(BaseModel):
     """Schema for liquidating a purchase (confirmar precios, mover stock, actualizar saldo proveedor)."""
     lines: Optional[List[PurchaseLiquidateLineUpdate]] = Field(None, description="Actualizacion opcional de precios por linea")
@@ -276,6 +297,10 @@ class PurchaseLiquidateRequest(BaseModel):
     # presente exige flag kg_ledger_enabled (422 en servicio)
     retentions: Optional[List[PurchaseRetentionCreate]] = Field(
         None, description="Retenciones tributarias (proveedor recibe neto; requiere kg_ledger_enabled)"
+    )
+    # SAC Ciclo D: mismo data-gate D9 — ausente = camino actual byte a byte
+    collector_commission: Optional[CollectorCommissionIn] = Field(
+        None, description="Comision de recolector como gasto (requiere kg_ledger_enabled)"
     )
 
     @model_validator(mode="after")

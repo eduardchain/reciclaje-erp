@@ -19,7 +19,7 @@ import { MoneyInput } from "@/components/shared/MoneyInput";
 import { PurchaseLink } from "@/components/shared/EntityLink";
 import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { useInboundOrder, useUpdateInboundOrder } from "@/hooks/useInboundOrders";
-import { useMaterials } from "@/hooks/useMasterData";
+import { useMaterials, usePayableProviders } from "@/hooks/useMasterData";
 import { useDrivers, useKgProfiles, useVehicles } from "@/hooks/useSacConfig";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { toLocalDateInput, utcToLocalDateInput } from "@/utils/formatters";
@@ -61,6 +61,7 @@ export default function InboundEditPage() {
 
   const { data: materialsData } = useMaterials();
   const { data: driversData } = useDrivers();
+  const { data: collectorsData } = usePayableProviders();
   const { data: vehiclesData } = useVehicles();
   const { data: profilesData } = useKgProfiles();
 
@@ -73,6 +74,7 @@ export default function InboundEditPage() {
   const [date, setDate] = useState("");
   const [driverId, setDriverId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
+  const [collectorId, setCollectorId] = useState("");
   const [willardCenter, setWillardCenter] = useState("none");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([]);
@@ -98,6 +100,7 @@ export default function InboundEditPage() {
       setDate(utcToLocalDateInput(order.date));
       setDriverId(order.driver_id ?? "");
       setVehicleId(order.vehicle_id ?? "");
+      setCollectorId(order.collector_id ?? "");
       setWillardCenter(order.willard_distribution_center ?? "none");
       setNotes(order.notes ?? "");
       setLines(
@@ -130,6 +133,11 @@ export default function InboundEditPage() {
   }
 
   const isWillard = WILLARD_INBOUND_TYPES.includes(order.inbound_type);
+  const collectors = collectorsData?.items ?? [];
+  // Ciclo D: el recolector se congela cuando la compra derivada ya no esta
+  // registered — la comision ya se definio al liquidar (backend 422)
+  const collectorLocked =
+    !isWillard && order.purchase_status != null && order.purchase_status !== "registered";
   const todayStr = toLocalDateInput();
   const isFutureDate = date ? date > todayStr : false;
 
@@ -160,6 +168,11 @@ export default function InboundEditPage() {
     }
     if (driverId && driverId !== (order.driver_id ?? "")) payload.driver_id = driverId;
     if (vehicleId && vehicleId !== (order.vehicle_id ?? "")) payload.vehicle_id = vehicleId;
+    // Ciclo D: null explicito quita el recolector. Willard: siempre editable
+    // (informativo); tipo compra: congelado cuando la derivada no esta registered
+    if (!collectorLocked && collectorId !== (order.collector_id ?? "")) {
+      payload.collector_id = collectorId || null;
+    }
     // Nota de cabecera: editable en AMBOS tipos (informativa, sin efectos)
     if (notes.trim() !== (order.notes ?? "")) payload.notes = notes.trim() || null;
     return payload;
@@ -271,6 +284,25 @@ export default function InboundEditPage() {
                 }))}
                 placeholder="Sin vehículo..."
               />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Recolector{isWillard ? "" : " (comisión)"}
+              </Label>
+              <EntitySelect
+                value={collectorId}
+                onChange={setCollectorId}
+                options={collectors.map((c) => ({ id: c.id, label: c.name }))}
+                placeholder="Sin recolector..."
+                disabled={collectorLocked}
+              />
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {isWillard
+                  ? "Solo registro — la recolección Willard no genera comisión"
+                  : collectorLocked
+                  ? "La compra ya se liquidó — la comisión ya se definió; el recolector no se puede cambiar"
+                  : "La comisión se define al liquidar (va a gastos, no al costo)"}
+              </p>
             </div>
             {isWillard && (
               <div>
