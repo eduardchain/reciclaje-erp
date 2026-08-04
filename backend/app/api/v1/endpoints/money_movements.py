@@ -85,6 +85,10 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "loan_interest_accrual": 1,         # Interes causado por cobrar: nos debe mas (balance sube)
     "loan_interest_collection": -1,     # Recaudo de intereses: nos debe menos (balance baja)
     "loan_capital_collection": -1,      # Recaudo de capital: nos debe menos (balance baja)
+    "obligation_interest_transfer": 1,  # Traslado a tercero: la obligacion debe menos (balance sube)
+    "obligation_capital_transfer": 1,   # Abono desde tercero: la obligacion debe menos (balance sube)
+    "loan_interest_transfer": -1,       # Traslado (prestamo): el deudor debe menos (balance baja)
+    "loan_capital_transfer": -1,        # Recaudo desde tercero: el deudor debe menos (balance baja)
 }
 
 # Direccion del efecto en el balance de la cuenta por tipo de movimiento.
@@ -117,6 +121,8 @@ ACCOUNT_BALANCE_DIRECTION = {
     # expense_accrual: NO toca cuenta (account_id=None)
     # deferred_expense: NO toca cuenta (account_id=None)
     # obligation_interest_accrual / loan_interest_accrual: NO tocan cuenta
+    # *_interest_transfer / *_capital_transfer + sus legs tp_transfer_*:
+    # NO tocan cuenta (traslados contra tercero, account_id=None)
 }
 
 

@@ -44,6 +44,14 @@ export interface ObligationMovementCreate {
   notes?: string;
 }
 
+export interface ObligationTransferCreate {
+  amount: number;
+  third_party_id: string;
+  date: string;
+  reference_number?: string;
+  notes?: string;
+}
+
 export interface PendingAccrualItem {
   obligation_id: string;
   third_party_name: string;

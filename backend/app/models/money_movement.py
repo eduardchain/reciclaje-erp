@@ -95,6 +95,10 @@ VALID_MOVEMENT_TYPES = [
     "loan_interest_accrual",         # Interes causado por cobrar: NO cuenta, tp.balance(+), P&L ingreso financiero
     "loan_interest_collection",      # Recaudo de intereses: account(+), tp.balance(-)
     "loan_capital_collection",       # Recaudo de capital: account(+), tp.balance(-)
+    "obligation_interest_transfer",  # Traslado de intereses a tercero: NO cuenta, tp.balance(+). Par con tp_transfer_out
+    "obligation_capital_transfer",   # Abono a capital desde tercero: NO cuenta, tp.balance(+). Par con tp_transfer_out
+    "loan_interest_transfer",        # Traslado de intereses (prestamo): NO cuenta, tp.balance(-). Par con tp_transfer_in
+    "loan_capital_transfer",         # Recaudo de capital desde tercero: NO cuenta, tp.balance(-). Par con tp_transfer_in
     "internal_maquila_expense",      # Maquila intersede (sede origen): NO cuenta, NO tercero. Solo P&L por sede (SAC E3.1)
     "internal_maquila_income",       # Maquila intersede (sede destino): NO cuenta, NO tercero. Solo P&L por sede (SAC E3.1)
 ]

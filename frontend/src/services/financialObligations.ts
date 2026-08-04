@@ -7,6 +7,7 @@ import type {
   FinancialObligationResponse,
   ObligationAccrueRequest,
   ObligationMovementCreate,
+  ObligationTransferCreate,
   ObligationSummaryResponse,
   PendingAccrualsResponse,
 } from "@/types/financial-obligation";
@@ -72,6 +73,16 @@ export const financialObligationService = {
 
   interestPayment: async (id: string, data: ObligationMovementCreate): Promise<MoneyMovementResponse> => {
     const response = await apiClient.post<MoneyMovementResponse>(`${BASE}/${id}/interest-payment`, data);
+    return response.data;
+  },
+
+  interestTransfer: async (id: string, data: ObligationTransferCreate): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.post<MoneyMovementResponse>(`${BASE}/${id}/interest-transfer`, data);
+    return response.data;
+  },
+
+  capitalTransfer: async (id: string, data: ObligationTransferCreate): Promise<MoneyMovementResponse> => {
+    const response = await apiClient.post<MoneyMovementResponse>(`${BASE}/${id}/capital-transfer`, data);
     return response.data;
   },
 

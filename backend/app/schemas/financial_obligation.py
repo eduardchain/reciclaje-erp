@@ -65,6 +65,18 @@ class ObligationMovementCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class ObligationTransferCreate(BaseModel):
+    """Traslado de intereses o abono de capital contra un tercero — sin caja.
+
+    La contraparte asume la deuda como saldo ordinario (par con tp_transfer_*).
+    """
+    amount: Decimal = Field(..., gt=0)
+    third_party_id: UUID = Field(..., description="Tercero contraparte del traslado")
+    date: BusinessDate = Field(..., description="Fecha del movimiento")
+    reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+
 class AccruePendingRequest(BaseModel):
     """Batch de causacion. La categoria de gasto es obligatoria si hay causaciones payable."""
     expense_category_id: Optional[UUID] = Field(

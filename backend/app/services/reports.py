@@ -151,6 +151,10 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "loan_interest_accrual": 1,         # Interes causado por cobrar: nos debe mas
     "loan_interest_collection": -1,     # Recaudo de intereses: nos debe menos
     "loan_capital_collection": -1,      # Recaudo de capital: nos debe menos
+    "obligation_interest_transfer": 1,  # Traslado a tercero: la obligacion debe menos
+    "obligation_capital_transfer": 1,   # Abono desde tercero: la obligacion debe menos
+    "loan_interest_transfer": -1,       # Traslado (prestamo): el deudor debe menos
+    "loan_capital_transfer": -1,        # Recaudo desde tercero: el deudor debe menos
 }
 
 # Tipos de money_movement que representan inflows a cuentas

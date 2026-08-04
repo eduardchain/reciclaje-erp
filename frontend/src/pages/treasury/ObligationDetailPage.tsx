@@ -21,12 +21,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { Checkbox } from "@/components/ui/checkbox";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useMoneyAccounts, useExpenseCategoriesFlat } from "@/hooks/useMasterData";
+import { useMoneyAccounts, useExpenseCategoriesFlat, useThirdParties } from "@/hooks/useMasterData";
+import { EntitySelect } from "@/components/shared/EntitySelect";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
 import {
   useFinancialObligation,
   useObligationStatement,
   useObligationMovement,
+  useObligationTransfer,
   useSettleObligation,
   useAnnulObligationMovement,
   useAccruePreview,
@@ -46,12 +48,18 @@ const MOVEMENT_LABELS: Record<string, string> = {
   loan_interest_accrual: "Interés Causado",
   loan_interest_collection: "Recaudo de Intereses",
   loan_capital_collection: "Recaudo de Capital",
+  obligation_interest_transfer: "Traslado de Intereses a Tercero",
+  obligation_capital_transfer: "Abono a Capital (desde tercero)",
+  loan_interest_transfer: "Traslado de Intereses a Tercero",
+  loan_capital_transfer: "Recaudo de Capital (desde tercero)",
+  tp_transfer_out: "Contraparte del Traslado",
+  tp_transfer_in: "Contraparte del Traslado",
 };
 
 type ActionKind = "capital" | "interest" | "disbursement";
 
 function ActionDialog({
-  open, onOpenChange, obligationId, kind, title, maxAmount,
+  open, onOpenChange, obligationId, kind, title, maxAmount, direction, obligationThirdPartyId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -59,21 +67,54 @@ function ActionDialog({
   kind: ActionKind;
   title: string;
   maxAmount?: number;
+  direction: "payable" | "receivable";
+  obligationThirdPartyId: string;
 }) {
   const [amount, setAmount] = useState(0);
   const [accountId, setAccountId] = useState("");
+  const [thirdPartyId, setThirdPartyId] = useState("");
+  const [mode, setMode] = useState<"account" | "third_party">("account");
   const [date, setDate] = useState("");
   const [notes, setNotes] = useState("");
   const { data: accounts } = useMoneyAccounts();
   const mutation = useObligationMovement(kind);
+  const transferMutation = useObligationTransfer(kind === "interest" ? "interest" : "capital");
+  // Traslado contra tercero: solo capital/intereses (el desembolso siempre es por cuenta)
+  const canTransfer = kind !== "disbursement";
+  const { data: thirdParties } = useThirdParties(
+    { is_active: true, limit: 1000 },
+    { staleTime: 60_000 }
+  );
+  const tpOptions = (thirdParties?.items ?? []).filter(
+    (tp: any) => tp.id !== obligationThirdPartyId && !tp.is_system_entity
+  );
+  const selectedTp = tpOptions.find((tp: any) => tp.id === thirdPartyId);
+  // Preview del saldo resultante (informativo, no bloquea — mas negativo es valido)
+  const resultingBalance = selectedTp !== undefined
+    ? Number(selectedTp.current_balance ?? 0) + (direction === "payable" ? -amount : amount)
+    : null;
 
   const overMax = maxAmount !== undefined && amount > maxAmount;
-  const canSubmit = amount > 0 && !!accountId && !!date && !overMax;
+  const isTransfer = canTransfer && mode === "third_party";
+  const canSubmit = amount > 0 && !!date && !overMax
+    && (isTransfer ? !!thirdPartyId : !!accountId);
+
+  const reset = () => {
+    setAmount(0); setAccountId(""); setThirdPartyId("");
+    setMode("account"); setDate(""); setNotes("");
+  };
 
   const handleSubmit = () => {
+    if (isTransfer) {
+      transferMutation.mutate(
+        { id: obligationId, data: { amount, third_party_id: thirdPartyId, date, ...(notes ? { notes } : {}) } },
+        { onSuccess: () => { reset(); onOpenChange(false); } }
+      );
+      return;
+    }
     mutation.mutate(
       { id: obligationId, data: { amount, account_id: accountId, date, ...(notes ? { notes } : {}) } },
-      { onSuccess: () => { setAmount(0); setAccountId(""); setDate(""); setNotes(""); onOpenChange(false); } }
+      { onSuccess: () => { reset(); onOpenChange(false); } }
     );
   };
 
@@ -101,17 +142,57 @@ function ActionDialog({
               <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
           </div>
-          <div className="space-y-1.5">
-            <Label>Cuenta</Label>
-            <Select value={accountId} onValueChange={setAccountId}>
-              <SelectTrigger><SelectValue placeholder="Seleccione la cuenta" /></SelectTrigger>
-              <SelectContent>
-                {(accounts?.items ?? []).map((acc: any) => (
-                  <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {canTransfer && (
+            <div className="space-y-1.5">
+              <Label>Contrapartida</Label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={mode === "account"}
+                    onChange={() => setMode("account")}
+                  />
+                  Desde cuenta
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={mode === "third_party"}
+                    onChange={() => setMode("third_party")}
+                  />
+                  Contra tercero (sin caja)
+                </label>
+              </div>
+            </div>
+          )}
+          {isTransfer ? (
+            <div className="space-y-1.5">
+              <Label>Tercero contraparte</Label>
+              <EntitySelect
+                value={thirdPartyId}
+                onChange={setThirdPartyId}
+                options={tpOptions.map((tp: any) => ({ id: tp.id, label: tp.name }))}
+                placeholder="Seleccione el tercero"
+              />
+              {selectedTp !== undefined && amount > 0 && (
+                <p className="text-xs text-slate-500">
+                  Saldo resultante de {selectedTp.name}: {formatCurrency(resultingBalance ?? 0)}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>Cuenta</Label>
+              <Select value={accountId} onValueChange={setAccountId}>
+                <SelectTrigger><SelectValue placeholder="Seleccione la cuenta" /></SelectTrigger>
+                <SelectContent>
+                  {(accounts?.items ?? []).map((acc: any) => (
+                    <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label>Notas (opcional)</Label>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
@@ -119,7 +200,11 @@ function ActionDialog({
         </div>
         <DialogFooter className="gap-2">
           <Button variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button className="w-full sm:w-auto" disabled={!canSubmit || mutation.isPending} onClick={handleSubmit}>
+          <Button
+            className="w-full sm:w-auto"
+            disabled={!canSubmit || mutation.isPending || transferMutation.isPending}
+            onClick={handleSubmit}
+          >
             Registrar
           </Button>
         </DialogFooter>
@@ -633,6 +718,8 @@ export default function ObligationDetailPage() {
           kind={action.kind}
           title={action.title}
           maxAmount={action.max}
+          direction={obligation.direction}
+          obligationThirdPartyId={obligation.third_party_id}
         />
       )}
       <AnnulMovementDialog

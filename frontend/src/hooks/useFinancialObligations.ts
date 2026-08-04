@@ -7,6 +7,7 @@ import type {
   FinancialObligationCreate,
   ObligationAccrueRequest,
   ObligationMovementCreate,
+  ObligationTransferCreate,
 } from "@/types/financial-obligation";
 
 interface ObligationFilters {
@@ -130,6 +131,28 @@ export function useObligationMovement(action: MovementAction) {
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, "Error al registrar el movimiento"));
+    },
+  });
+}
+
+export function useObligationTransfer(action: "capital" | "interest") {
+  const queryClient = useQueryClient();
+  const fn = {
+    capital: financialObligationService.capitalTransfer,
+    interest: financialObligationService.interestTransfer,
+  }[action];
+  const label = {
+    capital: "Abono a capital contra tercero registrado",
+    interest: "Traslado de intereses registrado",
+  }[action];
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ObligationTransferCreate }) => fn(id, data),
+    onSuccess: () => {
+      invalidateAfterObligation(queryClient);
+      toast.success(label);
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al registrar el traslado"));
     },
   });
 }
