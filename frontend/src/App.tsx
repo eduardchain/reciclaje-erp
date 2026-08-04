@@ -94,6 +94,7 @@ const TransferDetailPage = lazy(() => import("@/pages/transfers/TransferDetailPa
 const TariffsPage = lazy(() => import("@/pages/config/TariffsPage"));
 const FormulasPage = lazy(() => import("@/pages/config/FormulasPage"));
 const FleetPage = lazy(() => import("@/pages/config/FleetPage"));
+const WillardCentersPage = lazy(() => import("@/pages/config/WillardCentersPage"));
 const RolesPage = lazy(() => import("@/pages/admin/RolesPage"));
 const RoleEditPage = lazy(() => import("@/pages/admin/RoleEditPage"));
 const UsersPage = lazy(() => import("@/pages/admin/UsersPage"));
@@ -228,6 +229,7 @@ function App() {
               <Route path={ROUTES.CONFIG_TARIFFS} element={<FP flag="kg_ledger_enabled" permission="tariffs.view"><TariffsPage /></FP>} />
               <Route path={ROUTES.CONFIG_FORMULAS} element={<FP flag="kg_ledger_enabled" permission="formulas.view"><FormulasPage /></FP>} />
               <Route path={ROUTES.CONFIG_FLEET} element={<FP flag="kg_ledger_enabled" permission="config.view_fleet"><FleetPage /></FP>} />
+              <Route path={ROUTES.CONFIG_WILLARD_CENTERS} element={<FP flag="kg_ledger_enabled" permission="config.manage_sac_settings"><WillardCentersPage /></FP>} />
               {/* Admin */}
               <Route path={ROUTES.ADMIN_ROLES} element={<P permission="admin.manage_roles"><RolesPage /></P>} />
               <Route path="/admin/roles/:id" element={<P permission="admin.manage_roles"><RoleEditPage /></P>} />

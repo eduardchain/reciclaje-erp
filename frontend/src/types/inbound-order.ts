@@ -35,6 +35,8 @@ export interface InboundOrderCreate {
   collector_id?: string | null;
   willard_distribution_center?: string | null;
   notes?: string | null;
+  /** Ajustes 2026-08-03 (A): factura — compra la propaga a la compra derivada, willard a su columna */
+  invoice_number?: string | null;
   lines: InboundOrderLineCreate[];
 }
 
@@ -45,12 +47,15 @@ export interface InboundOrderCreate {
  */
 export interface InboundOrderUpdate {
   date?: string;
-  driver_id?: string;
-  vehicle_id?: string;
+  /** null explícito = quitar (alineado a fields_set en el backend, ajustes 2026-08-03) */
+  driver_id?: string | null;
+  vehicle_id?: string | null;
   /** Ciclo D: editable (incl. null para quitar) solo mientras la compra derivada esté registered */
   collector_id?: string | null;
   willard_distribution_center?: string;
   notes?: string | null;
+  /** Ajustes 2026-08-03 (A): factura — compra la propaga a la compra derivada, willard a su columna */
+  invoice_number?: string | null;
   lines?: InboundOrderLineCreate[];
 }
 
@@ -101,6 +106,8 @@ export interface InboundOrderResponse {
   collector_commission_total?: number | null;
   willard_distribution_center: string | null;
   notes: string | null;
+  /** Lectura condicional por tipo (D1): compra -> purchases.invoice_number, willard -> columna propia */
+  invoice_number: string | null;
   status: InboundOrderStatus;
   display_status: InboundDisplayStatus;
   purchase_id: string | null;

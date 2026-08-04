@@ -117,6 +117,9 @@ PERMISSIONS_CATALOG = [
     # SAC E1 (D4: dual-write con migracion d7e0a3c4b5f6; sin wiring a SYSTEM_ROLES)
     ("config.view_fleet", "Ver Conductores y Vehiculos", "config", "Permite ver los maestros de conductores y vehiculos", 129),
     ("config.manage_fleet", "Gestionar Conductores y Vehiculos", "config", "Permite crear y editar conductores y vehiculos", 130),
+    # Ajustes reunion 2026-08-03 (C, migracion c4d5e6f7a8b9): autoservicio de
+    # centros de distribucion Willard sin abrir el JSONB de settings completo
+    ("config.manage_sac_settings", "Gestionar Configuracion SAC", "config", "Permite editar los centros de distribucion Willard de la organizacion", 131),
     ("tariffs.view", "Ver Tarifas", "tariffs", "Permite ver tarifas de servicio (historico y vigente)", 140),
     ("tariffs.manage", "Gestionar Tarifas", "tariffs", "Permite crear nuevas tarifas de servicio (append-only)", 141),
     ("formulas.view", "Ver Formulas de Conversion", "formulas", "Permite ver formulas de conversion de materiales", 142),

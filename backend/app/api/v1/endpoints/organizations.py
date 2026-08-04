@@ -3,7 +3,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_active_user, get_optional_org_context
+from app.api.deps import (
+    get_db,
+    get_current_active_user,
+    get_optional_org_context,
+    get_required_org_context,
+    require_org_flag,
+    require_permission,
+)
 from app.schemas.organization import (
     OrganizationCreate,
     OrganizationUpdate,
@@ -13,6 +20,8 @@ from app.schemas.organization import (
     OrganizationMemberResponse,
     AccountAssignmentsUpdate,
     CreateUserWithMembership,
+    WillardDistributionCentersUpdate,
+    WillardDistributionCentersResponse,
 )
 from app.services.organization import (
     create_organization,
@@ -27,6 +36,7 @@ from app.services.organization import (
     get_user_account_assignments,
     update_user_account_assignments,
     get_user_org_count,
+    update_willard_distribution_centers,
 )
 from app.services.user import get_user_by_email, get_user_by_id, create_user, reset_password, delete_user
 from app.schemas.user import UserCreate
@@ -114,6 +124,43 @@ def create_new_organization(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+
+
+@router.put(
+    "/settings/willard-distribution-centers",
+    response_model=WillardDistributionCentersResponse,
+    summary="Actualizar centros de distribucion Willard",
+    dependencies=[
+        Depends(require_org_flag("kg_ledger_enabled")),
+        Depends(require_permission("config.manage_sac_settings")),
+    ],
+)
+def put_willard_distribution_centers(
+    data: WillardDistributionCentersUpdate,
+    db: Session = Depends(get_db),
+    org_context: dict = Depends(get_required_org_context),
+) -> WillardDistributionCentersResponse:
+    """Autoservicio de centros de distribucion (ajustes 2026-08-03, item C).
+
+    Superficie DELIBERADAMENTE estrecha: este endpoint solo puede tocar una
+    clave del JSONB de settings. Los feature flags siguen siendo exclusivos
+    del superusuario via PATCH /system/organizations/{id} — abrirle settings
+    completo a un admin de organizacion le permitiria encender maquila o
+    traslados de dos pasos.
+
+    No hay GET hermano: el frontend ya lee la lista con useOrgSettings() via
+    GET /organizations/{id}, que es la misma query que alimenta el selector de
+    la Entrada.
+    """
+    try:
+        centers, warnings = update_willard_distribution_centers(
+            db, org_context["organization_id"], data.centers
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        )
+    return WillardDistributionCentersResponse(centers=centers, warnings=warnings)
 
 
 @router.get(

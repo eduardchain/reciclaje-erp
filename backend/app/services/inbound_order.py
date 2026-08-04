@@ -118,6 +118,10 @@ class InboundOrderService:
             # goes_directly_to_jm retirado de la superficie (Ciclo B B4, Q-03) —
             # la columna queda inerte con su server_default
             notes=obj_in.notes,
+            # A/D1: se persiste aca SOLO en willard (sin compra derivada donde
+            # guardarla); la rama de tipo compra la manda al PurchaseCreate y
+            # deja esta columna en NULL — jamas las dos a la vez
+            invoice_number=obj_in.invoice_number if is_willard else None,
             # B.2: willard nace "Registrada" (draft) — bandeja de Johana;
             # tipo compra sigue confirmed (su 2-pasos vive en la Purchase derivada)
             status="draft" if is_willard else "confirmed",
@@ -146,6 +150,7 @@ class InboundOrderService:
                 date=obj_in.date,
                 warehouse_id=obj_in.warehouse_id,  # D11: header fuerza lineas
                 vehicle_plate=vehicle_plate,
+                invoice_number=obj_in.invoice_number,
                 lines=[
                     PurchaseLineCreate(
                         material_id=l.material_id,
@@ -717,15 +722,35 @@ class InboundOrderService:
             self._apply_willard_effects(db, order, new_lines, organization_id, user_id)
 
         # Cabecera sin efectos
-        if obj_in.driver_id is not None:
+        # `fields_set` (no `is not None`): distingue ausente de null explicito —
+        # antes de este ciclo driver/vehiculo usaban `is not None` y por eso NO
+        # se podian QUITAR de una entrada. Alineados al patron de notes.
+        if "driver_id" in fields_set:
             order.driver_id = obj_in.driver_id
-        if obj_in.vehicle_id is not None:
+        if "vehicle_id" in fields_set:
             order.vehicle_id = obj_in.vehicle_id
+            # E: la compra derivada guarda la PLACA (no el FK) y el listado de
+            # Compras filtra y muestra por ella — sin esto la correccion del
+            # operador no se ve donde importa. Sin guard de estado (D10): una
+            # compra liquidada con la placa equivocada es justo el caso a
+            # corregir, y no hay efecto financiero.
+            if order.purchase is not None:
+                order.purchase.vehicle_plate = (
+                    db.get(Vehicle, obj_in.vehicle_id).plate
+                    if obj_in.vehicle_id is not None
+                    else None
+                )
         if obj_in.willard_distribution_center is not None:
             order.willard_distribution_center = obj_in.willard_distribution_center
         if "notes" in fields_set:
             # None explicito borra la nota (exclude_unset distingue ausente de null)
             order.notes = obj_in.notes
+        if "invoice_number" in fields_set:
+            # A/D1: al destino que corresponde al tipo, nunca a los dos
+            if order.purchase is not None:
+                order.purchase.invoice_number = obj_in.invoice_number
+            else:
+                order.invoice_number = obj_in.invoice_number
 
         db.commit()
         db.refresh(order)
@@ -799,6 +824,7 @@ class InboundOrderService:
                 )
 
         # Ciclo C (C-2): buscador — #, placa, conductor, tercero, material
+        # + factura (ajustes 2026-08-03, A)
         if search and search.strip():
             like = f"%{search.strip()}%"
             material_match = (
@@ -807,6 +833,21 @@ class InboundOrderService:
                 .where(
                     InboundOrderLine.inbound_order_id == InboundOrder.id,
                     or_(Material.code.ilike(like), Material.name.ilike(like)),
+                )
+                .exists()
+            )
+            # A/H3: la factura vive en DOS sitios segun el tipo (D1). Se resuelve
+            # con EXISTS y NO con un join a Purchase por dos razones: (a) el
+            # outerjoin de arriba es CONDICIONAL (solo con display_status) —
+            # reusarlo romperia al buscar sin filtro de estado y lo duplicaria
+            # con filtro; (b) un join no-outer haria DESAPARECER en silencio
+            # todas las willard, que no tienen compra. Con EXISTS el modo de
+            # falla es estructuralmente imposible.
+            purchase_invoice_match = (
+                select(Purchase.id)
+                .where(
+                    Purchase.id == InboundOrder.purchase_id,
+                    Purchase.invoice_number.ilike(like),
                 )
                 .exists()
             )
@@ -821,6 +862,8 @@ class InboundOrderService:
                         Driver.name.ilike(like),
                         ThirdParty.name.ilike(like),
                         material_match,
+                        InboundOrder.invoice_number.ilike(like),  # willard
+                        purchase_invoice_match,                    # tipo compra
                     )
                 )
             )

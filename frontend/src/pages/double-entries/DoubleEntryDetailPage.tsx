@@ -13,7 +13,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { useDoubleEntry, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
-import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
+import { formatCurrency, formatDate, formatDateTime, formatWeight, formatPercentage } from "@/utils/formatters";
 import { exportDoubleEntryPDF } from "@/utils/pdfExport";
 import { CHARGE_TYPE_LABELS } from "@/utils/constants";
 import { useAuthStore } from "@/stores/authStore";
@@ -80,7 +80,7 @@ export default function DoubleEntryDetailPage() {
               {de.invoice_number && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Factura</dt><dd>{de.invoice_number}</dd></div>}
               {de.vehicle_plate && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa</dt><dd>{de.vehicle_plate}</dd></div>}
               {de.liquidated_at && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidada</dt><dd>{formatDate(de.liquidated_at)}</dd></div>}
-              {de.cancelled_at && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cancelada</dt><dd>{formatDate(de.cancelled_at)}</dd></div>}
+              {de.cancelled_at && <div className="flex justify-between"><dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cancelada</dt><dd>{formatDateTime(de.cancelled_at)}</dd></div>}
             </dl>
           </CardContent>
         </Card>

@@ -407,7 +407,7 @@ export default function PurchaseDetailPage() {
               <div>
                 <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Liquidada por</dt>
                 <dd className="mt-0.5">{purchase.liquidated_by_name ?? "-"}</dd>
-                <dd className="text-xs text-slate-400">{formatDateTime(purchase.liquidated_at)}</dd>
+                <dd className="text-xs text-slate-400">{formatDate(purchase.liquidated_at)}</dd>
               </div>
             )}
             {purchase.cancelled_at && (

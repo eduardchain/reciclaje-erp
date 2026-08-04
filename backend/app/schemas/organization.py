@@ -57,6 +57,28 @@ class OrgSettingsPayload(BaseModel):
     )
 
 
+class WillardDistributionCentersUpdate(BaseModel):
+    """Ajustes reunion 2026-08-03 (C) — autoservicio de centros Willard.
+
+    Payload de la UNICA clave de settings que un admin de organizacion puede
+    escribir. El PATCH de sistema (superuser) sigue siendo el unico camino
+    para los feature flags: dejarlos al alcance de un admin de org seria
+    escalada de privilegios (podria encender maquila o traslados).
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    centers: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Centros de distribucion Willard validos en la recepcion",
+    )
+
+
+class WillardDistributionCentersResponse(BaseModel):
+    centers: list[str]
+    warnings: list[str] = []
+
+
 class OrganizationBase(BaseModel):
     """Base organization schema with common attributes."""
     name: str = Field(..., min_length=2, max_length=255)

@@ -7,6 +7,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -20,7 +27,13 @@ import { PurchaseLink } from "@/components/shared/EntityLink";
 import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { useInboundOrder, useUpdateInboundOrder } from "@/hooks/useInboundOrders";
 import { useMaterials, usePayableProviders } from "@/hooks/useMasterData";
-import { useDrivers, useKgProfiles, useVehicles } from "@/hooks/useSacConfig";
+import {
+  useCreateDriver,
+  useCreateVehicle,
+  useDrivers,
+  useKgProfiles,
+  useVehicles,
+} from "@/hooks/useSacConfig";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { toLocalDateInput, utcToLocalDateInput } from "@/utils/formatters";
 import { buildRoute, ROUTES } from "@/utils/constants";
@@ -74,9 +87,49 @@ export default function InboundEditPage() {
   const [date, setDate] = useState("");
   const [driverId, setDriverId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
+  // Quick-create de flota: el Ciclo B lo agrego SOLO en la pagina de crear;
+  // en edicion el operador quedaba atrapado con "Sin resultados" (reportado
+  // por Daniel en pruebas 2026-08-04). Mismo dialogo, mismos hooks.
+  const [driverDialogOpen, setDriverDialogOpen] = useState(false);
+  const [vehicleDialogOpen, setVehicleDialogOpen] = useState(false);
+  const [newDriverName, setNewDriverName] = useState("");
+  const [newVehiclePlate, setNewVehiclePlate] = useState("");
+  const createDriver = useCreateDriver();
+  const createVehicle = useCreateVehicle();
+
+  const handleQuickCreateDriver = () => {
+    const name = newDriverName.trim();
+    if (!name) return;
+    createDriver.mutate(
+      { name },
+      {
+        onSuccess: (d) => {
+          setDriverId(d.id);
+          setDriverDialogOpen(false);
+          setNewDriverName("");
+        },
+      }
+    );
+  };
+
+  const handleQuickCreateVehicle = () => {
+    const plate = newVehiclePlate.trim().toUpperCase();
+    if (!plate) return;
+    createVehicle.mutate(
+      { plate },
+      {
+        onSuccess: (v) => {
+          setVehicleId(v.id);
+          setVehicleDialogOpen(false);
+          setNewVehiclePlate("");
+        },
+      }
+    );
+  };
   const [collectorId, setCollectorId] = useState("");
   const [willardCenter, setWillardCenter] = useState("none");
   const [notes, setNotes] = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([]);
   const [linesDirty, setLinesDirty] = useState(false);
 
@@ -103,6 +156,7 @@ export default function InboundEditPage() {
       setCollectorId(order.collector_id ?? "");
       setWillardCenter(order.willard_distribution_center ?? "none");
       setNotes(order.notes ?? "");
+      setInvoiceNumber(order.invoice_number ?? "");
       setLines(
         order.lines.map((l) => ({
           _key: ++lineKeyCounter,
@@ -166,8 +220,12 @@ export default function InboundEditPage() {
         payload.willard_distribution_center = willardCenter;
       }
     }
-    if (driverId && driverId !== (order.driver_id ?? "")) payload.driver_id = driverId;
-    if (vehicleId && vehicleId !== (order.vehicle_id ?? "")) payload.vehicle_id = vehicleId;
+    // El `&&` de antes hacia que vaciar el selector NO mandara nada: el
+    // conductor/vehiculo no se podian QUITAR (misma asimetria que el backend
+    // tenia con `is not None`, alineada en este ciclo). `|| null` manda el
+    // borrado explicito que el servicio ya distingue via fields_set.
+    if (driverId !== (order.driver_id ?? "")) payload.driver_id = driverId || null;
+    if (vehicleId !== (order.vehicle_id ?? "")) payload.vehicle_id = vehicleId || null;
     // Ciclo D: null explicito quita el recolector. Willard: siempre editable
     // (informativo); tipo compra: congelado cuando la derivada no esta registered
     if (!collectorLocked && collectorId !== (order.collector_id ?? "")) {
@@ -175,6 +233,8 @@ export default function InboundEditPage() {
     }
     // Nota de cabecera: editable en AMBOS tipos (informativa, sin efectos)
     if (notes.trim() !== (order.notes ?? "")) payload.notes = notes.trim() || null;
+    if (invoiceNumber.trim() !== (order.invoice_number ?? ""))
+      payload.invoice_number = invoiceNumber.trim() || null;
     return payload;
   };
 
@@ -266,24 +326,52 @@ export default function InboundEditPage() {
             )}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Conductor</Label>
-              <EntitySelect
-                value={driverId}
-                onChange={setDriverId}
-                options={drivers.map((d) => ({ id: d.id, label: d.name }))}
-                placeholder="Sin conductor..."
-              />
+              <div className="flex gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <EntitySelect
+                    value={driverId}
+                    onChange={setDriverId}
+                    options={drivers.map((d) => ({ id: d.id, label: d.name }))}
+                    placeholder="Sin conductor..."
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  title="Crear conductor"
+                  onClick={() => setDriverDialogOpen(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Vehículo</Label>
-              <EntitySelect
-                value={vehicleId}
-                onChange={setVehicleId}
-                options={vehicles.map((v) => ({
-                  id: v.id,
-                  label: v.display_name ? `${v.plate} - ${v.display_name}` : v.plate,
-                }))}
-                placeholder="Sin vehículo..."
-              />
+              <div className="flex gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <EntitySelect
+                    value={vehicleId}
+                    onChange={setVehicleId}
+                    options={vehicles.map((v) => ({
+                      id: v.id,
+                      label: v.display_name ? `${v.plate} - ${v.display_name}` : v.plate,
+                    }))}
+                    placeholder="Sin vehículo..."
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  title="Crear vehículo"
+                  onClick={() => setVehicleDialogOpen(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -318,6 +406,18 @@ export default function InboundEditPage() {
                 </Select>
               </div>
             )}
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                N° Factura
+              </Label>
+              <Input
+                value={invoiceNumber}
+                onChange={(e) => setInvoiceNumber(e.target.value)}
+                maxLength={50}
+                className="w-full"
+                placeholder="Opcional"
+              />
+            </div>
             <div className="md:col-span-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
               <Textarea
@@ -434,6 +534,74 @@ export default function InboundEditPage() {
           </Button>
         </div>
       </div>
+
+      {/* Quick-create de flota (calco de InboundCreatePage) */}
+      <Dialog open={driverDialogOpen} onOpenChange={setDriverDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nuevo Conductor</DialogTitle>
+          </DialogHeader>
+          <div>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nombre *</Label>
+            <Input
+              value={newDriverName}
+              onChange={(e) => setNewDriverName(e.target.value)}
+              placeholder="Nombre del conductor..."
+              autoFocus
+              onKeyDown={(e) => e.key === "Enter" && handleQuickCreateDriver()}
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              Documento y teléfono se pueden completar después en Configuración → Flota.
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDriverDialogOpen(false)} className="w-full sm:w-auto">
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleQuickCreateDriver}
+              disabled={!newDriverName.trim() || createDriver.isPending}
+              className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"
+            >
+              {createDriver.isPending ? "Creando..." : "Crear y usar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={vehicleDialogOpen} onOpenChange={setVehicleDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nuevo Vehículo</DialogTitle>
+          </DialogHeader>
+          <div>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Placa *</Label>
+            <Input
+              value={newVehiclePlate}
+              onChange={(e) => setNewVehiclePlate(e.target.value.toUpperCase())}
+              placeholder="ABC123"
+              maxLength={10}
+              autoFocus
+              onKeyDown={(e) => e.key === "Enter" && handleQuickCreateVehicle()}
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              Tipo y descripción se pueden completar después en Configuración → Flota.
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setVehicleDialogOpen(false)} className="w-full sm:w-auto">
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleQuickCreateVehicle}
+              disabled={!newVehiclePlate.trim() || createVehicle.isPending}
+              className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto"
+            >
+              {createVehicle.isPending ? "Creando..." : "Crear y usar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
