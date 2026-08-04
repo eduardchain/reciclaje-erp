@@ -118,6 +118,26 @@ class FixedAsset(Base, OrganizationMixin, TimestampMixin):
 
     disposal_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # Venta (plan venta-activos-fijos): la venta NO expensa el remanente (D1) —
+    # current_value queda congelado y la diferencia precio - libro va al P&L.
+    # Guardan la ULTIMA venta; el rastro completo vive en los MMs (anulados incl.).
+    sale_price: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2), nullable=True,
+        comment="Precio de la ultima venta (NULL = nunca vendido)",
+    )
+
+    sale_gain: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2), nullable=True,
+        comment=(
+            "sale_price - current_value al momento de la venta (signed; "
+            "cuenta en P&L solo si el MM enlazado esta confirmed)"
+        ),
+    )
+
+    sale_movement_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("money_movements.id", ondelete="RESTRICT"), nullable=True,
+    )
+
     # Auditoria
     created_by: Mapped[Optional[UUID]] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
@@ -134,6 +154,10 @@ class FixedAsset(Base, OrganizationMixin, TimestampMixin):
 
     purchase_movement: Mapped[Optional["MoneyMovement"]] = relationship(
         "MoneyMovement", foreign_keys=[purchase_movement_id],
+    )
+
+    sale_movement: Mapped[Optional["MoneyMovement"]] = relationship(
+        "MoneyMovement", foreign_keys=[sale_movement_id],
     )
 
     business_unit: Mapped[Optional["BusinessUnit"]] = relationship(

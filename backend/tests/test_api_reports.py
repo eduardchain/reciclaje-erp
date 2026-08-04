@@ -3007,6 +3007,8 @@ class TestDpPctGeneralExpenses:
         assert rec["tp_adjustment_net"] == pytest.approx(30000, abs=1)
         # 5a linea (Modelo L #65): sin oversell en esta fixture debe ser 0
         assert rec["oversell_cost_adjustment"] == pytest.approx(0, abs=1)
+        # 7a linea (venta de activos): sin ventas en esta fixture debe ser 0
+        assert rec["asset_sale_gain"] == pytest.approx(0, abs=1)
 
         residual = (
             rec["pnl_net_profit"]
@@ -3017,6 +3019,7 @@ class TestDpPctGeneralExpenses:
             - rec["inventory_adjustment_net"]
             - rec["tp_adjustment_net"]
             - rec["oversell_cost_adjustment"]
+            - rec["asset_sale_gain"]
         )
         assert abs(residual) < 1
 

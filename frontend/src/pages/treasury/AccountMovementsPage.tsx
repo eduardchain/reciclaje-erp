@@ -42,6 +42,8 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   asset_revaluation_credit: "Revalorización Activo (Crédito)",
   asset_devaluation_collection: "Devaluación Activo (Reembolso)",
   asset_devaluation_receivable: "Devaluación Activo (Por Cobrar)",
+  asset_sale_collection: "Venta de Activo (a Cuenta)",
+  asset_sale_receivable: "Venta de Activo (Por Cobrar)",
   obligation_disbursement: "Desembolso Obligación",
   obligation_interest_accrual: "Interés Causado (Obligación)",
   obligation_interest_payment: "Pago Intereses Obligación",

@@ -20,6 +20,8 @@ export type MoneyMovementType =
   | "asset_revaluation_credit"
   | "asset_devaluation_collection"
   | "asset_devaluation_receivable"
+  | "asset_sale_collection"
+  | "asset_sale_receivable"
   | "expense_accrual"
   | "deferred_funding"
   | "deferred_expense"

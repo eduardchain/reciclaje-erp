@@ -77,6 +77,7 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "tp_adjustment_debit": -1,       # Ajuste debito: saldo baja (hacia cero desde positivo)
     "asset_revaluation_credit": -1,     # Revalorizacion activo alza a credito: le debemos (balance baja)
     "asset_devaluation_receivable": 1,  # Devaluacion activo a cargo del tercero: nos debe (balance sube)
+    "asset_sale_receivable": 1,         # Venta de activo a credito: nos debe (balance sube)
     "obligation_disbursement": -1,      # Nos prestan: les debemos mas (balance baja)
     "obligation_interest_accrual": -1,  # Interes causado por pagar: debemos mas (balance baja)
     "obligation_interest_payment": 1,   # Pago de intereses: debemos menos (balance sube)
@@ -112,6 +113,7 @@ ACCOUNT_BALANCE_DIRECTION = {
     "collection_from_generic": 1,    # Cobro a generico: entra dinero
     "asset_revaluation_payment": -1,    # Revalorizacion activo alza pagada: sale dinero
     "asset_devaluation_collection": 1,  # Devaluacion activo con reembolso: entra dinero
+    "asset_sale_collection": 1,         # Venta de activo a cuenta: entra dinero
     "obligation_disbursement": 1,       # Nos prestan: entra el prestamo
     "obligation_interest_payment": -1,  # Pago de intereses: sale dinero
     "obligation_capital_payment": -1,   # Abono a capital: sale dinero

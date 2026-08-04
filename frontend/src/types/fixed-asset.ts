@@ -69,11 +69,25 @@ export interface FixedAsset {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // Venta (plan venta-activos-fijos): sale_active gobernado por el status del
+  // MM enlazado — tras anular, sale_* quedan como rastro con sale_active=false.
+  sale_price: number | null;
+  sale_gain: number | null;
+  sale_movement_id: string | null;
+  sale_active: boolean;
   remaining_months: number;
   depreciation_progress: number;
   revalued_total: number;
   depreciations: AssetDepreciation[];
   revaluations: AssetRevaluation[];
+  warnings?: string[] | null;
+}
+
+export interface FixedAssetSellRequest {
+  sale_price: number;
+  account_id?: string | null;
+  third_party_id?: string | null;
+  notes?: string | null;
 }
 
 export interface FixedAssetCreate {

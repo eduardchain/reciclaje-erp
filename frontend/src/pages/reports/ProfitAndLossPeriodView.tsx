@@ -156,6 +156,14 @@ export default function ProfitAndLossPeriodView() {
                   </span>
                 </div>
               )}
+              {(data.asset_sale_gain ?? 0) !== 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Ganancia/Pérdida por Venta de Activos</span>
+                  <span className={data.asset_sale_gain >= 0 ? "text-emerald-700" : "text-red-700"}>
+                    {`${data.asset_sale_gain >= 0 ? "" : "-"}${formatCurrency(Math.abs(data.asset_sale_gain))}`}
+                  </span>
+                </div>
+              )}
               {(data.internal_maquila_income ?? 0) !== 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">+ Ingreso Maquila Intersede</span>

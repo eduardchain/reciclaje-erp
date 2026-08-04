@@ -109,6 +109,7 @@ ACCOUNT_BALANCE_DIRECTION = {
     "collection_from_generic": 1,
     "asset_revaluation_payment": -1,     # Revalorizacion alza pagada: sale dinero
     "asset_devaluation_collection": 1,   # Devaluacion con reembolso: entra dinero
+    "asset_sale_collection": 1,          # Venta de activo a cuenta: entra dinero
     "obligation_disbursement": 1,        # Nos prestan: entra el prestamo
     "obligation_interest_payment": -1,   # Pago de intereses: sale dinero
     "obligation_capital_payment": -1,    # Abono a capital: sale dinero
@@ -143,6 +144,7 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "tp_adjustment_debit": -1,       # Ajuste debito: saldo baja
     "asset_revaluation_credit": -1,     # Revalorizacion alza a credito: le debemos
     "asset_devaluation_receivable": 1,  # Devaluacion a cargo del tercero: nos debe
+    "asset_sale_receivable": 1,         # Venta de activo a credito: nos debe (CxC)
     "obligation_disbursement": -1,      # Nos prestan: les debemos mas
     "obligation_interest_accrual": -1,  # Interes causado por pagar: debemos mas
     "obligation_interest_payment": 1,   # Pago de intereses: debemos menos
@@ -166,6 +168,7 @@ INFLOW_TYPES = frozenset([
     "advance_collection",
     "collection_from_generic",
     "asset_devaluation_collection",  # Devaluacion de activo con reembolso: entra dinero
+    "asset_sale_collection",         # Venta de activo a cuenta: entra dinero
     "obligation_disbursement",       # Nos prestan: entra el prestamo
     "loan_interest_collection",      # Recaudo de intereses de prestamo
     "loan_capital_collection",       # Recaudo de capital de prestamo
@@ -825,6 +828,31 @@ class ReportService:
             + oversell_from_inbound_annuls
         )
 
+        # 3b. Ganancia/Perdida por Venta de Activos (plan venta-activos-fijos D6):
+        # columna persistida fixed_assets.sale_gain gobernada por el status del
+        # MM enlazado (patron oversell) y fechada por MM.date (HOY al vender).
+        # Org-level, no atribuible a UN → $0 por sede (M1) y 7a linea de
+        # conciliacion (#59).
+        from app.models.fixed_asset import FixedAsset as _FA
+        asset_sale_filters = [
+            _FA.organization_id == organization_id,
+            _FA.sale_gain != 0,
+            self._active_at_cutoff(MoneyMovement.status, "confirmed"),
+        ]
+        if has_dates:
+            asset_sale_filters += [
+                MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to,
+            ]
+        asset_sale_filters += _not_by_sede
+        asset_sale_gain = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(_FA.sale_gain), 0))
+                .select_from(_FA)
+                .join(MoneyMovement, _FA.sale_movement_id == MoneyMovement.id)
+                .where(*asset_sale_filters)
+            )
+        ))
+
         # 4. Ajustes de terceros (perdida/ganancia)
         tp_adj_filters = [
             MoneyMovement.organization_id == organization_id,
@@ -1003,7 +1031,7 @@ class ReportService:
 
         # Calculos
         gross_profit_sales = sales_revenue - cogs
-        total_gross_profit = gross_profit_sales + de_profit + service_income + interest_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss + oversell_adjustment + internal_maquila_income - internal_maquila_expense
+        total_gross_profit = gross_profit_sales + de_profit + service_income + interest_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss + oversell_adjustment + asset_sale_gain + internal_maquila_income - internal_maquila_expense
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
         # Subtotales del P&L por rubros (GAP-1 QA): la escalera VISIBLE cierra
@@ -1028,6 +1056,7 @@ class ReportService:
             "waste_loss": waste_loss,
             "adjustment_net": adjustment_net,
             "oversell_adjustment": oversell_adjustment,
+            "asset_sale_gain": asset_sale_gain,
             "tp_adjustment_loss": tp_adj_loss,
             "tp_adjustment_gain": tp_adj_gain,
             "service_income": service_income,
@@ -1208,6 +1237,7 @@ class ReportService:
             waste_loss=float(r["waste_loss"]),
             adjustment_net=float(r["adjustment_net"]),
             oversell_cost_adjustment=float(r["oversell_adjustment"]),
+            asset_sale_gain=float(r["asset_sale_gain"]),
             tp_adjustment_loss=float(r["tp_adjustment_loss"]),
             tp_adjustment_gain=float(r["tp_adjustment_gain"]),
             total_gross_profit=float(r["total_gross_profit"]),
@@ -1275,6 +1305,7 @@ class ReportService:
         capital_injections = mm_map.get("capital_injection", Decimal("0"))
         advance_collections = mm_map.get("advance_collection", Decimal("0"))
         asset_devaluation_collections = mm_map.get("asset_devaluation_collection", Decimal("0"))
+        asset_sale_collections = mm_map.get("asset_sale_collection", Decimal("0"))
         obligation_disbursements = mm_map.get("obligation_disbursement", Decimal("0"))
         loan_interest_collections = mm_map.get("loan_interest_collection", Decimal("0"))
         loan_capital_collections = mm_map.get("loan_capital_collection", Decimal("0"))
@@ -1301,6 +1332,7 @@ class ReportService:
             customer_collections + service_income
             + capital_injections + advance_collections
             + generic_collections + asset_devaluation_collections
+            + asset_sale_collections
             + obligation_disbursements + loan_interest_collections
             + loan_capital_collections
         )
@@ -1351,6 +1383,7 @@ class ReportService:
                 advance_collections=float(advance_collections),
                 generic_collections=float(generic_collections),
                 asset_devaluation_collections=float(asset_devaluation_collections),
+                asset_sale_collections=float(asset_sale_collections),
                 obligation_disbursements=float(obligation_disbursements),
                 loan_interest_collections=float(loan_interest_collections),
                 loan_capital_collections=float(loan_capital_collections),
@@ -4529,7 +4562,7 @@ class ReportService:
             ),
         )
 
-        # 9. Conciliacion con P&L (§3.7 plan A.2): las 6 lineas del P&L que NO
+        # 9. Conciliacion con P&L (§3.7 plan A.2): las 7 lineas del P&L que NO
         # son atribuibles a ninguna UN. Se derivan de LA MISMA funcion que
         # alimenta el tab P&L (`_calculate_profit`) — paridad por construccion,
         # cambios futuros al P&L se propagan solos. Guardrail:
@@ -4545,6 +4578,7 @@ class ReportService:
             inventory_adjustment_net=float(pnl["adjustment_net"]),
             tp_adjustment_net=float(pnl["tp_adjustment_gain"] - pnl["tp_adjustment_loss"]),
             oversell_cost_adjustment=float(pnl["oversell_adjustment"]),
+            asset_sale_gain=float(pnl["asset_sale_gain"]),
             pnl_net_profit=float(pnl["net_profit"]),
         )
 

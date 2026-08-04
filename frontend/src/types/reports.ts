@@ -87,6 +87,7 @@ export interface ProfitAndLossResponse {
   waste_loss: number;
   adjustment_net: number;
   oversell_cost_adjustment: number;
+  asset_sale_gain: number;
   /** SAC E3.1: maquila intersede — lineas propias (0 en consolidado sin flag) */
   internal_maquila_income: number;
   internal_maquila_expense: number;
@@ -140,6 +141,7 @@ export interface CashFlowInflows {
   loan_interest_collections: number;
   loan_capital_collections: number;
   asset_devaluation_collections: number;
+  asset_sale_collections: number;
   total: number;
 }
 
@@ -525,7 +527,7 @@ export interface DoubleEntryProfitability {
 }
 
 // Conciliacion con P&L: lineas no atribuibles a UN.
-// grand_total_net + estas 6 lineas == pnl_net_profit
+// grand_total_net + estas 7 lineas == pnl_net_profit
 export interface PnlReconciliation {
   service_income: number;
   interest_income: number;
@@ -533,6 +535,7 @@ export interface PnlReconciliation {
   inventory_adjustment_net: number;
   tp_adjustment_net: number;
   oversell_cost_adjustment: number;
+  asset_sale_gain: number;
   /** SAC E3.1: maquila intersede — lineas propias (0 en consolidado sin flag) */
   internal_maquila_income: number;
   internal_maquila_expense: number;

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, XCircle, Pencil, TrendingUp } from "lucide-react";
+import { ArrowLeft, Play, XCircle, Pencil, TrendingUp, HandCoins } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { RevalueAssetModal } from "@/components/treasury/RevalueAssetModal";
-import { useFixedAsset, useDepreciateAsset, useDisposeAsset, useCancelFixedAsset, useAnnulRevaluation } from "@/hooks/useFixedAssets";
+import { SellAssetModal } from "@/components/treasury/SellAssetModal";
+import { useFixedAsset, useDepreciateAsset, useDisposeAsset, useCancelFixedAsset, useAnnulRevaluation, useAnnulAssetSale } from "@/hooks/useFixedAssets";
 import { formatCurrency } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import { MoneyMovementLink } from "@/components/shared/EntityLink";
@@ -38,10 +39,14 @@ export default function FixedAssetDetailPage() {
   const dispose = useDisposeAsset();
   const cancelAsset = useCancelFixedAsset();
   const annulRevaluation = useAnnulRevaluation();
+  const annulSale = useAnnulAssetSale();
   const [showDepreciate, setShowDepreciate] = useState(false);
   const [showDispose, setShowDispose] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [showRevalue, setShowRevalue] = useState(false);
+  const [showSell, setShowSell] = useState(false);
+  const [showAnnulSale, setShowAnnulSale] = useState(false);
+  const [annulSaleReason, setAnnulSaleReason] = useState("");
   const [disposeReason, setDisposeReason] = useState("");
   const [annulTarget, setAnnulTarget] = useState<AssetRevaluation | null>(null);
   const [annulReason, setAnnulReason] = useState("");
@@ -53,6 +58,9 @@ export default function FixedAssetDetailPage() {
   const canDispose = !["disposed", "cancelled"].includes(asset.status);
   const canCancel = ["active", "fully_depreciated"].includes(asset.status);
   const canRevalue = ["active", "fully_depreciated"].includes(asset.status);
+  const canSell = ["active", "fully_depreciated"].includes(asset.status);
+  // Venta vigente = MM confirmado (tras anular, sale_* quedan como rastro no vigente)
+  const isSold = asset.status === "disposed" && asset.sale_active;
   const revaluations = asset.revaluations ?? [];
   const progress = Math.min(asset.depreciation_progress, 100);
   const remaining = asset.current_value - asset.salvage_value;
@@ -129,8 +137,11 @@ export default function FixedAssetDetailPage() {
             <div>
               <span className="text-slate-400">Estado</span>
               <div className="mt-1">
-                <Badge variant="secondary" className={statusColors[asset.status]}>
-                  {statusLabels[asset.status]}
+                <Badge
+                  variant="secondary"
+                  className={isSold ? "bg-indigo-100 text-indigo-800" : statusColors[asset.status]}
+                >
+                  {isSold ? "Vendido" : statusLabels[asset.status]}
                 </Badge>
               </div>
             </div>
@@ -201,6 +212,11 @@ export default function FixedAssetDetailPage() {
               <TrendingUp className="h-4 w-4 mr-2" />Revalorizar
             </Button>
           )}
+          {canSell && (
+            <Button variant="outline" onClick={() => setShowSell(true)} className="text-emerald-700 hover:text-emerald-800">
+              <HandCoins className="h-4 w-4 mr-2" />Vender
+            </Button>
+          )}
           {canDispose && (
             <Button variant="outline" onClick={() => setShowDispose(true)} className="text-red-600 hover:text-red-700">
               <XCircle className="h-4 w-4 mr-2" />Dar de Baja
@@ -212,6 +228,53 @@ export default function FixedAssetDetailPage() {
             </Button>
           )}
       </div>
+
+      {/* Venta vigente (solo si el MM enlazado esta confirmado) */}
+      {isSold && (
+        <Card className="shadow-sm border-indigo-200">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-indigo-600">
+              Venta
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <span className="text-slate-400">Precio de venta</span>
+                <p className="font-medium mt-1 tabular-nums">{formatCurrency(asset.sale_price ?? 0)}</p>
+              </div>
+              <div>
+                <span className="text-slate-400">Valor en libros al vender</span>
+                <p className="font-medium mt-1 tabular-nums">{formatCurrency(asset.current_value)}</p>
+              </div>
+              <div>
+                <span className="text-slate-400">{(asset.sale_gain ?? 0) >= 0 ? "Ganancia" : "Pérdida"}</span>
+                <p className={`font-semibold mt-1 tabular-nums ${(asset.sale_gain ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                  {formatCurrency(Math.abs(asset.sale_gain ?? 0))}
+                </p>
+              </div>
+              <div>
+                <span className="text-slate-400">Movimiento</span>
+                <p className="mt-1">
+                  {asset.sale_movement_id && (
+                    <MoneyMovementLink id={asset.sale_movement_id}>Ver movimiento</MoneyMovementLink>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="mt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-red-600 hover:text-red-700"
+                onClick={() => { setAnnulSaleReason(""); setShowAnnulSale(true); }}
+              >
+                <XCircle className="h-4 w-4 mr-2" />Anular Venta
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Tabla de depreciaciones */}
       <Card className="shadow-sm">
@@ -371,6 +434,32 @@ export default function FixedAssetDetailPage() {
 
       {/* Dialogs */}
       <RevalueAssetModal open={showRevalue} onOpenChange={setShowRevalue} asset={asset} />
+      <SellAssetModal open={showSell} onOpenChange={setShowSell} asset={asset} />
+      <ConfirmDialog
+        open={showAnnulSale}
+        onOpenChange={setShowAnnulSale}
+        title="Anular Venta"
+        description={`Se revertirá la contrapartida (${formatCurrency(asset.sale_price ?? 0)} devueltos por la cuenta o el tercero), la ganancia/pérdida sale del Estado de Resultados y el activo vuelve a su estado anterior.`}
+        confirmLabel="Anular Venta"
+        variant="destructive"
+        loading={annulSale.isPending}
+        onConfirm={() => {
+          if (!annulSaleReason.trim()) return;
+          annulSale.mutate(
+            { id: asset.id, reason: annulSaleReason },
+            { onSuccess: () => setShowAnnulSale(false) },
+          );
+        }}
+      >
+        <div className="mt-3">
+          <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Razón *</Label>
+          <Input
+            value={annulSaleReason}
+            onChange={(e) => setAnnulSaleReason(e.target.value)}
+            placeholder="Ej: Error de captura, la venta no se concretó"
+          />
+        </div>
+      </ConfirmDialog>
       <ConfirmDialog
         open={annulTarget !== null}
         onOpenChange={(open) => { if (!open) setAnnulTarget(null); }}

@@ -87,6 +87,8 @@ VALID_MOVEMENT_TYPES = [
     "asset_revaluation_credit",      # Revalorizacion activo al alza a credito: NO cuenta, supplier.balance(-)
     "asset_devaluation_collection",  # Devaluacion activo con reembolso: account(+), NO P&L
     "asset_devaluation_receivable",  # Devaluacion activo a cargo de tercero: NO cuenta, tp.balance(+)
+    "asset_sale_collection",  # Venta de activo a cuenta: account(+); ganancia via fixed_assets.sale_gain
+    "asset_sale_receivable",  # Venta de activo a credito: NO cuenta, tp.balance(+) (CxC)
     "obligation_disbursement",       # Nos prestan (entra el prestamo): account(+), tp.balance(-)
     "obligation_interest_accrual",   # Interes causado por pagar: NO cuenta, tp.balance(-), P&L gasto
     "obligation_interest_payment",   # Pago de intereses: account(-), tp.balance(+)

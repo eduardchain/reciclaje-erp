@@ -4,6 +4,7 @@ import type {
   FixedAsset,
   FixedAssetCreate,
   FixedAssetUpdate,
+  FixedAssetSellRequest,
   ApplyPendingResult,
   AssetRevaluationCreate,
 } from "@/types/fixed-asset";
@@ -52,6 +53,16 @@ export const fixedAssetService = {
 
   cancel: async (id: string): Promise<FixedAsset> => {
     const response = await apiClient.post<FixedAsset>(`/api/v1/fixed-assets/${id}/cancel`);
+    return response.data;
+  },
+
+  sell: async (id: string, data: FixedAssetSellRequest): Promise<FixedAsset> => {
+    const response = await apiClient.post<FixedAsset>(`/api/v1/fixed-assets/${id}/sell`, data);
+    return response.data;
+  },
+
+  annulSale: async (id: string, reason: string): Promise<FixedAsset> => {
+    const response = await apiClient.post<FixedAsset>(`/api/v1/fixed-assets/${id}/sale/annul`, { reason });
     return response.data;
   },
 

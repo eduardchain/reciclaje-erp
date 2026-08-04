@@ -29,6 +29,12 @@ const statusColors: Record<string, string> = {
   cancelled: "bg-slate-100 text-slate-800",
 };
 
+// Vendido (venta vigente = MM confirmado) se distingue de la baja normal
+const assetBadgeLabel = (a: { status: string; sale_active?: boolean }) =>
+  a.status === "disposed" && a.sale_active ? "Vendido" : statusLabels[a.status];
+const assetBadgeClass = (a: { status: string; sale_active?: boolean }) =>
+  a.status === "disposed" && a.sale_active ? "bg-indigo-100 text-indigo-800" : statusColors[a.status];
+
 export default function FixedAssetsPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -131,8 +137,8 @@ export default function FixedAssetsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={statusColors[asset.status]}>
-                        {statusLabels[asset.status]}
+                      <Badge variant="secondary" className={assetBadgeClass(asset)}>
+                        {assetBadgeLabel(asset)}
                       </Badge>
                     </TableCell>
                   </TableRow>
@@ -153,8 +159,8 @@ export default function FixedAssetsPage() {
                       <div className="font-medium truncate">{asset.name}</div>
                       {asset.asset_code && <div className="text-xs text-slate-500 mt-0.5">Cod: {asset.asset_code}</div>}
                     </div>
-                    <Badge variant="secondary" className={`text-[10px] shrink-0 ${statusColors[asset.status]}`}>
-                      {statusLabels[asset.status]}
+                    <Badge variant="secondary" className={`text-[10px] shrink-0 ${assetBadgeClass(asset)}`}>
+                      {assetBadgeLabel(asset)}
                     </Badge>
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs">

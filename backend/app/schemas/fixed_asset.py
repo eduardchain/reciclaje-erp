@@ -85,6 +85,34 @@ class FixedAssetDisposeRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
 
 
+class FixedAssetSellRequest(BaseModel):
+    """Vender un activo fijo (plan venta-activos-fijos).
+
+    Contrapartida XOR: cuenta (entra dinero) o tercero (CxC — nos debe).
+    Sin campo de fecha: el evento es SIEMPRE hoy (anti back-dating, #62).
+    El precio no se restringe al valor en libros — la diferencia va al P&L.
+    """
+    sale_price: Decimal = Field(..., gt=0)
+    account_id: Optional[UUID] = None
+    third_party_id: Optional[UUID] = None
+    notes: Optional[str] = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_sell(self):
+        has_account = self.account_id is not None
+        has_third_party = self.third_party_id is not None
+        if has_account == has_third_party:
+            raise ValueError(
+                "Debe especificar exactamente una contrapartida: cuenta O tercero"
+            )
+        return self
+
+
+class FixedAssetSaleAnnulRequest(BaseModel):
+    """Anular la venta de un activo."""
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
 class AssetRevaluationRequest(BaseModel):
     """Revalorizar un activo fijo (alza = mejora capitalizable / baja = recuperacion).
 
@@ -197,12 +225,21 @@ class FixedAssetResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Venta (plan venta-activos-fijos): sale_active gobernado por el status del
+    # MM enlazado — tras anular sin re-vender, sale_* quedan como rastro pero
+    # sale_active=False (la UI no la presenta como venta vigente).
+    sale_price: Optional[float] = None
+    sale_gain: Optional[float] = None
+    sale_movement_id: Optional[UUID] = None
+    sale_active: bool = False
+
     # Campos calculados (set en endpoint)
     remaining_months: int = 0
     depreciation_progress: float = 0.0
     revalued_total: float = 0.0  # Σ deltas firmados de revalorizaciones activas
     depreciations: List[AssetDepreciationResponse] = []
     revaluations: List[AssetRevaluationResponse] = []
+    warnings: Optional[List[str]] = Field(None, description="Advertencias no bloqueantes")
 
     model_config = {"from_attributes": True}
 
