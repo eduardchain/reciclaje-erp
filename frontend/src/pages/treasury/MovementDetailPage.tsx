@@ -49,6 +49,10 @@ const typeLabels: Record<string, string> = {
   loan_interest_accrual: "Interés Causado (Préstamo)",
   loan_interest_collection: "Recaudo Intereses Préstamo",
   loan_capital_collection: "Recaudo Capital Préstamo",
+  obligation_interest_transfer: "Traslado Intereses Obligación",
+  obligation_capital_transfer: "Abono Capital Obligación (desde Tercero)",
+  loan_interest_transfer: "Traslado Intereses Préstamo",
+  loan_capital_transfer: "Recaudo Capital Préstamo (desde Tercero)",
   expense_accrual: "Gasto Causado (Pasivo)",
   deferred_funding: "Pago Gasto Diferido",
   deferred_expense: "Cuota Gasto Diferido",
@@ -71,7 +75,11 @@ const REVALUATION_TYPES = ["asset_revaluation_payment", "asset_revaluation_credi
 // Movimientos de obligaciones financieras: se anulan desde la obligación (backend responde 422)
 // SAC E3.1: el par de maquila intersede se anula desde el traslado (patron #67)
 const MAQUILA_TYPES = ["internal_maquila_expense", "internal_maquila_income"];
-const OBLIGATION_TYPES = ["obligation_disbursement", "obligation_interest_accrual", "obligation_interest_payment", "obligation_capital_payment", "loan_disbursement", "loan_interest_accrual", "loan_interest_collection", "loan_capital_collection"];
+const OBLIGATION_TYPES = ["obligation_disbursement", "obligation_interest_accrual", "obligation_interest_payment", "obligation_capital_payment", "loan_disbursement", "loan_interest_accrual", "loan_interest_collection", "loan_capital_collection", "obligation_interest_transfer", "obligation_capital_transfer", "loan_interest_transfer", "loan_capital_transfer"];
+// Campo-based (espejo del guard backend): cubre tambien los legs tp_transfer_*
+// de los traslados contra tercero — cualquier MM con la FK se anula desde el modulo
+const isObligationOwned = (m: { movement_type: string; financial_obligation_id?: string | null }) =>
+  OBLIGATION_TYPES.includes(m.movement_type) || !!m.financial_obligation_id;
 
 const statusBorderMap: Record<string, string> = {
   confirmed: "border-t-[3px] border-t-emerald-400",
@@ -134,7 +142,7 @@ export default function MovementDetailPage() {
               <Pencil className="h-4 w-4 mr-2" />Editar Clasificacion
             </Button>
           )}
-          {movement.status === "confirmed" && !ASSET_OWNED_TYPES.includes(movement.movement_type) && !OBLIGATION_TYPES.includes(movement.movement_type) && !MAQUILA_TYPES.includes(movement.movement_type) && (
+          {movement.status === "confirmed" && !ASSET_OWNED_TYPES.includes(movement.movement_type) && !isObligationOwned(movement) && !MAQUILA_TYPES.includes(movement.movement_type) && (
             <Button variant="outline" onClick={() => setShowAnnul(true)} className="text-red-600 border-red-200 hover:bg-red-50">
               <XCircle className="h-4 w-4 mr-2" />Anular
             </Button>
@@ -165,7 +173,7 @@ export default function MovementDetailPage() {
         </div>
       )}
 
-      {movement.status === "confirmed" && OBLIGATION_TYPES.includes(movement.movement_type) && (
+      {movement.status === "confirmed" && isObligationOwned(movement) && (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800">
           Este movimiento pertenece a una obligación financiera y no se anula desde Tesorería.
           Anúlalo desde el detalle de la obligación — eso revierte capital/intereses pendientes con las validaciones del módulo.{" "}

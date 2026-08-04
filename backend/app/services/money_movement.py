@@ -1044,13 +1044,10 @@ class CRUDMoneyMovement:
         # Movimientos de Obligaciones Financieras tampoco (patron #67): la
         # anulacion vive en el modulo, que revierte contadores (capital/
         # pendientes) y aplica los guards retroactivos del plan F §5.
-        OBLIGATION_MOVEMENT_TYPES = {
-            "obligation_disbursement", "obligation_interest_accrual",
-            "obligation_interest_payment", "obligation_capital_payment",
-            "loan_disbursement", "loan_interest_accrual",
-            "loan_interest_collection", "loan_capital_collection",
-        }
-        if movement.movement_type in OBLIGATION_MOVEMENT_TYPES:
+        # Guard por CAMPO (no por tipo): cubre tambien los legs tp_transfer_*
+        # de los traslados contra tercero (ampliacion estricta — la FK solo la
+        # estampan los sitios del modulo; un cruce normal la lleva NULL).
+        if movement.financial_obligation_id:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="No se puede anular un movimiento generado por Obligaciones "

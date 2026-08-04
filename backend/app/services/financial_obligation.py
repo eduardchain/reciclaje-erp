@@ -44,6 +44,7 @@ from app.schemas.financial_obligation import (
     ObligationAccrueRequest,
     ObligationDirectionSummary,
     ObligationMovementCreate,
+    ObligationTransferCreate,
     ObligationSummaryResponse,
     PendingAccrualItem,
     PendingAccrualsResponse,
@@ -74,6 +75,23 @@ DISBURSEMENT_TYPE = {
     "payable": "obligation_disbursement",
     "receivable": "loan_disbursement",
 }
+# Traslados contra tercero (plan pagos-contra-tercero, D8): la deuda de la
+# obligacion se convierte en deuda ordinaria de un tercero contraparte — sin caja.
+INTEREST_TRANSFER_TYPE = {
+    "payable": "obligation_interest_transfer",
+    "receivable": "loan_interest_transfer",
+}
+CAPITAL_TRANSFER_TYPE = {
+    "payable": "obligation_capital_transfer",
+    "receivable": "loan_capital_transfer",
+}
+# Leg contraparte del par (tipos de cruce EXISTENTES): payable → el tercero
+# contraparte queda debiendonos menos / le debemos mas (out, -1); receivable →
+# la contraparte asume lo que nos debian (in, +1).
+TRANSFER_LEG_TYPE = {
+    "payable": "tp_transfer_out",
+    "receivable": "tp_transfer_in",
+}
 
 # Efecto VIVO (account_sign, tp_sign) por tipo — sitio 6 de la terna de signos
 # (#67). Los otros 5 sitios (reports.py ×3, money_movements.py ×2) DEBEN
@@ -87,14 +105,29 @@ EFFECT_SIGNS = {
     "loan_interest_accrual": (0, 1),         # nos deben mas, sin caja
     "loan_interest_collection": (1, -1),
     "loan_capital_collection": (1, -1),
+    # Traslados contra tercero: patron accrual (cuenta 0 — NO entran a
+    # INFLOW/OUTFLOW ni a mapas de cuenta; solo mapas de tercero)
+    "obligation_interest_transfer": (0, 1),  # la obligacion queda al dia
+    "obligation_capital_transfer": (0, 1),
+    "loan_interest_transfer": (0, -1),       # el deudor de la obligacion queda al dia
+    "loan_capital_transfer": (0, -1),
+    # Legs contraparte del par (espejo exacto de create_tp_transfer)
+    "tp_transfer_out": (0, -1),
+    "tp_transfer_in": (0, 1),
 }
 
-# Delta de capital por tipo (para reconstruir el saldo de arranque de cada mes)
+# Delta de capital por tipo (para reconstruir el saldo de arranque de cada mes).
+# 7o sitio de la terna (GAP-1 QA): los traslados de CAPITAL entran con -1
+# (reducen el contador en ambas direcciones); los de INTERES NO entran
+# (no mueven capital) — un tipo ausente aqui es exclusion SILENCIOSA y el
+# motor causaria sobre capital desactualizado.
 CAPITAL_DELTA_SIGNS = {
     "obligation_disbursement": 1,
     "obligation_capital_payment": -1,
+    "obligation_capital_transfer": -1,
     "loan_disbursement": 1,
     "loan_capital_collection": -1,
+    "loan_capital_transfer": -1,
 }
 
 
@@ -490,6 +523,178 @@ class FinancialObligationService:
         db.refresh(movement)
         return movement
 
+    # ==================================================================
+    # Traslados contra tercero (plan pagos-contra-tercero)
+    # ==================================================================
+
+    def _validate_transfer_counterpart(
+        self,
+        db: Session,
+        obligation: FinancialObligation,
+        third_party_id: UUID,
+        organization_id: UUID,
+    ) -> ThirdParty:
+        """Contraparte del traslado: cualquier tercero activo de la org, EXCEPTO
+        el propio de la obligacion (D4a: romperia el invariante contadores==saldo),
+        titulares de otra obligacion activa (D4b: desincronizaria ese modulo) y
+        entidades de sistema (espejo del cruce). SIN restriccion por signo (regla
+        de Daniel: quedar mas negativo es valido) ni por behavior_type."""
+        if third_party_id == obligation.third_party_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "La contraparte no puede ser el mismo tercero de la obligación "
+                    "— la deuda quedaría por fuera de los contadores del módulo"
+                ),
+            )
+        dest = money_movement_service._validate_third_party(
+            db, third_party_id, organization_id
+        )
+        if dest.is_system_entity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"El tercero '{dest.name}' es una entidad del sistema y no "
+                    "puede ser contraparte de un traslado"
+                ),
+            )
+        other = db.execute(
+            select(FinancialObligation.id).where(
+                FinancialObligation.organization_id == organization_id,
+                FinancialObligation.third_party_id == third_party_id,
+                FinancialObligation.status == "active",
+            ).limit(1)
+        ).scalar_one_or_none()
+        if other:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"'{dest.name}' es titular de una obligación activa — "
+                    "gestione capital e intereses desde el módulo de esa obligación"
+                ),
+            )
+        return dest
+
+    def _create_transfer_pair(
+        self,
+        db: Session,
+        obligation: FinancialObligation,
+        movement_type: str,
+        dest: ThirdParty,
+        data: "ObligationTransferCreate",
+        description: str,
+        leg_description: str,
+        user_id: Optional[UUID],
+    ) -> MoneyMovement:
+        """Par atomico: MM de la obligacion (tipo nuevo, cuenta NULL) + leg
+        tp_transfer_out/in en la contraparte, vinculados por transfer_pair_id y
+        AMBOS con financial_obligation_id (la anulacion en Tesoreria los 422-ea).
+        Efectos por _apply_effects en ambos legs (W2: un solo camino)."""
+        tp = obligation.third_party
+        movement = money_movement_service._create_movement(
+            db=db,
+            organization_id=obligation.organization_id,
+            movement_type=movement_type,
+            amount=data.amount,
+            account_id=None,
+            date=data.date,
+            description=description,
+            third_party_id=tp.id,
+            reference_number=data.reference_number,
+            notes=data.notes,
+            user_id=user_id,
+            financial_obligation_id=obligation.id,
+        )
+        leg_type = TRANSFER_LEG_TYPE[obligation.direction]
+        leg = money_movement_service._create_movement(
+            db=db,
+            organization_id=obligation.organization_id,
+            movement_type=leg_type,
+            amount=data.amount,
+            account_id=None,
+            date=data.date,
+            description=leg_description,
+            third_party_id=dest.id,
+            reference_number=data.reference_number,
+            notes=data.notes,
+            user_id=user_id,
+            financial_obligation_id=obligation.id,
+        )
+        movement.transfer_pair_id = leg.id
+        leg.transfer_pair_id = movement.id
+        self._apply_effects(movement_type, data.amount, None, tp)
+        self._apply_effects(leg_type, data.amount, None, dest)
+        return movement
+
+    def create_interest_transfer(
+        self,
+        db: Session,
+        obligation_id: UUID,
+        organization_id: UUID,
+        data: "ObligationTransferCreate",
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """Traslada intereses pendientes (total o parcial) a un tercero — sin caja."""
+        obligation = self._get_active(db, obligation_id, organization_id)
+        if data.amount > obligation.pending_interest:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"El traslado (${data.amount:,.2f}) supera los intereses pendientes "
+                    f"(${obligation.pending_interest:,.2f})"
+                ),
+            )
+        dest = self._validate_transfer_counterpart(
+            db, obligation, data.third_party_id, organization_id
+        )
+        tp = obligation.third_party
+        movement = self._create_transfer_pair(
+            db, obligation, INTEREST_TRANSFER_TYPE[obligation.direction], dest, data,
+            description=f"Traslado de intereses a {dest.name} — {tp.name}",
+            leg_description=f"Intereses obligación de {tp.name} (traslado)",
+            user_id=user_id,
+        )
+        obligation.pending_interest -= data.amount
+
+        db.commit()
+        db.refresh(movement)
+        return movement
+
+    def create_capital_transfer(
+        self,
+        db: Session,
+        obligation_id: UUID,
+        organization_id: UUID,
+        data: "ObligationTransferCreate",
+        user_id: Optional[UUID] = None,
+    ) -> MoneyMovement:
+        """Abono (payable) / recaudo (receivable) de capital fondeado por un tercero."""
+        obligation = self._get_active(db, obligation_id, organization_id)
+        self._retro_guard(obligation, data.date)
+        if data.amount > obligation.capital_balance:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"El abono (${data.amount:,.2f}) supera el capital vigente "
+                    f"(${obligation.capital_balance:,.2f})"
+                ),
+            )
+        dest = self._validate_transfer_counterpart(
+            db, obligation, data.third_party_id, organization_id
+        )
+        tp = obligation.third_party
+        movement = self._create_transfer_pair(
+            db, obligation, CAPITAL_TRANSFER_TYPE[obligation.direction], dest, data,
+            description=f"Abono a capital desde {dest.name} — {tp.name}",
+            leg_description=f"Abono a capital obligación de {tp.name} (traslado)",
+            user_id=user_id,
+        )
+        obligation.capital_balance -= data.amount
+
+        db.commit()
+        db.refresh(movement)
+        return movement
+
     def create_additional_disbursement(
         self,
         db: Session,
@@ -557,6 +762,7 @@ class FinancialObligationService:
         capital_types = [
             DISBURSEMENT_TYPE[obligation.direction],
             CAPITAL_PAYMENT_TYPE[obligation.direction],
+            CAPITAL_TRANSFER_TYPE[obligation.direction],
         ]
         return list(
             db.execute(
@@ -1052,6 +1258,30 @@ class FinancialObligationService:
             self._apply_effects(mtype, amount, account, tp, reverse=True)
             obligation.capital_balance -= amount
 
+        elif mtype == INTEREST_TRANSFER_TYPE[obligation.direction]:
+            # Sin guard de periodo (no toca tramos, igual que el pago)
+            self._annul_transfer_leg(db, movement, reason, user_id)
+            self._apply_effects(mtype, amount, None, tp, reverse=True)
+            obligation.pending_interest += amount
+
+        elif mtype == CAPITAL_TRANSFER_TYPE[obligation.direction]:
+            # Guard espejo del abono a capital: el capital en periodo causado
+            # rompe la matematica de tramos tambien por la puerta de atras
+            self._retro_guard_annul(obligation, movement)
+            self._annul_transfer_leg(db, movement, reason, user_id)
+            self._apply_effects(mtype, amount, None, tp, reverse=True)
+            obligation.capital_balance += amount
+
+        elif mtype in ("tp_transfer_out", "tp_transfer_in"):
+            # Leg contraparte de un traslado: se anula por su movimiento padre
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Este es el leg contraparte de un traslado — anule el "
+                    "movimiento de traslado de la obligación (el par se anula junto)"
+                ),
+            )
+
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1069,6 +1299,28 @@ class FinancialObligationService:
         db.commit()
         db.refresh(movement)
         return movement
+
+    def _annul_transfer_leg(
+        self,
+        db: Session,
+        movement: MoneyMovement,
+        reason: str,
+        user_id: Optional[UUID],
+    ) -> None:
+        """Cascade del par (D3): revierte el efecto del leg contraparte y lo
+        marca anulado con la misma auditoria. El leg vive en EFFECT_SIGNS
+        (tp_transfer_out/in) — un solo camino de efectos (W2)."""
+        if not movement.transfer_pair_id:
+            return
+        leg = db.get(MoneyMovement, movement.transfer_pair_id)
+        if not leg or leg.status != "confirmed":
+            return
+        leg_tp = db.get(ThirdParty, leg.third_party_id)
+        self._apply_effects(leg.movement_type, leg.amount, None, leg_tp, reverse=True)
+        leg.status = "annulled"
+        leg.annulled_at = datetime.now(timezone.utc)
+        leg.annulled_by = user_id
+        leg.annulled_reason = reason
 
     def _retro_guard_annul(
         self, obligation: FinancialObligation, movement: MoneyMovement

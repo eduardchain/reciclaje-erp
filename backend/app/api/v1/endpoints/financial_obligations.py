@@ -22,6 +22,7 @@ from app.schemas.financial_obligation import (
     ObligationAccrueRequest,
     ObligationAnnulRequest,
     ObligationMovementCreate,
+    ObligationTransferCreate,
     ObligationSummaryResponse,
     PendingAccrualsResponse,
 )
@@ -164,6 +165,34 @@ def create_interest_payment(
     ctx: dict = Depends(require_permission("treasury.manage_obligations")),
 ):
     movement = service.create_interest_payment(
+        db, obligation_id, ctx["organization_id"], data, user_id=ctx["user_id"]
+    )
+    return MoneyMovementResponse.model_validate(movement)
+
+
+@router.post("/{obligation_id}/interest-transfer", response_model=MoneyMovementResponse)
+def create_interest_transfer(
+    obligation_id: UUID,
+    data: ObligationTransferCreate,
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_permission("treasury.manage_obligations")),
+):
+    """Traslada intereses pendientes a un tercero contraparte — sin caja."""
+    movement = service.create_interest_transfer(
+        db, obligation_id, ctx["organization_id"], data, user_id=ctx["user_id"]
+    )
+    return MoneyMovementResponse.model_validate(movement)
+
+
+@router.post("/{obligation_id}/capital-transfer", response_model=MoneyMovementResponse)
+def create_capital_transfer(
+    obligation_id: UUID,
+    data: ObligationTransferCreate,
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_permission("treasury.manage_obligations")),
+):
+    """Abono/recaudo de capital fondeado por un tercero contraparte — sin caja."""
+    movement = service.create_capital_transfer(
         db, obligation_id, ctx["organization_id"], data, user_id=ctx["user_id"]
     )
     return MoneyMovementResponse.model_validate(movement)

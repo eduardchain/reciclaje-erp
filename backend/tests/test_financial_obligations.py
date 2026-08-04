@@ -181,6 +181,30 @@ def _get_obligation(client, headers, obligation_id):
     return resp.json()
 
 
+def _transfer(client, headers, obligation_id, action, *, amount, third_party_id, date, expect=200):
+    """action: 'interest-transfer' | 'capital-transfer' — contra tercero, sin caja."""
+    resp = client.post(
+        f"{URL}/{obligation_id}/{action}",
+        json={"amount": str(amount), "third_party_id": str(third_party_id), "date": date},
+        headers=headers,
+    )
+    assert resp.status_code == expect, resp.json()
+    return resp.json()
+
+
+def _plain_tp(db, org_id, name, balance=0):
+    """Tercero generico SIN categoria de obligaciones (contraparte de traslados)."""
+    tp = ThirdParty(
+        name=name,
+        organization_id=org_id,
+        current_balance=D(str(balance)),
+        initial_balance=D(str(balance)),
+    )
+    db.add(tp)
+    db.commit()
+    return tp
+
+
 def _fresh(db, model, obj_id):
     db.expire_all()
     return db.get(model, obj_id)
@@ -1440,6 +1464,359 @@ class TestIndividualAccrue:
 # Walk multi-mes con invariantes (analogo del stress walk de Modelo L #65)
 # ===========================================================================
 
+class TestObligationTransfers:
+    """Traslados contra tercero (plan pagos-contra-tercero v1.1): intereses y
+    capital con contrapartida un tercero — sin caja. Par de MMs enlazados."""
+
+    def _setup_payable(self, client, org_headers, db, org_id, name_prefix, amount=20_000_000):
+        tp = _obligation_tp(db, org_id, f"{name_prefix} Oblig")
+        dest = _plain_tp(db, org_id, f"{name_prefix} Personal")
+        acc = _account(db, org_id, f"Caja {name_prefix}", balance=100_000_000)
+        ob = _create_obligation(
+            client, org_headers, tp.id, direction="payable",
+            account_id=acc.id, amount=amount, date=_date_in(1, 1),
+        )
+        return tp, dest, acc, ob
+
+    def _pair_of(self, db, movement_id):
+        from uuid import UUID as _UUID
+        db.expire_all()
+        mv = db.get(MoneyMovement, _UUID(movement_id))
+        leg = db.get(MoneyMovement, mv.transfer_pair_id)
+        return mv, leg
+
+    def test_interest_transfer_payable_happy(self, client, org_headers, db_session, test_organization):
+        """El caso del cliente (Abdel): causar y trasladar TODO el interes a la
+        cuenta personal. Modulo al dia, personal mas negativo, caja intacta."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "IT Happy")
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)  # M-1 vencido: 20M×2% = 400.000
+        acc_balance_before = D("100000000") + D("20000000")  # payable: el desembolso ENTRO a caja
+
+        result = _transfer(client, org_headers, ob["id"], "interest-transfer",
+                           amount=400_000, third_party_id=dest.id, date=_date_in(0, 5))
+
+        data = _get_obligation(client, org_headers, ob["id"])
+        assert float(data["pending_interest"]) == 0
+        assert float(data["capital_balance"]) == 20_000_000
+        db_session.expire_all()
+        tp_db = db_session.get(ThirdParty, tp.id)
+        dest_db = db_session.get(ThirdParty, dest.id)
+        assert tp_db.current_balance == D("-20000000")  # solo capital
+        assert dest_db.current_balance == D("-400000")  # le debemos los intereses
+        from app.models.money_account import MoneyAccount
+        assert db_session.get(MoneyAccount, acc.id).current_balance == acc_balance_before
+
+        # Par enlazado: ambos con financial_obligation_id, cross-ref, leg tp_transfer_out
+        mv, leg = self._pair_of(db_session, result["id"])
+        assert mv.movement_type == "obligation_interest_transfer"
+        assert mv.account_id is None and leg.account_id is None
+        assert leg.movement_type == "tp_transfer_out"
+        assert str(leg.transfer_pair_id) == str(mv.id)
+        assert leg.financial_obligation_id == mv.financial_obligation_id
+        assert str(leg.third_party_id) == str(dest.id)
+
+    def test_interest_transfer_partial(self, client, org_headers, db_session, test_organization):
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "IT Parcial")
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)
+        _transfer(client, org_headers, ob["id"], "interest-transfer",
+                  amount=150_000, third_party_id=dest.id, date=_date_in(0, 5))
+        data = _get_obligation(client, org_headers, ob["id"])
+        assert float(data["pending_interest"]) == 250_000
+        db_session.expire_all()
+        assert db_session.get(ThirdParty, dest.id).current_balance == D("-150000")
+
+    def test_capital_transfer_payable_happy(self, client, org_headers, db_session, test_organization):
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "CT Happy")
+        _transfer(client, org_headers, ob["id"], "capital-transfer",
+                  amount=5_000_000, third_party_id=dest.id, date=_date_in(0, 5))
+        data = _get_obligation(client, org_headers, ob["id"])
+        assert float(data["capital_balance"]) == 15_000_000
+        db_session.expire_all()
+        assert db_session.get(ThirdParty, tp.id).current_balance == D("-15000000")
+        assert db_session.get(ThirdParty, dest.id).current_balance == D("-5000000")
+
+    def test_receivable_transfers_happy(self, client, org_headers, db_session, test_organization):
+        """Espejo receivable: la contraparte asume lo que nos debian (queda +)."""
+        org_id = test_organization.id
+        tp = _obligation_tp(db_session, org_id, "RT Oblig")
+        dest = _plain_tp(db_session, org_id, "RT Personal")
+        acc = _account(db_session, org_id, "Caja RT", balance=100_000_000)
+        cat = _expense_cat(db_session, org_id)
+        ob = _create_obligation(
+            client, org_headers, tp.id, direction="receivable",
+            account_id=acc.id, amount=12_000_000, date=_date_in(1, 1),
+        )
+        _accrue(client, org_headers, expense_category_id=cat.id)  # 12M×2% = 240.000
+        result = _transfer(client, org_headers, ob["id"], "interest-transfer",
+                           amount=240_000, third_party_id=dest.id, date=_date_in(0, 5))
+        _transfer(client, org_headers, ob["id"], "capital-transfer",
+                  amount=2_000_000, third_party_id=dest.id, date=_date_in(0, 6))
+        data = _get_obligation(client, org_headers, ob["id"])
+        assert float(data["pending_interest"]) == 0
+        assert float(data["capital_balance"]) == 10_000_000
+        db_session.expire_all()
+        assert db_session.get(ThirdParty, tp.id).current_balance == D("10000000")
+        assert db_session.get(ThirdParty, dest.id).current_balance == D("2240000")  # ahora nos debe el
+        mv, leg = self._pair_of(db_session, result["id"])
+        assert mv.movement_type == "loan_interest_transfer"
+        assert leg.movement_type == "tp_transfer_in"
+
+    def test_transfer_counterpart_more_negative_allowed(self, client, org_headers, db_session, test_organization):
+        """Regla de Daniel: la contraparte puede quedar MAS negativa — nunca bloquear."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Neg OK")
+        dest_neg = _plain_tp(db_session, org_id, "Neg OK Endeudado", balance=-8_000_000)
+        _transfer(client, org_headers, ob["id"], "capital-transfer",
+                  amount=5_000_000, third_party_id=dest_neg.id, date=_date_in(0, 5))
+        db_session.expire_all()
+        assert db_session.get(ThirdParty, dest_neg.id).current_balance == D("-13000000")
+
+    def test_transfer_same_third_party_rejected(self, client, org_headers, db_session, test_organization):
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Same TP")
+        resp = _transfer(client, org_headers, ob["id"], "capital-transfer",
+                         amount=1_000_000, third_party_id=tp.id, date=_date_in(0, 5), expect=400)
+        assert "mismo tercero" in resp["detail"]
+
+    def test_transfer_to_active_obligation_holder_rejected(self, client, org_headers, db_session, test_organization):
+        """D4b: la contraparte no puede ser titular de otra obligacion activa."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Holder")
+        tp2 = _obligation_tp(db_session, org_id, "Holder Otro Titular")
+        _create_obligation(
+            client, org_headers, tp2.id, direction="payable",
+            account_id=acc.id, amount=3_000_000, date=_date_in(1, 2),
+        )
+        resp = _transfer(client, org_headers, ob["id"], "capital-transfer",
+                         amount=1_000_000, third_party_id=tp2.id, date=_date_in(0, 5), expect=400)
+        assert "obligación activa" in resp["detail"]
+
+    def test_transfer_system_entity_rejected(self, client, org_headers, db_session, test_organization):
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "SysEnt")
+        sys_tp = ThirdParty(
+            name="[Prepago] SysEnt", organization_id=org_id, is_system_entity=True,
+        )
+        db_session.add(sys_tp)
+        db_session.commit()
+        resp = _transfer(client, org_headers, ob["id"], "capital-transfer",
+                         amount=1_000_000, third_party_id=sys_tp.id, date=_date_in(0, 5), expect=400)
+        assert "entidad del sistema" in resp["detail"]
+
+    def test_transfer_exceeds_limits(self, client, org_headers, db_session, test_organization):
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Limites")
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)  # pendiente 400.000
+        resp = _transfer(client, org_headers, ob["id"], "interest-transfer",
+                         amount=400_001, third_party_id=dest.id, date=_date_in(0, 5), expect=400)
+        assert "supera los intereses pendientes" in resp["detail"]
+        resp = _transfer(client, org_headers, ob["id"], "capital-transfer",
+                         amount=20_000_001, third_party_id=dest.id, date=_date_in(0, 5), expect=400)
+        assert "supera el capital vigente" in resp["detail"]
+
+    def test_capital_transfer_retro_guard(self, client, org_headers, db_session, test_organization):
+        """Capital en periodo ya causado → 400 (creacion); espejo en anulacion."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Retro")
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)  # causa M-1
+        resp = _transfer(client, org_headers, ob["id"], "capital-transfer",
+                         amount=1_000_000, third_party_id=dest.id, date=_date_in(1, 15), expect=400)
+        assert "ya tiene intereses causados" in resp["detail"]
+        # Interes NO tiene guard de periodo (igual que el pago)
+        _transfer(client, org_headers, ob["id"], "interest-transfer",
+                  amount=100_000, third_party_id=dest.id, date=_date_in(1, 15))
+
+    def test_transfer_on_settled_rejected(self, client, org_headers, db_session, test_organization):
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Settled", amount=4_000_000)
+        _action(client, org_headers, ob["id"], "capital-payment",
+                amount=4_000_000, account_id=acc.id, date=_date_in(0, 5))
+        resp = client.post(f"{URL}/{ob['id']}/settle", headers=org_headers)
+        assert resp.status_code == 200, resp.json()
+        _transfer(client, org_headers, ob["id"], "interest-transfer",
+                  amount=1, third_party_id=dest.id, date=_date_in(0, 6), expect=400)
+
+    def test_annul_interest_transfer_round_trip(self, client, org_headers, db_session, test_organization):
+        """Anular desde el modulo: revierte AMBOS terceros, restaura pendientes
+        y anula los DOS legs del par."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Annul RT")
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)
+        result = _transfer(client, org_headers, ob["id"], "interest-transfer",
+                           amount=400_000, third_party_id=dest.id, date=_date_in(0, 5))
+        _annul(client, org_headers, result["id"])
+        data = _get_obligation(client, org_headers, ob["id"])
+        assert float(data["pending_interest"]) == 400_000
+        db_session.expire_all()
+        assert db_session.get(ThirdParty, tp.id).current_balance == D("-20400000")
+        assert db_session.get(ThirdParty, dest.id).current_balance == D("0")
+        mv, leg = self._pair_of(db_session, result["id"])
+        assert mv.status == "annulled" and leg.status == "annulled"
+        assert leg.annulled_reason == "Anulacion de prueba"
+
+    def test_annul_capital_transfer_retro_guard(self, client, org_headers, db_session, test_organization):
+        """Anular un traslado de capital fechado en periodo YA causado → 400."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Annul Retro")
+        result = _transfer(client, org_headers, ob["id"], "capital-transfer",
+                           amount=5_000_000, third_party_id=dest.id, date=_date_in(1, 20))
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)  # causa M-1 (con el traslado adentro)
+        resp = _annul(client, org_headers, result["id"], expect=400)
+        assert "ya tiene intereses" in resp["detail"]
+
+    def test_treasury_annul_blocked_both_legs(self, client, org_headers, db_session, test_organization):
+        """422 en Tesoreria para AMBOS legs; el cruce normal sigue anulable (W1)."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Tes Guard")
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)
+        result = _transfer(client, org_headers, ob["id"], "interest-transfer",
+                           amount=400_000, third_party_id=dest.id, date=_date_in(0, 5))
+        mv, leg = self._pair_of(db_session, result["id"])
+        for mid in (str(mv.id), str(leg.id)):
+            resp = client.post(
+                f"/api/v1/money-movements/{mid}/annul",
+                json={"reason": "no deberia"},
+                headers=org_headers,
+            )
+            assert resp.status_code == 422, resp.json()
+            assert "Obligaciones" in resp.json()["detail"]
+        # No-regresion: cruce normal (sin obligacion) sigue anulable en Tesoreria
+        tp_a = _plain_tp(db_session, org_id, "Cruce Normal A", balance=1_000_000)
+        tp_b = _plain_tp(db_session, org_id, "Cruce Normal B")
+        resp = client.post(
+            "/api/v1/money-movements/tp-transfer",
+            json={
+                "source_third_party_id": str(tp_a.id),
+                "destination_third_party_id": str(tp_b.id),
+                "amount": "500000",
+                "date": _date_in(0, 5),
+                "description": "Cruce de prueba",
+            },
+            headers=org_headers,
+        )
+        assert resp.status_code == 201, resp.json()
+        resp = client.post(
+            f"/api/v1/money-movements/{resp.json()['id']}/annul",
+            json={"reason": "cruce anulable"},
+            headers=org_headers,
+        )
+        assert resp.status_code == 200, resp.json()
+
+    def test_annul_leg_via_module_guided(self, client, org_headers, db_session, test_organization):
+        """Anular el leg contraparte por el modulo → 400 guia al movimiento padre."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Leg Guia")
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)
+        result = _transfer(client, org_headers, ob["id"], "interest-transfer",
+                           amount=400_000, third_party_id=dest.id, date=_date_in(0, 5))
+        _, leg = self._pair_of(db_session, result["id"])
+        resp = _annul(client, org_headers, str(leg.id), expect=400)
+        assert "leg contraparte" in resp["detail"]
+
+    def test_cash_flow_unchanged(self, client, org_headers, db_session, test_organization):
+        """El traslado NO toca el flujo de caja (por construccion, con test)."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "CF Zero")
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)
+        params = {"date_from": _date_in(2, 1), "date_to": _date_in(0, 28)}
+        before = client.get("/api/v1/reports/cash-flow", params=params, headers=org_headers).json()
+        _transfer(client, org_headers, ob["id"], "interest-transfer",
+                  amount=400_000, third_party_id=dest.id, date=_date_in(0, 5))
+        _transfer(client, org_headers, ob["id"], "capital-transfer",
+                  amount=3_000_000, third_party_id=dest.id, date=_date_in(0, 6))
+        after = client.get("/api/v1/reports/cash-flow", params=params, headers=org_headers).json()
+        assert before == after
+
+    def test_statement_both_terceros(self, client, org_headers, db_session, test_organization):
+        """Ambos estados de cuenta muestran su leg con saldo corrido correcto."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Stmt")
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)
+        _transfer(client, org_headers, ob["id"], "interest-transfer",
+                  amount=400_000, third_party_id=dest.id, date=_date_in(0, 5))
+        db_session.expire_all()
+        for tercero in (tp, dest):
+            resp = client.get(
+                f"/api/v1/money-movements/third-party/{tercero.id}",
+                params={"date_from": _date_in(3, 1)},
+                headers=org_headers,
+            )
+            assert resp.status_code == 200
+            items = resp.json()["items"]
+            assert items, f"statement vacio para {tercero.name}"
+            live = db_session.get(ThirdParty, tercero.id).current_balance
+            assert items[-1]["balance_after"] == float(live)
+
+    def test_transfer_all_then_settle(self, client, org_headers, db_session, test_organization):
+        """Flujo completo del cliente: trasladar TODO (interes + capital) y cerrar."""
+        org_id = test_organization.id
+        tp, dest, acc, ob = self._setup_payable(client, org_headers, db_session, org_id, "Full Settle")
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)
+        _transfer(client, org_headers, ob["id"], "interest-transfer",
+                  amount=400_000, third_party_id=dest.id, date=_date_in(0, 5))
+        _transfer(client, org_headers, ob["id"], "capital-transfer",
+                  amount=20_000_000, third_party_id=dest.id, date=_date_in(0, 6))
+        resp = client.post(f"{URL}/{ob['id']}/settle", headers=org_headers)
+        assert resp.status_code == 200, resp.json()
+        db_session.expire_all()
+        assert db_session.get(ThirdParty, tp.id).current_balance == D("0")
+        assert db_session.get(ThirdParty, dest.id).current_balance == D("-20400000")
+
+    def test_motor_capital_transfer_mid_month(self, client, org_headers, db_session, test_organization):
+        """GAP-1 QA: el motor de intereses VE los traslados de capital.
+
+        30M @2% desembolsado M-2 dia 1; traslado de capital 12M el dia 16 de M-1.
+        A MANO (30/360, dia del evento cuenta con saldo NUEVO):
+          M-2: 30M×2% = 600.000
+          M-1: 30M×15d + 18M×15d @2%/30 = 300.000 + 180.000 = 480.000
+        Espejo: anular el traslado → M-1 vuelve a 600.000.
+        """
+        org_id = test_organization.id
+        tp = _obligation_tp(db_session, org_id, "Motor Oblig")
+        dest = _plain_tp(db_session, org_id, "Motor Personal")
+        acc = _account(db_session, org_id, "Caja Motor", balance=100_000_000)
+        ob = _create_obligation(
+            client, org_headers, tp.id, direction="payable",
+            account_id=acc.id, amount=30_000_000, date=_date_in(2, 1),
+        )
+        result = _transfer(client, org_headers, ob["id"], "capital-transfer",
+                           amount=12_000_000, third_party_id=dest.id, date=_date_in(1, 16))
+
+        pending = _pending(client, org_headers)
+        mine = {i["period"]: i for i in pending["items"] if i["obligation_id"] == ob["id"]}
+        assert float(mine[_period(2)]["amount"]) == 600_000
+        assert float(mine[_period(1)]["amount"]) == 480_000
+
+        # Espejo: sin el traslado, M-1 vuelve al mes completo a 30M
+        _annul(client, org_headers, result["id"])
+        pending = _pending(client, org_headers)
+        mine = {i["period"]: i for i in pending["items"] if i["obligation_id"] == ob["id"]}
+        assert float(mine[_period(1)]["amount"]) == 600_000
+
+        # Re-trasladar y causar de verdad: pendientes == 600.000 + 480.000
+        _transfer(client, org_headers, ob["id"], "capital-transfer",
+                  amount=12_000_000, third_party_id=dest.id, date=_date_in(1, 16))
+        cat = _expense_cat(db_session, org_id)
+        _accrue(client, org_headers, expense_category_id=cat.id)
+        data = _get_obligation(client, org_headers, ob["id"])
+        assert float(data["pending_interest"]) == 1_080_000
+        assert float(data["capital_balance"]) == 18_000_000
+
+
 class TestObligationWalk:
     """Combinaciones complejas: causar + pagar + anular + re-causar intercalados.
 
@@ -1477,9 +1854,13 @@ class TestObligationWalk:
             )
         ).scalars().all()
         disb = {"obligation_disbursement", "loan_disbursement"}
-        cap_pay = {"obligation_capital_payment", "loan_capital_collection"}
+        cap_pay = {"obligation_capital_payment", "loan_capital_collection",
+                   "obligation_capital_transfer", "loan_capital_transfer"}
         accr = {"obligation_interest_accrual", "loan_interest_accrual"}
-        int_pay = {"obligation_interest_payment", "loan_interest_collection"}
+        int_pay = {"obligation_interest_payment", "loan_interest_collection",
+                   "obligation_interest_transfer", "loan_interest_transfer"}
+        # Los legs tp_transfer_* del par comparten la FK pero NO entran a ningun
+        # set — si un dia se contaran, la reconstruccion 2-3 reventaria (W4)
         capital_rebuilt = sum((m.amount for m in movements if m.movement_type in disb), D("0")) \
             - sum((m.amount for m in movements if m.movement_type in cap_pay), D("0"))
         pending_rebuilt = sum((m.amount for m in movements if m.movement_type in accr), D("0")) \
@@ -1649,6 +2030,83 @@ class TestObligationWalk:
         _action(client, org_headers, ob["id"], "capital-payment",
                 amount=15_000_000, account_id=acc.id, date=_date_in(0, 7))
         check("recaudo capital total")
+        resp = client.post(f"{URL}/{ob['id']}/settle", headers=org_headers)
+        assert resp.status_code == 200
+        check("settle")
+
+    def test_payable_walk_with_transfers(self, client, org_headers, db_session, test_organization):
+        """Walk con traslados contra tercero intercalados (plan §7.8): los 4
+        invariantes tras cada paso + invariante nuevo del tercero contraparte
+        (su saldo == Σ de sus legs confirmados)."""
+        org_id = test_organization.id
+        tp = _obligation_tp(db_session, org_id, "Walk Transfer")
+        dest = _plain_tp(db_session, org_id, "Walk Transfer Personal")
+        acc = _account(db_session, org_id, "Caja Walk Transfer", balance=200_000_000)
+        cat = _expense_cat(db_session, org_id)
+        check = lambda step: self._assert_invariants(
+            client, org_headers, db_session, ob["id"], tp.id, "payable", step
+        )
+
+        def check_dest(step):
+            db_session.expire_all()
+            legs = db_session.execute(
+                select(MoneyMovement).where(
+                    MoneyMovement.third_party_id == dest.id,
+                    MoneyMovement.status == "confirmed",
+                )
+            ).scalars().all()
+            rebuilt = sum(
+                (m.amount * (-1 if m.movement_type == "tp_transfer_out" else 1)
+                 for m in legs),
+                D("0"),
+            )
+            live = db_session.get(ThirdParty, dest.id).current_balance
+            assert live == rebuilt, f"[{step}] dest={live} != Σlegs={rebuilt}"
+
+        # M-2: desembolso $20M dia 1 → M-2 y M-1 vencidos: 400.000 c/u
+        ob = _create_obligation(
+            client, org_headers, tp.id, direction="payable",
+            account_id=acc.id, amount=20_000_000, date=_date_in(2, 1),
+        )
+        check("desembolso")
+        _accrue(client, org_headers, expense_category_id=cat.id)
+        check("causacion 2 meses")
+
+        # Trasladar la mitad de los intereses, pagar un cuarto por caja
+        _transfer(client, org_headers, ob["id"], "interest-transfer",
+                  amount=400_000, third_party_id=dest.id, date=_date_in(0, 5))
+        check("traslado intereses")
+        check_dest("traslado intereses")
+        _action(client, org_headers, ob["id"], "interest-payment",
+                amount=200_000, account_id=acc.id, date=_date_in(0, 6))
+        check("pago parcial por caja")
+
+        # Traslado de capital (mes actual, sin causar → sin retro guard)
+        _transfer(client, org_headers, ob["id"], "capital-transfer",
+                  amount=6_000_000, third_party_id=dest.id, date=_date_in(0, 7))
+        check("traslado capital")
+        check_dest("traslado capital")
+
+        # Anular el traslado de capital (mes actual NO causado → guard pasa)
+        movements = db_session.execute(
+            select(MoneyMovement).where(
+                MoneyMovement.movement_type == "obligation_capital_transfer",
+                MoneyMovement.third_party_id == tp.id,
+                MoneyMovement.status == "confirmed",
+            )
+        ).scalars().all()
+        _annul(client, org_headers, str(movements[0].id))
+        check("anulacion traslado capital")
+        check_dest("anulacion traslado capital")
+
+        # Cerrar: trasladar el resto de intereses y todo el capital
+        _transfer(client, org_headers, ob["id"], "interest-transfer",
+                  amount=200_000, third_party_id=dest.id, date=_date_in(0, 8))
+        check("traslado intereses final")
+        _transfer(client, org_headers, ob["id"], "capital-transfer",
+                  amount=20_000_000, third_party_id=dest.id, date=_date_in(0, 9))
+        check("traslado capital total")
+        check_dest("traslado capital total")
         resp = client.post(f"{URL}/{ob['id']}/settle", headers=org_headers)
         assert resp.status_code == 200
         check("settle")

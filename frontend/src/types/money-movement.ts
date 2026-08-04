@@ -39,7 +39,11 @@ export type MoneyMovementType =
   | "loan_disbursement"
   | "loan_interest_accrual"
   | "loan_interest_collection"
-  | "loan_capital_collection";
+  | "loan_capital_collection"
+  | "obligation_interest_transfer"
+  | "obligation_capital_transfer"
+  | "loan_interest_transfer"
+  | "loan_capital_transfer";
 
 export type MovementStatus = "confirmed" | "annulled";
 
