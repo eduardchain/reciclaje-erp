@@ -3,7 +3,7 @@ Pydantic schemas for ThirdParty model.
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, EmailStr, field_serializer, model_validator
@@ -101,3 +101,42 @@ class ThirdPartyResponse(ThirdPartyBase):
 class ThirdPartyBalanceUpdate(BaseModel):
     """Schema for updating third party balance."""
     amount_delta: float = Field(..., description="Amount to add (positive) or subtract (negative)")
+
+
+# --- Retenciones: catalogo + entidades (SAC E2 D9 + v2 CC-006) --- #
+
+class RetentionConfigCreate(BaseModel):
+    """Tarifa configurada: tipo + municipio (solo ica) + concepto opcional (F3)
+    + %. El monto al liquidar se pre-calcula con rate_pct y es editable."""
+    retention_type: Literal["retefuente", "reteiva", "ica"]
+    municipality: Optional[str] = Field(None, min_length=1, max_length=60)
+    concept: Optional[str] = Field(None, min_length=1, max_length=60)
+    rate_pct: Decimal = Field(..., gt=0, le=100)
+
+    @model_validator(mode="after")
+    def _municipality_iff_ica(self):
+        if self.retention_type == "ica" and not (self.municipality or "").strip():
+            raise ValueError("El municipio es obligatorio para ICA")
+        if self.retention_type != "ica" and self.municipality is not None:
+            raise ValueError("El municipio solo aplica para ICA")
+        return self
+
+
+class RetentionConfigUpdate(BaseModel):
+    rate_pct: Optional[Decimal] = Field(None, gt=0, le=100)
+    is_active: Optional[bool] = None
+
+
+class RetentionRowResponse(BaseModel):
+    """Fila del GET unificado (plan v2 D-v2-1): config y/o entidad.
+    entity_id NULL = config sin uso aún (sin Pagar/Estado);
+    config_id NULL = entidad sin tarifa configurada (sin precálculo)."""
+    config_id: Optional[UUID] = None
+    entity_id: Optional[UUID] = None
+    retention_type: str
+    municipality: Optional[str] = None
+    concept: Optional[str] = None
+    rate_pct: Optional[float] = None
+    name: Optional[str] = None
+    current_balance: float
+    is_active: bool

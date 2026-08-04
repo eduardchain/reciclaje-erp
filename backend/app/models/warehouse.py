@@ -34,7 +34,34 @@ class Warehouse(Base, TimestampMixin, OrganizationMixin):
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    
+
+    # SAC Ciclo B addendum (Q-12, feedback Daniel): una bodega recibe material
+    # de terceros salvo que se marque como interna (molino/transito). Default
+    # True = bodega nueva nace receptora ("¿y si mañana hay otra?" =
+    # autoservicio). Solo la Recepcion (SAC) lo consume; prod no cambia.
+    is_receiving: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, server_default="true",
+        comment="Recibe material de terceros (false = interna: molino/transito)",
+    )
+
+    # SAC E3.1 (E12): bodega virtual de transito intersede — GATE DURO en tabla
+    # compartida (golden incluye GET /warehouses x3 orgs). Cuando el flag
+    # two_step_transfers_enabled esta ON, operar contra una bodega is_transit
+    # fuera del propio 2-pasos da 400 (guard en servicios).
+    is_transit: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false",
+        comment="Bodega virtual de transito intersede (SAC E3.1)",
+    )
+
+    # Mecanismo unico de ruteo (menor-31): la bodega de transito apunta a su
+    # bodega fisica destino. E4 lo reusa para CV-TRANSITO sin migracion.
+    transit_target_warehouse_id: Mapped[UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("warehouses.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Bodega fisica destino a la que rutea esta bodega de transito",
+    )
+
     # Relationships
     inventory_movements: Mapped[list["InventoryMovement"]] = relationship(
         "InventoryMovement",

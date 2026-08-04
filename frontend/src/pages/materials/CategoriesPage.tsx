@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { useMaterialCategories, useCreateMaterialCategory, useUpdateMaterialCategory } from "@/hooks/useCrudData";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { ROUTES } from "@/utils/constants";
 import type { MaterialCategoryResponse } from "@/types/material";
 
@@ -19,6 +20,11 @@ const columns: ColumnDef<MaterialCategoryResponse, unknown>[] = [
 
 export default function CategoriesPage() {
   const navigate = useNavigate();
+  // W3: en SAC el catalogo vive en Config → Materiales (kg) — el "volver" debe
+  // llevar alla, no a la pagina general (oculta del sidebar SAC). Degradacion:
+  // flag en loading/error = false → comportamiento actual (orgs prod intactas).
+  const { flagEnabled } = useOrgSettings();
+  const kgMode = flagEnabled("kg_ledger_enabled");
   const { data, isLoading } = useMaterialCategories();
   const create = useCreateMaterialCategory();
   const update = useUpdateMaterialCategory();
@@ -49,7 +55,9 @@ export default function CategoriesPage() {
     <div className="space-y-4">
       <PageHeader title="Categorias de Material" description="Clasificacion de materiales">
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(ROUTES.MATERIALS)}><ArrowLeft className="h-4 w-4 mr-2" />Materiales</Button>
+          <Button variant="outline" onClick={() => navigate(kgMode ? ROUTES.CONFIG_FORMULAS : ROUTES.MATERIALS)}>
+            <ArrowLeft className="h-4 w-4 mr-2" />{kgMode ? "Materiales (kg)" : "Materiales"}
+          </Button>
           <Button onClick={() => openDialog(null)} className="bg-emerald-600 hover:bg-emerald-700"><Plus className="h-4 w-4 mr-2" />Nueva Categoria</Button>
         </div>
       </PageHeader>

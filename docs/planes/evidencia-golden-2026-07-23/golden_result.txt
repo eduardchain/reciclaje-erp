@@ -1,0 +1,47 @@
+✅ biogreen__balance_detailed: byte-identico
+✅ biogreen__balance_detailed_asof: byte-identico
+✅ biogreen__balance_sheet: byte-identico
+✅ biogreen__balance_sheet_asof: byte-identico
+✅ biogreen__cash_flow: byte-identico
+✅ biogreen__expenses: byte-identico
+✅ biogreen__expenses_detail: byte-identico
+✅ biogreen__money_accounts: identico salvo 7 claves aditivas esperadas
+✅ biogreen__money_movements: identico salvo 400 claves aditivas esperadas
+✅ biogreen__pnl_june: identico salvo 2 claves aditivas esperadas
+✅ biogreen__pnl_monthly: identico salvo 8 claves aditivas esperadas
+✅ biogreen__pnl_period: identico salvo 2 claves aditivas esperadas
+✅ biogreen__profitability_bu: byte-identico
+✅ biogreen__tp_statement: byte-identico
+✅ biogreen__warehouses: identico salvo 3 claves aditivas esperadas
+✅ costa__balance_detailed: byte-identico
+✅ costa__balance_detailed_asof: byte-identico
+✅ costa__balance_sheet: byte-identico
+✅ costa__balance_sheet_asof: byte-identico
+✅ costa__cash_flow: byte-identico
+✅ costa__expenses: byte-identico
+✅ costa__expenses_detail: byte-identico
+✅ costa__money_accounts: identico salvo 6 claves aditivas esperadas
+✅ costa__money_movements: identico salvo 400 claves aditivas esperadas
+✅ costa__pnl_june: identico salvo 2 claves aditivas esperadas
+✅ costa__pnl_monthly: identico salvo 8 claves aditivas esperadas
+✅ costa__pnl_period: identico salvo 2 claves aditivas esperadas
+✅ costa__profitability_bu: byte-identico
+✅ costa__tp_statement: byte-identico
+✅ costa__warehouses: identico salvo 12 claves aditivas esperadas
+✅ metarecycling__balance_detailed: byte-identico
+✅ metarecycling__balance_detailed_asof: byte-identico
+✅ metarecycling__balance_sheet: byte-identico
+✅ metarecycling__balance_sheet_asof: byte-identico
+✅ metarecycling__cash_flow: byte-identico
+✅ metarecycling__expenses: byte-identico
+✅ metarecycling__expenses_detail: byte-identico
+✅ metarecycling__money_accounts: identico salvo 4 claves aditivas esperadas
+✅ metarecycling__money_movements: identico salvo 400 claves aditivas esperadas
+✅ metarecycling__pnl_june: identico salvo 2 claves aditivas esperadas
+✅ metarecycling__pnl_monthly: identico salvo 8 claves aditivas esperadas
+✅ metarecycling__pnl_period: identico salvo 2 claves aditivas esperadas
+✅ metarecycling__profitability_bu: byte-identico
+✅ metarecycling__tp_statement: byte-identico
+✅ metarecycling__warehouses: identico salvo 3 claves aditivas esperadas
+======================================================================
+RESULTADO: 0 diffs reales, 1271 claves aditivas esperadas

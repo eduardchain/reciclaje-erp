@@ -73,6 +73,10 @@ export default function MovementCreatePage() {
   const { data: expCategoriesData } = useExpenseCategoriesFlat();
   const { data: provisionsData } = useProvisions();
   const { data: liabilitiesData } = useLiabilities();
+  // W5 (SAC D9): el PAGO de pasivo lista también las entidades sistema
+  // "[Retenciones] X" (backend ya lo soporta; sin esto no se pueden pagar
+  // desde la UI). Causar gasto (expense_accrual) sigue SIN system entities.
+  const { data: payableLiabilitiesData } = useLiabilities(undefined, undefined, true);
   const { data: genericData } = useGenericThirdParties();
 
   const payableSuppliers = payableSuppliersData?.items ?? [];
@@ -83,6 +87,7 @@ export default function MovementCreatePage() {
   const expenseCategories = expCategoriesData?.items ?? [];
   const provisions = provisionsData?.items ?? [];
   const liabilities = liabilitiesData?.items ?? [];
+  const payableLiabilities = payableLiabilitiesData?.items ?? [];
   const generics = genericData?.items ?? [];
 
   const [amount, setAmount] = useState(0);
@@ -283,7 +288,9 @@ export default function MovementCreatePage() {
     switch (type) {
       case "payment_to_supplier":
       case "advance_payment": return payableSuppliers.map(tpOption);
-      case "liability_payment": return liabilities.map(tpOption);
+      // W5: pago lista TAMBIÉN las entidades "[Retenciones] X" (payable);
+      // causar gasto (expense_accrual, abajo) sigue con la lista sin system.
+      case "liability_payment": return payableLiabilities.map(tpOption);
       case "collection_from_client":
       case "advance_collection": return customers.map(tpOption);
       case "capital_injection":

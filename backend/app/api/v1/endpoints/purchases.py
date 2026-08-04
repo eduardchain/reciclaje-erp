@@ -39,7 +39,39 @@ router = APIRouter()
 # Helper Functions
 # ============================================================================
 
-def _enrich_purchase_response(purchase: Purchase, db: Session = None) -> dict:
+def _inbound_origin_map(db: Session, purchase_ids: list, organization_id: UUID) -> dict:
+    """SAC Ciclo B (B1): purchase_id -> (inbound_order_id, order_number,
+    collector_id, collector_name). Ciclo D suma el recolector al MISMO lookup
+    (outerjoin, cero queries extra) — la Liquidate page pre-carga la comision.
+
+    Lookup por pagina (F3 QA): la query paginada de compras NO se toca —
+    duplicar filas del listado es imposible por construccion (si un bug creara
+    dos inbounds por compra, el dict se queda con uno, sin fila fantasma).
+    Orgs sin recepciones (prod actual) -> dict vacio, costo ~0.
+    """
+    if not purchase_ids:
+        return {}
+    from sqlalchemy import select
+    from app.models.inbound_order import InboundOrder
+    from app.models.third_party import ThirdParty as TP
+    rows = db.execute(
+        select(
+            InboundOrder.purchase_id,
+            InboundOrder.id,
+            InboundOrder.order_number,
+            InboundOrder.collector_id,
+            TP.name,
+        )
+        .outerjoin(TP, TP.id == InboundOrder.collector_id)
+        .where(
+            InboundOrder.organization_id == organization_id,
+            InboundOrder.purchase_id.in_(purchase_ids),
+        )
+    ).all()
+    return {pid: (oid, num, cid, cname) for pid, oid, num, cid, cname in rows}
+
+
+def _enrich_purchase_response(purchase: Purchase, db: Session = None, inbound_map: dict = None) -> dict:
     """
     Enrich purchase object with joined data for response.
 
@@ -66,11 +98,22 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None) -> dict:
             }
             for comm in (purchase.commissions or [])
         ],
+        # SAC E2 D9 — vacio para compras sin retenciones (clientes actuales)
+        "retentions": list(purchase.retentions or []),
         "created_by_name": None,
         "liquidated_by_name": None,
         "cancelled_by_name": None,
         "updated_by_name": None,
     }
+
+    # SAC Ciclo B (B1): origen inbound solo cuando el caller paso el map
+    if inbound_map is not None:
+        origin = inbound_map.get(purchase.id)
+        data["inbound_order_id"] = origin[0] if origin else None
+        data["inbound_order_number"] = origin[1] if origin else None
+        # SAC Ciclo D: recolector de la entrada (pre-carga de comision al liquidar)
+        data["collector_id"] = origin[2] if origin else None
+        data["collector_name"] = origin[3] if origin else None
 
     # Resolver nombres de usuarios de auditoria
     if db:
@@ -275,9 +318,15 @@ async def list_purchases(
             sort_dir=sort_dir,
         )
         
-        # Enrich each purchase with joined data
-        items = [PurchaseResponse(**_enrich_purchase_response(p, db)) for p in purchases]
-        
+        # Enrich each purchase with joined data (+ origen inbound B1, por pagina)
+        inbound_map = _inbound_origin_map(
+            db, [p.id for p in purchases], org_context["organization_id"]
+        )
+        items = [
+            PurchaseResponse(**_enrich_purchase_response(p, db, inbound_map=inbound_map))
+            for p in purchases
+        ]
+
         return PaginatedPurchaseResponse(
             items=items,
             total=total,
@@ -286,7 +335,7 @@ async def list_purchases(
             limit=limit,
             total_amount_sum=float(amount_sum),
         )
-    
+
     except Exception as e:
         logger.error(f"Error listing purchases: {e}", exc_info=True)
         raise HTTPException(
@@ -376,6 +425,11 @@ async def get_purchase_by_number(
     response_data["linked_payment_total"] = float(
         purchase_service.get_linked_payment_total(db, purchase.id, org_context["organization_id"])
     )
+    # Ciclo D (pruebas Daniel): costo de recoleccion visible en el detalle
+    cc_total = purchase_service.get_collector_commission_total(
+        db, purchase.id, org_context["organization_id"]
+    )
+    response_data["collector_commission_total"] = float(cc_total) if cc_total > 0 else None
     return PurchaseResponse(**response_data)
 
 
@@ -453,10 +507,16 @@ async def get_purchase(
             detail="Compra no encontrada",
         )
     
-    response_data = _enrich_purchase_response(purchase, db)
+    inbound_map = _inbound_origin_map(db, [purchase.id], org_context["organization_id"])
+    response_data = _enrich_purchase_response(purchase, db, inbound_map=inbound_map)
     response_data["linked_payment_total"] = float(
         purchase_service.get_linked_payment_total(db, purchase.id, org_context["organization_id"])
     )
+    # Ciclo D (pruebas Daniel): costo de recoleccion visible en el detalle
+    cc_total = purchase_service.get_collector_commission_total(
+        db, purchase.id, org_context["organization_id"]
+    )
+    response_data["collector_commission_total"] = float(cc_total) if cc_total > 0 else None
     return PurchaseResponse(**response_data)
 
 
@@ -564,6 +624,8 @@ async def liquidate_purchase(
             payment_account_id=liquidate_data.payment_account_id,
             commissions_data=liquidate_data.commissions,
             liquidation_date=liquidate_data.liquidation_date,
+            retentions_data=liquidate_data.retentions,
+            collector_commission_data=liquidate_data.collector_commission,
         )
         
         response_data = _enrich_purchase_response(purchase, db)

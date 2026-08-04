@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
-import { ArrowLeft, CreditCard, XCircle, Pencil, FileText } from "lucide-react";
+import { ArrowLeft, CreditCard, XCircle, Pencil, FileText, PackageOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +23,7 @@ import { usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
 import { CHARGE_TYPE_LABELS } from "@/utils/constants";
+import { RETENTION_TYPE_LABELS } from "@/types/purchase";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
 
@@ -114,6 +115,23 @@ export default function PurchaseDetailPage() {
           </Button>
         </div>
       </PageHeader>
+
+      {/* Ciclo B (B1): origen inbound — trazabilidad del canal unico */}
+      {purchase.inbound_order_number != null && purchase.inbound_order_id && (
+        <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm text-indigo-800">
+          <PackageOpen className="h-4 w-4 shrink-0" />
+          <span>
+            Origen:{" "}
+            <Link
+              to={`/inbound/${purchase.inbound_order_id}`}
+              className="font-medium underline hover:text-indigo-900"
+            >
+              Entrada #{purchase.inbound_order_number}
+            </Link>{" "}
+            — esta compra fue derivada desde el patio.
+          </span>
+        </div>
+      )}
 
       {/* Info general */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -279,6 +297,92 @@ export default function PurchaseDetailPage() {
                   <span>Costo Total Inventario</span>
                   <span className="tabular-nums">
                     {formatCurrency(purchase.total_amount + purchase.commissions.reduce((s, c) => s + c.commission_amount, 0))}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Comisión de recolección (SAC Ciclo D — gasto causado, no prorratea al costo) */}
+      {purchase.collector_commission_total != null && canViewPrices && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Comisión de Recolección</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="text-sm">
+                <span className="text-slate-600">Recolector: </span>
+                {purchase.collector_id ? (
+                  <ThirdPartyLink id={purchase.collector_id}>
+                    <span className="font-medium">{purchase.collector_name}</span>
+                  </ThirdPartyLink>
+                ) : (
+                  <span className="font-medium">{purchase.collector_name ?? "—"}</span>
+                )}
+              </div>
+              <div className="text-sm font-semibold tabular-nums">
+                {formatCurrency(purchase.collector_commission_total)}
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              Causada como <strong>gasto</strong> (categoría "Comisiones de recolección") al liquidar —
+              no hace parte del costo del material ni del total a pagar al proveedor.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Retenciones aplicadas (SAC D9 — vacío para orgs sin flag) */}
+      {purchase.retentions?.length > 0 && canViewPrices && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Retenciones Aplicadas</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-lg border border-slate-200/80 overflow-x-auto">
+              <Table className="min-w-[480px]">
+                <TableHeader>
+                  <TableRow className="bg-slate-50/80 border-b border-slate-200/80">
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Tipo</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10">Municipio</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 h-10 text-right">Monto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {purchase.retentions.map((ret) => (
+                    <TableRow key={ret.id} className={ret.reverted_at ? "opacity-60" : ""}>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5">
+                          <ThirdPartyLink id={ret.third_party_id}>
+                            {RETENTION_TYPE_LABELS[ret.retention_type] ?? ret.retention_type}
+                          </ThirdPartyLink>
+                          {ret.reverted_at && (
+                            <Badge variant="outline" className="bg-rose-100 text-rose-800">Revertida</Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-slate-600">{ret.municipality ?? "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">{formatCurrency(ret.amount)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 mt-3">
+              <div className="max-w-sm ml-auto space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">Total Retenciones</span>
+                  <span className="tabular-nums text-rose-600">
+                    −{formatCurrency(purchase.retentions.reduce((s, r) => s + (r.reverted_at ? 0 : r.amount), 0))}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm font-semibold">
+                  <span>Neto Acreditado al Proveedor</span>
+                  <span className="tabular-nums">
+                    {formatCurrency(purchase.total_amount - purchase.retentions.reduce((s, r) => s + (r.reverted_at ? 0 : r.amount), 0))}
                   </span>
                 </div>
               </div>

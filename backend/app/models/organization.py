@@ -2,6 +2,7 @@ from uuid import UUID, uuid4
 from typing import List
 
 from sqlalchemy import Boolean, String, Integer
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, GUID
@@ -44,6 +45,14 @@ class Organization(Base, TimestampMixin):
     max_users: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    settings: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Flags y parametros por org (SAC E1, D3). NULL = flags apagados y "
+        "parametros en default. Escritura REPLACE del dict completo, solo superuser. "
+        "Sin MutableDict: toda escritura reasigna el dict completo",
+    )
 
     # Relationships
     members: Mapped[List["OrganizationMember"]] = relationship(

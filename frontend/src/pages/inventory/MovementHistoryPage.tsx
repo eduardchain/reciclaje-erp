@@ -16,7 +16,7 @@ import { DataTable } from "@/components/shared/DataTable";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { MovementListCard } from "@/components/shared/MovementListCard";
-import { PurchaseLink, SaleLink, TransformationLink, AdjustmentLink } from "@/components/shared/EntityLink";
+import { PurchaseLink, SaleLink, TransformationLink, AdjustmentLink, InboundOrderLink } from "@/components/shared/EntityLink";
 import { useInventoryMovements } from "@/hooks/useInventory";
 import { useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { formatCurrency, formatDate } from "@/utils/formatters";
@@ -35,6 +35,9 @@ const typeLabels: Record<string, string> = {
   purchase_reversal: "Rev. Compra",
   sale_reversal: "Rev. Venta",
   transformation: "Transformacion",
+  // SAC E2: entradas por orden de Recepcion (tipos Willard)
+  inbound_receipt: "Recepción Willard",
+  inbound_reversal: "Reversa recepción",
 };
 
 const typeColors: Record<string, string> = {
@@ -46,6 +49,8 @@ const typeColors: Record<string, string> = {
   purchase_reversal: "bg-red-100 text-red-800",
   sale_reversal: "bg-red-100 text-red-800",
   transformation: "bg-orange-100 text-orange-800",
+  inbound_receipt: "bg-teal-100 text-teal-800",
+  inbound_reversal: "bg-red-100 text-red-800",
 };
 
 export default function MovementHistoryPage() {
@@ -157,6 +162,9 @@ export default function MovementHistoryPage() {
           if (movement_type === "adjustment") {
             return <AdjustmentLink id={reference_id}>Ver ajuste</AdjustmentLink>;
           }
+          if (movement_type === "inbound_receipt" || movement_type === "inbound_reversal") {
+            return <InboundOrderLink id={reference_id}>Ver recepción</InboundOrderLink>;
+          }
           return <span className="text-slate-400 text-sm">-</span>;
         },
       },
@@ -241,6 +249,7 @@ export default function MovementHistoryPage() {
             else if (m.movement_type === "sale" || m.movement_type === "sale_reversal") navigate(`/sales/${m.reference_id}`);
             else if (m.movement_type === "transformation") navigate(`/inventory/transformations/${m.reference_id}`);
             else if (m.movement_type === "adjustment") navigate(`/inventory/adjustments/${m.reference_id}`);
+            else if (m.movement_type === "inbound_receipt" || m.movement_type === "inbound_reversal") navigate(`/inbound/${m.reference_id}`);
           };
           const extras = (
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">

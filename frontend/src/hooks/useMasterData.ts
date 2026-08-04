@@ -1,5 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { thirdPartyService } from "@/services/thirdParties";
+import { getApiErrorMessage } from "@/utils/formatters";
+import type { RetentionConfigCreate, RetentionConfigUpdate } from "@/types/third-party";
 import { materialService } from "@/services/materials";
 import { warehouseService } from "@/services/warehouses";
 import { moneyAccountService } from "@/services/moneyAccounts";
@@ -97,10 +100,58 @@ export function useProvisions(search?: string, is_active?: boolean) {
   });
 }
 
-export function useLiabilities(search?: string, is_active?: boolean) {
+export function useLiabilities(search?: string, is_active?: boolean, includeSystem?: boolean) {
+  // includeSystem (SAC E2 D9): suma las entidades "[Retenciones] X" — usar SOLO
+  // en selectores de PAGO (sus saldos nacen de liquidaciones, no de causaciones).
   return useQuery({
-    queryKey: ["third-parties", "liabilities", search, is_active],
-    queryFn: () => thirdPartyService.getLiabilities({ search, limit: 500, is_active }),
+    queryKey: ["third-parties", "liabilities", search, is_active, includeSystem ?? false],
+    queryFn: () =>
+      thirdPartyService.getLiabilities({
+        search,
+        limit: 500,
+        is_active,
+        ...(includeSystem ? { include_system: true } : {}),
+      }),
+  });
+}
+
+export function useRetentionRows(enabled: boolean) {
+  // F2 QA: el endpoint es flag-gated (kg_ledger_enabled) y este hook vive
+  // tambien en una pagina COMPARTIDA con las orgs prod (PurchaseLiquidatePage)
+  // — pasar SIEMPRE enabled=flagEnabled("kg_ledger_enabled"): sin flag, cero requests.
+  return useQuery({
+    queryKey: ["third-parties", "retention-entities"],
+    queryFn: () => thirdPartyService.getRetentionRows(),
+    enabled,
+  });
+}
+
+export function useCreateRetentionConfig() {
+  // Colision (tipo, municipio, concepto) normalizados H4 → 409 con la tarifa
+  // existente en el detail (editarla, no duplicar).
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: RetentionConfigCreate) => thirdPartyService.createRetentionConfig(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["third-parties"] });
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al crear la retención"));
+    },
+  });
+}
+
+export function useUpdateRetentionConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ configId, data }: { configId: string; data: RetentionConfigUpdate }) =>
+      thirdPartyService.updateRetentionConfig(configId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["third-parties"] });
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al actualizar la retención"));
+    },
   });
 }
 

@@ -213,6 +213,17 @@ class InventoryAdjustment(Base, OrganizationMixin, TimestampMixin):
         comment="Usuario que creo el ajuste",
     )
 
+    # SAC E3.1 (C1 QA): enlaza los ajustes hijos de merma/excedente al traslado
+    # para el cascade de anulacion. NO se expone en el response schema (interno,
+    # precedente #75 purchase_retentions.third_party_id) — la serializacion de
+    # GET /inventory/adjustments queda byte-identica para las orgs prod.
+    transfer_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("transfers.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Traslado padre cuando el ajuste es merma/excedente de recepcion (SAC E3.1)",
+    )
+
     # --- Relationships ---
     material: Mapped["Material"] = relationship(
         "Material",

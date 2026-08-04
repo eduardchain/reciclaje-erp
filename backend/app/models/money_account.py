@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 from decimal import Decimal
 
-from sqlalchemy import String, Boolean, Numeric
+from sqlalchemy import String, Boolean, ForeignKey, Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, OrganizationMixin, GUID
@@ -53,7 +53,16 @@ class MoneyAccount(Base, TimestampMixin, OrganizationMixin):
     )
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    
+
+    # --- Columna SAC E1 (Migracion B, D10) — inerte hasta E5, NULL para clientes existentes ---
+    warehouse_id: Mapped[UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("warehouses.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Sede de la caja (cajas menores por sede, v0.5 §11.2.6a): el gasto "
+        "hereda la sede de la CAJA usada. NULL = cuenta corporativa",
+    )
+
     # Relationships
     purchases: Mapped[list["Purchase"]] = relationship(
         "Purchase",

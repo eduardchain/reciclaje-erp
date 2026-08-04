@@ -47,4 +47,13 @@ export const systemService = {
     const response = await apiClient.post(`/api/v1/system/users/${userId}/add-to-org`, data);
     return response.data;
   },
+
+  /** Resetea la clave de un usuario. La clave NUNCA vuelve en el response (D1). */
+  resetUserPassword: async (userId: string, newPassword: string): Promise<SystemUserResponse> => {
+    const response = await apiClient.post<SystemUserResponse>(
+      `/api/v1/system/users/${userId}/reset-password`,
+      { new_password: newPassword },
+    );
+    return response.data;
+  },
 };

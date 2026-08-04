@@ -36,6 +36,8 @@ import {
   Sheet,
   Receipt,
   Landmark,
+  Percent,
+  PackageOpen,
 } from "lucide-react";
 import { cn } from "@/utils";
 import { ROUTES } from "@/utils/constants";
@@ -47,7 +49,35 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { usePendingEntriesCount } from "@/hooks/useInboundOrders";
+import { usePendingTransfersCount } from "@/hooks/useTransfers";
 import { useAuthStore } from "@/stores/authStore";
+
+
+// Ciclo C (W-C3): solo se monta dentro del item "Entradas", que existe
+// unicamente con kg_ledger_enabled — en orgs sin flag este query jamas corre
+function PendingEntriesBadge() {
+  const count = usePendingEntriesCount();
+  if (!count) return null;
+  return (
+    <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500/90 text-white text-[11px] font-semibold flex items-center justify-center tabular-nums">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
+// E3.1: solo se monta dentro del item "Traslados" (existe solo con
+// two_step_transfers_enabled) — cero requests sin flag (regla F2)
+function PendingTransfersBadge() {
+  const count = usePendingTransfersCount();
+  if (!count) return null;
+  return (
+    <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500/90 text-white text-[11px] font-semibold flex items-center justify-center tabular-nums">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
 
 interface NavChild {
   name: string;
@@ -55,6 +85,10 @@ interface NavChild {
   icon: React.ReactNode;
   permission?: string | string[];
   superuserOnly?: boolean;
+  // Feature flag de la org (SAC E1, D12): la entrada solo aparece si el flag
+  // esta encendido. Las entradas SIN orgFlag JAMAS dependen del query de
+  // settings (regla de no-regresion §5.1 del plan E1).
+  orgFlag?: string;
 }
 
 interface NavItem {
@@ -65,6 +99,18 @@ interface NavItem {
   permission?: string;
   children?: NavChild[];
   superuserOnly?: boolean;
+  // Feature flag de la org (SAC E2, plan §5): NavItem hoja gated por flag.
+  // Regla de no-regresion: las entradas SIN orgFlag jamas tocan el query de settings.
+  orgFlag?: string;
+  // Inverso (paquete UX W1): la entrada se OCULTA si el flag esta encendido.
+  // Degradacion segura: en loading/error flagEnabled=false → visible (status
+  // quo para orgs sin flag). Uso: "Materiales" general se oculta en SAC, cuyo
+  // reemplazo es Config → Materiales (kg); la ruta /materials queda viva.
+  hideWhenOrgFlag?: string;
+  // Ciclo C: contador ambar de entradas por liquidar (solo item Entradas SAC)
+  pendingBadge?: boolean;
+  // E3.1: contador ambar de traslados por recibir (solo item Traslados SAC)
+  transferBadge?: boolean;
 }
 
 const systemNavItems: NavItem[] = [
@@ -92,11 +138,37 @@ const orgNavItems: NavItem[] = [
     icon: <ShoppingCart className="w-5 h-5" />,
     section: "OPERACIONES",
     permission: "purchases.view",
+    // Ciclo C: en SAC el canal es "Entradas" — las rutas /purchases siguen
+    // vivas (cara financiera), solo sale del menu
+    hideWhenOrgFlag: "kg_ledger_enabled",
+  },
+  {
+    // Ciclo C: modulo unico de entradas (ex "Recepción") — compras + willard
+    name: "Entradas",
+    path: ROUTES.INBOUND,
+    icon: <PackageOpen className="w-5 h-5" />,
+    section: "OPERACIONES",
+    permission: "purchases.view",
+    orgFlag: "kg_ledger_enabled",
+    pendingBadge: true,
+  },
+  {
+    // E3.1: traslados intersede dos pasos (SAC)
+    name: "Traslados",
+    path: ROUTES.TRANSFERS,
+    icon: <Truck className="w-5 h-5" />,
+    section: "OPERACIONES",
+    permission: "inventory.view",
+    orgFlag: "two_step_transfers_enabled",
+    transferBadge: true,
   },
   {
     name: "Ventas",
     path: ROUTES.SALES,
     icon: <DollarSign className="w-5 h-5" />,
+    // Fallback de seccion cuando Compras esta oculta (SAC) — el dedupe de
+    // secciones consecutivas evita el doble header en orgs normales
+    section: "OPERACIONES",
     permission: "sales.view",
   },
   {
@@ -104,6 +176,13 @@ const orgNavItems: NavItem[] = [
     path: ROUTES.DOUBLE_ENTRIES,
     icon: <ArrowLeftRight className="w-5 h-5" />,
     permission: "double_entries.view",
+  },
+  {
+    name: "Plomo (kg)",
+    path: ROUTES.KG_LEDGER,
+    icon: <Scale className="w-5 h-5" />,
+    permission: "kg_ledger.view",
+    orgFlag: "kg_ledger_enabled",
   },
   {
     name: "Tesoreria",
@@ -117,6 +196,7 @@ const orgNavItems: NavItem[] = [
       { name: "Cuentas", path: ROUTES.TREASURY_ACCOUNT_MOVEMENTS, icon: <CreditCard className="w-4 h-4" />, permission: "treasury.view_accounts" },
       { name: "Provisiones", path: ROUTES.TREASURY_PROVISIONS, icon: <Tag className="w-4 h-4" />, permission: "treasury.view_provisions" },
       { name: "Pasivos", path: ROUTES.TREASURY_LIABILITIES, icon: <Scale className="w-4 h-4" />, permission: "treasury.view_liabilities" },
+      { name: "Retenciones", path: ROUTES.TREASURY_RETENTIONS, icon: <Percent className="w-4 h-4" />, permission: "third_parties.view", orgFlag: "kg_ledger_enabled" },
       { name: "Gastos Diferidos", path: ROUTES.TREASURY_SCHEDULED, icon: <CalendarClock className="w-4 h-4" />, permission: "treasury.view_scheduled" },
       { name: "Activos Fijos", path: ROUTES.TREASURY_FIXED_ASSETS, icon: <Building2 className="w-4 h-4" />, permission: "treasury.view_fixed_assets" },
       { name: "Obligaciones", path: ROUTES.TREASURY_OBLIGATIONS, icon: <Landmark className="w-4 h-4" />, permission: "treasury.view_obligations" },
@@ -169,6 +249,9 @@ const orgNavItems: NavItem[] = [
     path: ROUTES.MATERIALS,
     icon: <Boxes className="w-5 h-5" />,
     permission: "materials.view",
+    // W1: en SAC el catalogo vive en Config → Materiales (kg) — esta entrada
+    // duplicaria el alta de materiales (ruido, C1). Ruta /materials sigue viva.
+    hideWhenOrgFlag: "kg_ledger_enabled",
   },
   {
     name: "Configuracion",
@@ -182,6 +265,9 @@ const orgNavItems: NavItem[] = [
       { name: "Cat. Gastos", path: ROUTES.CONFIG_EXPENSE_CATEGORIES, icon: <Tag className="w-4 h-4" />, permission: "treasury.manage_expenses" },
       { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" />, permission: "materials.view_prices" },
       { name: "Cat. Terceros", path: ROUTES.CONFIG_THIRD_PARTY_CATEGORIES, icon: <Users className="w-4 h-4" />, permission: "third_parties.create" },
+      { name: "Tarifas", path: ROUTES.CONFIG_TARIFFS, icon: <Receipt className="w-4 h-4" />, permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
+      { name: "Materiales (kg)", path: ROUTES.CONFIG_FORMULAS, icon: <Calculator className="w-4 h-4" />, permission: "formulas.view", orgFlag: "kg_ledger_enabled" },
+      { name: "Conductores y Vehiculos", path: ROUTES.CONFIG_FLEET, icon: <Truck className="w-4 h-4" />, permission: "config.view_fleet", orgFlag: "kg_ledger_enabled" },
     ],
   },
   {
@@ -206,6 +292,7 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [collapsedDesktop, setCollapsedDesktop] = useState(false);
   const { hasPermission, hasAnyPermission, isLoading } = usePermissions();
+  const { flagEnabled } = useOrgSettings();
   const user = useAuthStore((s) => s.user);
   const organizationId = useAuthStore((s) => s.organizationId);
   const isSuperuser = user?.is_superuser ?? false;
@@ -229,22 +316,41 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
       return hasPermission(perm);
     };
 
+    // Regla de no-regresion (plan E1 §5.1): SOLO las entradas CON orgFlag
+    // consultan flagEnabled — en loading/error/settings NULL se ocultan ellas
+    // y el resto del sidebar se renderiza identico a hoy.
+    const checkFlag = (flag?: string) => !flag || flagEnabled(flag);
+    // W1: ocultar-si-flag — solo la consulta la entrada que lo declara
+    const checkHide = (flag?: string) => !flag || !flagEnabled(flag);
+
     const filtered = orgNavItems
       .map((item) => {
         if (item.children) {
           const filteredChildren = item.children.filter(
-            (child) => checkPerm(child.permission)
+            (child) => checkPerm(child.permission) && checkFlag(child.orgFlag)
           );
           if (filteredChildren.length === 0) return null;
           return { ...item, children: filteredChildren };
         }
-        if (!checkPerm(item.permission)) return null;
+        if (!checkPerm(item.permission) || !checkFlag(item.orgFlag) || !checkHide(item.hideWhenOrgFlag)) return null;
         return item;
       })
       .filter(Boolean) as NavItem[];
 
-    return filtered;
-  }, [isLoading, hasPermission, hasAnyPermission, isSystemMode, isSuperuser]);
+    // Ciclo C: dedupe de secciones consecutivas — varios items declaran la
+    // misma seccion como fallback (ej. Compras oculta en SAC → Entradas o
+    // Ventas cargan "OPERACIONES"); solo el primero visible la renderiza
+    let lastSection: string | undefined;
+    return filtered.map((item) => {
+      if (!item.section) return item;
+      if (item.section === lastSection) {
+        const { section: _dropped, ...rest } = item;
+        return rest as NavItem;
+      }
+      lastSection = item.section;
+      return item;
+    });
+  }, [isLoading, hasPermission, hasAnyPermission, isSystemMode, isSuperuser, flagEnabled]);
 
   const toggleExpand = (name: string) => {
     setExpanded((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -401,8 +507,15 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
                     >
                       <span className={cn(active && "text-emerald-400")}>{item.icon}</span>
                       <span className="text-sm">{item.name}</span>
-                      {active && (
-                        <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      {item.pendingBadge || item.transferBadge ? (
+                        <span className="ml-auto flex items-center gap-1.5">
+                          {item.pendingBadge ? <PendingEntriesBadge /> : <PendingTransfersBadge />}
+                          {active && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                        </span>
+                      ) : (
+                        active && (
+                          <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        )
                       )}
                     </Link>
                   )}

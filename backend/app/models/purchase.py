@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from app.models.money_account import MoneyAccount
     from app.models.material import Material
     from app.models.warehouse import Warehouse
+    from app.models.purchase_retention import PurchaseRetention
 
 
 class Purchase(Base, OrganizationMixin, TimestampMixin):
@@ -129,6 +130,16 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         comment="Additional notes or observations",
     )
 
+    # --- Columna SAC E1 (Migracion B, D10) — header de sede, inerte hasta E2 ---
+    # Exigida por v0.5 §12.2.3 (obligatoria para SAC, inmutable post-registro);
+    # simetrica con sales.warehouse_id. La logica que la puebla es de E2.
+    warehouse_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("warehouses.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Sede de recepcion (header) — NULL para clientes existentes",
+    )
+
     # Audit and traceability fields
     vehicle_plate: Mapped[Optional[str]] = mapped_column(
         String(20),
@@ -208,6 +219,15 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         back_populates="purchase",
         cascade="all, delete-orphan",
         order_by="PurchaseCommission.created_at",
+    )
+
+    # SAC E2 (D9): retenciones tributarias aplicadas al liquidar — vacio para
+    # los 3 clientes existentes (data-gated, cero efecto sin payload)
+    retentions: Mapped[List["PurchaseRetention"]] = relationship(
+        "PurchaseRetention",
+        back_populates="purchase",
+        cascade="all, delete-orphan",
+        order_by="PurchaseRetention.created_at",
     )
 
     double_entry: Mapped[Optional["DoubleEntry"]] = relationship(

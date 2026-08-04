@@ -107,12 +107,25 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
         nullable=True,
         comment="Vehicle plate number for delivery/pickup"
     )
-    
+
     invoice_number: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
         index=True,
         comment="Invoice or bill number"
+    )
+
+    # --- Columnas SAC E1 (Migracion B, D10) — inertes hasta E4, NULL para clientes existentes ---
+    willard_remission_number: Mapped[Optional[str]] = mapped_column(
+        String(40),
+        nullable=True,
+        comment="Remision Willard — decide que cuenta kg se descarga (v0.5 §11.2.2)",
+    )
+
+    willard_target_account: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="baterias | drosses — cuenta kg destino de la entrega Willard",
     )
     
     total_amount: Mapped[Decimal] = mapped_column(

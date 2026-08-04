@@ -30,6 +30,17 @@ export const ROUTES = {
   DOUBLE_ENTRIES: "/double-entries",
   DOUBLE_ENTRIES_NEW: "/double-entries/new",
 
+  // SAC E2 — Recepcion y Plomo (kg), gated por flag kg_ledger_enabled
+  INBOUND: "/inbound",
+  INBOUND_NEW: "/inbound/new",
+  INBOUND_DETAIL: "/inbound/:id",
+  INBOUND_EDIT: "/inbound/:id/edit",
+  TRANSFERS: "/transfers",
+  TRANSFER_NEW: "/transfers/new",
+  TRANSFER_DETAIL: "/transfers/:id",
+  KG_LEDGER: "/kg-ledger",
+  KG_LEDGER_ACCOUNT: "/kg-ledger/:id",
+
   // Tesoreria
   TREASURY: "/treasury",
   TREASURY_NEW: "/treasury/new",
@@ -38,6 +49,7 @@ export const ROUTES = {
   TREASURY_DASHBOARD: "/treasury/dashboard",
   TREASURY_ACCOUNT_MOVEMENTS: "/treasury/account-movements",
   TREASURY_LIABILITIES: "/treasury/liabilities",
+  TREASURY_RETENTIONS: "/treasury/retentions",
   TREASURY_SCHEDULED: "/treasury/scheduled-expenses",
   TREASURY_SCHEDULED_NEW: "/treasury/scheduled-expenses/new",
   TREASURY_FIXED_ASSETS: "/treasury/fixed-assets",
@@ -85,6 +97,9 @@ export const ROUTES = {
   CONFIG_EXPENSE_CATEGORIES: "/config/expense-categories",
   CONFIG_PRICE_LISTS: "/config/price-lists",
   CONFIG_THIRD_PARTY_CATEGORIES: "/config/third-party-categories",
+  CONFIG_TARIFFS: "/config/tariffs",
+  CONFIG_FORMULAS: "/config/formulas",
+  CONFIG_FLEET: "/config/fleet",
 
   // Admin
   ADMIN_ROLES: "/admin/roles",

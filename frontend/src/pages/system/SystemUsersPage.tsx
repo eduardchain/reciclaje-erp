@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { UserPlus, Shield, X, Globe } from "lucide-react";
+import { UserPlus, Shield, X, Globe, KeyRound, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -16,7 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useSystemOrganizations, useSystemUsers, useAddUserToOrg, useOrgRoles } from "@/hooks/useSystem";
+import {
+  useSystemOrganizations,
+  useSystemUsers,
+  useAddUserToOrg,
+  useOrgRoles,
+  useResetUserPassword,
+} from "@/hooks/useSystem";
 import { formatDate } from "@/utils/formatters";
 import type { SystemUserResponse } from "@/types/organization";
 
@@ -58,6 +65,37 @@ export default function SystemUsersPage() {
     setAddTarget(user);
     setSelectedOrgId("");
     setSelectedRoleId("");
+  };
+
+  // Reseteo de contrasena (solo superusuario; D2: nunca sobre otro superusuario)
+  const resetPassword = useResetUserPassword();
+  const [resetTarget, setResetTarget] = useState<SystemUserResponse | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const passwordTooShort = newPassword.length > 0 && newPassword.length < 6;
+  const passwordsMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+  const canReset =
+    newPassword.length >= 6 && newPassword === confirmPassword && !resetPassword.isPending;
+
+  const openResetDialog = (user: SystemUserResponse) => {
+    setResetTarget(user);
+    setNewPassword("");
+    setConfirmPassword("");
+  };
+
+  const closeResetDialog = () => {
+    setResetTarget(null);
+    setNewPassword("");
+    setConfirmPassword("");
+  };
+
+  const handleResetPassword = () => {
+    if (!resetTarget || !canReset) return;
+    resetPassword.mutate(
+      { userId: resetTarget.id, newPassword },
+      { onSuccess: closeResetDialog },
+    );
   };
 
   const handleOrgChange = (orgId: string) => {
@@ -161,15 +199,26 @@ export default function SystemUsersPage() {
                   <TableCell className="text-sm text-slate-500">{formatDate(user.created_at)}</TableCell>
                   <TableCell className="text-right">
                     {!user.is_superuser && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 px-2 text-xs"
-                        onClick={() => openAddDialog(user)}
-                      >
-                        <UserPlus className="h-3.5 w-3.5 mr-1" />
-                        Agregar a Org
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2 text-xs"
+                          onClick={() => openAddDialog(user)}
+                        >
+                          <UserPlus className="h-3.5 w-3.5 mr-1" />
+                          Agregar a Org
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2 text-xs"
+                          onClick={() => openResetDialog(user)}
+                        >
+                          <KeyRound className="h-3.5 w-3.5 mr-1" />
+                          Contrasena
+                        </Button>
+                      </div>
                     )}
                   </TableCell>
                 </TableRow>
@@ -206,15 +255,26 @@ export default function SystemUsersPage() {
                   <div className="text-xs text-slate-500 truncate mt-0.5">{user.email}</div>
                 </div>
                 {!user.is_superuser && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 px-2 text-xs shrink-0"
-                    onClick={() => openAddDialog(user)}
-                  >
-                    <UserPlus className="h-3.5 w-3.5 mr-1" />
-                    Agregar
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      onClick={() => openAddDialog(user)}
+                    >
+                      <UserPlus className="h-3.5 w-3.5 mr-1" />
+                      Agregar
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      aria-label="Resetear contrasena"
+                      onClick={() => openResetDialog(user)}
+                    >
+                      <KeyRound className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 )}
               </div>
               <div className="mt-2">
@@ -308,6 +368,75 @@ export default function SystemUsersPage() {
               className="bg-emerald-600 hover:bg-emerald-700"
             >
               {addUserToOrg.isPending ? "Agregando..." : "Agregar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Resetear contrasena */}
+      <Dialog open={!!resetTarget} onOpenChange={(open) => !open && closeResetDialog()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Resetear Contrasena</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="rounded-md bg-slate-50 border p-3 text-sm">
+              <div className="font-medium">{resetTarget?.full_name ?? "-"}</div>
+              <div className="text-slate-500 text-xs mt-0.5">{resetTarget?.email}</div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="new-password">Contrasena nueva</Label>
+              <Input
+                id="new-password"
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Minimo 6 caracteres"
+                className="w-full"
+              />
+              {passwordTooShort && (
+                <p className="text-xs text-red-600">Debe tener al menos 6 caracteres.</p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="confirm-password">Confirmar contrasena</Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full"
+              />
+              {passwordsMismatch && (
+                <p className="text-xs text-red-600">Las contrasenas no coinciden.</p>
+              )}
+            </div>
+
+            {/* D4: honestidad sobre el alcance del reseteo */}
+            <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+              <p className="text-xs text-amber-800">
+                La sesion que el usuario ya tenga abierta seguira siendo valida hasta 7 dias.
+                Si la cuenta esta comprometida, pidele que cierre sesion.
+                <br />
+                Comunicale la contrasena por un canal privado: el sistema no se la envia.
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={closeResetDialog} className="w-full sm:w-auto">
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleResetPassword}
+              disabled={!canReset}
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700"
+            >
+              {resetPassword.isPending ? "Reseteando..." : "Resetear Contrasena"}
             </Button>
           </DialogFooter>
         </DialogContent>

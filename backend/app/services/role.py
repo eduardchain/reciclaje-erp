@@ -53,6 +53,9 @@ PERMISSIONS_CATALOG = [
     ("inventory.view_movements", "Ver Movimientos", "inventory", "Permite ver movimientos de inventario", 34),
     ("inventory.view_adjustments", "Ver Ajustes", "inventory", "Permite ver ajustes de inventario", 35),
     ("inventory.view_transit", "Ver En Transito", "inventory", "Permite ver inventario en transito", 36),
+    # SAC E3.1 (sort 147 — bloque SAC, tras kg_ledger 144-146; sin asignar a roles de sistema, D4)
+    ("inventory.transfer_receive", "Recibir Traslados Intersede", "inventory",
+     "Permite confirmar recepcion y resolver discrepancias de traslados dos pasos (SAC)", 147),
 
     # Materiales
     ("materials.view", "Ver Materiales", "materials", "Permite ver catalogo de materiales", 40),
@@ -110,6 +113,17 @@ PERMISSIONS_CATALOG = [
     ("treasury.manage_expenses", "Gestionar Cat. Gastos", "config", "Permite gestionar categorias de gastos", 126),
     ("materials.view_prices", "Ver Listas de Precios", "config", "Permite ver lista de precios", 127),
     ("materials.edit_prices", "Editar Listas de Precios", "config", "Permite modificar lista de precios", 128),
+
+    # SAC E1 (D4: dual-write con migracion d7e0a3c4b5f6; sin wiring a SYSTEM_ROLES)
+    ("config.view_fleet", "Ver Conductores y Vehiculos", "config", "Permite ver los maestros de conductores y vehiculos", 129),
+    ("config.manage_fleet", "Gestionar Conductores y Vehiculos", "config", "Permite crear y editar conductores y vehiculos", 130),
+    ("tariffs.view", "Ver Tarifas", "tariffs", "Permite ver tarifas de servicio (historico y vigente)", 140),
+    ("tariffs.manage", "Gestionar Tarifas", "tariffs", "Permite crear nuevas tarifas de servicio (append-only)", 141),
+    ("formulas.view", "Ver Formulas de Conversion", "formulas", "Permite ver formulas de conversion de materiales", 142),
+    ("formulas.manage", "Gestionar Formulas de Conversion", "formulas", "Permite crear nuevas formulas de conversion (append-only)", 143),
+    ("kg_ledger.view", "Ver Cuentas en Kg", "kg_ledger", "Permite ver saldos, movimientos y estados de cuenta del KgLedger", 144),
+    ("kg_ledger.manage", "Gestionar Cuentas en Kg", "kg_ledger", "Permite crear y editar la metadata de cuentas KgLedger", 145),
+    ("kg_ledger.manage_adjustments", "Ajustes Manuales de Kg", "kg_ledger", "Permite crear y anular movimientos manuales del KgLedger (auditados)", 146),
 
     # Administracion
     ("admin.manage_users", "Gestionar Usuarios", "admin", "Permite invitar y gestionar usuarios", 200),
@@ -210,6 +224,9 @@ MODULE_DISPLAY_NAMES = {
     "treasury": "Tesoreria",
     "reports": "Reportes",
     "config": "Configuracion",
+    "tariffs": "Tarifas",
+    "formulas": "Formulas de Conversion",
+    "kg_ledger": "Cuentas en Kg",
     "admin": "Administracion",
 }
 

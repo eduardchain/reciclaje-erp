@@ -107,6 +107,14 @@ class ExpenseCategory(Base, TimestampMixin, OrganizationMixin):
         Boolean, default=True, nullable=False,
     )
 
+    # --- Columna SAC E1 (Migracion B, D10) — el codigo lee bool(x): NULL ≡ false ---
+    is_system_entity: Mapped[Optional[bool]] = mapped_column(
+        Boolean,
+        nullable=True,
+        comment="Seeds de sistema SAC (v0.5 §11.1.8) — protegidas de edicion/borrado. "
+        "Sin server_default (regla 'default NULL, cero backfill' del plan E1)",
+    )
+
     def __repr__(self) -> str:
         tipo = "directo" if self.is_direct_expense else "indirecto"
         return f"<ExpenseCategory(id={self.id}, name='{self.name}', tipo={tipo})>"

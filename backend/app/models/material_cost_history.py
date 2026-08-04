@@ -29,6 +29,8 @@ class MaterialCostHistory(Base, TimestampMixin):
     - purchase_liquidation: Liquidacion de compra
     - adjustment_increase: Ajuste de inventario tipo aumento
     - transformation_in: Material destino de transformacion
+    - inbound_receipt: Recepcion Willard (SAC E2 — identidad D2, checkpoint HOY)
+    - inbound_annulment: Anulacion de recepcion Willard (SAC E2, reversion Fase 5)
     """
     __tablename__ = "material_cost_histories"
 

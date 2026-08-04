@@ -138,13 +138,14 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         search: Optional[str] = None,
         sort_by: str = "name",
         sort_order: str = "asc",
+        include_system: bool = False,
     ) -> PaginatedResponse:
         """Helper generico para listar terceros con filtros."""
         from sqlalchemy import func
 
-        query = self._base_query(organization_id).where(
-            self.model.is_system_entity == False
-        )
+        query = self._base_query(organization_id)
+        if not include_system:
+            query = query.where(self.model.is_system_entity == False)
 
         if extra_filter is not None:
             query = query.where(extra_filter)
@@ -448,9 +449,13 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         is_active: Optional[bool] = None,
         search: Optional[str] = None,
         sort_by: str = "name",
-        sort_order: str = "asc"
+        sort_order: str = "asc",
+        include_system: bool = False,
     ) -> PaginatedResponse:
-        """Get liabilities (behavior_type='liability') — pasivos/obligaciones."""
+        """Get liabilities (behavior_type='liability') — pasivos/obligaciones.
+
+        include_system (SAC E2 D9): incluye las entidades sistema
+        '[Retenciones] X' para que el selector de pago las liste."""
         return self._get_filtered_list(
             db=db,
             organization_id=organization_id,
@@ -458,6 +463,7 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             skip=skip, limit=limit,
             is_active=is_active, search=search,
             sort_by=sort_by, sort_order=sort_order,
+            include_system=include_system,
         )
 
     def get_payable_providers(

@@ -1,5 +1,12 @@
 import apiClient from "./api";
-import type { ThirdPartyResponse, ThirdPartyCreate, ThirdPartyUpdate } from "@/types/third-party";
+import type {
+  ThirdPartyResponse,
+  ThirdPartyCreate,
+  ThirdPartyUpdate,
+  RetentionRow,
+  RetentionConfigCreate,
+  RetentionConfigUpdate,
+} from "@/types/third-party";
 import type { PaginatedResponse } from "@/types/common";
 
 interface ThirdPartyFilters {
@@ -64,8 +71,29 @@ export const thirdPartyService = {
     return response.data;
   },
 
-  getLiabilities: async (filters: Omit<ThirdPartyFilters, "role"> = {}): Promise<PaginatedResponse<ThirdPartyResponse>> => {
+  getLiabilities: async (
+    filters: (Omit<ThirdPartyFilters, "role"> & { include_system?: boolean }) = {}
+  ): Promise<PaginatedResponse<ThirdPartyResponse>> => {
+    // include_system=true (SAC E2 D9): incluye entidades sistema "[Retenciones] X"
+    // — necesario en el selector de Pago de Pasivo para poder pagarlas.
     const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties/liabilities", { params: filters });
+    return response.data;
+  },
+
+  // Retenciones v2 (CC-006): GET unificado configs+entidades + CRUD de tarifas.
+  // Endpoints flag-gated (kg_ledger_enabled): NO llamar sin gate (F2 QA).
+  getRetentionRows: async (): Promise<RetentionRow[]> => {
+    const response = await apiClient.get<RetentionRow[]>("/api/v1/third-parties/retention-entities");
+    return response.data;
+  },
+
+  createRetentionConfig: async (data: RetentionConfigCreate): Promise<RetentionRow> => {
+    const response = await apiClient.post<RetentionRow>("/api/v1/third-parties/retention-configs", data);
+    return response.data;
+  },
+
+  updateRetentionConfig: async (configId: string, data: RetentionConfigUpdate): Promise<RetentionRow> => {
+    const response = await apiClient.patch<RetentionRow>(`/api/v1/third-parties/retention-configs/${configId}`, data);
     return response.data;
   },
 

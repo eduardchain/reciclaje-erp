@@ -124,7 +124,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         db: Session,
         obj_in: PurchaseCreate,
         organization_id: UUID,
-        user_id: Optional[UUID] = None
+        user_id: Optional[UUID] = None,
+        commit: bool = True,
     ) -> Purchase:
         """
         Create purchase with lines, inventory movements, and balance updates.
@@ -158,6 +159,15 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="La fecha de la compra no puede ser futura"
+            )
+
+        # SAC E2 D7: commit=False compone la compra dentro de una transaccion
+        # mayor (inbound); auto_liquidate commitea internamente y romperia la
+        # atomicidad — combinacion prohibida por construccion.
+        if not commit and obj_in.auto_liquidate:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="auto_liquidate no es compatible con creacion componible (commit=False)",
             )
 
         # Step 1: Generate next purchase_number with lock
@@ -194,7 +204,25 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Step 3: Create Purchase
         # Check if this is a double-entry purchase (skip inventory movements)
         is_double_entry = hasattr(obj_in, 'double_entry_id') and obj_in.double_entry_id is not None
-        
+
+        # SAC Ciclo B (B3): material Willard-puro no entra por compra — cubre
+        # la compra manual Y la derivada de recepcion (ambas pasan por aca).
+        # DPs excluidas: no tocan inventario, no corrompen conciliacion kg.
+        if not is_double_entry:
+            self._guard_willard_pure_materials(
+                db, organization_id, [l.material_id for l in obj_in.lines]
+            )
+
+        # SAC E2 D11: bodega de cabecera opcional — valida y fuerza las lineas
+        header_warehouse_id = getattr(obj_in, 'warehouse_id', None)
+        if header_warehouse_id is not None and not is_double_entry:
+            header_wh = db.get(Warehouse, header_warehouse_id)
+            if not header_wh or header_wh.organization_id != organization_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Bodega de cabecera no encontrada"
+                )
+
         purchase = Purchase(
             organization_id=organization_id,
             purchase_number=purchase_number,
@@ -207,6 +235,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             invoice_number=getattr(obj_in, 'invoice_number', None),
             created_by=user_id,
             double_entry_id=obj_in.double_entry_id if is_double_entry else None,
+            warehouse_id=header_warehouse_id if not is_double_entry else None,
         )
         db.add(purchase)
         db.flush()  # Get purchase.id before creating lines
@@ -220,6 +249,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         total_amount = Decimal("0.00")
         
         for line_data in obj_in.lines:
+            # SAC E2 D11: la cabecera fuerza el warehouse de todas las lineas
+            if header_warehouse_id is not None and not is_double_entry:
+                line_data.warehouse_id = header_warehouse_id
+
             # Validate material
             material = db.get(Material, line_data.material_id)
             if not material or material.organization_id != organization_id:
@@ -227,7 +260,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Material {line_data.material_id} no encontrado"
                 )
-            
+
             # Validate warehouse (skip for double-entry)
             if not is_double_entry:
                 if not line_data.warehouse_id:
@@ -241,7 +274,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"Bodega {line_data.warehouse_id} no encontrada"
                     )
-            
+                # SAC E3.1 (E12): bodega de transito solo opera via 2-pasos
+                from app.services.transfer import validate_not_transit_warehouse
+                validate_not_transit_warehouse(db, organization_id, warehouse)
+
             # Calculate line total
             quantity = Decimal(str(line_data.quantity))
             unit_price = Decimal(str(line_data.unit_price))
@@ -307,9 +343,14 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 payment_account_id=obj_in.payment_account_id,
                 commissions_data=obj_in.commissions if obj_in.commissions else None,
             )
-        
-        db.commit()
-        db.refresh(purchase)
+
+        # SAC E2 D7: commit=False deja la compra en la transaccion del caller
+        # (inbound) — el default preserva el comportamiento actual byte a byte
+        if commit:
+            db.commit()
+            db.refresh(purchase)
+        else:
+            db.flush()
 
         return purchase, warnings
 
@@ -324,6 +365,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         payment_account_id: Optional[UUID] = None,
         commissions_data: Optional[List] = None,
         liquidation_date: Optional[datetime] = None,
+        retentions_data: Optional[List] = None,
+        collector_commission_data: Optional[object] = None,
     ) -> Purchase:
         """
         Liquidar compra registrada (cambiar status a 'liquidated').
@@ -517,6 +560,26 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             recipient.current_balance -= comm.commission_amount
             print(f"  💼 Comision '{comm.concept}': ${comm.commission_amount} → {recipient.name} (saldo: {recipient.current_balance})")
 
+        # Step 8c (SAC E2 D9): retenciones — bloques compensatorios ADITIVOS
+        # tras el credito estandar: proveedor +Σret (queda acreditado NETO),
+        # entidad de retencion −amount (pasivo total conservado al peso).
+        # Cero P&L, cero costo de material. Ausente = camino actual intacto.
+        total_retentions = Decimal("0")
+        if retentions_data:
+            total_retentions = self._apply_retentions(
+                db, purchase, retentions_data, supplier, organization_id
+            )
+
+        # Step 8d (SAC Ciclo D): comision de recolector como GASTO causado.
+        # NO entra al prorrateo #30 (Step 4c solo ve purchase.commissions —
+        # params disjuntos, W-D2). Fecha con el PARAMETRO (W-D5 trampa #61:
+        # purchase.liquidated_at se asigna recien en Step 9).
+        if collector_commission_data is not None:
+            self._apply_collector_commission(
+                db, purchase, collector_commission_data, organization_id,
+                user_id, liquidation_date or purchase.date,
+            )
+
         # Step 9: Cambiar status
         purchase.status = "liquidated"
         purchase.liquidated_by = user_id
@@ -526,6 +589,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
         # Step 10 (opcional): Pago inmediato
         if immediate_payment and payment_account_id:
+            # SAC E2 D9: con retenciones se paga el NETO (total − Σret).
+            # Sin retenciones, net == total — camino actual byte a byte.
+            net_payment = purchase.total_amount - total_retentions
             account = db.execute(
                 select(MoneyAccount).where(
                     MoneyAccount.id == payment_account_id,
@@ -538,17 +604,17 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Cuenta de pago no encontrada",
                 )
-            if account.current_balance < purchase.total_amount:
+            if account.current_balance < net_payment:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Fondos insuficientes. Disponible: ${account.current_balance}, Requerido: ${purchase.total_amount}",
+                    detail=f"Fondos insuficientes. Disponible: ${account.current_balance}, Requerido: ${net_payment}",
                 )
 
             mm_service._create_movement(
                 db=db,
                 organization_id=organization_id,
                 movement_type="payment_to_supplier",
-                amount=purchase.total_amount,
+                amount=net_payment,
                 account_id=payment_account_id,
                 date=purchase.liquidated_at,
                 description=f"Pago compra #{purchase.purchase_number}",
@@ -557,9 +623,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 user_id=user_id,
             )
 
-            account.current_balance -= purchase.total_amount
-            supplier.current_balance += purchase.total_amount
-            print(f"  💳 Pago inmediato: ${purchase.total_amount} desde {account.name}")
+            account.current_balance -= net_payment
+            supplier.current_balance += net_payment
+            print(f"  💳 Pago inmediato: ${net_payment} desde {account.name}")
 
         db.commit()
         db.refresh(purchase)
@@ -573,6 +639,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         organization_id: UUID,
         user_id: Optional[UUID] = None,
         annul_linked_payments: bool = False,
+        commit: bool = True,
+        from_inbound: bool = False,
     ) -> tuple[Purchase, list[str]]:
         """
         Cancel a purchase and reverse all effects.
@@ -628,7 +696,27 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No se puede cancelar una compra de doble partida. Cancele la doble partida."
             )
-        
+
+        # SAC E2 D7b: compra derivada REGISTRADA se anula desde la orden
+        # (par atomico, espejo patron #67). Ciclo C: una derivada LIQUIDADA si
+        # se cancela directo — con reversa y eleccion de pago enlazado (#63);
+        # antes esto era un deadlock (annul de orden tambien daba 400) y el
+        # estado "orden confirmada + compra cancelada" ya no confunde: el
+        # display_status derivado la muestra Anulada.
+        if not from_inbound and purchase.status == "registered":
+            from app.models.inbound_order import InboundOrder
+            linked_number = db.execute(
+                select(InboundOrder.order_number).where(
+                    InboundOrder.purchase_id == purchase_id,
+                    InboundOrder.status != "annulled",
+                )
+            ).scalar_one_or_none()
+            if linked_number is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Anule desde la orden de recepción #{linked_number}",
+                )
+
         if purchase.status == "cancelled":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -764,6 +852,44 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 recipient.current_balance += comm.commission_amount
                 print(f"  ↩️  Comision revertida: ${comm.commission_amount} → {recipient.name}")
 
+            # Step 6c (SAC E2 D9): revertir bloques compensatorios de retenciones
+            # — inverso exacto de la liquidacion; reverted_at = auditoria sin
+            # delete fisico. Compatible con annul_linked_payments (#63): el pago
+            # enlazado fue NETO → su reversa usa el monto del movimiento.
+            for ret in (purchase.retentions or []):
+                if ret.reverted_at is not None:
+                    continue
+                supplier.current_balance -= ret.amount
+                entity = db.get(ThirdParty, ret.third_party_id)
+                if entity:
+                    entity.current_balance += ret.amount
+                ret.reverted_at = datetime.now(timezone.utc)
+                print(f"  ↩️  Retencion revertida: ${ret.amount} ({ret.retention_type})")
+
+            # Step 6d (SAC Ciclo D): auto-anular la comision de recolector
+            # causada al liquidar (patron commission_accrual #23 — sin eleccion
+            # #63: no hay caja de por medio). Filtro con source_type (D-02 QA):
+            # jamas anular un expense_accrual manual asociado a la compra.
+            # Solo confirmed → si ya se anulo a mano en Tesoreria, no-op seguro.
+            collector_accruals = db.scalars(
+                select(MoneyMovement).where(
+                    MoneyMovement.purchase_id == purchase_id,
+                    MoneyMovement.movement_type == "expense_accrual",
+                    MoneyMovement.source_type == "collector_commission",
+                    MoneyMovement.status == "confirmed",
+                )
+            ).all()
+            for mov in collector_accruals:
+                mov.status = "annulled"
+                mov.annulled_at = datetime.now(timezone.utc)
+                mov.annulled_by = user_id
+                mov.annulled_reason = f"Cancelación compra #{purchase.purchase_number}"
+                if mov.third_party_id:
+                    collector_tp = db.get(ThirdParty, mov.third_party_id)
+                    if collector_tp:
+                        collector_tp.current_balance += mov.amount
+                print(f"  ↩️  Comision recolector anulada: ${mov.amount} (MM #{mov.movement_number})")
+
         # Step 7: opcional — anular pagos inmediatos enlazados (payment_to_supplier con purchase_id).
         # Simétrico a ventas (decisión #63): revierte el efecto del pago: caja +amount, proveedor
         # -amount. Solo confirmed (no re-anula un pago ya anulado; no-op seguro si no hay ninguno).
@@ -807,8 +933,12 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         print(f"❌ Cancelled purchase #{purchase.purchase_number}")
         print(f"   Supplier balance: {supplier.current_balance} (debt reduced by ${purchase.total_amount})")
 
-        db.commit()
-        db.refresh(purchase)
+        # SAC E2 D7: commit=False compone dentro de la transaccion del inbound
+        if commit:
+            db.commit()
+            db.refresh(purchase)
+        else:
+            db.flush()
 
         return purchase, warnings
     
@@ -825,6 +955,24 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 MoneyMovement.purchase_id == purchase_id,
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.movement_type == "payment_to_supplier",
+                MoneyMovement.status == "confirmed",
+            )
+        ).scalar_one()
+        return Decimal(str(total or 0))
+
+    def get_collector_commission_total(
+        self, db: Session, purchase_id: UUID, organization_id: UUID
+    ) -> Decimal:
+        """Ciclo D (pruebas Daniel): comision de recolector causada (confirmed)
+        de esta compra — para mostrarla en el detalle (patron #63: solo en los
+        GET de detalle, sin N+1 en listados). 0 si no hay o fue anulada
+        (condonada) — el detalle la oculta en ese caso."""
+        total = db.execute(
+            select(func.coalesce(func.sum(MoneyMovement.amount), 0)).where(
+                MoneyMovement.purchase_id == purchase_id,
+                MoneyMovement.organization_id == organization_id,
+                MoneyMovement.movement_type == "expense_accrual",
+                MoneyMovement.source_type == "collector_commission",
                 MoneyMovement.status == "confirmed",
             )
         ).scalar_one()
@@ -902,6 +1050,11 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Step 3: Si hay lineas nuevas, hacer revert+reapply
         warnings: list[str] = []
         if obj_in.lines is not None:
+            # SAC Ciclo B (B3): mismo guard que create — sin el, se crearia con
+            # material valido y se editaria a Willard-puro (hueco de ruteo)
+            self._guard_willard_pure_materials(
+                db, organization_id, [l.material_id for l in obj_in.lines]
+            )
             # 3a. Detectar stock negativo al revertir (warning, no bloquea —
             # decision #76: inventario negativo es valido en toda la app)
             for line in purchase.lines:
@@ -940,6 +1093,21 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             # 3e. Crear nuevas lineas
             new_total = Decimal("0.00")
             for line_data in obj_in.lines:
+                # SAC E2 D11: con bodega de cabecera, las lineas nuevas del full
+                # edit heredan o validan contra ella (sin esto el revert-reapply
+                # dejaria header W con movimientos en W')
+                if purchase.warehouse_id is not None:
+                    if line_data.warehouse_id is None:
+                        line_data.warehouse_id = purchase.warehouse_id
+                    elif line_data.warehouse_id != purchase.warehouse_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=(
+                                "La compra tiene bodega de cabecera — todas las lineas "
+                                "deben usar esa bodega"
+                            ),
+                        )
+
                 # Validar material
                 material = db.get(Material, line_data.material_id)
                 if not material or material.organization_id != organization_id:
@@ -960,6 +1128,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"Bodega {line_data.warehouse_id} no encontrada"
                     )
+                # SAC E3.1 (E12): bodega de transito solo opera via 2-pasos
+                from app.services.transfer import validate_not_transit_warehouse
+                validate_not_transit_warehouse(db, organization_id, warehouse)
 
                 quantity = Decimal(str(line_data.quantity))
                 unit_price = Decimal(str(line_data.unit_price))
@@ -1219,12 +1390,242 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             Purchase.organization_id == organization_id
         ).order_by(Purchase.date.desc()).offset(skip).limit(limit).all()
     
+    # ------------------------------------------------------------------ #
+    # Retenciones (SAC E2 D9)                                             #
+    # La logica get-or-create + matching H4 vive en                       #
+    # services/retention_entities.py (addendum §8: la comparten estos     #
+    # bloques de liquidacion y los endpoints GET/POST /retention-entities)#
+    # ------------------------------------------------------------------ #
+
+    def _apply_retentions(
+        self, db: Session, purchase: Purchase, retentions_data: List,
+        supplier: ThirdParty, organization_id: UUID,
+    ) -> Decimal:
+        """Bloques compensatorios ADITIVOS (D9): tras el credito estandar
+        (−total), proveedor +Σret y entidad de retencion −amount cada una —
+        pasivo total conservado. Cero P&L, cero costo de material."""
+        from app.utils.org_settings import get_org_setting
+        from app.models.purchase_retention import PurchaseRetention
+
+        # Guard de flag: sin el, una org no-SAC podria crear terceros sistema
+        # indelebles via API cruda (D9/D10)
+        if not get_org_setting(db, organization_id, "kg_ledger_enabled"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Retenciones: modulo no habilitado para esta organizacion",
+            )
+
+        total = sum(Decimal(str(r.amount)) for r in retentions_data)
+        if total >= purchase.total_amount:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"La suma de retenciones (${total}) debe ser menor al "
+                    f"total de la compra (${purchase.total_amount})"
+                ),
+            )
+
+        from app.services.retention_entities import resolve_retention_entity
+
+        for r in retentions_data:
+            entity = resolve_retention_entity(
+                db, organization_id, r.retention_type, r.municipality
+            )
+            db.add(PurchaseRetention(
+                organization_id=organization_id,
+                purchase_id=purchase.id,
+                third_party_id=entity.id,
+                retention_type=r.retention_type,
+                municipality=r.municipality.strip() if r.municipality else None,
+                rate=r.rate,
+                base=r.base,
+                amount=r.amount,
+            ))
+            entity.current_balance -= r.amount
+            print(f"  🧾 Retencion {r.retention_type}: ${r.amount} → {entity.name}")
+
+        supplier.current_balance += total  # compensatorio: queda acreditado NETO
+        db.flush()
+        return total
+
+    COLLECTOR_CATEGORY_NAME = "Comisiones de recolección"
+
+    def _get_or_create_collector_category(self, db: Session, organization_id: UUID):
+        """Categoria sistema para comisiones de recolector (SAC Ciclo D).
+
+        Patron get-or-create #78 con normalize_entity_name (D-03 QA: un solo
+        normalizador NFKD en el repo). Nace INDIRECTA (decision Daniel: gasto
+        operativo general, NO entra al Costo Real por material) + pnl_section
+        default operativo; reclasificable en Config (retroactivo al leer, #4).
+        Limitacion aceptada (identica a entidades de retencion): renombrarla
+        en Config hace que el proximo uso cree una nueva.
+        """
+        from app.models.expense_category import ExpenseCategory
+        from app.services.retention_entities import normalize_entity_name
+
+        target = normalize_entity_name(self.COLLECTOR_CATEGORY_NAME)
+        candidates = db.execute(
+            select(ExpenseCategory).where(
+                ExpenseCategory.organization_id == organization_id,
+                ExpenseCategory.is_system_entity == True,  # noqa: E712
+                ExpenseCategory.is_active == True,  # noqa: E712
+            )
+        ).scalars().all()
+        for cat in candidates:
+            if normalize_entity_name(cat.name) == target:
+                return cat
+
+        cat = ExpenseCategory(
+            organization_id=organization_id,
+            name=self.COLLECTOR_CATEGORY_NAME,
+            description="Comisiones de recolectores (Green Loop y similares) causadas al liquidar compras",
+            is_direct_expense=False,
+            is_system_entity=True,
+        )
+        db.add(cat)
+        db.flush()
+        print(f"  📁 Categoria sistema creada: {cat.name}")
+        return cat
+
+    def _apply_collector_commission(
+        self,
+        db: Session,
+        purchase: Purchase,
+        cc,
+        organization_id: UUID,
+        user_id: Optional[UUID],
+        mm_date,
+    ) -> None:
+        """SAC Ciclo D: comision de recolector como GASTO causado (decision
+        Daniel 2026-07-17 — supersede el prorrateo #30 SOLO para recolectores).
+
+        Crea un expense_accrual (cuenta NULL, categoria sistema, saldo del
+        recolector −monto = le debemos) fechado en liquidated_at (#61). La
+        firma viaja en source_type='collector_commission' (D-01 ruta a).
+        JAMAS toca el costo del material: params disjuntos de commissions #30.
+        Data-gated D9: ausente = camino actual byte a byte; presente sin flag
+        kg_ledger_enabled → 422.
+        """
+        from app.utils.org_settings import get_org_setting
+
+        if not get_org_setting(db, organization_id, "kg_ledger_enabled"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Comision de recolector: modulo no habilitado para esta organizacion",
+            )
+
+        from app.services.third_party import third_party as tp_service
+        collector = db.get(ThirdParty, cc.third_party_id)
+        if not collector or collector.organization_id != organization_id or not collector.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Recolector no encontrado",
+            )
+        if not tp_service.has_behavior_type(db, collector.id, ["service_provider"]):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "El recolector debe tener una categoria con comportamiento "
+                    "'Proveedor de Servicios' (recibe comisiones)"
+                ),
+            )
+
+        category = self._get_or_create_collector_category(db, organization_id)
+
+        # Entrada de origen (si existe): descripcion + source_id
+        from app.models.inbound_order import InboundOrder
+        origin = db.execute(
+            select(InboundOrder.id, InboundOrder.order_number).where(
+                InboundOrder.purchase_id == purchase.id,
+                InboundOrder.status != "annulled",
+            )
+        ).first()
+        inbound_id, inbound_number = (origin[0], origin[1]) if origin else (None, None)
+
+        # Snapshot informativo de la tarifa vigente que sugirio el monto
+        # (el monto editado es la fuente de verdad — F1 #79)
+        from app.models.service_tariff import ServiceTariff
+        tariff_id = db.execute(
+            select(ServiceTariff.id)
+            .where(
+                ServiceTariff.organization_id == organization_id,
+                ServiceTariff.tariff_code == "comision_green_loop",
+            )
+            .order_by(ServiceTariff.created_at.desc(), ServiceTariff.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+        desc = f"Comisión recolección compra #{purchase.purchase_number}"
+        if inbound_number is not None:
+            desc += f" — Entrada #{inbound_number}"
+
+        mm_service._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="expense_accrual",
+            amount=cc.amount,
+            account_id=None,
+            date=mm_date,
+            description=desc,
+            user_id=user_id,
+            third_party_id=collector.id,
+            expense_category_id=category.id,
+            purchase_id=purchase.id,
+            source_type="collector_commission",
+            source_id=inbound_id,
+            tariff_id=tariff_id,
+            warehouse_id=purchase.warehouse_id,
+        )
+        collector.current_balance -= cc.amount
+        print(
+            f"  🚚 Comision recolector: ${cc.amount} → {collector.name} "
+            f"(gasto causado, saldo: {collector.current_balance})"
+        )
+
+    def _guard_willard_pure_materials(
+        self, db: Session, organization_id: UUID, material_ids: list
+    ) -> None:
+        """SAC Ciclo B (B3): un material Willard-puro (willard_world != 'none' y
+        compra_regular=False) NO entra por compra — se recibe como recepcion
+        Willard. Espejo simetrico del guard del path Willard (inbound_order.py,
+        que rechaza materiales no-Willard).
+
+        Solo aplica con kg_ledger_enabled: sin flag no hay perfiles -> inerte,
+        prod byte-identico (cero queries extra: get_org_setting usa el identity
+        map). Bloqueo 400, no warning: no es stock negativo (estado valido) —
+        es error de ruteo que corrompe la conciliacion kg, sin caso de negocio
+        valido (Q-04 Johana: "lo Willard nunca es compra").
+        """
+        from app.utils.org_settings import get_org_setting
+        if not get_org_setting(db, organization_id, "kg_ledger_enabled"):
+            return
+        from app.models.material_kg_profile import MaterialKgProfile
+        codes = db.execute(
+            select(Material.code)
+            .join(MaterialKgProfile, MaterialKgProfile.material_id == Material.id)
+            .where(
+                MaterialKgProfile.organization_id == organization_id,
+                MaterialKgProfile.material_id.in_(material_ids),
+                MaterialKgProfile.willard_world != "none",
+                MaterialKgProfile.compra_regular.is_(False),
+            )
+        ).scalars().all()
+        if codes:
+            listed = ", ".join(sorted(set(codes)))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"El material {listed} es Willard (postconsumo/drosses) y "
+                    "no se compra — recibalo como recepcion Willard"
+                ),
+            )
+
     def _generate_purchase_number(self, db: Session, organization_id: UUID) -> int:
         """
         Generate next sequential purchase_number for organization.
-        
+
         Uses PostgreSQL advisory locks to prevent race conditions in concurrent requests.
-        
+
         Returns:
             Next purchase number (1, 2, 3, ...)
         """

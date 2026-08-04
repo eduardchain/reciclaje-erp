@@ -15,7 +15,7 @@ export function useDashboard(params: DateRange) {
   });
 }
 
-export function useProfitAndLoss(params: DateRange) {
+export function useProfitAndLoss(params: DateRange & { warehouse_id?: string }) {
   return useQuery({
     queryKey: ["reports", "profit-and-loss", params],
     queryFn: () => reportsService.getProfitAndLoss(params),

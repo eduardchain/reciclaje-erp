@@ -23,6 +23,7 @@ const accentBorderMap: Record<string, string> = {
   amber: "border-t-amber-500",
   teal: "border-t-teal-500",
   rose: "border-t-rose-500",
+  indigo: "border-t-indigo-500",
 };
 
 const accentIconMap: Record<string, string> = {
@@ -32,6 +33,7 @@ const accentIconMap: Record<string, string> = {
   amber: "text-amber-600 bg-amber-50",
   teal: "text-teal-600 bg-teal-50",
   rose: "text-rose-600 bg-rose-50",
+  indigo: "text-indigo-600 bg-indigo-50",
 };
 
 export function KpiCard({

@@ -115,6 +115,15 @@ export function AdjustmentLink({ id, children, showIcon, className }: IdProps) {
   );
 }
 
+export function InboundOrderLink({ id, children, showIcon, className }: IdProps) {
+  const to = id ? buildRoute(ROUTES.INBOUND_DETAIL, { id }) : null;
+  return (
+    <EntityLink to={to} showIcon={showIcon} className={className}>
+      {children}
+    </EntityLink>
+  );
+}
+
 export function MoneyMovementLink({ id, children, showIcon, className }: IdProps) {
   const to = id ? buildRoute(ROUTES.TREASURY_MOVEMENT_DETAIL, { id }) : null;
   return (

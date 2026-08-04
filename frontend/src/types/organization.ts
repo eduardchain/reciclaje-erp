@@ -11,6 +11,7 @@ export interface OrganizationResponse extends BaseEntity {
   max_users: number;
   is_active?: boolean;
   member_role?: string | null;
+  settings?: Record<string, unknown> | null; // Flags/parametros SAC (D3) — NULL = defaults
 }
 
 export interface OrganizationCreate {
@@ -30,6 +31,7 @@ export interface SystemOrgResponse {
   is_active: boolean;
   member_count: number;
   created_at: string;
+  settings?: Record<string, unknown> | null;
 }
 
 export interface SystemOrgCreate {
@@ -44,6 +46,8 @@ export interface SystemOrgUpdate {
   subscription_plan?: string;
   subscription_status?: string;
   is_active?: boolean;
+  // Semantica REPLACE: mandar SIEMPRE el dict completo (un subset borra el resto)
+  settings?: Record<string, unknown>;
 }
 
 export interface SystemUserMembership {

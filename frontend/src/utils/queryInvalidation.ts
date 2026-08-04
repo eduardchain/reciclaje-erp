@@ -23,6 +23,9 @@ export const invalidateAfterPurchaseLiquidateOrCancel = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["purchases"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });
   qc.invalidateQueries({ queryKey: ["treasury-dashboard"] });
+  // Ciclo C: la entrada refleja el display_status de su compra (bandeja +
+  // badge sidebar). Key inofensiva en orgs sin flag (cero queries bajo ella).
+  qc.invalidateQueries({ queryKey: ["inbound-orders"] });
   invalidateInventory(qc);
   invalidateFinancial(qc);
 };
@@ -67,6 +70,31 @@ export const invalidateAfterInventoryChange = (qc: QueryClient) => {
 export const invalidateAfterObligation = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["financial-obligations"] });
   invalidateAfterTreasury(qc);
+};
+
+// Recepcion (SAC E2, D17): tipos Willard mueven inventario + cuentas kg;
+// tipos purchase/ruta derivan una Purchase registrada (transito)
+export const invalidateAfterInboundOrder = (qc: QueryClient) => {
+  qc.invalidateQueries({ queryKey: ["inbound-orders"] });
+  qc.invalidateQueries({ queryKey: ["kg-ledger"] });
+  qc.invalidateQueries({ queryKey: ["purchases"] });
+  invalidateInventory(qc);
+};
+
+// Movimiento manual kg / anulacion (SAC E2, D17): solo toca el ledger kg
+export const invalidateAfterKgMovement = (qc: QueryClient) => {
+  qc.invalidateQueries({ queryKey: ["kg-ledger"] });
+};
+
+// Traslados dos pasos (SAC E3.1, N1): la recepcion emite par de maquila +
+// intersede kg + posible ajuste de merma; el despacho solo inventario — un
+// solo helper mantiene la regla simple (#27).
+export const invalidateAfterTransfer = (qc: QueryClient) => {
+  qc.invalidateQueries({ queryKey: ["transfers"] });
+  qc.invalidateQueries({ queryKey: ["kg-ledger"] });
+  qc.invalidateQueries({ queryKey: ["money-movements"] });
+  qc.invalidateQueries({ queryKey: ["reports"] });
+  invalidateInventory(qc);
 };
 
 export const invalidateAfterFixedAsset = (qc: QueryClient) => {

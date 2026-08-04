@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, func, case, cast, Date, DateTime, exists, or_, and_, union_all
+from sqlalchemy import select, func, case, cast, Date, DateTime, exists, false, or_, and_, union_all
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.double_entry import DoubleEntry, DoubleEntryLine
@@ -17,7 +17,7 @@ from app.models.expense_category import ExpenseCategory
 from app.models.material import Material, MaterialCategory
 from app.models.material_cost_history import MaterialCostHistory
 from app.models.money_account import MoneyAccount
-from app.models.money_movement import MoneyMovement
+from app.models.money_movement import MoneyMovement, INTERNAL_MAQUILA_MOVEMENT_TYPES
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.purchase import PurchaseCommission
 from app.models.sale import Sale, SaleLine
@@ -479,11 +479,26 @@ class ReportService:
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
         cutoff_dt: Optional[datetime] = None,
+        warehouse_id: Optional[UUID] = None,
+        include_internal_maquila: bool = False,
     ) -> dict:
         """Calcula componentes de P&L. Sin fechas = acumulado historico.
 
         cutoff_dt: si se pasa, usa _active_at_cutoff para incluir operaciones
         canceladas/anuladas despues del corte (snapshot historico).
+
+        warehouse_id (SAC E3.1, plan v1.1 E13/M1): P&L POR SEDE — fragmenta
+        solo lo que efectivamente lleva sede: ventas/COGS/bascula por
+        Sale.warehouse_id, comisiones por la sede de SU venta (via el
+        outerjoin existente — NUNCA MoneyMovement.warehouse_id, que nace
+        NULL en commission_accrual y daria $0), y el par de maquila por su
+        propio warehouse_id. Todo lo demas (gastos, service_income, DP,
+        transformaciones, ajustes, oversell, tp_adj) sale $0 por sede
+        (filtro false()) hasta que exista captura de gasto-por-sede (E4).
+        Con warehouse_id=None el dict es byte-identico a hoy.
+
+        include_internal_maquila: fuerza las lineas del par en consolidado
+        (E5); efectivo automaticamente cuando hay warehouse_id.
 
         Retorna dict con: sales_revenue, sales_count, cogs, de_profit, de_count,
         transformation_profit, transformation_count, service_income,
@@ -493,6 +508,11 @@ class ReportService:
         has_dates = date_from is not None and date_to is not None
         if has_dates:
             dt_from, dt_to = self._date_range(date_from, date_to)
+        by_sede = warehouse_id is not None
+        # Filtro imposible para los bloques NO atribuibles a sede: la query
+        # corre con WHERE false (costo ~0 en PG) y devuelve ceros — el camino
+        # consolidado (by_sede=False) queda byte a byte como hoy.
+        _not_by_sede = [false()] if by_sede else []
 
         # 1. Sales Revenue (ventas normales, excluye DE)
         sale_filters = [
@@ -502,6 +522,8 @@ class ReportService:
         ]
         if has_dates:
             sale_filters += [Sale.liquidated_at >= dt_from, Sale.liquidated_at < dt_to]
+        if by_sede:
+            sale_filters.append(Sale.warehouse_id == warehouse_id)
 
         row = db.execute(
             select(
@@ -520,6 +542,8 @@ class ReportService:
         ]
         if has_dates:
             cogs_filters += [Sale.liquidated_at >= dt_from, Sale.liquidated_at < dt_to]
+        if by_sede:
+            cogs_filters.append(Sale.warehouse_id == warehouse_id)
 
         cogs_val = db.scalar(
             select(
@@ -537,6 +561,7 @@ class ReportService:
         ]
         if has_dates:
             de_filters += [DoubleEntry.liquidated_at >= dt_from, DoubleEntry.liquidated_at < dt_to]
+        de_filters += _not_by_sede
 
         de_row = db.execute(
             select(
@@ -566,6 +591,7 @@ class ReportService:
         ]
         if has_dates:
             trans_filters += [MaterialTransformation.date >= dt_from, MaterialTransformation.date < dt_to]
+        trans_filters += _not_by_sede
 
         trans_row = db.execute(
             select(
@@ -584,6 +610,7 @@ class ReportService:
         ]
         if has_dates:
             waste_filters += [MaterialTransformation.date >= dt_from, MaterialTransformation.date < dt_to]
+        waste_filters += _not_by_sede
 
         waste_loss = Decimal(str(
             db.scalar(
@@ -606,6 +633,7 @@ class ReportService:
         ]
         if has_dates:
             adj_filters += [InventoryAdjustment.date >= dt_from, InventoryAdjustment.date < dt_to]
+        adj_filters += _not_by_sede
 
         # quantity > 0 = ganancia (increase/recount+), < 0 = perdida (decrease/recount-/zero_out)
         adjustment_net = Decimal(str(
@@ -635,6 +663,7 @@ class ReportService:
         ]
         if has_dates:
             oversell_purchase_filters += [Purchase.liquidated_at >= dt_from, Purchase.liquidated_at < dt_to]
+        oversell_purchase_filters += _not_by_sede
 
         oversell_from_purchases = Decimal(str(
             db.scalar(
@@ -656,6 +685,7 @@ class ReportService:
         ]
         if has_dates:
             oversell_sale_filters += [Sale.cancelled_at >= dt_from, Sale.cancelled_at < dt_to]
+        oversell_sale_filters += _not_by_sede
 
         oversell_from_cancellations = Decimal(str(
             db.scalar(
@@ -675,6 +705,7 @@ class ReportService:
         ]
         if has_dates:
             oversell_adj_filters += [InventoryAdjustment.date >= dt_from, InventoryAdjustment.date < dt_to]
+        oversell_adj_filters += _not_by_sede
 
         oversell_from_adjustments = Decimal(str(
             db.scalar(
@@ -695,6 +726,7 @@ class ReportService:
         ]
         if has_dates:
             oversell_tline_filters += [MaterialTransformation.date >= dt_from, MaterialTransformation.date < dt_to]
+        oversell_tline_filters += _not_by_sede
 
         oversell_from_transformations = Decimal(str(
             db.scalar(
@@ -721,6 +753,7 @@ class ReportService:
         ]
         if has_dates:
             rev_purchase_filters += [Purchase.cancelled_at >= dt_from, Purchase.cancelled_at < dt_to]
+        rev_purchase_filters += _not_by_sede
         oversell_from_purchase_cancels = Decimal(str(
             db.scalar(
                 select(func.coalesce(func.sum(Purchase.cancellation_cost_adjustment), 0))
@@ -735,6 +768,7 @@ class ReportService:
         ]
         if has_dates:
             rev_adj_filters += [InventoryAdjustment.annulled_at >= dt_from, InventoryAdjustment.annulled_at < dt_to]
+        rev_adj_filters += _not_by_sede
         oversell_from_adjustment_annuls = Decimal(str(
             db.scalar(
                 select(func.coalesce(func.sum(InventoryAdjustment.annul_cost_adjustment), 0))
@@ -749,10 +783,30 @@ class ReportService:
         ]
         if has_dates:
             rev_trans_filters += [MaterialTransformation.annulled_at >= dt_from, MaterialTransformation.annulled_at < dt_to]
+        rev_trans_filters += _not_by_sede
         oversell_from_transformation_annuls = Decimal(str(
             db.scalar(
                 select(func.coalesce(func.sum(MaterialTransformation.annul_cost_adjustment), 0))
                 .where(*rev_trans_filters)
+            )
+        ))
+
+        # SAC E2 D8 — 8a fuente: anulacion de ordenes de recepcion Willard.
+        # Solo lado annul (D2: la entrada es identidad, adjustment 0 al confirmar
+        # por construccion — el confirm-side NO existe). Fechada por annulled_at.
+        from app.models.inbound_order import InboundOrder as _IO
+        rev_inbound_filters = [
+            _IO.organization_id == organization_id,
+            _IO.status == "annulled",
+            _IO.annul_cost_adjustment != 0,
+        ]
+        if has_dates:
+            rev_inbound_filters += [_IO.annulled_at >= dt_from, _IO.annulled_at < dt_to]
+        rev_inbound_filters += _not_by_sede
+        oversell_from_inbound_annuls = Decimal(str(
+            db.scalar(
+                select(func.coalesce(func.sum(_IO.annul_cost_adjustment), 0))
+                .where(*rev_inbound_filters)
             )
         ))
 
@@ -764,6 +818,7 @@ class ReportService:
             + oversell_from_purchase_cancels
             + oversell_from_adjustment_annuls
             + oversell_from_transformation_annuls
+            + oversell_from_inbound_annuls
         )
 
         # 4. Ajustes de terceros (perdida/ganancia)
@@ -774,6 +829,7 @@ class ReportService:
         ]
         if has_dates:
             tp_adj_filters += [MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to]
+        tp_adj_filters += _not_by_sede
 
         tp_adj_rows = db.execute(
             select(
@@ -799,6 +855,8 @@ class ReportService:
         ]
         if has_dates:
             mm_filters += [MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to]
+        # M1: gastos/service_income NO llevan sede (sus writers no la capturan)
+        mm_filters += _not_by_sede
 
         mm_rows = db.execute(
             select(
@@ -874,6 +932,13 @@ class ReportService:
         ]
         if has_dates:
             comm_filters += [MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to]
+        if by_sede:
+            # M1 QA: la comision pertenece a la sede de SU venta — el filtro
+            # correcto es Sale.warehouse_id via el outerjoin de abajo. JAMAS
+            # MoneyMovement.warehouse_id (commission_accrual nace con sede
+            # NULL → daria $0 y el test de oro pasaria en falso). Huerfanas
+            # (sale_id NULL) quedan solo en consolidado.
+            comm_filters.append(Sale.warehouse_id == warehouse_id)
 
         comm_rows = db.execute(
             select(
@@ -899,9 +964,42 @@ class ReportService:
                 commissions_paid_sales += total_dec
         commissions_paid = commissions_paid_sales + commissions_paid_dp
 
+        # Par de maquila intersede (SAC E3.1, E4: lineas PROPIAS — jamas
+        # plegadas en service_income ni operating_expenses). Consolidado
+        # (warehouse_id=None, include=False) NO corre esta query → ambos $0 y
+        # el dict queda byte-identico (los tipos tampoco estan en el allowlist
+        # inline de arriba: exclusion por construccion, N5).
+        internal_maquila_income = Decimal("0")
+        internal_maquila_expense = Decimal("0")
+        effective_include_maquila = include_internal_maquila or by_sede
+        if effective_include_maquila:
+            maquila_filters = [
+                MoneyMovement.organization_id == organization_id,
+                self._active_at_cutoff(MoneyMovement.status, "confirmed"),
+                MoneyMovement.movement_type.in_(sorted(INTERNAL_MAQUILA_MOVEMENT_TYPES)),
+            ]
+            if has_dates:
+                maquila_filters += [MoneyMovement.date >= dt_from, MoneyMovement.date < dt_to]
+            if by_sede:
+                # El par SI nace con warehouse_id propio: expense=sede origen,
+                # income=sede destino — cada sede ve su lado.
+                maquila_filters.append(MoneyMovement.warehouse_id == warehouse_id)
+            maquila_rows = db.execute(
+                select(
+                    MoneyMovement.movement_type,
+                    func.coalesce(func.sum(MoneyMovement.amount), 0),
+                ).where(*maquila_filters)
+                .group_by(MoneyMovement.movement_type)
+            ).all()
+            for mt, total in maquila_rows:
+                if mt == "internal_maquila_income":
+                    internal_maquila_income += Decimal(str(total))
+                else:
+                    internal_maquila_expense += Decimal(str(total))
+
         # Calculos
         gross_profit_sales = sales_revenue - cogs
-        total_gross_profit = gross_profit_sales + de_profit + service_income + interest_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss + oversell_adjustment
+        total_gross_profit = gross_profit_sales + de_profit + service_income + interest_income + transformation_profit - waste_loss + adjustment_net + tp_adj_gain - tp_adj_loss + oversell_adjustment + internal_maquila_income - internal_maquila_expense
         net_profit = total_gross_profit - operating_expenses - commissions_paid
 
         # Subtotales del P&L por rubros (GAP-1 QA): la escalera VISIBLE cierra
@@ -943,6 +1041,8 @@ class ReportService:
             "expenses_financial": expenses_financial,
             "gross_profit_before_financial": gross_profit_before_financial,
             "operating_result": operating_result,
+            "internal_maquila_income": internal_maquila_income,
+            "internal_maquila_expense": internal_maquila_expense,
         }
 
     # ------------------------------------------------------------------
@@ -1032,6 +1132,8 @@ class ReportService:
         date_from: date,
         date_to: date,
         cutoff_day: int = 1,
+        warehouse_id: Optional[UUID] = None,
+        include_internal_maquila: bool = False,
     ) -> ProfitAndLossMonthlyResponse:
         """P&L mensual: una columna por mes contable derivado de cutoff_day.
 
@@ -1046,12 +1148,20 @@ class ReportService:
         months = self._split_into_accounting_months(date_from, date_to, cutoff_day)
         periods: list[ProfitAndLossMonthlyPeriod] = []
         for period_from, period_to, label in months:
-            period_pnl = self.get_profit_and_loss(db, organization_id, period_from, period_to)
+            period_pnl = self.get_profit_and_loss(
+                db, organization_id, period_from, period_to,
+                warehouse_id=warehouse_id,
+                include_internal_maquila=include_internal_maquila,
+            )
             periods.append(ProfitAndLossMonthlyPeriod(
                 **period_pnl.model_dump(),
                 label=label,
             ))
-        totals = self.get_profit_and_loss(db, organization_id, date_from, date_to)
+        totals = self.get_profit_and_loss(
+            db, organization_id, date_from, date_to,
+            warehouse_id=warehouse_id,
+            include_internal_maquila=include_internal_maquila,
+        )
         return ProfitAndLossMonthlyResponse(
             cutoff_day=cutoff_day,
             range_from=date_from,
@@ -1066,8 +1176,14 @@ class ReportService:
         organization_id: UUID,
         date_from: date,
         date_to: date,
+        warehouse_id: Optional[UUID] = None,
+        include_internal_maquila: bool = False,
     ) -> ProfitAndLossResponse:
-        r = self._calculate_profit(db, organization_id, date_from, date_to)
+        r = self._calculate_profit(
+            db, organization_id, date_from, date_to,
+            warehouse_id=warehouse_id,
+            include_internal_maquila=include_internal_maquila,
+        )
 
         margin_base = r["sales_revenue"] + r["service_income"]
 
@@ -1103,6 +1219,8 @@ class ReportService:
             net_profit=float(r["net_profit"]),
             net_margin=self._safe_pct(r["net_profit"], margin_base) if margin_base else 0.0,
             expenses_by_category=r["expenses_by_cat"],
+            internal_maquila_income=float(r["internal_maquila_income"]),
+            internal_maquila_expense=float(r["internal_maquila_expense"]),
         )
 
     # ------------------------------------------------------------------
@@ -2307,11 +2425,13 @@ class ReportService:
         #   reversion que existe pre-Fase 5).
         from app.models.inventory_adjustment import InventoryAdjustment as _IA
         from app.models.material_transformation import MaterialTransformation as _MT
+        from app.models.inbound_order import InboundOrder as _IOrd
 
         MCH_FASE5_REVERSAL_TYPES = [
             "purchase_cancellation",
             "adjustment_annulment",
             "transformation_annulment",
+            "inbound_annulment",  # SAC E2 D8 (extension H2)
         ]
         mch_source_is_cancelled = or_(
             and_(
@@ -2338,6 +2458,17 @@ class ReportService:
                     select(_MT.id).where(
                         _MT.id == MaterialCostHistory.source_id,
                         _MT.status == "annulled",
+                    )
+                ),
+            ),
+            # SAC E2 D8 (extension H2): recepciones Willard de ordenes anuladas
+            # — su checkpoint de avg no debe verse en cortes (doctrina #41)
+            and_(
+                MaterialCostHistory.source_type == "inbound_receipt",
+                exists(
+                    select(_IOrd.id).where(
+                        _IOrd.id == MaterialCostHistory.source_id,
+                        _IOrd.status == "annulled",
                     )
                 ),
             ),

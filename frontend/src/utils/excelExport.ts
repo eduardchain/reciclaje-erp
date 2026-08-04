@@ -778,13 +778,21 @@ export function exportMarginAnalysisExcel(data: MarginAnalysisResponse) {
 }
 
 
-export function exportStockExcel(items: StockItem[], canViewValues: boolean) {
+export function exportStockExcel(
+  items: StockItem[],
+  canViewValues: boolean,
+  // SAC: kg de plomo que representa el stock (formula vigente) — paridad con
+  // la columna en pantalla. Solo materiales con formula; undefined = sin columna
+  kgLeadByMaterial?: Map<string, number>,
+) {
+  const hasKgLead = kgLeadByMaterial !== undefined;
   const rows: (string | number)[][] = [];
   rows.push(["Inventario - Stock Consolidado"]);
   rows.push([`Generado: ${new Date().toLocaleDateString("es-CO")}`]);
   rows.push([]);
 
   const headers: string[] = ["Codigo", "Material", "Categoria", "Unidad", "Stock Liq.", "Stock Trans.", "Total"];
+  if (hasKgLead) headers.push("Kg Plomo");
   if (canViewValues) headers.push("Costo Prom.", "Valor Total");
   rows.push(headers);
 
@@ -798,6 +806,10 @@ export function exportStockExcel(items: StockItem[], canViewValues: boolean) {
       item.current_stock_transit,
       item.current_stock_total,
     ];
+    if (hasKgLead) {
+      const kg = kgLeadByMaterial!.get(item.material_id);
+      row.push(kg != null ? kg : "");
+    }
     if (canViewValues) {
       row.push(item.current_average_cost, item.total_value);
     }
@@ -811,6 +823,11 @@ export function exportStockExcel(items: StockItem[], canViewValues: boolean) {
     items.reduce((s, i) => s + i.current_stock_transit, 0),
     items.reduce((s, i) => s + i.current_stock_total, 0),
   ];
+  if (hasKgLead) {
+    let kgTotal = 0;
+    kgLeadByMaterial!.forEach((v) => { kgTotal += v; });
+    totalsRow.push(kgTotal);
+  }
   if (canViewValues) {
     totalsRow.push("", items.reduce((s, i) => s + i.total_value, 0));
   }
@@ -819,12 +836,15 @@ export function exportStockExcel(items: StockItem[], canViewValues: boolean) {
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [
     { wch: 12 }, { wch: 30 }, { wch: 20 }, { wch: 8 },
-    { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 },
+    { wch: 14 }, { wch: 14 }, { wch: 14 },
+    ...(hasKgLead ? [{ wch: 12 }] : []),
+    { wch: 14 }, { wch: 16 },
   ];
 
-  // Currency cols (only when canViewValues): 7 (Costo Prom), 8 (Valor Total)
+  // Currency cols (only when canViewValues) — shift si hay columna Kg Plomo
   if (canViewValues) {
-    applyCurrencyFormat(ws, [7, 8]);
+    const base = hasKgLead ? 8 : 7;
+    applyCurrencyFormat(ws, [base, base + 1]);
   }
 
   const wb = XLSX.utils.book_new();
@@ -1192,4 +1212,45 @@ export function exportInactiveBalancesExcel(data: InactiveBalancesResponse, cont
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Dinero Inactivo");
   XLSX.writeFile(wb, `dinero_inactivo_${data.as_of.slice(0, 10)}.xlsx`);
+}
+
+// --- Materiales (kg) — catálogo SAC con clasificación y factor (paquete UX W2) ---
+
+export interface MaterialKgExportRow {
+  code: string;
+  name: string;
+  unit: string;
+  category: string;
+  businessUnit: string;
+  classification: string;
+  alsoCompra: boolean;
+  factor: string;
+  since: string;
+  by: string;
+  description: string;
+}
+
+export function exportMaterialsKgExcel(rows: MaterialKgExportRow[]) {
+  const data: (string | number | null)[][] = [];
+  data.push(["Materiales (kg) — Catálogo con clasificación y factores"]);
+  data.push([`Generado: ${formatDate(new Date().toISOString())}`]);
+  data.push([]);
+  data.push([
+    "Código", "Nombre", "Unidad", "Categoría", "Unidad de Negocio",
+    "Clasificación", "También Compra", "Factor Vigente", "Desde", "Por", "Descripción",
+  ]);
+  for (const r of rows) {
+    data.push([
+      r.code, r.name, r.unit, r.category, r.businessUnit,
+      r.classification, r.alsoCompra ? "Sí" : "", r.factor, r.since, r.by, r.description,
+    ]);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws["!cols"] = [
+    { wch: 12 }, { wch: 28 }, { wch: 8 }, { wch: 16 }, { wch: 22 },
+    { wch: 22 }, { wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 30 },
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Materiales (kg)");
+  XLSX.writeFile(wb, "materiales_kg.xlsx");
 }

@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import Layout from "@/components/layout/Layout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { PermissionGate } from "@/components/auth/PermissionGate";
+import { FlagGate } from "@/components/auth/FlagGate";
 import { SuperuserGate } from "@/components/auth/SuperuserGate";
 import Dashboard from "@/pages/Dashboard";
 import Login from "@/pages/Login";
@@ -37,6 +38,7 @@ const AccountStatementPage = lazy(() => import("@/pages/treasury/AccountStatemen
 const TreasuryDashboardPage = lazy(() => import("@/pages/treasury/TreasuryDashboardPage"));
 const AccountMovementsPage = lazy(() => import("@/pages/treasury/AccountMovementsPage"));
 const LiabilitiesPage = lazy(() => import("@/pages/treasury/LiabilitiesPage"));
+const RetentionsPage = lazy(() => import("@/pages/treasury/RetentionsPage"));
 const ScheduledExpensesPage = lazy(() => import("@/pages/treasury/ScheduledExpensesPage"));
 const ScheduledExpenseCreatePage = lazy(() => import("@/pages/treasury/ScheduledExpenseCreatePage"));
 const ScheduledExpenseDetailPage = lazy(() => import("@/pages/treasury/ScheduledExpenseDetailPage"));
@@ -80,6 +82,18 @@ const BusinessUnitsPage = lazy(() => import("@/pages/config/BusinessUnitsPage"))
 const ExpenseCategoriesPage = lazy(() => import("@/pages/config/ExpenseCategoriesPage"));
 const PriceListsPage = lazy(() => import("@/pages/config/PriceListsPage"));
 const ThirdPartyCategoriesPage = lazy(() => import("@/pages/config/ThirdPartyCategoriesPage"));
+const KgLedgerPage = lazy(() => import("@/pages/kg-ledger/KgLedgerPage"));
+const KgAccountStatementPage = lazy(() => import("@/pages/kg-ledger/KgAccountStatementPage"));
+const InboundOrdersPage = lazy(() => import("@/pages/inbound/InboundOrdersPage"));
+const InboundCreatePage = lazy(() => import("@/pages/inbound/InboundCreatePage"));
+const InboundDetailPage = lazy(() => import("@/pages/inbound/InboundDetailPage"));
+const InboundEditPage = lazy(() => import("@/pages/inbound/InboundEditPage"));
+const TransfersPage = lazy(() => import("@/pages/transfers/TransfersPage"));
+const TransferCreatePage = lazy(() => import("@/pages/transfers/TransferCreatePage"));
+const TransferDetailPage = lazy(() => import("@/pages/transfers/TransferDetailPage"));
+const TariffsPage = lazy(() => import("@/pages/config/TariffsPage"));
+const FormulasPage = lazy(() => import("@/pages/config/FormulasPage"));
+const FleetPage = lazy(() => import("@/pages/config/FleetPage"));
 const RolesPage = lazy(() => import("@/pages/admin/RolesPage"));
 const RoleEditPage = lazy(() => import("@/pages/admin/RoleEditPage"));
 const UsersPage = lazy(() => import("@/pages/admin/UsersPage"));
@@ -98,6 +112,16 @@ const queryClient = new QueryClient({
 
 function P({ permission, children }: { permission: string | string[]; children: React.ReactNode }) {
   return <PermissionGate permission={permission}>{children}</PermissionGate>;
+}
+
+// Guard compuesto flag+permiso para rutas SAC (D12): sin el flag, un admin de
+// otra org deep-linkea la ruta por el bypass de permisos de admin.
+function FP({ flag, permission, children }: { flag: string; permission: string | string[]; children: React.ReactNode }) {
+  return (
+    <FlagGate flag={flag}>
+      <PermissionGate permission={permission}>{children}</PermissionGate>
+    </FlagGate>
+  );
 }
 
 function App() {
@@ -125,6 +149,17 @@ function App() {
               <Route path={ROUTES.SALE_EDIT} element={<P permission="sales.edit"><SaleEditPage /></P>} />
               <Route path={ROUTES.SALE_LIQUIDATE} element={<P permission="sales.liquidate"><SaleLiquidatePage /></P>} />
               <Route path={ROUTES.SALE_DETAIL} element={<P permission="sales.view"><SaleDetailPage /></P>} />
+              {/* SAC E2: Recepcion + Plomo (kg) — gated flag + permiso */}
+              <Route path={ROUTES.INBOUND} element={<FP flag="kg_ledger_enabled" permission="purchases.view"><InboundOrdersPage /></FP>} />
+              <Route path={ROUTES.INBOUND_NEW} element={<FP flag="kg_ledger_enabled" permission="purchases.create"><InboundCreatePage /></FP>} />
+              <Route path={ROUTES.INBOUND_EDIT} element={<FP flag="kg_ledger_enabled" permission="purchases.edit"><InboundEditPage /></FP>} />
+              <Route path={ROUTES.INBOUND_DETAIL} element={<FP flag="kg_ledger_enabled" permission="purchases.view"><InboundDetailPage /></FP>} />
+              {/* SAC E3.1 — traslados dos pasos, gated two_step_transfers_enabled */}
+              <Route path={ROUTES.TRANSFERS} element={<FP flag="two_step_transfers_enabled" permission="inventory.view"><TransfersPage /></FP>} />
+              <Route path={ROUTES.TRANSFER_NEW} element={<FP flag="two_step_transfers_enabled" permission="inventory.transfer"><TransferCreatePage /></FP>} />
+              <Route path={ROUTES.TRANSFER_DETAIL} element={<FP flag="two_step_transfers_enabled" permission="inventory.view"><TransferDetailPage /></FP>} />
+              <Route path={ROUTES.KG_LEDGER} element={<FP flag="kg_ledger_enabled" permission="kg_ledger.view"><KgLedgerPage /></FP>} />
+              <Route path={ROUTES.KG_LEDGER_ACCOUNT} element={<FP flag="kg_ledger_enabled" permission="kg_ledger.view"><KgAccountStatementPage /></FP>} />
               {/* Doble Partida */}
               <Route path={ROUTES.DOUBLE_ENTRIES} element={<P permission="double_entries.view"><DoubleEntriesPage /></P>} />
               <Route path={ROUTES.DOUBLE_ENTRIES_NEW} element={<P permission="double_entries.create"><DoubleEntryCreatePage /></P>} />
@@ -139,6 +174,7 @@ function App() {
               <Route path={ROUTES.TREASURY_DASHBOARD} element={<P permission="treasury.view_dashboard"><TreasuryDashboardPage /></P>} />
               <Route path={ROUTES.TREASURY_ACCOUNT_MOVEMENTS} element={<P permission="treasury.view_accounts"><AccountMovementsPage /></P>} />
               <Route path={ROUTES.TREASURY_LIABILITIES} element={<P permission="treasury.view_liabilities"><LiabilitiesPage /></P>} />
+              <Route path={ROUTES.TREASURY_RETENTIONS} element={<FP flag="kg_ledger_enabled" permission="third_parties.view"><RetentionsPage /></FP>} />
               <Route path={ROUTES.TREASURY_SCHEDULED} element={<P permission="treasury.view_scheduled"><ScheduledExpensesPage /></P>} />
               <Route path={ROUTES.TREASURY_SCHEDULED_NEW} element={<P permission="treasury.manage_expenses"><ScheduledExpenseCreatePage /></P>} />
               <Route path={ROUTES.TREASURY_SCHEDULED_DETAIL} element={<P permission="treasury.view_scheduled"><ScheduledExpenseDetailPage /></P>} />
@@ -189,6 +225,9 @@ function App() {
               <Route path={ROUTES.CONFIG_EXPENSE_CATEGORIES} element={<P permission="treasury.manage_expenses"><ExpenseCategoriesPage /></P>} />
               <Route path={ROUTES.CONFIG_PRICE_LISTS} element={<P permission="materials.view_prices"><PriceListsPage /></P>} />
               <Route path={ROUTES.CONFIG_THIRD_PARTY_CATEGORIES} element={<P permission="third_parties.create"><ThirdPartyCategoriesPage /></P>} />
+              <Route path={ROUTES.CONFIG_TARIFFS} element={<FP flag="kg_ledger_enabled" permission="tariffs.view"><TariffsPage /></FP>} />
+              <Route path={ROUTES.CONFIG_FORMULAS} element={<FP flag="kg_ledger_enabled" permission="formulas.view"><FormulasPage /></FP>} />
+              <Route path={ROUTES.CONFIG_FLEET} element={<FP flag="kg_ledger_enabled" permission="config.view_fleet"><FleetPage /></FP>} />
               {/* Admin */}
               <Route path={ROUTES.ADMIN_ROLES} element={<P permission="admin.manage_roles"><RolesPage /></P>} />
               <Route path="/admin/roles/:id" element={<P permission="admin.manage_roles"><RoleEditPage /></P>} />

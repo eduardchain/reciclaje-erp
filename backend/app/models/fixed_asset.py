@@ -92,6 +92,14 @@ class FixedAsset(Base, OrganizationMixin, TimestampMixin):
         GUID(), ForeignKey("business_units.id", ondelete="SET NULL"), nullable=True,
     )
 
+    # --- Columna SAC E1 (Migracion B, D10) — solo alimenta filtro de reportes por sede ---
+    warehouse_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("warehouses.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Sede del activo (v0.5 §11.2.3) — NULL para clientes existentes",
+    )
+
     applicable_business_unit_ids: Mapped[Optional[list]] = mapped_column(
         JSONB, nullable=True,
     )

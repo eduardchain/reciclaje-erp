@@ -95,7 +95,19 @@ VALID_MOVEMENT_TYPES = [
     "loan_interest_accrual",         # Interes causado por cobrar: NO cuenta, tp.balance(+), P&L ingreso financiero
     "loan_interest_collection",      # Recaudo de intereses: account(+), tp.balance(-)
     "loan_capital_collection",       # Recaudo de capital: account(+), tp.balance(-)
+    "internal_maquila_expense",      # Maquila intersede (sede origen): NO cuenta, NO tercero. Solo P&L por sede (SAC E3.1)
+    "internal_maquila_income",       # Maquila intersede (sede destino): NO cuenta, NO tercero. Solo P&L por sede (SAC E3.1)
 ]
+
+# SAC E3.1 (E5/E9): el par de maquila intersede se anula desde el servicio de
+# traslados (cascade con inventario + kg), nunca desde Tesoreria — mismo patron
+# que ASSET/OBLIGATION_MOVEMENT_TYPES. Ambos tipos son account_id=NULL y
+# third_party_id=NULL: no tocan balances ni cash flow; solo existen para el
+# P&L por sede (excluidos del consolidado por construccion).
+INTERNAL_MAQUILA_MOVEMENT_TYPES = {
+    "internal_maquila_expense",
+    "internal_maquila_income",
+}
 
 
 class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
@@ -293,6 +305,33 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
         comment="Clasificacion P&L para tp_adjustment: loss o gain",
     )
 
+    # --- Columnas SAC E1 (Migracion B, D10) — inertes hasta E2/E3, NULL para clientes existentes ---
+    warehouse_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("warehouses.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Dimension gerencial persistida (sede) — ortogonal al 3-tier de UN (v0.5 §11.2.1)",
+    )
+
+    tariff_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("service_tariffs.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Tarifa aplicada en causaciones automaticas (trazabilidad)",
+    )
+
+    source_type: Mapped[Optional[str]] = mapped_column(
+        String(40),
+        nullable=True,
+        comment="Origen de causacion automatica: transfer | crucible_discharge | sale | willard_monthly_freight",
+    )
+
+    source_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        nullable=True,
+        comment="FK polimorfico al documento origen (sin FK fisica)",
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -354,6 +393,8 @@ class MoneyMovement(Base, OrganizationMixin, TimestampMixin):
         Index("ix_money_movements_org_account", "organization_id", "account_id"),
         Index("ix_money_movements_org_third_party", "organization_id", "third_party_id"),
         Index("ix_money_movements_org_status", "organization_id", "status"),
+        Index("ix_money_movements_org_warehouse", "organization_id", "warehouse_id"),
+        Index("ix_money_movements_source", "source_type", "source_id"),
         # Idempotencia de causacion de intereses: 1 causacion confirmada por
         # (obligacion, periodo). Anular libera el slot para recausar — espejo
         # del uq_asset_depreciation_period pero como indice parcial.

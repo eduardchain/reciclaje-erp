@@ -520,6 +520,117 @@ class TestMovements:
         types = [it["movement_type"] for it in data3["items"]]
         assert "transfer" not in types
 
+    def test_avg_cost_after_reads_from_cost_history(
+        self,
+        client,
+        org_headers,
+        db_session,
+        test_organization,
+        test_warehouse,
+    ):
+        """La columna Costo Prom. lee del LIBRO real (MaterialCostHistory) —
+        no de una reconstruccion ingenua (hallazgo pruebas Daniel, BAT-08).
+
+        Dos niveles: (1) por FUENTE — la liquidacion de una compra muestra su
+        efecto EN la fila de la compra aunque ocurra despues (Modelo L #64:
+        el promedio solo se mueve al liquidar); (2) por TIEMPO — extracciones
+        MCH-silenciosas (ventas) muestran el promedio vigente sin cambio.
+        Sin historial de costo -> None (la UI pinta "—")."""
+        from tests.conftest import create_third_party_with_category
+
+        mat = Material(
+            id=uuid4(),
+            code="AVG-MCH",
+            name="Avg Display Test",
+            default_unit="kg",
+            current_stock=Decimal("0"),
+            current_stock_liquidated=Decimal("0"),
+            current_stock_transit=Decimal("0"),
+            current_average_cost=Decimal("0"),
+            organization_id=test_organization.id,
+            is_active=True,
+        )
+        db_session.add(mat)
+        supplier = create_third_party_with_category(
+            db_session, test_organization.id, "Prov Avg Display", "material_supplier"
+        )
+        customer = create_third_party_with_category(
+            db_session, test_organization.id, "Cliente Avg Display", "customer"
+        )
+        db_session.commit()
+
+        def day(d):
+            return (datetime.now(timezone.utc) - timedelta(days=d)).date().isoformat()
+
+        def movs():
+            resp = client.get(
+                "/api/v1/inventory/movements",
+                params={"material_id": str(mat.id)},
+                headers=org_headers,
+            )
+            assert resp.status_code == 200
+            return {(it["movement_type"], it["quantity"]): it for it in resp.json()["items"]}
+
+        # P1 registrada: +100 @ 1000 — transito puro, sin MCH aun -> None
+        p1 = client.post("/api/v1/purchases", json={
+            "supplier_id": str(supplier.id),
+            "date": day(4),
+            "lines": [{"material_id": str(mat.id), "quantity": 100,
+                       "unit_price": 1000, "warehouse_id": str(test_warehouse.id)}],
+            "auto_liquidate": False,
+        }, headers=org_headers)
+        assert p1.status_code == 201, p1.text
+        assert movs()[("purchase", 100.0)]["avg_cost_after"] is None
+
+        # P1 liquidada -> avg 1000 aparece EN su fila (nivel por fuente)
+        liq1 = client.patch(
+            f"/api/v1/purchases/{p1.json()['id']}/liquidate",
+            json={"liquidation_date": day(4)}, headers=org_headers,
+        )
+        assert liq1.status_code == 200, liq1.text
+        assert movs()[("purchase", 100.0)]["avg_cost_after"] == 1000.0
+
+        # Venta liquidada -40: extraccion MCH-silenciosa — promedio intacto
+        s1 = client.post("/api/v1/sales", json={
+            "customer_id": str(customer.id),
+            "warehouse_id": str(test_warehouse.id),
+            "date": day(3),
+            "lines": [{"material_id": str(mat.id), "quantity": 40, "unit_price": 1500}],
+            "commissions": [],
+            "auto_liquidate": False,
+        }, headers=org_headers)
+        assert s1.status_code == 201, s1.text
+        liqs = client.patch(
+            f"/api/v1/sales/{s1.json()['id']}/liquidate",
+            json={"liquidation_date": day(3)}, headers=org_headers,
+        )
+        assert liqs.status_code == 200, liqs.text
+        assert movs()[("sale", -40.0)]["avg_cost_after"] == 1000.0
+
+        # P2 registrada: +140 @ 2000 — la fila muestra el promedio VIGENTE
+        # (el transito NO mueve el promedio; la formula ingenua aqui mentia)
+        p2 = client.post("/api/v1/purchases", json={
+            "supplier_id": str(supplier.id),
+            "date": day(2),
+            "lines": [{"material_id": str(mat.id), "quantity": 140,
+                       "unit_price": 2000, "warehouse_id": str(test_warehouse.id)}],
+            "auto_liquidate": False,
+        }, headers=org_headers)
+        assert p2.status_code == 201, p2.text
+        assert movs()[("purchase", 140.0)]["avg_cost_after"] == 1000.0
+
+        # P2 liquidada: (60x1000 + 140x2000)/200 = 1700 EN su fila; las filas
+        # anteriores NO se reescriben (el libro es append-only)
+        liq2 = client.patch(
+            f"/api/v1/purchases/{p2.json()['id']}/liquidate",
+            json={"liquidation_date": day(2)}, headers=org_headers,
+        )
+        assert liq2.status_code == 200, liq2.text
+        final = movs()
+        assert final[("purchase", 140.0)]["avg_cost_after"] == 1700.0
+        assert final[("purchase", 100.0)]["avg_cost_after"] == 1000.0
+        assert final[("sale", -40.0)]["avg_cost_after"] == 1000.0
+
 
 class TestValuation:
     """Tests for GET /api/v1/inventory/valuation"""
