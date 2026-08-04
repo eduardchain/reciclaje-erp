@@ -38,6 +38,7 @@ import {
   Landmark,
   Percent,
   PackageOpen,
+  MapPin,
 } from "lucide-react";
 import { cn } from "@/utils";
 import { ROUTES } from "@/utils/constants";
@@ -268,6 +269,7 @@ const orgNavItems: NavItem[] = [
       { name: "Tarifas", path: ROUTES.CONFIG_TARIFFS, icon: <Receipt className="w-4 h-4" />, permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
       { name: "Materiales (kg)", path: ROUTES.CONFIG_FORMULAS, icon: <Calculator className="w-4 h-4" />, permission: "formulas.view", orgFlag: "kg_ledger_enabled" },
       { name: "Conductores y Vehiculos", path: ROUTES.CONFIG_FLEET, icon: <Truck className="w-4 h-4" />, permission: "config.view_fleet", orgFlag: "kg_ledger_enabled" },
+      { name: "Centros Willard", path: ROUTES.CONFIG_WILLARD_CENTERS, icon: <MapPin className="w-4 h-4" />, permission: "config.manage_sac_settings", orgFlag: "kg_ledger_enabled" },
     ],
   },
   {
