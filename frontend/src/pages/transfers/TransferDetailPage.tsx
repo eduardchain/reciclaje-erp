@@ -34,6 +34,7 @@ import {
 import {
   formatCurrency,
   formatDate,
+  formatDateTime,
   formatWeight,
   toLocalDateInput,
 } from "@/utils/formatters";
@@ -189,7 +190,7 @@ export default function TransferDetailPage() {
 
       {t.status === "annulled" && (
         <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-          Anulado{t.annulled_at ? ` el ${formatDate(t.annulled_at)}` : ""}
+          Anulado{t.annulled_at ? ` el ${formatDateTime(t.annulled_at)}` : ""}
           {t.annulled_reason ? ` — ${t.annulled_reason}` : ""}
         </div>
       )}

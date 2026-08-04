@@ -133,6 +133,13 @@ def _enrich(
         collector_name=order.collector.name if order.collector else None,
         willard_distribution_center=order.willard_distribution_center,
         notes=order.notes,
+        # Ajustes 2026-08-03 (A, D1): fuente unica POR TIPO. Tipo compra -> la
+        # factura vive en el documento comercial; willard -> en la columna
+        # propia. `order.purchase` ya viene cargado (mismo lookup que alimenta
+        # purchase_number/purchase_status) -> cero queries nuevas.
+        invoice_number=(
+            order.purchase.invoice_number if order.purchase else order.invoice_number
+        ),
         status=order.status,
         display_status=inbound_order_service.display_status_of(order),
         purchase_id=order.purchase_id,

@@ -144,6 +144,7 @@ export default function InboundCreatePage() {
   const [collectorId, setCollectorId] = useState("");
   const [willardCenter, setWillardCenter] = useState("none");
   const [notes, setNotes] = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
 
   // Quick-create de conductor/vehiculo (feedback Daniel: "deben ser creados
@@ -362,6 +363,7 @@ export default function InboundCreatePage() {
         collector_id: collectorId || null,
         willard_distribution_center: isWillard && willardCenter !== "none" ? willardCenter : null,
         notes: notes.trim() || null,
+        invoice_number: invoiceNumber.trim() || null,
         lines: lines.map((l) => ({
           material_id: l.material_id,
           quantity: l.quantity,
@@ -538,6 +540,18 @@ export default function InboundCreatePage() {
                   ? "Solo registro — la recolección Willard no genera comisión"
                   : "Green Loop u otro recolector — la comisión se define al liquidar (va a gastos, no al costo)"}
               </p>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                N° Factura
+              </Label>
+              <Input
+                value={invoiceNumber}
+                onChange={(e) => setInvoiceNumber(e.target.value)}
+                maxLength={50}
+                className="w-full"
+                placeholder="Opcional"
+              />
             </div>
             <div className="md:col-span-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>

@@ -107,15 +107,22 @@ ACCOUNTS = [
 
 # (name, is_direct_expense) — "Comisiones de recoleccion" NO va: es entidad de
 # sistema get-or-create al liquidar con recolector (#83)
+# (nombre, is_direct_expense, pnl_section) — pnl_section solo vive en raices (#71)
 EXPENSE_CATEGORIES = [
-    ("Arriendos", False),
-    ("Combustibles", True),
-    ("Insumos de Planta", True),
-    ("Mantenimiento", False),
-    ("Nomina", False),
-    ("Papeleria y Otros", False),
-    ("Servicios Publicos", False),
-    ("Transporte y Fletes", True),
+    ("Arriendos", False, "operativo"),
+    ("Combustibles", True, "operativo"),
+    ("Insumos de Planta", True, "operativo"),
+    ("Mantenimiento", False, "operativo"),
+    ("Nomina", False, "operativo"),
+    ("Papeleria y Otros", False, "operativo"),
+    ("Servicios Publicos", False, "operativo"),
+    ("Transporte y Fletes", True, "operativo"),
+    # Ajustes reunion 2026-08-03 (D). Ojo: el P&L ya manda los intereses de
+    # obligaciones a la seccion financiera por FUENTE (#71, reports.py:909) —
+    # esta categoria es para el Reporte de Gastos (#44), que agrupa por
+    # categoria, y para gastos financieros manuales (comision bancaria, 4x1000)
+    # registrados como `expense` suelto, donde no hay fuente que los salve.
+    ("Gastos Financieros", False, "financiero"),
 ]
 
 MATERIAL_CATEGORIES = ["Baterías", "Scrap", "Plomo", "Chatarra", "Aluminio", "Drosses"]
@@ -557,12 +564,17 @@ class SacSeeder:
     def create_expense_categories(self) -> None:
         logging.info("[7] Categorias de gasto")
         existing = self.api.existing_by("/expense-categories", "name")
-        for name, is_direct in EXPENSE_CATEGORIES:
+        for name, is_direct, pnl_section in EXPENSE_CATEGORIES:
             if name in existing:
                 continue
             self.api.post(
                 "/expense-categories/",
-                {"name": name, "is_direct_expense": is_direct}, label=name,
+                {
+                    "name": name,
+                    "is_direct_expense": is_direct,
+                    "pnl_section": pnl_section,
+                },
+                label=name,
             )
 
     def create_material_categories(self) -> None:

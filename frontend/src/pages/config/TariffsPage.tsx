@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useCreateTariff, useCurrentTariffs, useTariffHistory } from "@/hooks/useSacConfig";
-import { formatCurrencyDecimals, formatDate } from "@/utils/formatters";
+import { formatCurrencyDecimals, formatDate, formatDateTime } from "@/utils/formatters";
 import ConfigLayout from "./ConfigLayout";
 import {
   CANONICAL_UNIT_BY_CODE,
@@ -190,7 +190,7 @@ export default function TariffsPage() {
                 {(history.data?.items ?? []).map((h, idx) => (
                   <TableRow key={h.id}>
                     <TableCell>
-                      {formatDate(h.created_at)}
+                      {formatDateTime(h.created_at)}
                       {idx === 0 && (
                         <span className="ml-2 text-xs text-emerald-600 font-medium">vigente</span>
                       )}

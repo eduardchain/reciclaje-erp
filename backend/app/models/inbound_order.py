@@ -115,6 +115,17 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
         comment="Nota informativa de la captura en patio",
     )
 
+    # Ajustes reunion 2026-08-03 (A, D1): factura de la captura — SOLO tipo
+    # willard. En tipo compra la factura vive en purchases.invoice_number (el
+    # documento comercial) y esta columna queda NULL: una sola fuente de verdad
+    # POR TIPO, jamas dos para la misma fila. La lectura del response es
+    # condicional (purchase si existe, si no esta columna).
+    invoice_number: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Factura de recepciones Willard (tipo compra: vive en purchases.invoice_number)",
+    )
+
     status: Mapped[str] = mapped_column(
         String(16),
         nullable=False,

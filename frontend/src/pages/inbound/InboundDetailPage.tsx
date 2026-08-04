@@ -22,7 +22,7 @@ import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAnnulInboundOrder, useConfirmInboundOrder, useInboundOrder } from "@/hooks/useInboundOrders";
 import { useCurrentFormulas } from "@/hooks/useSacConfig";
-import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
+import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
 import { buildRoute, ROUTES } from "@/utils/constants";
 import { estimateKgLead, willardCenterLabel } from "./InboundCreatePage";
 import { EntradaStatusBadge, EntradaTypeBadge } from "./InboundOrdersPage";
@@ -158,11 +158,14 @@ export default function InboundDetailPage() {
             <InfoRow label="Tipo" value={<EntradaTypeBadge order={order} />} />
             <InfoRow label="Tercero" value={order.third_party_name ?? "—"} long />
             <InfoRow label="Sede" value={order.warehouse_name ?? "—"} long />
+            {order.invoice_number && (
+              <InfoRow label="N° Factura" value={order.invoice_number} long />
+            )}
             {/* Ciclo C (C-5): quien hizo que — capa de confianza del flujo a 2 personas */}
             {order.created_by_name && (
               <InfoRow
                 label="Registrada por"
-                value={`${order.created_by_name} · ${formatDate(order.created_at)}`}
+                value={`${order.created_by_name} · ${formatDateTime(order.created_at)}`}
                 long
               />
             )}
@@ -176,7 +179,7 @@ export default function InboundDetailPage() {
             {order.display_status === "annulled" && (order.annulled_by_name || order.annulled_at) && (
               <InfoRow
                 label="Anulada por"
-                value={`${order.annulled_by_name ?? "—"}${order.annulled_at ? ` · ${formatDate(order.annulled_at)}` : ""}`}
+                value={`${order.annulled_by_name ?? "—"}${order.annulled_at ? ` · ${formatDateTime(order.annulled_at)}` : ""}`}
                 long
               />
             )}
@@ -266,7 +269,7 @@ export default function InboundDetailPage() {
             )}
             {order.status === "annulled" && (
               <>
-                <InfoRow label="Anulada" value={order.annulled_at ? formatDate(order.annulled_at) : "—"} />
+                <InfoRow label="Anulada" value={order.annulled_at ? formatDateTime(order.annulled_at) : "—"} />
                 <InfoRow label="Motivo" value={order.annulled_reason ?? "—"} long />
               </>
             )}

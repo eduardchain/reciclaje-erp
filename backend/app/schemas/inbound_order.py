@@ -51,6 +51,11 @@ class InboundOrderCreate(BaseModel):
     # goes_directly_to_jm retirado (Ciclo B B4, Q-03: drosses SIEMPRE a la
     # planta — peso muerto). extra="forbid" -> enviarlo da 422 (F1 QA).
     notes: Optional[str] = Field(None, max_length=1000)
+    # Ajustes reunion 2026-08-03 (A): factura — AMBOS tipos. max_length calcado
+    # de PurchaseCreate.invoice_number (cero drift). Tipo compra: se propaga a
+    # la compra derivada y la columna del inbound queda NULL (D1, fuente unica
+    # por tipo). Tipo willard: vive en la columna propia.
+    invoice_number: Optional[str] = Field(None, max_length=50)
     lines: list[InboundOrderLineCreate] = Field(..., min_length=1)
 
     @field_validator("date")
@@ -76,6 +81,11 @@ class InboundOrderUpdate(BaseModel):
     collector_id: Optional[UUID] = None
     willard_distribution_center: Optional[str] = Field(None, max_length=24)
     notes: Optional[str] = Field(None, max_length=1000)
+    # Ajustes 2026-08-03 (A, D2): editable SIEMPRE, incluso con la compra ya
+    # liquidada — dato de referencia sin efecto financiero (mismo criterio que
+    # notes). La factura del proveedor llega tarde con frecuencia y bloquearla
+    # obligaria a anular una compra liquidada para escribir un numero.
+    invoice_number: Optional[str] = Field(None, max_length=50)
     lines: Optional[list[InboundOrderLineCreate]] = Field(None, min_length=1)
 
     @field_validator("date")
@@ -131,6 +141,10 @@ class InboundOrderResponse(BaseModel):
     collector_commission_total: Optional[float] = None
     willard_distribution_center: Optional[str] = None
     notes: Optional[str] = None
+    # Ajustes 2026-08-03 (A, D1): lectura CONDICIONAL — purchase.invoice_number
+    # si hay compra derivada, si no la columna propia del inbound. Hace la
+    # desincronizacion imposible por construccion en vez de vigilarla.
+    invoice_number: Optional[str] = None
     status: str
     display_status: str = Field(
         "registered",

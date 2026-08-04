@@ -319,7 +319,7 @@ export default function SaleDetailPage() {
               <div>
                 <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cobrada por</dt>
                 <dd className="mt-0.5">{sale.liquidated_by_name ?? "-"}</dd>
-                <dd className="text-xs text-slate-400">{formatDateTime(sale.liquidated_at)}</dd>
+                <dd className="text-xs text-slate-400">{formatDate(sale.liquidated_at)}</dd>
               </div>
             )}
             {sale.updated_by_name && (

@@ -561,3 +561,88 @@ def update_user_account_assignments(
 
     db.commit()
     return account_ids
+
+
+# ---------------------------------------------------------------------------
+# Settings de organizacion — superficie ESTRECHA para admins de org
+# (ajustes reunion 2026-08-03, item C)
+# ---------------------------------------------------------------------------
+
+def _normalize_center(raw: str) -> str:
+    """Slug canonico de un centro de distribucion.
+
+    Reusa normalize_entity_name (dueño del formato desde #78: NFKD, sin
+    acentos, minusculas) y ademas colapsa espacios a '_' — los valores
+    existentes son slugs ('santa_marta', 'motocosta').
+    """
+    from app.services.retention_entities import normalize_entity_name
+
+    return re.sub(r"\s+", "_", normalize_entity_name(raw)).strip("_")
+
+
+def update_willard_distribution_centers(
+    db: Session, organization_id: UUID, centers: list[str]
+) -> tuple[list[str], list[str]]:
+    """Reemplaza SOLO la clave willard_distribution_centers de settings.
+
+    El resto del JSONB — en particular los 3 feature flags — pasa intacto por
+    construccion: se copia el dict, se reemplaza una clave y se REASIGNA.
+
+    ⚠️ La columna NO usa MutableDict (models/organization.py: "toda escritura
+    reasigna el dict completo"). Mutar in-place NO persistiria, y el fallo
+    seria SILENCIOSO: los flags quedarian intactos... por no haberse escrito
+    nada. Por eso se reasigna y por eso el test relee desde BD.
+
+    Retorna (centros efectivos, warnings).
+    """
+    from app.models.inbound_order import InboundOrder
+    from app.utils.org_settings import SETTING_DEFAULTS
+
+    org = db.get(Organization, organization_id)
+    if org is None:
+        raise ValueError("Organizacion no encontrada")
+
+    normalized: list[str] = []
+    for raw in centers:
+        slug = _normalize_center(raw)
+        if not slug:
+            raise ValueError(f"Centro invalido: {raw!r}")
+        if len(slug) > 24:
+            raise ValueError(
+                f"'{slug}' excede 24 caracteres (limite del campo en la Entrada)"
+            )
+        if slug not in normalized:  # dedup preservando orden
+            normalized.append(slug)
+
+    if not normalized:
+        raise ValueError(
+            "La lista no puede quedar vacia: ninguna entrada Willard podria "
+            "declarar centro de distribucion"
+        )
+
+    previous = (org.settings or {}).get(
+        "willard_distribution_centers", SETTING_DEFAULTS["willard_distribution_centers"]
+    )
+
+    # Avisar, no bloquear (#17/#76): el historico guarda el string en la fila,
+    # no una FK — no hay integridad que proteger, solo deja de poder elegirse.
+    warnings: list[str] = []
+    for removed in [c for c in (previous or []) if c not in normalized]:
+        used = db.scalar(
+            select(func.count(InboundOrder.id)).where(
+                InboundOrder.organization_id == organization_id,
+                InboundOrder.willard_distribution_center == removed,
+            )
+        )
+        if used:
+            warnings.append(
+                f"'{removed}' se uso en {used} entrada(s); el historico no "
+                "cambia, pero ya no podra elegirse"
+            )
+
+    new_settings = dict(org.settings or {})
+    new_settings["willard_distribution_centers"] = normalized
+    org.settings = new_settings  # REASIGNACION, no mutacion in-place
+    db.commit()
+
+    return normalized, warnings

@@ -18,7 +18,7 @@ import { useCurrentFormulas, useFormulaHistory, useKgProfiles } from "@/hooks/us
 import { materialService } from "@/services/materials";
 import { sacConfigService } from "@/services/sacConfig";
 import { exportMaterialsKgExcel } from "@/utils/excelExport";
-import { formatDate, getApiErrorMessage } from "@/utils/formatters";
+import { formatDate, formatDateTime, getApiErrorMessage } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import ConfigLayout from "./ConfigLayout";
 import {
@@ -703,7 +703,7 @@ export default function FormulasPage() {
               <TableBody>
                 {(history.data?.items ?? []).map((h) => (
                   <TableRow key={h.id}>
-                    <TableCell>{formatDate(h.created_at)}</TableCell>
+                    <TableCell>{formatDateTime(h.created_at)}</TableCell>
                     <TableCell>{readableParams(h)}</TableCell>
                     <TableCell className="text-slate-500">{h.created_by_name ?? "—"}</TableCell>
                   </TableRow>
