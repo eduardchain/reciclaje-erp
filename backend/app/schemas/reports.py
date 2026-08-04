@@ -132,6 +132,12 @@ class ProfitAndLossResponse(BaseModel):
     # cargado a ventas en hueco y el costo real de reposicion al rellenar.
     oversell_cost_adjustment: float = 0.0
 
+    # Maquila intersede (SAC E3.1, E4: lineas propias — jamas plegadas en
+    # service_income ni operating_expenses). Consolidado sin flags: ambas 0.0
+    # (netean $0 por construccion). Por sede: income=JM, expense=CV/BOG.
+    internal_maquila_income: float = 0.0
+    internal_maquila_expense: float = 0.0
+
     # Ajustes de terceros
     tp_adjustment_loss: float = 0.0
     tp_adjustment_gain: float = 0.0

@@ -7,6 +7,10 @@ import { Separator } from "@/components/ui/separator";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { FileSpreadsheet, ChevronRight } from "lucide-react";
+import { useState } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { useWarehouses } from "@/hooks/useMasterData";
 import { useProfitAndLoss } from "@/hooks/useReports";
 import { formatCurrency } from "@/utils/formatters";
 import { exportPnlExcel } from "@/utils/excelExport";
@@ -41,15 +45,49 @@ function DrillRow({ to, label, value, valueClass = "", indent = false }: DrillRo
 
 export default function ProfitAndLossPeriodView() {
   const { dateFrom, dateTo, setDateFrom, setDateTo } = useDateFilter();
-  const { data, isLoading } = useProfitAndLoss({ date_from: dateFrom, date_to: dateTo });
+  // SAC E3.1: P&L por sede — selector solo con two_step_transfers_enabled.
+  // Regla de no-regresion: sin flag el selector no se monta y el query no
+  // gana el param (URL identica a hoy).
+  const { flagEnabled } = useOrgSettings();
+  const bySedeEnabled = flagEnabled("two_step_transfers_enabled");
+  const [warehouseId, setWarehouseId] = useState<string>("all");
+  const { data: warehousesData } = useWarehouses();
+  const sedes = (warehousesData?.items ?? []).filter((w) => w.is_active && !w.is_transit);
+  const effectiveWarehouse = bySedeEnabled && warehouseId !== "all" ? warehouseId : undefined;
+  const { data, isLoading } = useProfitAndLoss({
+    date_from: dateFrom,
+    date_to: dateTo,
+    ...(effectiveWarehouse ? { warehouse_id: effectiveWarehouse } : {}),
+  });
   useScrollRestoration(!isLoading);
 
   return (
     <>
       <ResponsiveFilterBar className="sm:justify-end">
+        {bySedeEnabled && (
+          <Select value={warehouseId} onValueChange={setWarehouseId}>
+            <SelectTrigger className="w-full sm:w-44">
+              <SelectValue placeholder="Sede" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Consolidado</SelectItem>
+              {sedes.map((w) => (
+                <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         {data && <Button variant="outline" size="sm" onClick={() => exportPnlExcel(data)} className="w-full sm:w-auto"><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>}
         <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
       </ResponsiveFilterBar>
+
+      {effectiveWarehouse && (
+        <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm text-indigo-800">
+          Vista por sede: ventas, costo, comisiones y maquila de{" "}
+          <span className="font-medium">{sedes.find((w) => w.id === effectiveWarehouse)?.name}</span>.
+          Los gastos operativos sin sede, cruces y ajustes solo aparecen en el consolidado.
+        </div>
+      )}
 
       {isLoading && <div className="text-center text-slate-500 py-8">Cargando...</div>}
 
@@ -116,6 +154,18 @@ export default function ProfitAndLossPeriodView() {
                   <span className={data.oversell_cost_adjustment >= 0 ? "text-emerald-700" : "text-red-700"}>
                     {`${data.oversell_cost_adjustment >= 0 ? "" : "-"}${formatCurrency(Math.abs(data.oversell_cost_adjustment))}`}
                   </span>
+                </div>
+              )}
+              {(data.internal_maquila_income ?? 0) !== 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">+ Ingreso Maquila Intersede</span>
+                  <span className="text-emerald-700">{formatCurrency(data.internal_maquila_income)}</span>
+                </div>
+              )}
+              {(data.internal_maquila_expense ?? 0) !== 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">- Gasto Maquila Intersede</span>
+                  <span className="text-red-700">-{formatCurrency(data.internal_maquila_expense)}</span>
                 </div>
               )}
               {data.tp_adjustment_gain > 0 && (

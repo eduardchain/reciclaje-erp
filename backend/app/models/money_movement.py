@@ -95,7 +95,19 @@ VALID_MOVEMENT_TYPES = [
     "loan_interest_accrual",         # Interes causado por cobrar: NO cuenta, tp.balance(+), P&L ingreso financiero
     "loan_interest_collection",      # Recaudo de intereses: account(+), tp.balance(-)
     "loan_capital_collection",       # Recaudo de capital: account(+), tp.balance(-)
+    "internal_maquila_expense",      # Maquila intersede (sede origen): NO cuenta, NO tercero. Solo P&L por sede (SAC E3.1)
+    "internal_maquila_income",       # Maquila intersede (sede destino): NO cuenta, NO tercero. Solo P&L por sede (SAC E3.1)
 ]
+
+# SAC E3.1 (E5/E9): el par de maquila intersede se anula desde el servicio de
+# traslados (cascade con inventario + kg), nunca desde Tesoreria — mismo patron
+# que ASSET/OBLIGATION_MOVEMENT_TYPES. Ambos tipos son account_id=NULL y
+# third_party_id=NULL: no tocan balances ni cash flow; solo existen para el
+# P&L por sede (excluidos del consolidado por construccion).
+INTERNAL_MAQUILA_MOVEMENT_TYPES = {
+    "internal_maquila_expense",
+    "internal_maquila_income",
+}
 
 
 class MoneyMovement(Base, OrganizationMixin, TimestampMixin):

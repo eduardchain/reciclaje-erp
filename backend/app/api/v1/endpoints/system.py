@@ -1,4 +1,5 @@
 """Endpoints de super admin para gestion global del sistema."""
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -17,11 +18,13 @@ from app.schemas.system import (
     SystemUserResponse,
     SystemUserMembership,
     AddUserToOrgRequest,
+    ResetPasswordRequest,
 )
 from app.schemas.organization import OrganizationCreate
 from app.services.organization import create_organization, add_member
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -311,3 +314,77 @@ def add_user_to_organization(
     db.commit()
 
     return {"message": f"Usuario '{user.email}' agregado a '{org.name}' como {role.display_name}"}
+
+
+@router.post("/users/{user_id}/reset-password", response_model=SystemUserResponse)
+def reset_user_password(
+    user_id: UUID,
+    data: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+    _su: User = Depends(get_current_superuser),
+):
+    """Resetear la contrasena de un usuario (solo superusuario).
+
+    Unica via de recuperacion de acceso del sistema: /auth/change-password
+    exige la clave actual y no hay flujo de "olvide mi contrasena".
+
+    Limitaciones declaradas (plan §4):
+    - D3: NO reactiva al usuario. Un usuario inactivo sigue sin poder entrar
+      (login y get_current_user lo rechazan); la reactivacion es otro camino.
+    - D4: NO invalida las sesiones ya emitidas — no existe token_version ni
+      lista negra de JWT, y el token vive 7 dias. Sirve para "olvide mi
+      clave"; NO alcanza para "me robaron la cuenta".
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    # D2 — superusuario -> superusuario es toma de cuenta lateral. Un
+    # superusuario cambia su propia clave con /auth/change-password.
+    if user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "No se puede resetear la contrasena de otro superusuario. "
+                "Use /auth/change-password para la suya."
+            ),
+        )
+
+    user.hashed_password = get_password_hash(data.new_password)
+    db.commit()
+    db.refresh(user)
+
+    # D5 — auditoria por log (el sistema no tiene tabla de auditoria sobre
+    # users). H3: SOLO actor y objetivo. JAMAS el payload ni la clave: eso
+    # desharia D1 (el secreto no viaja de vuelta ni queda en disco).
+    logger.warning(
+        "password_reset actor_id=%s actor_email=%s target_id=%s target_email=%s",
+        _su.id, _su.email, user.id, user.email,
+    )
+
+    memberships = (
+        db.query(OrganizationMember)
+        .options(
+            joinedload(OrganizationMember.organization),
+            joinedload(OrganizationMember.role),
+        )
+        .filter(OrganizationMember.user_id == user.id)
+        .all()
+    )
+    return SystemUserResponse(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        is_active=user.is_active,
+        is_superuser=user.is_superuser,
+        created_at=user.created_at,
+        memberships=[
+            SystemUserMembership(
+                organization_id=m.organization_id,
+                organization_name=m.organization.name if m.organization else "—",
+                role_name=m.role.name if m.role else "—",
+                role_display_name=m.role.display_name if m.role else "—",
+            )
+            for m in memberships
+        ],
+    )

@@ -274,7 +274,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"Bodega {line_data.warehouse_id} no encontrada"
                     )
-            
+                # SAC E3.1 (E12): bodega de transito solo opera via 2-pasos
+                from app.services.transfer import validate_not_transit_warehouse
+                validate_not_transit_warehouse(db, organization_id, warehouse)
+
             # Calculate line total
             quantity = Decimal(str(line_data.quantity))
             unit_price = Decimal(str(line_data.unit_price))
@@ -1125,6 +1128,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"Bodega {line_data.warehouse_id} no encontrada"
                     )
+                # SAC E3.1 (E12): bodega de transito solo opera via 2-pasos
+                from app.services.transfer import validate_not_transit_warehouse
+                validate_not_transit_warehouse(db, organization_id, warehouse)
 
                 quantity = Decimal(str(line_data.quantity))
                 unit_price = Decimal(str(line_data.unit_price))

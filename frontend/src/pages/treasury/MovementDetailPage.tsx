@@ -20,6 +20,8 @@ import { ROUTES } from "@/utils/constants";
 import apiClient from "@/services/api";
 
 const typeLabels: Record<string, string> = {
+  internal_maquila_expense: "Maquila Intersede (Gasto sede origen)",
+  internal_maquila_income: "Maquila Intersede (Ingreso sede destino)",
   payment_to_supplier: "Pago a Proveedor",
   collection_from_client: "Cobro a Cliente",
   expense: "Gasto",
@@ -67,6 +69,8 @@ const EDITABLE_EXPENSE_TYPES = ["expense", "expense_accrual", "provision_expense
 const ASSET_OWNED_TYPES = ["asset_payment", "depreciation_expense", "asset_purchase", "asset_revaluation_payment", "asset_revaluation_credit", "asset_devaluation_collection", "asset_devaluation_receivable"];
 const REVALUATION_TYPES = ["asset_revaluation_payment", "asset_revaluation_credit", "asset_devaluation_collection", "asset_devaluation_receivable"];
 // Movimientos de obligaciones financieras: se anulan desde la obligación (backend responde 422)
+// SAC E3.1: el par de maquila intersede se anula desde el traslado (patron #67)
+const MAQUILA_TYPES = ["internal_maquila_expense", "internal_maquila_income"];
 const OBLIGATION_TYPES = ["obligation_disbursement", "obligation_interest_accrual", "obligation_interest_payment", "obligation_capital_payment", "loan_disbursement", "loan_interest_accrual", "loan_interest_collection", "loan_capital_collection"];
 
 const statusBorderMap: Record<string, string> = {
@@ -130,7 +134,7 @@ export default function MovementDetailPage() {
               <Pencil className="h-4 w-4 mr-2" />Editar Clasificacion
             </Button>
           )}
-          {movement.status === "confirmed" && !ASSET_OWNED_TYPES.includes(movement.movement_type) && !OBLIGATION_TYPES.includes(movement.movement_type) && (
+          {movement.status === "confirmed" && !ASSET_OWNED_TYPES.includes(movement.movement_type) && !OBLIGATION_TYPES.includes(movement.movement_type) && !MAQUILA_TYPES.includes(movement.movement_type) && (
             <Button variant="outline" onClick={() => setShowAnnul(true)} className="text-red-600 border-red-200 hover:bg-red-50">
               <XCircle className="h-4 w-4 mr-2" />Anular
             </Button>
@@ -150,6 +154,14 @@ export default function MovementDetailPage() {
           <Link to={ROUTES.TREASURY_FIXED_ASSETS} className="font-medium underline underline-offset-2">
             Ir a Activos Fijos
           </Link>
+        </div>
+      )}
+
+      {movement.status === "confirmed" && MAQUILA_TYPES.includes(movement.movement_type) && (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800">
+          Este movimiento es maquila intersede y no se anula desde Tesorería.
+          Anula el traslado desde el módulo de Traslados — eso revierte el par completo
+          junto con el inventario y los kg.
         </div>
       )}
 

@@ -142,6 +142,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Bodega no encontrada"
                 )
+            # SAC E3.1 (E12): bodega de transito solo opera via 2-pasos
+            from app.services.transfer import validate_not_transit_warehouse
+            validate_not_transit_warehouse(db, organization_id, warehouse)
         
         # Step 4: Validate stock availability for all materials BEFORE creating anything (skip for double-entry)
         # RN-INV-03: Stock negativo PERMITIDO con warning (no bloquea la operacion)
@@ -749,6 +752,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Bodega no encontrada"
                 )
+            # SAC E3.1 (E12): bodega de transito solo opera via 2-pasos
+            from app.services.transfer import validate_not_transit_warehouse
+            validate_not_transit_warehouse(db, organization_id, warehouse)
 
         # Step 3: Si hay lineas nuevas, hacer revert+reapply
         if obj_in.lines is not None:

@@ -20,6 +20,10 @@ class WarehouseCreate(WarehouseBase):
     # SAC Ciclo B (Q-12): True = recibe de terceros; las internas
     # (molino/transito) se crean/marcan con False
     is_receiving: bool = True
+    # SAC E3.1 (E12): bodega virtual de transito intersede + su ruteo a la
+    # sede fisica destino. Solo relevante con two_step_transfers_enabled.
+    is_transit: bool = False
+    transit_target_warehouse_id: Optional[UUID] = None
 
 
 class WarehouseUpdate(BaseModel):
@@ -28,6 +32,8 @@ class WarehouseUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=500)
     address: Optional[str] = Field(None, max_length=500)
     is_receiving: Optional[bool] = None
+    is_transit: Optional[bool] = None
+    transit_target_warehouse_id: Optional[UUID] = None
 
 
 class WarehouseResponse(WarehouseBase):
@@ -36,6 +42,8 @@ class WarehouseResponse(WarehouseBase):
     organization_id: UUID
     is_active: bool
     is_receiving: bool = True
+    is_transit: bool = False
+    transit_target_warehouse_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
 

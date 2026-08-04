@@ -1057,6 +1057,17 @@ class CRUDMoneyMovement:
                 "Financieras. Anúlelo desde el detalle de la obligación.",
             )
 
+        # SAC E3.1 (E5/E9): el par de maquila intersede se anula desde el
+        # traslado (cascade con inventario fisico + kg). Anular un solo lado
+        # aqui dejaria el par asimetrico y el consolidado dejaria de netear $0.
+        from app.models.money_movement import INTERNAL_MAQUILA_MOVEMENT_TYPES
+        if movement.movement_type in INTERNAL_MAQUILA_MOVEMENT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No se puede anular un movimiento de maquila intersede desde "
+                "Tesorería. Anule el traslado desde el módulo de Traslados.",
+            )
+
         now = datetime.now(timezone.utc)
 
         # Revertir efectos del movimiento
@@ -1847,6 +1858,12 @@ class CRUDMoneyMovement:
             # Reversa: habia hecho -=, ahora +=
             if third_party:
                 third_party.current_balance += amt
+
+        elif mt in ("internal_maquila_expense", "internal_maquila_income"):
+            # SAC E3.1 (E9): par de maquila intersede — account y tercero NULL,
+            # cero efectos en balances. Rama explicita (no fall-through) para
+            # que la reversa desde el servicio de traslados sea deliberada.
+            pass
 
     def _get_or_404(
         self,

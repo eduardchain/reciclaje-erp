@@ -23,6 +23,7 @@ import type { StockItem } from "@/types/inventory";
 import type { MetricCard } from "@/types/reports";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { ROUTES } from "@/utils/constants";
 import { useCurrentFormulas } from "@/hooks/useSacConfig";
 import { estimateKgLead } from "@/pages/inbound/InboundCreatePage";
 
@@ -421,6 +422,12 @@ export default function StockPage() {
   };
 
   const handleOpenTransfer = (materialId: string, warehouseId: string, warehouseName: string) => {
+    // SAC E3.1 (§2.12): con traslados dos pasos activos, el 1-paso sale del
+    // camino — el boton lleva al despacho formal (patron redirect Ciclo B B1)
+    if (getSetting("two_step_transfers_enabled") === true) {
+      navigate(ROUTES.TRANSFER_NEW);
+      return;
+    }
     const material = data?.items.find(i => i.material_id === materialId);
     setTransferModal({
       materialId,

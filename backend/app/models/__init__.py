@@ -34,6 +34,7 @@ from .material_conversion_formula import MaterialConversionFormula
 from .material_kg_profile import MaterialKgProfile
 from .retention_config import RetentionConfig
 from .inbound_order import InboundOrder, InboundOrderLine
+from .transfer import Transfer, TransferLine
 from .plant_process import FurnaceCharge, CrucibleCharge
 from .exception_task import DiscrepancyTask, DailyOkSeal
 from .fleet import Driver, Vehicle
@@ -87,6 +88,8 @@ __all__ = [
     "RetentionConfig",
     "InboundOrder",
     "InboundOrderLine",
+    "Transfer",
+    "TransferLine",
     "PurchaseRetention",
     "FurnaceCharge",
     "CrucibleCharge",

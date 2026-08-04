@@ -87,6 +87,9 @@ export interface ProfitAndLossResponse {
   waste_loss: number;
   adjustment_net: number;
   oversell_cost_adjustment: number;
+  /** SAC E3.1: maquila intersede — lineas propias (0 en consolidado sin flag) */
+  internal_maquila_income: number;
+  internal_maquila_expense: number;
   tp_adjustment_loss: number;
   tp_adjustment_gain: number;
   total_gross_profit: number;
@@ -530,6 +533,9 @@ export interface PnlReconciliation {
   inventory_adjustment_net: number;
   tp_adjustment_net: number;
   oversell_cost_adjustment: number;
+  /** SAC E3.1: maquila intersede — lineas propias (0 en consolidado sin flag) */
+  internal_maquila_income: number;
+  internal_maquila_expense: number;
   pnl_net_profit: number;
 }
 

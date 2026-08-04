@@ -101,3 +101,19 @@ export function useAddUserToOrg() {
     },
   });
 }
+
+export function useResetUserPassword() {
+  return useMutation({
+    mutationFn: ({ userId, newPassword }: { userId: string; newPassword: string }) =>
+      systemService.resetUserPassword(userId, newPassword),
+    // Sin invalidacion: el reset no cambia ningun listado (solo el hash).
+    onSuccess: (user) => {
+      // El toast JAMAS incluye la clave (D1): el operador la comunica por su canal.
+      toast.success(`Contrasena actualizada para ${user.email}`);
+    },
+    onError: (error: unknown) => {
+      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(detail || "Error al resetear la contrasena");
+    },
+  });
+}

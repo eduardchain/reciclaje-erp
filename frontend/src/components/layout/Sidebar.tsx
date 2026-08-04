@@ -51,6 +51,7 @@ import {
 import { usePermissions } from "@/hooks/usePermissions";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { usePendingEntriesCount } from "@/hooks/useInboundOrders";
+import { usePendingTransfersCount } from "@/hooks/useTransfers";
 import { useAuthStore } from "@/stores/authStore";
 
 
@@ -58,6 +59,18 @@ import { useAuthStore } from "@/stores/authStore";
 // unicamente con kg_ledger_enabled — en orgs sin flag este query jamas corre
 function PendingEntriesBadge() {
   const count = usePendingEntriesCount();
+  if (!count) return null;
+  return (
+    <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500/90 text-white text-[11px] font-semibold flex items-center justify-center tabular-nums">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
+// E3.1: solo se monta dentro del item "Traslados" (existe solo con
+// two_step_transfers_enabled) — cero requests sin flag (regla F2)
+function PendingTransfersBadge() {
+  const count = usePendingTransfersCount();
   if (!count) return null;
   return (
     <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500/90 text-white text-[11px] font-semibold flex items-center justify-center tabular-nums">
@@ -96,6 +109,8 @@ interface NavItem {
   hideWhenOrgFlag?: string;
   // Ciclo C: contador ambar de entradas por liquidar (solo item Entradas SAC)
   pendingBadge?: boolean;
+  // E3.1: contador ambar de traslados por recibir (solo item Traslados SAC)
+  transferBadge?: boolean;
 }
 
 const systemNavItems: NavItem[] = [
@@ -136,6 +151,16 @@ const orgNavItems: NavItem[] = [
     permission: "purchases.view",
     orgFlag: "kg_ledger_enabled",
     pendingBadge: true,
+  },
+  {
+    // E3.1: traslados intersede dos pasos (SAC)
+    name: "Traslados",
+    path: ROUTES.TRANSFERS,
+    icon: <Truck className="w-5 h-5" />,
+    section: "OPERACIONES",
+    permission: "inventory.view",
+    orgFlag: "two_step_transfers_enabled",
+    transferBadge: true,
   },
   {
     name: "Ventas",
@@ -482,9 +507,9 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
                     >
                       <span className={cn(active && "text-emerald-400")}>{item.icon}</span>
                       <span className="text-sm">{item.name}</span>
-                      {item.pendingBadge ? (
+                      {item.pendingBadge || item.transferBadge ? (
                         <span className="ml-auto flex items-center gap-1.5">
-                          <PendingEntriesBadge />
+                          {item.pendingBadge ? <PendingEntriesBadge /> : <PendingTransfersBadge />}
                           {active && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
                         </span>
                       ) : (

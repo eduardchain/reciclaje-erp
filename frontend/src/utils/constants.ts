@@ -35,6 +35,9 @@ export const ROUTES = {
   INBOUND_NEW: "/inbound/new",
   INBOUND_DETAIL: "/inbound/:id",
   INBOUND_EDIT: "/inbound/:id/edit",
+  TRANSFERS: "/transfers",
+  TRANSFER_NEW: "/transfers/new",
+  TRANSFER_DETAIL: "/transfers/:id",
   KG_LEDGER: "/kg-ledger",
   KG_LEDGER_ACCOUNT: "/kg-ledger/:id",
 

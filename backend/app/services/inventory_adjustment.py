@@ -68,9 +68,14 @@ class CRUDInventoryAdjustment:
         data: IncreaseCreate,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
+        commit: bool = True,
+        allow_transit: bool = False,
     ) -> tuple[InventoryAdjustment, list[str]]:
         """
         Aumento de stock — recalcula costo promedio.
+
+        commit=False (patron #20/#75): el caller (traslados E3.1) compone el
+        ajuste dentro de su propia transaccion atomica.
 
         Efectos:
         - material.current_stock_liquidated += quantity
@@ -78,7 +83,9 @@ class CRUDInventoryAdjustment:
         - Recalcula current_average_cost con promedio ponderado
         """
         material = self._validate_material(db, data.material_id, organization_id)
-        warehouse = self._validate_warehouse(db, data.warehouse_id, organization_id)
+        warehouse = self._validate_warehouse(
+            db, data.warehouse_id, organization_id, allow_transit=allow_transit
+        )
         warnings: list[str] = []
 
         previous_stock = material.current_stock_liquidated
@@ -148,8 +155,11 @@ class CRUDInventoryAdjustment:
             notes=f"Ajuste aumento #{adjustment.adjustment_number}: {data.reason}",
         )
 
-        db.commit()
-        db.refresh(adjustment)
+        if commit:
+            db.commit()
+            db.refresh(adjustment)
+        else:
+            db.flush()
         return adjustment, warnings
 
     def decrease(
@@ -158,6 +168,8 @@ class CRUDInventoryAdjustment:
         data: DecreaseCreate,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
+        commit: bool = True,
+        allow_transit: bool = False,
     ) -> tuple[InventoryAdjustment, list[str]]:
         """
         Disminucion de stock — usa costo promedio actual.
@@ -168,7 +180,9 @@ class CRUDInventoryAdjustment:
         - NO recalcula costo promedio (salidas usan costo actual)
         """
         material = self._validate_material(db, data.material_id, organization_id)
-        warehouse = self._validate_warehouse(db, data.warehouse_id, organization_id)
+        warehouse = self._validate_warehouse(
+            db, data.warehouse_id, organization_id, allow_transit=allow_transit
+        )
         warnings: list[str] = []
 
         previous_stock = material.current_stock_liquidated
@@ -215,8 +229,11 @@ class CRUDInventoryAdjustment:
             notes=f"Ajuste disminucion #{adjustment.adjustment_number}: {data.reason}",
         )
 
-        db.commit()
-        db.refresh(adjustment)
+        if commit:
+            db.commit()
+            db.refresh(adjustment)
+        else:
+            db.flush()
         return adjustment, warnings
 
     def recount(
@@ -369,6 +386,7 @@ class CRUDInventoryAdjustment:
         reason: str,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
+        commit: bool = True,
     ) -> InventoryAdjustment:
         """
         Anular ajuste — revierte stock y costo con conservacion de valor (Fase 5).
@@ -459,8 +477,11 @@ class CRUDInventoryAdjustment:
         adjustment.annulled_at = datetime.now(timezone.utc)
         adjustment.annulled_by = user_id
 
-        db.commit()
-        db.refresh(adjustment)
+        if commit:
+            db.commit()
+            db.refresh(adjustment)
+        else:
+            db.flush()
         return adjustment
 
     def transfer_between_warehouses(
@@ -761,6 +782,7 @@ class CRUDInventoryAdjustment:
         db: Session,
         warehouse_id: UUID,
         organization_id: UUID,
+        allow_transit: bool = False,
     ) -> Warehouse:
         """Validar que la bodega existe y pertenece a la org."""
         warehouse = db.get(Warehouse, warehouse_id)
@@ -774,6 +796,11 @@ class CRUDInventoryAdjustment:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Bodega esta inactiva",
             )
+        # SAC E3.1 (E12/§2.10): bodega de transito solo opera via el 2-pasos.
+        # Flag-check primero (cortocircuito sin costo para orgs sin SAC).
+        if not allow_transit:
+            from app.services.transfer import validate_not_transit_warehouse
+            validate_not_transit_warehouse(db, organization_id, warehouse)
         return warehouse
 
     def _calculate_warehouse_stock(

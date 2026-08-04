@@ -59,6 +59,8 @@ def get_dashboard(
 def get_profit_and_loss(
     date_from: date = Query(..., description="Fecha inicio del periodo"),
     date_to: date = Query(..., description="Fecha fin del periodo"),
+    warehouse_id: Optional[UUID] = Query(None, description="P&L por sede (SAC E3.1): fragmenta ventas/COGS/comisiones/maquila por Sale.warehouse_id"),
+    include_internal_maquila: bool = Query(False, description="Incluir lineas del par de maquila en consolidado (E5)"),
     org_context: dict = Depends(require_any_permission("reports.view", "reports.view_pnl")),
     db: Session = Depends(get_db),
 ):
@@ -81,6 +83,8 @@ def get_profit_and_loss(
         organization_id=org_context["organization_id"],
         date_from=date_from,
         date_to=date_to,
+        warehouse_id=warehouse_id,
+        include_internal_maquila=include_internal_maquila,
     )
 
 
@@ -89,6 +93,8 @@ def get_profit_and_loss_monthly(
     date_from: date = Query(..., description="Fecha inicio del rango"),
     date_to: date = Query(..., description="Fecha fin del rango"),
     cutoff_day: int = Query(1, ge=1, le=28, description="Dia de inicio del mes contable (1=mes calendario)"),
+    warehouse_id: Optional[UUID] = Query(None, description="P&L por sede (SAC E3.1)"),
+    include_internal_maquila: bool = Query(False, description="Incluir lineas del par de maquila en consolidado"),
     org_context: dict = Depends(require_any_permission("reports.view", "reports.view_pnl")),
     db: Session = Depends(get_db),
 ):
@@ -115,6 +121,8 @@ def get_profit_and_loss_monthly(
         date_from=date_from,
         date_to=date_to,
         cutoff_day=cutoff_day,
+        warehouse_id=warehouse_id,
+        include_internal_maquila=include_internal_maquila,
     )
 
 

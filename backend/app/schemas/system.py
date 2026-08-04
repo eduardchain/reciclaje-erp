@@ -58,6 +58,20 @@ class SystemUserMembership(BaseModel):
     role_display_name: str
 
 
+class ResetPasswordRequest(BaseModel):
+    """Reseteo de contrasena por superusuario (D1).
+
+    NO exige la clave actual — ese es justamente el punto: el usuario que
+    olvido su clave no puede usar /auth/change-password. La clave la provee
+    el operador y NUNCA vuelve en el response (ni se escribe en logs, D5/H3).
+
+    min_length=6 es calco literal de ChangePassword.new_password: misma
+    politica de claves, cero drift. Si alguna vez se endurece, se endurece
+    en AMBOS schemas a la vez (H4 del micro-QA).
+    """
+    new_password: str = Field(..., min_length=6)
+
+
 class SystemUserResponse(BaseModel):
     """Usuario con sus memberships para super admin."""
     id: UUID

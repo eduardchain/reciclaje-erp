@@ -53,6 +53,9 @@ PERMISSIONS_CATALOG = [
     ("inventory.view_movements", "Ver Movimientos", "inventory", "Permite ver movimientos de inventario", 34),
     ("inventory.view_adjustments", "Ver Ajustes", "inventory", "Permite ver ajustes de inventario", 35),
     ("inventory.view_transit", "Ver En Transito", "inventory", "Permite ver inventario en transito", 36),
+    # SAC E3.1 (sort 147 — bloque SAC, tras kg_ledger 144-146; sin asignar a roles de sistema, D4)
+    ("inventory.transfer_receive", "Recibir Traslados Intersede", "inventory",
+     "Permite confirmar recepcion y resolver discrepancias de traslados dos pasos (SAC)", 147),
 
     # Materiales
     ("materials.view", "Ver Materiales", "materials", "Permite ver catalogo de materiales", 40),

@@ -86,6 +86,17 @@ export const invalidateAfterKgMovement = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["kg-ledger"] });
 };
 
+// Traslados dos pasos (SAC E3.1, N1): la recepcion emite par de maquila +
+// intersede kg + posible ajuste de merma; el despacho solo inventario — un
+// solo helper mantiene la regla simple (#27).
+export const invalidateAfterTransfer = (qc: QueryClient) => {
+  qc.invalidateQueries({ queryKey: ["transfers"] });
+  qc.invalidateQueries({ queryKey: ["kg-ledger"] });
+  qc.invalidateQueries({ queryKey: ["money-movements"] });
+  qc.invalidateQueries({ queryKey: ["reports"] });
+  invalidateInventory(qc);
+};
+
 export const invalidateAfterFixedAsset = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["fixed-assets"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });
