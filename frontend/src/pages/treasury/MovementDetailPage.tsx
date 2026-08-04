@@ -41,6 +41,8 @@ const typeLabels: Record<string, string> = {
   asset_revaluation_credit: "Revalorización Activo (Crédito)",
   asset_devaluation_collection: "Devaluación Activo (Reembolso)",
   asset_devaluation_receivable: "Devaluación Activo (Por Cobrar)",
+  asset_sale_collection: "Venta de Activo (a Cuenta)",
+  asset_sale_receivable: "Venta de Activo (Por Cobrar)",
   obligation_disbursement: "Desembolso Obligación",
   obligation_interest_accrual: "Interés Causado (Obligación)",
   obligation_interest_payment: "Pago Intereses Obligación",
@@ -70,7 +72,7 @@ const typeLabels: Record<string, string> = {
 const EDITABLE_EXPENSE_TYPES = ["expense", "expense_accrual", "provision_expense", "deferred_expense", "depreciation_expense"];
 
 // Movimientos que pertenecen a un activo fijo: se anulan desde el activo, no desde Tesorería (backend responde 422)
-const ASSET_OWNED_TYPES = ["asset_payment", "depreciation_expense", "asset_purchase", "asset_revaluation_payment", "asset_revaluation_credit", "asset_devaluation_collection", "asset_devaluation_receivable"];
+const ASSET_OWNED_TYPES = ["asset_payment", "depreciation_expense", "asset_purchase", "asset_revaluation_payment", "asset_revaluation_credit", "asset_devaluation_collection", "asset_devaluation_receivable", "asset_sale_collection", "asset_sale_receivable"];
 const REVALUATION_TYPES = ["asset_revaluation_payment", "asset_revaluation_credit", "asset_devaluation_collection", "asset_devaluation_receivable"];
 // Movimientos de obligaciones financieras: se anulan desde la obligación (backend responde 422)
 // SAC E3.1: el par de maquila intersede se anula desde el traslado (patron #67)

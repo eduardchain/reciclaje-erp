@@ -9,6 +9,8 @@ Flujo:
 5. update(): Editar activo (restringido si ya tiene depreciaciones)
 6. revalue(): Revalorizar al alza/baja con contrapartida cuenta o tercero
 7. annul_revaluation(): Anular revalorizacion (guard LIFO exacto)
+8. sell(): Vender con contrapartida cuenta XOR tercero (ganancia/perdida al P&L)
+9. annul_sale(): Anular la venta (revierte contrapartida, restaura status derivado)
 """
 from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
@@ -462,6 +464,234 @@ class CRUDFixedAsset:
         db.commit()
         db.refresh(asset)
         return asset
+
+    # ------------------------------------------------------------------
+    # Venta (plan venta-activos-fijos)
+    # ------------------------------------------------------------------
+
+    def sell(
+        self,
+        db: Session,
+        asset_id: UUID,
+        organization_id: UUID,
+        data,
+        user_id: Optional[UUID] = None,
+    ) -> tuple[FixedAsset, list[str]]:
+        """
+        Vender un activo: contrapartida cuenta (entra dinero) XOR tercero (CxC).
+
+        D1 — la venta NO expensa el remanente (a diferencia de dispose): el
+        valor en libros se da de baja contra el precio, current_value queda
+        CONGELADO (exactitud as-of por construccion, #41/#61/#67) y la
+        diferencia precio - libro se persiste en sale_gain (linea P&L
+        "Ganancia/Perdida por Venta de Activos", gobernada por el status
+        del MM enlazado — patron oversell #65/#66).
+        Fecha del evento SIEMPRE hoy — anti back-dating (#62/#67).
+        Retorna (asset, warnings) — patron #17: avisar, no bloquear.
+        """
+        asset = self.get(db, asset_id, organization_id)
+
+        if asset.status not in ("active", "fully_depreciated"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No se puede vender: activo en estado '{asset.status}'",
+            )
+
+        # Contrapartida XOR (el schema valida el XOR; aca se validan entidades)
+        account = None
+        third_party = None
+        if data.account_id:
+            account = mm_service._validate_account(
+                db, data.account_id, organization_id,
+            )
+        else:
+            from app.services.third_party import third_party as tp_service
+            third_party = db.execute(
+                select(ThirdParty).where(
+                    ThirdParty.id == data.third_party_id,
+                    ThirdParty.organization_id == organization_id,
+                    ThirdParty.is_active == True,
+                )
+            ).scalar_one_or_none()
+            # Comprador: cualquier tercero menos provision/liability (espejo #32,
+            # misma regla que la contrapartida de revalorizacion)
+            if not third_party or not tp_service.has_behavior_type(
+                db, third_party.id,
+                ["material_supplier", "service_provider", "customer", "investor", "generic"],
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Tercero no encontrado",
+                )
+
+        # Warning informativo (no bloquea, #17/#76): vender con depreciaciones
+        # pendientes congela el libro como esta — ganancia mayor a la que
+        # tendria aplicando primero los meses pendientes.
+        warnings: list[str] = []
+        pending = self._pending_months(asset)
+        if pending > 0:
+            warnings.append(
+                f"El activo tiene {pending} mes(es) de depreciación sin aplicar. "
+                f"La venta usa el valor en libros actual (${asset.current_value:,.0f}); "
+                f"aplicar la depreciación pendiente primero reduciría el libro y "
+                f"aumentaría la ganancia registrada."
+            )
+
+        book_value = asset.current_value
+        sale_gain = (data.sale_price - book_value).quantize(Decimal("0.01"))
+
+        # Fecha del evento: SIEMPRE hoy (patron dispose/revalue) — anti back-dating
+        col_today = datetime.now(ZoneInfo("America/Bogota")).date()
+        movement_date = datetime.combine(col_today, time(12, 0), tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+
+        # MM de contrapartida — lleva el PRECIO, no la ganancia.
+        # ⚠️ Signos alineados con los 4 sign maps derivados + INFLOW_TYPES.
+        if account:
+            movement = mm_service._create_movement(
+                db=db,
+                organization_id=organization_id,
+                movement_type="asset_sale_collection",
+                amount=data.sale_price,
+                account_id=data.account_id,
+                date=movement_date,
+                description=f"Venta de activo: {asset.name}",
+                user_id=user_id,
+                third_party_id=None,
+                notes=data.notes,
+            )
+            account.current_balance += data.sale_price
+        else:
+            movement = mm_service._create_movement(
+                db=db,
+                organization_id=organization_id,
+                movement_type="asset_sale_receivable",
+                amount=data.sale_price,
+                account_id=None,
+                date=movement_date,
+                description=f"Venta de activo: {asset.name}",
+                user_id=user_id,
+                third_party_id=data.third_party_id,
+                notes=data.notes,
+            )
+            third_party.current_balance += data.sale_price
+
+        db.flush()
+
+        # D1: current_value NO se toca (libro congelado); cero depreciaciones.
+        asset.sale_price = data.sale_price
+        asset.sale_gain = sale_gain
+        asset.sale_movement_id = movement.id
+        asset.status = "disposed"
+        asset.disposed_at = now
+        asset.disposed_by = user_id
+        asset.disposal_reason = "Venta"
+
+        db.commit()
+        db.refresh(asset)
+        return asset, warnings
+
+    def annul_sale(
+        self,
+        db: Session,
+        asset_id: UUID,
+        organization_id: UUID,
+        reason: str,
+        user_id: Optional[UUID] = None,
+    ) -> FixedAsset:
+        """
+        Anular la venta: revierte la contrapartida y restaura el activo.
+
+        Guard LIFO defensivo (barandilla — un activo vendido no genera
+        eventos, imposible por construccion): sin depreciaciones ni
+        revalorizaciones activas posteriores a la venta. El status se
+        RESTAURA DERIVADO de current_value vs salvage_value (criterio #67
+        "estados derivados") — D1 garantiza que el libro quedo intacto.
+        Las columnas sale_* quedan como rastro: el MM anulado las saca del
+        P&L (la linea filtra por MM.status='confirmed').
+        """
+        asset = self.get(db, asset_id, organization_id)
+
+        if asset.status != "disposed" or not asset.sale_movement_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El activo no tiene una venta vigente para anular",
+            )
+
+        movement = db.get(MoneyMovement, asset.sale_movement_id)
+        if not movement or movement.status != "confirmed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La venta ya está anulada",
+            )
+
+        # Barandilla LIFO (ver docstring)
+        later_dep = db.execute(
+            select(func.count()).where(
+                AssetDepreciation.fixed_asset_id == asset.id,
+                AssetDepreciation.is_active == True,
+                AssetDepreciation.applied_at > asset.disposed_at,
+            )
+        ).scalar() or 0
+        later_reval = db.execute(
+            select(func.count()).where(
+                AssetRevaluation.fixed_asset_id == asset.id,
+                AssetRevaluation.is_active == True,
+                AssetRevaluation.applied_at > asset.disposed_at,
+            )
+        ).scalar() or 0
+        if later_dep or later_reval:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No se puede anular: el activo tiene eventos posteriores a la venta",
+            )
+
+        now = datetime.now(timezone.utc)
+
+        # Revertir contrapartida (efecto opuesto exacto)
+        if movement.account_id:
+            from app.models.money_account import MoneyAccount
+            acc = db.get(MoneyAccount, movement.account_id)
+            if acc:
+                acc.current_balance -= movement.amount
+        elif movement.third_party_id:
+            tp = db.get(ThirdParty, movement.third_party_id)
+            if tp:
+                tp.current_balance -= movement.amount
+        movement.status = "annulled"
+        movement.annulled_at = now
+        movement.annulled_by = user_id
+        movement.annulled_reason = f"Anulación de venta de activo: {reason}"
+
+        # Restaurar: status derivado del libro congelado (D1)
+        if asset.current_value <= asset.salvage_value:
+            asset.status = "fully_depreciated"
+        else:
+            asset.status = "active"
+        asset.disposed_at = None
+        asset.disposed_by = None
+        asset.disposal_reason = None
+
+        db.commit()
+        db.refresh(asset)
+        return asset
+
+    def _pending_months(self, asset: FixedAsset) -> int:
+        """Meses de depreciacion vencidos sin aplicar (aprox informativa para warning)."""
+        if asset.status != "active" or asset.monthly_depreciation <= 0:
+            return 0
+        if asset.current_value <= asset.salvage_value:
+            return 0
+        today = datetime.now(ZoneInfo("America/Bogota")).date()
+        start = asset.depreciation_start_date
+        # Meses contables completos transcurridos desde el inicio
+        elapsed = (today.year - start.year) * 12 + (today.month - start.month)
+        if today.day >= start.day:
+            elapsed += 1
+        applied = len([d for d in asset.depreciations if d.is_active]) if asset.depreciations else 0
+        remaining_value = asset.current_value - asset.salvage_value
+        max_remaining = ceil(float(remaining_value / asset.monthly_depreciation))
+        return max(0, min(elapsed - applied, max_remaining))
 
     # ------------------------------------------------------------------
     # Revalorizacion (requerimiento D — mejora capitalizable / recuperacion)

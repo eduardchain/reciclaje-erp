@@ -130,6 +130,37 @@ export function useAnnulRevaluation() {
   });
 }
 
+export function useSellAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof fixedAssetService.sell>[1] }) =>
+      fixedAssetService.sell(id, data),
+    onSuccess: (asset) => {
+      invalidateAfterFixedAsset(queryClient);
+      toast.success("Venta registrada");
+      (asset.warnings ?? []).forEach((w) => toast.warning(w, { duration: 8000 }));
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al vender el activo"));
+    },
+  });
+}
+
+export function useAnnulAssetSale() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      fixedAssetService.annulSale(id, reason),
+    onSuccess: () => {
+      invalidateAfterFixedAsset(queryClient);
+      toast.success("Venta anulada — contrapartida revertida y activo restaurado");
+    },
+    onError: (error: unknown) => {
+      toast.error(getApiErrorMessage(error, "Error al anular la venta"));
+    },
+  });
+}
+
 export function useDisposeAsset() {
   const queryClient = useQueryClient();
   return useMutation({

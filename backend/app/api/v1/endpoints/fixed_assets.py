@@ -11,6 +11,8 @@ POST   /{id}/cancel         — Cancelar activo (revertir todo)
 POST   /{id}/dispose        — Dar de baja
 POST   /{id}/revalue        — Revalorizar (alza/baja, contrapartida cuenta o tercero)
 POST   /{id}/revaluations/{rev_id}/annul — Anular revalorizacion (guard LIFO)
+POST   /{id}/sell           — Vender (contrapartida cuenta XOR tercero, ganancia al P&L)
+POST   /{id}/sale/annul     — Anular la venta (revierte contrapartida, restaura activo)
 """
 from typing import List
 from uuid import UUID
@@ -24,6 +26,8 @@ from app.schemas.fixed_asset import (
     FixedAssetUpdate,
     FixedAssetResponse,
     FixedAssetDisposeRequest,
+    FixedAssetSellRequest,
+    FixedAssetSaleAnnulRequest,
     AssetDepreciationResponse,
     AssetRevaluationRequest,
     AssetRevaluationAnnulRequest,
@@ -93,6 +97,15 @@ def _build_response(asset, include_depreciations: bool = False) -> FixedAssetRes
         created_by=asset.created_by,
         created_at=asset.created_at,
         updated_at=asset.updated_at,
+        sale_price=float(asset.sale_price) if asset.sale_price is not None else None,
+        sale_gain=float(asset.sale_gain) if asset.sale_gain is not None else None,
+        sale_movement_id=asset.sale_movement_id,
+        # Venta vigente = MM enlazado confirmado (lazy load solo en activos vendidos)
+        sale_active=bool(
+            asset.sale_movement_id
+            and asset.sale_movement
+            and asset.sale_movement.status == "confirmed"
+        ),
         remaining_months=remaining_months,
         depreciation_progress=round(progress, 2),
         revalued_total=revalued_total,
@@ -273,6 +286,51 @@ def dispose_asset(
         organization_id=ctx["organization_id"],
         user_id=ctx["user_id"],
         reason=data.reason,
+    )
+    asset = fixed_asset.get(db, asset.id, ctx["organization_id"])
+    return _build_response(asset, include_depreciations=True)
+
+
+@router.post("/{asset_id}/sell", response_model=FixedAssetResponse, status_code=201)
+def sell_asset(
+    asset_id: UUID,
+    data: FixedAssetSellRequest,
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_permission("treasury.manage_fixed_assets")),
+):
+    """Vender un activo: contrapartida cuenta (entra dinero) XOR tercero (CxC).
+
+    La diferencia precio - valor en libros va al P&L como
+    "Ganancia/Perdida por Venta de Activos".
+    """
+    asset, warnings = fixed_asset.sell(
+        db=db,
+        asset_id=asset_id,
+        organization_id=ctx["organization_id"],
+        data=data,
+        user_id=ctx["user_id"],
+    )
+    asset = fixed_asset.get(db, asset.id, ctx["organization_id"])
+    response = _build_response(asset, include_depreciations=True)
+    if warnings:
+        response.warnings = warnings
+    return response
+
+
+@router.post("/{asset_id}/sale/annul", response_model=FixedAssetResponse)
+def annul_asset_sale(
+    asset_id: UUID,
+    data: FixedAssetSaleAnnulRequest,
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_permission("treasury.manage_fixed_assets")),
+):
+    """Anular la venta: revierte la contrapartida y restaura el activo."""
+    asset = fixed_asset.annul_sale(
+        db=db,
+        asset_id=asset_id,
+        organization_id=ctx["organization_id"],
+        reason=data.reason,
+        user_id=ctx["user_id"],
     )
     asset = fixed_asset.get(db, asset.id, ctx["organization_id"])
     return _build_response(asset, include_depreciations=True)

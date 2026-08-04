@@ -304,6 +304,7 @@ export function exportProfitabilityBUExcel(data: ProfitabilityByBUResponse) {
   rows.push(["Ajustes de Inventario (neto)", rec.inventory_adjustment_net]);
   rows.push(["Ajustes de Terceros (neto)", rec.tp_adjustment_net]);
   rows.push(["Ajuste Costo por Sobreventa y Reversiones", rec.oversell_cost_adjustment]);
+  rows.push(["Ganancia/Perdida por Venta de Activos", rec.asset_sale_gain]);
   rows.push(["= Utilidad Neta P&L", rec.pnl_net_profit]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -459,6 +460,7 @@ export function exportPnlExcel(data: ProfitAndLossResponse) {
   if (data.waste_loss > 0) rows.push(["Perdida por Merma", -data.waste_loss]);
   if (data.adjustment_net !== 0) rows.push(["Ajustes de Inventario", data.adjustment_net]);
   if (data.oversell_cost_adjustment !== 0) rows.push(["Ajuste Costo por Sobreventa y Reversiones", data.oversell_cost_adjustment]);
+  if (data.asset_sale_gain !== 0) rows.push(["Ganancia/Perdida por Venta de Activos", data.asset_sale_gain]);
   if (data.tp_adjustment_gain > 0) rows.push(["+ Ganancia Ajuste Terceros", data.tp_adjustment_gain]);
   if (data.tp_adjustment_loss > 0) rows.push(["- Perdida Ajuste Terceros", -data.tp_adjustment_loss]);
   // GAP-1 QA: subtotal bruto SIN intereses — la cascada suma leyendo de arriba abajo
@@ -530,6 +532,9 @@ export function exportPnlMonthlyExcel(
   }
   if (data.periods.some((p) => Math.abs(p.oversell_cost_adjustment) > 0.01) || Math.abs(data.totals.oversell_cost_adjustment) > 0.01) {
     pushRow("Ajuste Costo por Sobreventa y Reversiones", (p) => p.oversell_cost_adjustment);
+  }
+  if (data.periods.some((p) => Math.abs(p.asset_sale_gain) > 0.01) || Math.abs(data.totals.asset_sale_gain) > 0.01) {
+    pushRow("Ganancia/Perdida por Venta de Activos", (p) => p.asset_sale_gain);
   }
   if (data.periods.some((p) => p.tp_adjustment_gain > 0) || data.totals.tp_adjustment_gain > 0) {
     pushRow("+ Ganancia Ajuste Terceros", (p) => p.tp_adjustment_gain);

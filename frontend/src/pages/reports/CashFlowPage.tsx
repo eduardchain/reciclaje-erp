@@ -40,6 +40,9 @@ export default function CashFlowPage() {
               {data.inflows.asset_devaluation_collections > 0 && (
                 <div className="flex justify-between"><span>Devaluación de Activos (Reembolso)</span><span>{formatCurrency(data.inflows.asset_devaluation_collections)}</span></div>
               )}
+              {data.inflows.asset_sale_collections > 0 && (
+                <div className="flex justify-between"><span>Venta de Activos</span><span>{formatCurrency(data.inflows.asset_sale_collections)}</span></div>
+              )}
               {(data.inflows.obligation_disbursements ?? 0) > 0 && (
                 <div className="flex justify-between"><span>Desembolsos de Obligaciones</span><span>{formatCurrency(data.inflows.obligation_disbursements)}</span></div>
               )}

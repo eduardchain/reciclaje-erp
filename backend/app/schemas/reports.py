@@ -132,6 +132,11 @@ class ProfitAndLossResponse(BaseModel):
     # cargado a ventas en hueco y el costo real de reposicion al rellenar.
     oversell_cost_adjustment: float = 0.0
 
+    # Ganancia/Perdida por Venta de Activos (plan venta-activos-fijos D6):
+    # sale_price - valor en libros al vender, signed. Gobernada por el status
+    # del MM enlazado y fechada por MM.date (HOY al vender).
+    asset_sale_gain: float = 0.0
+
     # Maquila intersede (SAC E3.1, E4: lineas propias — jamas plegadas en
     # service_income ni operating_expenses). Consolidado sin flags: ambas 0.0
     # (netean $0 por construccion). Por sede: income=JM, expense=CV/BOG.
@@ -207,6 +212,7 @@ class CashFlowInflows(BaseModel):
     advance_collections: float = 0.0
     generic_collections: float = 0.0
     asset_devaluation_collections: float = 0.0
+    asset_sale_collections: float = 0.0
     obligation_disbursements: float = 0.0
     loan_interest_collections: float = 0.0
     loan_capital_collections: float = 0.0
@@ -677,8 +683,8 @@ class DoubleEntryProfitability(BaseModel):
 class PnlReconciliation(BaseModel):
     """Conciliacion con el Estado de Resultados (plan A.2 §3.7).
 
-    Las 6 lineas del P&L no atribuibles a ninguna UN. Promesa contractual:
-    grand_total_net + estas 6 lineas == pnl_net_profit (tolerancia $1).
+    Las 7 lineas del P&L no atribuibles a ninguna UN. Promesa contractual:
+    grand_total_net + estas 7 lineas == pnl_net_profit (tolerancia $1).
     Guardrail: test_reconciliation_residual_zero.
     """
     service_income: float = 0
@@ -687,6 +693,7 @@ class PnlReconciliation(BaseModel):
     inventory_adjustment_net: float = 0
     tp_adjustment_net: float = 0  # gain - loss
     oversell_cost_adjustment: float = 0  # Modelo L #65 (org-level, no atribuible a UN — G4)
+    asset_sale_gain: float = 0  # Ganancia/Perdida por Venta de Activos (org-level)
     pnl_net_profit: float = 0
 
 

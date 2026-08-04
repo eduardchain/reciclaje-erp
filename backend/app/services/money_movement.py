@@ -1033,6 +1033,7 @@ class CRUDMoneyMovement:
             "asset_payment", "depreciation_expense", "asset_purchase",
             "asset_revaluation_payment", "asset_revaluation_credit",
             "asset_devaluation_collection", "asset_devaluation_receivable",
+            "asset_sale_collection", "asset_sale_receivable",
         }
         if movement.movement_type in ASSET_MOVEMENT_TYPES:
             raise HTTPException(
