@@ -7,7 +7,7 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { useThirdParties, useMoneyAccounts } from "@/hooks/useMasterData";
 import { useSellAsset } from "@/hooks/useFixedAssets";
-import { formatCurrency } from "@/utils/formatters";
+import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import type { FixedAsset } from "@/types/fixed-asset";
 
 interface Props {
@@ -54,7 +54,10 @@ export function SellAssetModal({ open, onOpenChange, asset }: Props) {
   // Warning informativo de depreciaciones pendientes (mismo criterio de RevalueAssetModal)
   const hasPendingDepreciation = useMemo(() => {
     if (asset.status !== "active") return false;
-    const currentPeriod = new Date().toISOString().slice(0, 7);
+    // El periodo se deriva del dia LOCAL, no del UTC: con `toISOString()` el
+    // ultimo dia del mes despues de las 19:00 hora Colombia ya reporta el mes
+    // siguiente y el aviso de depreciaciones pendientes se invertia.
+    const currentPeriod = toLocalDateInput().slice(0, 7);
     const startPeriod = asset.depreciation_start_date.slice(0, 7);
     if (startPeriod > currentPeriod) return false;
     const lastPeriod = (asset.depreciations ?? [])

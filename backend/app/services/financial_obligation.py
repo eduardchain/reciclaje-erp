@@ -54,6 +54,7 @@ from app.services.obligation_interest import (
     build_capital_events,
     compute_monthly_interest,
 )
+from app.utils.dates import business_today_noon
 
 _BOGOTA_TZ = timezone(timedelta(hours=-5))
 ZERO = Decimal("0.00")
@@ -168,9 +169,13 @@ def _last_day_noon_utc(period: str) -> datetime:
 
 
 def _today_noon_utc() -> datetime:
-    """Hoy (Bogota) a mediodia UTC — fecha del MM del tramo de cierre (#62, sin back-dating)."""
-    today = datetime.now(_BOGOTA_TZ)
-    return datetime(today.year, today.month, today.day, 12, 0, 0, tzinfo=timezone.utc)
+    """Hoy (Bogota) a mediodia UTC — fecha del MM del tramo de cierre (#62, sin back-dating).
+
+    Delega en el helper compartido: este modulo tenia la implementacion
+    correcta pero era una de TRES en el repo, y las otras dos usaban el reloj
+    UTC. Una sola implementacion = no se puede elegir la equivocada.
+    """
+    return business_today_noon()
 
 
 class FinancialObligationService:

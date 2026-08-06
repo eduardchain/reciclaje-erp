@@ -29,6 +29,7 @@ from sqlalchemy import String as SAString, and_, cast, func, or_, select, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.inbound_order import InboundOrder, InboundOrderLine
+from app.utils.dates import business_today
 from app.models.inventory_movement import InventoryMovement
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
 from app.models.material import Material
@@ -363,7 +364,7 @@ class InboundOrderService:
         worlds, formulas, account_by_world = self._validate_willard_capture(
             db, organization_id, order.warehouse_id, order.third_party_id, lines_in
         )
-        today = datetime.now(timezone.utc).date()
+        today = business_today()
 
         for line_in in lines_in:
             material = self._validate_material(db, line_in.material_id, organization_id)
@@ -467,7 +468,7 @@ class InboundOrderService:
         los kg movements (#48). Retorna (diferencia_total, warnings)."""
         warnings: list[str] = []
         total_adjustment = Decimal("0")
-        today = datetime.now(timezone.utc).date()
+        today = business_today()
 
         for line in order.lines:
             material = db.get(Material, line.material_id)

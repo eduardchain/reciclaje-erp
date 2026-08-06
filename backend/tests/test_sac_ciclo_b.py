@@ -19,6 +19,7 @@ from decimal import Decimal
 from app.utils.org_settings import SETTING_DEFAULTS, get_org_setting
 from tests.integration_helpers import create_material, create_material_category, create_warehouse
 from tests.conftest import create_third_party_with_category
+from app.utils.dates import business_today
 
 INBOUND_URL = "/api/v1/inbound-orders"
 PURCHASES_URL = "/api/v1/purchases"
@@ -140,7 +141,7 @@ def kg_bat_cv(client, org_headers, wh_cv, supplier):
 
 
 def _today():
-    return datetime.now(timezone.utc).date().isoformat()
+    return business_today().isoformat()
 
 
 def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id, lines, **extra):

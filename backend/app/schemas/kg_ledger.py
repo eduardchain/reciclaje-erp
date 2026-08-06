@@ -5,14 +5,14 @@ El Literal de creacion manual solo permite 'manual_adjustment' (D1): los
 source_types de negocio (postconsumo_receipt, drosses_receipt) los emite SOLO
 el servicio de inbound; los 9 restantes de §4.3 llegan con E3/E4.
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.utils.dates import BusinessDate
+from app.utils.dates import BusinessDate, business_today
 
 KgAccountType = Literal[
     "willard_baterias", "willard_drosses", "intersede", "intra_horno", "crisol"
@@ -79,7 +79,7 @@ class KgLedgerMovementManualCreate(BaseModel):
     @classmethod
     def not_future(cls, v: datetime) -> datetime:
         # Canon §11.1.2 L1917 + filosofia anti back-dating #62 (D15)
-        if v.date() > datetime.now(timezone.utc).date():
+        if v.date() > business_today():
             raise ValueError("transaction_date no puede ser futura")
         return v
 

@@ -16,7 +16,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { useStock, useStockDetail, useCreateTransfer } from "@/hooks/useInventory";
 import { useWarehouses } from "@/hooks/useMasterData";
-import { formatCurrency } from "@/utils/formatters";
+import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { exportStockExcel } from "@/utils/excelExport";
 import { cn } from "@/utils";
 import type { StockItem } from "@/types/inventory";
@@ -145,7 +145,11 @@ function WarehouseTransferModal({
   const [destinationWarehouseId, setDestinationWarehouseId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  // `toISOString()` da el dia UTC: entre las 19:00 y 24:00 hora Colombia
+  // pre-llenaba MAÑANA y el usuario que no toca el campo estampaba dos
+  // movimientos de inventario con fecha futura. `toLocalDateInput` (el helper
+  // que usan los otros 18 formularios) da el dia local.
+  const [date, setDate] = useState(toLocalDateInput());
 
   const availableWarehouses = allWarehouses.filter(w => w.id !== state.sourceWarehouseId);
 

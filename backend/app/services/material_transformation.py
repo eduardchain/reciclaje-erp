@@ -29,6 +29,7 @@ from app.schemas.material_transformation import MaterialTransformationCreate
 
 from app.services.inventory_costing import incorporate_into_pool, remove_from_pool
 from app.services.material_cost_history import material_cost_history_service
+from app.utils.dates import business_today
 
 
 class CRUDMaterialTransformation:
@@ -391,7 +392,7 @@ class CRUDMaterialTransformation:
                 source_type="transformation_annulment",
                 source_id=transformation.id,
                 organization_id=organization_id,
-                transaction_date=datetime.now(timezone.utc).date(),
+                transaction_date=business_today(),
             )
 
         self._create_inventory_movement(
@@ -437,7 +438,7 @@ class CRUDMaterialTransformation:
                     source_type="transformation_annulment",
                     source_id=transformation.id,
                     organization_id=organization_id,
-                    transaction_date=datetime.now(timezone.utc).date(),
+                    transaction_date=business_today(),
                 )
 
             self._create_inventory_movement(

@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.utils.dates import business_today
 from app.api.deps import require_permission, get_db
 from app.services.organization import get_user_account_assignments
 from app.schemas.money_movement import (
@@ -767,7 +768,7 @@ def get_by_account(
     org_id = org_context["organization_id"]
 
     # Default 90 dias
-    effective_date_from = date_from if date_from else (date.today() - timedelta(days=90))
+    effective_date_from = date_from if date_from else (business_today() - timedelta(days=90))
     effective_date_to = date_to if date_to else None
 
     # Query todos los movimientos de esta cuenta (confirmed + annulled)
@@ -863,7 +864,7 @@ def get_by_third_party(
     org_id = org_context["organization_id"]
 
     # Default: ultimos 90 dias si no se provee date_from
-    effective_date_from = date_from if date_from else (date.today() - timedelta(days=90))
+    effective_date_from = date_from if date_from else (business_today() - timedelta(days=90))
     date_from_dt = datetime.combine(effective_date_from, dt_time.min, tzinfo=tz.utc)
     date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
 

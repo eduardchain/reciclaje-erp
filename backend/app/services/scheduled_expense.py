@@ -12,10 +12,11 @@ Reemplaza DeferredExpense con modelo mas claro:
 - ThirdParty auto-creado con is_system_entity=True como prepago
 """
 from datetime import date, datetime, time, timezone
-from zoneinfo import ZoneInfo
 from decimal import Decimal, ROUND_DOWN
 from typing import Optional, List
 from uuid import UUID
+
+from app.utils.dates import business_today, business_today_noon
 
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException, status
@@ -196,8 +197,8 @@ class CRUDScheduledExpense:
             amount = scheduled.monthly_amount
 
         # Fecha de negocio: dia actual en Colombia (no UTC, para evitar desfase nocturno)
-        col_today = datetime.now(ZoneInfo("America/Bogota")).date()
-        today_dt = datetime.combine(col_today, time(12, 0), tzinfo=timezone.utc)
+        col_today = business_today()
+        today_dt = business_today_noon()  # mismo dia que col_today, por construccion
         now = datetime.now(timezone.utc)
         desc = f"Cuota gasto diferido: {scheduled.name} ({next_number}/{scheduled.total_months})"
 
