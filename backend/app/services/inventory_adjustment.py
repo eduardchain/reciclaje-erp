@@ -37,6 +37,7 @@ from app.schemas.inventory_adjustment import (
 
 from app.services.inventory_costing import incorporate_into_pool, remove_from_pool
 from app.services.material_cost_history import material_cost_history_service
+from app.utils.dates import business_today
 
 
 class CRUDInventoryAdjustment:
@@ -454,7 +455,7 @@ class CRUDInventoryAdjustment:
                 source_type="adjustment_annulment",
                 source_id=adjustment.id,
                 organization_id=organization_id,
-                transaction_date=datetime.now(timezone.utc).date(),
+                transaction_date=business_today(),
             )
 
         # Crear movimiento de reversal

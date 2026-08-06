@@ -44,6 +44,7 @@ from app.schemas.transfer import (
     TransferResolveRequest,
 )
 from app.utils.org_settings import get_org_setting
+from app.utils.dates import business_today, business_today_noon
 
 MAQUILA_TARIFF_CODE = "maquila_intersede_cv_jm"
 MAQUILA_CATEGORY_NAME = "Maquila Intersede"
@@ -1113,15 +1114,22 @@ class TransferService:
 
     @staticmethod
     def _today_noon() -> datetime:
-        """Hoy a mediodia UTC (convencion BusinessDate del repo)."""
-        now = datetime.now(timezone.utc)
-        return now.replace(hour=12, minute=0, second=0, microsecond=0)
+        """Hoy a mediodia UTC (convencion BusinessDate del repo).
+
+        El dia es el COLOMBIANO. Antes se derivaba de `now(timezone.utc)`, que
+        entre las 19:00 y 24:00 hora Colombia acuña MAÑANA como fecha de
+        negocio — y esta fecha viaja a cuatro fronteras de reporte (la merma
+        del traslado, el par de maquila, el libro kg y el movimiento de
+        inventario).
+        """
+        return business_today_noon()
 
     @staticmethod
     def _validate_not_future(value: datetime, label: str) -> None:
-        # Convencion tz (memoria gotcha_fechas_utc_vs_local): now(utc).date(),
-        # NUNCA date.today() local — evita el flake de la franja 00-05 UTC
-        if value.date() > datetime.now(timezone.utc).date():
+        # El tope es el dia de negocio (Colombia), el mismo con el que se
+        # acuñan las fechas de este modulo. Con el dia UTC, entre las 19:00 y
+        # 24:00 una fecha de mañana pasaba el guard.
+        if value.date() > business_today():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"La {label} no puede ser futura",

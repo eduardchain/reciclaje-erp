@@ -36,6 +36,7 @@ from app.models.material_cost_history import MaterialCostHistory
 from app.services.base import CRUDBase
 from app.services.inventory_costing import incorporate_into_pool
 from app.services.material_cost_history import material_cost_history_service
+from app.utils.dates import business_today
 
 
 class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
@@ -98,7 +99,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             HTTPException: 400 if insufficient stock or invalid data
         """
         # Validar fecha no futura — comparar solo fechas (BusinessDate normaliza a mediodia)
-        if obj_in.date.date() > datetime.now(timezone.utc).date():
+        if obj_in.date.date() > business_today():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="La fecha de venta no puede ser futura"
@@ -340,7 +341,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="La fecha de liquidacion no puede ser anterior a la fecha del documento."
                 )
-            if liq_date > date.today():
+            if liq_date > business_today():
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="La fecha de liquidacion no puede ser futura."
@@ -591,7 +592,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                         source_type="sale_cancellation",
                         source_id=sale.id,
                         organization_id=organization_id,
-                        transaction_date=datetime.now(timezone.utc).date(),
+                        transaction_date=business_today(),
                     )
             else:
                 material.current_stock_transit += line.quantity

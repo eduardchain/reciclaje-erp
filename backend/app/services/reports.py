@@ -17,6 +17,7 @@ from app.models.expense_category import ExpenseCategory
 from app.models.material import Material, MaterialCategory
 from app.models.material_cost_history import MaterialCostHistory
 from app.models.money_account import MoneyAccount
+from app.utils.dates import business_today
 from app.models.money_movement import MoneyMovement, INTERNAL_MAQUILA_MOVEMENT_TYPES
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.purchase import PurchaseCommission
@@ -394,7 +395,7 @@ class ReportService:
         se muestra con abs() (fondos apartados). Reloj = ultima actividad VIVA (D1); si el
         tercero no tiene eventos, cuenta desde created_at (fallback D6, conservador).
         """
-        today = datetime.now(self._BOGOTA_TZ).date()
+        today = business_today()
         tps = db.execute(
             select(ThirdParty).where(
                 ThirdParty.organization_id == organization_id,
@@ -1531,7 +1532,7 @@ class ReportService:
         distributed_profit = profit_distribution_service.calculate_distributed_profit(db, organization_id)
 
         return BalanceSheetResponse(
-            as_of_date=date.today(),
+            as_of_date=business_today(),
             assets=BalanceSheetAssets(
                 cash_and_bank=float(cash_and_bank),
                 accounts_receivable=float(accounts_receivable),
@@ -1888,7 +1889,7 @@ class ReportService:
         distributed_profit = float(profit_distribution_service.calculate_distributed_profit(db, organization_id))
 
         return BalanceDetailedResponse(
-            as_of_date=date.today(),
+            as_of_date=business_today(),
             assets=assets,
             total_assets=total_assets,
             liabilities=liabilities,

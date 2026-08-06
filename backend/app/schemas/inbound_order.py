@@ -7,14 +7,14 @@ La Recepcion es la pantalla de captura unica con 2 tipos (colapso 4->2):
   (postconsumo->baterias por sede; drosses->drosses org-wide).
 - purchase: deriva una Purchase(registered) (D7). Absorbe el viejo tipo `ruta`.
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.utils.dates import BusinessDate
+from app.utils.dates import BusinessDate, business_today
 
 InboundType = Literal["purchase", "willard"]
 
@@ -62,7 +62,7 @@ class InboundOrderCreate(BaseModel):
     @classmethod
     def not_future(cls, v: datetime) -> datetime:
         # D15 — §11.1.2 L1917 + filosofia anti back-dating #62
-        if v.date() > datetime.now(timezone.utc).date():
+        if v.date() > business_today():
             raise ValueError("La fecha de la orden no puede ser futura")
         return v
 
@@ -91,7 +91,7 @@ class InboundOrderUpdate(BaseModel):
     @field_validator("date")
     @classmethod
     def not_future(cls, v: Optional[datetime]) -> Optional[datetime]:
-        if v is not None and v.date() > datetime.now(timezone.utc).date():
+        if v is not None and v.date() > business_today():
             raise ValueError("La fecha de la orden no puede ser futura")
         return v
 

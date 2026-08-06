@@ -13,7 +13,6 @@ Flujo:
 9. annul_sale(): Anular la venta (revierte contrapartida, restaura status derivado)
 """
 from datetime import date, datetime, time, timezone
-from zoneinfo import ZoneInfo
 from decimal import Decimal
 from math import ceil
 from typing import Optional, List
@@ -28,6 +27,24 @@ from app.models.expense_category import ExpenseCategory
 from app.models.third_party import ThirdParty
 from app.models.money_movement import MoneyMovement
 from app.services.money_movement import money_movement as mm_service
+from app.utils.dates import business_today as _business_today, business_today_noon
+
+
+def business_today() -> datetime:
+    """El dia de negocio de HOY a mediodia UTC — alias local de `business_today_noon`.
+
+    UN SOLO RELOJ POR EVENTO: el `MoneyMovement` y el campo que los reportes
+    usan como frontera (`disposed_at`) tienen que caer en el MISMO dia. Con el
+    movimiento en el dia colombiano y el `disposed_at` en `now(timezone.utc)`,
+    entre las 19:00 y 24:00 hora Colombia el balance a esa fecha mostraba la
+    plata adentro y el activo todavia en libros. Ver CLAUDE.md, regla del
+    reloj unico.
+
+    Para timestamps de AUDITORIA (`applied_at`, `annulled_at`) y para ORDEN de
+    eventos (guards LIFO) el reloj correcto sigue siendo
+    `datetime.now(timezone.utc)`: son instantes reales, no dias.
+    """
+    return business_today_noon()
 
 
 class CRUDFixedAsset:
@@ -212,11 +229,11 @@ class CRUDFixedAsset:
 
         # Determinar periodo
         if not period:
-            col_today = datetime.now(ZoneInfo("America/Bogota")).date()
+            col_today = _business_today()
             period = col_today.strftime("%Y-%m")
 
         # Validar periodo no futuro
-        col_today = datetime.now(ZoneInfo("America/Bogota")).date()
+        col_today = _business_today()
         current_period = col_today.strftime("%Y-%m")
         if period > current_period:
             raise HTTPException(
@@ -335,7 +352,7 @@ class CRUDFixedAsset:
 
         Solo procesa activos cuyo depreciation_start_date <= primer dia del mes actual.
         """
-        col_today = datetime.now(ZoneInfo("America/Bogota")).date()
+        col_today = _business_today()
         current_period = col_today.strftime("%Y-%m")
         first_of_month = col_today.replace(day=1)
 
@@ -408,15 +425,13 @@ class CRUDFixedAsset:
                 detail="El activo ya está dado de baja",
             )
 
+        # Un solo reloj para todo el evento (ver `business_today`)
+        movement_date = business_today()
+
         remaining = asset.current_value - asset.salvage_value
         if remaining > 0:
             # Depreciacion acelerada — periodo con sufijo "B" (baja) para evitar conflicto unique
-            col_today = datetime.now(ZoneInfo("America/Bogota")).date()
-            disposal_period = col_today.strftime("%Y-%m") + "B"
-
-            movement_date = datetime.combine(
-                col_today, time(12, 0), tzinfo=timezone.utc
-            )
+            disposal_period = movement_date.strftime("%Y-%m") + "B"
 
             movement = mm_service._create_movement(
                 db=db,
@@ -457,7 +472,9 @@ class CRUDFixedAsset:
             asset.current_value = asset.salvage_value
 
         asset.status = "disposed"
-        asset.disposed_at = datetime.now(timezone.utc)
+        # Frontera de corte (`_fa_existed_at_cutoff`), NO un timestamp: mismo
+        # dia que el movimiento de la baja
+        asset.disposed_at = movement_date
         asset.disposed_by = user_id
         asset.disposal_reason = reason
 
@@ -540,10 +557,9 @@ class CRUDFixedAsset:
         book_value = asset.current_value
         sale_gain = (data.sale_price - book_value).quantize(Decimal("0.01"))
 
-        # Fecha del evento: SIEMPRE hoy (patron dispose/revalue) — anti back-dating
-        col_today = datetime.now(ZoneInfo("America/Bogota")).date()
-        movement_date = datetime.combine(col_today, time(12, 0), tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+        # Fecha del evento: SIEMPRE hoy (patron dispose/revalue) — anti back-dating.
+        # Un solo reloj para todo el evento (ver `business_today`)
+        movement_date = business_today()
 
         # MM de contrapartida — lleva el PRECIO, no la ganancia.
         # ⚠️ Signos alineados con los 4 sign maps derivados + INFLOW_TYPES.
@@ -583,7 +599,10 @@ class CRUDFixedAsset:
         asset.sale_gain = sale_gain
         asset.sale_movement_id = movement.id
         asset.status = "disposed"
-        asset.disposed_at = now
+        # Frontera de corte (`_fa_existed_at_cutoff`), NO un timestamp: el
+        # MISMO dia que el MM del precio, o el balance a esa fecha muestra la
+        # plata adentro y el activo todavia en libros
+        asset.disposed_at = movement_date
         asset.disposed_by = user_id
         asset.disposal_reason = "Venta"
 
@@ -625,19 +644,27 @@ class CRUDFixedAsset:
                 detail="La venta ya está anulada",
             )
 
-        # Barandilla LIFO (ver docstring)
+        # Barandilla LIFO (ver docstring).
+        # ⚠️ Ordenar eventos es una pregunta de INSTANTES, no de dias: se
+        # compara contra el `created_at` del movimiento de la venta (cuando se
+        # registro de verdad), no contra `disposed_at`, que es la FECHA DE
+        # NEGOCIO de la venta (mediodia UTC, ver `business_today`). Mezclarlos
+        # daba un falso positivo: un `applied_at` de hace un minuto es
+        # "posterior" a un mediodia que ya paso, y el guard bloqueaba
+        # anulaciones legitimas.
+        sold_at = movement.created_at or asset.disposed_at
         later_dep = db.execute(
             select(func.count()).where(
                 AssetDepreciation.fixed_asset_id == asset.id,
                 AssetDepreciation.is_active == True,
-                AssetDepreciation.applied_at > asset.disposed_at,
+                AssetDepreciation.applied_at > sold_at,
             )
         ).scalar() or 0
         later_reval = db.execute(
             select(func.count()).where(
                 AssetRevaluation.fixed_asset_id == asset.id,
                 AssetRevaluation.is_active == True,
-                AssetRevaluation.applied_at > asset.disposed_at,
+                AssetRevaluation.applied_at > sold_at,
             )
         ).scalar() or 0
         if later_dep or later_reval:
@@ -682,7 +709,7 @@ class CRUDFixedAsset:
             return 0
         if asset.current_value <= asset.salvage_value:
             return 0
-        today = datetime.now(ZoneInfo("America/Bogota")).date()
+        today = _business_today()
         start = asset.depreciation_start_date
         # Meses contables completos transcurridos desde el inicio
         elapsed = (today.year - start.year) * 12 + (today.month - start.month)
@@ -802,9 +829,9 @@ class CRUDFixedAsset:
             monthly_after = monthly_before
 
         # Fecha del evento: SIEMPRE hoy (patron dispose) — anti back-dating
-        col_today = datetime.now(ZoneInfo("America/Bogota")).date()
+        col_today = _business_today()
         period = col_today.strftime("%Y-%m")
-        movement_date = datetime.combine(col_today, time(12, 0), tzinfo=timezone.utc)
+        movement_date = business_today_noon()  # mismo dia que col_today, por construccion
         now = datetime.now(timezone.utc)
 
         label = "alza" if is_increase else "baja"
@@ -1197,6 +1224,9 @@ class CRUDFixedAsset:
 
         # 3. Marcar activo como cancelado (reusa campos de disposal)
         asset.status = "cancelled"
+        # Aca SI es un timestamp de auditoria y no una frontera: los
+        # `cancelled` se excluyen del corte SIEMPRE, sin mirar la fecha
+        # (735c2c3: "nunca existio"). Por eso no pasa por `business_today()`.
         asset.disposed_at = now
         asset.disposed_by = user_id
         asset.disposal_reason = "Cancelado"

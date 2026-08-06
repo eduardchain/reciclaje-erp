@@ -14,6 +14,7 @@ from decimal import Decimal
 from app.models.kg_ledger import KgLedgerMovement
 from tests.integration_helpers import create_warehouse
 from tests.conftest import create_third_party_with_category
+from app.utils.dates import business_today
 
 KG_URL = "/api/v1/kg-ledger"
 
@@ -238,7 +239,7 @@ class TestKgAccounts:
 
     def test_deactivate_with_balance_422(self, client, org_headers, intersede_account):
         acc_id = intersede_account["id"]
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
         assert _manual(client, org_headers, acc_id, 100, today).status_code == 201
         resp = client.patch(
             f"{KG_URL}/accounts/{acc_id}", headers=org_headers, json={"is_active": False}
@@ -275,7 +276,7 @@ class TestKgAccounts:
 
 class TestManualMovements:
     def test_create_happy_noon_utc(self, client, org_headers, intersede_account, db_session):
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
         resp = _manual(
             client, org_headers, intersede_account["id"], "150.5", today,
             desc="Conteo fisico", reason="Diferencia bascula",
@@ -295,7 +296,7 @@ class TestManualMovements:
         assert Decimal(acc["current_balance_kg"]) == Decimal("150.5")
 
     def test_delta_zero_422(self, client, org_headers, intersede_account):
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
         resp = _manual(client, org_headers, intersede_account["id"], 0, today)
         assert resp.status_code == 422
 
@@ -307,13 +308,13 @@ class TestManualMovements:
     def test_inactive_account_422(self, client, org_headers, intersede_account):
         acc_id = intersede_account["id"]
         client.patch(f"{KG_URL}/accounts/{acc_id}", headers=org_headers, json={"is_active": False})
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
         resp = _manual(client, org_headers, acc_id, 10, today)
         assert resp.status_code == 422
         assert "inactiva" in resp.json()["detail"]
 
     def test_annul_happy_with_audit(self, client, org_headers, intersede_account):
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
         mov = _manual(client, org_headers, intersede_account["id"], 80, today).json()
         resp = client.post(
             f"{KG_URL}/movements/{mov['id']}/annul",
@@ -354,7 +355,7 @@ class TestManualMovements:
         assert "documento origen" in resp.json()["detail"]
 
     def test_annul_already_annulled_422(self, client, org_headers, intersede_account):
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
         mov = _manual(client, org_headers, intersede_account["id"], 40, today).json()
         client.post(
             f"{KG_URL}/movements/{mov['id']}/annul", headers=org_headers, json={"reason": "a"}
@@ -375,7 +376,7 @@ class TestStatement:
         """Fix #55: lo confirmado ANTES de la ventana acumula en la apertura."""
         acc_id = intersede_account["id"]
         old = (datetime.now(timezone.utc) - timedelta(days=120)).date().isoformat()
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
         assert _manual(client, org_headers, acc_id, 500, old).status_code == 201
         assert _manual(client, org_headers, acc_id, 200, today).status_code == 201
 
@@ -391,7 +392,7 @@ class TestStatement:
     def test_explicit_window_lists_all(self, client, org_headers, intersede_account):
         acc_id = intersede_account["id"]
         old = (datetime.now(timezone.utc) - timedelta(days=120)).date()
-        today = datetime.now(timezone.utc).date()
+        today = business_today()
         _manual(client, org_headers, acc_id, 500, old.isoformat())
         _manual(client, org_headers, acc_id, 200, today.isoformat())
 
@@ -425,7 +426,7 @@ class TestStatement:
 
     def test_annulled_never_moves_balance(self, client, org_headers, intersede_account):
         acc_id = intersede_account["id"]
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
         _manual(client, org_headers, acc_id, 100, today)
         bad = _manual(client, org_headers, acc_id, 999, today).json()
         client.post(
@@ -461,7 +462,7 @@ class TestSummary:
     def test_totals_by_type_willard_grouped(
         self, client, org_headers, willard_account, intersede_account
     ):
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
         _manual(client, org_headers, willard_account["id"], 1200, today)
         _manual(client, org_headers, intersede_account["id"], 340, today)
 
@@ -478,7 +479,7 @@ class TestSummary:
     ):
         """Test de oro bloque 1: saldo del summary == saldo corrido final del
         statement, por cuenta — dos caminos de calculo, un solo numero."""
-        today = datetime.now(timezone.utc).date()
+        today = business_today()
         old = (today - timedelta(days=200)).isoformat()
         for acc in (willard_account, intersede_account):
             _manual(client, org_headers, acc["id"], "111.25", old)
@@ -505,7 +506,7 @@ class TestSummary:
     def test_summary_as_of(self, client, org_headers, intersede_account):
         acc_id = intersede_account["id"]
         d_old = (datetime.now(timezone.utc) - timedelta(days=30)).date()
-        today = datetime.now(timezone.utc).date()
+        today = business_today()
         _manual(client, org_headers, acc_id, 400, d_old.isoformat())
         _manual(client, org_headers, acc_id, 100, today.isoformat())
 

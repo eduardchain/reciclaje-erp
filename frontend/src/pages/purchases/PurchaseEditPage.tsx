@@ -18,7 +18,7 @@ import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useSuppliers, usePayableProviders, useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { formatCurrency, utcToLocalDateInput } from "@/utils/formatters";
+import { formatCurrency, toLocalDateInput, utcToLocalDateInput } from "@/utils/formatters";
 import { purchaseService } from "@/services/purchases";
 import type { PurchaseLineCreate, PurchaseCommissionCreate } from "@/types/purchase";
 
@@ -162,7 +162,10 @@ export default function PurchaseEditPage() {
       return { materialId: line.material_id, unitCost };
     });
   }, [lines, commissions, total, totalComm]);
-  const isFutureDate = date ? new Date(date) > new Date() : false;
+  // Mismo fix que PurchaseCreatePage: comparacion de strings contra el dia
+  // local. `new Date(str) > new Date()` dejaba pasar mañana despues de las 7pm.
+  const todayStr = toLocalDateInput();
+  const isFutureDate = date ? date > todayStr : false;
 
   const canSubmit =
     supplierId &&
@@ -254,6 +257,7 @@ export default function PurchaseEditPage() {
               <Input
                 type="date"
                 value={date}
+                max={todayStr}
                 onChange={(e) => setDate(e.target.value)}
                 className={isFutureDate ? "border-red-300" : ""}
               />

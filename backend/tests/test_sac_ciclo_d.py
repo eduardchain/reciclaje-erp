@@ -33,6 +33,7 @@ from app.models.money_movement import MoneyMovement
 from app.models.third_party import ThirdParty
 from tests.integration_helpers import create_material, create_material_category, create_warehouse
 from tests.conftest import create_third_party_with_category
+from app.utils.dates import business_today
 
 INBOUND_URL = "/api/v1/inbound-orders"
 PURCHASES_URL = "/api/v1/purchases"
@@ -401,7 +402,7 @@ class TestCollectorCommissionEffects:
         )
         assert liq.status_code == 200, liq.text
 
-        date_from, date_to = _past(5), datetime.now(timezone.utc).date().isoformat()
+        date_from, date_to = _past(5), business_today().isoformat()
         pnl = client.get(
             f"{REPORTS_URL}/profit-and-loss",
             headers=org_headers,

@@ -19,6 +19,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.dates import business_today
 from app.models.purchase import Purchase, PurchaseCommission, PurchaseLine
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
@@ -155,7 +156,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             HTTPException: 403 if resources don't belong to organization
         """
         # Step 0: Validar fecha no futura (V-COMP-04) — comparar solo fechas (BusinessDate normaliza a mediodia)
-        if obj_in.date.date() > datetime.now(timezone.utc).date():
+        if obj_in.date.date() > business_today():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="La fecha de la compra no puede ser futura"
@@ -422,7 +423,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="La fecha de liquidacion no puede ser anterior a la fecha del documento."
                 )
-            if liq_date > date.today():
+            if liq_date > business_today():
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="La fecha de liquidacion no puede ser futura."
@@ -828,7 +829,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                         source_type="purchase_cancellation",
                         source_id=purchase.id,
                         organization_id=organization_id,
-                        transaction_date=datetime.now(timezone.utc).date(),
+                        transaction_date=business_today(),
                     )
             else:
                 material.current_stock_transit -= line.quantity

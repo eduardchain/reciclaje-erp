@@ -156,7 +156,13 @@ export default function PurchaseCreatePage() {
       return { materialId: line.material_id, unitCost };
     });
   }, [lines, commissions, total, totalComm]);
-  const isFutureDate = date ? new Date(date) > new Date() : false;
+  // ⚠️ Comparacion de STRINGS contra el dia local, calco de SaleCreatePage.
+  // `new Date("2026-08-05") > new Date()` comparaba medianoche UTC de la fecha
+  // contra el INSTANTE actual: despues de las 7pm hora Colombia daba `false`
+  // para la fecha de mañana y dejaba guardar una compra que despues no se podia
+  // liquidar nunca (la liquidacion exige `>= fecha doc` y `<= hoy` a la vez).
+  const todayStr = toLocalDateInput();
+  const isFutureDate = date ? date > todayStr : false;
 
   const canSubmit =
     supplierId &&
@@ -256,6 +262,7 @@ export default function PurchaseCreatePage() {
               <Input
                 type="date"
                 value={date}
+                max={todayStr}
                 onChange={(e) => setDate(e.target.value)}
                 className={isFutureDate ? "border-red-300" : ""}
               />

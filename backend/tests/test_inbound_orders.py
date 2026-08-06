@@ -20,6 +20,7 @@ from app.models.material import Material
 from app.models.material_cost_history import MaterialCostHistory
 from tests.integration_helpers import create_material, create_material_category, create_warehouse
 from tests.conftest import create_third_party_with_category
+from app.utils.dates import business_today
 
 INBOUND_URL = "/api/v1/inbound-orders"
 KG_URL = "/api/v1/kg-ledger"
@@ -93,7 +94,7 @@ def _seed_avg(client, headers, material_id, warehouse_id, qty, unit_cost):
             "warehouse_id": str(warehouse_id),
             "quantity": qty,
             "unit_cost": unit_cost,
-            "date": datetime.now(timezone.utc).date().isoformat(),
+            "date": business_today().isoformat(),
             "reason": "Seed test",
         },
     )
@@ -109,7 +110,7 @@ def _decrease(client, headers, material_id, warehouse_id, qty):
             "material_id": str(material_id),
             "warehouse_id": str(warehouse_id),
             "quantity": qty,
-            "date": datetime.now(timezone.utc).date().isoformat(),
+            "date": business_today().isoformat(),
             "reason": "Merma test",
         },
     )
@@ -184,7 +185,7 @@ def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id, lin
         "inbound_type": inbound_type,
         "warehouse_id": str(warehouse_id),
         "third_party_id": str(third_party_id),
-        "date": date_str or datetime.now(timezone.utc).date().isoformat(),
+        "date": date_str or business_today().isoformat(),
         "lines": lines,
         **extra,
     }
@@ -266,7 +267,7 @@ class TestWillardCreate:
                 MaterialCostHistory.source_id == body["id"],
             )
         ).scalar_one()
-        assert mch.transaction_date == datetime.now(timezone.utc).date()
+        assert mch.transaction_date == business_today()
         assert mch.previous_cost == mch.new_cost == avg_before
 
         # Saldo de la cuenta kg refleja la deuda
@@ -606,7 +607,7 @@ class TestPurchaseDerivation:
             headers=org_headers,
             json={
                 "supplier_id": str(willard_tp.id),
-                "date": datetime.now(timezone.utc).date().isoformat(),
+                "date": business_today().isoformat(),
                 "warehouse_id": str(warehouse.id),
                 "lines": [{
                     "material_id": str(mat_regular.id),
@@ -695,7 +696,7 @@ class TestWillardAnnul:
                 MaterialCostHistory.source_id == body["id"],
             )
         ).scalar_one()
-        assert mch.transaction_date == datetime.now(timezone.utc).date()
+        assert mch.transaction_date == business_today()
 
         # Identidad limpia -> sin diferencia de remocion
         detail = client.get(f"{INBOUND_URL}/{body['id']}", headers=org_headers).json()
@@ -772,7 +773,7 @@ class TestWillardAnnul:
         """Extension H2: la orden anulada desaparece del corte as-of (reversal
         backdateado neutraliza cantidad + MCH inbound_receipt excluido)."""
         _seed_avg(client, org_headers, mat_bat.id, warehouse.id, 100, 50)
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
 
         bs_seed = client.get(
             BS_URL, headers=org_headers, params={"as_of_date": today}
@@ -1041,7 +1042,7 @@ class TestWillardTwoStep:
                 MaterialCostHistory.source_id == body["id"],
             )
         ).scalar_one()
-        assert mch.transaction_date == datetime.now(timezone.utc).date()
+        assert mch.transaction_date == business_today()
         assert mch.previous_cost == mch.new_cost == avg_before
 
     def test_confirm_twice_400(
@@ -1202,7 +1203,7 @@ class TestWillardTwoStep:
         """Un draft no toca ni el saldo kg ni el balance — solo existe como
         documento en la bandeja."""
         _seed_avg(client, org_headers, mat_bat.id, warehouse.id, 100, 50)
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = business_today().isoformat()
         bs_before = client.get(
             BS_URL, headers=org_headers, params={"as_of_date": today}
         ).json()
@@ -1239,7 +1240,7 @@ class TestGatingAndRbac:
                 "inbound_type": "purchase",
                 "warehouse_id": str(warehouse.id),
                 "third_party_id": str(warehouse.id),
-                "date": datetime.now(timezone.utc).date().isoformat(),
+                "date": business_today().isoformat(),
                 "lines": [{"material_id": str(warehouse.id), "quantity": "1"}],
             },
         )

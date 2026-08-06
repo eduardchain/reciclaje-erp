@@ -15,6 +15,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text, or_, cast, String
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.dates import business_today
 from app.models.double_entry import DoubleEntry, DoubleEntryLine
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.sale import Sale, SaleLine, SaleCommission
@@ -254,7 +255,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="La fecha de liquidacion no puede ser anterior a la fecha del documento."
                 )
-            if liq_date > date.today():
+            if liq_date > business_today():
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="La fecha de liquidacion no puede ser futura."

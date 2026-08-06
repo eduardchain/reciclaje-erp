@@ -16,13 +16,14 @@ B (hora en auditoria) y D (categoria financiera del seeder) no llevan test:
 frontend puro y data de seeder respectivamente (§6 del plan).
 """
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.models.inbound_order import InboundOrder
 from app.models.organization import Organization
 from app.models.purchase import Purchase
 from tests.integration_helpers import create_material, create_material_category, create_warehouse
 from tests.conftest import create_third_party_with_category
+from app.utils.dates import business_today
 
 INBOUND_URL = "/api/v1/inbound-orders"
 KG_URL = "/api/v1/kg-ledger"
@@ -123,11 +124,24 @@ def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id, lin
         "inbound_type": inbound_type,
         "warehouse_id": str(warehouse_id),
         "third_party_id": str(third_party_id),
-        "date": datetime.now(timezone.utc).date().isoformat(),
+        "date": business_today().isoformat(),
         "lines": lines,
         **extra,
     }
     return client.post(INBOUND_URL, headers=headers, json=body)
+
+
+def _past(days: int = 2) -> str:
+    """Fecha de negocio robusta a zona horaria.
+
+    Los validadores de "no futura" de compras usan `date.today()` (LOCAL,
+    Bogota UTC-5) mientras estos tests arman fechas con `now(utc).date()`.
+    Entre las 00:00 y 05:00 UTC (19:00-24:00 en Bogota) la fecha UTC de hoy es
+    un dia MAYOR que la local, y liquidar "hoy" revienta con 422 "no puede ser
+    futura" — flake que solo aparece de noche. Una fecha pasada es <= hoy en
+    cualquier zona. Ver memoria `gotcha_fechas_utc_vs_local`.
+    """
+    return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 
 
 def _purchase_inbound(client, headers, warehouse, supplier, mat, **extra):
@@ -244,11 +258,13 @@ class TestInvoiceNumber:
         """D2: la factura del proveedor llega tarde con frecuencia. Bloquearla
         obligaria a anular una compra liquidada para escribir un numero. El
         resto del set bloqueado D7b sigue dando 400."""
-        p = _purchase_inbound(client, org_headers, warehouse, willard_tp, mat_regular).json()
+        p = _purchase_inbound(
+            client, org_headers, warehouse, willard_tp, mat_regular, date=_past()
+        ).json()
         liq = client.patch(
             f"{PURCHASES_URL}/{p['purchase_id']}/liquidate",
             headers=org_headers,
-            json={"lines": [], "liquidation_date": datetime.now(timezone.utc).date().isoformat()},
+            json={"lines": [], "liquidation_date": _past()},
         )
         assert liq.status_code == 200, liq.text
 
@@ -265,7 +281,7 @@ class TestInvoiceNumber:
         blocked = client.patch(
             f"{INBOUND_URL}/{p['id']}",
             headers=org_headers,
-            json={"date": datetime.now(timezone.utc).date().isoformat()},
+            json={"date": business_today().isoformat()},
         )
         assert blocked.status_code == 422, blocked.text
 
@@ -518,12 +534,13 @@ class TestVehiclePlatePropagation:
         v1 = self._vehicle(client, org_headers, "DDD444")
         v2 = self._vehicle(client, org_headers, "EEE555")
         p = _purchase_inbound(
-            client, org_headers, warehouse, willard_tp, mat_regular, vehicle_id=v1["id"]
+            client, org_headers, warehouse, willard_tp, mat_regular,
+            vehicle_id=v1["id"], date=_past(),
         ).json()
         liq = client.patch(
             f"{PURCHASES_URL}/{p['purchase_id']}/liquidate",
             headers=org_headers,
-            json={"lines": [], "liquidation_date": datetime.now(timezone.utc).date().isoformat()},
+            json={"lines": [], "liquidation_date": _past()},
         )
         assert liq.status_code == 200, liq.text
 
