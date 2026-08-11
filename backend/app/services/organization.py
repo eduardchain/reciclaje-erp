@@ -186,7 +186,15 @@ def get_user_organizations(db: Session, user_id: UUID) -> list[tuple[Organizatio
         select(Organization, Role.name)
         .join(OrganizationMember, OrganizationMember.organization_id == Organization.id)
         .join(Role, Role.id == OrganizationMember.role_id)
-        .where(OrganizationMember.user_id == user_id)
+        .where(
+            OrganizationMember.user_id == user_id,
+            # Una org dada de baja (#29: soft delete) desaparece del selector.
+            # El filtro existia en la rama de superusuario y en el GET
+            # individual, pero NO aca: sus miembros la seguian viendo para
+            # siempre. Detectado en pruebas de usuario (dos "SAC" en pantalla
+            # tras un --reset del seeder, que da de baja la org y crea otra).
+            Organization.is_active.is_(True),
+        )
         .order_by(Organization.created_at.desc())
     )
 
@@ -435,9 +443,15 @@ def get_user_role_in_org(
     result = db.execute(
         select(OrganizationMember.role_id, Role.name, Role.is_system_role)
         .join(Role, Role.id == OrganizationMember.role_id)
+        .join(Organization, Organization.id == OrganizationMember.organization_id)
         .where(
             OrganizationMember.organization_id == organization_id,
             OrganizationMember.user_id == user_id,
+            # Sin esto, quitar la org del selector no bastaba: un miembro con
+            # el org_id guardado (authStore, deep-link) seguia OPERANDO dentro
+            # de una org dada de baja. La rama de superusuario ya lo validaba
+            # (deps.py `_build_superuser_context`); la de miembro no.
+            Organization.is_active.is_(True),
         )
     ).first()
 
