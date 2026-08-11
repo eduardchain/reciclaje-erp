@@ -460,111 +460,161 @@ class TestWillardCreate:
 # ---------------------------------------------------------------------------
 
 class TestPurchaseDerivation:
-    def _create_purchase_order(self, client, org_headers, warehouse, willard_tp, material,
-                               inbound_type="purchase", unit_price="1200", date_str=None):
-        return _inbound(
-            client, org_headers,
-            inbound_type=inbound_type,
-            warehouse_id=warehouse.id,
-            third_party_id=willard_tp.id,
-            date_str=date_str,
-            lines=[{
-                "material_id": str(material.id),
-                "quantity": "500",
-                "unit_price": unit_price,
-            }],
-        )
+    """#93: la entrada tipo compra ya NO deriva al capturar — el reparto al
+    liquidar crea las N compras (re-semantizacion del modelo E2/ciclos B-D)."""
 
-    def test_purchase_type_derives_registered(
+    def _capture(self, client, org_headers, warehouse, material,
+                 qty="500", date_str=None):
+        resp = client.post(
+            INBOUND_URL, headers=org_headers,
+            json={
+                "inbound_type": "purchase",
+                "warehouse_id": str(warehouse.id),
+                "date": date_str or business_today().isoformat(),
+                "lines": [{"material_id": str(material.id), "quantity": qty}],
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    def _review(self, client, org_headers, order_id):
+        resp = client.post(f"{INBOUND_URL}/{order_id}/review", headers=org_headers)
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    def _liquidate(self, client, org_headers, order_id, material, supplier,
+                   qty="500", price="1200"):
+        resp = client.post(
+            f"{INBOUND_URL}/{order_id}/liquidate", headers=org_headers,
+            json={"lines": [{
+                "material_id": str(material.id),
+                "allocations": [{
+                    "third_party_id": str(supplier.id),
+                    "quantity": qty, "unit_price": price,
+                }],
+            }]},
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    def _liquidated(self, client, org_headers, warehouse, material, supplier,
+                    date_str=None):
+        body = self._capture(client, org_headers, warehouse, material,
+                             date_str=date_str)
+        self._review(client, org_headers, body["id"])
+        return self._liquidate(client, org_headers, body["id"], material, supplier)
+
+    def test_purchase_type_liquidation_derives_purchases(
         self, client, org_headers, db_session, warehouse, willard_tp, mat_regular,
     ):
-        resp = self._create_purchase_order(client, org_headers, warehouse, willard_tp, mat_regular)
-        assert resp.status_code == 201, resp.text
-        body = resp.json()
-        assert body["purchase_id"] is not None
-        assert body["purchase_status"] == "registered"
+        """La captura no crea compra alguna; la liquidacion con reparto la crea
+        LIQUIDADA con header D11 y origen B1."""
+        body = self._capture(client, org_headers, warehouse, mat_regular)
+        assert body["purchases"] == []
         assert body["total_kg_lead"] is None  # no toca cuentas kg (D7)
         assert _kg_movs(db_session, body["id"]) == []
+        db_session.expire_all()
+        assert db_session.get(Material, mat_regular.id).current_stock_transit == 0
 
-        # Derivada con header D11 y stock en transito
+        self._review(client, org_headers, body["id"])
+        result = self._liquidate(
+            client, org_headers, body["id"], mat_regular, willard_tp
+        )
+        assert len(result["purchases"]) == 1
+        summary = result["purchases"][0]
+        assert summary["status"] == "liquidated"
+
         purchase = client.get(
-            f"/api/v1/purchases/{body['purchase_id']}", headers=org_headers
+            f"/api/v1/purchases/{summary['purchase_id']}", headers=org_headers
         ).json()
-        assert purchase["status"] == "registered"
+        assert purchase["status"] == "liquidated"
         assert purchase["lines"][0]["warehouse_id"] == str(warehouse.id)
-        # Ciclo B (B1): la derivada expone su origen
+        # Ciclo B (B1): la derivada expone su origen (via puente #89/#93)
         assert purchase["inbound_order_id"] == body["id"]
         assert purchase["inbound_order_number"] == body["order_number"]
         db_session.expire_all()
         mat = db_session.get(Material, mat_regular.id)
-        assert mat.current_stock_transit == 500
+        assert mat.current_stock_liquidated == 500
+        assert mat.current_stock_transit == 0
 
     def test_direct_cancel_of_derived_400(
-        self, client, org_headers, warehouse, willard_tp, mat_regular,
+        self, client, org_headers, db_session, warehouse, willard_tp, mat_regular,
     ):
-        body = self._create_purchase_order(
-            client, org_headers, warehouse, willard_tp, mat_regular
-        ).json()
-        resp = client.patch(
-            f"/api/v1/purchases/{body['purchase_id']}/cancel", headers=org_headers
+        result = self._liquidated(
+            client, org_headers, warehouse, mat_regular, willard_tp
         )
+        pid = result["purchases"][0]["purchase_id"]
+        resp = client.patch(f"/api/v1/purchases/{pid}/cancel", headers=org_headers)
         assert resp.status_code == 400
-        assert f"orden de recepción #{body['order_number']}" in resp.json()["detail"]
+        assert "Entrada" in resp.json()["detail"]
 
     def test_annul_order_cancels_registered_purchase(
         self, client, org_headers, db_session, warehouse, willard_tp, mat_regular,
     ):
-        body = self._create_purchase_order(
-            client, org_headers, warehouse, willard_tp, mat_regular
-        ).json()
+        """Tras unliquidate las compras quedan registered; el annul de la
+        entrada las cancela y limpia el transito."""
+        result = self._liquidated(
+            client, org_headers, warehouse, mat_regular, willard_tp
+        )
+        order_id = result["id"]
         resp = client.post(
-            f"{INBOUND_URL}/{body['id']}/annul",
+            f"{INBOUND_URL}/{order_id}/unliquidate", headers=org_headers
+        )
+        assert resp.status_code == 200, resp.text
+        pid = result["purchases"][0]["purchase_id"]
+        assert client.get(
+            f"/api/v1/purchases/{pid}", headers=org_headers
+        ).json()["status"] == "registered"
+
+        resp = client.post(
+            f"{INBOUND_URL}/{order_id}/annul",
             headers=org_headers,
             json={"reason": "Captura erronea"},
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["status"] == "annulled"
-        purchase = client.get(
-            f"/api/v1/purchases/{body['purchase_id']}", headers=org_headers
-        ).json()
-        assert purchase["status"] == "cancelled"
+        assert client.get(
+            f"/api/v1/purchases/{pid}", headers=org_headers
+        ).json()["status"] == "cancelled"
         db_session.expire_all()
         mat = db_session.get(Material, mat_regular.id)
         assert mat.current_stock_transit == 0
+        assert mat.current_stock_liquidated == 0
 
-    def test_annul_order_with_liquidated_purchase_400(
-        self, client, org_headers, warehouse, willard_tp, mat_regular,
+    def test_annul_liquidated_order_succeeds(
+        self, client, org_headers, db_session, warehouse, willard_tp, mat_regular,
     ):
-        # Fecha pasada para no chocar con el boundary UTC vs local de la
-        # validacion de liquidacion de compras (date.today() local) — la orden
-        # y la liquidacion comparten fecha en cualquier zona horaria.
-        past = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
-        body = self._create_purchase_order(
-            client, org_headers, warehouse, willard_tp, mat_regular, date_str=past
-        ).json()
-        liq = client.patch(
-            f"/api/v1/purchases/{body['purchase_id']}/liquidate",
-            headers=org_headers,
-            json={"liquidation_date": past},
+        """#93 supersede el 400 del ciclo C: anular una entrada LIQUIDADA
+        delega en unliquidate y cancela — el deadlock D7b no vuelve."""
+        result = self._liquidated(
+            client, org_headers, warehouse, mat_regular, willard_tp,
+            date_str=(datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat(),
         )
-        assert liq.status_code == 200, liq.text
         resp = client.post(
-            f"{INBOUND_URL}/{body['id']}/annul",
+            f"{INBOUND_URL}/{result['id']}/annul",
             headers=org_headers,
             json={"reason": "x"},
         )
-        assert resp.status_code == 400
-        assert "Cancele primero la compra" in resp.json()["detail"]
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "annulled"
+        pid = result["purchases"][0]["purchase_id"]
+        assert client.get(
+            f"/api/v1/purchases/{pid}", headers=org_headers
+        ).json()["status"] == "cancelled"
 
     def test_edit_derived_purchase_allowed(
         self, client, org_headers, warehouse, willard_tp, mat_regular,
     ):
-        """D7b: el edit de la derivada se permite (flujo Erwin §7.2)."""
-        body = self._create_purchase_order(
-            client, org_headers, warehouse, willard_tp, mat_regular
-        ).json()
+        """El edit directo de una compra puente REGISTERED (post-unliquidate)
+        se permite (flujo Erwin §7.2) — la re-liquidacion lo sincroniza por
+        firma de todos modos."""
+        result = self._liquidated(
+            client, org_headers, warehouse, mat_regular, willard_tp
+        )
+        client.post(f"{INBOUND_URL}/{result['id']}/unliquidate", headers=org_headers)
+        pid = result["purchases"][0]["purchase_id"]
         resp = client.patch(
-            f"/api/v1/purchases/{body['purchase_id']}",
+            f"/api/v1/purchases/{pid}",
             headers=org_headers,
             json={
                 "lines": [{
@@ -581,19 +631,30 @@ class TestPurchaseDerivation:
     def test_supplier_behavior_enforced(
         self, client, org_headers, db_session, test_organization, warehouse, mat_regular,
     ):
+        """El proveedor de una asignacion debe ser material_supplier — lo
+        exige purchase.create dentro de la transaccion (rollback total D14)."""
         generic_tp = create_third_party_with_category(
             db_session, test_organization.id, "Generico X", "generic"
         )
         db_session.commit()
-        resp = _inbound(
-            client, org_headers,
-            inbound_type="purchase",
-            warehouse_id=warehouse.id,
-            third_party_id=generic_tp.id,
-            lines=[{"material_id": str(mat_regular.id), "quantity": "10"}],
+        body = self._capture(client, org_headers, warehouse, mat_regular, qty="10")
+        self._review(client, org_headers, body["id"])
+        resp = client.post(
+            f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
+            json={"lines": [{
+                "material_id": str(mat_regular.id),
+                "allocations": [{
+                    "third_party_id": str(generic_tp.id),
+                    "quantity": "10", "unit_price": "900",
+                }],
+            }]},
         )
         assert resp.status_code == 400
         assert "proveedor de material" in resp.json()["detail"]
+        # atomicidad: nada quedo grabado
+        assert client.get(
+            f"{INBOUND_URL}/{body['id']}", headers=org_headers
+        ).json()["status"] == "reviewed"
 
     def test_purchase_header_warehouse_forces_lines_direct_api(
         self, client, org_headers, db_session, test_organization,
@@ -892,25 +953,29 @@ class TestEditD18:
         assert len(confirmed) == 1
         assert confirmed[0].transaction_date.date().isoformat() == new_date
 
-    def test_edit_purchase_type_lines_422(
+    def test_edit_purchase_type_lines(
         self, client, org_headers, warehouse, willard_tp, mat_regular,
     ):
-        body = _inbound(
-            client, org_headers,
-            inbound_type="purchase",
-            warehouse_id=warehouse.id,
-            third_party_id=willard_tp.id,
-            lines=[{"material_id": str(mat_regular.id), "quantity": "100", "unit_price": "900"}],
+        """#93: lineas/fecha editables en draft/reviewed (la captura es la
+        fuente de verdad, cero efectos); LIQUIDADA exige desliquidar (D20)."""
+        body = client.post(
+            INBOUND_URL, headers=org_headers,
+            json={
+                "inbound_type": "purchase",
+                "warehouse_id": str(warehouse.id),
+                "date": business_today().isoformat(),
+                "lines": [{"material_id": str(mat_regular.id), "quantity": "100"}],
+            },
         ).json()
+        # draft: lineas editables (respuesta 4: corregir la bascula)
         resp = client.patch(
             f"{INBOUND_URL}/{body['id']}",
             headers=org_headers,
             json={"lines": [{"material_id": str(mat_regular.id), "quantity": "90"}]},
         )
-        assert resp.status_code == 422
-        assert "compra derivada" in resp.json()["detail"]
-        # Cabecera sin efectos SI se permite (goes_directly_to_jm ya no existe
-        # — B4 Ciclo B; driver_id es el campo de cabecera editable)
+        assert resp.status_code == 200, resp.text
+        assert Decimal(str(resp.json()["lines"][0]["quantity"])) == 90
+        # Cabecera sin efectos tambien (driver_id)
         drv = client.post(
             "/api/v1/drivers", headers=org_headers, json={"name": "Pedro Conductor"}
         ).json()
@@ -920,6 +985,27 @@ class TestEditD18:
             json={"driver_id": drv["id"]},
         )
         assert resp.status_code == 200
+
+        # liquidada: lineas bloqueadas con mensaje que guia a desliquidar
+        client.post(f"{INBOUND_URL}/{body['id']}/review", headers=org_headers)
+        liq = client.post(
+            f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
+            json={"lines": [{
+                "material_id": str(mat_regular.id),
+                "allocations": [{
+                    "third_party_id": str(willard_tp.id),
+                    "quantity": "90", "unit_price": "900",
+                }],
+            }]},
+        )
+        assert liq.status_code == 200, liq.text
+        resp = client.patch(
+            f"{INBOUND_URL}/{body['id']}",
+            headers=org_headers,
+            json={"lines": [{"material_id": str(mat_regular.id), "quantity": "80"}]},
+        )
+        assert resp.status_code == 422
+        assert "revertir la liquidacion" in resp.json()["detail"]
 
     def test_edit_annulled_404(
         self, client, org_headers, warehouse, willard_tp, mat_bat, kg_bat_account,
@@ -1055,19 +1141,20 @@ class TestWillardTwoStep:
         assert "ya esta confirmada" in resp.json()["detail"]
 
     def test_confirm_purchase_type_400(
-        self, client, org_headers, warehouse, willard_tp, mat_regular,
+        self, client, org_headers, warehouse, mat_regular,
     ):
-        body = _inbound(
-            client, org_headers,
-            inbound_type="purchase",
-            warehouse_id=warehouse.id,
-            third_party_id=willard_tp.id,
-            lines=[{"material_id": str(mat_regular.id), "quantity": "100",
-                    "unit_price": "900"}],
+        body = client.post(
+            INBOUND_URL, headers=org_headers,
+            json={
+                "inbound_type": "purchase",
+                "warehouse_id": str(warehouse.id),
+                "date": business_today().isoformat(),
+                "lines": [{"material_id": str(mat_regular.id), "quantity": "100"}],
+            },
         ).json()
         resp = client.post(f"{INBOUND_URL}/{body['id']}/confirm", headers=org_headers)
         assert resp.status_code == 400
-        assert "compra derivada" in resp.json()["detail"]
+        assert "no se confirma" in resp.json()["detail"]
 
     def test_confirm_annulled_400(
         self, client, org_headers, warehouse, willard_tp, mat_bat, kg_bat_account,
@@ -1180,21 +1267,23 @@ class TestWillardTwoStep:
         kg = _kg_movs(db_session, body["id"], "confirmed")
         assert kg[0].conversion_formula_snapshot["parameters"] == {"kg_lead_per_unit": 3.0}
 
-    def test_purchase_type_still_confirmed_on_create(
-        self, client, org_headers, warehouse, willard_tp, mat_regular,
+    def test_purchase_type_born_draft(
+        self, client, org_headers, warehouse, mat_regular,
     ):
-        """El tipo compra queda intacto: nace confirmed y su 2-pasos vive en la
-        Purchase derivada (registered -> liquidar en Compras)."""
-        body = _inbound(
-            client, org_headers,
-            inbound_type="purchase",
-            warehouse_id=warehouse.id,
-            third_party_id=willard_tp.id,
-            lines=[{"material_id": str(mat_regular.id), "quantity": "100",
-                    "unit_price": "900"}],
+        """#93 (supersede B.2 para tipo compra): nace draft (Registrada) — su
+        ciclo es draft -> reviewed -> liquidated en la propia Entrada."""
+        body = client.post(
+            INBOUND_URL, headers=org_headers,
+            json={
+                "inbound_type": "purchase",
+                "warehouse_id": str(warehouse.id),
+                "date": business_today().isoformat(),
+                "lines": [{"material_id": str(mat_regular.id), "quantity": "100"}],
+            },
         ).json()
-        assert body["status"] == "confirmed"
-        assert body["purchase_status"] == "registered"
+        assert body["status"] == "draft"
+        assert body["display_status"] == "registered"
+        assert body["purchases"] == []
 
     def test_draft_invisible_in_kg_and_balance(
         self, client, org_headers, db_session, warehouse, willard_tp,

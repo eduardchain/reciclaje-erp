@@ -38,6 +38,10 @@ class ServiceTariffCreate(BaseModel):
     tariff_code: TariffCode
     unit_price_cop: Decimal = Field(..., gt=0, description="Precio unitario COP")
     unit: TariffUnit
+    # #93 D11: kg equivalentes por unidad para la base de la comision del
+    # recolector ("14 kg por unidad, sea cual sea la unidad" — Hugo). Se
+    # versiona JUNTO al precio (mismo acuerdo). Solo comision_green_loop.
+    kg_per_unit: Optional[Decimal] = Field(None, gt=0)
     notes: Optional[str] = Field(None, max_length=500)
 
 
@@ -47,6 +51,7 @@ class ServiceTariffResponse(BaseModel):
     tariff_code: str
     unit_price_cop: Decimal
     unit: str
+    kg_per_unit: Optional[Decimal] = None
     notes: Optional[str] = None
     created_by: UUID
     created_by_name: Optional[str] = None

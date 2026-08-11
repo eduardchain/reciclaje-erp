@@ -44,6 +44,9 @@ export interface ServiceTariffResponse {
   tariff_code: TariffCode;
   unit_price_cop: number | string;
   unit: TariffUnit;
+  /** #93 D11: kg equivalentes por unidad para la base de la comisión del
+   *  recolector ("14 kg por unidad") — solo comision_green_loop */
+  kg_per_unit: number | string | null;
   notes: string | null;
   created_by: string;
   created_by_name: string | null;
@@ -54,6 +57,8 @@ export interface ServiceTariffCreate {
   tariff_code: TariffCode;
   unit_price_cop: number;
   unit: TariffUnit;
+  /** #93 D11: solo comision_green_loop (422 en otros códigos) */
+  kg_per_unit?: number | null;
   notes?: string | null;
 }
 

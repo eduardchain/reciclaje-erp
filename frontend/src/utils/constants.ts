@@ -35,6 +35,8 @@ export const ROUTES = {
   INBOUND_NEW: "/inbound/new",
   INBOUND_DETAIL: "/inbound/:id",
   INBOUND_EDIT: "/inbound/:id/edit",
+  /** #93: reparto de proveedores (liquidación de la entrada) */
+  INBOUND_LIQUIDATE: "/inbound/:id/liquidate",
   TRANSFERS: "/transfers",
   TRANSFER_NEW: "/transfers/new",
   TRANSFER_DETAIL: "/transfers/:id",

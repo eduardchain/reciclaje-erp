@@ -1,5 +1,6 @@
 import apiClient from "./api";
 import type {
+  InboundLiquidateRequest,
   InboundOrderCreate,
   InboundOrderListResponse,
   InboundOrderResponse,
@@ -7,13 +8,14 @@ import type {
 } from "@/types/inbound-order";
 
 // Recepcion unificada (SAC E2): captura unica en patio. Router completo
-// gated por flag kg_ledger_enabled en backend; permisos reusan purchases.*.
+// gated por flag kg_ledger_enabled en backend; permisos reusan purchases.*
+// (+ purchases.review para la revision #93).
 
 export interface InboundOrderFilters {
   inbound_type?: string;
-  status?: "draft" | "confirmed" | "annulled";
-  /** Ciclo C: estado derivado unico (orden+compra) */
-  display_status?: "registered" | "liquidated" | "annulled";
+  status?: "draft" | "reviewed" | "liquidated" | "confirmed" | "annulled";
+  /** #93: estado UNICO visible (columna-driven) */
+  display_status?: "registered" | "reviewed" | "liquidated" | "annulled";
   /** Ciclo C: busca por #, placa, conductor, tercero o material */
   search?: string;
   /** Ciclo C: oldest = FIFO para la bandeja */
@@ -55,10 +57,39 @@ export const inboundOrderService = {
     return response.data;
   },
 
-  // B.2: draft -> confirmed (efectos inventario + kg nacen aca)
+  // B.2: draft -> confirmed (efectos inventario + kg nacen aca) — solo willard
   confirm: async (id: string): Promise<InboundOrderResponse> => {
     const response = await apiClient.post<InboundOrderResponse>(
       `/api/v1/inbound-orders/${id}/confirm`
+    );
+    return response.data;
+  },
+
+  // #93 D10: draft -> reviewed (permiso purchases.review) — solo tipo compra
+  review: async (id: string): Promise<InboundOrderResponse> => {
+    const response = await apiClient.post<InboundOrderResponse>(
+      `/api/v1/inbound-orders/${id}/review`
+    );
+    return response.data;
+  },
+
+  // #93 D14: reparto -> N compras + descuadres + comision, atomico
+  liquidate: async (
+    id: string,
+    data: InboundLiquidateRequest
+  ): Promise<InboundOrderResponse> => {
+    const response = await apiClient.post<InboundOrderResponse>(
+      `/api/v1/inbound-orders/${id}/liquidate`,
+      data
+    );
+    return response.data;
+  },
+
+  // #93 D20: reversa completa del evento de liquidacion (vuelve a Revisada,
+  // conserva el reparto, sin quemar consecutivos)
+  unliquidate: async (id: string): Promise<InboundOrderResponse> => {
+    const response = await apiClient.post<InboundOrderResponse>(
+      `/api/v1/inbound-orders/${id}/unliquidate`
     );
     return response.data;
   },

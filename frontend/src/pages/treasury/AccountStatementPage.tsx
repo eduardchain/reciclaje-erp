@@ -62,6 +62,10 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   loan_capital_transfer: "Recaudo Capital Préstamo (desde Tercero)",
   purchase_liquidation: "Compra Liquidada",
   purchase_cancellation: "Compra Cancelada",
+  // Eventos sintéticos de retención (#75/#93) — sin estos, el estado de
+  // cuenta que se le manda al proveedor muestra el nombre interno en inglés
+  purchase_retention: "Retención",
+  purchase_retention_cancellation: "Retención Revertida",
   sale_liquidation: "Venta Liquidada",
   sale_cancellation: "Venta Cancelada",
   sale_commission: "Comision de Venta",

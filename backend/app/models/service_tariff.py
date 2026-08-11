@@ -43,6 +43,18 @@ class ServiceTariff(Base, OrganizationMixin, TimestampMixin):
         comment="per_kg_lead | per_kg_battery | per_unit",
     )
 
+    # #93 D11: equivalencia para la base de la comision del recolector cuando
+    # el material se cuenta en unidades ("14 kg por unidad, sea cual sea la
+    # unidad" — Hugo). Vive junto al precio porque son parte del MISMO acuerdo
+    # con Green Loop y se versionan juntos (append-only: las entradas viejas
+    # conservan el suyo). NO configurable por referencia: es un acuerdo, no un
+    # peso. Solo aplica a comision_green_loop; NULL en el resto.
+    kg_per_unit: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 4),
+        nullable=True,
+        comment="Kg equivalentes por unidad para la base de comision (solo comision_green_loop)",
+    )
+
     notes: Mapped[Optional[str]] = mapped_column(
         String(500),
         nullable=True,
@@ -57,6 +69,10 @@ class ServiceTariff(Base, OrganizationMixin, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint("unit_price_cop > 0", name="ck_service_tariffs_price_positive"),
+        CheckConstraint(
+            "kg_per_unit IS NULL OR kg_per_unit > 0",
+            name="ck_service_tariffs_kg_per_unit_positive",
+        ),
         Index(
             "ix_st_code_current",
             "organization_id",

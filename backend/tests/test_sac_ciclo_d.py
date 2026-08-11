@@ -145,18 +145,37 @@ def _past(days=2):
     return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 
 
-def _entrada_compra(client, headers, wh, tp, mat, qty="100", price="900", **extra):
+def _entrada_compra(client, headers, wh, mat, qty="100", **extra):
+    """#93: la captura tipo compra NO lleva proveedor ni precios definitivos."""
     resp = client.post(
         INBOUND_URL, headers=headers,
         json={
             "inbound_type": "purchase",
             "warehouse_id": str(wh.id),
-            "third_party_id": str(tp.id),
             "date": _past(),
-            "lines": [{"material_id": str(mat.id), "quantity": qty, "unit_price": price}],
+            "lines": [{"material_id": str(mat.id), "quantity": qty}],
             **extra,
         },
     )
+    return resp
+
+
+def _direct_purchase(client, headers, wh, tp, mat, qty="100", price="900"):
+    """Compra DIRECTA (sin entrada) — el camino purchase-level de #83 vive
+    aca tras #93 (la comision de una entrada es por-entrada, D11)."""
+    resp = client.post(
+        PURCHASES_URL, headers=headers,
+        json={
+            "supplier_id": str(tp.id),
+            "date": _past(),
+            "warehouse_id": str(wh.id),
+            "lines": [{
+                "material_id": str(mat.id), "warehouse_id": str(wh.id),
+                "quantity": qty, "unit_price": price,
+            }],
+        },
+    )
+    assert resp.status_code == 201, resp.text
     return resp
 
 
@@ -166,6 +185,32 @@ def _liquidate(client, headers, purchase_id, **payload):
         headers=headers,
         json={"liquidation_date": _past(), **payload},
     )
+
+
+def _review(client, headers, order_id):
+    resp = client.post(f"{INBOUND_URL}/{order_id}/review", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _liquidate_entrada(client, headers, order, mat, tp, qty="100", price="900",
+                       expect=200, **extra):
+    """#93: reviewed -> liquidated con reparto de UN proveedor."""
+    resp = client.post(
+        f"{INBOUND_URL}/{order['id']}/liquidate", headers=headers,
+        json={
+            "lines": [{
+                "material_id": str(mat.id),
+                "allocations": [{
+                    "third_party_id": str(tp.id),
+                    "quantity": str(qty), "unit_price": str(price),
+                }],
+            }],
+            **extra,
+        },
+    )
+    assert resp.status_code == expect, resp.text
+    return resp.json()
 
 
 def _collector_accruals(db, purchase_id):
@@ -194,7 +239,7 @@ class TestCollectorCapture:
         self, client, org_headers, db_session, wh_cv, supplier, mat_compra, collector,
     ):
         resp = _entrada_compra(
-            client, org_headers, wh_cv, supplier, mat_compra,
+            client, org_headers, wh_cv, mat_compra,
             collector_id=str(collector.id),
         )
         assert resp.status_code == 201, resp.text
@@ -206,9 +251,13 @@ class TestCollectorCapture:
         detail = client.get(f"{INBOUND_URL}/{body['id']}", headers=org_headers).json()
         assert detail["collector_name"] == "Green Loop D"
 
-        # B1 enrich: la compra derivada expone el recolector (pre-carga de la
-        # Liquidate page) — detail Y listado
-        pd = client.get(f"{PURCHASES_URL}/{body['purchase_id']}", headers=org_headers).json()
+        # B1 enrich: la compra nacida del reparto (#93) expone el recolector
+        _review(client, org_headers, body["id"])
+        result = _liquidate_entrada(
+            client, org_headers, body, mat_compra, supplier
+        )
+        pid = result["purchases"][0]["purchase_id"]
+        pd = client.get(f"{PURCHASES_URL}/{pid}", headers=org_headers).json()
         assert pd["collector_id"] == str(collector.id)
         assert pd["collector_name"] == "Green Loop D"
 
@@ -289,7 +338,7 @@ class TestCollectorCapture:
     ):
         # El proveedor de materiales NO es service_provider -> 422
         resp = _entrada_compra(
-            client, org_headers, wh_cv, supplier, mat_compra,
+            client, org_headers, wh_cv, mat_compra,
             collector_id=str(supplier.id),
         )
         assert resp.status_code == 422
@@ -298,11 +347,10 @@ class TestCollectorCapture:
     def test_edit_collector_lifecycle(
         self, client, org_headers, wh_cv, supplier, mat_compra, collector, collector2,
     ):
-        # Sin recolector al capturar -> se agrega editando (registered)
-        resp = _entrada_compra(client, org_headers, wh_cv, supplier, mat_compra)
+        # Sin recolector al capturar -> se agrega editando (draft)
+        resp = _entrada_compra(client, org_headers, wh_cv, mat_compra)
         assert resp.status_code == 201, resp.text
         oid = resp.json()["id"]
-        pid = resp.json()["purchase_id"]
 
         patch = client.patch(
             f"{INBOUND_URL}/{oid}", headers=org_headers,
@@ -311,7 +359,7 @@ class TestCollectorCapture:
         assert patch.status_code == 200, patch.text
         assert patch.json()["collector_name"] == "Green Loop D"
 
-        # Cambiarlo (registered) -> OK
+        # Cambiarlo (draft) -> OK
         patch2 = client.patch(
             f"{INBOUND_URL}/{oid}", headers=org_headers,
             json={"collector_id": str(collector2.id)},
@@ -319,20 +367,22 @@ class TestCollectorCapture:
         assert patch2.status_code == 200
         assert patch2.json()["collector_name"] == "Recolector Dos"
 
-        # Quitarlo con null explicito (registered) -> OK
+        # Quitarlo con null explicito (draft) -> OK
         patch3 = client.patch(
             f"{INBOUND_URL}/{oid}", headers=org_headers, json={"collector_id": None},
         )
         assert patch3.status_code == 200
         assert patch3.json()["collector_id"] is None
 
-        # Re-poner y liquidar la compra -> despues 422
+        # Re-poner, revisar y liquidar la ENTRADA (#93) -> despues 422
         client.patch(
             f"{INBOUND_URL}/{oid}", headers=org_headers,
             json={"collector_id": str(collector.id)},
         )
-        liq = _liquidate(client, org_headers, pid)
-        assert liq.status_code == 200, liq.text
+        _review(client, org_headers, resp.json()["id"])
+        _liquidate_entrada(
+            client, org_headers, resp.json(), mat_compra, supplier
+        )
 
         blocked = client.patch(
             f"{INBOUND_URL}/{oid}", headers=org_headers,
@@ -352,9 +402,10 @@ class TestCollectorCommissionEffects:
         wh_cv, supplier, mat_compra, collector,
     ):
         """W-D2: con comision de recolector el costo promedio es IDENTICO al
-        de liquidar sin ella (con #30 seria price + comision/qty)."""
-        resp = _entrada_compra(client, org_headers, wh_cv, supplier, mat_compra)
-        pid = resp.json()["purchase_id"]
+        de liquidar sin ella (con #30 seria price + comision/qty).
+        #93: el camino purchase-level de #83 vive en compras DIRECTAS."""
+        resp = _direct_purchase(client, org_headers, wh_cv, supplier, mat_compra)
+        pid = resp.json()["id"]
 
         liq = _liquidate(
             client, org_headers, pid,
@@ -376,10 +427,9 @@ class TestCollectorCommissionEffects:
         assert mm.amount == Decimal("50000.00")
         assert mm.third_party_id == collector.id
         assert mm.source_type == "collector_commission"
-        assert str(mm.source_id) == resp.json()["id"]  # entrada de origen
+        assert mm.source_id is None  # compra directa: sin entrada de origen
         assert mm.warehouse_id is not None  # header de la compra (D11)
         assert "Comisión recolección" in mm.description
-        assert f"Entrada #{resp.json()['order_number']}" in mm.description
 
         # Categoria sistema INDIRECTA (decision Daniel: no entra al Costo Real)
         cat = db_session.get(ExpenseCategory, mm.expense_category_id)
@@ -394,8 +444,8 @@ class TestCollectorCommissionEffects:
     def test_pnl_and_expenses_report_include(
         self, client, org_headers, db_session, wh_cv, supplier, mat_compra, collector,
     ):
-        resp = _entrada_compra(client, org_headers, wh_cv, supplier, mat_compra)
-        pid = resp.json()["purchase_id"]
+        resp = _direct_purchase(client, org_headers, wh_cv, supplier, mat_compra)
+        pid = resp.json()["id"]
         liq = _liquidate(
             client, org_headers, pid,
             collector_commission={"third_party_id": str(collector.id), "amount": "40000"},
@@ -429,8 +479,8 @@ class TestCollectorCommissionEffects:
     def test_statement_and_balance_detailed(
         self, client, org_headers, db_session, wh_cv, supplier, mat_compra, collector,
     ):
-        resp = _entrada_compra(client, org_headers, wh_cv, supplier, mat_compra)
-        pid = resp.json()["purchase_id"]
+        resp = _direct_purchase(client, org_headers, wh_cv, supplier, mat_compra)
+        pid = resp.json()["id"]
         liq = _liquidate(
             client, org_headers, pid,
             collector_commission={"third_party_id": str(collector.id), "amount": "30000"},
@@ -470,9 +520,9 @@ class TestCollectorCommissionEffects:
         pre_id = pre.id
 
         for _ in range(2):
-            resp = _entrada_compra(client, org_headers, wh_cv, supplier, mat_compra)
+            resp = _direct_purchase(client, org_headers, wh_cv, supplier, mat_compra)
             liq = _liquidate(
-                client, org_headers, resp.json()["purchase_id"],
+                client, org_headers, resp.json()["id"],
                 collector_commission={"third_party_id": str(collector.id), "amount": "10000"},
             )
             assert liq.status_code == 200, liq.text
@@ -493,17 +543,22 @@ class TestCollectorCommissionEffects:
         self, client, org_headers, db_session, test_organization,
         wh_cv, supplier, mat_compra, collector,
     ):
-        """Liquidar SIN collector_commission aunque la entrada tenga recolector
-        -> no se causa nada (condonada / no aplica)."""
+        """#93: liquidar la ENTRADA sin collector_commission aunque tenga
+        recolector -> no se causa nada (condonada / no aplica)."""
         resp = _entrada_compra(
-            client, org_headers, wh_cv, supplier, mat_compra,
+            client, org_headers, wh_cv, mat_compra,
             collector_id=str(collector.id),
         )
-        pid = resp.json()["purchase_id"]
-        liq = _liquidate(client, org_headers, pid)
-        assert liq.status_code == 200, liq.text
+        assert resp.status_code == 201, resp.text
+        _review(client, org_headers, resp.json()["id"])
+        _liquidate_entrada(client, org_headers, resp.json(), mat_compra, supplier)
 
-        assert _collector_accruals(db_session, pid) == []
+        db_session.expire_all()
+        mms = db_session.query(MoneyMovement).filter(
+            MoneyMovement.organization_id == test_organization.id,
+            MoneyMovement.source_type == "collector_commission",
+        ).all()
+        assert mms == []
         assert _system_categories(db_session, test_organization.id) == []
         tp = db_session.get(ThirdParty, collector.id)
         assert tp.current_balance == Decimal("0.00")
@@ -542,8 +597,8 @@ class TestCollectorCommissionEffects:
     ):
         """W-D1 guard: liquidar SIN el param -> cero MMs nuevos, efectos de
         siempre (avg = precio, saldo proveedor = -total)."""
-        resp = _entrada_compra(client, org_headers, wh_cv, supplier, mat_compra)
-        pid = resp.json()["purchase_id"]
+        resp = _direct_purchase(client, org_headers, wh_cv, supplier, mat_compra)
+        pid = resp.json()["id"]
         liq = _liquidate(client, org_headers, pid)
         assert liq.status_code == 200, liq.text
 
@@ -560,8 +615,8 @@ class TestCollectorCommissionEffects:
     def test_amount_invalid_422(
         self, client, org_headers, wh_cv, supplier, mat_compra, collector,
     ):
-        resp = _entrada_compra(client, org_headers, wh_cv, supplier, mat_compra)
-        pid = resp.json()["purchase_id"]
+        resp = _direct_purchase(client, org_headers, wh_cv, supplier, mat_compra)
+        pid = resp.json()["id"]
         for bad in ("0", "-100"):
             liq = _liquidate(
                 client, org_headers, pid,
@@ -572,9 +627,9 @@ class TestCollectorCommissionEffects:
     def test_liquidate_collector_not_service_provider_422(
         self, client, org_headers, wh_cv, supplier, mat_compra,
     ):
-        resp = _entrada_compra(client, org_headers, wh_cv, supplier, mat_compra)
+        resp = _direct_purchase(client, org_headers, wh_cv, supplier, mat_compra)
         liq = _liquidate(
-            client, org_headers, resp.json()["purchase_id"],
+            client, org_headers, resp.json()["id"],
             collector_commission={"third_party_id": str(supplier.id), "amount": "5000"},
         )
         assert liq.status_code == 422
@@ -583,11 +638,11 @@ class TestCollectorCommissionEffects:
     def test_detail_exposes_collector_commission_total(
         self, client, org_headers, wh_cv, supplier, mat_compra, collector,
     ):
-        """Addendum pruebas Daniel: el costo de recoleccion se ve en el detalle
-        de la compra Y en la cara financiera de la entrada; anulada (cancel) ->
-        None en ambos (condonada se oculta)."""
-        resp = _entrada_compra(client, org_headers, wh_cv, supplier, mat_compra)
-        oid, pid = resp.json()["id"], resp.json()["purchase_id"]
+        """Addendum pruebas Daniel, re-anclado a compra DIRECTA (#93): el costo
+        de recoleccion se ve en el detalle de la compra; cancelada -> None
+        (condonada se oculta)."""
+        resp = _direct_purchase(client, org_headers, wh_cv, supplier, mat_compra)
+        pid = resp.json()["id"]
 
         # Antes de liquidar: None
         pd = client.get(f"{PURCHASES_URL}/{pid}", headers=org_headers).json()
@@ -601,14 +656,34 @@ class TestCollectorCommissionEffects:
 
         pd = client.get(f"{PURCHASES_URL}/{pid}", headers=org_headers).json()
         assert pd["collector_commission_total"] == 25000.0
-        od = client.get(f"{INBOUND_URL}/{oid}", headers=org_headers).json()
-        assert od["collector_commission_total"] == 25000.0
 
         # Cancelar -> auto-annul -> el detalle la oculta (None)
         cancel = client.patch(f"{PURCHASES_URL}/{pid}/cancel", headers=org_headers)
         assert cancel.status_code == 200, cancel.text
         pd = client.get(f"{PURCHASES_URL}/{pid}", headers=org_headers).json()
         assert pd["collector_commission_total"] is None
+
+    def test_entrada_detail_exposes_commission_total(
+        self, client, org_headers, wh_cv, supplier, mat_compra, collector,
+    ):
+        """#93: la comision POR ENTRADA (D11, purchase_id NULL) se ve en la
+        cara financiera de la entrada; desliquidar la anula -> None."""
+        resp = _entrada_compra(
+            client, org_headers, wh_cv, mat_compra,
+            collector_id=str(collector.id),
+        )
+        assert resp.status_code == 201, resp.text
+        oid = resp.json()["id"]
+        _review(client, org_headers, oid)
+        _liquidate_entrada(
+            client, org_headers, resp.json(), mat_compra, supplier,
+            collector_commission={"third_party_id": str(collector.id), "amount": "25000"},
+        )
+        od = client.get(f"{INBOUND_URL}/{oid}", headers=org_headers).json()
+        assert od["collector_commission_total"] == 25000.0
+
+        unliq = client.post(f"{INBOUND_URL}/{oid}/unliquidate", headers=org_headers)
+        assert unliq.status_code == 200, unliq.text
         od = client.get(f"{INBOUND_URL}/{oid}", headers=org_headers).json()
         assert od["collector_commission_total"] is None
 
@@ -619,8 +694,10 @@ class TestCollectorCommissionEffects:
 
 class TestCollectorCancelRoundtrip:
     def _setup_liquidated(self, client, org_headers, wh_cv, supplier, mat_compra, collector):
-        resp = _entrada_compra(client, org_headers, wh_cv, supplier, mat_compra)
-        pid = resp.json()["purchase_id"]
+        """#93: compra DIRECTA — el auto-annul purchase-level de #83 vive aca
+        (la comision de una entrada la anula la Entrada via unliquidate)."""
+        resp = _direct_purchase(client, org_headers, wh_cv, supplier, mat_compra)
+        pid = resp.json()["id"]
         liq = _liquidate(
             client, org_headers, pid,
             collector_commission={"third_party_id": str(collector.id), "amount": "50000"},
@@ -634,7 +711,6 @@ class TestCollectorCancelRoundtrip:
         pid = self._setup_liquidated(
             client, org_headers, wh_cv, supplier, mat_compra, collector
         )
-        # Derivada liquidada se cancela directo (fix deadlock Ciclo C)
         cancel = client.patch(f"{PURCHASES_URL}/{pid}/cancel", headers=org_headers)
         assert cancel.status_code == 200, cancel.text
 

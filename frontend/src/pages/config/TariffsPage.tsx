@@ -29,16 +29,21 @@ export default function TariffsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [code, setCode] = useState<TariffCode | "">("");
   const [price, setPrice] = useState(0);
+  const [kgPerUnit, setKgPerUnit] = useState(0);
   const [notes, setNotes] = useState("");
   const [historyCode, setHistoryCode] = useState<TariffCode | null>(null);
   const history = useTariffHistory(historyCode ?? undefined, historyCode !== null);
 
   const items = data?.items ?? [];
   const canManage = hasPermission("tariffs.manage");
+  // #93 D11: la equivalencia kg/unidad solo existe en la comision del
+  // recolector (el backend 422a en cualquier otro codigo)
+  const isGreenLoop = code === "comision_green_loop";
 
   const openCreate = (preselect?: TariffCode) => {
     setCode(preselect ?? "");
     setPrice(0);
+    setKgPerUnit(0);
     setNotes("");
     setDialogOpen(true);
   };
@@ -47,7 +52,13 @@ export default function TariffsPage() {
     if (!code || price <= 0) return;
     create.mutate(
       // La unidad es canonica por codigo (D11a) — la UI no la deja cambiar
-      { tariff_code: code, unit_price_cop: price, unit: CANONICAL_UNIT_BY_CODE[code], notes: notes || null },
+      {
+        tariff_code: code,
+        unit_price_cop: price,
+        unit: CANONICAL_UNIT_BY_CODE[code],
+        kg_per_unit: isGreenLoop && kgPerUnit > 0 ? kgPerUnit : null,
+        notes: notes || null,
+      },
       { onSuccess: () => setDialogOpen(false) }
     );
   };
@@ -96,6 +107,11 @@ export default function TariffsPage() {
                   </TableCell>
                   <TableCell className="text-slate-500">
                     {TARIFF_UNIT_LABELS[t.unit] ?? t.unit}
+                    {t.kg_per_unit != null && (
+                      <span className="block text-xs text-indigo-600">
+                        1 unidad ≡ {Number(t.kg_per_unit)} kg
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>{formatDate(t.created_at)}</TableCell>
                   <TableCell className="text-slate-500">{t.created_by_name ?? "—"}</TableCell>
@@ -145,6 +161,19 @@ export default function TariffsPage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio (COP) *</Label>
               <MoneyInput value={price} onChange={setPrice} decimals={2} placeholder="0" />
             </div>
+            {isGreenLoop && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Equivalencia kg por unidad
+                </Label>
+                <MoneyInput value={kgPerUnit} onChange={setKgPerUnit} decimals={2} placeholder="Ej: 14" />
+                <p className="text-xs text-slate-500 mt-1">
+                  Para la base de la comision: los materiales por unidad cuentan
+                  como esta cantidad de kg (ej: 14 kg por bateria). Vacio = las
+                  unidades no suman a la base.
+                </p>
+              </div>
+            )}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
               <Input
@@ -195,7 +224,12 @@ export default function TariffsPage() {
                         <span className="ml-2 text-xs text-emerald-600 font-medium">vigente</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">{formatCurrencyDecimals(Number(h.unit_price_cop))}</TableCell>
+                    <TableCell className="text-right">
+                      {formatCurrencyDecimals(Number(h.unit_price_cop))}
+                      {h.kg_per_unit != null && (
+                        <span className="block text-xs text-indigo-600">≡ {Number(h.kg_per_unit)} kg/u</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-slate-500">{h.created_by_name ?? "—"}</TableCell>
                     <TableCell className="text-slate-500 max-w-[200px] truncate">{h.notes ?? "—"}</TableCell>
                   </TableRow>

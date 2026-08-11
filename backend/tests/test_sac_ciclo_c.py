@@ -106,12 +106,27 @@ def mat_compra(db_session, test_organization, client, org_headers):
 
 
 @pytest.fixture
-def kg_dross_account(client, org_headers, supplier):
+def willard_holder(db_session, test_organization):
+    """Titular de las cuentas kg. Antes era el MISMO `supplier` que reparte las
+    compras, atajo que dejo de ser valido con el guard de #80 (el titular de una
+    cuenta kg no puede ser proveedor de compra): un solo tercero no puede vivir
+    en los dos canales. Separarlos es tambien mas fiel a la realidad."""
+    tp = create_third_party_with_category(
+        db_session, test_organization.id, "Willard S.A. (titular kg)",
+        "material_supplier",
+    )
+    db_session.commit()
+    return tp
+
+
+@pytest.fixture
+def kg_dross_account(client, org_headers, willard_holder):
     resp = client.post(
         f"{KG_URL}/accounts", headers=org_headers,
         json={
             "code": "W-DROSS-C", "display_name": "Willard Drosses C",
-            "account_type": "willard_drosses", "third_party_id": str(supplier.id),
+            "account_type": "willard_drosses",
+            "third_party_id": str(willard_holder.id),
         },
     )
     assert resp.status_code == 201, resp.text
@@ -119,13 +134,13 @@ def kg_dross_account(client, org_headers, supplier):
 
 
 @pytest.fixture
-def kg_bat_cv(client, org_headers, wh_cv, supplier):
+def kg_bat_cv(client, org_headers, wh_cv, willard_holder):
     resp = client.post(
         f"{KG_URL}/accounts", headers=org_headers,
         json={
             "code": "W-BAT-C", "display_name": "Willard Baterias C",
             "account_type": "willard_baterias", "warehouse_id": str(wh_cv.id),
-            "third_party_id": str(supplier.id),
+            "third_party_id": str(willard_holder.id),
         },
     )
     assert resp.status_code == 201, resp.text
@@ -136,19 +151,18 @@ def _past(days=2):
     return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 
 
-def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id, lines,
-             date_str=None, **extra):
-    resp = client.post(
-        INBOUND_URL, headers=headers,
-        json={
-            "inbound_type": inbound_type,
-            "warehouse_id": str(warehouse_id),
-            "third_party_id": str(third_party_id),
-            "date": date_str or _past(),
-            "lines": lines,
-            **extra,
-        },
-    )
+def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id=None,
+             lines, date_str=None, **extra):
+    body = {
+        "inbound_type": inbound_type,
+        "warehouse_id": str(warehouse_id),
+        "date": date_str or _past(),
+        "lines": lines,
+        **extra,
+    }
+    if third_party_id is not None:
+        body["third_party_id"] = str(third_party_id)
+    resp = client.post(INBOUND_URL, headers=headers, json=body)
     assert resp.status_code == 201, resp.text
     return resp.json()
 
@@ -160,11 +174,12 @@ def _willard(client, headers, wh, tp, mat, qty="10"):
     )
 
 
-def _purchase_order(client, headers, wh, tp, mat, qty="100", price="900"):
+def _purchase_order(client, headers, wh, mat, qty="100", **extra):
+    """#93: la captura tipo compra NO lleva proveedor — llega al liquidar."""
     return _inbound(
         client, headers, inbound_type="purchase", warehouse_id=wh.id,
-        third_party_id=tp.id,
-        lines=[{"material_id": str(mat.id), "quantity": qty, "unit_price": price}],
+        lines=[{"material_id": str(mat.id), "quantity": qty}],
+        **extra,
     )
 
 
@@ -174,11 +189,23 @@ def _confirm(client, headers, order_id):
     return resp.json()
 
 
-def _liquidate_purchase(client, headers, purchase_id):
-    resp = client.patch(
-        f"{PURCHASES_URL}/{purchase_id}/liquidate",
-        headers=headers,
-        json={"liquidation_date": _past()},
+def _review(client, headers, order_id):
+    resp = client.post(f"{INBOUND_URL}/{order_id}/review", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _liquidate_order(client, headers, order, mat, tp, qty="100", price="900"):
+    """#93: reviewed -> liquidated con reparto de UN proveedor."""
+    resp = client.post(
+        f"{INBOUND_URL}/{order['id']}/liquidate", headers=headers,
+        json={"lines": [{
+            "material_id": str(mat.id),
+            "allocations": [{
+                "third_party_id": str(tp.id),
+                "quantity": str(qty), "unit_price": str(price),
+            }],
+        }]},
     )
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -202,69 +229,78 @@ def _listing(client, headers, **params):
 
 class TestDisplayStatus:
     def test_willard_draft_registered(
-        self, client, org_headers, wh_cv, supplier, mat_bat, kg_bat_cv,
+        self, client, org_headers, wh_cv, willard_holder, supplier, mat_bat, kg_bat_cv,
     ):
-        body = _willard(client, org_headers, wh_cv, supplier, mat_bat)
+        body = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
         assert body["display_status"] == "registered"
         assert body["status"] == "draft"  # el tecnico sigue expuesto (compat)
 
     def test_willard_confirmed_liquidated(
-        self, client, org_headers, wh_cv, supplier, mat_bat, kg_bat_cv,
+        self, client, org_headers, wh_cv, willard_holder, supplier, mat_bat, kg_bat_cv,
     ):
-        body = _willard(client, org_headers, wh_cv, supplier, mat_bat)
+        body = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
         out = _confirm(client, org_headers, body["id"])
         assert out["display_status"] == "liquidated"
 
     def test_willard_annulled(
-        self, client, org_headers, wh_cv, supplier, mat_bat, kg_bat_cv,
+        self, client, org_headers, wh_cv, willard_holder, supplier, mat_bat, kg_bat_cv,
     ):
-        body = _willard(client, org_headers, wh_cv, supplier, mat_bat)
+        body = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/annul", headers=org_headers,
             json={"reason": "c"},
         )
         assert resp.json()["display_status"] == "annulled"
 
-    def test_purchase_registered_despite_confirmed_order(
-        self, client, org_headers, wh_cv, supplier, mat_compra,
+    def test_purchase_draft_and_reviewed(
+        self, client, org_headers, wh_cv, mat_compra,
     ):
-        """El corazon del ciclo: la orden interna esta 'confirmed' (captura
-        completa) pero la compra derivada sigue registrada — el usuario ve
-        UNA cosa: Registrada."""
-        body = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
-        assert body["status"] == "confirmed"
-        assert body["purchase_status"] == "registered"
+        """#93: la entrada tipo compra nace draft (Registrada) y la revision
+        es un estado visible propio (Revisada)."""
+        body = _purchase_order(client, org_headers, wh_cv, mat_compra)
+        assert body["status"] == "draft"
         assert body["display_status"] == "registered"
+        assert body["purchases"] == []
+
+        out = _review(client, org_headers, body["id"])
+        assert out["status"] == "reviewed"
+        assert out["display_status"] == "reviewed"
 
     def test_purchase_liquidated(
         self, client, org_headers, wh_cv, supplier, mat_compra,
     ):
-        body = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
-        _liquidate_purchase(client, org_headers, body["purchase_id"])
-        out = _detail(client, org_headers, body["id"])
+        body = _purchase_order(client, org_headers, wh_cv, mat_compra)
+        _review(client, org_headers, body["id"])
+        out = _liquidate_order(client, org_headers, body, mat_compra, supplier)
         assert out["display_status"] == "liquidated"
 
-    def test_purchase_cancelled_after_liquidation_annulled(
+    def test_purchase_annulled_after_liquidation(
         self, client, org_headers, wh_cv, supplier, mat_compra,
     ):
-        """W-C2 caso delicado: compra liquidada y luego cancelada desde el
-        modulo de compras — la orden interna sigue 'confirmed' pero el usuario
-        ve Anulada (precedencia)."""
-        body = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
-        _liquidate_purchase(client, org_headers, body["purchase_id"])
-        resp = client.patch(
-            f"{PURCHASES_URL}/{body['purchase_id']}/cancel", headers=org_headers
+        """#93 supersede el caso W-C2: la compra puente no se cancela directo
+        (400) — anular la entrada LIQUIDADA delega en unliquidate y el usuario
+        ve UNA cosa: Anulada."""
+        body = _purchase_order(client, org_headers, wh_cv, mat_compra)
+        _review(client, org_headers, body["id"])
+        result = _liquidate_order(client, org_headers, body, mat_compra, supplier)
+        pid = result["purchases"][0]["purchase_id"]
+        resp = client.patch(f"{PURCHASES_URL}/{pid}/cancel", headers=org_headers)
+        assert resp.status_code == 400  # guia a la Entrada
+
+        resp = client.post(
+            f"{INBOUND_URL}/{body['id']}/annul", headers=org_headers,
+            json={"reason": "c"},
         )
         assert resp.status_code == 200, resp.text
         out = _detail(client, org_headers, body["id"])
-        assert out["status"] == "confirmed"  # la orden no se toco
+        assert out["status"] == "annulled"
         assert out["display_status"] == "annulled"
 
     def test_purchase_order_annulled(
-        self, client, org_headers, wh_cv, supplier, mat_compra,
+        self, client, org_headers, wh_cv, mat_compra,
     ):
-        """Anular la orden registrada cancela el par (D7b) — Anulada."""
-        body = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
+        """Anular la captura draft — Anulada (sin compras que cancelar)."""
+        body = _purchase_order(client, org_headers, wh_cv, mat_compra)
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/annul", headers=org_headers,
             json={"reason": "c"},
@@ -272,35 +308,42 @@ class TestDisplayStatus:
         assert resp.json()["display_status"] == "annulled"
 
     def test_filter_parity_with_field(
-        self, client, org_headers, wh_cv, supplier, mat_bat, mat_compra,
+        self, client, org_headers, wh_cv, willard_holder, supplier, mat_bat, mat_compra,
         kg_bat_cv,
     ):
         """W-C2 guardrail: para cada valor del filtro, los ids retornados ==
-        los ids cuyo campo display_status tiene ese valor (sin filtro)."""
+        los ids cuyo campo display_status tiene ese valor (sin filtro).
+        #93: se suma el estado 'reviewed'."""
         # Set mixto: willard draft, willard liquidada, willard anulada,
-        # compra registrada, compra liquidada, compra cancelada-post-liq
-        w_draft = _willard(client, org_headers, wh_cv, supplier, mat_bat)
-        w_liq = _willard(client, org_headers, wh_cv, supplier, mat_bat)
+        # compra draft, compra revisada, compra liquidada, compra anulada
+        w_draft = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
+        w_liq = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
         _confirm(client, org_headers, w_liq["id"])
-        w_ann = _willard(client, org_headers, wh_cv, supplier, mat_bat)
+        w_ann = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
         client.post(f"{INBOUND_URL}/{w_ann['id']}/annul", headers=org_headers,
                     json={"reason": "c"})
-        p_reg = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
-        p_liq = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
-        _liquidate_purchase(client, org_headers, p_liq["purchase_id"])
-        p_cxl = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
-        _liquidate_purchase(client, org_headers, p_cxl["purchase_id"])
-        client.patch(f"{PURCHASES_URL}/{p_cxl['purchase_id']}/cancel", headers=org_headers)
+        p_draft = _purchase_order(client, org_headers, wh_cv, mat_compra)
+        p_rev = _purchase_order(client, org_headers, wh_cv, mat_compra)
+        _review(client, org_headers, p_rev["id"])
+        p_liq = _purchase_order(client, org_headers, wh_cv, mat_compra)
+        _review(client, org_headers, p_liq["id"])
+        _liquidate_order(client, org_headers, p_liq, mat_compra, supplier)
+        p_ann = _purchase_order(client, org_headers, wh_cv, mat_compra)
+        _review(client, org_headers, p_ann["id"])
+        _liquidate_order(client, org_headers, p_ann, mat_compra, supplier)
+        client.post(f"{INBOUND_URL}/{p_ann['id']}/annul", headers=org_headers,
+                    json={"reason": "c"})
 
         all_items = _listing(client, org_headers, limit=100)["items"]
         by_field = {
             ds: {i["id"] for i in all_items if i["display_status"] == ds}
-            for ds in ("registered", "liquidated", "annulled")
+            for ds in ("registered", "reviewed", "liquidated", "annulled")
         }
         expected = {
-            "registered": {w_draft["id"], p_reg["id"]},
+            "registered": {w_draft["id"], p_draft["id"]},
+            "reviewed": {p_rev["id"]},
             "liquidated": {w_liq["id"], p_liq["id"]},
-            "annulled": {w_ann["id"], p_cxl["id"]},
+            "annulled": {w_ann["id"], p_ann["id"]},
         }
         for ds, ids in expected.items():
             assert by_field[ds] == ids, f"campo {ds}: {by_field[ds]} != {ids}"
@@ -318,18 +361,21 @@ class TestSearch:
     def test_search_by_plate_driver_material_tp_number(
         self, client, org_headers, wh_cv, supplier, mat_compra,
     ):
+        """#93: el tercero ya no vive en la cabecera — el buscador lo alcanza
+        via las ASIGNACIONES del reparto (EXISTS, R2)."""
         drv = client.post(DRIVERS_URL, headers=org_headers,
                           json={"name": "Anibal Buscable"}).json()
         veh = client.post(VEHICLES_URL, headers=org_headers,
                           json={"plate": "XYZ-987"}).json()
         body = _inbound(
             client, org_headers, inbound_type="purchase", warehouse_id=wh_cv.id,
-            third_party_id=supplier.id,
-            lines=[{"material_id": str(mat_compra.id), "quantity": "50", "unit_price": "700"}],
+            lines=[{"material_id": str(mat_compra.id), "quantity": "50"}],
             driver_id=drv["id"], vehicle_id=veh["id"],
         )
+        _review(client, org_headers, body["id"])
+        _liquidate_order(client, org_headers, body, mat_compra, supplier, qty="50", price="700")
         # Ruido: otra orden sin esos atributos
-        _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
+        _purchase_order(client, org_headers, wh_cv, mat_compra)
 
         for term in ("XYZ-987", "xyz", "Anibal", "CHATARRA-C", "Willard Ciclo C",
                      str(body["order_number"])):
@@ -346,10 +392,10 @@ class TestSearch:
 
 class TestSort:
     def test_sort_oldest_fifo(
-        self, client, org_headers, wh_cv, supplier, mat_bat, kg_bat_cv,
+        self, client, org_headers, wh_cv, willard_holder, supplier, mat_bat, kg_bat_cv,
     ):
-        first = _willard(client, org_headers, wh_cv, supplier, mat_bat)
-        second = _willard(client, org_headers, wh_cv, supplier, mat_bat)
+        first = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
+        second = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
         newest = _listing(client, org_headers)["items"]
         assert newest[0]["id"] == second["id"]  # default: mas nueva primero
         oldest = _listing(client, org_headers, sort="oldest")["items"]
@@ -366,12 +412,12 @@ class TestSort:
 
 class TestWillardWorld:
     def test_worlds_and_purchase_null(
-        self, client, org_headers, wh_cv, supplier, mat_bat, mat_dross,
+        self, client, org_headers, wh_cv, willard_holder, supplier, mat_bat, mat_dross,
         mat_compra, kg_bat_cv, kg_dross_account,
     ):
-        w_bat = _willard(client, org_headers, wh_cv, supplier, mat_bat)
-        w_dross = _willard(client, org_headers, wh_cv, supplier, mat_dross, qty="100")
-        p = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
+        w_bat = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
+        w_dross = _willard(client, org_headers, wh_cv, willard_holder, mat_dross, qty="100")
+        p = _purchase_order(client, org_headers, wh_cv, mat_compra)
 
         assert w_bat["willard_world"] == "postconsumo"
         assert w_dross["willard_world"] == "drosses"
@@ -389,10 +435,10 @@ class TestWillardWorld:
 
 class TestAuditNames:
     def test_created_and_liquidated_willard(
-        self, client, org_headers, test_user, wh_cv, supplier, mat_bat, kg_bat_cv,
+        self, client, org_headers, test_user, wh_cv, willard_holder, supplier, mat_bat, kg_bat_cv,
     ):
         expected_name = test_user.full_name or test_user.email
-        body = _willard(client, org_headers, wh_cv, supplier, mat_bat)
+        body = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
         assert body["created_by_name"] == expected_name
         assert body["liquidated_by_name"] is None  # draft: nadie ha liquidado
         assert body["liquidated_at"] is None
@@ -405,16 +451,19 @@ class TestAuditNames:
         self, client, org_headers, test_user, wh_cv, supplier, mat_compra,
     ):
         expected_name = test_user.full_name or test_user.email
-        body = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
+        body = _purchase_order(client, org_headers, wh_cv, mat_compra)
         assert body["created_by_name"] == expected_name
         assert body["liquidated_by_name"] is None
 
-        _liquidate_purchase(client, org_headers, body["purchase_id"])
+        _review(client, org_headers, body["id"])
+        _liquidate_order(client, org_headers, body, mat_compra, supplier)
         out = _detail(client, org_headers, body["id"])
         assert out["liquidated_by_name"] == expected_name  # Purchase.liquidated_by
         assert out["liquidated_at"] is not None
+        # #93: la revision tambien queda auditada
+        assert out["reviewed_by_name"] == expected_name
 
-        other = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
+        other = _purchase_order(client, org_headers, wh_cv, mat_compra)
         ann = client.post(
             f"{INBOUND_URL}/{other['id']}/annul", headers=org_headers,
             json={"reason": "c"},
@@ -428,11 +477,11 @@ class TestAuditNames:
 
 class TestWorldAndWarehouseFilters:
     def test_filter_by_willard_world(
-        self, client, org_headers, wh_cv, supplier, mat_bat, mat_dross,
+        self, client, org_headers, wh_cv, willard_holder, supplier, mat_bat, mat_dross,
         kg_bat_cv, kg_dross_account,
     ):
-        w_bat = _willard(client, org_headers, wh_cv, supplier, mat_bat)
-        w_dross = _willard(client, org_headers, wh_cv, supplier, mat_dross, qty="100")
+        w_bat = _willard(client, org_headers, wh_cv, willard_holder, mat_bat)
+        w_dross = _willard(client, org_headers, wh_cv, willard_holder, mat_dross, qty="100")
 
         post = _listing(client, org_headers, willard_world="postconsumo", limit=100)
         assert {i["id"] for i in post["items"]} == {w_bat["id"]}
@@ -440,7 +489,7 @@ class TestWorldAndWarehouseFilters:
         assert {i["id"] for i in dross["items"]} == {w_dross["id"]}
 
     def test_world_filter_excludes_both_channels_purchase(
-        self, client, org_headers, db_session, test_organization, wh_cv, supplier,
+        self, client, org_headers, db_session, test_organization, wh_cv, willard_holder, supplier,
         kg_bat_cv,
     ):
         """Q-04: un material 'ambos canales' (world=postconsumo Y compra_regular)
@@ -449,8 +498,8 @@ class TestWorldAndWarehouseFilters:
         mat = _mat(db_session, test_organization.id, "BAT-AMBOS-C", unit="unidad")
         _post_formula(client, org_headers, mat.id, "battery_to_lead", {"kg_lead_per_unit": 2.5})
         _set_profile(client, org_headers, mat.id, compra_regular=True, willard_world="postconsumo")
-        p = _purchase_order(client, org_headers, wh_cv, supplier, mat, qty="10", price="500")
-        w = _willard(client, org_headers, wh_cv, supplier, mat)
+        p = _purchase_order(client, org_headers, wh_cv, mat, qty="10")
+        w = _willard(client, org_headers, wh_cv, willard_holder, mat)
 
         out = _listing(client, org_headers, willard_world="postconsumo", limit=100)
         ids = {i["id"] for i in out["items"]}
@@ -463,11 +512,10 @@ class TestWorldAndWarehouseFilters:
     ):
         wh_jm = create_warehouse(db_session, test_organization.id, "Juan Mina C")
         db_session.commit()
-        p_cv = _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
+        p_cv = _purchase_order(client, org_headers, wh_cv, mat_compra)
         p_jm = _inbound(
             client, org_headers, inbound_type="purchase", warehouse_id=wh_jm.id,
-            third_party_id=supplier.id,
-            lines=[{"material_id": str(mat_compra.id), "quantity": "20", "unit_price": "800"}],
+            lines=[{"material_id": str(mat_compra.id), "quantity": "20"}],
         )
         out = _listing(client, org_headers, warehouse_id=str(wh_jm.id), limit=100)
         ids = {i["id"] for i in out["items"]}
@@ -489,7 +537,7 @@ class TestTenancyAndGating:
     ):
         """Los joins nuevos (search/display_status) conservan el filtro de org:
         org2 (viewer, flag on) no ve las ordenes de org1."""
-        _purchase_order(client, org_headers, wh_cv, supplier, mat_compra)
+        _purchase_order(client, org_headers, wh_cv, mat_compra)
         for params in (
             {"display_status": "registered"},
             {"search": "CHATARRA-C"},

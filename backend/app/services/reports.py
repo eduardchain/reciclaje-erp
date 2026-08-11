@@ -2470,6 +2470,14 @@ class ReportService:
             "adjustment_annulment",
             "transformation_annulment",
             "inbound_annulment",  # SAC E2 D8 (extension H2)
+            # #93 D20a: reversa de unliquidate — SI es reversion (a diferencia
+            # de inbound_discrepancy, que es OPERATIVO y queda fuera — A5).
+            # D20b: mch_source_is_cancelled NO se extiende para desliquidadas:
+            # la compra termina en 'registered' (no 'cancelled'), el checkpoint
+            # purchase_liquidation original PERMANECE en los cortes y este
+            # registro re-establece el avg — quitar el original romperia la
+            # cadena entre la liquidacion y su reversa.
+            "purchase_unliquidation",
         ]
         mch_source_is_cancelled = or_(
             and_(
@@ -2483,6 +2491,18 @@ class ReportService:
             ),
             and_(
                 MaterialCostHistory.source_type == "adjustment_increase",
+                exists(
+                    select(_IA.id).where(
+                        _IA.id == MaterialCostHistory.source_id,
+                        _IA.status == "annulled",
+                    )
+                ),
+            ),
+            # #93 fix 5: el checkpoint de un descuadre de entrada ANULADO no
+            # debe verse en cortes (doctrina #41) — espejo de adjustment_increase
+            # (mismo source: el InventoryAdjustment del descuadre).
+            and_(
+                MaterialCostHistory.source_type == "inbound_discrepancy",
                 exists(
                     select(_IA.id).where(
                         _IA.id == MaterialCostHistory.source_id,

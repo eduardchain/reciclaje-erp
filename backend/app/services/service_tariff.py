@@ -40,11 +40,20 @@ class ServiceTariffService:
                 f"no {obj_in.unit}",
             )
 
+        # #93 D11: kg_per_unit solo tiene sentido en comision_green_loop (la
+        # base de la comision mezcla kg y unidades — "14 kg por unidad")
+        if obj_in.kg_per_unit is not None and obj_in.tariff_code != "comision_green_loop":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="kg_per_unit solo aplica a la tarifa comision_green_loop",
+            )
+
         db_obj = ServiceTariff(
             organization_id=organization_id,
             tariff_code=obj_in.tariff_code,
             unit_price_cop=obj_in.unit_price_cop,
             unit=obj_in.unit,
+            kg_per_unit=obj_in.kg_per_unit,
             notes=obj_in.notes,
             created_by=user_id,
         )

@@ -1005,12 +1005,12 @@ def get_by_third_party(
              event_type="purchase_commission",
              description=f"{_charge_label} Compra #{purch.purchase_number}: {comm.concept}",
              amount=float(comm.commission_amount), direction=-1,
-             status="confirmed" if purch.status == "liquidated" else "cancelled",
+             status="confirmed" if ret.reverted_at is None else "cancelled",
              reference_number=None, movement_number=None,
              source="purchase_commission", source_id=str(comm.id), source_number=purch.purchase_number,
              **_null_ops)
-        if purch.status == "cancelled" and purch.cancelled_at:
-            _evt(purch.liquidated_at, purch.cancelled_at, 2,
+        if ret.reverted_at is not None:
+            _evt(purch.liquidated_at, ret.reverted_at, 2,
                  id=f"purch-comm-cancel-{comm.id}", date=purch.liquidated_at.isoformat(),
                  document_date=purch.date.isoformat(),
                  event_type="purchase_commission_cancellation",
@@ -1041,6 +1041,20 @@ def get_by_third_party(
             Purchase.liquidated_at.isnot(None),
         )
     )
+    # El estado del evento y el contra-evento siguen a la FILA (reverted_at),
+    # no al status de la compra (fix QA addendum #93): una compra re-liquidada
+    # (D20) queda 'liquidated' con filas viejas revertidas + filas nuevas
+    # vivas — con el disparador por status, las revertidas se mostraban como
+    # confirmadas y el statement divergia del saldo (#55). En canceladas el
+    # comportamiento es identico al de siempre: el cancel SIEMPRE estampa
+    # reverted_at (#75), asi que todas sus filas emiten su par evento+reversa.
+    def _ret_reversal_desc(ret, purch) -> str:
+        if purch.status == "cancelled":
+            return (f"Retencion {_ret_label(ret)} Compra #{purch.purchase_number} "
+                    "cancelada (reversa)")
+        return (f"Retencion {_ret_label(ret)} Compra #{purch.purchase_number} "
+                "revertida (des-liquidacion)")
+
     for ret, purch in db.execute(ret_supplier_query).all():
         _evt(purch.liquidated_at, purch.liquidated_at, 0,
              id=f"purch-retention-sup-{ret.id}", date=purch.liquidated_at.isoformat(),
@@ -1048,16 +1062,16 @@ def get_by_third_party(
              event_type="purchase_retention",
              description=f"Retencion {_ret_label(ret)} Compra #{purch.purchase_number}",
              amount=float(ret.amount), direction=1,
-             status="confirmed" if purch.status == "liquidated" else "cancelled",
+             status="confirmed" if ret.reverted_at is None else "cancelled",
              reference_number=None, movement_number=None,
              source="purchase_retention", source_id=str(ret.id), source_number=purch.purchase_number,
              **_null_ops)
-        if purch.status == "cancelled" and purch.cancelled_at:
-            _evt(purch.liquidated_at, purch.cancelled_at, 2,
+        if ret.reverted_at is not None:
+            _evt(purch.liquidated_at, ret.reverted_at, 2,
                  id=f"purch-ret-sup-cancel-{ret.id}", date=purch.liquidated_at.isoformat(),
                  document_date=purch.date.isoformat(),
                  event_type="purchase_retention_cancellation",
-                 description=f"Retencion {_ret_label(ret)} Compra #{purch.purchase_number} cancelada (reversa)",
+                 description=_ret_reversal_desc(ret, purch),
                  amount=float(ret.amount), direction=-1,
                  status="annulled", reference_number=None, movement_number=None,
                  source="purchase_retention", source_id=str(ret.id), source_number=purch.purchase_number,
@@ -1081,16 +1095,16 @@ def get_by_third_party(
              event_type="purchase_retention",
              description=f"Retencion {_ret_label(ret)} Compra #{purch.purchase_number}",
              amount=float(ret.amount), direction=-1,
-             status="confirmed" if purch.status == "liquidated" else "cancelled",
+             status="confirmed" if ret.reverted_at is None else "cancelled",
              reference_number=None, movement_number=None,
              source="purchase_retention", source_id=str(ret.id), source_number=purch.purchase_number,
              **_null_ops)
-        if purch.status == "cancelled" and purch.cancelled_at:
-            _evt(purch.liquidated_at, purch.cancelled_at, 2,
+        if ret.reverted_at is not None:
+            _evt(purch.liquidated_at, ret.reverted_at, 2,
                  id=f"purch-ret-ent-cancel-{ret.id}", date=purch.liquidated_at.isoformat(),
                  document_date=purch.date.isoformat(),
                  event_type="purchase_retention_cancellation",
-                 description=f"Retencion {_ret_label(ret)} Compra #{purch.purchase_number} cancelada (reversa)",
+                 description=_ret_reversal_desc(ret, purch),
                  amount=float(ret.amount), direction=1,
                  status="annulled", reference_number=None, movement_number=None,
                  source="purchase_retention", source_id=str(ret.id), source_number=purch.purchase_number,

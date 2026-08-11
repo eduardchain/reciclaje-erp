@@ -368,12 +368,17 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         liquidation_date: Optional[datetime] = None,
         retentions_data: Optional[List] = None,
         collector_commission_data: Optional[object] = None,
+        commit: bool = True,
     ) -> Purchase:
         """
         Liquidar compra registrada (cambiar status a 'liquidated').
 
         Confirma precios, mueve stock de transito a liquidado, recalcula costo
         promedio, y actualiza saldo del proveedor. NO involucra pago (cuenta de dinero).
+
+        commit=False (#93 D14 fix 1, patron #20/#75): la liquidacion atomica de
+        una Entrada liquida N compras en UNA transaccion — trece commits
+        internos dejarian seis compras grabadas si la septima revienta.
 
         Workflow:
         1. Validar compra existe y status='registered'
@@ -628,11 +633,14 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             supplier.current_balance += net_payment
             print(f"  💳 Pago inmediato: ${net_payment} desde {account.name}")
 
-        db.commit()
-        db.refresh(purchase)
+        if commit:
+            db.commit()
+            db.refresh(purchase)
+        else:
+            db.flush()
 
         return purchase
-    
+
     def cancel(
         self,
         db: Session,
@@ -698,24 +706,33 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 detail="No se puede cancelar una compra de doble partida. Cancele la doble partida."
             )
 
-        # SAC E2 D7b: compra derivada REGISTRADA se anula desde la orden
-        # (par atomico, espejo patron #67). Ciclo C: una derivada LIQUIDADA si
-        # se cancela directo — con reversa y eleccion de pago enlazado (#63);
-        # antes esto era un deadlock (annul de orden tambien daba 400) y el
-        # estado "orden confirmada + compra cancelada" ya no confunde: el
-        # display_status derivado la muestra Anulada.
-        if not from_inbound and purchase.status == "registered":
-            from app.models.inbound_order import InboundOrder
+        # #93 D14 (camino de reversa UNICO, supersede el guard D7b de E2 y su
+        # excepcion de Ciclo C): una compra enlazada a una Entrada — por la
+        # puente, que cubre legacy 1:1 backfilleado Y las N del reparto — NO se
+        # cancela por separado en NINGUN estado. Cancelar una sola de las 13
+        # dejaria la Entrada con un descuadre calculado sobre un reparto que ya
+        # cambio. El deadlock que Ciclo C resolvio no vuelve: el annul de la
+        # Entrada ahora SI cubre liquidadas (delega en unliquidate, D14 fix 3).
+        if not from_inbound:
+            from app.models.inbound_order import InboundOrder, InboundOrderPurchase
             linked_number = db.execute(
-                select(InboundOrder.order_number).where(
-                    InboundOrder.purchase_id == purchase_id,
+                select(InboundOrder.order_number)
+                .join(
+                    InboundOrderPurchase,
+                    InboundOrderPurchase.inbound_order_id == InboundOrder.id,
+                )
+                .where(
+                    InboundOrderPurchase.purchase_id == purchase_id,
                     InboundOrder.status != "annulled",
                 )
             ).scalar_one_or_none()
             if linked_number is not None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Anule desde la orden de recepción #{linked_number}",
+                    detail=(
+                        f"Esta compra pertenece a la Entrada #{linked_number} — "
+                        "anule la liquidación desde la Entrada"
+                    ),
                 )
 
         if purchase.status == "cancelled":
@@ -749,147 +766,48 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Nota: NO se reembolsa a cuenta de pago. El pago es operacion separada
         # via MoneyMovement y debe anularse por separado si corresponde.
 
-        # Step 5: Create reversal movements and revert stock
-        # Fase 5 (remocion ponderada): la remocion saca lo que la compra METIO
-        # realmente. Fuente H1: el costo ajustado por comision vive en el
-        # InventoryMovement (se escribio al liquidar), NO en la linea (que solo
-        # tiene unit_price crudo) — se lee via el mismo patron deque-por-firma
-        # de liquidate/QW-B, single source of truth sin recompute drift.
-        movements_by_key: dict = defaultdict(deque)
+        # Step 5-6: reversa. Para liquidadas, el cuerpo vive en el helper
+        # compartido _revert_liquidation_effects (#93 D20c): unliquidate NO es
+        # una tercera copia del codigo mas delicado del motor.
+        warnings: list[str] = []
+        supplier = db.get(ThirdParty, purchase.supplier_id)
         if was_liquidated:
-            purchase_movements = db.query(InventoryMovement).filter(
-                InventoryMovement.reference_type == "purchase",
-                InventoryMovement.reference_id == purchase.id,
-                InventoryMovement.movement_type == "purchase",
-            ).all()
-            for mv in purchase_movements:
-                movements_by_key[(mv.material_id, mv.warehouse_id, mv.quantity)].append(mv)
-
-        total_cancellation_adjustment = Decimal("0")
-        for line in purchase.lines:
-            material = line.material
-
-            # Costo ajustado desde el movimiento de ESTA linea (fallback al
-            # precio crudo solo si el movimiento no existe — huerfanos/legacy)
-            adjusted_unit_cost = line.unit_price
-            if was_liquidated:
-                queue = movements_by_key.get((line.material_id, line.warehouse_id, line.quantity))
-                inv_movement = queue.popleft() if queue else None
-                if inv_movement is not None:
-                    adjusted_unit_cost = inv_movement.unit_cost
-
-            # Create reversal movement (unit_cost = ajustado, por auditoria)
-            reversal = InventoryMovement(
-                organization_id=organization_id,
-                material_id=line.material_id,
-                warehouse_id=line.warehouse_id,
-                movement_type="purchase_reversal",
-                quantity=-line.quantity,  # Negative = out
-                unit_cost=adjusted_unit_cost,
-                reference_type="purchase",
-                reference_id=purchase.id,
-                date=purchase.date,
-                notes=f"Cancellation of purchase #{purchase.purchase_number}",
+            total_cancellation_adjustment, warnings = self._revert_liquidation_effects(
+                db,
+                purchase,
+                organization_id,
+                user_id,
+                mch_source_type="purchase_cancellation",
+                to_transit=False,
+                # #83: el annulled_reason del accrual de recolector es texto de
+                # negocio (español) — byte-parity con el ciclo D pre-#93
+                reason_label=f"Cancelación compra #{purchase.purchase_number}",
+                warning_event="la cancelación",
             )
-            db.add(reversal)
-
-            # Revert stock del bucket correcto segun estado previo
-            material.current_stock -= line.quantity
-            if was_liquidated:
-                # Contribucion REAL de la linea al pool: costo ajustado + el
-                # relleno de hueco que hizo al liquidar (H1) — si el fill sale
-                # del P&L (status cancelled), su valor tambien sale del pool.
-                u_total = adjusted_unit_cost
-                if line.quantity > 0:
-                    u_total = adjusted_unit_cost + (line.cost_adjustment / line.quantity)
-
-                old_liq = material.current_stock_liquidated
-                old_avg = material.current_average_cost
-                new_avg, adjustment = remove_from_pool(
-                    liquidated=old_liq,
-                    avg_cost=old_avg,
-                    quantity=line.quantity,
-                    unit_cost=u_total,
-                )
-                material.current_average_cost = new_avg
-                material.current_stock_liquidated -= line.quantity
-                total_cancellation_adjustment += adjustment
-                # Append-only: la cancelacion escribe su propio registro en el
-                # historial (no borra el de la liquidacion). SIEMPRE, incluso si
-                # el avg no cambio: el registro original queda oculto para la
-                # valuacion as-of (op cancelada, filtro H2) — sin este registro
-                # la cadena visible perderia el costo y as-of(hoy) != balance vivo.
-                material_cost_history_service.record_cost_change(
-                        db=db,
-                        material=material,
-                        previous_cost=old_avg,
-                        previous_stock=old_liq,
-                        new_cost=new_avg,
-                        new_stock=old_liq - line.quantity,
-                        source_type="purchase_cancellation",
-                        source_id=purchase.id,
-                        organization_id=organization_id,
-                        transaction_date=business_today(),
-                    )
-            else:
-                material.current_stock_transit -= line.quantity
-
-            print(f"  ↩️  Reversed: {material.code} -{line.quantity} (new stock: {material.current_stock}, cost: {material.current_average_cost})")
-
-        if was_liquidated:
             # != 0 solo si la remocion no pudo sacar exactamente lo que la compra
             # metio (hubo extracciones intermedias o cruzo a hueco). P&L por
             # cancelled_at (G3: puede caer en periodo distinto al de la compra).
             purchase.cancellation_cost_adjustment = total_cancellation_adjustment
-
-        # Step 6: Revert supplier balance (solo si estaba liquidada, ya que al crear no se modifica)
-        supplier = db.get(ThirdParty, purchase.supplier_id)
-        if was_liquidated:
-            supplier.current_balance += purchase.total_amount  # Reduce debt
-
-            # Step 6b: Revertir saldo de comisionistas
-            for comm in (purchase.commissions or []):
-                recipient = db.get(ThirdParty, comm.third_party_id)
-                recipient.current_balance += comm.commission_amount
-                print(f"  ↩️  Comision revertida: ${comm.commission_amount} → {recipient.name}")
-
-            # Step 6c (SAC E2 D9): revertir bloques compensatorios de retenciones
-            # — inverso exacto de la liquidacion; reverted_at = auditoria sin
-            # delete fisico. Compatible con annul_linked_payments (#63): el pago
-            # enlazado fue NETO → su reversa usa el monto del movimiento.
-            for ret in (purchase.retentions or []):
-                if ret.reverted_at is not None:
-                    continue
-                supplier.current_balance -= ret.amount
-                entity = db.get(ThirdParty, ret.third_party_id)
-                if entity:
-                    entity.current_balance += ret.amount
-                ret.reverted_at = datetime.now(timezone.utc)
-                print(f"  ↩️  Retencion revertida: ${ret.amount} ({ret.retention_type})")
-
-            # Step 6d (SAC Ciclo D): auto-anular la comision de recolector
-            # causada al liquidar (patron commission_accrual #23 — sin eleccion
-            # #63: no hay caja de por medio). Filtro con source_type (D-02 QA):
-            # jamas anular un expense_accrual manual asociado a la compra.
-            # Solo confirmed → si ya se anulo a mano en Tesoreria, no-op seguro.
-            collector_accruals = db.scalars(
-                select(MoneyMovement).where(
-                    MoneyMovement.purchase_id == purchase_id,
-                    MoneyMovement.movement_type == "expense_accrual",
-                    MoneyMovement.source_type == "collector_commission",
-                    MoneyMovement.status == "confirmed",
+        else:
+            # Registrada: solo reversa fisica del transito (cero financiero)
+            for line in purchase.lines:
+                material = line.material
+                reversal = InventoryMovement(
+                    organization_id=organization_id,
+                    material_id=line.material_id,
+                    warehouse_id=line.warehouse_id,
+                    movement_type="purchase_reversal",
+                    quantity=-line.quantity,  # Negative = out
+                    unit_cost=line.unit_price,
+                    reference_type="purchase",
+                    reference_id=purchase.id,
+                    date=purchase.date,
+                    notes=f"Cancellation of purchase #{purchase.purchase_number}",
                 )
-            ).all()
-            for mov in collector_accruals:
-                mov.status = "annulled"
-                mov.annulled_at = datetime.now(timezone.utc)
-                mov.annulled_by = user_id
-                mov.annulled_reason = f"Cancelación compra #{purchase.purchase_number}"
-                if mov.third_party_id:
-                    collector_tp = db.get(ThirdParty, mov.third_party_id)
-                    if collector_tp:
-                        collector_tp.current_balance += mov.amount
-                print(f"  ↩️  Comision recolector anulada: ${mov.amount} (MM #{mov.movement_number})")
+                db.add(reversal)
+                material.current_stock -= line.quantity
+                material.current_stock_transit -= line.quantity
+                print(f"  ↩️  Reversed: {material.code} -{line.quantity} (new stock: {material.current_stock}, cost: {material.current_average_cost})")
 
         # Step 7: opcional — anular pagos inmediatos enlazados (payment_to_supplier con purchase_id).
         # Simétrico a ventas (decisión #63): revierte el efecto del pago: caja +amount, proveedor
@@ -917,19 +835,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 mov.annulled_reason = f"Cancelación compra #{purchase.purchase_number}"
                 print(f"  📝 Pago #{mov.movement_number} anulado (cancelación compra)")
 
-        # Step 8: warnings de hueco proyectado (una vez por material, estado FINAL)
-        warnings: list[str] = []
-        if was_liquidated:
-            seen: dict = {}
-            for line in purchase.lines:
-                seen[line.material_id] = line.material
-            for material in seen.values():
-                if material.current_stock_liquidated < 0:
-                    warnings.append(
-                        f"El stock liquidado de {material.code} queda negativo tras la "
-                        f"cancelación: {float(material.current_stock_liquidated):g} "
-                        f"{material.default_unit or 'kg'} (el material ya fue vendido)"
-                    )
+        # Step 8: warnings de hueco proyectado — ahora los construye el helper
+        # (mismo texto, estado FINAL por material).
 
         print(f"❌ Cancelled purchase #{purchase.purchase_number}")
         print(f"   Supplier balance: {supplier.current_balance} (debt reduced by ${purchase.total_amount})")
@@ -942,7 +849,280 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             db.flush()
 
         return purchase, warnings
-    
+
+    def _revert_liquidation_effects(
+        self,
+        db: Session,
+        purchase: Purchase,
+        organization_id: UUID,
+        user_id: Optional[UUID],
+        mch_source_type: str,
+        to_transit: bool,
+        reason_label: str,
+        warning_event: str,
+    ) -> tuple[Decimal, list[str]]:
+        """Reversa de los efectos de LIQUIDACION de una compra (#93 D20c).
+
+        Factorizado del cuerpo de cancel(): la reconstruccion deque-por-firma
+        de la contribucion real (H1 #66 — costo ajustado por comision del
+        InventoryMovement + cost_adjustment/qty del relleno) ya vivia DOS veces
+        en este archivo; unliquidate no sera la tercera.
+
+        to_transit gobierna el destino fisico del stock:
+        - False (cancel): el material SALE del inventario — reversal movement
+          fechado en purchase.date + current_stock/liquidated -= qty.
+        - True (unliquidate): liquidado -> transito (la compra vuelve a
+          'registered', que ES stock en transito) — current_stock intacto,
+          SIN reversal movement (el movimiento de compra original sigue vivo;
+          deja de contar como liquidado porque liquidated_at vuelve a NULL,
+          #61c).
+
+        Reversa financiera identica en ambos casos: pool (remove_from_pool +
+        MCH mch_source_type con checkpoint business_today), saldo proveedor,
+        comisionistas, retenciones (reverted_at) y comision de recolector
+        purchase-level (Ciclo D).
+
+        Retorna (total_adjustment, warnings). El caller decide donde persiste
+        el adjustment (cancel: purchase.cancellation_cost_adjustment; entrada
+        unliquidate: acumula en order.annul_cost_adjustment — precedente del
+        micro-gap E2).
+        """
+        movements_by_key: dict = defaultdict(deque)
+        purchase_movements = db.query(InventoryMovement).filter(
+            InventoryMovement.reference_type == "purchase",
+            InventoryMovement.reference_id == purchase.id,
+            InventoryMovement.movement_type == "purchase",
+        ).all()
+        for mv in purchase_movements:
+            movements_by_key[(mv.material_id, mv.warehouse_id, mv.quantity)].append(mv)
+
+        total_adjustment = Decimal("0")
+        for line in purchase.lines:
+            material = line.material
+
+            # Costo ajustado desde el movimiento de ESTA linea (fallback al
+            # precio crudo solo si el movimiento no existe — huerfanos/legacy)
+            adjusted_unit_cost = line.unit_price
+            queue = movements_by_key.get((line.material_id, line.warehouse_id, line.quantity))
+            inv_movement = queue.popleft() if queue else None
+            if inv_movement is not None:
+                adjusted_unit_cost = inv_movement.unit_cost
+
+            if not to_transit:
+                # Create reversal movement (unit_cost = ajustado, por auditoria)
+                reversal = InventoryMovement(
+                    organization_id=organization_id,
+                    material_id=line.material_id,
+                    warehouse_id=line.warehouse_id,
+                    movement_type="purchase_reversal",
+                    quantity=-line.quantity,  # Negative = out
+                    unit_cost=adjusted_unit_cost,
+                    reference_type="purchase",
+                    reference_id=purchase.id,
+                    date=purchase.date,
+                    notes=reason_label,
+                )
+                db.add(reversal)
+                material.current_stock -= line.quantity
+
+            # Contribucion REAL de la linea al pool: costo ajustado + el
+            # relleno de hueco que hizo al liquidar (H1) — si el fill sale
+            # del P&L, su valor tambien sale del pool.
+            u_total = adjusted_unit_cost
+            if line.quantity > 0:
+                u_total = adjusted_unit_cost + (line.cost_adjustment / line.quantity)
+
+            old_liq = material.current_stock_liquidated
+            old_avg = material.current_average_cost
+            new_avg, adjustment = remove_from_pool(
+                liquidated=old_liq,
+                avg_cost=old_avg,
+                quantity=line.quantity,
+                unit_cost=u_total,
+            )
+            material.current_average_cost = new_avg
+            material.current_stock_liquidated -= line.quantity
+            if to_transit:
+                material.current_stock_transit += line.quantity
+            total_adjustment += adjustment
+            # Append-only: la reversa escribe su propio registro en el
+            # historial (no borra el de la liquidacion — D20b). SIEMPRE,
+            # incluso si el avg no cambio: sin este registro la cadena
+            # visible perderia el costo vigente (filtro H2 para cancel;
+            # para unliquidate el original PERMANECE por decision).
+            material_cost_history_service.record_cost_change(
+                db=db,
+                material=material,
+                previous_cost=old_avg,
+                previous_stock=old_liq,
+                new_cost=new_avg,
+                new_stock=old_liq - line.quantity,
+                source_type=mch_source_type,
+                source_id=purchase.id,
+                organization_id=organization_id,
+                transaction_date=business_today(),
+            )
+            print(f"  ↩️  Reversed: {material.code} -{line.quantity} (new stock: {material.current_stock}, cost: {material.current_average_cost})")
+
+        # Revert supplier balance
+        supplier = db.get(ThirdParty, purchase.supplier_id)
+        supplier.current_balance += purchase.total_amount  # Reduce debt
+
+        # Revertir saldo de comisionistas
+        for comm in (purchase.commissions or []):
+            recipient = db.get(ThirdParty, comm.third_party_id)
+            recipient.current_balance += comm.commission_amount
+            print(f"  ↩️  Comision revertida: ${comm.commission_amount} → {recipient.name}")
+
+        # SAC E2 D9: revertir bloques compensatorios de retenciones
+        # — inverso exacto de la liquidacion; reverted_at = auditoria sin
+        # delete fisico. Compatible con annul_linked_payments (#63): el pago
+        # enlazado fue NETO → su reversa usa el monto del movimiento.
+        for ret in (purchase.retentions or []):
+            if ret.reverted_at is not None:
+                continue
+            supplier.current_balance -= ret.amount
+            entity = db.get(ThirdParty, ret.third_party_id)
+            if entity:
+                entity.current_balance += ret.amount
+            ret.reverted_at = datetime.now(timezone.utc)
+            print(f"  ↩️  Retencion revertida: ${ret.amount} ({ret.retention_type})")
+
+        # SAC Ciclo D: auto-anular la comision de recolector causada al
+        # liquidar (patron commission_accrual #23 — sin eleccion #63: no hay
+        # caja de por medio). Filtro con source_type (D-02 QA): jamas anular
+        # un expense_accrual manual asociado a la compra. Solo confirmed →
+        # si ya se anulo a mano en Tesoreria, no-op seguro. (La comision
+        # POR ENTRADA de #93 D11 tiene purchase_id NULL — la anula la Entrada.)
+        collector_accruals = db.scalars(
+            select(MoneyMovement).where(
+                MoneyMovement.purchase_id == purchase.id,
+                MoneyMovement.movement_type == "expense_accrual",
+                MoneyMovement.source_type == "collector_commission",
+                MoneyMovement.status == "confirmed",
+            )
+        ).all()
+        for mov in collector_accruals:
+            mov.status = "annulled"
+            mov.annulled_at = datetime.now(timezone.utc)
+            mov.annulled_by = user_id
+            mov.annulled_reason = reason_label
+            if mov.third_party_id:
+                collector_tp = db.get(ThirdParty, mov.third_party_id)
+                if collector_tp:
+                    collector_tp.current_balance += mov.amount
+            print(f"  ↩️  Comision recolector anulada: ${mov.amount} (MM #{mov.movement_number})")
+
+        # Warnings de hueco proyectado (una vez por material, estado FINAL)
+        warnings: list[str] = []
+        seen: dict = {}
+        for line in purchase.lines:
+            seen[line.material_id] = line.material
+        for material in seen.values():
+            if material.current_stock_liquidated < 0:
+                warnings.append(
+                    f"El stock liquidado de {material.code} queda negativo tras "
+                    f"{warning_event}: {float(material.current_stock_liquidated):g} "
+                    f"{material.default_unit or 'kg'} (el material ya fue vendido)"
+                )
+
+        return total_adjustment, warnings
+
+    def unliquidate(
+        self,
+        db: Session,
+        purchase_id: UUID,
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+        commit: bool = True,
+    ) -> tuple[Purchase, Decimal, list[str]]:
+        """#93 D20: transicion liquidada -> registrada SIN cancelar.
+
+        Revierte los efectos de LIQUIDACION (helper compartido) y devuelve la
+        compra a 'registered' con su transito: sin quemar consecutivo, sin
+        filas de cancelacion en los estados de cuenta. MCH source_type
+        'purchase_unliquidation' (reversion, en MCH_FASE5_REVERSAL_TYPES); el
+        checkpoint purchase_liquidation original PERMANECE (D20b).
+
+        NUNCA bloquea (#76, criterio 23) — si bloqueara, vuelve el deadlock
+        del Ciclo C con 13 compras adentro. Sin endpoint propio: solo lo llama
+        la Entrada (unliquidate de entrada / annul de entrada liquidada).
+
+        Retorna (purchase, residual_adjustment, warnings). El residual (ramas
+        de hueco de remove_from_pool) lo persiste el CALLER en la Entrada
+        (order.annul_cost_adjustment — precedente micro-gap E2); en la rama
+        limpia (SAC normal: stock positivo) es exactamente 0.
+
+        Consecuencia declarada (doctrina #41): los cortes consultados dentro
+        de la ventana liquidacion -> unliquidate se re-presentan — la cantidad
+        cuenta por liquidated_at, que vuelve a NULL. En la practica la ventana
+        son minutos (Johana corrige y re-liquida).
+        """
+        purchase = db.query(Purchase).options(
+            joinedload(Purchase.lines).joinedload(PurchaseLine.material),
+            joinedload(Purchase.commissions),
+        ).filter(
+            Purchase.id == purchase_id,
+            Purchase.organization_id == organization_id,
+        ).first()
+
+        if not purchase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Compra no encontrada",
+            )
+        if purchase.double_entry_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No se puede desliquidar una compra de doble partida.",
+            )
+        if purchase.status != "liquidated":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Solo se desliquida una compra liquidada (estado actual: '{purchase.status}')",
+            )
+
+        residual, warnings = self._revert_liquidation_effects(
+            db,
+            purchase,
+            organization_id,
+            user_id,
+            mch_source_type="purchase_unliquidation",
+            to_transit=True,
+            reason_label=f"Reversa de liquidación compra #{purchase.purchase_number}",
+            warning_event="la reversa de liquidación",
+        )
+
+        # Pago enlazado (legacy 1:1 con pago inmediato): NO se anula — queda
+        # como anticipo del proveedor al revertir su saldo (decision #16/#63,
+        # "Liquidacion != Pago"). Se avisa, no se decide por el operador.
+        linked_total = self.get_linked_payment_total(db, purchase.id, organization_id)
+        if linked_total and linked_total > 0:
+            warnings.append(
+                f"El pago enlazado de ${linked_total:,.0f} queda como anticipo "
+                "del proveedor (anulelo desde Tesoreria si fue error de captura)"
+            )
+
+        # El fill de la liquidacion original ya salio del pool via u_total —
+        # la linea vuelve al estado de una registrada fresca (re-liquidar lo
+        # recalcula via _apply_cost_at_liquidation).
+        for line in purchase.lines:
+            line.cost_adjustment = Decimal("0")
+
+        purchase.status = "registered"
+        purchase.liquidated_at = None
+        purchase.liquidated_by = None
+
+        print(f"↩️ Unliquidated purchase #{purchase.purchase_number} (residual ${residual})")
+
+        if commit:
+            db.commit()
+            db.refresh(purchase)
+        else:
+            db.flush()
+
+        return purchase, residual, warnings
+
     def get_linked_payment_total(
         self, db: Session, purchase_id: UUID, organization_id: UUID
     ) -> Decimal:
@@ -985,10 +1165,14 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         purchase_id: UUID,
         obj_in: PurchaseFullUpdate,
         organization_id: UUID,
-        user_id: Optional[UUID] = None
+        user_id: Optional[UUID] = None,
+        commit: bool = True,
     ) -> tuple[Purchase, list[str]]:
         """
         Edicion completa de compra (metadata + proveedor + lineas).
+
+        commit=False (#93, patron #20/#75): la re-liquidacion de una Entrada
+        sincroniza sus compras registradas dentro de UNA transaccion.
 
         Estrategia Revert-and-Reapply:
         1. Revertir efectos de lineas actuales (inventario, stock, costo)
@@ -1203,8 +1387,11 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if user_id:
             purchase.updated_by = user_id
 
-        db.commit()
-        db.refresh(purchase)
+        if commit:
+            db.commit()
+            db.refresh(purchase)
+        else:
+            db.flush()
 
         print(f"✏️ Purchase #{purchase.purchase_number} updated")
 

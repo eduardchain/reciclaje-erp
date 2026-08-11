@@ -224,6 +224,16 @@ class InventoryAdjustment(Base, OrganizationMixin, TimestampMixin):
         comment="Traslado padre cuando el ajuste es merma/excedente de recepcion (SAC E3.1)",
     )
 
+    # #93 D7: marca los ajustes de descuadre de entrada (increase/decrease al
+    # precio de referencia). NO se serializa (mismo precedente que transfer_id).
+    # Con FK: anularlo desde Ajustes -> 422 que guia a la Entrada (D17).
+    inbound_order_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("inbound_orders.id", ondelete="CASCADE"),
+        nullable=True,
+        comment="Entrada padre cuando el ajuste es descuadre de entrada (SAC #93)",
+    )
+
     # --- Relationships ---
     material: Mapped["Material"] = relationship(
         "Material",

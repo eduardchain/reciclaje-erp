@@ -1260,13 +1260,14 @@ class TestInventoryStressWalk:
         pending_sales: list[str] = []
         liquidated_sales: list[str] = []
         confirmed_increases: list[str] = []
+        confirmed_priced_decreases: list[str] = []
         confirmed_inbounds: list[str] = []
         tol_qty = Decimal("0")  # kg acumulados que pasaron por redondeo 2-dec
         saw_hole = False
         counts = {
             "pc": 0, "pl": 0, "sc": 0, "sl": 0, "s_cxl": 0,
             "p_cxl": 0, "ai": 0, "ad": 0, "aa": 0,
-            "ic": 0, "ia": 0, "ie": 0,
+            "ic": 0, "ia": 0, "ie": 0, "adp": 0, "aap": 0,
         }
 
         for _ in range(self.OPS):
@@ -1276,8 +1277,9 @@ class TestInventoryStressWalk:
                     "sale_cancel", "purchase_cancel",
                     "adj_increase", "adj_decrease", "adj_annul",
                     "inbound_create", "inbound_annul", "inbound_edit",
+                    "adj_decrease_priced", "adj_annul_priced",
                 ],
-                weights=[18, 15, 18, 15, 5, 5, 6, 6, 4, 8, 4, 3],
+                weights=[18, 15, 18, 15, 5, 5, 6, 6, 4, 8, 4, 3, 5, 3],
             )[0]
 
             if action == "purchase_create":
@@ -1371,6 +1373,56 @@ class TestInventoryStressWalk:
                 assert resp.status_code == 200, resp.text
                 tol_qty += Decimal("400")
                 counts["ie"] += 1
+            elif action == "adj_decrease_priced":
+                # #93 D7: el motor del descuadre faltante — decrease con precio
+                # explicito (remove_from_pool, MCH inbound_discrepancy). Camino
+                # de servicio: el endpoint no lo expone (lo usa la liquidacion
+                # de Entradas); aca se ejercita pelado, sin FK de entrada.
+                from app.services.inventory_adjustment import (
+                    inventory_adjustment as _ia_service,
+                )
+                from app.schemas.inventory_adjustment import (
+                    DecreaseCreate as _DecreaseCreate,
+                )
+                qty = rng.randrange(20, 200, 10)
+                price = rng.randrange(1000, 12000, 100)
+                # db_session arrastra una transaccion de solo-lectura abierta
+                # desde el primer chequeo de invariantes — func.now() de PG es
+                # transaction_timestamp y estamparia el MCH con la hora de
+                # INICIO del walk (ordenado antes que todo, I4 falso-roto).
+                # En produccion cada request abre transaccion fresca; aca se
+                # cierra la stale a mano. Artefacto del test, no del motor.
+                db_session.rollback()
+                adj, _w = _ia_service.decrease(
+                    db_session,
+                    _DecreaseCreate(
+                        material_id=ml_material.id,
+                        warehouse_id=ml_warehouse.id,
+                        date=_today,
+                        quantity=Decimal(str(qty)),
+                        reason="Descuadre walk (#93)",
+                    ),
+                    ml_material.organization_id,
+                    commit=True,
+                    unit_cost_override=Decimal(str(price)),
+                )
+                confirmed_priced_decreases.append(str(adj.id))
+                tol_qty += Decimal("200")
+                counts["adp"] += 1
+            elif action == "adj_annul_priced" and confirmed_priced_decreases:
+                # W-1: reingreso a u_total = p + adj/q — round-trip exacto por
+                # algebra tambien en rama de hueco (criterio 20)
+                aid = confirmed_priced_decreases.pop(
+                    rng.randrange(len(confirmed_priced_decreases))
+                )
+                resp = client.post(
+                    f"{ADJ_URL}/{aid}/annul",
+                    json={"reason": "Anulacion walk (#93)"},
+                    headers=org_headers,
+                )
+                assert resp.status_code == 200, resp.text
+                tol_qty += Decimal("200")
+                counts["aap"] += 1
 
             self._invariants(db_session, ml_material, tol_qty)
             if ml_material.current_stock_liquidated < 0:
@@ -1387,6 +1439,10 @@ class TestInventoryStressWalk:
         # SAC E2: el walk ejercita de verdad el inbound (identidad + reversa/edicion)
         assert counts["ic"] >= 2, counts
         assert counts["ia"] + counts["ie"] >= 1, counts
+        # #93 D7: decreases con precio explicito (motor del descuadre) y al
+        # menos un round-trip de anulacion W-1
+        assert counts["adp"] >= 2, counts
+        assert counts["aap"] >= 1, counts
         assert saw_hole, f"El walk nunca paso por oversell — ajustar semilla/pesos: {counts}"
 
         # Cierre: liquidar todo lo pendiente y verificar una ultima vez

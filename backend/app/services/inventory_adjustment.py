@@ -171,6 +171,7 @@ class CRUDInventoryAdjustment:
         user_id: Optional[UUID] = None,
         commit: bool = True,
         allow_transit: bool = False,
+        unit_cost_override: Optional[Decimal] = None,
     ) -> tuple[InventoryAdjustment, list[str]]:
         """
         Disminucion de stock — usa costo promedio actual.
@@ -178,7 +179,20 @@ class CRUDInventoryAdjustment:
         Efectos:
         - material.current_stock_liquidated -= quantity
         - material.current_stock -= quantity
-        - NO recalcula costo promedio (salidas usan costo actual)
+        - Sin unit_cost_override: NO recalcula costo promedio (salidas al costo
+          actual — byte a byte el comportamiento historico, criterio 29 de #93).
+
+        unit_cost_override (#93 D6/D7/D15): el faltante de un descuadre de
+        entrada se valora al precio de REFERENCIA, no al promedio. Va en la
+        firma del servicio y NO en DecreaseCreate: el schema es el contrato
+        publico de las 7 orgs y exponer el precio invitaria a valorar mermas
+        manuales a precio arbitrario (lo que #66 quiso evitar). Unico caller
+        que lo pasa: la liquidacion de Entradas. Usa remove_from_pool (#66):
+        fuera de la rama limpia se degrada solo al numero de hoy
+        (-q*p + q*(p-A) = -q*A) y la diferencia queda en cost_adjustment
+        (misma linea P&L de oversell — limitacion declarada del plan).
+        ⚠️ D21: el caller fija data.date = dia de la liquidacion; el MCH
+        hereda esa fecha (un solo reloj por evento).
         """
         material = self._validate_material(db, data.material_id, organization_id)
         warehouse = self._validate_warehouse(
@@ -189,6 +203,21 @@ class CRUDInventoryAdjustment:
         previous_stock = material.current_stock_liquidated
         new_stock = previous_stock - data.quantity
         unit_cost = material.current_average_cost
+        cost_adjustment = Decimal("0")
+
+        if unit_cost_override is not None:
+            # #93: sacar del pool q unidades que ENTRARON a este precio (las
+            # compras de esta misma entrada). Rama limpia: avg exacto. Ramas
+            # de hueco: avg queda quieto y la diferencia va a cost_adjustment.
+            old_avg = material.current_average_cost
+            new_avg, cost_adjustment = remove_from_pool(
+                liquidated=previous_stock,
+                avg_cost=old_avg,
+                quantity=data.quantity,
+                unit_cost=unit_cost_override,
+            )
+            material.current_average_cost = new_avg
+            unit_cost = unit_cost_override
 
         # Warning si stock resultante es negativo (RN-INV-03: permitido con warning)
         if new_stock < 0:
@@ -216,6 +245,28 @@ class CRUDInventoryAdjustment:
             notes=data.notes,
             user_id=user_id,
         )
+        adjustment.cost_adjustment = cost_adjustment
+
+        if unit_cost_override is not None:
+            # #93 fix 3: el decrease historico no escribia MCH (no movia el
+            # avg); con override SI puede moverlo — sin checkpoint, el
+            # invariante "avg == ultimo MCH" revienta y _get_inventory_as_of
+            # valuaria todo corte posterior al avg viejo. Se registra SIEMPRE
+            # que hay override (espejo del increase, que registra siempre).
+            # A5: source_type OPERATIVO — NO entra a MCH_FASE5_REVERSAL_TYPES;
+            # el silencio en ese set es el default correcto, no un olvido.
+            material_cost_history_service.record_cost_change(
+                db=db,
+                material=material,
+                previous_cost=old_avg,
+                previous_stock=previous_stock,
+                new_cost=material.current_average_cost,
+                new_stock=new_stock,
+                source_type="inbound_discrepancy",
+                source_id=adjustment.id,
+                organization_id=organization_id,
+                transaction_date=data.date.date() if hasattr(data.date, "date") else data.date,
+            )
 
         self._create_inventory_movement(
             db=db,
@@ -388,6 +439,7 @@ class CRUDInventoryAdjustment:
         organization_id: UUID,
         user_id: Optional[UUID] = None,
         commit: bool = True,
+        from_module: bool = False,
     ) -> InventoryAdjustment:
         """
         Anular ajuste — revierte stock y costo con conservacion de valor (Fase 5).
@@ -396,13 +448,42 @@ class CRUDInventoryAdjustment:
         se revierte por remocion/reingreso PONDERADO (nunca bloquea):
         - El ajuste habia METIDO stock (quantity > 0): remocion ponderada de su
           contribucion real (unit_cost + cost_adjustment de relleno prorrateado).
-        - El ajuste habia SACADO stock (quantity < 0): reingreso ponderado al
-          unit_cost persistido (el avg del momento de la salida — NO el vigente,
-          que re-valuaba el reingreso en silencio).
+        - El ajuste habia SACADO stock (quantity < 0): reingreso ponderado a la
+          contribucion real de la salida (#93 W-1) — para los decreases
+          historicos (cost_adjustment=0) el algebra colapsa al unit_cost
+          persistido, identico a antes.
         La diferencia va a annul_cost_adjustment (P&L por annulled_at). El
         historial de costo es append-only: se registra adjustment_annulment.
+
+        from_module (#93 D17/A3): los ajustes hijos de un traslado (#84) o de
+        un descuadre de entrada solo se anulan desde SU modulo (el cascade les
+        pasa True); anularlos desde Ajustes romperia en silencio el invariante
+        del padre (traslado: "nunca cambia el avg"; entrada: "stock ==
+        repartido + descuadre").
         """
         adjustment = self._get_or_404(db, adjustment_id, organization_id)
+
+        if not from_module:
+            if adjustment.inbound_order_id is not None:
+                # El mensaje nombra la entrada y usa el MISMO verbo del boton
+                # ("Revertir Liquidacion") — pruebas de usuario: decir "anule
+                # la liquidacion" manda a buscar un boton que no existe.
+                # Import local: inbound_order importa este modulo (circular)
+                from app.models.inbound_order import InboundOrder
+
+                order = db.get(InboundOrder, adjustment.inbound_order_id)
+                ref = f" #{order.order_number}" if order else ""
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Este ajuste es el descuadre de la Entrada{ref} — use "
+                    f"«Revertir Liquidación» en la Entrada{ref} para deshacerlo",
+                )
+            if adjustment.transfer_id is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Este ajuste es merma/excedente de un traslado — anule el "
+                    "traslado desde el módulo de Traslados",
+                )
 
         if adjustment.status != "confirmed":
             raise HTTPException(
@@ -427,11 +508,19 @@ class CRUDInventoryAdjustment:
                 unit_cost=u_total,
             )
         elif qty < 0:
+            # #93 W-1: contribucion real de la SALIDA. Un decrease con precio
+            # explicito (descuadre D7) pudo dejar cost_adjustment en rama de
+            # hueco; reingresar al unit_cost crudo INVENTA valor (verificado:
+            # pool $1.000 -> $3.700). qty es NEGATIVO: dividir por el signado
+            # produce p - adj/|qty|, el inverso exacto de remove_from_pool
+            # (conservacion: valor extraido = |qty|*p - adj). Historicos:
+            # cost_adjustment=0 -> u_total == unit_cost, byte a byte (crit 33).
+            u_total = adjustment.unit_cost + (adjustment.cost_adjustment / qty)
             new_avg, annul_adjustment = incorporate_into_pool(
                 liquidated=old_liq,
                 avg_cost=old_avg,
                 quantity=-qty,
-                unit_cost=adjustment.unit_cost,
+                unit_cost=u_total,
             )
         else:
             new_avg = old_avg

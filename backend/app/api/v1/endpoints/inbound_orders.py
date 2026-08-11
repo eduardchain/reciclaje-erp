@@ -7,6 +7,7 @@ David corrige sus capturas), purchases.cancel (annul, Johana).
 """
 from collections import defaultdict, deque
 from datetime import date, datetime, time as dt_time, timezone
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -18,12 +19,16 @@ from app.api.deps import get_db, require_org_flag, require_permission
 from app.models.inbound_order import InboundOrder
 from app.models.user import User
 from app.schemas.inbound_order import (
+    InboundAllocationResponse,
+    InboundLiquidateRequest,
     InboundOrderAnnulRequest,
     InboundOrderCreate,
     InboundOrderLineResponse,
     InboundOrderListResponse,
     InboundOrderResponse,
     InboundOrderUpdate,
+    InboundPurchaseSummary,
+    InboundRetentionDetail,
 )
 from app.services.inbound_order import inbound_order_service
 
@@ -31,19 +36,24 @@ router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))]
 
 
 def _page_context(db: Session, org_id: UUID, orders: list[InboundOrder]) -> dict:
-    """Ciclo C: mapas por pagina para el enrich — mundo willard (C-4),
-    auditoria de liquidacion willard (C-5) y nombres de usuarios (C-5).
-    3 queries por pagina, cero N+1."""
+    """Mapas por pagina para el enrich — mundo willard (C-4), auditoria de
+    liquidacion willard (C-5), compras via puente (#93, R2: lookup por pagina,
+    JAMAS join en el listado) y nombres de usuarios. 4 queries, cero N+1."""
     order_ids = [o.id for o in orders]
     audit = inbound_order_service.willard_confirm_audit(db, org_id, order_ids)
     worlds = inbound_order_service.willard_worlds_by_order(db, org_id, orders)
+    purchases = inbound_order_service.purchases_by_order(db, org_id, order_ids)
     user_ids = set()
     for o in orders:
         user_ids.add(o.created_by)
         if o.annulled_by:
             user_ids.add(o.annulled_by)
-        if o.purchase is not None and o.purchase.liquidated_by:
-            user_ids.add(o.purchase.liquidated_by)
+        if o.reviewed_by:
+            user_ids.add(o.reviewed_by)
+    for plist in purchases.values():
+        for p in plist:
+            if p.liquidated_by:
+                user_ids.add(p.liquidated_by)
     for liq_by, _liq_at in audit.values():
         if liq_by:
             user_ids.add(liq_by)
@@ -54,7 +64,23 @@ def _page_context(db: Session, org_id: UUID, orders: list[InboundOrder]) -> dict
             select(User.id, User.full_name, User.email).where(User.id.in_(user_ids))
         ).all()
         names = {uid: (full_name or email) for uid, full_name, email in rows}
-    return {"audit": audit, "worlds": worlds, "names": names}
+    return {"audit": audit, "worlds": worlds, "names": names, "purchases": purchases}
+
+
+def _last_retention_batch(retentions: list) -> list:
+    """El lote vigente de retenciones de una compra (#93, pruebas de usuario).
+
+    Vivas si las hay; si no, las revertidas con el `reverted_at` mas reciente
+    — el estado tras des-liquidar, que es cuando la UI las precarga para que
+    Johana corrija en vez de re-digitar. Lotes viejos quedan fuera."""
+    live = [r for r in retentions if r.reverted_at is None]
+    if live:
+        return live
+    reverted = [r for r in retentions if r.reverted_at is not None]
+    if not reverted:
+        return []
+    last = max(r.reverted_at for r in reverted)
+    return [r for r in reverted if r.reverted_at == last]
 
 
 def _enrich(
@@ -75,6 +101,7 @@ def _enrich(
         if delta is not None:
             kg_by_signature[(mov.material_id, mov.quantity)].append(delta)
 
+    is_purchase_type = order.inbound_type == "purchase"
     lines = []
     total_kg = None
     for line in order.lines:
@@ -83,6 +110,25 @@ def _enrich(
         if bucket:
             kg_lead = bucket.popleft()
             total_kg = (total_kg or 0) + kg_lead
+        # #93: reparto y descuadre por linea (solo tipo compra)
+        allocations = []
+        allocated_qty = None
+        discrepancy = None
+        if is_purchase_type:
+            allocations = [
+                InboundAllocationResponse(
+                    id=a.id,
+                    third_party_id=a.third_party_id,
+                    third_party_name=a.third_party.name if a.third_party else None,
+                    quantity=a.quantity,
+                    unit_price=a.unit_price,
+                    invoice_number=a.invoice_number,
+                )
+                for a in (line.allocations or [])
+            ]
+            if allocations or order.status in ("liquidated",):
+                allocated_qty = sum((a.quantity for a in allocations), Decimal("0"))
+                discrepancy = line.quantity - allocated_qty
         lines.append(
             InboundOrderLineResponse(
                 id=line.id,
@@ -97,18 +143,62 @@ def _enrich(
                 scale_weight_kg=line.scale_weight_kg,
                 quality_notes=line.quality_notes,
                 kg_lead=kg_lead,
+                reference_unit_price=line.reference_unit_price,
+                unallocated_intentional=line.unallocated_intentional,
+                allocations=allocations,
+                allocated_quantity=allocated_qty,
+                discrepancy=discrepancy,
             )
         )
 
-    # Ciclo C (C-5): quien liquido — compra: liquidated_by de la Purchase;
-    # willard: created_by del primer kg movement confirmado (auditoria B.2)
     ctx = ctx or {}
     names = ctx.get("names", {})
+    bridge_purchases = ctx.get("purchases", {}).get(order.id, [])
+    purchase_summaries = [
+        InboundPurchaseSummary(
+            purchase_id=p.id,
+            purchase_number=p.purchase_number,
+            supplier_id=p.supplier_id,
+            supplier_name=p.supplier.name if p.supplier else None,
+            status=p.status,
+            total_amount=float(p.total_amount or 0),
+            invoice_number=p.invoice_number,
+            # Addendum retenciones #93: solo las VIVAS (reverted_at NULL) —
+            # el proveedor quedo acreditado neto; viene por selectinload (R2)
+            retentions_total=(
+                float(sum(r.amount for r in p.retentions if r.reverted_at is None))
+                if any(r.reverted_at is None for r in (p.retentions or []))
+                else None
+            ),
+            # Precarga al re-liquidar (pruebas Daniel): si D20 conserva el
+            # reparto, conserva tambien lo que se le colgo encima. Devuelve el
+            # ULTIMO lote: las vivas si las hay; si no (post-unliquidate, que
+            # es justo cuando la UI precarga), las revertidas mas recientes —
+            # un ciclo previo de correcciones no debe reaparecer.
+            retentions=[
+                InboundRetentionDetail(
+                    retention_type=r.retention_type,
+                    municipality=r.municipality,
+                    rate=r.rate,
+                    base=r.base,
+                    amount=r.amount,
+                )
+                for r in _last_retention_batch(p.retentions or [])
+            ],
+        )
+        for p in bridge_purchases
+    ]
+
+    # Quien liquido — tipo compra: liquidated_by de las compras de la puente
+    # (todas nacen del mismo evento D14 — la primera liquidada sirve);
+    # willard: created_by del primer kg movement confirmado (auditoria B.2)
     liquidated_by_name = None
     liquidated_at = None
-    if order.purchase is not None:
-        liquidated_by_name = names.get(order.purchase.liquidated_by)
-        liquidated_at = order.purchase.liquidated_at
+    if is_purchase_type:
+        liq_p = next((p for p in bridge_purchases if p.status == "liquidated"), None)
+        if liq_p is not None:
+            liquidated_by_name = names.get(liq_p.liquidated_by)
+            liquidated_at = liq_p.liquidated_at
     else:
         w_audit = ctx.get("audit", {}).get(order.id)
         if w_audit:
@@ -133,18 +223,21 @@ def _enrich(
         collector_name=order.collector.name if order.collector else None,
         willard_distribution_center=order.willard_distribution_center,
         notes=order.notes,
-        # Ajustes 2026-08-03 (A, D1): fuente unica POR TIPO. Tipo compra -> la
-        # factura vive en el documento comercial; willard -> en la columna
-        # propia. `order.purchase` ya viene cargado (mismo lookup que alimenta
-        # purchase_number/purchase_status) -> cero queries nuevas.
+        # Willard: columna propia. Legacy 1:1: la compra derivada. Tipo compra
+        # #93: NULL (la factura vive por proveedor en purchases[])
         invoice_number=(
             order.purchase.invoice_number if order.purchase else order.invoice_number
         ),
+        remission_number=order.remission_number,
         status=order.status,
         display_status=inbound_order_service.display_status_of(order),
         purchase_id=order.purchase_id,
         purchase_number=order.purchase.purchase_number if order.purchase else None,
         purchase_status=order.purchase.status if order.purchase else None,
+        purchases=purchase_summaries,
+        discrepancy_adjustments=ctx.get("discrepancies", {}).get(order.id, []),
+        reviewed_by_name=names.get(order.reviewed_by),
+        reviewed_at=order.reviewed_at,
         willard_world=ctx.get("worlds", {}).get(order.id),
         total_kg_lead=total_kg,
         annulled_reason=order.annulled_reason,
@@ -153,6 +246,7 @@ def _enrich(
         created_by_name=names.get(order.created_by),
         liquidated_by_name=liquidated_by_name,
         liquidated_at=liquidated_at,
+        liquidated_ts=order.liquidated_ts,
         annulled_by_name=names.get(order.annulled_by),
         lines=lines,
         warnings=warnings or [],
@@ -163,6 +257,11 @@ def _enrich_one(db: Session, order: InboundOrder, org_id: UUID, warnings=None) -
     kg_map = inbound_order_service.kg_deltas_by_movement(db, org_id, [order.id])
     movs = inbound_order_service.receipt_movements(db, org_id, order.id)
     ctx = _page_context(db, org_id, [order])
+    # Los ajustes de descuadre SOLO en el detalle (una query; el listado no los
+    # muestra y ahi seria una query por pagina sin uso)
+    ctx["discrepancies"] = {
+        order.id: inbound_order_service.discrepancy_adjustments(db, org_id, order.id)
+    }
     return _enrich(db, order, kg_map, movs, warnings, ctx)
 
 
@@ -186,11 +285,11 @@ def create_inbound_order(
 @router.get("", response_model=InboundOrderListResponse)
 def list_inbound_orders(
     inbound_type: Optional[str] = Query(None),
-    status_filter: Optional[str] = Query(None, alias="status", pattern="^(draft|confirmed|annulled)$"),
+    status_filter: Optional[str] = Query(None, alias="status", pattern="^(draft|reviewed|liquidated|confirmed|annulled)$"),
     display_status: Optional[str] = Query(
         None,
-        pattern="^(registered|liquidated|annulled)$",
-        description="Ciclo C: estado derivado unico (orden+compra)",
+        pattern="^(registered|reviewed|liquidated|annulled)$",
+        description="#93 D4: estado unico columna-driven",
     ),
     search: Optional[str] = Query(None, max_length=100),
     sort: str = Query("newest", pattern="^(newest|oldest)$"),
@@ -239,13 +338,23 @@ def get_inbound_order(
     order = inbound_order_service.get(db, order_id, org_context["organization_id"])
     resp = _enrich_one(db, order, org_context["organization_id"])
     # Ciclo D (pruebas Daniel): costo de recoleccion en la cara financiera —
-    # solo detalle (patron #63, sin N+1 en listados)
-    if order.purchase_id is not None:
-        from app.services.purchase import purchase as purchase_service
-        cc = purchase_service.get_collector_commission_total(
-            db, order.purchase_id, org_context["organization_id"]
+    # solo detalle (patron #63, sin N+1 en listados). #93: la comision vive
+    # POR ENTRADA (source_id=orden, purchase_id NULL) y la legacy #83 tambien
+    # estampaba source_id=orden — una sola query por FUENTE cubre ambas.
+    from decimal import Decimal as _Dec
+    from sqlalchemy import func as _func, select as _select
+    from app.models.money_movement import MoneyMovement as _MM
+    cc = db.execute(
+        _select(_func.coalesce(_func.sum(_MM.amount), 0)).where(
+            _MM.organization_id == org_context["organization_id"],
+            _MM.movement_type == "expense_accrual",
+            _MM.source_type == "collector_commission",
+            _MM.source_id == order.id,
+            _MM.status == "confirmed",
         )
-        resp.collector_commission_total = float(cc) if cc > 0 else None
+    ).scalar_one()
+    cc = _Dec(str(cc or 0))
+    resp.collector_commission_total = float(cc) if cc > 0 else None
     return resp
 
 
@@ -286,6 +395,66 @@ def confirm_inbound_order(
     )
     order = inbound_order_service.get(db, order.id, org_context["organization_id"])
     return _enrich_one(db, order, org_context["organization_id"])
+
+
+@router.post("/{order_id}/review", response_model=InboundOrderResponse)
+def review_inbound_order(
+    order_id: UUID,
+    org_context: dict = Depends(require_permission("purchases.review")),
+    db: Session = Depends(get_db),
+):
+    """#93 D10: draft -> reviewed (tipo compra) — confirma las cantidades
+    pesadas y habilita liquidar. Permiso propio purchases.review."""
+    order = inbound_order_service.review(
+        db,
+        order_id=order_id,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    order = inbound_order_service.get(db, order.id, org_context["organization_id"])
+    return _enrich_one(db, order, org_context["organization_id"])
+
+
+@router.post("/{order_id}/liquidate", response_model=InboundOrderResponse)
+def liquidate_inbound_order(
+    order_id: UUID,
+    payload: InboundLiquidateRequest,
+    org_context: dict = Depends(require_permission("purchases.liquidate")),
+    db: Session = Depends(get_db),
+):
+    """#93 D14: liquidacion ATOMICA — el reparto asigna cada linea a N
+    proveedores, nacen y se liquidan N compras en una transaccion, el
+    descuadre se ajusta al precio de referencia (D6/D7) y la comision del
+    recolector se causa una vez por entrada (D11). Todo el evento en el dia
+    de la liquidacion (D21)."""
+    order, warnings = inbound_order_service.liquidate(
+        db,
+        order_id=order_id,
+        payload=payload,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    order = inbound_order_service.get(db, order.id, org_context["organization_id"])
+    return _enrich_one(db, order, org_context["organization_id"], warnings)
+
+
+@router.post("/{order_id}/unliquidate", response_model=InboundOrderResponse)
+def unliquidate_inbound_order(
+    order_id: UUID,
+    org_context: dict = Depends(require_permission("purchases.cancel")),
+    db: Session = Depends(get_db),
+):
+    """#93 D20: revierte la liquidacion completa (N compras -> registradas,
+    ajustes y comision anulados) y vuelve a 'revisada' CONSERVANDO el reparto
+    — sin quemar consecutivos. Nunca bloquea (#76)."""
+    order, warnings = inbound_order_service.unliquidate(
+        db,
+        order_id=order_id,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    order = inbound_order_service.get(db, order.id, org_context["organization_id"])
+    return _enrich_one(db, order, org_context["organization_id"], warnings)
 
 
 @router.post("/{order_id}/annul", response_model=InboundOrderResponse)

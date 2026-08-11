@@ -81,6 +81,20 @@ BASCULA_ROLE = {
     ],
 }
 
+# #93 D10: rol de revision de entradas (confirma cantidades, habilita liquidar).
+# Custom y NO de sistema: un sexto rol de sistema apareceria en Costa/Biogreen.
+# R5: el sembrado lo crea ANTES del deploy — sin nadie con purchases.review,
+# 'revisada' frenaria la operacion.
+REVISOR_ROLE = {
+    "name": "revisor_inventario",
+    "display_name": "Revisor de Inventario",
+    "description": "Revisa entradas (confirma cantidades pesadas) y consulta compras e inventario",
+    "permission_codes": [
+        "purchases.view", "purchases.review", "materials.view",
+        "third_parties.view", "warehouses.view", "kg_ledger.view",
+    ],
+}
+
 BUSINESS_UNITS = [
     "UN1 Reciclaje Plomo",
     "UN2 Maquila Willard",
@@ -187,6 +201,16 @@ THIRD_PARTIES = [
     ("PRUEBA - Cliente Nacional", "Cliente"),
 ]
 
+# SOLO en modo local con --reset (nunca contra produccion). El reparto de una
+# Entrada es multi-proveedor por naturaleza — con un unico proveedor de material
+# no se puede probar. Ojo: Willard S.A NO sirve para esto, es titular de las
+# cuentas kg y el guard de #80 lo rechaza como proveedor de compra.
+THIRD_PARTIES_LOCAL = [
+    ("PRUEBA - Chatarreria Bogota", "Proveedor Material"),
+    ("PRUEBA - Reciclados del Norte", "Proveedor Material"),
+    ("PRUEBA - Metales del Atlantico", "Proveedor Material"),
+]
+
 # (code, display_name, account_type, warehouse_name|None, titular_name|None)
 KG_ACCOUNTS = [
     ("WILLARD-BAT-CV", "Willard Baterias CV", "willard_baterias", "Circunvalar", "Willard S.A"),
@@ -196,7 +220,10 @@ KG_ACCOUNTS = [
 ]
 
 TARIFFS = [
-    {"tariff_code": "comision_green_loop", "unit_price_cop": "100", "unit": "per_kg_material"},
+    # #93 D11: kg_per_unit=14 — "14 kg por unidad, sea cual sea la unidad"
+    # (Hugo); base de la comision con unidades mezcladas, versionado con el precio
+    {"tariff_code": "comision_green_loop", "unit_price_cop": "100",
+     "unit": "per_kg_material", "kg_per_unit": "14"},
     {"tariff_code": "maquila_intersede_cv_jm", "unit_price_cop": "1500", "unit": "per_kg_lead"},
 ]
 
@@ -455,12 +482,14 @@ class SacSeeder:
 
         roles = self.api.get(f"/system/organizations/{self.api.org_id}/roles")
         by_role_name = {r["name"]: r["id"] for r in roles}
-        if BASCULA_ROLE["name"] not in by_role_name:
-            created = self.api.post("/roles", BASCULA_ROLE, label="rol-bascula")
-            by_role_name[BASCULA_ROLE["name"]] = created["id"]
+        for custom_role in (BASCULA_ROLE, REVISOR_ROLE):
+            if custom_role["name"] not in by_role_name:
+                created = self.api.post("/roles", custom_role, label=f"rol-{custom_role['name']}")
+                by_role_name[custom_role["name"]] = created["id"]
         role_ids = {
             "admin": by_role_name["admin"],
             BASCULA_ROLE["name"]: by_role_name[BASCULA_ROLE["name"]],
+            REVISOR_ROLE["name"]: by_role_name[REVISOR_ROLE["name"]],
         }
 
         sys_users = self.api.get("/system/users")
@@ -676,7 +705,10 @@ class SacSeeder:
         if not self.api.dry_run:
             cats = self.api.get("/third-party-categories/flat")
             self.tp_categories = {c["name"]: c["id"] for c in cats["items"]}
-        for name, cat_name in THIRD_PARTIES:
+        # Los de prueba multi-proveedor SOLO en local (mismo criterio del guard
+        # de --reset): produccion no acumula terceros ficticios
+        catalog = THIRD_PARTIES + (THIRD_PARTIES_LOCAL if self.api.is_local else [])
+        for name, cat_name in catalog:
             if name in existing:
                 self.third_parties[name] = existing[name]["id"]
                 continue
@@ -711,8 +743,19 @@ class SacSeeder:
             vigentes = {t["tariff_code"]: t for t in items}
         for t in TARIFFS:
             cur = vigentes.get(t["tariff_code"])
+            # #93: kg_per_unit entra a la comparacion — la vigente de prod nacio
+            # sin el 14 y el seed debe versionar una nueva (append-only #35),
+            # no saltarsela por tener el mismo precio
+            same_kg = (
+                (cur.get("kg_per_unit") is None and t.get("kg_per_unit") is None)
+                or (
+                    cur.get("kg_per_unit") is not None
+                    and t.get("kg_per_unit") is not None
+                    and float(cur["kg_per_unit"]) == float(t["kg_per_unit"])
+                )
+            ) if cur else False
             if cur and float(cur["unit_price_cop"]) == float(t["unit_price_cop"]) \
-                    and cur["unit"] == t["unit"]:
+                    and cur["unit"] == t["unit"] and same_kg:
                 continue
             self.api.post("/service-tariffs", t, label=t["tariff_code"])
 
@@ -754,7 +797,7 @@ class SacSeeder:
         logging.info(
             f"  Org SAC: {len(WAREHOUSES)} bodegas, {len(BUSINESS_UNITS)} UNs, "
             f"{len(ACCOUNTS)} cuentas, {len(MATERIALS)} materiales, "
-            f"{len(THIRD_PARTIES)} terceros, {len(KG_ACCOUNTS)} cuentas kg, "
+            f"{len(self.third_parties)} terceros, {len(KG_ACCOUNTS)} cuentas kg, "
             f"{len(TARIFFS)} tarifas, {len(RETENTION_CONFIGS)} retenciones. "
             f"SIN transacciones."
         )

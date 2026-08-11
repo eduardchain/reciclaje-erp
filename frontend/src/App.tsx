@@ -88,6 +88,7 @@ const InboundOrdersPage = lazy(() => import("@/pages/inbound/InboundOrdersPage")
 const InboundCreatePage = lazy(() => import("@/pages/inbound/InboundCreatePage"));
 const InboundDetailPage = lazy(() => import("@/pages/inbound/InboundDetailPage"));
 const InboundEditPage = lazy(() => import("@/pages/inbound/InboundEditPage"));
+const InboundLiquidatePage = lazy(() => import("@/pages/inbound/InboundLiquidatePage"));
 const TransfersPage = lazy(() => import("@/pages/transfers/TransfersPage"));
 const TransferCreatePage = lazy(() => import("@/pages/transfers/TransferCreatePage"));
 const TransferDetailPage = lazy(() => import("@/pages/transfers/TransferDetailPage"));
@@ -154,6 +155,7 @@ function App() {
               <Route path={ROUTES.INBOUND} element={<FP flag="kg_ledger_enabled" permission="purchases.view"><InboundOrdersPage /></FP>} />
               <Route path={ROUTES.INBOUND_NEW} element={<FP flag="kg_ledger_enabled" permission="purchases.create"><InboundCreatePage /></FP>} />
               <Route path={ROUTES.INBOUND_EDIT} element={<FP flag="kg_ledger_enabled" permission="purchases.edit"><InboundEditPage /></FP>} />
+              <Route path={ROUTES.INBOUND_LIQUIDATE} element={<FP flag="kg_ledger_enabled" permission="purchases.liquidate"><InboundLiquidatePage /></FP>} />
               <Route path={ROUTES.INBOUND_DETAIL} element={<FP flag="kg_ledger_enabled" permission="purchases.view"><InboundDetailPage /></FP>} />
               {/* SAC E3.1 — traslados dos pasos, gated two_step_transfers_enabled */}
               <Route path={ROUTES.TRANSFERS} element={<FP flag="two_step_transfers_enabled" permission="inventory.view"><TransfersPage /></FP>} />
