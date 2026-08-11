@@ -66,7 +66,8 @@ export interface TransferResponse {
   from_warehouse_name?: string | null;
   to_warehouse_id: string;
   to_warehouse_name?: string | null;
-  transit_warehouse_id: string;
+  /** null = traslado intra-sede: se completó al registrarlo, sin escala en tránsito */
+  transit_warehouse_id?: string | null;
   transit_warehouse_name?: string | null;
   dispatch_date: string;
   received_date?: string | null;

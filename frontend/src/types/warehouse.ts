@@ -12,6 +12,11 @@ export interface WarehouseResponse extends BaseEntity {
   is_transit: boolean;
   /** SAC E3.1: sede fisica destino a la que rutea esta bodega de transito */
   transit_target_warehouse_id?: string | null;
+  /**
+   * Sede a la que pertenece (null = es su propia sede). Un traslado entre dos
+   * bodegas de la MISMA sede mueve material pero no genera kg intersede ni maquila.
+   */
+  sede_warehouse_id?: string | null;
 }
 
 export interface WarehouseCreate {
@@ -21,6 +26,7 @@ export interface WarehouseCreate {
   is_receiving?: boolean;
   is_transit?: boolean;
   transit_target_warehouse_id?: string | null;
+  sede_warehouse_id?: string | null;
 }
 
 export interface WarehouseUpdate {
@@ -30,4 +36,5 @@ export interface WarehouseUpdate {
   is_receiving?: boolean;
   is_transit?: boolean;
   transit_target_warehouse_id?: string | null;
+  sede_warehouse_id?: string | null;
 }

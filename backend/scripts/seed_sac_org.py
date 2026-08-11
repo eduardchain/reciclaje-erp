@@ -8,7 +8,7 @@ Que crea:
     sedes deterministas Willard apuntando a las bodegas NUEVAS).
   - Usuarios: hugo@sac.com (admin, dueno de la org), johana@sac.com (admin),
     yurani@sac.com (admin) y erwin@sac.com (rol custom bascula_sac).
-  - 6 bodegas (3 receptoras + Molino + 2 transito is_transit=True con target).
+  - 6 bodegas (3 receptoras + Molino en la sede Circunvalar + 2 transito).
   - 4 UNs, 4 cuentas de dinero ($0), 8 categorias de gasto, 6 categorias de material.
   - Los 37 materiales del listado de Daniel (2026-07-23) + perfil kg + formula
     de conversion (battery_to_lead / drosses_to_lead) donde aplica.
@@ -102,14 +102,22 @@ BUSINESS_UNITS = [
     "UN4 Proyectos Especiales",
 ]
 
-# (name, is_receiving, is_transit, transit_target_name)
-WAREHOUSES: list[tuple[str, bool, bool, Optional[str]]] = [
-    ("Circunvalar", True, False, None),
-    ("Juan Mina", True, False, None),
-    ("Bogota", True, False, None),
-    ("Circunvalar - Molino", False, False, None),
-    ("Juan Mina - Transito", False, True, "Juan Mina"),
-    ("Circunvalar - Transito", False, True, "Circunvalar"),
+# (name, is_receiving, is_transit, transit_target_name, sede_name)
+#
+# `sede_name` agrupa bodegas que son "un solo inventario" (Johana, 2026-08-11:
+# Circunvalar y su molino lo son). Un traslado DENTRO de una sede se completa al
+# registrarlo —no se pesa al salir ni al llegar— y no genera deuda de plomo ni
+# maquila. Cruzar de sede si: dos pasos, transito y efectos.
+#
+# Por eso el molino NO necesita bodega de transito: nada llega a el cruzando de
+# sede. Solo las sedes reales (JM, CV) tienen la suya.
+WAREHOUSES: list[tuple[str, bool, bool, Optional[str], Optional[str]]] = [
+    ("Circunvalar", True, False, None, None),
+    ("Juan Mina", True, False, None, None),
+    ("Bogota", True, False, None, None),
+    ("Circunvalar - Molino", False, False, None, "Circunvalar"),
+    ("Juan Mina - Transito", False, True, "Juan Mina", None),
+    ("Circunvalar - Transito", False, True, "Circunvalar", None),
 ]
 
 ACCOUNTS = [
@@ -534,7 +542,7 @@ class SacSeeder:
         existing = self.api.existing_by("/warehouses", "name")
         # 1a pasada: crear/registrar las que no son de transito (los targets
         # tienen que existir antes de apuntarles)
-        for name, is_receiving, is_transit, _target in WAREHOUSES:
+        for name, is_receiving, is_transit, _target, _sede in WAREHOUSES:
             if name in existing:
                 self.warehouses[name] = existing[name]["id"]
                 continue
@@ -542,7 +550,7 @@ class SacSeeder:
             r = self.api.post("/warehouses/", body, label=name)
             self.warehouses[name] = r["id"]
         # 2a pasada: alinear flags (PATCH solo si algo difiere)
-        for name, is_receiving, is_transit, target in WAREHOUSES:
+        for name, is_receiving, is_transit, target, sede in WAREHOUSES:
             current = existing.get(name)
             desired: dict[str, Any] = {
                 "is_receiving": is_receiving,
@@ -550,9 +558,11 @@ class SacSeeder:
                 "transit_target_warehouse_id": (
                     self.warehouses[target] if is_transit else None
                 ),
+                "sede_warehouse_id": self.warehouses[sede] if sede else None,
             }
             if current is None:
-                if is_transit:  # recien creada: faltan los flags de transito
+                # recien creada: le faltan los flags de transito y/o la sede
+                if is_transit or sede:
                     self.api.patch(
                         f"/warehouses/{self.warehouses[name]}", desired, label=name
                     )

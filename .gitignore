@@ -294,3 +294,16 @@ presentacion/screenshots/
 
 # Backups locales del landing antes de cambios mayores
 .claude/skills/deploy/landing/index.html.*
+
+########## SAC — material de cliente que NO es codigo ##########
+# Transcripts crudos de reuniones y material comercial: otro ciclo de vida y
+# otra audiencia que el repo. El canon de requisitos (control-cambios,
+# requerimientos-funcionales) SI se versiona — CLAUDE.md #77 lo cita como fuente.
+docs/soluciones ambientales del caribe/Reunión iniciada a las *
+docs/soluciones ambientales del caribe/propuesta-comercial-cliente.md
+docs/soluciones ambientales del caribe/estimacion-interna-propuesta-comercial.md
+presentacion/propuesta-comercial.md
+
+# Evidencia de corridas del golden: reproducible y crece sin techo. No debe
+# viajar de polizon dentro de un commit de codigo.
+docs/planes/evidencia-golden-*/

@@ -3,7 +3,7 @@
 
 Diffs esperados (aditivos, documentados):
   - warehouses: cada item gana is_receiving=true (Ciclo B), is_transit=false y
-    transit_target_warehouse_id=null (E3.1).
+    transit_target_warehouse_id=null (E3.1), sede_warehouse_id=null (sedes).
   - pnl_*: gana internal_maquila_income=0.0 e internal_maquila_expense=0.0 (E3.1),
     tambien dentro de periods[]/totals del monthly.
 Cualquier otra diferencia = FALLO del golden.
@@ -18,6 +18,9 @@ ALLOWED_ADDED = {
         "is_receiving": True,
         "is_transit": False,
         "transit_target_warehouse_id": None,
+        # Sede de la bodega. NULL en las 3 orgs cliente = cada bodega es su
+        # propia sede = todo traslado sigue siendo intersede (no-regresion).
+        "sede_warehouse_id": None,
     },
     "pnl": {
         "internal_maquila_income": 0.0,

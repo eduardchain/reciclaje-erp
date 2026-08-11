@@ -24,6 +24,9 @@ class WarehouseCreate(WarehouseBase):
     # sede fisica destino. Solo relevante con two_step_transfers_enabled.
     is_transit: bool = False
     transit_target_warehouse_id: Optional[UUID] = None
+    # Sede a la que pertenece. NULL = es su propia sede — un traslado entre dos
+    # bodegas de la MISMA sede no emite kg intersede ni maquila.
+    sede_warehouse_id: Optional[UUID] = None
 
 
 class WarehouseUpdate(BaseModel):
@@ -34,6 +37,7 @@ class WarehouseUpdate(BaseModel):
     is_receiving: Optional[bool] = None
     is_transit: Optional[bool] = None
     transit_target_warehouse_id: Optional[UUID] = None
+    sede_warehouse_id: Optional[UUID] = None
 
 
 class WarehouseResponse(WarehouseBase):
@@ -44,6 +48,7 @@ class WarehouseResponse(WarehouseBase):
     is_receiving: bool = True
     is_transit: bool = False
     transit_target_warehouse_id: Optional[UUID] = None
+    sede_warehouse_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
 
