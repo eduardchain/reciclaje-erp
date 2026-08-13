@@ -144,6 +144,18 @@ def _today():
     return business_today().isoformat()
 
 
+def _weighed(line: dict) -> dict:
+    """Q-13: el peso es opcional al capturar pero obligatorio al REVISAR, asi
+    que el helper lo manda por defecto. `scale_weight_kg=None` explicito
+    captura sin peso a proposito."""
+    if "scale_weight_kg" in line:
+        out = dict(line)
+        if out["scale_weight_kg"] is None:
+            out.pop("scale_weight_kg")
+        return out
+    return {**line, "scale_weight_kg": "100"}
+
+
 def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id=None,
              lines, **extra):
     """#93: tipo purchase captura SIN tercero (third_party_id=None lo omite);
@@ -152,7 +164,7 @@ def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id=None
         "inbound_type": inbound_type,
         "warehouse_id": str(warehouse_id),
         "date": _today(),
-        "lines": lines,
+        "lines": [_weighed(l) for l in lines],
         **extra,
     }
     if third_party_id is not None:
@@ -180,7 +192,10 @@ def _review_and_liquidate(client, headers, order, material_id, supplier_id,
 
 
 def _confirm(client, headers, order_id):
-    """B.2: draft -> confirmed (los efectos willard nacen al confirmar)."""
+    """Q-16: draft -> reviewed -> confirmed (los efectos willard siguen
+    naciendo al confirmar; ahora hay revision antes)."""
+    rev = client.post(f"{INBOUND_URL}/{order_id}/review", headers=headers)
+    assert rev.status_code == 200, rev.text
     resp = client.post(f"{INBOUND_URL}/{order_id}/confirm", headers=headers)
     assert resp.status_code == 200, resp.text
     return resp.json()

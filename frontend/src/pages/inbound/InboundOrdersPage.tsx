@@ -335,9 +335,10 @@ export default function InboundOrdersPage() {
           const o = row.original;
           const isWillardRow = WILLARD_INBOUND_TYPES.includes(o.inbound_type);
           const isLegacyRow = !isWillardRow && !!o.purchase_id;
-          // #93: compra nueva registrada -> Revisar; revisada -> Liquidar.
-          // Willard/legacy conservan Liquidar directo desde registrada.
-          if (o.display_status === "registered" && !isWillardRow && !isLegacyRow) {
+          // Registrada -> Revisar; revisada -> Liquidar. Desde el ciclo de
+          // Entradas aplica también a Willard (ítem 4); solo la legacy 1:1
+          // conserva Liquidar directo desde registrada.
+          if (o.display_status === "registered" && !isLegacyRow) {
             if (!canReview) return null;
             return (
               <Button
@@ -355,8 +356,8 @@ export default function InboundOrdersPage() {
             );
           }
           const liquidatable =
-            (o.display_status === "registered" && (isWillardRow || isLegacyRow)) ||
-            (o.display_status === "reviewed" && !isWillardRow && !isLegacyRow);
+            (o.display_status === "registered" && isLegacyRow) ||
+            o.display_status === "reviewed";
           if (!liquidatable || !canLiquidate) return null;
           return (
             <Button
@@ -476,7 +477,9 @@ export default function InboundOrdersPage() {
                 {(() => {
                   const isWillardRow = WILLARD_INBOUND_TYPES.includes(o.inbound_type);
                   const isLegacyRow = !isWillardRow && !!o.purchase_id;
-                  if (o.display_status === "registered" && !isWillardRow && !isLegacyRow) {
+                  // Espejo mobile de la columna de acciones (ítem 4: Willard
+                  // también pasa por Revisar)
+                  if (o.display_status === "registered" && !isLegacyRow) {
                     return canReview ? (
                       <Button
                         size="sm"
@@ -493,8 +496,8 @@ export default function InboundOrdersPage() {
                     ) : null;
                   }
                   const liquidatable =
-                    (o.display_status === "registered" && (isWillardRow || isLegacyRow)) ||
-                    (o.display_status === "reviewed" && !isWillardRow && !isLegacyRow);
+                    (o.display_status === "registered" && isLegacyRow) ||
+                    o.display_status === "reviewed";
                   return canLiquidate && liquidatable ? (
                     <Button
                       size="sm"

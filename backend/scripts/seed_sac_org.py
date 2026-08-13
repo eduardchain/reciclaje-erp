@@ -66,6 +66,12 @@ USERS = [
      "full_name": "Yurani", "role": "admin"},
     {"key": "erwin", "email": "erwin@sac.com",
      "full_name": "Erwin", "role": "bascula_sac"},
+    # Reunion 12-ago + confirmacion telefonica de Hugo 13-ago (canon Q-19):
+    # Erwin CAPTURA en bascula, David REVISA, Johana liquida. Ojo que la
+    # grabacion dice lo contrario ("David, que es el de recepcion, confirmo;
+    # Erwin reviso") — mando la correccion telefonica.
+    {"key": "david", "email": "david@sac.com",
+     "full_name": "David", "role": "revisor_inventario"},
 ]
 
 # Rol custom de bascula: captura y edita entradas, NO liquida ni anula
@@ -85,13 +91,23 @@ BASCULA_ROLE = {
 # Custom y NO de sistema: un sexto rol de sistema apareceria en Costa/Biogreen.
 # R5: el sembrado lo crea ANTES del deploy — sin nadie con purchases.review,
 # 'revisada' frenaria la operacion.
+# El revisor trabaja sobre las MISMAS pantallas que la bascula: abre la
+# entrada, corrige lo que este mal y despues certifica. Por eso lleva el
+# mismo set que BASCULA_ROLE menos purchases.create (no captura) y mas
+# purchases.review (certifica). Sin config.*_fleet los selectores de
+# conductor y vehiculo salen vacios y el boton de crear al vuelo da error;
+# sin formulas.view no ve los kg estimados de la Willard que va a certificar.
+# El control de "certifico y despues cambio" NO depende de quitarle edicion:
+# lo cierra D17 — editar lineas des-certifica, sea quien sea.
 REVISOR_ROLE = {
     "name": "revisor_inventario",
     "display_name": "Revisor de Inventario",
-    "description": "Revisa entradas (confirma cantidades pesadas) y consulta compras e inventario",
+    "description": "Revisa entradas (certifica cantidades pesadas), corrige lo capturado y consulta compras e inventario",
     "permission_codes": [
-        "purchases.view", "purchases.review", "materials.view",
-        "third_parties.view", "warehouses.view", "kg_ledger.view",
+        "config.manage_fleet", "config.view_fleet", "formulas.view",
+        "kg_ledger.view", "materials.view", "purchases.edit",
+        "purchases.review", "purchases.view", "third_parties.view",
+        "warehouses.view",
     ],
 }
 
@@ -494,6 +510,40 @@ class SacSeeder:
             if custom_role["name"] not in by_role_name:
                 created = self.api.post("/roles", custom_role, label=f"rol-{custom_role['name']}")
                 by_role_name[custom_role["name"]] = created["id"]
+                continue
+            # El rol ya existe: alinear sus permisos con la definicion de este
+            # script. Sin esto el sembrado era create-only para roles y agregar
+            # un permiso a la constante NO tenia ningun efecto sobre una org ya
+            # provisionada — el rol se quedaba con lo que tuviera el dia que
+            # nacio, en silencio. Mismo criterio que el PATCH de bodegas (#28).
+            role_id = by_role_name[custom_role["name"]]
+            detalle = self.api.get(f"/roles/{role_id}")
+            # `update_role` NO tiene guard de is_system_role (el de :439 es del
+            # delete), asi que hoy lo unico que impide pisar un rol de sistema
+            # es que estas dos constantes se llamen distinto — y `bascula` de
+            # sistema esta a un sufijo de `bascula_sac`. Esto convierte esa
+            # convencion de nombres en un invariante.
+            if detalle["is_system_role"]:
+                raise SystemExit(
+                    f"ABORTADO: '{custom_role['name']}' resolvio a un ROL DE SISTEMA "
+                    f"(id {role_id}). El sembrado no pisa roles de sistema."
+                )
+            actual = {p["code"] for p in detalle["permissions"]}
+            esperado = set(custom_role["permission_codes"])
+            if actual == esperado:
+                logging.info(f"  Rol {custom_role['name']}: permisos al dia")
+                continue
+            self.api.patch(
+                f"/roles/{role_id}",
+                {"permission_codes": custom_role["permission_codes"],
+                 "display_name": custom_role["display_name"],
+                 "description": custom_role["description"]},
+                label=f"rol-{custom_role['name']}-sync",
+            )
+            logging.info(
+                f"  Rol {custom_role['name']}: permisos alineados "
+                f"(+{sorted(esperado - actual)} -{sorted(actual - esperado)})"
+            )
         role_ids = {
             "admin": by_role_name["admin"],
             BASCULA_ROLE["name"]: by_role_name[BASCULA_ROLE["name"]],

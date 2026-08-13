@@ -54,6 +54,9 @@ interface AllocRow {
   third_party_id: string;
   quantity: number;
   unit_price: number;
+  /** Q-15: si NO es null, Johana digitó el valor total y el unitario es una
+   *  fórmula (total / cantidad). null = digitó el unitario, como siempre. */
+  total_price: number | null;
 }
 
 interface LineState {
@@ -64,6 +67,11 @@ interface LineState {
   material_unit: string;
   /** cantidad pesada (0 = material de reparto que la báscula no vio, D16) */
   weighed: number;
+  /** Q-13: peso de báscula certificado en la revisión. Es literalmente la
+   *  pregunta de Hugo en vivo — "¿dónde sale aquí el peso de lo que acabamos
+   *  de traer?" —: se capturaba y esta pantalla nunca lo mostraba. NO entra a
+   *  ningún cálculo: Johana lo mira para decidir el precio. */
+  weightKg: number | null;
   isExtra: boolean;
   refPrice: number;
   refTouched: boolean;
@@ -72,8 +80,37 @@ interface LineState {
 }
 
 function newAlloc(price = 0): AllocRow {
-  return { _key: ++allocKeyCounter, third_party_id: "", quantity: 0, unit_price: price };
+  return {
+    _key: ++allocKeyCounter,
+    third_party_id: "",
+    quantity: 0,
+    unit_price: price,
+    total_price: null,
+  };
 }
+
+/** Q-15/D8: el efecto REAL del valor total digitado. El backend deriva el
+ *  unitario a 2 decimales y después re-multiplica, así que $200.000 entre 3
+ *  vuelven como $200.000,01. Se calcula igual acá para que el centavo nunca
+ *  sea una sorpresa contra la factura: se acepta, pero se muestra.
+ *
+ *  ⚠️ La vista previa puede diferir en 1 centavo del valor persistido en un
+ *  empate exacto: acá es `Math.round` sobre float (half up) y allá
+ *  `Decimal.quantize` (HALF_EVEN). Igualar el modo de redondeo NO lo cierra —
+ *  float y Decimal difieren en la representación, no solo en el redondeo — y
+ *  pintar el número del servidor exigiría un round-trip que antes de guardar
+ *  no existe. Con montos en pesos el empate al medio centavo no ocurre. */
+const effUnitPrice = (a: AllocRow): number =>
+  a.total_price != null && a.quantity > 0
+    ? Math.round((a.total_price / a.quantity) * 100) / 100
+    : a.unit_price;
+
+const effAllocTotal = (a: AllocRow): number => a.quantity * effUnitPrice(a);
+
+/** Una asignación está completa si tiene proveedor, cantidad y ALGUNO de los
+ *  dos precios — no siempre el unitario (Q-15). */
+const allocPriced = (a: AllocRow): boolean =>
+  a.total_price != null ? a.total_price > 0 : a.unit_price > 0;
 
 /** Fila de retención por proveedor (patrón RetentionFormData de
  *  PurchaseLiquidatePage: monto vigente solo cuando touched) */
@@ -108,6 +145,7 @@ function initLines(order: InboundOrderResponse): LineState[] {
     material_name: l.material_name ?? "",
     material_unit: l.material_unit || "kg",
     weighed: num(l.quantity),
+    weightKg: l.scale_weight_kg != null ? num(l.scale_weight_kg) : null,
     isExtra: false,
     refPrice: num(l.reference_unit_price ?? l.unit_price ?? 0),
     refTouched: l.reference_unit_price != null,
@@ -118,6 +156,9 @@ function initLines(order: InboundOrderResponse): LineState[] {
       third_party_id: a.third_party_id,
       quantity: num(a.quantity),
       unit_price: num(a.unit_price),
+      // El MODO es parte del reparto: si se guardó por total, se re-abre por
+      // total. Sin esto Johana vería un unitario derivado en vez de lo suyo.
+      total_price: a.total_price != null ? num(a.total_price) : null,
     })),
   }));
 }
@@ -178,6 +219,8 @@ export default function InboundLiquidatePage() {
   // cuenta. Ausente = se le queda debiendo, que es el camino normal.
   const [paymentBySupplier, setPaymentBySupplier] = useState<Record<string, string>>({});
   const [extraMaterialId, setExtraMaterialId] = useState("");
+  // Ítem 2 (Hugo): el caso más común es que todo el camión sea de un proveedor
+  const [bulkSupplier, setBulkSupplier] = useState("");
 
   // Catálogo de retenciones (v2 #79) — la ruta ya está gated por el flag (FP),
   // enabled=true no fuga requests a orgs sin SAC
@@ -296,14 +339,16 @@ export default function InboundLiquidatePage() {
         const entry =
           map.get(a.third_party_id) ??
           { name, total: 0, qtyByUnit: {}, materials: [] };
-        entry.total += a.quantity * a.unit_price;
+        // Q-15/D8: el resumen muestra el efecto REAL (unitario derivado y
+        // re-multiplicado), no el total digitado — es donde el centavo se ve
+        entry.total += effAllocTotal(a);
         entry.qtyByUnit[l.material_unit] =
           (entry.qtyByUnit[l.material_unit] ?? 0) + a.quantity;
         entry.materials.push({
           code: l.material_code || l.material_name || "—",
           qty: a.quantity,
           unit: l.material_unit,
-          price: a.unit_price,
+          price: effUnitPrice(a),
         });
         map.set(a.third_party_id, entry);
       }
@@ -375,12 +420,42 @@ export default function InboundLiquidatePage() {
           a._key === allocKey ? { ...a, ...patch } : a
         );
         // "Reutilizar el primer precio digitado" (respuesta Daniel): si la
-        // referencia sigue virgen, el primer precio del reparto la llena
+        // referencia sigue virgen, el primer precio del reparto la llena.
+        // Q-15: si se digitó el TOTAL, la llena el unitario derivado — es el
+        // mismo precio expresado distinto, así que se lee del efectivo y no
+        // del campo, que puede venir vacío en modo total.
         let refPrice = l.refPrice;
-        if (!l.refTouched && refPrice <= 0 && patch.unit_price && patch.unit_price > 0) {
-          refPrice = patch.unit_price;
+        if (!l.refTouched && refPrice <= 0) {
+          const touched = allocations.find((a) => a._key === allocKey);
+          const eff = touched ? effUnitPrice(touched) : 0;
+          if (eff > 0) refPrice = eff;
         }
         return { ...l, allocations, refPrice };
+      })
+    );
+  };
+
+  /** Q-15: cambiar entre unitario y total NO pierde el número — se convierte
+   *  con la cantidad vigente. Sin cantidad no hay conversión posible y el
+   *  campo arranca en 0 (la validación lo marca incompleto, que es honesto). */
+  const toggleAllocMode = (lineKey: number, allocKey: number) => {
+    setLines((prev) =>
+      prev.map((l) => {
+        if (l._key !== lineKey) return l;
+        return {
+          ...l,
+          allocations: l.allocations.map((a) => {
+            if (a._key !== allocKey) return a;
+            if (a.total_price != null) {
+              return { ...a, unit_price: effUnitPrice(a), total_price: null };
+            }
+            return {
+              ...a,
+              total_price:
+                a.quantity > 0 ? Math.round(a.unit_price * a.quantity * 100) / 100 : 0,
+            };
+          }),
+        };
       })
     );
   };
@@ -405,6 +480,43 @@ export default function InboundLiquidatePage() {
     );
   };
 
+  /**
+   * Ítem 2 — Hugo: *"no le carga las cantidades al llamar el proveedor de lo
+   * que tenga pendiente"*. Pide más de lo que suena: no es fijar el tercero,
+   * es pre-llenar el reparto con lo pesado.
+   *
+   * Las líneas con pesado 0 NO reciben asignación (una asignación en 0 es
+   * inválida y quedarían bloqueando la pantalla): las capturadas en 0 se
+   * marcan "sin proveedor" —con descuadre 0 eso es inerte, ni ajuste ni P&L—
+   * y los extras del D16 se dejan quietos, que se agregaron a mano para
+   * asignarlos a mano.
+   */
+  const applySingleSupplier = () => {
+    if (!bulkSupplier) return;
+    setLines((prev) =>
+      prev.map((l) => {
+        if (l.weighed <= 0) {
+          return l.isExtra ? l : { ...l, unallocated: true };
+        }
+        // Conserva el precio ya digitado en la línea, venga del modo que venga
+        const priced = l.allocations.find((a) => allocPriced(a));
+        return {
+          ...l,
+          unallocated: false,
+          allocations: [
+            {
+              _key: ++allocKeyCounter,
+              third_party_id: bulkSupplier,
+              quantity: l.weighed,
+              unit_price: priced ? effUnitPrice(priced) : l.refPrice,
+              total_price: null,
+            },
+          ],
+        };
+      })
+    );
+  };
+
   const addExtraLine = () => {
     const mat = materials.find((m) => m.id === extraMaterialId);
     if (!mat) return;
@@ -417,6 +529,7 @@ export default function InboundLiquidatePage() {
         material_name: mat.name,
         material_unit: mat.default_unit || "kg",
         weighed: 0,
+        weightKg: null, // material que la báscula no vio (D16)
         isExtra: true,
         refPrice: 0,
         refTouched: false,
@@ -467,8 +580,19 @@ export default function InboundLiquidatePage() {
   for (const s of supplierSummary) {
     const rows = retentionsBySupplier[s.tpId] ?? [];
     if (rows.length === 0) continue;
-    if (rows.some((r) => !r.config_id || effRetAmount(r, s.total) <= 0)) {
-      retentionProblems.push(`Retenciones de ${s.name}: falta tarifa o monto`);
+    // Tres causas distintas, tres mensajes distintos. "Falta tarifa o monto"
+    // mandaba a revisar el selector incluso con la tarifa bien puesta: el monto
+    // sale $0 porque el % se calcula sobre un subtotal de $0, y el usuario no
+    // tenía cómo saberlo (pruebas Daniel).
+    if (rows.some((r) => !r.config_id)) {
+      retentionProblems.push(`Retenciones de ${s.name}: falta elegir la tarifa`);
+    } else if (s.total <= 0) {
+      retentionProblems.push(
+        `Retenciones de ${s.name}: su subtotal es $0, no hay base sobre la cual ` +
+        `retener — ponga los precios del reparto o quite la retención`
+      );
+    } else if (rows.some((r) => effRetAmount(r, s.total) <= 0)) {
+      retentionProblems.push(`Retenciones de ${s.name}: el monto quedó en $0`);
     } else if (supplierRetTotal(s.tpId, s.total) >= s.total) {
       retentionProblems.push(
         `Retenciones de ${s.name} deben ser menores a su total (${formatCurrency(s.total)})`
@@ -490,8 +614,9 @@ export default function InboundLiquidatePage() {
 
   const lineProblems = (l: LineState): string | null => {
     const active = activeAllocs(l);
+    // Q-15: "precio" es el unitario O el total, según el modo de la fila
     const halfFilled = l.allocations.some(
-      (a) => (a.third_party_id || a.quantity > 0) && !(a.third_party_id && a.quantity > 0 && a.unit_price > 0)
+      (a) => (a.third_party_id || a.quantity > 0) && !(a.third_party_id && a.quantity > 0 && allocPriced(a))
     );
     if (halfFilled) return "Hay asignaciones incompletas (proveedor, cantidad y precio)";
     const ids = active.map((a) => a.third_party_id);
@@ -526,7 +651,10 @@ export default function InboundLiquidatePage() {
       allocations: activeAllocs(l).map((a) => ({
         third_party_id: a.third_party_id,
         quantity: a.quantity,
-        unit_price: a.unit_price,
+        // Q-15: viaja UNO de los dos — mandar ambos es 422 del backend
+        ...(a.total_price != null
+          ? { total_price: a.total_price }
+          : { unit_price: a.unit_price }),
         invoice_number: invoiceBySupplier[a.third_party_id]?.trim() || null,
       })),
     }));
@@ -592,6 +720,39 @@ export default function InboundLiquidatePage() {
         </Button>
       </PageHeader>
 
+      {/* Ítem 2: el atajo del caso común — todo el camión de un proveedor */}
+      <Card className="shadow-sm border-indigo-100 bg-indigo-50/40">
+        <CardContent className="pt-4">
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+            <div className="flex-1">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                ¿Toda la entrada es de un solo proveedor?
+              </Label>
+              <EntitySelect
+                value={bulkSupplier}
+                onChange={setBulkSupplier}
+                options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+                placeholder="Proveedor..."
+              />
+            </div>
+            <Button
+              variant="outline"
+              className="w-full sm:w-auto bg-white"
+              onClick={applySingleSupplier}
+              disabled={!bulkSupplier}
+            >
+              Repartir todo a este proveedor
+            </Button>
+          </div>
+          <p className="text-xs text-slate-500 mt-1.5">
+            Carga cada material con lo pesado; después puede ajustar línea por línea.
+            {lines.some((l) => activeAllocs(l).length > 0) && (
+              <span className="text-amber-600"> Reemplaza el reparto actual.</span>
+            )}
+          </p>
+        </CardContent>
+      </Card>
+
       {/* Lineas con reparto */}
       {lines.map((l) => {
         const allocated = lineAllocated(l);
@@ -613,12 +774,27 @@ export default function InboundLiquidatePage() {
                     </span>
                   )}
                 </CardTitle>
-                <div className="flex items-center gap-2 text-sm">
-                  <Scale className="h-4 w-4 text-slate-400" />
-                  <span className="text-slate-500">Pesado:</span>
-                  <span className="font-semibold tabular-nums">
-                    {formatWeight(l.weighed, l.material_unit)}
-                  </span>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Scale className="h-4 w-4 text-slate-400" />
+                    <span className="text-slate-500">Pesado:</span>
+                    <span className="font-semibold tabular-nums">
+                      {formatWeight(l.weighed, l.material_unit)}
+                    </span>
+                  </div>
+                  {/* Q-13: el peso de báscula que certificó el revisor. Se
+                      capturaba desde E2 y esta pantalla nunca lo mostró — es
+                      exactamente lo que Hugo preguntó en la reunión. Solo
+                      aparece cuando dice algo que la cantidad no dice ya. */}
+                  {l.weightKg != null &&
+                    (l.material_unit !== "kg" || l.weightKg !== l.weighed) && (
+                      <div className="flex items-center gap-2 sm:border-l sm:pl-3">
+                        <span className="text-slate-500">Báscula:</span>
+                        <span className="font-semibold tabular-nums text-indigo-700">
+                          {formatWeight(l.weightKg, "kg")}
+                        </span>
+                      </div>
+                    )}
                 </div>
               </div>
             </CardHeader>
@@ -626,7 +802,7 @@ export default function InboundLiquidatePage() {
               {/* Asignaciones */}
               {l.allocations.map((a) => (
                 <div key={a._key} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
-                  <div className="md:col-span-5">
+                  <div className="md:col-span-4">
                     <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</Label>
                     <EntitySelect
                       value={a.third_party_id}
@@ -642,18 +818,58 @@ export default function InboundLiquidatePage() {
                     <MoneyInput
                       value={a.quantity}
                       onChange={(v) => updateAlloc(l._key, a._key, { quantity: v })}
-                      decimals={4}
+                      /* 3 decimales: es la escala real con la que se guarda
+                         (ALLOC_Q) y con la que entra al inventario — un 4º
+                         decimal se perdía en silencio */
+                      decimals={3}
                       placeholder="0"
                     />
                   </div>
-                  <div className="md:col-span-3">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio Unit.</Label>
+                  {/* Q-15: Johana digita el VALOR TOTAL; el unitario es una
+                      fórmula (total / cantidad). El modo es por asignación
+                      porque cada proveedor negocia su precio. */}
+                  <div className="md:col-span-4">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                        {a.total_price != null ? "Valor total" : "Precio unit."}
+                      </Label>
+                      <button
+                        type="button"
+                        className="text-[11px] text-indigo-600 hover:underline"
+                        onClick={() => toggleAllocMode(l._key, a._key)}
+                      >
+                        {a.total_price != null ? "usar precio unit." : "usar valor total"}
+                      </button>
+                    </div>
                     <MoneyInput
-                      value={a.unit_price}
-                      onChange={(v) => updateAlloc(l._key, a._key, { unit_price: v })}
+                      value={a.total_price != null ? a.total_price : a.unit_price}
+                      onChange={(v) =>
+                        updateAlloc(
+                          l._key,
+                          a._key,
+                          a.total_price != null ? { total_price: v } : { unit_price: v }
+                        )
+                      }
                       decimals={2}
                       placeholder="0"
                     />
+                    {a.quantity > 0 && allocPriced(a) && (
+                      <p
+                        className={cn(
+                          "text-xs mt-0.5 tabular-nums",
+                          a.total_price != null &&
+                            Math.abs(effAllocTotal(a) - a.total_price) >= 0.005
+                            ? "text-amber-600"
+                            : "text-slate-400"
+                        )}
+                      >
+                        {a.total_price != null
+                          ? // D8: el total que realmente queda. $200.000 entre 3
+                            // vuelven como $200.000,01 — se acepta, pero se ve
+                            `${formatCurrency(effUnitPrice(a))} c/u → ${formatCurrency(effAllocTotal(a))}`
+                          : `Total ${formatCurrency(effAllocTotal(a))}`}
+                      </p>
+                    )}
                   </div>
                   <div className="md:col-span-1 flex justify-end">
                     <Button
@@ -945,7 +1161,12 @@ export default function InboundLiquidatePage() {
                           onChange={(v) => updateRet(s.tpId, r._key, { amount: v, touched: true })}
                           decimals={2}
                           placeholder="0"
-                          className={cn("h-8 text-sm", effRetAmount(r, s.total) <= 0 && "border-red-300")}
+                          // Con subtotal $0 el monto SIEMPRE sale 0: marcar el
+                          // input en rojo culpa al campo de algo que no es suyo
+                          className={cn(
+                            "h-8 text-sm",
+                            s.total > 0 && effRetAmount(r, s.total) <= 0 && "border-red-300"
+                          )}
                         />
                         {r.config_id && r.touched &&
                           effRetAmount(r, s.total) !== suggestedRet(r.config_id, s.total) && (

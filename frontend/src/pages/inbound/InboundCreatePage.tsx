@@ -759,6 +759,18 @@ export default function InboundCreatePage() {
                     decimals={2}
                     placeholder="0,00"
                   />
+                  {/* D1/D2: opcional al capturar, obligatorio al REVISAR. Si el
+                      material se mide en kg el revisor lo autocompleta con la
+                      cantidad; si se mide por unidad (baterías) no hay de dónde
+                      sacarlo y la revisión se rechaza. Sin este aviso el
+                      pesador se entera cuando ya no está frente a la báscula. */}
+                  {unitOf(line.material_id) &&
+                    unitOf(line.material_id) !== "kg" &&
+                    line.scale_weight_kg <= 0 && (
+                      <p className="text-xs text-amber-600 mt-0.5">
+                        Sin este peso no se puede revisar
+                      </p>
+                    )}
                 </div>
                 <div className={isPurchaseType ? "md:col-span-2" : "md:col-span-3"}>
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Notas Calidad</Label>

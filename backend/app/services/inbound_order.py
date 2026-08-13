@@ -233,27 +233,87 @@ class InboundOrderService:
         organization_id: UUID,
         user_id: UUID,
     ) -> InboundOrder:
-        """draft -> reviewed (tipo compra): alguien con purchases.review
-        confirmo las cantidades pesadas. Habilita liquidar (criterio 2/3)."""
+        """draft -> reviewed: alguien con purchases.review certifico las
+        cantidades pesadas. En tipo compra habilita liquidar (criterio 2/3);
+        en Willard habilita confirmar (Q-16 — Hugo pidio que Willard pase por
+        los mismos pasos; en la reunion del 12-ago se le habia respondido que
+        ya era asi y NO lo era, Willard iba draft -> confirmed directo, #81).
+
+        Es el punto UNICO donde el peso de bascula se vuelve obligatorio
+        (Q-13): opcional al capturar para no trabar al pesador, exigido aca
+        porque el revisor es justo quien certifica lo pesado."""
         order = self._get_or_404(db, order_id, organization_id)
-        if order.inbound_type in WILLARD_INBOUND_TYPES:
-            raise _err(
-                "Una recepcion Willard no se revisa — se confirma",
-                status.HTTP_400_BAD_REQUEST,
-            )
         if order.status != "draft":
             labels = {"reviewed": "ya esta revisada", "liquidated": "ya esta liquidada",
-                      "annulled": "esta anulada"}
+                      "confirmed": "ya esta confirmada", "annulled": "esta anulada"}
             raise _err(
                 f"No se puede revisar: la entrada {labels.get(order.status, order.status)}",
                 status.HTTP_400_BAD_REQUEST,
             )
+        self._require_scale_weights(db, order)
         order.status = "reviewed"
         order.reviewed_by = user_id
         order.reviewed_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(order)
         return order
+
+    def _require_scale_weights(self, db: Session, order: InboundOrder) -> None:
+        """Q-13: el peso de bascula es obligatorio AL REVISAR, en ambos tipos.
+
+        D2: si el material YA se mide en kg, el peso ES la cantidad — se
+        autocompleta en vez de pedirlo dos veces (exigir ambos seria friccion
+        pura). Se persiste, no se deriva al vuelo: el informe de peso promedio
+        (la carta con la que Hugo renegocia el 5,2 kg/unidad con Willard) lee
+        la columna, no reconstruye."""
+        if not order.lines:
+            raise _err(
+                "La entrada no tiene lineas — no hay nada que revisar",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        materials = {
+            m.id: m
+            for m in db.execute(
+                select(Material).where(
+                    Material.id.in_([l.material_id for l in order.lines])
+                )
+            ).scalars()
+        }
+        faltantes: list[str] = []
+        for line in order.lines:
+            if line.scale_weight_kg is not None and line.scale_weight_kg > 0:
+                continue
+            material = materials.get(line.material_id)
+            unit = (material.default_unit or "").strip().lower() if material else ""
+            if unit == "kg":
+                line.scale_weight_kg = line.quantity
+                continue
+            faltantes.append(material.code if material else str(line.material_id))
+        if faltantes:
+            raise _err(
+                "Falta el peso de bascula en: " + ", ".join(sorted(faltantes))
+                + ". La revision certifica lo pesado — sin el peso no se puede revisar.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+    @staticmethod
+    def _decertify_if_reviewed(order: InboundOrder) -> Optional[str]:
+        """D17: editar las LINEAS de una entrada revisada la devuelve a
+        Registrada. El revisor certifico pesos y cantidades, que son lineas;
+        dejarla revisada permitiria certificar y despues cambiar justo lo
+        certificado. La CABECERA (factura, nota, vehiculo, fecha) NO
+        des-certifica — no toca lo que el revisor miro. La distincion no es
+        invento: el set bloqueado de #93 D7b ya trata las lineas como el
+        contenido sensible."""
+        if order.status != "reviewed":
+            return None
+        order.status = "draft"
+        order.reviewed_by = None
+        order.reviewed_at = None
+        return (
+            "La entrada volvio a Registrada porque cambiaron sus lineas — "
+            "hay que revisarla de nuevo"
+        )
 
     def liquidate(
         self,
@@ -301,6 +361,44 @@ class InboundOrderService:
 
         QTY_Q = Decimal("0.0001")   # escala Numeric(15,4) de la BD
         PRICE_Q = Decimal("0.01")   # escala Numeric(15,2)
+        # Escala REAL del reparto: al inventario entra la cantidad de
+        # purchase_lines, que es Numeric(10,3). La asignacion permitia 4
+        # decimales, asi que la identidad "pesado = repartido + descuadre" se
+        # rompia hasta 0,0005 kg por asignacion SIN NINGUN AVISO. Con pesos en
+        # kg (Q-13) dejo de ser hipotetico.
+        ALLOC_Q = Decimal("0.001")
+
+        # ---------- Normalizacion del reparto (ANTES de cualquier calculo) ----
+        # Que la cantidad y el precio que se validan, se persisten, se comparan
+        # en la firma de re-liquidacion y llegan al inventario sean el MISMO
+        # numero. Hacerlo aca y no en cada consumidor es lo que hace la
+        # identidad exacta por construccion en vez de por vigilancia.
+        for pl in payload.lines:
+            for a in pl.allocations:
+                a.quantity = a.quantity.quantize(ALLOC_Q)
+                # El schema exige > 0, pero eso es ANTES de cuantizar: 0,0004
+                # pasa el Field y queda en 0,000. Sin esta guarda la division
+                # de abajo revienta con un 500 en vez de explicar.
+                if a.quantity <= 0:
+                    material = db.get(Material, pl.material_id)
+                    code = material.code if material else pl.material_id
+                    raise _err(
+                        f"La cantidad repartida de {code} es demasiado pequena: "
+                        f"queda en 0 al redondear a gramos"
+                    )
+                if a.total_price is not None:
+                    # Q-15: el unitario es una formula — "costo total dividido
+                    # unidades" (Hugo). Se cuantiza a PRICE_Q para que la firma
+                    # de #93 vea el mismo numero y no dispare un
+                    # revert-and-reapply innecesario en cada re-liquidacion.
+                    a.unit_price = (a.total_price / a.quantity).quantize(PRICE_Q)
+                    if a.unit_price <= 0:
+                        material = db.get(Material, pl.material_id)
+                        code = material.code if material else pl.material_id
+                        raise _err(
+                            f"El valor total de {code} es demasiado bajo para la "
+                            f"cantidad repartida: el precio unitario queda en $0"
+                        )
 
         # ---------- Fase de validacion COMPLETA (criterio 15: fallar ANTES ----
         # de escribir nada, no a mitad de las compras) ----------
@@ -496,6 +594,10 @@ class InboundOrderService:
                     third_party_id=a.third_party_id,
                     quantity=a.quantity,
                     unit_price=a.unit_price,
+                    # Q-15: el MODO es parte del reparto — sin persistirlo, el
+                    # round-trip de D20 devolveria el unitario derivado y
+                    # Johana veria otra cosa de la que guardo
+                    total_price=a.total_price,
                     invoice_number=a.invoice_number,
                 ))
         db.flush()
@@ -897,11 +999,15 @@ class InboundOrderService:
         organization_id: UUID,
         user_id: UUID,
     ) -> InboundOrder:
-        """Draft -> confirmed: borra las lineas draft y re-aplica via
+        """Reviewed -> confirmed: borra las lineas y re-aplica via
         _apply_willard_effects (el MISMO camino de efectos del 1-paso previo:
         inventario a identidad D2 + kg ledger D5 + MCH hoy H1a + snapshot de
         formula/avg AL CONFIRMAR — si la formula cambio desde la captura,
-        aplica la vigente, #35)."""
+        aplica la vigente, #35).
+
+        Q-16: el paso previo pasa de `draft` a `reviewed` — Willard ahora se
+        revisa como la compra. Los efectos son byte a byte los mismos; lo
+        unico que cambia es de que estado se sale."""
         order = self._get_or_404(db, order_id, organization_id)
         if order.inbound_type not in WILLARD_INBOUND_TYPES:
             raise _err(
@@ -916,6 +1022,12 @@ class InboundOrderService:
         if order.status == "confirmed":
             raise _err(
                 "La recepcion ya esta confirmada", status.HTTP_400_BAD_REQUEST
+            )
+        if order.status != "reviewed":
+            raise _err(
+                "Revise la recepcion antes de confirmarla — el revisor certifica "
+                "las cantidades pesadas (Q-16)",
+                status.HTTP_400_BAD_REQUEST,
             )
 
         # Re-validar lo que pudo cambiar entre captura y confirmacion
@@ -1397,6 +1509,9 @@ class InboundOrderService:
                 ).delete(synchronize_session=False)
                 db.flush()
                 self._persist_mirror_lines(db, order, obj_in.lines, organization_id)
+                decert = self._decertify_if_reviewed(order)  # D17
+                if decert:
+                    warnings.append(decert)
 
         # Revert-and-reapply Willard cuando cambian lineas o fecha
         # (la fecha mueve los eventos kg e inventario) — SOLO confirmadas;
@@ -1420,6 +1535,9 @@ class InboundOrderService:
                 ).delete(synchronize_session=False)
                 db.flush()
                 self._persist_mirror_lines(db, order, obj_in.lines, organization_id)
+                decert = self._decertify_if_reviewed(order)  # D17
+                if decert:
+                    warnings.append(decert)
         if needs_reapply:
             old_lines = [
                 SimpleNamespace(

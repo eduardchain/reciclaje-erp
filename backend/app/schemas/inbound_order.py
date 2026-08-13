@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.purchase import PurchaseRetentionCreate
 from app.utils.dates import BusinessDate, business_today
@@ -124,10 +124,24 @@ class InboundAllocationCreate(BaseModel):
     quantity: Decimal = Field(..., gt=0)
     # gt=0 en el API (purchase.liquidate exige precios > 0 — V-LIQ-01);
     # el CHECK de BD queda >= 0 per D1
-    unit_price: Decimal = Field(..., gt=0)
+    unit_price: Optional[Decimal] = Field(None, gt=0)
+    # Q-15: o el unitario, o el TOTAL — Johana elige por asignacion. El
+    # unitario se deriva como total/cantidad (Hugo: "el precio unitario seria
+    # una formula, costo total dividido unidades"). El peso NO participa del
+    # calculo: ella lo mira para decidir, el sistema no computa desde el.
+    total_price: Optional[Decimal] = Field(None, gt=0)
     invoice_number: Optional[str] = Field(
         None, max_length=50, description="Factura del proveedor (D12)"
     )
+
+    @model_validator(mode="after")
+    def _exactly_one_price(self):
+        if (self.unit_price is None) == (self.total_price is None):
+            raise ValueError(
+                "Cada asignacion lleva precio unitario O valor total, no ambos "
+                "ni ninguno"
+            )
+        return self
 
 
 class InboundLiquidateLine(BaseModel):
@@ -207,6 +221,10 @@ class InboundAllocationResponse(BaseModel):
     third_party_name: Optional[str] = None
     quantity: Decimal
     unit_price: Decimal
+    # Q-15: presente solo si se digito el total. La pantalla lo usa para
+    # re-abrir el reparto en el modo en que se guardo (D20: el reparto
+    # sobrevive el round-trip, y el MODO es parte del reparto)
+    total_price: Optional[Decimal] = None
     invoice_number: Optional[str] = None
 
 

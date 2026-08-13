@@ -496,6 +496,16 @@ export default function InboundEditPage() {
               Agregar Línea
             </Button>
           </CardHeader>
+          {/* D17: la revisión certifica pesos y cantidades — o sea, líneas.
+              Cambiarlas la devuelve a Registrada y hay que revisarla de nuevo;
+              la cabecera (factura, nota, vehículo) no toca lo certificado. Se
+              avisa ANTES de guardar, no solo con el warning de la respuesta. */}
+          {order.status === "reviewed" && linesDirty && (
+            <div className="mx-6 mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Al guardar, la entrada vuelve a <strong>Registrada</strong>: cambió lo
+              que el revisor había certificado y hay que revisarla de nuevo.
+            </div>
+          )}
           <CardContent className="space-y-0">
             {lines.map((line, idx) => (
               <FormLineGrid
@@ -563,6 +573,15 @@ export default function InboundEditPage() {
                     decimals={2}
                     placeholder="0,00"
                   />
+                  {/* D1/D2: obligatorio al REVISAR; en materiales medidos en kg
+                      el revisor lo autocompleta con la cantidad (ver Create) */}
+                  {unitOf(line.material_id) &&
+                    unitOf(line.material_id) !== "kg" &&
+                    line.scale_weight_kg <= 0 && (
+                      <p className="text-xs text-amber-600 mt-0.5">
+                        Sin este peso no se puede revisar
+                      </p>
+                    )}
                 </div>
                 <div className="md:col-span-2">
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Notas Calidad</Label>

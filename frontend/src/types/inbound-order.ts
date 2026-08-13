@@ -76,8 +76,11 @@ export interface InboundOrderUpdate {
 
 export interface InboundAllocationCreate {
   third_party_id: string;
+  /** Q-15: o el unitario O el total, nunca ambos ni ninguno (422 del backend).
+   *  El unitario es una fórmula: total / cantidad. */
   quantity: number;
-  unit_price: number;
+  unit_price?: number | null;
+  total_price?: number | null;
   /** Factura del proveedor (D12) */
   invoice_number?: string | null;
 }
@@ -137,6 +140,10 @@ export interface InboundAllocationResponse {
   third_party_name: string | null;
   quantity: number;
   unit_price: number;
+  /** Q-15: presente solo si se digitó el VALOR TOTAL en vez del unitario.
+   *  El backend serializa Decimal como string — coercionar con num() antes de
+   *  hacer aritmética (lección #93). */
+  total_price: number | null;
   invoice_number: string | null;
 }
 

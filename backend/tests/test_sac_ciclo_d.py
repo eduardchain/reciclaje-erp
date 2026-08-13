@@ -276,7 +276,8 @@ class TestCollectorCapture:
                 "third_party_id": str(supplier.id),
                 "date": _past(),
                 "collector_id": str(collector.id),
-                "lines": [{"material_id": str(mat_bat.id), "quantity": "10"}],
+                "lines": [{"material_id": str(mat_bat.id), "quantity": "10",
+                           "scale_weight_kg": "100"}],  # Q-13
             },
         )
         assert resp.status_code == 201, resp.text
@@ -284,6 +285,7 @@ class TestCollectorCapture:
         assert body["collector_name"] == "Green Loop D"
 
         # Confirmar (efectos willard) — NINGUNA comision nace
+        client.post(f"{INBOUND_URL}/{body['id']}/review", headers=org_headers)  # Q-16
         confirm = client.post(
             f"{INBOUND_URL}/{body['id']}/confirm", headers=org_headers,
         )
@@ -312,7 +314,8 @@ class TestCollectorCapture:
                 "warehouse_id": str(wh_cv.id),
                 "third_party_id": str(supplier.id),
                 "date": _past(),
-                "lines": [{"material_id": str(mat_bat.id), "quantity": "10"}],
+                "lines": [{"material_id": str(mat_bat.id), "quantity": "10",
+                           "scale_weight_kg": "100"}],  # Q-13
             },
         )
         assert resp.status_code == 201, resp.text
@@ -326,6 +329,7 @@ class TestCollectorCapture:
         assert patch.json()["collector_name"] == "Green Loop D"
 
         # Confirmar y seguir editando (informativo, sin efectos)
+        client.post(f"{INBOUND_URL}/{oid}/review", headers=org_headers)  # Q-16
         client.post(f"{INBOUND_URL}/{oid}/confirm", headers=org_headers)
         remove = client.patch(
             f"{INBOUND_URL}/{oid}", headers=org_headers, json={"collector_id": None},
@@ -821,10 +825,12 @@ class TestMovementAvgDisplayWillard:
                 "warehouse_id": str(wh_cv.id),
                 "third_party_id": str(supplier.id),
                 "date": _past(2),
-                "lines": [{"material_id": str(mat_bat.id), "quantity": "8"}],
+                "lines": [{"material_id": str(mat_bat.id), "quantity": "8",
+                           "scale_weight_kg": "80"}],  # Q-13
             },
         )
         assert resp.status_code == 201, resp.text
+        client.post(f"{INBOUND_URL}/{resp.json()['id']}/review", headers=org_headers)  # Q-16
         conf = client.post(f"{INBOUND_URL}/{resp.json()['id']}/confirm", headers=org_headers)
         assert conf.status_code == 200, conf.text
 

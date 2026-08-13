@@ -151,13 +151,23 @@ def _past(days=2):
     return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 
 
+def _weighed(line: dict) -> dict:
+    """Q-13: el peso es opcional al capturar pero obligatorio al REVISAR."""
+    if "scale_weight_kg" in line:
+        out = dict(line)
+        if out["scale_weight_kg"] is None:
+            out.pop("scale_weight_kg")
+        return out
+    return {**line, "scale_weight_kg": "100"}
+
+
 def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id=None,
              lines, date_str=None, **extra):
     body = {
         "inbound_type": inbound_type,
         "warehouse_id": str(warehouse_id),
         "date": date_str or _past(),
-        "lines": lines,
+        "lines": [_weighed(l) for l in lines],
         **extra,
     }
     if third_party_id is not None:
@@ -184,6 +194,9 @@ def _purchase_order(client, headers, wh, mat, qty="100", **extra):
 
 
 def _confirm(client, headers, order_id):
+    """Q-16: la willard pasa por revision antes de confirmar."""
+    rev = client.post(f"{INBOUND_URL}/{order_id}/review", headers=headers)
+    assert rev.status_code == 200, rev.text
     resp = client.post(f"{INBOUND_URL}/{order_id}/confirm", headers=headers)
     assert resp.status_code == 200, resp.text
     return resp.json()

@@ -122,6 +122,10 @@ def _enrich(
                     third_party_name=a.third_party.name if a.third_party else None,
                     quantity=a.quantity,
                     unit_price=a.unit_price,
+                    # Q-15: sin esto la pantalla re-abriria el reparto en modo
+                    # unitario aunque se hubiera guardado por total — el campo
+                    # no romperia, MENTIRIA (leccion #89)
+                    total_price=a.total_price,
                     invoice_number=a.invoice_number,
                 )
                 for a in (line.allocations or [])
@@ -384,9 +388,10 @@ def confirm_inbound_order(
     org_context: dict = Depends(require_permission("purchases.liquidate")),
     db: Session = Depends(get_db),
 ):
-    """B.2: draft -> confirmed — los efectos (inventario D2 + kg D5 + MCH H1a)
-    nacen aca, por el MISMO camino del 1-paso previo. Solo tipos Willard
-    (una orden tipo compra se confirma liquidando su compra derivada)."""
+    """B.2 + Q-16: reviewed -> confirmed — los efectos (inventario D2 + kg D5 +
+    MCH H1a) nacen aca, por el MISMO camino del 1-paso previo. Solo tipos
+    Willard (una orden tipo compra se confirma liquidando su compra derivada).
+    Desde Q-16 el paso previo es la REVISION, no la captura."""
     order = inbound_order_service.confirm(
         db,
         order_id=order_id,
@@ -403,8 +408,10 @@ def review_inbound_order(
     org_context: dict = Depends(require_permission("purchases.review")),
     db: Session = Depends(get_db),
 ):
-    """#93 D10: draft -> reviewed (tipo compra) — confirma las cantidades
-    pesadas y habilita liquidar. Permiso propio purchases.review."""
+    """#93 D10 + Q-16: draft -> reviewed, en AMBOS tipos — certifica las
+    cantidades pesadas; en compra habilita liquidar, en Willard confirmar.
+    Es donde el peso de bascula se vuelve obligatorio (Q-13).
+    Permiso propio purchases.review."""
     order = inbound_order_service.review(
         db,
         order_id=order_id,

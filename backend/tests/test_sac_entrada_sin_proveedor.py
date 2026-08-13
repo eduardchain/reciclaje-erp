@@ -190,10 +190,14 @@ def _capture(client, headers, wh, lines, expect=201, **extra):
     return resp.json()
 
 
-def _line(mat, qty, price=None):
+def _line(mat, qty, price=None, weight="100"):
+    """Q-13: toda linea llega pesada — el peso es opcional al capturar pero
+    obligatorio al REVISAR. `weight=None` captura sin peso a proposito."""
     body = {"material_id": str(mat.id), "quantity": str(qty)}
     if price is not None:
         body["unit_price"] = str(price)
+    if weight is not None:
+        body["scale_weight_kg"] = str(weight)
     return body
 
 
@@ -203,8 +207,13 @@ def _review(client, headers, order_id, expect=200):
     return resp.json()
 
 
-def _alloc(tp, qty, price, invoice=None):
-    body = {"third_party_id": str(tp.id), "quantity": str(qty), "unit_price": str(price)}
+def _alloc(tp, qty, price=None, invoice=None, total=None):
+    """Q-15: o precio unitario o valor total, nunca ambos."""
+    body = {"third_party_id": str(tp.id), "quantity": str(qty)}
+    if price is not None:
+        body["unit_price"] = str(price)
+    if total is not None:
+        body["total_price"] = str(total)
     if invoice:
         body["invoice_number"] = invoice
     return body
@@ -2001,3 +2010,296 @@ class TestPagoContadoYWillard:
         client.post(f"{INBOUND_URL}/{body['id']}/unliquidate", headers=org_headers)
         cleared = client.get(f"{INBOUND_URL}/{body['id']}", headers=org_headers).json()
         assert cleared["liquidated_ts"] is None  # se re-estampa al re-liquidar
+
+
+# ---------------------------------------------------------------------------
+# Ciclo Entradas (reunion 12-ago + respuestas telefonicas 13-ago)
+# Q-13 peso obligatorio al revisar · D17 des-certificacion al editar lineas
+# ---------------------------------------------------------------------------
+
+class TestPesoObligatorioAlRevisar:
+    """Q-13: opcional al CAPTURAR (el pesador es el eslabon apurado),
+    obligatorio al REVISAR (el revisor es justo quien certifica lo pesado)."""
+
+    def test_capturar_sin_peso_se_permite(self, client, org_headers, wh, mat_balancin):
+        order = _capture(client, org_headers, wh, [_line(mat_balancin, 10, weight=None)])
+        assert order["lines"][0]["scale_weight_kg"] is None
+
+    def test_revisar_sin_peso_rechaza_y_nombra_el_material(
+        self, client, org_headers, wh, mat_balancin,
+    ):
+        """El error nombra el material — el revisor tiene que saber cual
+        devolver a bascula, no que 'falta un peso'."""
+        order = _capture(client, org_headers, wh, [_line(mat_balancin, 10, weight=None)])
+        resp = client.post(f"{INBOUND_URL}/{order['id']}/review", headers=org_headers)
+        assert resp.status_code == 400, resp.text
+        assert "BALANCIN-93" in resp.json()["detail"]
+        # La revision fallida no deja rastro: sigue Registrada y sin certificar
+        got = client.get(f"{INBOUND_URL}/{order['id']}", headers=org_headers).json()
+        assert got["status"] == "draft"
+        assert got["reviewed_at"] is None
+
+    def test_revisar_con_peso_pasa_y_lo_conserva(
+        self, client, org_headers, wh, mat_balancin,
+    ):
+        order = _capture(client, org_headers, wh, [_line(mat_balancin, 10, weight="55.5")])
+        body = _review(client, org_headers, order["id"])
+        assert body["status"] == "reviewed"
+        assert Decimal(body["lines"][0]["scale_weight_kg"]) == Decimal("55.5")
+
+    def test_material_en_kg_autocompleta_el_peso(
+        self, client, org_headers, wh, mat_moto, db_session,
+    ):
+        """D2: si el material YA se mide en kg, el peso ES la cantidad — pedir
+        los dos seria friccion pura. Se PERSISTE, no se deriva al vuelo: el
+        informe de peso promedio lee la columna."""
+        order = _capture(client, org_headers, wh, [_line(mat_moto, "40", weight=None)])
+        body = _review(client, org_headers, order["id"])
+        assert body["status"] == "reviewed"
+        assert Decimal(body["lines"][0]["scale_weight_kg"]) == Decimal("40")
+
+    def test_mezcla_kg_y_unidad_solo_reclama_la_de_unidad(
+        self, client, org_headers, wh, mat_moto, mat_balancin,
+    ):
+        order = _capture(
+            client, org_headers, wh,
+            [_line(mat_moto, "40", weight=None), _line(mat_balancin, 10, weight=None)],
+        )
+        resp = client.post(f"{INBOUND_URL}/{order['id']}/review", headers=org_headers)
+        assert resp.status_code == 400, resp.text
+        detail = resp.json()["detail"]
+        assert "BALANCIN-93" in detail and "MOTO-93" not in detail
+
+    def test_entrada_vieja_sin_peso_se_edita_y_se_revisa(
+        self, client, org_headers, wh, mat_balancin,
+    ):
+        """Camino de salida para lo capturado antes de Q-13: editar y revisar.
+        Sin esto, toda entrada vieja quedaria irrevisable."""
+        order = _capture(client, org_headers, wh, [_line(mat_balancin, 10, weight=None)])
+        _review(client, org_headers, order["id"], expect=400)
+        resp = client.patch(
+            f"{INBOUND_URL}/{order['id']}", headers=org_headers,
+            json={"lines": [_line(mat_balancin, 10, weight="88")]},
+        )
+        assert resp.status_code == 200, resp.text
+        body = _review(client, org_headers, order["id"])
+        assert body["status"] == "reviewed"
+
+
+class TestD17Descertificacion:
+    """D17: el revisor certifica pesos y cantidades, que son LINEAS. Cambiarlas
+    exige revisar de nuevo; la cabecera no toca lo certificado."""
+
+    def test_editar_lineas_devuelve_a_registrada(
+        self, client, org_headers, wh, mat_balancin,
+    ):
+        order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 10)])
+        got = client.get(f"{INBOUND_URL}/{order['id']}", headers=org_headers).json()
+        assert got["status"] == "reviewed"
+        resp = client.patch(
+            f"{INBOUND_URL}/{order['id']}", headers=org_headers,
+            json={"lines": [_line(mat_balancin, 12)]},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "draft"
+        assert body["reviewed_at"] is None
+        assert any("Registrada" in w for w in body["warnings"])
+
+    def test_editar_cabecera_no_descertifica(
+        self, client, org_headers, wh, mat_balancin,
+    ):
+        order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 10)])
+        resp = client.patch(
+            f"{INBOUND_URL}/{order['id']}", headers=org_headers,
+            # La factura NO sirve de ejemplo de cabecera en tipo compra: vive
+            # en el reparto por proveedor (#93 D12) y el PATCH la rechaza
+            json={"notes": "llego con lluvia", "remission_number": "R-99"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "reviewed"
+        assert body["reviewed_at"] is not None
+        assert body["warnings"] == []
+
+    def test_descertificada_no_se_liquida_hasta_revisar_de_nuevo(
+        self, client, org_headers, wh, mat_balancin, sup1,
+    ):
+        """El punto de D17: sin esto se podia certificar y despues cambiar
+        justo lo certificado, y liquidar igual."""
+        order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 10)])
+        client.patch(
+            f"{INBOUND_URL}/{order['id']}", headers=org_headers,
+            json={"lines": [_line(mat_balancin, 12)]},
+        )
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, 12, 500)])],
+            expect=400,
+        )
+        _review(client, org_headers, order["id"])
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, 12, 500)])],
+        )
+
+
+class TestLiquidarPorValorTotal:
+    """Q-15: Johana digita el VALOR TOTAL de la asignacion; el unitario es una
+    formula, total / cantidad. El peso NO participa del calculo."""
+
+    def test_total_deriva_el_unitario(
+        self, client, org_headers, db_session, wh, mat_balancin, sup1,
+    ):
+        """El caso canonico del centavo: $200.000 entre 3 unidades dan
+        $66.666,67 y el total vuelve como $200.000,01. Se acepta (D8) — hacerlo
+        exacto obligaria a tocar purchase_lines, tabla compartida, por 1 centavo.
+        Lo que NO se acepta es que sea una sorpresa: la pantalla muestra el
+        total resultante antes de guardar."""
+        order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 3)])
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, 3, total="200000")])],
+        )
+        allocs = db_session.execute(
+            select(InboundLineAllocation).join(
+                InboundLineAllocation.line
+            ).where(InboundLineAllocation.third_party_id == sup1.id)
+        ).scalars().all()
+        assert len(allocs) == 1
+        assert allocs[0].unit_price == Decimal("66666.67")
+        assert allocs[0].total_price == Decimal("200000.00")  # el MODO persiste
+
+        purchases = _order_purchases(db_session, order["id"])
+        assert len(purchases) == 1
+        assert purchases[0].total_amount == Decimal("200000.01")
+
+    def test_mezcla_unitario_y_total_en_la_misma_entrada(
+        self, client, org_headers, db_session, wh, mat_balancin, mat_moto, sup1, sup2,
+    ):
+        order = _captured_reviewed(
+            client, org_headers, wh,
+            [_line(mat_balancin, 10), _line(mat_moto, 20)],
+        )
+        _liquidate(
+            client, org_headers, order["id"],
+            [
+                _liq_line(mat_balancin, [_alloc(sup1, 10, 500)]),
+                _liq_line(mat_moto, [_alloc(sup2, 20, total="3000")]),
+            ],
+        )
+        by_tp = {
+            p.supplier_id: p for p in _order_purchases(db_session, order["id"])
+        }
+        assert by_tp[sup1.id].total_amount == Decimal("5000.00")
+        assert by_tp[sup2.id].total_amount == Decimal("3000.00")  # 150 x 20
+
+    def test_ni_precio_ni_total_rechaza(
+        self, client, org_headers, wh, mat_balancin, sup1,
+    ):
+        order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 10)])
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, 10)])],
+            expect=422,
+        )
+
+    def test_precio_y_total_juntos_rechaza(
+        self, client, org_headers, wh, mat_balancin, sup1,
+    ):
+        order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 10)])
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, 10, 500, total="5000")])],
+            expect=422,
+        )
+
+    def test_total_demasiado_bajo_avisa_claro(
+        self, client, org_headers, wh, mat_balancin, sup1,
+    ):
+        """Sin este guard el unitario quedaria en $0 y reventaria mas abajo,
+        en purchase.liquidate, con un error que no explica nada."""
+        resp = _liquidate(
+            client, org_headers,
+            _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 10000)])["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, 10000, total="0.01")])],
+            expect=422,  # idioma del modulo: la Entrada responde 422 (#80)
+        )
+        assert "precio unitario queda en $0" in resp["detail"]
+
+    def test_round_trip_conserva_el_modo_y_no_recrea_compras(
+        self, client, org_headers, db_session, wh, mat_balancin, sup1,
+    ):
+        """D20 promete que el reparto sobrevive desliquidar/re-liquidar. El
+        MODO es parte del reparto: si el total no se persistiera, al re-abrir
+        Johana veria un unitario derivado en vez de lo que ella escribio.
+        Y la firma cuantizada tiene que ver el MISMO numero, o cada
+        re-liquidacion recrearia las compras."""
+        order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 3)])
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, 3, total="200000")])],
+        )
+        before = [p.purchase_number for p in _order_purchases(db_session, order["id"])]
+
+        client.post(f"{INBOUND_URL}/{order['id']}/unliquidate", headers=org_headers)
+        detail = client.get(f"{INBOUND_URL}/{order['id']}", headers=org_headers).json()
+        alloc = detail["lines"][0]["allocations"][0]
+        assert Decimal(alloc["total_price"]) == Decimal("200000.00")
+
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, 3, total="200000")])],
+        )
+        db_session.expire_all()
+        after = [p.purchase_number for p in _order_purchases(db_session, order["id"])]
+        assert after == before  # mismas compras, no nacieron nuevas
+
+    def test_cuantizacion_cierra_la_identidad_al_gramo(
+        self, client, org_headers, db_session, wh, mat_balancin, sup1, sup2,
+    ):
+        """Defecto pre-existente que el total hace mas probable: la asignacion
+        guardaba 4 decimales y al inventario entra la de la compra, con 3 —
+        la identidad 'pesado = repartido + descuadre' se rompia hasta 0,0005 kg
+        por asignacion SIN NINGUN AVISO."""
+        order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 100)])
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(
+                mat_balancin,
+                [_alloc(sup1, "33.3333", 500), _alloc(sup2, "66.6666", 500)],
+                ref_price=500,
+            )],
+        )
+        allocs = db_session.execute(
+            select(InboundLineAllocation)
+        ).scalars().all()
+        # Persistido a la escala REAL (3 decimales), no a la de la columna
+        assert {a.quantity for a in allocs} == {Decimal("33.333"), Decimal("66.667")}
+
+        repartido = sum(a.quantity for a in allocs)
+        adjustments = _order_adjustments(db_session, order["id"])
+        descuadre = sum(
+            (a.quantity if a.adjustment_type == "increase" else -a.quantity)
+            for a in adjustments
+        )
+        # pesado == repartido + descuadre, exacto
+        assert repartido - descuadre == Decimal("100.000")
+
+    def test_cantidad_que_desaparece_al_cuantizar_explica(
+        self, client, org_headers, wh, mat_balancin, sup1,
+    ):
+        """El schema exige cantidad > 0, pero valida ANTES de cuantizar: 0,0004
+        pasa el Field y queda en 0,000. Antes de la guarda, la derivacion del
+        unitario dividia por cero y devolvia un 500 sin explicacion."""
+        order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 100)])
+        r = client.post(
+            f"/api/v1/inbound-orders/{order['id']}/liquidate",
+            headers=org_headers,
+            json={"lines": [_liq_line(
+                mat_balancin, [_alloc(sup1, "0.0004", total="50000")], ref_price=500,
+            )]},
+        )
+        assert r.status_code == 422, r.text
+        assert "demasiado pequena" in r.json()["detail"]
+        assert mat_balancin.code in r.json()["detail"]

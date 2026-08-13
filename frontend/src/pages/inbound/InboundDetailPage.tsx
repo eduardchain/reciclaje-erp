@@ -150,8 +150,11 @@ export default function InboundDetailPage() {
             Editar
           </Button>
         )}
-        {/* #93 D10: registrada -> revisada (tipo compra, permiso propio) */}
-        {isRegistered && isPurchaseType && !isLegacy && canReview && (
+        {/* #93 D10: registrada -> revisada (permiso propio). Ítem 4: Willard
+            también pasa por revisión — el revisor certifica el peso de
+            báscula, que es la carta con la que Hugo renegocia el kg/unidad
+            con Willard. La compra legacy 1:1 conserva su flujo viejo. */}
+        {isRegistered && !isLegacy && canReview && (
           <Button
             onClick={() => setReviewOpen(true)}
             className="bg-sky-600 hover:bg-sky-700"
@@ -160,10 +163,10 @@ export default function InboundDetailPage() {
             Marcar Revisada
           </Button>
         )}
-        {/* Liquidar: willard registrada -> confirm; compra revisada -> reparto;
+        {/* Liquidar: willard REVISADA -> confirm; compra revisada -> reparto;
             legacy 1:1 -> liquidacion de la compra derivada */}
         {canConfirm && (
-          (isWillard && isRegistered) ? (
+          (isWillard && isReviewed) ? (
             <Button onClick={() => setConfirmOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
               <CheckCircle2 className="h-4 w-4 mr-2" />
               Liquidar
@@ -200,7 +203,7 @@ export default function InboundDetailPage() {
           <div>
             <span className="font-semibold">Registrada — pendiente.</span>{" "}
             {isWillard
-              ? "Al liquidar, el material entra al inventario y mueve el libro kg. Los kg mostrados son estimados con la fórmula vigente; los definitivos se calculan al liquidar."
+              ? "El siguiente paso es la revisión: alguien con permiso certifica el peso de báscula y la marca Revisada. Al liquidar, el material entra al inventario y mueve el libro kg — los kg mostrados son estimados con la fórmula vigente."
               : isLegacy
                 ? "Al liquidar se confirman los precios y la compra tiene efecto financiero (saldo del proveedor, costo promedio, retenciones)."
                 : "El siguiente paso es la revisión: alguien con permiso valida lo pesado y la marca Revisada. Después se liquida con el reparto de proveedores."}
@@ -213,8 +216,9 @@ export default function InboundDetailPage() {
           <ClipboardCheck className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
             <span className="font-semibold">Revisada — lista para liquidar.</span>{" "}
-            Al liquidar se reparte cada material entre sus proveedores: nacen las compras,
-            se valora el descuadre contra lo pesado y se causa la comisión del recolector.
+            {isWillard
+              ? "Al liquidar, el material entra al inventario al costo promedio vigente y se emite la deuda en kg de plomo con Willard."
+              : "Al liquidar se reparte cada material entre sus proveedores: nacen las compras, se valora el descuadre contra lo pesado y se causa la comisión del recolector."}
           </div>
         </div>
       )}
@@ -679,7 +683,11 @@ export default function InboundDetailPage() {
         open={reviewOpen}
         onOpenChange={setReviewOpen}
         title={`Marcar Revisada — Entrada #${order.order_number}`}
-        description="Confirma que lo pesado en patio fue validado. La entrada pasa a Revisada y queda lista para liquidar con el reparto de proveedores."
+        description={
+          isWillard
+            ? "Certifica el peso de báscula de cada línea. Si a alguna le falta, la revisión se rechaza indicando el material. Después la entrada queda lista para liquidar."
+            : "Confirma que lo pesado en patio fue validado — sin peso de báscula la revisión se rechaza. La entrada pasa a Revisada y queda lista para liquidar con el reparto de proveedores."
+        }
         confirmLabel="Marcar Revisada"
         loading={reviewOrder.isPending}
         onConfirm={() =>

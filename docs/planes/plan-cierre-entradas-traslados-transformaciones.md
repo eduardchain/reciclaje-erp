@@ -138,6 +138,30 @@ Además, `InboundLiquidatePage` **no consume listas de precios en absoluto** —
 
 ---
 
+### ✅ E · DECISIONES CERRADAS — respuestas de Hugo y Daniel, 13-ago
+
+Todo lo de arriba en el bloque E queda **resuelto**. Lo que sigue manda sobre el análisis.
+
+| Tema | Decisión | Consecuencia |
+|---|---|---|
+| **Peso: ¿cuándo es obligatorio?** | **Opcional al capturar, obligatorio al REVISAR** | Mejor que la propuesta original (bloqueo al liquidar): el revisor es justo quien confirma lo pesado, y el pesador no queda trabado. Si el material ya se mide en kg, el peso se autocompleta con la cantidad |
+| **¿Se pesa por referencia o el camión entero?** | **Por referencia** — Erwin pesa cada línea | 🟢 **Mata el problema del reparto del húmedo**: cada referencia ya llega con sus kilos, no hay ningún montón que prorratear. El *"me toca a mí hacer el cálculo"* de Hugo describe el dolor de HOY, no un requisito |
+| **Liquidar por peso: ¿cómo?** | **Johana digita el VALOR TOTAL de la línea**; el unitario sale de dividir por la cantidad | 🟢 **El peso NO participa en el cálculo del precio** — ella lo mira para decidir, el sistema no computa desde él. E1 se reduce a permitir digitar un total en vez de un unitario |
+| **El "precio del húmedo" ($/kg)** | **Fuera de alcance.** No entra al sistema como modo de precio | El húmedo es el nombre comercial de cómo Johana decide el total; el sistema solo recibe el total. **Nada que construir** |
+| **¿Para qué sirve entonces el peso?** | Dos cosas, ninguna es el precio | (a) el informe de **peso promedio por referencia**, que es la carta con la que Hugo renegocia el 5,2 kg/unidad con Willard; (b) con el % de plomo → kg de plomo → **costo por tonelada** |
+| **El % de plomo (el "53%")** | **Por material, heredado de un valor de organización.** El campo por batería nace vacío = usa el de la org | Patrón ya usado dos veces en el repo (#59, #71). Cambiar el 53 para todas = una edición. Va en `material_kg_profiles`, **exclusiva SAC**. 🔴 Ese plomo **NO genera `KgLedgerMovement`** — inventaría un pasivo con Willard |
+| **¿Willard pasa por revisión?** | **Sí** | Willard queda `draft → reviewed → confirmed`. ⚠️ El `display_status` (#82) se deriva en el cálculo **y** en el filtro SQL, con test de paridad — se tocan juntos |
+| **El centavo del redondeo** | Se acepta ($200.000 ÷ 3 vuelve como $200.000,01), **pero la pantalla muestra el total resultante antes de guardar** | Camino barato, todo dentro de SAC. Hacerlo exacto obligaría a tocar `purchase_lines`, tabla compartida, por un centavo |
+| **Listas de precios: forma** | N listas; **desde la lista se marcan los terceros**, no al revés (Hugo corrigió esto en vivo: *"es al contrario"*) | La pantalla de asignación vive en la lista |
+| **Tercero sin lista** | Usa la lista general de hoy, **y esa misma es el respaldo** cuando su lista no tiene precio para un material | Sin el respaldo habría que cargar los 37 materiales en cada lista y no lo mantendrían. Además es lo que deja el comportamiento actual **byte a byte** para las otras 3 empresas |
+| **¿Un tercero en dos listas?** | **No, una sola** | Unicidad en la tabla puente |
+| **¿Listas de venta también?** | **Sí, también para clientes** | Amplía a las 3 pantallas de ventas. Decisión de modelo derivada: **la lista se tipa (compra o venta)** y un tercero puede tener una de cada — un proveedor y un cliente son poblaciones distintas, y forzar una sola lista a servir a ambas dejaría media tabla en ceros. Reversible |
+| **Personas** | **Erwin captura, David revisa** (`david@sac.com`), Johana liquida | Erwin conserva `bascula_sac`; David recibe `revisor_inventario`. ⚠️ La grabación decía lo contrario (*"David, que es el de recepción, confirmó; Erwin revisó"*) — mandó la confirmación de Hugo por teléfono |
+
+**Orden de construcción acordado:** personas → botón un solo proveedor → peso obligatorio en revisión → revisión de Willard → liquidar por total → % de plomo por material → listas de precios.
+
+---
+
 ### T — Traslados y transformaciones. **El bloque grande. Todo bloqueado por decisiones.**
 
 #### T0 · La decisión que bloquea todo: ¿el molino es traslado, transformación, o algo nuevo?

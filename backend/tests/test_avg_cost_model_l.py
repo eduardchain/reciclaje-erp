@@ -1251,7 +1251,8 @@ class TestInventoryStressWalk:
                     "warehouse_id": str(ml_warehouse.id),
                     "third_party_id": str(ml_supplier.id),
                     "date": _today,
-                    "lines": [{"material_id": str(ml_material.id), "quantity": str(qty)}],
+                    "lines": [{"material_id": str(ml_material.id), "quantity": str(qty),
+                               "scale_weight_kg": str(qty)}],  # Q-13
                 },
             )
 
@@ -1343,7 +1344,12 @@ class TestInventoryStressWalk:
                 resp = _inbound_create(qty)
                 assert resp.status_code == 201, resp.text
                 oid = resp.json()["id"]
-                # B.2: capturar -> confirmar (los efectos willard nacen al confirmar)
+                # Q-16: capturar -> revisar -> confirmar (los efectos willard
+                # siguen naciendo al confirmar)
+                resp = client.post(
+                    f"/api/v1/inbound-orders/{oid}/review", headers=org_headers
+                )
+                assert resp.status_code == 200, resp.text
                 resp = client.post(
                     f"/api/v1/inbound-orders/{oid}/confirm", headers=org_headers
                 )

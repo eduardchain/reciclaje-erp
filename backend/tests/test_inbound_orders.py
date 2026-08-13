@@ -179,6 +179,20 @@ def kg_dross_account(client, org_headers, willard_tp):
     return resp.json()
 
 
+def _weighed(line: dict) -> dict:
+    """Q-13: toda entrada se pesa. El peso es opcional al CAPTURAR pero
+    obligatorio al REVISAR, asi que un helper que no lo mande dejaria todas
+    las entradas irrevisables. Un test que quiera capturar SIN peso manda
+    `scale_weight_kg=None` explicito. El valor no participa del costo ni del
+    kg de plomo — solo se certifica."""
+    if "scale_weight_kg" in line:
+        out = dict(line)
+        if out["scale_weight_kg"] is None:
+            out.pop("scale_weight_kg")
+        return out
+    return {**line, "scale_weight_kg": "100"}
+
+
 def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id, lines,
              date_str=None, center=None, **extra):
     body = {
@@ -186,7 +200,7 @@ def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id, lin
         "warehouse_id": str(warehouse_id),
         "third_party_id": str(third_party_id),
         "date": date_str or business_today().isoformat(),
-        "lines": lines,
+        "lines": [_weighed(l) for l in lines],
         **extra,
     }
     if center is not None:
@@ -202,8 +216,11 @@ def _kg_movs(db, order_id, status=None):
 
 
 def _confirm(client, headers, order_id):
-    """B.2: draft -> confirmed — los efectos willard nacen aca (re-semantizacion
-    mecanica del 1-paso previo, patron #73/#76)."""
+    """Q-16: draft -> reviewed -> confirmed. Los efectos willard siguen naciendo
+    en el confirm (B.2); lo que cambia es que ahora hay una revision antes
+    (re-semantizacion mecanica, patron #73/#76/#81)."""
+    rev = client.post(f"{INBOUND_URL}/{order_id}/review", headers=headers)
+    assert rev.status_code == 200, rev.text
     resp = client.post(f"{INBOUND_URL}/{order_id}/confirm", headers=headers)
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -1191,7 +1208,10 @@ class TestWillardTwoStep:
             f"{INBOUND_URL}/{body['id']}",
             headers=org_headers,
             json={
-                "lines": [{"material_id": str(mat_bat.id), "quantity": "7"}],
+                # Q-13: la linea nueva tambien llega pesada — el PATCH reemplaza
+                # las lineas enteras, asi que omitir el peso lo borraria
+                "lines": [{"material_id": str(mat_bat.id), "quantity": "7",
+                           "scale_weight_kg": "70"}],
                 "date": new_date,
             },
         )
@@ -1334,3 +1354,89 @@ class TestGatingAndRbac:
             },
         )
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Q-16 (reunion 12-ago): Willard tambien pasa por revision.
+# En la reunion se le habia respondido a Hugo que ya era asi — y NO lo era:
+# Willard iba draft -> confirmed directo desde B.2 (#81).
+# ---------------------------------------------------------------------------
+
+class TestWillardRevision:
+    def _capture(self, client, headers, warehouse, willard_tp, mat_bat, **kw):
+        resp = _inbound(
+            client, headers,
+            inbound_type="willard",
+            warehouse_id=warehouse.id,
+            third_party_id=willard_tp.id,
+            lines=[{"material_id": str(mat_bat.id), "quantity": "10", **kw}],
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    def test_flujo_completo_registrada_revisada_confirmada(
+        self, client, org_headers, warehouse, willard_tp, mat_bat, kg_bat_account,
+    ):
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        assert body["status"] == "draft"
+        rev = client.post(f"{INBOUND_URL}/{body['id']}/review", headers=org_headers)
+        assert rev.status_code == 200, rev.text
+        assert rev.json()["status"] == "reviewed"
+        assert rev.json()["reviewed_at"] is not None
+        conf = client.post(f"{INBOUND_URL}/{body['id']}/confirm", headers=org_headers)
+        assert conf.status_code == 200, conf.text
+        assert conf.json()["status"] == "confirmed"
+
+    def test_confirmar_sin_revisar_guia_a_la_revision(
+        self, client, org_headers, db_session, warehouse, willard_tp, mat_bat,
+        kg_bat_account,
+    ):
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        resp = client.post(f"{INBOUND_URL}/{body['id']}/confirm", headers=org_headers)
+        assert resp.status_code == 400, resp.text
+        assert "Revise" in resp.json()["detail"]
+        assert _kg_movs(db_session, body["id"]) == []  # sin efectos a medias
+
+    def test_sin_efectos_hasta_confirmar(
+        self, client, org_headers, db_session, warehouse, willard_tp, mat_bat,
+        kg_bat_account,
+    ):
+        """La revision certifica, NO aplica: los efectos siguen naciendo en el
+        confirm (B.2 intacto)."""
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        client.post(f"{INBOUND_URL}/{body['id']}/review", headers=org_headers)
+        assert _kg_movs(db_session, body["id"]) == []
+        client.post(f"{INBOUND_URL}/{body['id']}/confirm", headers=org_headers)
+        assert len(_kg_movs(db_session, body["id"], "confirmed")) == 1
+
+    def test_peso_obligatorio_tambien_en_willard(
+        self, client, org_headers, warehouse, willard_tp, mat_bat, kg_bat_account,
+    ):
+        """Q-13 + D4: no es carga extra — es lo que habilita el informe de peso
+        promedio por referencia con el que Hugo renegocia el 5,2 kg con
+        Willard. mat_bat se mide en unidades, asi que no autocompleta."""
+        body = self._capture(
+            client, org_headers, warehouse, willard_tp, mat_bat, scale_weight_kg=None,
+        )
+        resp = client.post(f"{INBOUND_URL}/{body['id']}/review", headers=org_headers)
+        assert resp.status_code == 400, resp.text
+        assert "peso" in resp.json()["detail"].lower()
+
+    def test_editar_lineas_de_una_revisada_la_devuelve_a_registrada(
+        self, client, org_headers, warehouse, willard_tp, mat_bat, kg_bat_account,
+    ):
+        """D17 aplica a los dos tipos."""
+        body = self._capture(client, org_headers, warehouse, willard_tp, mat_bat)
+        client.post(f"{INBOUND_URL}/{body['id']}/review", headers=org_headers)
+        resp = client.patch(
+            f"{INBOUND_URL}/{body['id']}", headers=org_headers,
+            json={"lines": [{"material_id": str(mat_bat.id), "quantity": "12",
+                             "scale_weight_kg": "120"}]},
+        )
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        assert out["status"] == "draft"
+        assert out["reviewed_at"] is None
+        # Y no se puede confirmar hasta revisar de nuevo
+        conf = client.post(f"{INBOUND_URL}/{body['id']}/confirm", headers=org_headers)
+        assert conf.status_code == 400

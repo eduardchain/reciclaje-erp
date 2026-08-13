@@ -357,6 +357,18 @@ class InboundLineAllocation(Base, OrganizationMixin, TimestampMixin):
 
     unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
 
+    # Q-15 (reunion 12-ago): Johana puede digitar el VALOR TOTAL de la
+    # asignacion en vez del precio unitario — "el precio unitario seria una
+    # formula, costo total dividido unidades" (Hugo). Se PERSISTE, no solo se
+    # deriva: #93 D20 promete que el reparto sobrevive el round-trip de
+    # desliquidar/re-liquidar, y un modo de captura que no sobrevive es un
+    # reparto que en realidad no se conservo. NULL = se digito el unitario.
+    total_price: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Valor total digitado (Q-15). NULL = se digito el unit_price",
+    )
+
     invoice_number: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,

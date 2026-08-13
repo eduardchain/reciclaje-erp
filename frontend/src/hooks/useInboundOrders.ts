@@ -117,7 +117,8 @@ export function useAnnulInboundOrder() {
   });
 }
 
-/** #93 D10: marcar revisada (permiso purchases.review) — solo tipo compra */
+/** #93 D10: marcar revisada (permiso purchases.review) — ambos tipos desde
+ *  el ciclo de Entradas: Willard también pasa por revisión */
 export function useReviewInboundOrder() {
   const qc = useQueryClient();
   return useMutation({
