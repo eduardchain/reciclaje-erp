@@ -22,7 +22,11 @@ import { useCurrentTariffs, useKgProfiles } from "@/hooks/useSacConfig";
 import { useKgAccounts } from "@/hooks/useKgLedger";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
-import { formatCurrency, formatWeight } from "@/utils/formatters";
+import {
+  formatCurrency,
+  formatCurrencyDecimals,
+  formatWeight,
+} from "@/utils/formatters";
 import { buildRoute, ROUTES } from "@/utils/constants";
 import { cn } from "@/utils";
 import {
@@ -106,6 +110,15 @@ const effUnitPrice = (a: AllocRow): number =>
     : a.unit_price;
 
 const effAllocTotal = (a: AllocRow): number => a.quantity * effUnitPrice(a);
+
+/** El peso colombiano se pinta sin decimales en toda la app (`formatCurrency`),
+ *  y en el reparto eso BORRABA justo el dato que D8 promete mostrar: el aviso
+ *  ámbar decía "$ 66.667 c/u → $ 200.000" — el mismo número dos veces, en un
+ *  color de alerta, sin rastro del centavo que sí se iba a guardar (defecto
+ *  encontrado abriendo la pantalla, no por los tests). Los decimales aparecen
+ *  SOLO cuando existen, para no ensuciar los montos redondos, que son la norma. */
+const fmtMoney = (v: number): string =>
+  Math.abs(v - Math.round(v)) < 0.005 ? formatCurrency(v) : formatCurrencyDecimals(v);
 
 /** Una asignación está completa si tiene proveedor, cantidad y ALGUNO de los
  *  dos precios — no siempre el unitario (Q-15). */
@@ -595,7 +608,7 @@ export default function InboundLiquidatePage() {
       retentionProblems.push(`Retenciones de ${s.name}: el monto quedó en $0`);
     } else if (supplierRetTotal(s.tpId, s.total) >= s.total) {
       retentionProblems.push(
-        `Retenciones de ${s.name} deben ser menores a su total (${formatCurrency(s.total)})`
+        `Retenciones de ${s.name} deben ser menores a su total (${fmtMoney(s.total)})`
       );
     }
   }
@@ -866,8 +879,8 @@ export default function InboundLiquidatePage() {
                         {a.total_price != null
                           ? // D8: el total que realmente queda. $200.000 entre 3
                             // vuelven como $200.000,01 — se acepta, pero se ve
-                            `${formatCurrency(effUnitPrice(a))} c/u → ${formatCurrency(effAllocTotal(a))}`
-                          : `Total ${formatCurrency(effAllocTotal(a))}`}
+                            `${fmtMoney(effUnitPrice(a))} c/u → ${fmtMoney(effAllocTotal(a))}`
+                          : `Total ${fmtMoney(effAllocTotal(a))}`}
                       </p>
                     )}
                   </div>
@@ -1069,7 +1082,7 @@ export default function InboundLiquidatePage() {
                   <div className="flex items-center justify-between gap-2 text-sm">
                     <span className="font-medium truncate">{s.name}</span>
                     {canViewPrices && (
-                      <span className="font-semibold tabular-nums">{formatCurrency(s.total)}</span>
+                      <span className="font-semibold tabular-nums">{fmtMoney(s.total)}</span>
                     )}
                   </div>
                   <div className="text-xs text-slate-500 tabular-nums">{s.qtyLabel} repartidos</div>
@@ -1085,7 +1098,7 @@ export default function InboundLiquidatePage() {
                         <span className="truncate text-slate-600">{m.code}</span>
                         <span className="tabular-nums text-slate-500 shrink-0">
                           {formatWeight(m.qty, m.unit)}
-                          {canViewPrices && ` × ${formatCurrency(m.price)}`}
+                          {canViewPrices && ` × ${fmtMoney(m.price)}`}
                         </span>
                       </li>
                     ))}
@@ -1185,7 +1198,7 @@ export default function InboundLiquidatePage() {
                       <p className="text-xs text-slate-500">
                         Neto al proveedor:{" "}
                         <span className="font-semibold text-slate-700">
-                          {formatCurrency(s.total - supplierRetTotal(s.tpId, s.total))}
+                          {fmtMoney(s.total - supplierRetTotal(s.tpId, s.total))}
                         </span>
                       </p>
                     )}
@@ -1236,7 +1249,7 @@ export default function InboundLiquidatePage() {
                           <p className="text-[11px] text-slate-500">
                             Sale de la cuenta:{" "}
                             <span className="font-semibold text-slate-700">
-                              {formatCurrency(s.total - supplierRetTotal(s.tpId, s.total))}
+                              {fmtMoney(s.total - supplierRetTotal(s.tpId, s.total))}
                             </span>{" "}
                             (el neto)
                           </p>
@@ -1273,7 +1286,7 @@ export default function InboundLiquidatePage() {
               <>
                 {supplierSummary.length} compra{supplierSummary.length === 1 ? "" : "s"}
                 {canViewPrices &&
-                  ` · ${formatCurrency(supplierSummary.reduce((acc, s) => acc + s.total, 0))}`}
+                  ` · ${fmtMoney(supplierSummary.reduce((acc, s) => acc + s.total, 0))}`}
                 {totalRetAll > 0 && canViewPrices &&
                   ` · retenciones ${formatCurrency(totalRetAll)}`}
                 {collectorEnabled && effCollectorAmount > 0 &&

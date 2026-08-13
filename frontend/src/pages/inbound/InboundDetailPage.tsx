@@ -29,7 +29,14 @@ import {
   useUnliquidateInboundOrder,
 } from "@/hooks/useInboundOrders";
 import { useCurrentFormulas } from "@/hooks/useSacConfig";
-import { formatCurrency, formatDate, formatDateTime, formatTime, formatWeight } from "@/utils/formatters";
+import {
+  formatCurrency,
+  formatCurrencyDecimals,
+  formatDate,
+  formatDateTime,
+  formatTime,
+  formatWeight,
+} from "@/utils/formatters";
 import { buildRoute, ROUTES } from "@/utils/constants";
 import { estimateKgLead, willardCenterLabel } from "./InboundCreatePage";
 import { EntradaStatusBadge, EntradaTypeBadge } from "./InboundOrdersPage";
@@ -38,6 +45,24 @@ import {
   PURCHASE_INBOUND_TYPES,
   WILLARD_INBOUND_TYPES,
 } from "@/types/inbound-order";
+
+/** El backend serializa Decimal como STRING ("0.0000") aunque el tipo TS diga
+ *  number. Para PINTAR da igual (Intl lo coacciona), pero toda COMPARACION
+ *  falla en silencio: `"0.0000" === 0` es false. Lección de #93. */
+const num = (v: unknown, fallback = 0): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+/** Los pesos van sin decimales en toda la app, pero al liquidar por VALOR
+ *  TOTAL el centavo del redondeo ES el dato (D8): una compra de $200.000,01
+ *  no puede mostrarse como $200.000. Decimales solo cuando existen. */
+const fmtMoney = (v: number | null | undefined): string => {
+  const n = num(v);
+  return Math.abs(n - Math.round(n)) < 0.005
+    ? formatCurrency(n)
+    : formatCurrencyDecimals(n);
+};
 
 // #93: el borde sigue el estado UNICO visible (columna-driven)
 const statusBorderMap: Record<string, string> = {
@@ -94,7 +119,13 @@ export default function InboundDetailPage() {
   // #93: legacy 1:1 (ciclos B-D) — la fila vieja tiene purchase_id y su cara
   // financiera se maneja en la compra derivada, no con el reparto nuevo
   const isLegacy = isPurchaseType && !!order.purchase_id;
-  const estimatedTotalKg = isDraft && isWillard
+  // Los kg de plomo NACEN al liquidar: hasta entonces se muestra el estimado
+  // con la fórmula vigente. Antes se condicionaba a `isDraft`, pero al meter
+  // la revisión de Willard apareció un estado intermedio donde ya no era draft
+  // y los kg todavía no existían — el estimado se borraba justo en Revisada,
+  // que es cuando el revisor lo está mirando para certificar.
+  const showsEstimatedKg = isWillard && (isRegistered || isReviewed);
+  const estimatedTotalKg = showsEstimatedKg
     ? order.lines.reduce((acc, l) => acc + (estimateKgLead(formulas, l.material_id, l.quantity) ?? 0), 0)
     : null;
   const purchaseTotal = isPurchaseType
@@ -322,9 +353,9 @@ export default function InboundDetailPage() {
           <CardContent className="space-y-2 text-sm">
             {isWillard && (
               <InfoRow
-                label={isDraft ? "Kg Plomo (estimado)" : "Total Kg Plomo"}
+                label={showsEstimatedKg ? "Kg Plomo (estimado)" : "Total Kg Plomo"}
                 value={
-                  isDraft ? (
+                  showsEstimatedKg ? (
                     <span className="font-semibold tabular-nums text-amber-700">
                       {estimatedTotalKg != null && estimatedTotalKg > 0
                         ? `~${formatWeight(estimatedTotalKg)}`
@@ -352,7 +383,7 @@ export default function InboundDetailPage() {
                   <InfoRow
                     label="Total Liquidado"
                     value={
-                      <span className="font-semibold tabular-nums">{formatCurrency(liquidatedTotal)}</span>
+                      <span className="font-semibold tabular-nums">{fmtMoney(liquidatedTotal)}</span>
                     }
                   />
                 )}
@@ -444,7 +475,7 @@ export default function InboundDetailPage() {
                   <div className="flex items-center justify-between gap-2 text-sm">
                     <PurchaseLink id={p.purchase_id}>Compra #{p.purchase_number}</PurchaseLink>
                     {canViewPrices && (
-                      <span className="font-semibold tabular-nums">{formatCurrency(p.total_amount)}</span>
+                      <span className="font-semibold tabular-nums">{fmtMoney(p.total_amount)}</span>
                     )}
                   </div>
                   {p.invoice_number && (
@@ -452,9 +483,9 @@ export default function InboundDetailPage() {
                   )}
                   {p.retentions_total != null && p.retentions_total > 0 && canViewPrices && (
                     <div className="text-xs text-slate-500">
-                      Retenciones: {formatCurrency(p.retentions_total)} · Neto:{" "}
+                      Retenciones: {fmtMoney(p.retentions_total)} · Neto:{" "}
                       <span className="font-medium text-slate-700">
-                        {formatCurrency(p.total_amount - p.retentions_total)}
+                        {fmtMoney(num(p.total_amount) - num(p.retentions_total))}
                       </span>
                     </div>
                   )}
@@ -551,7 +582,12 @@ export default function InboundDetailPage() {
               <TableBody>
                 {order.lines.map((line) => {
                   const hasAllocs = line.allocations.length > 0;
-                  const disc = line.discrepancy;
+                  // 🔴 El backend serializa Decimal como STRING ("0.0000")
+                  // aunque el tipo TS diga number: `disc === 0` daba false y el
+                  // cuadre exacto —el resultado BUENO— se pintaba de rojo como
+                  // si fuera un faltante. Misma trampa de #93, encontrada
+                  // abriendo la pantalla.
+                  const disc = line.discrepancy != null ? num(line.discrepancy) : null;
                   return (
                     <Fragment key={line.id}>
                       <TableRow>
@@ -582,10 +618,12 @@ export default function InboundDetailPage() {
                                 : "—"}
                             </TableCell>
                             <TableCell className="text-right">
-                              {disc == null || !hasAllocs && disc === 0 ? (
+                              {disc == null || (!hasAllocs && disc === 0) ? (
                                 <span className="text-slate-400">—</span>
                               ) : disc === 0 ? (
-                                <span className="text-emerald-600 tabular-nums font-medium">0</span>
+                                <span className="text-emerald-600 tabular-nums font-medium">
+                                  0 {line.material_unit || "kg"}
+                                </span>
                               ) : (
                                 <span
                                   className={`tabular-nums font-medium ${disc > 0 ? "text-emerald-700" : "text-rose-700"}`}
@@ -603,7 +641,7 @@ export default function InboundDetailPage() {
                         </TableCell>
                         {isWillard && (
                           <TableCell className="text-right">
-                            {isDraft ? (
+                            {showsEstimatedKg ? (
                               <span className="font-medium tabular-nums text-amber-700">
                                 {(() => {
                                   const est = estimateKgLead(formulas, line.material_id, line.quantity);
@@ -631,7 +669,7 @@ export default function InboundDetailPage() {
                                   <span className="font-medium">{a.third_party_name ?? "—"}</span>
                                   <span className="tabular-nums">
                                     {formatWeight(a.quantity, line.material_unit || "kg")}
-                                    {canViewPrices ? ` × ${formatCurrency(a.unit_price)}` : ""}
+                                    {canViewPrices ? ` × ${fmtMoney(a.unit_price)}` : ""}
                                   </span>
                                   {a.invoice_number && (
                                     <span className="text-slate-400">Fact. {a.invoice_number}</span>
@@ -655,7 +693,7 @@ export default function InboundDetailPage() {
               </span>
             </div>
           )}
-          {isDraft && isWillard && estimatedTotalKg != null && estimatedTotalKg > 0 && (
+          {showsEstimatedKg && estimatedTotalKg != null && estimatedTotalKg > 0 && (
             <div className="bg-amber-50 rounded-lg p-3 mt-3 flex justify-end">
               <span className="text-base font-bold tabular-nums text-amber-700">
                 Estimado: ~{formatWeight(estimatedTotalKg)}

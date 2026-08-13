@@ -1053,6 +1053,11 @@ class InboundOrderService:
 
         self._apply_willard_effects(db, order, lines_in, organization_id, user_id)
         order.status = "confirmed"
+        # La pantalla muestra el MISMO verbo ("Liquidar") en los dos tipos, asi
+        # que el instante real del clic tiene que existir en ambos: sin esto la
+        # Willard mostraba "Liquidada por Johana · 13/08/2026" sin hora y la
+        # compra sí. `liquidated_at` es fecha de negocio y no la lleva (#87).
+        order.liquidated_ts = datetime.now(timezone.utc)
         db.commit()
         db.refresh(order)
         return order

@@ -100,7 +100,23 @@ willard: revisar -> confirmar   -> 200  kg plomo 204 | peso bascula 352,4 conser
 
 ## 8. Deuda declarada de este ciclo
 
-- **La pantalla se abrió con smoke de API, no con ojos en el navegador.** `InboundLiquidatePage.tsx` es el archivo con el peor historial del repo (dos bloqueantes de runtime en #93 pasaron tsc, build, 1533 tests y golden). El riesgo estructural sigue: **no hay ESLint en `frontend/`**, así que `react-hooks/rules-of-hooks` no corre. Montarlo es ciclo propio pendiente. Mitigación aplicada acá: los dos hooks nuevos (`bulkSupplier`) quedaron con los demás `useState`, antes de todo guard, y las dos funciones nuevas son planas; y todo valor que viene del API pasa por `num()` — las dos clases de bug de #93.
+- **No hay ESLint en `frontend/`**, así que `react-hooks/rules-of-hooks` no corre. Montarlo es ciclo propio pendiente. Mitigación aplicada acá: los hooks nuevos quedaron con los demás `useState`, antes de todo guard, y las funciones nuevas son planas; y todo valor que viene del API pasa por `num()` — las dos clases de bug de #93.
+
+## 8b. 🔴 Los cinco defectos que solo aparecieron al abrir la pantalla
+
+Antes de este recorrido ya habían pasado: **`tsc`, `npm run build`, 1592 tests, parity DIFF CERO y un smoke de API end-to-end de los dos tipos y de los tres roles.** Ninguno vio nada de esto. Es el dato más importante del ciclo y va acá para que pese.
+
+| # | Defecto | Origen | Por qué ningún gate lo vio |
+|---|---|---|---|
+| 1 | El aviso ámbar del centavo decía `$ 66.667 c/u → $ 200.000` — **el mismo número dos veces, en color de alerta** | este ciclo | `formatCurrency` redondea a pesos enteros. La lógica estaba bien (por eso pintó ámbar); **mentía el formateador**. Ningún test compara texto renderizado |
+| 2 | Lo mismo en el detalle: compra de **$ 200.000,01** mostrada como `$ 200.000`, y total liquidado `$ 4.040.000` | este ciclo | otro archivo — arreglar la pantalla de liquidación no alcanzaba |
+| 3 | **Descuadre 0 pintado en ROJO** (el resultado bueno, con el color del malo) | #93 | `line.discrepancy` llega como **string** `"0.0000"` y `"0.0000" === 0` es `false` → caía en la rama del faltante. La misma trampa de #93, en código que este ciclo no tocó |
+| 4 | El estimado de kg **desaparecía en Revisada**, justo donde el revisor lo mira | **regresión de este ciclo** | se condicionaba a `isDraft`; la revisión de Willard creó un estado donde ya no es draft y los kg aún no existen. Antes era imposible: Willard iba draft → confirmed de un salto |
+| 5 | La Willard liquidaba **sin hora** y la compra sí, con el mismo botón "Liquidar" | #93 + este ciclo | `liquidated_ts` se estampaba en `liquidate()` y no en `confirm()`. Solo se nota viendo las dos pantallas seguidas |
+
+Tres son de presentación (1, 2, 5), uno es una **regresión propia** (4) y uno es un bug de color heredado que invertía el significado (3). Todos habrían llegado al cliente.
+
+**La conclusión operativa: abrir la pantalla no es una verificación opcional del ciclo, es un gate.** Y el orden importa — el recorrido fue capturar → revisar → editar → liquidar → detalle → Willard, siguiendo el flujo real; los defectos 4 y 5 solo son visibles comparando dos estados consecutivos, cosa que una revisión por pantallas sueltas no produce.
 - **Ítem 6 (% de plomo por material)** queda diseñado y sin construir; la pregunta a Hugo sigue viva (Q-17).
 - **Ítem 7 (listas de precios)** es el único con riesgo hacia afuera y sale con plan y ronda de QA propios.
 
