@@ -1240,7 +1240,11 @@ class TestInventoryStressWalk:
             },
         )
         assert resp.status_code == 201, resp.text
-        _today = _dt.now(_tz.utc).date().isoformat()
+        # Reloj de NEGOCIO (#91/#92): el servicio valida contra business_today().
+        # Con el reloj UTC, entre 19:00 y 24:00 hora Colombia esto daba mañana
+        # y la Entrada se rechazaba con 422 'no puede ser futura'.
+        from app.utils.dates import business_today
+        _today = business_today().isoformat()
 
         def _inbound_create(qty):
             return client.post(

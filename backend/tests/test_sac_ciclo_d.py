@@ -33,7 +33,7 @@ from app.models.money_movement import MoneyMovement
 from app.models.third_party import ThirdParty
 from tests.integration_helpers import create_material, create_material_category, create_warehouse
 from tests.conftest import create_third_party_with_category
-from app.utils.dates import business_today
+from app.utils.dates import business_today, business_today_noon
 
 INBOUND_URL = "/api/v1/inbound-orders"
 PURCHASES_URL = "/api/v1/purchases"
@@ -772,7 +772,7 @@ class TestCollectorCancelRoundtrip:
             movement_type="expense_accrual",
             amount=Decimal("7000"),
             account_id=None,
-            date=datetime.now(timezone.utc),
+            date=business_today_noon(),
             description="Accrual manual de prueba",
             third_party_id=collector.id,
             purchase_id=UUID(str(pid)),

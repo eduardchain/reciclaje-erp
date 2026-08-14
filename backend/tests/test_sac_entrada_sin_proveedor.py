@@ -172,7 +172,11 @@ def revisor_headers(client, db_session, test_organization):
 
 
 def _past(days=2):
-    return (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    # 🔴 Reloj de NEGOCIO, no UTC (#91/#92). `now(utc) - 1 dia` NO es "ayer"
+    # entre las 19:00 y las 24:00 hora Colombia: es HOY, porque en esa franja la
+    # fecha UTC ya avanzo. Con eso, `_past(1)` caia sobre el mismo dia en que el
+    # servicio fecha la liquidacion y el corte "de ayer" si cambiaba.
+    return (business_today() - timedelta(days=days)).isoformat()
 
 
 def _capture(client, headers, wh, lines, expect=201, **extra):

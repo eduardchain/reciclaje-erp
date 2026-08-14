@@ -5,6 +5,8 @@ Tests para el modulo de reportes y dashboard.
 Sales Report, Margin Analysis, Dashboard, Third Party Balances, Auth.
 """
 from datetime import datetime, timezone, timedelta
+
+from app.utils.dates import business_today_noon
 from decimal import Decimal
 from uuid import uuid4
 
@@ -1668,7 +1670,7 @@ class TestCommissionSupplierValidation:
         wh_id = str(report_data["warehouse"].id)
         payload = {
             "supplier_id": str(report_data["proveedor1"].id),
-            "date": datetime.now(timezone.utc).isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [{
                 "material_id": str(report_data["mat_cobre"].id),
                 "warehouse_id": wh_id,
@@ -1707,7 +1709,7 @@ class TestCommissionSupplierValidation:
         payload = {
             "customer_id": str(report_data["cliente1"].id),
             "warehouse_id": str(report_data["warehouse"].id),
-            "date": datetime.now(timezone.utc).isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [{
                 "material_id": str(report_data["mat_cobre"].id),
                 "quantity": 10,
@@ -1731,7 +1733,7 @@ class TestCommissionSupplierValidation:
         wh_id = str(report_data["warehouse"].id)
         payload = {
             "supplier_id": str(report_data["proveedor1"].id),
-            "date": datetime.now(timezone.utc).isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [{
                 "material_id": str(report_data["mat_cobre"].id),
                 "warehouse_id": wh_id,
@@ -2691,7 +2693,7 @@ class TestDpPctGeneralExpenses:
         db_session.flush()
         db_session.add(MoneyMovement(
             organization_id=parent.organization_id, movement_number=960,
-            date=datetime.now(tz=timezone.utc), movement_type="expense",
+            date=business_today_noon(), movement_type="expense",
             amount=Decimal("500000"), account_id=bu_data["cuenta"].id,
             description="Arriendo bodega norte", expense_category_id=child.id,
             status="confirmed",
@@ -2734,7 +2736,7 @@ class TestDpPctGeneralExpenses:
         self._set_pct(db_session, bu_data["cat_gasto_indirecto"], 20)
         db_session.add(MoneyMovement(
             organization_id=bu_data["cat_gasto_indirecto"].organization_id,
-            movement_number=961, date=datetime.now(tz=timezone.utc),
+            movement_number=961, date=business_today_noon(),
             movement_type="expense", amount=Decimal("300000"),
             account_id=bu_data["cuenta"].id, description="Gasto sin categoria",
             expense_category_id=None, status="confirmed",

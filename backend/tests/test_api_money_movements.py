@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.utils.dates import business_today_noon
 from app.models.money_account import MoneyAccount
 from app.models.third_party import ThirdParty
 from app.models.expense_category import ExpenseCategory
@@ -1176,7 +1177,7 @@ class TestOrganizationIsolation:
         movement = MoneyMovement(
             organization_id=test_organization2.id,
             movement_number=1,
-            date=datetime.now(timezone.utc),
+            date=business_today_noon(),
             movement_type="service_income",
             amount=Decimal("100000.00"),
             account_id=account_org2.id,
