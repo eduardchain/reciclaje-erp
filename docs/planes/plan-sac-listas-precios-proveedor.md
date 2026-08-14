@@ -1,6 +1,6 @@
 # Plan — Listas de precios por proveedor (ítem 7 del ciclo Entradas)
 
-**v1.1 · para QA** (v1.0 corregida con las respuestas de Hugo del 13-ago, 2ª llamada) · SAC (Soluciones Ambientales del Caribe)
+**v1.2 · GO de QA (14-ago) con 3 correcciones aplicadas** — v1.1 = respuestas de Hugo del 13-ago (2ª llamada); v1.0 = reunión del 12 · SAC (Soluciones Ambientales del Caribe)
 **Origen:** reunión 12-ago-2026 con Hugo Bedoya + respuestas telefónicas del 13 (canon `control-cambios-requerimientos.md`, Q-18)
 **Decisiones ya cerradas:** D12–D15 en `plan-sac-ciclo-entradas-peso-listas.md`, donde este ítem salió a ciclo propio por ser **el único que toca tablas compartidas con las 3 empresas cliente**.
 **Estado del repo:** `develop`, 6 commits locales sin push. El ciclo de Entradas (#95) está construido, con GO de QA, validado en el navegador y commiteado (`dce0ce4`, `77cb396`).
@@ -43,7 +43,9 @@ Corrigió en vivo el sentido de la asignación: *"es al contrario… digamos que
 
 Es la decisión central y es la que hace la no-regresión **demostrable en vez de verificable**. Mismo patrón que `warehouses.sede_warehouse_id` (#94):
 
-> Con la columna en `NULL` en las 3 empresas cliente —que es su estado el día del deploy y para siempre, porque la pantalla de listas está detrás del flag SAC— **cualquier consulta a la que se me olvide poner el filtro sigue devolviendo exactamente las mismas filas que hoy.**
+> Con la columna en `NULL` en las 3 empresas cliente —que es su estado el día del deploy y para siempre, porque **los endpoints que la escriben están gateados en el BACKEND** por `require_org_flag` (D6): un admin de Costa recibe 403 aunque llegue por API— **cualquier consulta a la que se me olvide poner el filtro sigue devolviendo exactamente las mismas filas que hoy.**
+
+⚠️ Ese paréntesis es lo que hace la premisa **estructural** en vez de operativa, y por eso D6 es una decisión y no un detalle de UI. Ver la corrección de QA allá.
 
 La alternativa (una tabla paralela `price_list_items`) obligaría a auditar a mano cada punto de lectura para probar lo mismo, y además duplicaría tres mecanismos que ya existen y funcionan: el append-only, el "vigente = el más reciente por `created_at`" (#35) y el modal de historial por material.
 
@@ -51,10 +53,14 @@ La alternativa (una tabla paralela `price_list_items`) obligaría a auditar a ma
 
 ### D2 — La membresía va en tabla puente, **no** en `third_parties`.
 
-Dos razones, y la segunda es dura:
+Dos razones:
 
 1. **`UNIQUE(third_party_id)` en la tabla puente hace cumplir D14 en la base** ("un tercero pertenece a una sola lista", respuesta de Hugo), en vez de confiarlo a una validación de servicio.
-2. 🔴 **`/third-parties` ES una de las 15 capturas del golden.** Poner la FK en el tercero obligaría a exponerla en `ThirdPartyResponse` y el golden vería una llave nueva en las 3 orgs cliente. Con la tabla puente, esa respuesta no cambia en un byte.
+2. La membresía queda **revocable con un `DELETE` de fila**, sin tocar el registro del tercero ni su historial de actualización.
+
+🔴 **Corrección (QA, 14-ago). La v1.1 traía acá una tercera razón que era FALSA**: *"`/third-parties` es una de las 15 capturas del golden"*. **No lo es.** `CAPTURES` tiene 14 entradas y ninguna es `/third-parties`; la única llamada a ese endpoint (`golden_capture.py:116`) sirve para **elegir** el tercero del `tp_statement` y su respuesta no se escribe como captura — y como la elección es por saldo e `id`, un campo nuevo en `ThirdPartyResponse` tampoco cambiaría al elegido. O sea que poner la FK en `third_parties` **no habría producido ningún diff de golden**.
+
+La decisión sobrevive porque la razón 1 alcanza sola. Se deja escrito el error, y no se borra en silencio, por dos motivos: **(a)** un hecho falso dentro de un plan aprobado se cita después como precedente (*"no podemos agregar campos a terceros porque el golden"*), y esa creencia costaría decisiones futuras; **(b)** ⚠️ el error **contradice mi propio hallazgo correcto del día anterior** — `plan-cierre-entradas-traslados-transformaciones.md:133` dice, bien, que *"el golden NO cubre esta regresión: `golden_capture.py` no captura `/price-lists` ni `/third-parties`"*. Escribí lo correcto el 12 y lo contrario el 13. Cuando una afirmación sobre el golden aparezca en un plan, **verificarla contra `CAPTURES` en vez de recordarla**.
 
 ### D3 — 🔴 **NO hay respaldo. La lista asignada es la única fuente.** (Reemplaza al D13 del plan anterior)
 
@@ -67,7 +73,17 @@ Regla, completa:
 
 Hugo (Q-21) describió otra cosa: **la lista trae TODOS los materiales registrados y el usuario decide a cuáles les pone precio y cuáles deja en cero.** Con eso, el cero deja de ser un hueco y pasa a ser una **decisión deliberada** — y caer a la lista general para "rellenarlo" sería exactamente pisar esa decisión con un precio que el usuario no eligió.
 
-Preguntado de frente por el proveedor sin lista (Q-22) respondió lo mismo: *"entra a ninguna, el sistema no sugiere precios en este caso"*. 🔴 Eso **supersede Q-18(a)**, donde había quedado registrado el respaldo — pero ahí Hugo estaba diciendo "de acuerdo" a una propuesta mía planteada en abstracto, y acá está respondiendo una pregunta concreta. Vale la respuesta directa y posterior.
+Preguntado de frente por el proveedor sin lista (Q-22) respondió lo mismo: *"entra a ninguna, el sistema no sugiere precios en este caso"*.
+
+🟢 **Por qué el supersede es sólido (argumento de QA, 14-ago — mejor que el que yo había escrito).** La v1.1 se apoyaba en un criterio de *peso de la evidencia*: "la respuesta directa y posterior vale más que un «de acuerdo» a una propuesta abstracta". Es un juicio sano, pero es un juicio: se cae si Hugo hubiera entendido mal Q-22. **No hace falta.** Las dos respuestas ni siquiera se contradicen una vez corregida la premisa falsa:
+
+1. Q-18(a) aceptó un respaldo **para resolver un problema**: "la lista es un subconjunto disperso, los huecos hay que rellenarlos".
+2. Q-21 estableció que la lista trae **todos** los materiales y que el cero es una decisión.
+3. **Sin huecos, el respaldo no tiene nada que hacer.**
+
+O sea que Q-22 no está *anulando* a Q-18(a): responde una pregunta que Q-18(a) nunca enfrentó. Eso saca la decisión del terreno de *"cuál respuesta pesa más"* y la pone en el de *"cambió el hecho"* — mucho más difícil de voltear después.
+
+🔴 **El riesgo que D3 introduce, nombrado:** si en la práctica los usuarios **no** llenan todos los materiales, las listas quedan dispersas, la premisa de Q-21 se cae, y el sistema deja de sugerir **en masa y sin que nadie lo note** (un campo vacío no avisa). D3 y Q-26 son el mismo riesgo en dos momentos distintos — por eso la salida de Q-26 lo ejercita a propósito en la primera semana.
 
 **Lo que gana el sistema:** nunca adivina un precio. Un campo vacío es información honesta ("nadie definió esto"); un precio heredado de otra lista es una afirmación que nadie hizo. Y desaparece toda la máquina de cascada, con sus casos borde.
 
@@ -83,9 +99,11 @@ Sin el parámetro → `price_list_group_id IS NULL` → **el comportamiento de h
 
 Reusa `materials.view_prices` / `materials.edit_prices`, que ya gobiernan las 7 rutas de precios. Cero migración de permisos, cero wiring de roles, cero cambio en el catálogo.
 
-### D6 — La pantalla de listas va detrás del flag `kg_ledger_enabled`.
+### D6 — 🔴 El flag `kg_ledger_enabled` se aplica en el BACKEND, no solo en la pantalla.
 
-Las 3 empresas cliente no ven nada. Es lo que sostiene la afirmación de D1 de que la columna se queda en `NULL` para siempre en esas orgs.
+Los endpoints de grupos, de membresía y el resolutor llevan **`require_org_flag("kg_ledger_enabled")` per-endpoint** (precedente directo: #75/#78 gatearon así los routers SAC — **403 incluso para admins**, porque el flag no lo bypassa el admin). La pantalla gated es consecuencia, no la medida.
+
+**Por qué esto es parte de la decisión y no un detalle de implementación** (corrección de QA, 14-ago): D1 afirma que la columna se queda en `NULL` en las 3 orgs cliente *"para siempre"*, y la v1.1 colgaba ese "para siempre" de que **la pantalla** estuviera escondida. Un enunciado de frontend no sostiene una premisa estructural: sin el gate de backend, un admin de Costa puede llegar por API y escribir un `price_list_group_id`, y en ese instante la premisa de D1 deja de ser cierta y toda la no-regresión demostrable se degrada a verificable. Con el gate, el "para siempre" pasa de promesa operativa a **propiedad del sistema**.
 
 ### D7 — La lista general se sigue editando donde se edita hoy.
 
@@ -160,7 +178,7 @@ Toda consulta a `price_lists` que hoy existe asume "hay una sola lista". Cada un
 
 - Suite completa.
 - Parity check.
-- **Golden ×3 orgs.** Con una honestidad sobre qué protege: **ninguna de las 15 capturas lee `price_lists`** (lo verifiqué: el único acoplamiento del modelo fuera de su servicio son referencias en docstrings de tarifas y fórmulas). O sea, el golden acá es **cinturón sobre tirantes** — la protección real es el `NULL` de D1. Se corre igual porque la regla es "toca tabla compartida, el golden es gate", y porque el costo de correrlo es bajo comparado con el de equivocarme sobre qué lee qué.
+- **Golden ×3 orgs.** Con una honestidad sobre qué protege: **ninguna de las 16 capturas por org lee `price_lists`** (lo verifiqué: el único acoplamiento del modelo fuera de su servicio son referencias en docstrings de tarifas y fórmulas). O sea, el golden acá es **cinturón sobre tirantes** — la protección real es el `NULL` de D1. Se corre igual porque la regla es "toca tabla compartida, el golden es gate", y porque el costo de correrlo es bajo comparado con el de equivocarme sobre qué lee qué.
 - **Abrir las pantallas.** Después del ciclo de Entradas esto deja de ser una recomendación: cinco defectos pasaron todos los gates automáticos y aparecieron en el recorrido guiado (§8b del informe de #95).
 
 ## 8. Respuestas del cliente (2ª llamada, 13-ago) y lo único que queda abierto
@@ -179,16 +197,21 @@ Cada 3 meses suena a "poco", y la conclusión ingenua sería que alcanza con edi
 
 🟢 Ese patrón ya existe y está probado: el modo tabla de precios (#35) — celda editable, Enter/blur guarda, check verde 1,5 s. Se reusa por lista.
 
-### 🟠 Lo único abierto: la transición (Q-26 del canon — la levanto yo, no la preguntó nadie)
+### 🟠 Q-26 — no es la transición: es la **configuración del día uno**, y entra al ciclo
 
-Q-22 dice que sin lista no hay sugerencia. Aplicado tal cual, **el día que esto se encienda todos los proveedores de SAC pierden el precio sugerido** hasta que alguien los asigne: hoy compran contra la lista general y mañana no tendrían nada. La operación de Johana se degradaría sin que ella lo haya pedido, y el síntoma sería un campo vacío — fácil de leer como "el sistema se dañó".
+Q-22 dice que sin lista no hay sugerencia. Aplicado tal cual, **el día que esto se encienda todos los proveedores de SAC pierden el precio sugerido**: hoy compran contra la lista general y mañana no tendrían nada. El síntoma sería un campo vacío — fácil de leer como *"el sistema se dañó"*.
 
-Dos salidas, ambas baratas, y es **decisión de operación, no de diseño**:
+🔴 **Reencuadre de QA (14-ago), y es correcto:** la v1.1 lo llamaba *"decisión de operación, no de diseño"* y lo mandaba al deploy. No es una arruga de transición — **con D3, «ningún proveedor tiene lista» ES el estado por defecto del día uno**. Y decide si hay que sembrar, que es **trabajo de este ciclo**, no del deploy.
 
-- **(a)** Sembrar una lista inicial con los precios generales de hoy y asignar a todos los proveedores; después Hugo los reparte entre sus listas con calma.
-- **(b)** Cargar y asignar todas las listas antes de encender.
+**Salida recomendada (a):** al desplegar, sembrar **una** lista con todos los materiales a los precios generales vigentes y asignarle **todos** los proveedores actuales. Tres beneficios:
 
-Hay que decidirla **antes del deploy**, no después.
+1. El día uno se comporta **igual que hoy** — cero sorpresa para Johana.
+2. Mover un proveedor a su lista propia pasa a ser una **edición**, no una carga desde cero.
+3. 🟢 El mejor: **ejercita la premisa de Q-21 de inmediato.** Si el modelo "todos los materiales, con ceros deliberados" no se sostiene en la práctica, se ve en la **primera semana** y no seis meses después. Es el mitigante directo del riesgo nombrado en D3.
+
+La alternativa (b) —cargar y asignar todas las listas definitivas antes de encender— deja el mismo resultado pero exige que Hugo tenga las listas listas antes del deploy, y no ejercita nada temprano.
+
+**Pendiente de confirmación de Daniel**, porque agrega el sembrado al alcance del ciclo.
 
 ### Nota de coherencia para SAC (no bloquea)
 
