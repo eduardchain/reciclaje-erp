@@ -3,6 +3,14 @@
 
 Uso: python capture_golden.py --base-url http://localhost:8001 --out before/
 Credenciales superuser: env SEED_SU_EMAIL / SEED_SU_PASSWORD.
+
+⚠️ CORRER SIEMPRE **ESTA** COPIA DEL SCRIPT PARA before Y PARA after.
+El script solo habla HTTP, asi que sirve igual contra el backend viejo (:8001,
+worktree de origin/main) que contra el nuevo (:8002). Usar la copia del worktree
+para `before` produce un set de archivos distinto y `golden_diff.py` lo reporta
+como `SOBRAN en after`, que cuenta como diff REAL — un falso positivo que cuesta
+una corrida entera. Es load-bearing desde 2026-08-13, cuando la captura de
+estado de cuenta paso de uno a dos terceros.
 """
 import argparse
 import json
@@ -86,18 +94,63 @@ def main() -> None:
             (out / f"{org_name}__{name}.json").write_text(
                 json.dumps(data, indent=1, sort_keys=True, ensure_ascii=False))
 
-        # Estado de cuenta del tercero "mas caliente": max |saldo|, tie-break id
+        # --- Estado de cuenta: DOS terceros, porque prueban cosas distintas ---
+        #
+        # 🔴 Hasta 2026-08-13 se capturaba uno solo, el de `max |saldo|`. Medido
+        # ese dia contra la replica, en las 3 orgs eso elige un socio con 3, 3 y
+        # 4 movimientos y CERO operaciones comerciales: el saldo grande lo
+        # producen inyecciones de capital, no la actividad. O sea que la muestra
+        # no era poco representativa — estaba **anti-correlacionada** con lo que
+        # hay que probar.
+        #
+        # La consecuencia es retroactiva: esa captura nunca ejercito las rutas
+        # comerciales del statement. El reposicionamiento de eventos por
+        # `liquidated_at` (#61), los eventos sinteticos de retencion (#93) y un
+        # `UnboundLocalError` que reventaba con 500 el estado de cuenta de
+        # cualquier comisionista (#96) pasaron los tres por este gate sin que los
+        # mirara.
+        #
+        # `hot` (mas saldo) y `busy` (mas eventos) prueban cosas distintas y
+        # cuestan lo mismo. Si coinciden, se escribe una sola captura.
         try:
             tps = get("/third-parties", {"limit": 5000})
             items = tps["items"] if isinstance(tps, dict) else tps
+
+            def _capturar(tp, sufijo):
+                stmt = get(f"/money-movements/third-party/{tp['id']}",
+                           {"date_from": "2026-01-01", "date_to": "2026-07-23"})
+                payload = {"third_party_id": str(tp["id"]),
+                           "third_party_name": tp.get("name"), "statement": stmt}
+                (out / f"{org_name}__tp_statement{sufijo}.json").write_text(
+                    json.dumps(payload, indent=1, sort_keys=True, ensure_ascii=False))
+                return len(stmt.get("items", []))
+
             hot = max(items, key=lambda t: (abs(float(t.get("current_balance") or 0)),
                                             str(t["id"])))
-            stmt = get(f"/money-movements/third-party/{hot['id']}",
-                       {"date_from": "2026-01-01", "date_to": "2026-07-23"})
-            payload = {"third_party_id": str(hot["id"]),
-                       "third_party_name": hot.get("name"), "statement": stmt}
-            (out / f"{org_name}__tp_statement.json").write_text(
-                json.dumps(payload, indent=1, sort_keys=True, ensure_ascii=False))
+            _capturar(hot, "")
+
+            # El mas activo: se mide pidiendo el statement de los candidatos con
+            # saldo != 0. Es O(n) llamadas, por eso se acota a 40 — suficiente
+            # para dar con un proveedor de cientos de operaciones y barato.
+            candidatos = sorted(
+                (t for t in items if t["id"] != hot["id"]),
+                key=lambda t: (abs(float(t.get("current_balance") or 0)), str(t["id"])),
+                reverse=True,
+            )[:40]
+            busy, n_busy = None, -1
+            for t in candidatos:
+                try:
+                    # ⚠️ NO llamar `s` a esto: `s` es la requests.Session del
+                    # modulo. Shadowearla convierte cada `s.get(...)` posterior
+                    # en `dict.get(...)` y revienta TODAS las capturas siguientes.
+                    st = get(f"/money-movements/third-party/{t['id']}",
+                             {"date_from": "2026-01-01", "date_to": "2026-07-23"})
+                except Exception:  # noqa: BLE001
+                    continue  # un candidato caido no debe tumbar la captura
+                if len(st.get("items", [])) > n_busy:
+                    busy, n_busy = t, len(st.get("items", []))
+            if busy is not None:
+                _capturar(busy, "_busy")
         except Exception as e:  # noqa: BLE001
             print(f"  FAIL {org_name}/tp_statement: {e}")
             failures += 1

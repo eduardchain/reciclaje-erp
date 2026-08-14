@@ -101,6 +101,41 @@ class TestHelper:
 RELOJES_PERMITIDOS: dict[str, tuple[int, str]] = {}
 
 
+# --- La misma guarda, para `tests/` -----------------------------------------
+#
+# 🔴 Por que existe (2026-08-13, #96). La suite estaba **roja de noche y verde de
+# dia** y nadie lo sabia: no hay CI, asi que solo se ve si a alguien le toca
+# correrla pasadas las 7 p.m. Esa noche fallaron 16 tests, todos por fechar un
+# documento con el reloj UTC contra servicios que validan con `business_today()`.
+#
+# Y la clase se escapo por `tests/` DOS veces: la guarda de arriba solo mira
+# `app/`. Un barrido a mano se declaro completo dos veces esa misma noche y las
+# dos veces faltaban formas — cuatro maneras distintas de escribir lo mismo:
+#
+#     datetime.now(timezone.utc).date()      # dia UTC
+#     datetime.now(timezone.utc).isoformat() # SIN .date(): el validador
+#                                            # BusinessDate lo lleva al mediodia
+#                                            # UTC del dia UTC. La que mas costo.
+#     datetime.utcnow().isoformat()          # naive UTC
+#     datetime.now().isoformat()             # naive local: da el dia correcto,
+#                                            # pero por accidente de la zona de
+#                                            # la maquina, no por decision
+#
+# Por eso este patron NO persigue la forma de la expresion sino el **sumidero**:
+# un campo de fecha de negocio (`"date":` o `date=`) alimentado desde cualquier
+# reloj. Da igual como se escriba el reloj — y esa es exactamente la propiedad
+# que le faltaba a los barridos que fallaron.
+#
+# La regla, entera: **una fecha de negocio en un test sale de
+# `business_today_noon()`**. Los 31 sitios que habia estan migrados y este
+# inventario quedo VACIO, igual que el de `app/`.
+#
+# ⚠️ Timestamps de auditoria (`created_at`, `annulled_at`) NO estan cubiertos ni
+# deben estarlo: esos SI son instantes y `datetime.now(timezone.utc)` es su
+# respuesta correcta. La guarda mira solo el campo `date`.
+RELOJES_PERMITIDOS_TESTS: dict[str, tuple[int, str]] = {}
+
+
 class TestInventarioDeRelojes:
     """🔴 La guarda de fondo: nadie deriva un dia del reloj sin declararlo."""
 
@@ -171,9 +206,79 @@ class TestInventarioDeRelojes:
             + "\n  ".join(f"{k}: {a} → {b}" for k, (a, b) in sorted(bajaron.items()))
         )
 
-    def test_toda_entrada_del_inventario_tiene_razon(self):
+    def test_toda_entrada_de_los_inventarios_tiene_razon(self):
+        """Vale para los dos: `app/` y `tests/`."""
         sin_razon = [k for k, (_, r) in RELOJES_PERMITIDOS.items() if not r.strip()]
+        sin_razon += [k for k, (_, r) in RELOJES_PERMITIDOS_TESTS.items() if not r.strip()]
         assert not sin_razon, f"Entradas sin razon escrita: {sin_razon}"
+
+
+class TestInventarioDeRelojesEnTests:
+    """🔴 La misma guarda, para `tests/` — el agujero por donde se escapo dos veces.
+
+    Ver el comentario de `RELOJES_PERMITIDOS_TESTS` arriba para el porque.
+    """
+
+    # Por el SUMIDERO (el campo de fecha), no por la forma del reloj: asi cubre
+    # las cuatro maneras conocidas de escribirlo y las que alguien invente.
+    _RELOJ = r"(?:datetime\.now\(|datetime\.utcnow\(|_dt\.now\()"
+    PATRON = re.compile(
+        # (a) el sumidero directo: un campo de fecha alimentado desde un reloj
+        r'(?:"date"\s*:|(?<![_a-zA-Z"])date\s*=)\s*[^,\n]*?' + _RELOJ
+        # (b) la escala intermedia: una variable que SE LLAMA dia y sale de un
+        #     reloj (`_today = _dt.now(_tz.utc)`), que despues alimenta el campo.
+        #     Sin esta rama el sumidero no la ve, porque ahi ya no hay un `now(`.
+        + r"|(?:_?(?:today|hoy|fecha|dia)\w*)\s*=\s*[^,\n]*?" + _RELOJ
+    )
+
+    CASOS_QUE_DEBE_ATRAPAR = [
+        '"date": datetime.now(timezone.utc).isoformat(),',
+        '"date": datetime.utcnow().isoformat(),',
+        '"date": datetime.now().isoformat(),',
+        "date=datetime.now(timezone.utc),",
+        "date=datetime.now(tz=timezone.utc),",
+        "_today = _dt.now(_tz.utc)",
+    ]
+
+    CASOS_QUE_NO_DEBE_TOCAR = [
+        # timestamps de auditoria: SI son instantes
+        "created_at=datetime.now(timezone.utc),",
+        "annulled_at = datetime.now(timezone.utc)",
+        "before = datetime.now(timezone.utc)",
+        # ya migrados
+        '"date": business_today_noon().isoformat(),',
+        "date=business_today_noon(),",
+    ]
+
+    def test_el_patron_atrapa_y_no_se_pasa(self):
+        """La guarda se prueba a si misma, en los dos sentidos: un patron con un
+        agujero da falsa cobertura, y uno que agarra de mas obliga a excepciones
+        que lo erosionan."""
+        escapan = [c for c in self.CASOS_QUE_DEBE_ATRAPAR if not self.PATRON.search(c)]
+        assert not escapan, f"El patron deja escapar: {escapan}"
+        sobran = [c for c in self.CASOS_QUE_NO_DEBE_TOCAR if self.PATRON.search(c)]
+        assert not sobran, f"El patron agarra de mas: {sobran}"
+
+    def test_ningun_test_fecha_un_documento_con_el_reloj_del_sistema(self):
+        tests_dir = pathlib.Path(__file__).resolve().parent
+        encontrados: dict[str, int] = {}
+        for archivo in sorted(tests_dir.rglob("*.py")):
+            if archivo.name == pathlib.Path(__file__).name:
+                continue  # este archivo contiene los casos de prueba del patron
+            n = len(self.PATRON.findall(archivo.read_text()))
+            if n:
+                encontrados[f"tests/{archivo.name}"] = n
+
+        nuevos = {k: v for k, v in encontrados.items() if k not in RELOJES_PERMITIDOS_TESTS}
+        assert not nuevos, (
+            "Tests que fechan un documento con el reloj del sistema:\n  "
+            + "\n  ".join(f"{k} ({v} sitio/s)" for k, v in sorted(nuevos.items()))
+            + "\n\nUna fecha de negocio en un test sale de `business_today_noon()`.\n"
+            "Entre las 19:00 y 24:00 hora Colombia el reloj UTC ya es del dia "
+            "siguiente y el servicio rechaza el documento por 'fecha futura'.\n"
+            "Si necesitas un dia pasado: `business_today() - timedelta(days=N)`, "
+            "NUNCA `now(utc) - timedelta(days=1)` (dentro de la franja eso es HOY)."
+        )
 
 
 class TestFrontend:

@@ -3815,3 +3815,92 @@ class TestBatchExpenses:
         items = [self._make_item(test_account.id, test_expense_category.id)]
         resp = client.post(self.URL, json={"items": items}, headers={})
         assert resp.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# Tests: acceso a cuenta restringida (UserAccountAssignment)
+# ---------------------------------------------------------------------------
+
+class TestRestrictedAccountAccess:
+    """El 403 de una cuenta no asignada.
+
+    🔴 Encontrado por `ruff --select F823` el 2026-08-13, VIVO en produccion:
+    `get_by_account` tenia dos `from fastapi import HTTPException` DENTRO de la
+    funcion, lo que vuelve el nombre local en todo su cuerpo — asi que el
+    `raise HTTPException(403)` de mas arriba explotaba con UnboundLocalError y
+    el usuario recibia **500 en vez de 403**. Es la misma clase que el bug de
+    `ret`, y el camino no tenia ni un test: `UserAccountAssignment` no aparecia
+    en toda la suite.
+    """
+
+    def _headers_con_cuenta_asignada(
+        self, db_session: Session, test_organization, test_user2, account_id,
+    ) -> dict:
+        from app.models.user import OrganizationMember, UserAccountAssignment
+        from app.models.role import Role, RolePermission
+        from app.models.permission import Permission
+        from app.core.security import create_access_token
+        from uuid import uuid4
+
+        rol = Role(
+            id=uuid4(), name="tesoreria_cuenta_unica",
+            display_name="Solo una cuenta",
+            organization_id=test_organization.id, is_system_role=False,
+        )
+        db_session.add(rol)
+        db_session.flush()
+
+        perms = db_session.query(Permission).filter(
+            Permission.code.in_(["treasury.view_accounts", "treasury.view_movements"])
+        ).all()
+        for p in perms:
+            db_session.add(RolePermission(role_id=rol.id, permission_id=p.id))
+
+        db_session.add(OrganizationMember(
+            user_id=test_user2.id, organization_id=test_organization.id, role_id=rol.id,
+        ))
+        db_session.add(UserAccountAssignment(
+            user_id=test_user2.id, account_id=account_id,
+            organization_id=test_organization.id,
+        ))
+        db_session.commit()
+
+        return {
+            "Authorization": f"Bearer {create_access_token(data={'sub': str(test_user2.id)})}",
+            "X-Organization-ID": str(test_organization.id),
+        }
+
+    def test_cuenta_no_asignada_da_403_no_500(
+        self, client: TestClient, db_session: Session,
+        test_organization, test_user2, test_account,
+    ):
+        """Pedir una cuenta ajena responde 403 con su mensaje, no un 500."""
+        from app.models.money_account import MoneyAccount
+        from decimal import Decimal
+        from uuid import uuid4
+
+        otra = MoneyAccount(
+            id=uuid4(), name="Cuenta Ajena", account_type="bank",
+            current_balance=Decimal("0"), organization_id=test_organization.id,
+        )
+        db_session.add(otra)
+        db_session.commit()
+
+        headers = self._headers_con_cuenta_asignada(
+            db_session, test_organization, test_user2, test_account.id,
+        )
+
+        r = client.get(f"/api/v1/money-movements/account/{otra.id}", headers=headers)
+        assert r.status_code == 403, r.text
+        assert "acceso" in r.json()["detail"].lower()
+
+    def test_cuenta_asignada_responde_200(
+        self, client: TestClient, db_session: Session,
+        test_organization, test_user2, test_account,
+    ):
+        """La cuenta que sí tiene asignada la puede consultar."""
+        headers = self._headers_con_cuenta_asignada(
+            db_session, test_organization, test_user2, test_account.id,
+        )
+        r = client.get(f"/api/v1/money-movements/account/{test_account.id}", headers=headers)
+        assert r.status_code == 200, r.text

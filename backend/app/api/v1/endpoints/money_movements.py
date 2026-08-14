@@ -734,7 +734,6 @@ def get_by_number(
     """Obtener movimiento por numero secuencial."""
     movement = money_movement.get_by_number(db, movement_number, org_context["organization_id"])
     if not movement:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Movimiento no encontrado")
     return _to_response(movement, db)
 
@@ -783,7 +782,6 @@ def get_by_account(
     # Calcular saldo base (initial_balance) = current_balance - efecto neto de todos los movimientos
     account = db.get(MoneyAccount, account_id)
     if not account:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Cuenta no encontrada")
 
     net_effect = sum(
