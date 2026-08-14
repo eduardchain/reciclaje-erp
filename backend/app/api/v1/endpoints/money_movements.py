@@ -1005,12 +1005,14 @@ def get_by_third_party(
              event_type="purchase_commission",
              description=f"{_charge_label} Compra #{purch.purchase_number}: {comm.concept}",
              amount=float(comm.commission_amount), direction=-1,
-             status="confirmed" if ret.reverted_at is None else "cancelled",
+             # La comision NO tiene `reverted_at` propio (eso es de las
+             # retenciones, 2c): su reversa la dispara el status de la COMPRA.
+             status="confirmed" if purch.status == "liquidated" else "cancelled",
              reference_number=None, movement_number=None,
              source="purchase_commission", source_id=str(comm.id), source_number=purch.purchase_number,
              **_null_ops)
-        if ret.reverted_at is not None:
-            _evt(purch.liquidated_at, ret.reverted_at, 2,
+        if purch.status == "cancelled" and purch.cancelled_at:
+            _evt(purch.liquidated_at, purch.cancelled_at, 2,
                  id=f"purch-comm-cancel-{comm.id}", date=purch.liquidated_at.isoformat(),
                  document_date=purch.date.isoformat(),
                  event_type="purchase_commission_cancellation",
