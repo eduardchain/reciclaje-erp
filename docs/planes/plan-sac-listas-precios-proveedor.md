@@ -89,6 +89,18 @@ O sea que Q-22 no está *anulando* a Q-18(a): responde una pregunta que Q-18(a) 
 
 🟢 **Además ya está implementado a medias**: `getSuggestedPrice` devuelve `null` cuando el precio es `<= 0` (`usePriceSuggestions.ts:29`). La semántica "cero = sin sugerencia" **ya existe en el hook**; solo hay que no romperla.
 
+### D10 — 🔴 Sin ninguna lista en la org, el parámetro `third_party_id` es INERTE (agregada durante la construcción, 14-ago)
+
+**No estaba en el plan y sin ella el ítem rompía producción.** Las 3 pantallas de compras que consumen el resolutor son **compartidas con las 3 empresas cliente**. Al cablearlas para que pasen el proveedor, Costa empezaría a llamar `/current?third_party_id=X`; el resolutor no le encontraría lista a ese proveedor y devolvería **cero sugerencias de precio en toda la operación de compras**.
+
+Ningún test lo habría atrapado: todos los del ítem crean listas primero. Lo encontré releyendo el cableado, no corriendo nada.
+
+**Regla:** si la organización no tiene **ninguna lista activa**, el parámetro se ignora y se devuelve la lista general. Con al menos una lista, aplica D3 completo.
+
+Es la semántica correcta, no un parche: *la funcionalidad está apagada hasta que alguien cree su primera lista*. Y es exactamente lo que ya prometía el copy del diálogo de creación — *"Es la primera lista. Desde que exista una, a un proveedor sin lista asignada no se le sugiere ningún precio"*.
+
+Se resuelve en el **backend y no gateando el frontend por flag**, por el mismo argumento de D4: gatear en la pantalla deja la regla escrita en dos lados y el día que cambie se corrige en uno. Acá además el backend puede *demostrarlo* — una org sin listas no puede tener membresías.
+
 ### D4 — 🔴 El resolutor vive en el SERVIDOR, en un solo lugar.
 
 `GET /price-lists/current?third_party_id=X` devuelve el mapa ya resuelto. **Por qué no client-side:** la misma resolución tiene que aplicar en las 3 pantallas de compras **y** en la liquidación de la Entrada, que es otro flujo con otro estado. En JS quedaría escrita dos veces, y el día que cambie —esta regla ya cambió una vez en 24 horas, ver D3— se corregiría en una y no en la otra.

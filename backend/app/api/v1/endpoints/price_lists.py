@@ -80,16 +80,38 @@ def get_price_table(
 
 @router.get("/current", response_model=CurrentPricesResponse)
 def get_all_current_prices(
+    third_party_id: Optional[UUID] = Query(
+        None,
+        description=(
+            "Resolver los precios que le corresponden a ESTE proveedor segun su "
+            "lista. Omitirlo devuelve la lista general (comportamiento historico)"
+        ),
+    ),
     org_context: dict = Depends(require_permission("materials.view_prices")),
     db: Session = Depends(get_db),
 ):
     """
     Obtener precios vigentes de todos los materiales.
-    Retorna el precio mas reciente por material para la organizacion.
+
+    🔴 EL SEAM DE NO-REGRESION (D4). Sin `third_party_id` esto devuelve la lista
+    general — exactamente lo de hoy, byte a byte — y es lo que llaman las 3
+    empresas cliente y las 6 pantallas de ventas y cruces. El parametro ES el
+    interruptor: no hay un modo escondido que dependa de un flag.
+
+    Con `third_party_id` aplica el resolutor (D3): la lista del proveedor, sin
+    los materiales en cero, y **nada** si no tiene lista. Ver
+    `price_list.resolve_for_supplier`.
     """
-    items = price_list.get_all_current_prices(
-        db=db, organization_id=org_context["organization_id"]
-    )
+    if third_party_id is not None:
+        items = price_list.resolve_for_supplier(
+            db=db,
+            organization_id=org_context["organization_id"],
+            third_party_id=third_party_id,
+        )
+    else:
+        items = price_list.get_all_current_prices(
+            db=db, organization_id=org_context["organization_id"]
+        )
     return CurrentPricesResponse(
         items=[
             CurrentPriceItem(

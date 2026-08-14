@@ -102,6 +102,7 @@ export const ROUTES = {
   CONFIG_TARIFFS: "/config/tariffs",
   CONFIG_FORMULAS: "/config/formulas",
   CONFIG_FLEET: "/config/fleet",
+  CONFIG_SUPPLIER_PRICE_LISTS: "/config/listas-precios",
   CONFIG_WILLARD_CENTERS: "/config/centros-willard",
 
   // Admin

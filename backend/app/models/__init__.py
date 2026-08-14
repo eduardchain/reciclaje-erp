@@ -16,6 +16,7 @@ from .sale import Sale, SaleLine, SaleCommission
 from .inventory_movement import InventoryMovement
 from .double_entry import DoubleEntry, DoubleEntryLine
 from .price_list import PriceList
+from .price_list_group import PriceListGroup, PriceListGroupMember
 from .expense_category import ExpenseCategory
 from .money_movement import MoneyMovement
 from .inventory_adjustment import InventoryAdjustment
@@ -66,6 +67,8 @@ __all__ = [
     "DoubleEntry",
     "DoubleEntryLine",
     "PriceList",
+    "PriceListGroup",
+    "PriceListGroupMember",
     "ExpenseCategory",
     "MoneyMovement",
     "InventoryAdjustment",

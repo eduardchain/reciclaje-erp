@@ -19,6 +19,7 @@ const tabs = [
   { value: ROUTES.CONFIG_FORMULAS, label: "Materiales (kg)", permission: "formulas.view", orgFlag: "kg_ledger_enabled" },
   { value: ROUTES.CONFIG_FLEET, label: "Conductores y Vehiculos", permission: "config.view_fleet", orgFlag: "kg_ledger_enabled" },
   { value: ROUTES.CONFIG_WILLARD_CENTERS, label: "Centros Willard", permission: "config.manage_sac_settings", orgFlag: "kg_ledger_enabled" },
+  { value: ROUTES.CONFIG_SUPPLIER_PRICE_LISTS, label: "Listas por Proveedor", permission: "materials.view_prices", orgFlag: "kg_ledger_enabled" },
 ];
 
 export default function ConfigLayout({ children }: { children: React.ReactNode }) {

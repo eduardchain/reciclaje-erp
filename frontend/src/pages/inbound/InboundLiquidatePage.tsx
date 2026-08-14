@@ -22,6 +22,7 @@ import { useCurrentTariffs, useKgProfiles } from "@/hooks/useSacConfig";
 import { useKgAccounts } from "@/hooks/useKgLedger";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { useSupplierPriceLookup } from "@/hooks/usePriceSuggestions";
 import {
   formatCurrency,
   formatCurrencyDecimals,
@@ -195,6 +196,14 @@ export default function InboundLiquidatePage() {
   const { data: tariffsData } = useCurrentTariffs();
   const { data: kgAccountsData } = useKgAccounts();
   const { data: accountsData } = useMoneyAccounts();
+
+  // 🔴 ARRIBA de cualquier `return` condicional (hay tres guards mas abajo):
+  // llamar un hook despues de un early return rompe el orden de hooks y deja
+  // la pantalla en blanco — el bloqueante (a) de #93, en esta misma pagina.
+  // Precio por proveedor (D8): al elegir el proveedor de una asignacion, se
+  // llena el precio con SU lista. Imperativo porque cada asignacion puede
+  // tener un proveedor distinto.
+  const lookupSupplierPrice = useSupplierPriceLookup();
 
   const collectors = collectorsData?.items ?? [];
   const materials = materialsData?.items ?? [];
@@ -421,11 +430,52 @@ export default function InboundLiquidatePage() {
     setLines((prev) => prev.map((l) => (l._key === key ? { ...l, ...patch } : l)));
   };
 
+  /**
+   * D8 — al elegir el proveedor de una asignacion, se le llena el precio con
+   * SU lista. Solo si el campo esta vacio: un precio ya digitado no se pisa
+   * (misma regla del sugerido de #10).
+   *
+   * Sin lista, o con el material en cero en ella, no hace nada — el sistema no
+   * adivina (D3). Es asincrono, asi que se aplica en un segundo `setLines`;
+   * mientras tanto la fila queda como estaba.
+   */
+  const autofillAllocPrice = async (lineKey: number, allocKey: number, supplierId: string) => {
+    // `lines` del render actual: la funcion se recrea en cada uno, asi que en
+    // el momento del evento es el estado vigente.
+    const line = lines.find((l) => l._key === lineKey);
+    if (!line || !supplierId) return;
+    const alloc = line.allocations.find((a) => a._key === allocKey);
+    if (!alloc || allocPriced(alloc)) return;   // ya tiene precio: no se toca
+
+    const price = await lookupSupplierPrice(supplierId, line.material_id);
+    if (price == null) return;
+
+    setLines((prev) =>
+      prev.map((l) =>
+        l._key !== lineKey
+          ? l
+          : {
+              ...l,
+              allocations: l.allocations.map((a) =>
+                // Se re-verifica al aplicar: el usuario pudo digitar un precio
+                // mientras la consulta viajaba.
+                a._key === allocKey && !allocPriced(a)
+                  ? { ...a, unit_price: price, total_price: null }
+                  : a
+              ),
+            }
+      )
+    );
+  };
+
   const updateAlloc = (
     lineKey: number,
     allocKey: number,
     patch: Partial<Omit<AllocRow, "_key">>
   ) => {
+    if (patch.third_party_id) {
+      void autofillAllocPrice(lineKey, allocKey, patch.third_party_id);
+    }
     setLines((prev) =>
       prev.map((l) => {
         if (l._key !== lineKey) return l;
@@ -504,15 +554,37 @@ export default function InboundLiquidatePage() {
    * y los extras del D16 se dejan quietos, que se agregaron a mano para
    * asignarlos a mano.
    */
-  const applySingleSupplier = () => {
+  const applySingleSupplier = async () => {
     if (!bulkSupplier) return;
+
+    // D8 — los precios de la lista de ESE proveedor, por material. Es
+    // exactamente el dolor que motivó las listas: hasta ahora el botón dejaba
+    // el precio en 0 y la pantalla marcaba "Hay asignaciones incompletas" en
+    // rojo. Un solo request (el resolutor devuelve el mapa completo).
+    const precios = new Map<string, number>();
+    await Promise.all(
+      [...new Set(lines.filter((l) => l.weighed > 0).map((l) => l.material_id))].map(
+        async (matId) => {
+          const p = await lookupSupplierPrice(bulkSupplier, matId);
+          if (p != null) precios.set(matId, p);
+        }
+      )
+    );
+
     setLines((prev) =>
       prev.map((l) => {
         if (l.weighed <= 0) {
           return l.isExtra ? l : { ...l, unallocated: true };
         }
-        // Conserva el precio ya digitado en la línea, venga del modo que venga
+        // Prioridad: lo ya digitado > la lista del proveedor > la referencia.
+        // Lo digitado nunca se pisa (#10); la lista es más específica que la
+        // referencia de la entrada, y si el proveedor no tiene precio para ese
+        // material, se cae a la referencia — que es el comportamiento previo,
+        // NO la lista general (D3: nada se hereda de otra lista).
         const priced = l.allocations.find((a) => allocPriced(a));
+        const precio = priced
+          ? effUnitPrice(priced)
+          : precios.get(l.material_id) ?? l.refPrice;
         return {
           ...l,
           unallocated: false,
@@ -521,7 +593,7 @@ export default function InboundLiquidatePage() {
               _key: ++allocKeyCounter,
               third_party_id: bulkSupplier,
               quantity: l.weighed,
-              unit_price: priced ? effUnitPrice(priced) : l.refPrice,
+              unit_price: precio,
               total_price: null,
             },
           ],
