@@ -36,7 +36,6 @@ export function useMoneyMovement(id: string) {
   });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function useCreateMovement(type: string) {
   const queryClient = useQueryClient();
   const endpointMap: Record<string, (data: any) => Promise<any>> = {

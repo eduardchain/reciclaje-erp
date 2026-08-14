@@ -92,7 +92,6 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   tp_adjustment_debit: "Ajuste Saldo (Debito)",
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 interface StatementItem {
   id: string;
   date: string;
