@@ -118,7 +118,10 @@ Toda consulta a `price_lists` que hoy existe asume "hay una sola lista". Cada un
 | `price_list.py:101 get_table` | modo hoja de cálculo (#35) | 🔴 param `group_id` **opcional, default `NULL`** — sin él, byte a byte lo de hoy (D7); la pantalla nueva lo pasa y obtiene la hoja de esa lista (D9) |
 | `price_list.py:169 get_by_material` | historial por material | `IS NULL` o `= group` |
 | `price_list.py:25 create` | alta de precio | recibe el grupo (default `NULL`) |
-| `_base_query` heredado de `CRUDBase` | listado genérico | `IS NULL` por defecto |
+| `_base_query` heredado de `CRUDBase` | listado genérico (`get_multi`, endpoint `GET ""`) | `IS NULL` por defecto |
+| `get_or_404` (endpoint `GET /{price_id}`) | trae **una fila por su PK** | 🟢 **ninguno, y la razón importa**: una fila concreta es una fila concreta — filtrar por grupo acá solo podría esconderla. Se anota para que la ausencia sea una decisión y no un olvido |
+
+**Barrido verificado el 2026-08-14** (no es una lista de memoria): `grep -rn "PriceList\|price_list" app/` confirma que **ningún servicio fuera de `app/services/price_list.py` consulta la tabla** — las demás apariciones son el registro de modelos, los schemas, los endpoints que delegan, y docstrings de tarifas/fórmulas que citan el patrón #35. Los 5 números de línea de arriba coinciden exactamente con los `def`. Esa exclusividad es lo que sostiene el argumento del §7.
 
 **Compromiso para la construcción:** ninguna de estas queda "por defecto sin filtro". El default explícito es `IS NULL`, para que agregar un punto de lectura nuevo mañana herede el comportamiento seguro.
 
