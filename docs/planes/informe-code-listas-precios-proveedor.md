@@ -78,7 +78,7 @@ Los 26 pasaron a la primera, así que los verifiqué al revés — rompiendo el 
 | `tsc --noEmit` | ✅ (atrapó un uso antes de declaración al cablear el hook) |
 | **Golden ×3 orgs** | ✅ **0 diffs reales, 0 claves aditivas** en 48 capturas × 3 orgs |
 | Smoke real contra la SAC de dev | ✅ (ver abajo) |
-| Abrir las pantallas en el navegador | 🔴 **pendiente — el único gate que no puedo correr yo** |
+| Abrir las pantallas en el navegador | ✅ **corrido con Daniel (2026-08-14) — encontró 1 defecto, ver §9** |
 
 ### El golden, y por qué hay que leerlo con cuidado
 
@@ -143,3 +143,57 @@ La regla que queda: **un argumento por construcción protege exactamente la supe
 cuantifica. Un ciclo que toca datos y llamadores necesita dos argumentos, no uno.** El segundo se
 escribe preguntando *qué va a empezar a enviar esta pantalla compartida cuando corra en una
 organización que no tiene la función*.
+
+---
+
+## 9. La revisión en pantalla, y el defecto que solo aparece ahí
+
+Recorrido en dev: Costa (no-regresión) → crear la primera lista con siembra → editar precios de
+lista → el reparto de una Entrada. Los cuatro pasos dieron lo esperado:
+
+| | Resultado |
+|---|---|
+| Costa, sin ninguna lista | `NF025` autocompleta $7.150 con su hint — **D10 protege lo que prometía** |
+| Primera lista con siembra | 6 precios copiados, 5 proveedores asignados, aviso ámbar visible |
+| Precio propio de la lista | `ALU-01` a $9.500 en la lista, **$1.000 intacto en la general** |
+| El reparto (lo que pidió Hugo) | `ALU-01` → **$9.500** (no los $1.000 de la general) · `BAT-G1` → $4.000 · `BAT-G07` (cero deliberado) → **vacío, sin respaldo** |
+
+### 🔴 El defecto: el precio se guardaba y la pantalla mostraba el viejo
+
+Al editar una celda de la lista, el valor **se persistía correctamente** (verificado en la BD: dos
+filas con 9.500 en `Lista base`, la general intacta en 1.000) pero la tabla seguía mostrando el
+precio anterior. Reintentar solo agregaba otra fila idéntica.
+
+**Causa:** `useCreatePriceList` ([hooks/useCrudData.ts](../../frontend/src/hooks/useCrudData.ts))
+—el hook de escritura compartido con la hoja general (#35)— invalidaba únicamente
+`["price-lists"]`. La hoja de una lista se lee con `["price-list-groups", "table", groupId]`, así
+que **nunca se enteraba**.
+
+**Arreglo:** la invalidación de la segunda llave va en el hook de escritura, no en la pantalla —
+cualquier fila de precio puede pertenecer hoy a una lista, así que la regla pertenece al lugar que
+escribe. En la hoja general esa llave no existe y la línea es un no-op.
+
+**Por qué ningún gate lo vio, y esto es lo que importa:** el backend guardaba bien, así que los 29
+tests pasaban; `tsc` y ESLint no leen llaves de caché; el golden compara respuestas HTTP, que eran
+correctas. **No fallaba: mentía** — y una pantalla que miente solo se detecta mirándola. Es la
+cuarta vez que un ciclo termina con un defecto de esta familia (ver `gates-punto-ciego-frontend`).
+
+Barrido posterior de la misma clase: las otras lecturas de precio (`usePriceSuggestions` usa
+`["price-lists", "current-all", supplierId]`) sí quedaban cubiertas por el prefijo, y las
+mutaciones de grupo ya invalidaban ambas llaves. Una sola instancia.
+
+### Una aspereza que se decidió dejar
+
+`BAT-G07` tiene cero deliberado en la lista, así que al repartir queda **sin precio** y la fila
+muestra *"Hay asignaciones incompletas"* con el botón Liquidar deshabilitado. Es el choque lógico
+de dos reglas correctas: el botón "Repartir todo a este proveedor" (#95) asigna todo lo pesado, y
+el resolutor deliberadamente no sugiere nada.
+
+**Decisión de Daniel: dejarlo así.** El razonamiento: si el botón salteara los materiales sin
+precio, la línea quedaría sin asignación y por D8 de #93 eso **también** bloquea hasta que alguien
+marque "sin proveedor" explícitamente. La acción del usuario es inevitable en los dos diseños, y el
+actual deja la fila armada —completar es escribir un número— en vez de hacer desaparecer del
+reparto un material que físicamente llegó.
+
+Queda anotado que el mensaje rojo dice *"asignaciones incompletas"* cuando la causa real es *"este
+proveedor no tiene precio para este material en su lista"*. Precisarlo es cosmético y quedó fuera.
