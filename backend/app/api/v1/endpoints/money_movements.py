@@ -869,11 +869,25 @@ def get_by_third_party(
     date_to_dt = datetime.combine(date_to + timedelta(days=1), dt_time.min, tzinfo=tz.utc) if date_to else None
 
     # --- Recopilar TODOS los eventos que afectan el balance del tercero ---
-    # Cada evento: (transaction_date, sort_datetime, sort_key, filter_datetime, event_dict)
-    # transaction_date: fecha de la transaccion (date del registro) para orden cronologico por fecha de negocio
-    # sort_datetime: timestamps del servidor (created_at, liquidated_at) para desempate dentro del mismo dia
-    # filter_datetime: timestamp para aplicar filtros de fecha (= sort_datetime por defecto)
-    # sort_key: 0=operacion comercial, 1=movimiento tesoreria, 2=cancelacion/anulacion
+    # Cada evento: (transaction_date, real_ts, sort_key, filter_datetime, event_dict)
+    #
+    # 🔴 UN SOLO RELOJ POR POSICION DE LA LLAVE (doctrina #91 aplicada al orden).
+    # La llave de orden es (dia de negocio, clase de evento, instante real, numero,
+    # orden de emision) y cada posicion compara UNA sola cosa:
+    #
+    #   transaction_date: fecha de NEGOCIO (BusinessDate). En que dia cae el evento.
+    #   sort_key:         clase. 0=operacion comercial, 1=tesoreria, 2=cancelacion/anulacion.
+    #   real_ts:          🔴 instante REAL del servidor (`created_at`, `cancelled_at`,
+    #                     `reverted_at`). NUNCA un BusinessDate.
+    #
+    # Hasta 2026-08-13 los eventos comerciales pasaban `liquidated_at` aca — que
+    # PARECE timestamp y es una fecha de negocio (mediodia UTC, la trampa de #87).
+    # Dos consecuencias: (a) todas las operaciones del mismo dia empataban exacto y
+    # el orden lo decidia lo que Postgres devolviera sin ORDER BY (orden fisico);
+    # (b) mezclar mediodia-UTC con `created_at` real hacia que un movimiento de
+    # tesoreria del dia cayera antes o despues de las operaciones segun si se
+    # digito antes o despues de las 7:00 a.m. de Bogota, y anulaba a `sort_key`,
+    # que quedaba despues en la llave y nunca llegaba a decidir nada.
     events: list[tuple] = []
 
     # Campos nulos para vista "operations" en eventos que no son lineas de detalle
@@ -887,7 +901,7 @@ def get_by_third_party(
             "parent_source_id": None,
         }
 
-    def _evt(txn_date, sort_dt, sort_key, filter_dt=None, **kwargs):
+    def _evt(txn_date, real_ts, sort_key, filter_dt=None, **kwargs):
         # Normalizar transaction_date a date (DoubleEntry.date es Date, otros son DateTime)
         if isinstance(txn_date, datetime):
             txn_date = txn_date.date()
@@ -895,7 +909,19 @@ def get_by_third_party(
         # que operaciones liquidadas en otra timezone caigan fuera del rango
         if filter_dt is None:
             filter_dt = datetime.combine(txn_date, dt_time(12, 0), tzinfo=tz.utc)
-        events.append((txn_date, sort_dt, sort_key, filter_dt, kwargs))
+        # Desempates finales, cuando el instante real tambien empata:
+        #   numero de documento: N compras nacidas en UNA transaccion (#93 D14)
+        #     comparten `created_at` al microsegundo. El consecutivo las ordena
+        #     #3, #4, #5 — y de paso pega cada operacion con sus satelites
+        #     (comision, retencion), que llevan el numero del padre.
+        #   orden de emision: ultimo recurso. Conserva el orden natural de las
+        #     lineas dentro de un documento (vista "operations") en vez de
+        #     barajarlas por UUID, y garantiza que el orden sea TOTAL —
+        #     reproducible entre corridas, que es lo que el golden compara.
+        num = kwargs.get("source_number")
+        events.append((txn_date, sort_key, real_ts,
+                       num if isinstance(num, int) else 0,
+                       len(events), filter_dt, kwargs))
 
     # 1. MoneyMovements confirmados y anulados
     allowed = _get_allowed_accounts(db, org_context)
@@ -950,7 +976,7 @@ def get_by_third_party(
                 # Posicionado en liquidated_at (fecha canonica de efecto
                 # financiero, decision #42) — document_date conserva la fecha
                 # del documento para mostrar ambas.
-                _evt(p.liquidated_at, p.liquidated_at, 0,
+                _evt(p.liquidated_at, p.created_at, 0,
                      id=f"purchase-line-{line.id}", date=p.liquidated_at.isoformat(),
                      document_date=p.date.isoformat(),
                      event_type="purchase_liquidation",
@@ -961,7 +987,7 @@ def get_by_third_party(
                      source="purchase", source_id=str(p.id), source_number=p.purchase_number,
                      **ops_fields)
         else:
-            _evt(p.liquidated_at, p.liquidated_at, 0,
+            _evt(p.liquidated_at, p.created_at, 0,
                  id=f"purchase-{p.id}", date=p.liquidated_at.isoformat(),
                  document_date=p.date.isoformat(),
                  event_type="purchase_liquidation",
@@ -999,7 +1025,7 @@ def get_by_third_party(
     )
     for comm, purch in db.execute(purch_comm_query).all():
         _charge_label = CHARGE_TYPE_LABELS.get(comm.charge_type, "Comisión")
-        _evt(purch.liquidated_at, purch.liquidated_at, 0,
+        _evt(purch.liquidated_at, purch.created_at, 0,
              id=f"purch-commission-{comm.id}", date=purch.liquidated_at.isoformat(),
              document_date=purch.date.isoformat(),
              event_type="purchase_commission",
@@ -1058,7 +1084,7 @@ def get_by_third_party(
                 "revertida (des-liquidacion)")
 
     for ret, purch in db.execute(ret_supplier_query).all():
-        _evt(purch.liquidated_at, purch.liquidated_at, 0,
+        _evt(purch.liquidated_at, purch.created_at, 0,
              id=f"purch-retention-sup-{ret.id}", date=purch.liquidated_at.isoformat(),
              document_date=purch.date.isoformat(),
              event_type="purchase_retention",
@@ -1091,7 +1117,7 @@ def get_by_third_party(
         )
     )
     for ret, purch in db.execute(ret_entity_query).all():
-        _evt(purch.liquidated_at, purch.liquidated_at, 0,
+        _evt(purch.liquidated_at, purch.created_at, 0,
              id=f"purch-retention-ent-{ret.id}", date=purch.liquidated_at.isoformat(),
              document_date=purch.date.isoformat(),
              event_type="purchase_retention",
@@ -1140,7 +1166,7 @@ def get_by_third_party(
                     "is_line_item": True,
                     "parent_source_id": str(s.id),
                 }
-                _evt(s.liquidated_at, s.liquidated_at, 0,
+                _evt(s.liquidated_at, s.created_at, 0,
                      id=f"sale-line-{line.id}", date=s.liquidated_at.isoformat(),
                      document_date=s.date.isoformat(),
                      event_type="sale_liquidation",
@@ -1151,7 +1177,7 @@ def get_by_third_party(
                      source="sale", source_id=str(s.id), source_number=s.sale_number,
                      **ops_fields)
         else:
-            _evt(s.liquidated_at, s.liquidated_at, 0,
+            _evt(s.liquidated_at, s.created_at, 0,
                  id=f"sale-{s.id}", date=s.liquidated_at.isoformat(),
                  document_date=s.date.isoformat(),
                  event_type="sale_liquidation",
@@ -1198,7 +1224,7 @@ def get_by_third_party(
     for comm, sale in db.execute(comm_query).all():
         if sale.id in sales_with_accrual:
             continue
-        _evt(sale.liquidated_at, sale.liquidated_at, 0,
+        _evt(sale.liquidated_at, sale.created_at, 0,
              id=f"commission-{comm.id}", date=sale.liquidated_at.isoformat(),
              document_date=sale.date.isoformat(),
              event_type="sale_commission",
@@ -1264,7 +1290,7 @@ def get_by_third_party(
                 }
                 # Como proveedor — precio de compra
                 if de.supplier_id == third_party_id:
-                    _evt(de_liq_dt, de_liq_dt, 0,
+                    _evt(de_liq_dt, de_dt, 0,
                          id=f"de-supplier-line-{line.id}", date=de_liq_iso, document_date=de_date_iso,
                          event_type="double_entry_purchase",
                          description=f"Doble Partida #{de.double_entry_number} (como proveedor)",
@@ -1274,7 +1300,7 @@ def get_by_third_party(
                          unit_price=float(line.purchase_unit_price), **base_ops)
                 # Como cliente — precio de venta
                 if de.customer_id == third_party_id:
-                    _evt(de_liq_dt, de_liq_dt, 0,
+                    _evt(de_liq_dt, de_dt, 0,
                          id=f"de-customer-line-{line.id}", date=de_liq_iso, document_date=de_date_iso,
                          event_type="double_entry_sale",
                          description=f"Doble Partida #{de.double_entry_number} (como cliente)",
@@ -1285,7 +1311,7 @@ def get_by_third_party(
         else:
             # Como proveedor
             if de.supplier_id == third_party_id:
-                _evt(de_liq_dt, de_liq_dt, 0,
+                _evt(de_liq_dt, de_dt, 0,
                      id=f"de-supplier-{de.id}", date=de_liq_iso, document_date=de_date_iso,
                      event_type="double_entry_purchase",
                      description=f"Doble Partida #{de.double_entry_number} (como proveedor)",
@@ -1294,7 +1320,7 @@ def get_by_third_party(
                      source="double_entry", source_id=str(de.id), source_number=de.double_entry_number)
             # Como cliente
             if de.customer_id == third_party_id:
-                _evt(de_liq_dt, de_liq_dt, 0,
+                _evt(de_liq_dt, de_dt, 0,
                      id=f"de-customer-{de.id}", date=de_liq_iso, document_date=de_date_iso,
                      event_type="double_entry_sale",
                      description=f"Doble Partida #{de.double_entry_number} (como cliente)",
@@ -1345,7 +1371,7 @@ def get_by_third_party(
         de_doc_iso = datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc).isoformat()
         de_liq_dt = de.liquidated_at or datetime.combine(de.date, dt_time(12, 0), tzinfo=tz.utc)
         de_liq_iso = de_liq_dt.isoformat()
-        _evt(de_liq_dt, de_liq_dt, 0,
+        _evt(de_liq_dt, de_dt, 0,
              id=f"de-commission-{comm.id}", date=de_liq_iso, document_date=de_doc_iso,
              event_type="double_entry_commission",
              description=f"Comision DP #{de.double_entry_number}: {comm.concept}",
@@ -1365,8 +1391,10 @@ def get_by_third_party(
                  source="commission", source_id=str(comm.id), source_number=de.double_entry_number,
                  **_null_ops)
 
-    # --- Ordenar por fecha de transaccion, timestamp servidor, sort_key ---
-    events.sort(key=lambda e: (e[0], e[1], e[2]))
+    # --- Ordenar: dia de negocio, clase de evento, instante real, numero, emision ---
+    # Los 5 primeros elementos SON la llave, en orden. Orden TOTAL: no quedan
+    # empates, asi que dos corridas sobre los mismos datos dan la misma lista.
+    events.sort(key=lambda e: e[:5])
 
     # --- Obtener initial_balance del tercero ---
     tp = db.query(ThirdParty).filter(
@@ -1387,7 +1415,7 @@ def get_by_third_party(
     # listan. Asi el saldo corrido queda trazable aunque el default de 90 dias
     # deje operaciones fuera de la vista (sin esto, el saldo "saltaba" sin
     # mostrar el movimiento que lo movio).
-    for _, _, _, filter_dt, evt in events:
+    for *_, filter_dt, evt in events:
         if evt["status"] not in ("annulled", "cancelled"):
             balance += Decimal(str(evt["amount"])) * evt["direction"]
         evt["balance_after"] = float(balance)
