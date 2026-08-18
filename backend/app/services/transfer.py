@@ -75,6 +75,47 @@ def validate_not_transit_warehouse(
     )
 
 
+def sede_of(warehouse: Warehouse) -> UUID:
+    """La sede de una bodega. NULL = la bodega ES su propia sede."""
+    return warehouse.sede_warehouse_id or warehouse.id
+
+
+def validate_same_sede(
+    db: Session, organization_id: UUID, origin: Warehouse, dest: Warehouse
+) -> None:
+    """Guard T0': una transformacion NUNCA cruza de sede.
+
+    Espejo de la invariante de #84 B1 ("un traslado NUNCA cambia el avg"). El
+    argumento no es de simetria: **una transformacion no tiene recepcion**. El
+    traslado esta en dos pasos justamente para garantizar que lo que salio
+    llego — segundo pesaje, tolerancia, DiscrepancyTask — y de ese control
+    cuelgan la deuda de plomo intersede y la maquila. Emitirlas desde una
+    transformacion crearia el efecto financiero soltando el control fisico que
+    lo justifica: una deuda que nadie peso.
+
+    🔴 El flag NO es opcional (leccion de #98 D10): `sede_warehouse_id` es NULL
+    en las 6 orgs que no son SAC, y `sede_of` devuelve el id propio, asi que
+    **dos bodegas distintas son siempre dos sedes distintas**. Sin el
+    cortocircuito, este guard le prohibiria a Costa transformar entre bodegas —
+    y lo hace: 1 de sus 83 lineas. El flag pregunta "¿esta organizacion piensa
+    en sedes?", que es el predicado correcto; gatear por "la sede esta
+    configurada" seria peor, porque en SAC Bogota y Juan Mina tienen las dos
+    NULL y son sedes distintas de verdad.
+    """
+    if sede_of(origin) == sede_of(dest):
+        return
+    if not get_org_setting(db, organization_id, "two_step_transfers_enabled"):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            f"La bodega de destino '{dest.name}' pertenece a otra sede que la de "
+            f"origen '{origin.name}': una transformación no puede cruzar sedes. "
+            "Muévalo primero con un traslado y transfórmelo en la sede de destino."
+        ),
+    )
+
+
 class TransferService:
     """Traslados dos pasos con tolerancia, kg intersede y maquila."""
 
@@ -952,8 +993,9 @@ class TransferService:
 
     @staticmethod
     def _sede_of(warehouse: Warehouse) -> UUID:
-        """La sede de una bodega. NULL = la bodega ES su propia sede."""
-        return warehouse.sede_warehouse_id or warehouse.id
+        """La sede de una bodega. Delega en `sede_of` (modulo): una sola
+        definicion de "sede" para traslados y para el guard T0'."""
+        return sede_of(warehouse)
 
     @classmethod
     def _crosses_sede(cls, origin: Warehouse, dest: Warehouse) -> bool:

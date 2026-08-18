@@ -24,6 +24,10 @@ from app.models.material_transformation import MaterialTransformation, MaterialT
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
 from app.models.warehouse import Warehouse
+from app.services.transfer import (
+    validate_not_transit_warehouse,
+    validate_same_sede,
+)
 from app.schemas.material_transformation import MaterialTransformationCreate
 
 
@@ -97,7 +101,12 @@ class CRUDMaterialTransformation:
         dest_units: set[str] = set()
         for line in data.lines:
             dest_material = self._validate_material(db, line.destination_material_id, organization_id)
-            self._validate_warehouse(db, line.destination_warehouse_id, organization_id)
+            dest_warehouse = self._validate_warehouse(
+                db, line.destination_warehouse_id, organization_id
+            )
+            # Guard T0' (H2): cruzar sedes es un TRASLADO, con su segundo pesaje
+            # y su deuda de plomo. Ver `validate_same_sede`.
+            validate_same_sede(db, organization_id, source_warehouse, dest_warehouse)
 
             if line.destination_material_id == data.source_material_id:
                 raise HTTPException(
@@ -666,6 +675,12 @@ class CRUDMaterialTransformation:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Bodega '{warehouse.name}' esta inactiva",
             )
+        # Guard T0' (H1): el transito guarda material EN VUELO — salio del origen
+        # y nadie lo ha recibido. Transformarlo ahi rompe la recepcion, que
+        # compara contra lo despachado. Calco de ajustes/compras/ventas; el guard
+        # cortocircuita por `is_transit` y despues por flag, asi que fuera de SAC
+        # (cero bodegas de transito) es inerte por datos.
+        validate_not_transit_warehouse(db, organization_id, warehouse)
         return warehouse
 
     def _get_or_404(
