@@ -219,7 +219,7 @@ React 18 + TypeScript + Vite. Zustand (auth state), TanStack React Query + Axios
 
 ### Testing
 
-PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 1639 tests (20 integration; **suite limpia** — los 6 fallos históricos se resolvieron 2026-07-15, ver decisión #73). Nota: la BD de test se recrea desde los modelos en `conftest` (DROP SCHEMA + create_all) — correr alembic contra 5433 es un no-op.
+PostgreSQL on port 5433. `conftest.py` provides: `test_user`, `auth_headers`, `org_headers`, `db_session`. Async auto-enabled via pytest-asyncio. Current: 1645 tests (20 integration; **suite limpia** — los 6 fallos históricos se resolvieron 2026-07-15, ver decisión #73). Nota: la BD de test se recrea desde los modelos en `conftest` (DROP SCHEMA + create_all) — correr alembic contra 5433 es un no-op.
 
 ### Database
 
