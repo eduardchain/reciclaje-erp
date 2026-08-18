@@ -379,7 +379,7 @@ export default function TransferDetailPage() {
         open={annulOpen}
         onOpenChange={setAnnulOpen}
         title={`Anular traslado #${t.transfer_number}`}
-        description="Se revierte el inventario, los kg intersede y la maquila. El stock que ya se haya vendido o procesado en destino quedará negativo (con aviso)."
+        description="Se revierte el inventario y, si el traslado cruzó de sede, los kg intersede y la maquila. El stock que ya se haya vendido o procesado en destino quedará negativo (con aviso)."
         confirmLabel="Anular"
         variant="destructive"
         loading={annul.isPending}

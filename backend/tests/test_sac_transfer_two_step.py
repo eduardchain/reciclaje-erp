@@ -23,6 +23,8 @@ from app.models.inventory_movement import InventoryMovement
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
 from app.models.material import Material
 from app.models.money_movement import MoneyMovement
+from app.models.organization import Organization
+from app.models.warehouse import Warehouse
 from app.models.exception_task import DiscrepancyTask
 from app.models.service_tariff import ServiceTariff
 from app.models.transfer import Transfer
@@ -1015,3 +1017,224 @@ class TestNoRegression:
             )
         )
         assert after == before
+
+
+# ---------------------------------------------------------------------------
+# Sedes — kg intersede y maquila SOLO si el traslado cruza de sede
+# ---------------------------------------------------------------------------
+
+class TestTransferSedes:
+    """Antes, un traslado emitia kg y maquila por el solo hecho de que el
+    material tuviera formula, sin mirar el recorrido: mover material de
+    Circunvalar a su molino inventaba deuda de plomo y un cargo de maquila por
+    material que nunca salio de la sede ("es un solo inventario", Johana).
+
+    Ahora la sede decide DOS cosas: si se emiten kg/maquila, y si el traslado es
+    de dos pasos. Dentro de una sede no se pesa al salir ni al llegar (Daniel),
+    asi que el traslado se completa al registrarlo, en un solo salto y sin
+    transito. NULL = la bodega es su propia sede, que es el estado de las 7 orgs:
+    por eso todos los demas tests de este archivo siguen en dos pasos sin
+    tocarlos.
+    """
+
+    @pytest.fixture
+    def wh_molino(self, db_session, test_organization, wh_cv):
+        """Molino de Circunvalar: misma sede que CV."""
+        wh = create_warehouse(db_session, test_organization.id, "CV - Molino")
+        wh.is_receiving = False
+        wh.sede_warehouse_id = wh_cv.id
+        db_session.commit()
+        return wh
+
+    def test_intra_sede_un_solo_paso_sin_kg_ni_maquila(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_molino, mat_contrib,
+    ):
+        """El test estrella. En esta prueba NO existe bodega de transito que
+        rutee al molino, ni cuenta intersede, ni tarifa de maquila: si el
+        traslado intentara ir en dos pasos o emitir, reventaria con 400."""
+        t = _dispatch(client, org_headers, wh_cv, wh_molino,
+                      [{"material_id": str(mat_contrib.id), "quantity_dispatched": 40}])
+
+        # Nace completo: sin transito, sin recepcion pendiente
+        assert t["status"] == "received"
+        assert t["transit_warehouse_id"] is None
+        assert t["received_date"] is not None
+        line = t["lines"][0]
+        assert line["is_contributor"] is False
+        assert float(line["quantity_received"]) == 40.0
+        assert line["kg_lead_equivalent"] is None
+        assert line["maquila_amount"] is None
+
+        # El material paso directo de CV al molino
+        assert _wh_stock(db_session, test_organization.id, mat_contrib.id,
+                         wh_molino.id) == Decimal("40")
+        assert _wh_stock(db_session, test_organization.id, mat_contrib.id,
+                         wh_cv.id) == Decimal("60")
+
+        # Cero kg, cero maquila y cero ajustes (no hay merma sin segundo pesaje)
+        assert db_session.scalar(
+            select(func.count(KgLedgerMovement.id)).where(
+                KgLedgerMovement.organization_id == test_organization.id
+            )
+        ) == 0
+        assert _maquila_mms(db_session, test_organization.id) == []
+        assert db_session.execute(
+            select(InventoryAdjustment).where(
+                InventoryAdjustment.organization_id == test_organization.id,
+                InventoryAdjustment.transfer_id == t["id"],
+            )
+        ).scalars().all() == []
+
+    def test_intra_sede_no_admite_recepcion(
+        self, client, org_headers, wh_cv, wh_molino, mat_contrib,
+    ):
+        """Recibir algo que ya llego: 400 que explica por que, no un estado raro."""
+        t = _dispatch(client, org_headers, wh_cv, wh_molino,
+                      [{"material_id": str(mat_contrib.id), "quantity_dispatched": 40}])
+        r = _receive(client, org_headers, t, {0: 40}, expect=400)
+        assert "misma sede" in r["detail"]
+
+    def test_intra_sede_no_toca_el_avg(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_molino, mat_contrib,
+    ):
+        """Invariante 1: un traslado JAMAS cambia el costo promedio."""
+        db_session.expire_all()  # el seed entro por API, en otra sesion
+        avg_before = db_session.get(Material, mat_contrib.id).current_average_cost
+        assert avg_before == Decimal("1000.0000")
+        _dispatch(client, org_headers, wh_cv, wh_molino,
+                  [{"material_id": str(mat_contrib.id), "quantity_dispatched": 40}])
+        db_session.expire_all()
+        assert db_session.get(Material, mat_contrib.id).current_average_cost == avg_before
+
+    def test_intra_sede_anulacion_devuelve_el_material(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_molino, mat_contrib,
+    ):
+        """El annul refleja TODOS los movimientos del traslado, sin importar
+        cuantos saltos tuvo — un salto tambien se revierte entero."""
+        t = _dispatch(client, org_headers, wh_cv, wh_molino,
+                      [{"material_id": str(mat_contrib.id), "quantity_dispatched": 40}])
+        resp = client.post(
+            f"{TRANSFERS_URL}/{t['id']}/annul",
+            headers=org_headers,
+            json={"reason": "Error de captura"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "annulled"
+        assert _wh_stock(db_session, test_organization.id, mat_contrib.id,
+                         wh_molino.id) == 0
+        assert _wh_stock(db_session, test_organization.id, mat_contrib.id,
+                         wh_cv.id) == Decimal("100")
+
+    def test_del_molino_a_otra_sede_si_emite(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_molino, wh_jm, wh_transit,
+        intersede_account, maquila_tariff, mat_contrib,
+    ):
+        """Molino → Juan Mina cruza de sede (CV vs JM): dos pasos y emite."""
+        # Llevar material al molino primero (intra-sede, un solo paso)
+        _dispatch(client, org_headers, wh_cv, wh_molino,
+                  [{"material_id": str(mat_contrib.id), "quantity_dispatched": 40}])
+
+        t2 = _dispatch(client, org_headers, wh_molino, wh_jm,
+                       [{"material_id": str(mat_contrib.id), "quantity_dispatched": 40}])
+        assert t2["status"] == "dispatched"
+        assert t2["transit_warehouse_id"] is not None
+        assert t2["lines"][0]["is_contributor"] is True
+        r = _receive(client, org_headers, t2, {0: 40})
+        assert r["lines"][0]["effects_emitted"] is True
+        assert float(r["lines"][0]["kg_lead_equivalent"]) == 20.0
+
+        assert _kg_balance(db_session, test_organization.id,
+                           intersede_account.id) != 0
+        mms = _maquila_mms(db_session, test_organization.id)
+        assert len(mms) == 2
+        # El gasto se carga a la sede que despacha: el molino
+        by_type = {m.movement_type: m for m in mms}
+        assert by_type["internal_maquila_expense"].warehouse_id == wh_molino.id
+        assert by_type["internal_maquila_income"].warehouse_id == wh_jm.id
+
+    def test_dos_bodegas_sin_sede_siguen_cruzando(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, wh_transit, intersede_account, maquila_tariff, mat_contrib,
+    ):
+        """No-regresion explicita: con sede NULL en ambas —el estado de las 7
+        orgs— cada bodega es su propia sede y el traslado sigue emitiendo."""
+        assert wh_cv.sede_warehouse_id is None and wh_jm.sede_warehouse_id is None
+        t = _dispatch(client, org_headers, wh_cv, wh_jm,
+                      [{"material_id": str(mat_contrib.id), "quantity_dispatched": 40}])
+        assert t["status"] == "dispatched"  # sigue siendo de dos pasos
+        assert t["lines"][0]["is_contributor"] is True
+        r = _receive(client, org_headers, t, {0: 40})
+        assert r["lines"][0]["effects_emitted"] is True
+        assert len(_maquila_mms(db_session, test_organization.id)) == 2
+
+    def test_misma_sede_entre_dos_hijas(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_molino, wh_bog, mat_contrib,
+    ):
+        """Dos bodegas que apuntan a la MISMA sede tampoco cruzan entre si —
+        aunque ninguna de las dos SEA la sede."""
+        wh_bog.sede_warehouse_id = wh_cv.id
+        db_session.commit()
+
+        t = _dispatch(client, org_headers, wh_molino, wh_bog,
+                      [{"material_id": str(mat_contrib.id), "quantity_dispatched": 0.5}])
+        assert t["status"] == "received"
+        assert t["transit_warehouse_id"] is None
+        assert t["lines"][0]["is_contributor"] is False
+
+
+class TestSedeValidation:
+    """Un valor malo aca no da error: da numeros equivocados en silencio."""
+
+    def _patch(self, client, headers, wh_id, sede_id, expect):
+        resp = client.patch(
+            f"/api/v1/warehouses/{wh_id}",
+            headers=headers,
+            json={"sede_warehouse_id": str(sede_id) if sede_id else None},
+        )
+        assert resp.status_code == expect, resp.text
+        return resp
+
+    def test_no_puede_ser_su_propia_sede(self, client, org_headers, wh_cv):
+        r = self._patch(client, org_headers, wh_cv.id, wh_cv.id, 400)
+        assert "propia sede" in r.json()["detail"]
+
+    def test_transito_no_puede_ser_sede(self, client, org_headers, wh_cv, wh_transit):
+        r = self._patch(client, org_headers, wh_cv.id, wh_transit.id, 400)
+        assert "tránsito" in r.json()["detail"]
+
+    def test_un_solo_nivel(self, client, org_headers, db_session, test_organization,
+                           wh_cv, wh_jm, wh_bog):
+        wh_jm.sede_warehouse_id = wh_cv.id
+        db_session.commit()
+        r = self._patch(client, org_headers, wh_bog.id, wh_jm.id, 400)
+        assert "un solo nivel" in r.json()["detail"]
+
+    def test_una_sede_no_puede_tener_sede(self, client, org_headers, db_session,
+                                          wh_cv, wh_jm, wh_bog):
+        """El otro extremo de la cadena: CV ya es sede de JM."""
+        wh_jm.sede_warehouse_id = wh_cv.id
+        db_session.commit()
+        r = self._patch(client, org_headers, wh_cv.id, wh_bog.id, 400)
+        assert "es sede de" in r.json()["detail"]
+
+    def test_sede_de_otra_org_rechazada(self, client, org_headers, db_session, wh_cv):
+        ajena = Organization(name="Org Ajena", slug="org-ajena-sede", max_users=5)
+        db_session.add(ajena)
+        db_session.flush()
+        otra = create_warehouse(db_session, ajena.id, "Ajena")
+        db_session.commit()
+        r = self._patch(client, org_headers, wh_cv.id, otra.id, 400)
+        assert "no existe" in r.json()["detail"]
+
+    def test_limpiar_sede_permitido(self, client, org_headers, db_session,
+                                    wh_cv, wh_jm):
+        wh_jm.sede_warehouse_id = wh_cv.id
+        db_session.commit()
+        self._patch(client, org_headers, wh_jm.id, None, 200)
+        db_session.expire_all()
+        assert db_session.get(Warehouse, wh_jm.id).sede_warehouse_id is None

@@ -16,6 +16,7 @@ from .sale import Sale, SaleLine, SaleCommission
 from .inventory_movement import InventoryMovement
 from .double_entry import DoubleEntry, DoubleEntryLine
 from .price_list import PriceList
+from .price_list_group import PriceListGroup, PriceListGroupMember
 from .expense_category import ExpenseCategory
 from .money_movement import MoneyMovement
 from .inventory_adjustment import InventoryAdjustment
@@ -33,7 +34,12 @@ from .service_tariff import ServiceTariff
 from .material_conversion_formula import MaterialConversionFormula
 from .material_kg_profile import MaterialKgProfile
 from .retention_config import RetentionConfig
-from .inbound_order import InboundOrder, InboundOrderLine
+from .inbound_order import (
+    InboundLineAllocation,
+    InboundOrder,
+    InboundOrderLine,
+    InboundOrderPurchase,
+)
 from .transfer import Transfer, TransferLine
 from .plant_process import FurnaceCharge, CrucibleCharge
 from .exception_task import DiscrepancyTask, DailyOkSeal
@@ -61,6 +67,8 @@ __all__ = [
     "DoubleEntry",
     "DoubleEntryLine",
     "PriceList",
+    "PriceListGroup",
+    "PriceListGroupMember",
     "ExpenseCategory",
     "MoneyMovement",
     "InventoryAdjustment",
@@ -86,8 +94,10 @@ __all__ = [
     "MaterialConversionFormula",
     "MaterialKgProfile",
     "RetentionConfig",
+    "InboundLineAllocation",
     "InboundOrder",
     "InboundOrderLine",
+    "InboundOrderPurchase",
     "Transfer",
     "TransferLine",
     "PurchaseRetention",

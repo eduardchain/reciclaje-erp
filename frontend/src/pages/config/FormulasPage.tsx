@@ -129,11 +129,17 @@ export default function FormulasPage() {
     for (const p of profilesData?.items ?? []) profByMat.set(p.material_id, p);
     const formByMat = new Map<string, MaterialConversionFormulaResponse>();
     for (const f of formulasData?.items ?? []) formByMat.set(f.material_id, f);
-    return (materialsData?.items ?? []).map((m) => ({
-      material: m,
-      profile: profByMat.get(m.id),
-      formula: formByMat.get(m.id),
-    }));
+    // Solo ACTIVOS: `GET /materials` no filtra por defecto, y los materiales
+    // dados de baja (soft delete #28 — el seeder desactiva los obsoletos)
+    // llegaban sin perfil y se pintaban "Sin clasificar", como si fueran
+    // trabajo pendiente. Un material fuera de servicio no se clasifica.
+    return (materialsData?.items ?? [])
+      .filter((m) => m.is_active)
+      .map((m) => ({
+        material: m,
+        profile: profByMat.get(m.id),
+        formula: formByMat.get(m.id),
+      }));
   }, [materialsData, profilesData, formulasData]);
 
   // Filtros client-side

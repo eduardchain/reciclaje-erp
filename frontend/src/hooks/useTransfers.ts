@@ -47,7 +47,13 @@ export function useDispatchTransfer() {
     mutationFn: (data: TransferDispatchCreate) => transferService.dispatch(data),
     onSuccess: (t) => {
       invalidateAfterTransfer(qc);
-      toast.success(`Traslado #${t.transfer_number} despachado`);
+      // Intra-sede nace `received`: decir "despachado" mandaría a buscar una
+      // recepción que no existe
+      toast.success(
+        t.status === "received"
+          ? `Traslado #${t.transfer_number} registrado — material ya en destino`
+          : `Traslado #${t.transfer_number} despachado`
+      );
       showWarnings(t.warnings);
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),

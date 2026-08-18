@@ -40,6 +40,10 @@ SETTING_DEFAULTS: dict = {
     # con cuenta willard_baterias — el frontend filtra por cuenta).
     "willard_sede_drosses": None,
     "willard_sede_postconsumo_default": None,
+    # SAC #93 (D8): tolerancia del descuadre de entrada — FRACCION, no
+    # porcentaje (igual que transfer_tolerance_pct). Dentro: aviso suave;
+    # fuera: resaltado. JAMAS bloquea por monto (#17/#76).
+    "inbound_discrepancy_tolerance_pct": 0.05,
 }
 
 

@@ -144,22 +144,58 @@ def _today():
     return business_today().isoformat()
 
 
-def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id, lines, **extra):
-    return client.post(
-        INBOUND_URL, headers=headers,
-        json={
-            "inbound_type": inbound_type,
-            "warehouse_id": str(warehouse_id),
-            "third_party_id": str(third_party_id),
-            "date": _today(),
-            "lines": lines,
-            **extra,
-        },
+def _weighed(line: dict) -> dict:
+    """Q-13: el peso es opcional al capturar pero obligatorio al REVISAR, asi
+    que el helper lo manda por defecto. `scale_weight_kg=None` explicito
+    captura sin peso a proposito."""
+    if "scale_weight_kg" in line:
+        out = dict(line)
+        if out["scale_weight_kg"] is None:
+            out.pop("scale_weight_kg")
+        return out
+    return {**line, "scale_weight_kg": "100"}
+
+
+def _inbound(client, headers, *, inbound_type, warehouse_id, third_party_id=None,
+             lines, **extra):
+    """#93: tipo purchase captura SIN tercero (third_party_id=None lo omite);
+    willard sigue exigiendo el titular de la cuenta kg."""
+    body = {
+        "inbound_type": inbound_type,
+        "warehouse_id": str(warehouse_id),
+        "date": _today(),
+        "lines": [_weighed(l) for l in lines],
+        **extra,
+    }
+    if third_party_id is not None:
+        body["third_party_id"] = str(third_party_id)
+    return client.post(INBOUND_URL, headers=headers, json=body)
+
+
+def _review_and_liquidate(client, headers, order, material_id, supplier_id,
+                          qty, price="700"):
+    """#93: draft -> reviewed -> liquidated con reparto de UN proveedor."""
+    resp = client.post(f"{INBOUND_URL}/{order['id']}/review", headers=headers)
+    assert resp.status_code == 200, resp.text
+    resp = client.post(
+        f"{INBOUND_URL}/{order['id']}/liquidate", headers=headers,
+        json={"lines": [{
+            "material_id": str(material_id),
+            "allocations": [{
+                "third_party_id": str(supplier_id),
+                "quantity": str(qty), "unit_price": str(price),
+            }],
+        }]},
     )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
 
 
 def _confirm(client, headers, order_id):
-    """B.2: draft -> confirmed (los efectos willard nacen al confirmar)."""
+    """Q-16: draft -> reviewed -> confirmed (los efectos willard siguen
+    naciendo al confirmar; ahora hay revision antes)."""
+    rev = client.post(f"{INBOUND_URL}/{order_id}/review", headers=headers)
+    assert rev.status_code == 200, rev.text
     resp = client.post(f"{INBOUND_URL}/{order_id}/confirm", headers=headers)
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -295,17 +331,14 @@ class TestGuardWillardPuro:
         assert "recepcion Willard" in resp.json()["detail"]
 
     def test_derived_purchase_willard_pure_blocked(
-        self, client, org_headers, wh_cv, supplier, mat_willard_puro,
+        self, client, org_headers, wh_cv, mat_willard_puro,
     ):
-        """El mismo guard fia en el path inbound->purchase (un solo guard,
-        dos puertas cubiertas)."""
+        """El mismo guard fia en el path de la Entrada (#93: la captura valida
+        el material aunque el proveedor llegue al liquidar — fail-fast)."""
         resp = _inbound(
             client, org_headers,
-            inbound_type="purchase", warehouse_id=wh_cv.id, third_party_id=supplier.id,
-            lines=[{
-                "material_id": str(mat_willard_puro.id),
-                "quantity": "10", "unit_price": "500",
-            }],
+            inbound_type="purchase", warehouse_id=wh_cv.id,
+            lines=[{"material_id": str(mat_willard_puro.id), "quantity": "10"}],
         )
         assert resp.status_code == 400, resp.text
         assert "recepcion Willard" in resp.json()["detail"]
@@ -381,15 +414,19 @@ class TestPurchaseInboundOrigin:
     def test_derived_purchase_exposes_origin(
         self, client, org_headers, wh_cv, supplier, mat_compra,
     ):
+        """#93: la compra nace al liquidar el reparto — y expone su origen B1
+        via la tabla puente (detalle Y listado, lookup por pagina F3)."""
         order = _inbound(
             client, org_headers,
-            inbound_type="purchase", warehouse_id=wh_cv.id, third_party_id=supplier.id,
-            lines=[{
-                "material_id": str(mat_compra.id), "quantity": "100", "unit_price": "800",
-            }],
+            inbound_type="purchase", warehouse_id=wh_cv.id,
+            lines=[{"material_id": str(mat_compra.id), "quantity": "100"}],
         ).json()
-        pid = order["purchase_id"]
-        assert pid is not None
+        assert order["purchases"] == []  # captura: cero compras
+
+        result = _review_and_liquidate(
+            client, org_headers, order, mat_compra.id, supplier.id, "100", "800"
+        )
+        pid = result["purchases"][0]["purchase_id"]
 
         # Detalle
         detail = client.get(f"{PURCHASES_URL}/{pid}", headers=org_headers).json()
@@ -503,18 +540,22 @@ class TestWillardThirdPartyLocked:
     def test_purchase_type_any_supplier_ok(
         self, client, org_headers, db_session, test_organization, wh_cv, mat_compra,
     ):
-        """El lock aplica SOLO a Willard — compra regular acepta cualquier
-        proveedor de material."""
+        """El lock aplica SOLO a Willard — el reparto de una compra regular
+        acepta cualquier proveedor de material (#93: al liquidar)."""
         otro = create_third_party_with_category(
             db_session, test_organization.id, "Proveedor Chatarra", "material_supplier"
         )
         db_session.commit()
-        resp = _inbound(
+        order = _inbound(
             client, org_headers,
-            inbound_type="purchase", warehouse_id=wh_cv.id, third_party_id=otro.id,
-            lines=[{"material_id": str(mat_compra.id), "quantity": "50", "unit_price": "700"}],
+            inbound_type="purchase", warehouse_id=wh_cv.id,
+            lines=[{"material_id": str(mat_compra.id), "quantity": "50"}],
         )
-        assert resp.status_code == 201, resp.text
+        assert order.status_code == 201, order.text
+        result = _review_and_liquidate(
+            client, org_headers, order.json(), mat_compra.id, otro.id, "50"
+        )
+        assert result["purchases"][0]["supplier_id"] == str(otro.id)
 
 
 class TestReceivingWarehouses:
@@ -566,14 +607,14 @@ class TestInboundHeaderNotes:
         assert resp.json()["notes"] == "Camion azul, llego 6am"
 
     def test_notes_editable_on_purchase_type(
-        self, client, org_headers, wh_cv, supplier, mat_compra,
+        self, client, org_headers, wh_cv, mat_compra,
     ):
         """notes es cabecera informativa — editable tambien en tipo purchase
-        (NO esta en el set bloqueado de D7b)."""
+        (NO esta en el set bloqueado)."""
         order = _inbound(
             client, org_headers,
-            inbound_type="purchase", warehouse_id=wh_cv.id, third_party_id=supplier.id,
-            lines=[{"material_id": str(mat_compra.id), "quantity": "50", "unit_price": "700"}],
+            inbound_type="purchase", warehouse_id=wh_cv.id,
+            lines=[{"material_id": str(mat_compra.id), "quantity": "50"}],
         ).json()
         resp = client.patch(
             f"{INBOUND_URL}/{order['id']}", headers=org_headers,

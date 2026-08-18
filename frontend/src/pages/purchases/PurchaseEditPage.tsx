@@ -67,9 +67,11 @@ export default function PurchaseEditPage() {
     return u ? ` (${u})` : "";
   };
   const warehouses = warehousesData?.items ?? [];
-  const { getSuggestedPrice } = usePriceSuggestions();
 
   const [supplierId, setSupplierId] = useState("");
+  // 🔴 Va DESPUES de `supplierId`: el hook lo consume. Con listas por
+  // proveedor trae SUS precios; sin listas, la general de siempre.
+  const { getSuggestedPrice } = usePriceSuggestions(supplierId || null);
   const [date, setDate] = useState("");
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");

@@ -13,6 +13,8 @@ Tests all 8 endpoints:
 """
 import pytest
 from datetime import datetime, timezone
+
+from app.utils.dates import business_today_noon
 from decimal import Decimal
 from uuid import uuid4
 
@@ -187,7 +189,7 @@ def test_purchase(db_session, test_organization, test_supplier, test_material, t
     
     purchase_data = PurchaseCreate(
         supplier_id=test_supplier.id,
-        date=datetime.now(),
+        date=business_today_noon(),
         notes="Test purchase",
         lines=[
             PurchaseLineCreate(
@@ -228,7 +230,7 @@ class TestCreatePurchase:
         # Arrange
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "notes": "Test purchase 2-step",
             "lines": [
                 {
@@ -284,7 +286,7 @@ class TestCreatePurchase:
 
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "material_id": str(unit_material.id),
@@ -315,7 +317,7 @@ class TestCreatePurchase:
         # Arrange
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "notes": "Test purchase 1-step",
             "lines": [
                 {
@@ -348,7 +350,7 @@ class TestCreatePurchase:
         """Test that auto_liquidate=True with price=0 fails validation."""
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "material_id": str(test_material.id),
@@ -374,7 +376,7 @@ class TestCreatePurchase:
         # Arrange
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "material_id": str(test_material.id),
@@ -424,7 +426,7 @@ class TestCreatePurchase:
         # Arrange
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "notes": "Multi-line purchase",
             "lines": [
                 {
@@ -694,7 +696,7 @@ class TestListPurchases:
         for _ in range(2):
             data = PurchaseCreate(
                 supplier_id=test_supplier.id,
-                date=datetime.now(),
+                date=business_today_noon(),
                 lines=[PurchaseLineCreate(
                     material_id=test_material.id,
                     quantity=Decimal("10.0"),
@@ -1018,7 +1020,7 @@ class TestPurchaseWeightedAverageCost:
 
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "material_id": str(test_material.id),
@@ -1051,7 +1053,7 @@ class TestPurchaseWeightedAverageCost:
         # Crear primera compra y liquidar
         p1 = client.post("/api/v1/purchases", json={
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [{
                 "material_id": str(test_material.id),
                 "quantity": 100.0,
@@ -1073,7 +1075,7 @@ class TestPurchaseWeightedAverageCost:
         # Crear segunda compra y liquidar
         p2 = client.post("/api/v1/purchases", json={
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [{
                 "material_id": str(test_material.id),
                 "quantity": 50.0,
@@ -1371,7 +1373,7 @@ class TestLiquidateWithPriceUpdates:
         # Create purchase with price 0
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "material_id": str(test_material.id),
@@ -1417,7 +1419,7 @@ class TestLiquidateWithPriceUpdates:
         # Create purchase with price 0
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "material_id": str(test_material.id),
@@ -1473,7 +1475,7 @@ class TestLiquidateWithPriceUpdates:
         # Create purchase with price 100
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "material_id": str(test_material.id),
@@ -1524,7 +1526,7 @@ class TestCancelLiquidatedPurchase:
         # Create and liquidate
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "material_id": str(test_material.id),
@@ -1572,7 +1574,7 @@ class TestCancelLiquidatedPurchase:
         # Create and liquidate
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "material_id": str(test_material.id),
@@ -1649,7 +1651,7 @@ class TestPurchaseValidations:
         """Test that duplicate purchases generate warnings (RN-COMP-02)."""
         purchase_data = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "material_id": str(test_material.id),
@@ -1684,7 +1686,7 @@ class TestPurchaseWorkflowSeparation:
 
         resp = client.post("/api/v1/purchases", json={
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [{
                 "material_id": str(test_material.id),
                 "quantity": 100.0,
@@ -1705,7 +1707,7 @@ class TestPurchaseWorkflowSeparation:
 
         resp = client.post("/api/v1/purchases", json={
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [{
                 "material_id": str(test_material.id),
                 "quantity": 500.0,
@@ -1728,7 +1730,7 @@ class TestPurchaseWorkflowSeparation:
         # Crear
         resp = client.post("/api/v1/purchases", json={
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [{
                 "material_id": str(test_material.id),
                 "quantity": 100.0,
@@ -1762,7 +1764,7 @@ class TestPurchaseWorkflowSeparation:
         # Crear
         resp = client.post("/api/v1/purchases", json={
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [{
                 "material_id": str(test_material.id),
                 "quantity": 100.0,
@@ -1791,7 +1793,7 @@ class TestPurchaseWorkflowSeparation:
 
         resp = client.post("/api/v1/purchases", json={
             "supplier_id": str(test_supplier.id),
-            "date": datetime.now().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [{
                 "material_id": str(test_material.id),
                 "quantity": 100.0,
@@ -1829,7 +1831,7 @@ class TestCostHistory:
         # Crear compra auto-liquidada
         payload = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.utcnow().isoformat(),
+            "date": business_today_noon().isoformat(),
             "auto_liquidate": True,
             "lines": [
                 {
@@ -1868,7 +1870,7 @@ class TestCostHistory:
         """
         payload = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.utcnow().isoformat(),
+            "date": business_today_noon().isoformat(),
             "auto_liquidate": True,
             "lines": [
                 {
@@ -1909,7 +1911,7 @@ class TestCostHistory:
         """
         base_payload = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.utcnow().isoformat(),
+            "date": business_today_noon().isoformat(),
             "auto_liquidate": True,
             "lines": [
                 {
@@ -1966,7 +1968,7 @@ class TestCostHistory:
         """
         base_payload = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.utcnow().isoformat(),
+            "date": business_today_noon().isoformat(),
             "auto_liquidate": True,
             "lines": [
                 {
@@ -2013,7 +2015,7 @@ class TestCostHistory:
         la cancelacion (append-only). El de la liquidacion sobrevive."""
         payload = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.utcnow().isoformat(),
+            "date": business_today_noon().isoformat(),
             "auto_liquidate": True,
             "lines": [
                 {
@@ -2055,7 +2057,7 @@ class TestCostHistory:
         """Cancelar compra registrada (no liquidada) no necesita historial de costo."""
         payload = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.utcnow().isoformat(),
+            "date": business_today_noon().isoformat(),
             "auto_liquidate": False,
             "lines": [
                 {
@@ -2097,7 +2099,7 @@ class TestCostHistory:
         # Compra 1: 1000 kg @ $2000, registrada (NO liquidar)
         payload1 = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.utcnow().isoformat(),
+            "date": business_today_noon().isoformat(),
             "auto_liquidate": False,
             "lines": [
                 {
@@ -2120,7 +2122,7 @@ class TestCostHistory:
         # Compra 2: 500 kg @ $2500, liquidar
         payload2 = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.utcnow().isoformat(),
+            "date": business_today_noon().isoformat(),
             "auto_liquidate": True,
             "lines": [
                 {
@@ -2227,7 +2229,7 @@ class TestCancelBlockedByTransformationSameCost:
         # 1. Compra liquidada: test_material 36kg @ $1200
         purchase_payload = {
             "supplier_id": str(test_supplier.id),
-            "date": datetime.utcnow().isoformat(),
+            "date": business_today_noon().isoformat(),
             "auto_liquidate": True,
             "lines": [
                 {
@@ -2276,7 +2278,7 @@ class TestCancelBlockedByTransformationSameCost:
             "waste_quantity": 0,
             "cost_distribution_method": "average_cost",
             "reason": "Test transformacion mismo costo",
-            "date": datetime.utcnow().isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": [
                 {
                     "destination_material_id": str(test_material.id),
@@ -2325,7 +2327,7 @@ class TestLiquidateMultiLineSameMaterial:
     def _create_and_liquidate(self, client, org_headers, supplier_id, warehouse_id, lines):
         purchase_data = {
             "supplier_id": str(supplier_id),
-            "date": datetime.now(timezone.utc).isoformat(),
+            "date": business_today_noon().isoformat(),
             "lines": lines,
             "auto_liquidate": False,
         }

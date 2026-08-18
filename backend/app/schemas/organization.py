@@ -55,6 +55,12 @@ class OrgSettingsPayload(BaseModel):
         None,
         description="Warehouse ID (str) default del selector en recepcion postconsumo (Q-05: Circunvalar); editable entre sedes con cuenta de baterias",
     )
+    # SAC #93 (D8): tolerancia del descuadre pesado vs repartido al liquidar
+    # una Entrada — FRACCION igual que transfer_tolerance_pct. Nunca bloquea.
+    inbound_discrepancy_tolerance_pct: float | None = Field(
+        None, ge=0, le=1,
+        description="Tolerancia del descuadre de entrada (0.05 = 5%); dentro avisa, fuera resalta, jamas bloquea",
+    )
 
 
 class WillardDistributionCentersUpdate(BaseModel):

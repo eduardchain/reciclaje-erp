@@ -110,7 +110,8 @@ class TransferResponse(BaseModel):
     from_warehouse_name: Optional[str] = None
     to_warehouse_id: UUID
     to_warehouse_name: Optional[str] = None
-    transit_warehouse_id: UUID
+    # NULL = intra-sede: se completo al registrarlo, sin escala en transito
+    transit_warehouse_id: Optional[UUID] = None
     transit_warehouse_name: Optional[str] = None
     dispatch_date: datetime
     received_date: Optional[datetime] = None

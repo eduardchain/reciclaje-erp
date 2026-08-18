@@ -25,6 +25,7 @@ PERMISSIONS_CATALOG = [
     ("purchases.cancel", "Anular Compras", "purchases", "Permite anular compras", 5),
     ("purchases.view_prices", "Ver Precios en Compras", "purchases", "Permite ver precios y totales", 6),
     ("purchases.edit_prices", "Editar Precios en Compras", "purchases", "Permite ingresar y modificar precios al crear/editar", 7),
+    ("purchases.review", "Revisar Entradas", "purchases", "Permite marcar una entrada como revisada (confirma cantidades y habilita liquidar, SAC)", 148),
 
     # Ventas
     ("sales.view", "Ver Ventas", "sales", "Permite ver listado e historial de ventas", 10),

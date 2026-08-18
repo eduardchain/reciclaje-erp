@@ -22,7 +22,6 @@ import type { MoneyAccountResponse, MoneyAccountType } from "@/types/money-accou
 const typeLabels: Record<MoneyAccountType, string> = { cash: "Efectivo", bank: "Banco", digital: "Digital" };
 const typeColors: Record<MoneyAccountType, string> = { cash: "bg-emerald-100 text-emerald-800", bank: "bg-blue-100 text-blue-800", digital: "bg-purple-100 text-purple-800" };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const getColumns = (onViewMovements: (id: string) => void): ColumnDef<MoneyAccountResponse, unknown>[] => [
   { accessorKey: "name", header: "Nombre", cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
   { accessorKey: "account_type", header: "Tipo", cell: ({ row }) => <Badge variant="outline" className={typeColors[row.original.account_type]}>{typeLabels[row.original.account_type]}</Badge> },

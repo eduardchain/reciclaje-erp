@@ -50,17 +50,19 @@ interface LineFormData {
   _key: number;
   material_id: string;
   quantity: number;
+  /** #93: precio de referencia (solo tipo compra, informativo hasta liquidar) */
+  unit_price: number;
   scale_weight_kg: number;
   quality_notes: string;
 }
 
 let lineKeyCounter = 0;
 
-const toApiLines = (lines: LineFormData[]): InboundOrderLineCreate[] =>
+const toApiLines = (lines: LineFormData[], withPrice: boolean): InboundOrderLineCreate[] =>
   lines.map((l) => ({
     material_id: l.material_id,
     quantity: l.quantity,
-    unit_price: null,
+    unit_price: withPrice && l.unit_price > 0 ? l.unit_price : null,
     scale_weight_kg: l.scale_weight_kg > 0 ? l.scale_weight_kg : null,
     quality_notes: l.quality_notes.trim() || null,
   }));
@@ -130,6 +132,7 @@ export default function InboundEditPage() {
   const [willardCenter, setWillardCenter] = useState("none");
   const [notes, setNotes] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [remissionNumber, setRemissionNumber] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([]);
   const [linesDirty, setLinesDirty] = useState(false);
 
@@ -157,11 +160,13 @@ export default function InboundEditPage() {
       setWillardCenter(order.willard_distribution_center ?? "none");
       setNotes(order.notes ?? "");
       setInvoiceNumber(order.invoice_number ?? "");
+      setRemissionNumber(order.remission_number ?? "");
       setLines(
         order.lines.map((l) => ({
           _key: ++lineKeyCounter,
           material_id: l.material_id,
           quantity: Number(l.quantity),
+          unit_price: l.unit_price != null ? Number(l.unit_price) : 0,
           scale_weight_kg: l.scale_weight_kg != null ? Number(l.scale_weight_kg) : 0,
           quality_notes: l.quality_notes ?? "",
         }))
@@ -188,15 +193,25 @@ export default function InboundEditPage() {
 
   const isWillard = WILLARD_INBOUND_TYPES.includes(order.inbound_type);
   const collectors = collectorsData?.items ?? [];
-  // Ciclo D: el recolector se congela cuando la compra derivada ya no esta
-  // registered — la comision ya se definio al liquidar (backend 422)
-  const collectorLocked =
-    !isWillard && order.purchase_status != null && order.purchase_status !== "registered";
+  // #93: legacy 1:1 (ciclos B-D) — su cara financiera es la compra derivada
+  const isLegacy = !isWillard && !!order.purchase_id;
+  // #93: lineas/fecha editables mientras la entrada no este liquidada (la
+  // captura es la fuente de verdad, cero efectos que revertir — respuesta 4)
+  const linesEditable = isWillard || (!isLegacy && order.status !== "liquidated");
+  // Ciclo D/#93: el recolector se congela al liquidar — la comision ya se causo
+  const collectorLocked = !isWillard && (
+    isLegacy
+      ? order.purchase_status != null && order.purchase_status !== "registered"
+      : order.status === "liquidated"
+  );
   const todayStr = toLocalDateInput();
   const isFutureDate = date ? date > todayStr : false;
 
+  const unitOf = (materialId: string) =>
+    materials.find((m) => m.id === materialId)?.default_unit || "";
+
   const unitSuffix = (materialId: string) => {
-    const u = materials.find((m) => m.id === materialId)?.default_unit;
+    const u = unitOf(materialId);
     return u ? ` (${u})` : "";
   };
 
@@ -213,9 +228,11 @@ export default function InboundEditPage() {
 
   const buildPayload = (): InboundOrderUpdate => {
     const payload: InboundOrderUpdate = {};
-    if (isWillard) {
+    if (linesEditable) {
       if (date && date !== originalDate) payload.date = date;
-      if (linesDirty) payload.lines = toApiLines(lines);
+      if (linesDirty) payload.lines = toApiLines(lines, !isWillard);
+    }
+    if (isWillard) {
       if (willardCenter !== "none" && willardCenter !== (order.willard_distribution_center ?? "none")) {
         payload.willard_distribution_center = willardCenter;
       }
@@ -233,16 +250,20 @@ export default function InboundEditPage() {
     }
     // Nota de cabecera: editable en AMBOS tipos (informativa, sin efectos)
     if (notes.trim() !== (order.notes ?? "")) payload.notes = notes.trim() || null;
-    if (invoiceNumber.trim() !== (order.invoice_number ?? ""))
+    // #93 D12: factura editable en willard y legacy (en compra nueva vive en
+    // el reparto → el campo ni se muestra); remision editable siempre
+    if ((isWillard || isLegacy) && invoiceNumber.trim() !== (order.invoice_number ?? ""))
       payload.invoice_number = invoiceNumber.trim() || null;
+    if (remissionNumber.trim() !== (order.remission_number ?? ""))
+      payload.remission_number = remissionNumber.trim() || null;
     return payload;
   };
 
   const payload = buildPayload();
   const hasChanges = Object.keys(payload).length > 0;
 
-  const linesValid = !isWillard || (lines.length > 0 && lines.every((l) => l.material_id && l.quantity > 0));
-  const canSubmit = hasChanges && linesValid && !isFutureDate && (!isWillard || !!date);
+  const linesValid = !linesEditable || (lines.length > 0 && lines.every((l) => l.material_id && l.quantity > 0));
+  const canSubmit = hasChanges && linesValid && !isFutureDate && (!linesEditable || !!date);
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -278,21 +299,21 @@ export default function InboundEditPage() {
             </div>
             <div>
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Tercero</span>
-              <span>{order.third_party_name ?? "—"}</span>
+              <span>{order.third_party_name ?? (isWillard ? "—" : "Se asigna al liquidar")}</span>
             </div>
           </div>
           <p className="text-xs text-slate-400 mt-2">
-            Tipo, sede y tercero son inmutables — para cambiarlos, anule la orden y cree otra.
+            Tipo y sede son inmutables — para cambiarlos, anule la orden y cree otra.
           </p>
         </CardContent>
       </Card>
 
       {/* Nota para tipos compra */}
-      {!isWillard && (
+      {!isWillard && isLegacy && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
           <Info className="h-4 w-4 mt-0.5 shrink-0" />
           <span>
-            En entradas tipo compra solo se editan conductor y vehículo — las líneas y la fecha se editan
+            Esta entrada es del modelo anterior: las líneas y la fecha se editan
             en la compra derivada{" "}
             {order.purchase_id ? (
               <PurchaseLink id={order.purchase_id}>#{order.purchase_number}</PurchaseLink>
@@ -300,6 +321,15 @@ export default function InboundEditPage() {
               `#${order.purchase_number ?? ""}`
             )}
             .
+          </span>
+        </div>
+      )}
+      {!isWillard && !isLegacy && order.status === "liquidated" && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+          <Info className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            La entrada está liquidada — solo se edita la cabecera informativa. Para tocar
+            líneas o fecha, revierta la liquidación desde el detalle.
           </span>
         </div>
       )}
@@ -311,7 +341,7 @@ export default function InboundEditPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {isWillard && (
+            {linesEditable && (
               <div>
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
                 <Input
@@ -406,16 +436,30 @@ export default function InboundEditPage() {
                 </Select>
               </div>
             )}
+            {(isWillard || isLegacy) && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  N° Factura
+                </Label>
+                <Input
+                  value={invoiceNumber}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                  maxLength={50}
+                  className="w-full"
+                  placeholder="Opcional"
+                />
+              </div>
+            )}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                N° Factura
+                N° Remisión
               </Label>
               <Input
-                value={invoiceNumber}
-                onChange={(e) => setInvoiceNumber(e.target.value)}
+                value={remissionNumber}
+                onChange={(e) => setRemissionNumber(e.target.value)}
                 maxLength={50}
                 className="w-full"
-                placeholder="Opcional"
+                placeholder="Remisión del camión (opcional)"
               />
             </div>
             <div className="md:col-span-2">
@@ -432,8 +476,8 @@ export default function InboundEditPage() {
         </CardContent>
       </Card>
 
-      {/* Lineas (solo Willard) */}
-      {isWillard && (
+      {/* Lineas — willard y tipo compra #93 (draft/reviewed) */}
+      {linesEditable && (
         <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Líneas de Material</CardTitle>
@@ -443,7 +487,7 @@ export default function InboundEditPage() {
               onClick={() => {
                 setLines((p) => [
                   ...p,
-                  { _key: ++lineKeyCounter, material_id: "", quantity: 0, scale_weight_kg: 0, quality_notes: "" },
+                  { _key: ++lineKeyCounter, material_id: "", quantity: 0, unit_price: 0, scale_weight_kg: 0, quality_notes: "" },
                 ]);
                 markLinesDirty();
               }}
@@ -452,6 +496,16 @@ export default function InboundEditPage() {
               Agregar Línea
             </Button>
           </CardHeader>
+          {/* D17: la revisión certifica pesos y cantidades — o sea, líneas.
+              Cambiarlas la devuelve a Registrada y hay que revisarla de nuevo;
+              la cabecera (factura, nota, vehículo) no toca lo certificado. Se
+              avisa ANTES de guardar, no solo con el warning de la respuesta. */}
+          {order.status === "reviewed" && linesDirty && (
+            <div className="mx-6 mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Al guardar, la entrada vuelve a <strong>Registrada</strong>: cambió lo
+              que el revisor había certificado y hay que revisarla de nuevo.
+            </div>
+          )}
           <CardContent className="space-y-0">
             {lines.map((line, idx) => (
               <FormLineGrid
@@ -464,28 +518,53 @@ export default function InboundEditPage() {
                 }}
                 disableDelete={lines.length === 1}
               >
-                <div className="md:col-span-4">
+                <div className={isWillard ? "md:col-span-4" : "md:col-span-3"}>
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Material *</Label>
                   <EntitySelect
                     value={line.material_id}
                     onChange={(v) => updateLine(line._key, "material_id", v)}
                     options={materials
-                      .filter((m) => !orderWorld || worldById.get(m.id) === orderWorld)
+                      .filter((m) =>
+                        isWillard
+                          ? !orderWorld || worldById.get(m.id) === orderWorld
+                          : true
+                      )
                       .map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
                     placeholder="Material..."
                   />
                 </div>
-                <div className="md:col-span-3">
+                <div className={isWillard ? "md:col-span-3" : "md:col-span-2"}>
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>
                     Cantidad{unitSuffix(line.material_id)} *
                   </Label>
-                  <MoneyInput
-                    value={line.quantity}
-                    onChange={(v) => updateLine(line._key, "quantity", v)}
-                    decimals={4}
-                    placeholder="0"
-                  />
+                  {/* Unidad DENTRO del input: el label se oculta de la 2a fila
+                      en adelante en desktop (lineLabelClass) */}
+                  <div className="relative">
+                    <MoneyInput
+                      value={line.quantity}
+                      onChange={(v) => updateLine(line._key, "quantity", v)}
+                      decimals={4}
+                      placeholder="0"
+                      className={unitOf(line.material_id) ? "pr-16" : undefined}
+                    />
+                    {unitOf(line.material_id) && (
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400">
+                        {unitOf(line.material_id)}
+                      </span>
+                    )}
+                  </div>
                 </div>
+                {!isWillard && (
+                  <div className="md:col-span-2">
+                    <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Precio (ref.)</Label>
+                    <MoneyInput
+                      value={line.unit_price}
+                      onChange={(v) => updateLine(line._key, "unit_price", v)}
+                      decimals={2}
+                      placeholder="0"
+                    />
+                  </div>
+                )}
                 <div className="md:col-span-2">
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Peso Báscula (kg)</Label>
                   <MoneyInput
@@ -494,6 +573,15 @@ export default function InboundEditPage() {
                     decimals={2}
                     placeholder="0,00"
                   />
+                  {/* D1/D2: obligatorio al REVISAR; en materiales medidos en kg
+                      el revisor lo autocompleta con la cantidad (ver Create) */}
+                  {unitOf(line.material_id) &&
+                    unitOf(line.material_id) !== "kg" &&
+                    line.scale_weight_kg <= 0 && (
+                      <p className="text-xs text-amber-600 mt-0.5">
+                        Sin este peso no se puede revisar
+                      </p>
+                    )}
                 </div>
                 <div className="md:col-span-2">
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Notas Calidad</Label>
@@ -507,9 +595,11 @@ export default function InboundEditPage() {
               </FormLineGrid>
             ))}
             <p className="text-xs text-amber-600 mt-2">
-              {order.status === "draft"
-                ? "La entrada está Registrada — editar solo actualiza el documento; los efectos nacen al liquidar."
-                : "Editar líneas o fecha re-emite los movimientos de inventario y kg (revert-and-reapply) — los saldos quedan exactos con los valores nuevos."}
+              {!isWillard
+                ? "La captura es la fuente de verdad de lo pesado — corregir acá el error de báscula evita descuadres falsos al liquidar (respuesta 4). Cero efectos hasta liquidar."
+                : order.status === "draft"
+                  ? "La entrada está Registrada — editar solo actualiza el documento; los efectos nacen al liquidar."
+                  : "Editar líneas o fecha re-emite los movimientos de inventario y kg (revert-and-reapply) — los saldos quedan exactos con los valores nuevos."}
             </p>
           </CardContent>
         </Card>

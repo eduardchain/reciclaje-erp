@@ -91,7 +91,7 @@ export default function TransfersPage() {
     <div>
       <PageHeader
         title="Traslados"
-        description="Traslados intersede en dos pasos: despacho → recepción confirmada"
+        description="Traslados en dos pasos: despacho → recepción confirmada"
       >
         <div className="flex flex-wrap items-center gap-2">
           {pendingCount > 0 && (
@@ -132,7 +132,7 @@ export default function TransfersPage() {
           description={
             tab === "dispatched"
               ? "No hay traslados pendientes de recepción."
-              : "Registra un despacho para iniciar un traslado intersede."
+              : "Registra un despacho para iniciar un traslado."
           }
         />
       ) : (

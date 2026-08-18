@@ -81,6 +81,15 @@ export const invalidateAfterInboundOrder = (qc: QueryClient) => {
   invalidateInventory(qc);
 };
 
+// #93: liquidar/desliquidar/anular-liquidada una Entrada = N compras
+// liquidadas/revertidas + descuadres (ajustes) + comision (accrual) →
+// los MISMOS side-effects de liquidar/cancelar una compra, mas el modulo
+// propio y el libro kg (el annul willard tambien pasa por aca).
+export const invalidateAfterEntradaLiquidation = (qc: QueryClient) => {
+  invalidateAfterPurchaseLiquidateOrCancel(qc);
+  qc.invalidateQueries({ queryKey: ["kg-ledger"] });
+};
+
 // Movimiento manual kg / anulacion (SAC E2, D17): solo toca el ledger kg
 export const invalidateAfterKgMovement = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["kg-ledger"] });

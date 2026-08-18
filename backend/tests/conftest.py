@@ -12,10 +12,6 @@ from sqlalchemy.pool import StaticPool
 from app.main import app
 from app.api.deps import get_db  # Override the deps.get_db that endpoints actually use
 from app.models import Base  # Import Base from models to get all registered tables
-from app.models.user import User, OrganizationMember
-from app.models.organization import Organization
-from app.models.role import Role, RolePermission
-from app.models.permission import Permission
 from app.core.security import get_password_hash, create_access_token
 from app.services.role import role_service
 

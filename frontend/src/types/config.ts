@@ -92,6 +92,8 @@ export interface PriceListCreate {
   purchase_price?: number;
   sale_price?: number;
   notes?: string | null;
+  /** Lista a la que pertenece. Omitir = lista general (comportamiento historico). */
+  price_list_group_id?: string;
 }
 
 export interface CurrentPriceItem {

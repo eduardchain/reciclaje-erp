@@ -1,0 +1,38 @@
+# Linter del backend. Motivo de existir, 2026-08-13 (#96):
+#
+# En dos ciclos se colaron TRES bugs de runtime de resolucion de nombres, todos
+# invisibles para `tsc`, para 1.593 tests y para el golden:
+#   - #93: `useMemo` despues de un return condicional (frontend, otra herramienta)
+#   - #96 A: `ret.reverted_at` leido 50 lineas antes de que exista `ret` -> 500 en
+#     el estado de cuenta de cualquier comisionista
+#   - #96 (encontrado por este linter a los 60 segundos de instalarlo): dos
+#     `from fastapi import HTTPException` DENTRO de una funcion que ya lo importa
+#     a nivel de modulo -> el nombre se vuelve local y el `raise` de mas arriba
+#     explota. VIVO en produccion: 500 en vez de 403 al pedir una cuenta ajena.
+#
+# Por eso el set inicial es la familia de RESOLUCION DE NOMBRES y nada mas: es la
+# clase que ya nos mordio tres veces, y deja el gate VERDE hoy en vez de dejar una
+# pared de 260 hallazgos que nadie va a mirar.
+#
+# Uso:  ./venv/bin/ruff check app tests scripts
+#
+# Backlog deliberado, NO habilitado todavia (conteo del 2026-08-13):
+#   F401 unused-import        169  -> auto-fixable, pero cuidado: quitar un import
+#                                     de modelo puede romper el registro de metadata
+#                                     de SQLAlchemy/Alembic. Revisar a mano.
+#   F841 unused-variable       34
+#   F541 f-string sin placeholders  27
+# Habilitarlos es un ciclo de limpieza propio, no un efecto colateral de un fix.
+
+line-length = 120
+
+[lint]
+select = ["F811", "F821", "F823"]
+
+[lint.per-file-ignores]
+# `Mapped[list["DoubleEntryLine"]]` y `data: "BatchExpenseCreate"` son anotaciones
+# en string: no se evaluan en runtime. Es el idioma de relaciones de SQLAlchemy y
+# de los imports locales para evitar ciclos. 20 hallazgos, cero riesgo, y
+# silenciarlos aca es mas honesto que reescribir 8 modelos compartidos.
+"app/models/*.py" = ["F821"]
+"app/services/money_movement.py" = ["F821"]

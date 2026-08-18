@@ -111,7 +111,14 @@ class TransferService:
                     detail=f"'{wh.name}' es una bodega de tránsito — no puede ser origen ni destino",
                 )
 
-        transit = self._resolve_transit_warehouse(db, organization_id, dest)
+        # Intra-sede: no se pesa al salir ni al llegar, asi que no hay dos pasos
+        # ni transito — el material va origen → destino de una vez y el traslado
+        # nace recibido. Solo el que cruza de sede necesita bodega de transito.
+        crosses_sede = self._crosses_sede(origin, dest)
+        transit = (
+            self._resolve_transit_warehouse(db, organization_id, dest)
+            if crosses_sede else None
+        )
 
         dispatch_date = data.dispatch_date or self._today_noon()
         self._validate_not_future(dispatch_date, "fecha de despacho")
@@ -121,9 +128,11 @@ class TransferService:
             transfer_number=self._generate_transfer_number(db, organization_id),
             from_warehouse_id=origin.id,
             to_warehouse_id=dest.id,
-            transit_warehouse_id=transit.id,
+            transit_warehouse_id=transit.id if transit else None,
             dispatch_date=dispatch_date,
-            status="dispatched",
+            status="dispatched" if crosses_sede else "received",
+            received_date=None if crosses_sede else dispatch_date,
+            received_by=None if crosses_sede else user_id,
             notes=data.notes,
             created_by=user_id,
         )
@@ -168,20 +177,29 @@ class TransferService:
                 material_id=material.id,
                 quantity_dispatched=qty,
                 unit_cost=material.current_average_cost.quantize(Decimal("0.01")),
-                is_contributor=formula is not None,
+                # El unico punto donde se decide si la linea mueve kg y maquila.
+                # Todo lo demas (recepcion, resolucion, anulacion) lo LEE, asi
+                # que la regla de sede vive aca y en ningun otro lado.
+                is_contributor=formula is not None and crosses_sede,
                 conversion_formula_snapshot=snapshot,
+                # Intra-sede: lo que sale es lo que llega, no hay segundo pesaje
+                quantity_received=None if crosses_sede else qty,
+                effects_emitted=not crosses_sede,
             )
             db.add(line)
             db.flush()
 
-            # Fisico: origen(-) → transito(+) al MISMO unit_cost (invariante 1)
+            # Fisico al MISMO unit_cost (invariante 1). Intersede: origen(-) →
+            # transito(+), y la recepcion cierra el otro tramo. Intra-sede: un
+            # solo salto origen(-) → destino(+), sin escala.
+            hop = transit if crosses_sede else dest
             self._add_movement(
                 db, organization_id, material.id, origin.id,
                 -qty, line.unit_cost, dispatch_date,
-                transfer.id, f"Traslado #{transfer.transfer_number} → {transit.name}",
+                transfer.id, f"Traslado #{transfer.transfer_number} → {hop.name}",
             )
             self._add_movement(
-                db, organization_id, material.id, transit.id,
+                db, organization_id, material.id, hop.id,
                 qty, line.unit_cost, dispatch_date,
                 transfer.id, f"Traslado #{transfer.transfer_number} desde {origin.name}",
             )
@@ -211,6 +229,14 @@ class TransferService:
         """
         transfer = self._get_or_404(db, transfer_id, organization_id)
         if transfer.status != "dispatched":
+            if transfer.transit_warehouse_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Este traslado es dentro de la misma sede: se completó al "
+                        "registrarlo y no requiere recepción"
+                    ),
+                )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Solo se recibe un traslado despachado (estado actual: '{transfer.status}')",
@@ -753,6 +779,7 @@ class TransferService:
                 db, adj.id,
                 f"Anulación traslado #{transfer.transfer_number}: {reason}"[:500],
                 organization_id, user_id=user_id, commit=False,
+                from_module=True,  # #93 A3: el guard de Ajustes ya no deja anular hijos de traslado
             )
 
         # 2. Anular kg intersede (filtro source_type — leccion D-02: un
@@ -923,6 +950,23 @@ class TransferService:
         elif all_emitted and transfer.received_date is not None:
             transfer.status = "received"
 
+    @staticmethod
+    def _sede_of(warehouse: Warehouse) -> UUID:
+        """La sede de una bodega. NULL = la bodega ES su propia sede."""
+        return warehouse.sede_warehouse_id or warehouse.id
+
+    @classmethod
+    def _crosses_sede(cls, origin: Warehouse, dest: Warehouse) -> bool:
+        """¿El traslado cruza de sede?
+
+        Determina si se emiten kg intersede y maquila. Con `sede_warehouse_id`
+        NULL en ambas —el estado de las 7 orgs— dos bodegas distintas dan sedes
+        distintas y esto es True: el comportamiento de #84 queda intacto. Solo
+        da False donde alguien agrupo bodegas explicitamente (SAC: el molino
+        pertenece a Circunvalar, y moverle material no es entregarselo a nadie).
+        """
+        return cls._sede_of(origin) != cls._sede_of(dest)
+
     def _resolve_transit_warehouse(
         self, db: Session, organization_id: UUID, dest: Warehouse
     ) -> Warehouse:
@@ -943,7 +987,7 @@ class TransferService:
                 detail=(
                     f"No existe bodega de tránsito que rutee a '{dest.name}'. "
                     "Cree una en Config → Bodegas (marcarla de tránsito y "
-                    "apuntarla a la sede destino)."
+                    "apuntarla a la bodega destino)."
                 ),
             )
         return transit

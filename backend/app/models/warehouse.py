@@ -62,6 +62,27 @@ class Warehouse(Base, TimestampMixin, OrganizationMixin):
         comment="Bodega fisica destino a la que rutea esta bodega de transito",
     )
 
+    # A que SEDE pertenece esta bodega. NULL = la bodega ES su propia sede.
+    #
+    # Un traslado emite kg intersede y maquila SOLO si cruza de sede (#84 los
+    # emitia por tener formula, sin mirar el recorrido). Con NULL en todas las
+    # bodegas —el estado de las 7 orgs— cada una es su propia sede y cualquier
+    # traslado entre dos bodegas distintas sigue siendo intersede: comportamiento
+    # byte a byte al de hoy. Solo cambia donde alguien agrupe explicitamente.
+    #
+    # Caso que lo motiva (SAC): Circunvalar-Molino pertenece a la sede
+    # Circunvalar. Mover material de la bodega al molino NO puede inventar deuda
+    # de plomo ni maquila —"es un solo inventario", Johana— pero Molino -> Juan
+    # Mina si cruza de sede y si las genera.
+    #
+    # Un solo nivel: la bodega apuntada debe ser su propia sede (sin cadenas).
+    sede_warehouse_id: Mapped[UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("warehouses.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Sede a la que pertenece (NULL = es su propia sede)",
+    )
+
     # Relationships
     inventory_movements: Mapped[list["InventoryMovement"]] = relationship(
         "InventoryMovement",

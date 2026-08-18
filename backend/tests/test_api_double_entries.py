@@ -892,7 +892,6 @@ class TestDoubleEntryAPI:
         db_session,
     ):
         """date_field=liquidated_at filtra por fecha de liquidacion (paridad con P&L decision #42)."""
-        from app.models.double_entry import DoubleEntry
         from sqlalchemy import update as sa_update
 
         # Crear DP con date=2026-02-28

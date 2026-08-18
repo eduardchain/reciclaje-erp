@@ -42,8 +42,11 @@ export const priceListService = {
     const response = await apiClient.get<PaginatedResponse<PriceListResponse>>("/api/v1/price-lists", { params: { material_id: materialId, limit: 500 } });
     return response.data;
   },
-  getCurrentPrices: async (): Promise<CurrentPricesResponse> => {
-    const response = await apiClient.get<CurrentPricesResponse>("/api/v1/price-lists/current");
+  getCurrentPrices: async (thirdPartyId?: string): Promise<CurrentPricesResponse> => {
+    // Sin third_party_id = lista general (comportamiento historico, byte a byte).
+    const response = await apiClient.get<CurrentPricesResponse>("/api/v1/price-lists/current", {
+      params: thirdPartyId ? { third_party_id: thirdPartyId } : undefined,
+    });
     return response.data;
   },
   create: async (data: PriceListCreate): Promise<PriceListResponse> => {

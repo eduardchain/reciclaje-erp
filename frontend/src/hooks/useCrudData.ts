@@ -250,6 +250,11 @@ export function useCreatePriceList() {
     mutationFn: (data: PriceListCreate) => priceListService.create(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["price-lists"] });
+      // Una fila de precio puede pertenecer a una lista por proveedor, que se lee
+      // con OTRA llave (`price-list-groups/table`). Sin esta linea el precio se
+      // guarda y la hoja de la lista sigue mostrando el viejo — no falla nada,
+      // miente. En la hoja general la llave no existe y esto es un no-op.
+      qc.invalidateQueries({ queryKey: ["price-list-groups"] });
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error")),
   });

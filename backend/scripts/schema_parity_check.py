@@ -33,6 +33,7 @@ DROP SCHEMA de este script revienta la suite en curso (y viceversa: el DROP
 del conftest invalida el snapshot de este script). Secuencial siempre.
 """
 import os
+import re
 import sys
 from collections import defaultdict
 
@@ -157,6 +158,30 @@ def snapshot(engine):
     return snap
 
 
+# Postgres renderiza el MISMO CHECK de dos formas segun como se creo (migracion
+# con texto explicito vs create_all desde el modelo): castea cada elemento del
+# array, o castea el array entero.
+#
+#   dev : ARRAY[('a'::character varying)::text, ('b'::character varying)::text]
+#   test: (ARRAY['a'::character varying, 'b'::character varying])::text[]
+#
+# Es la misma restriccion. Se normaliza el TEXTO antes de comparar en vez de
+# meter las tablas al baseline (#87): un baseline las silencia para siempre y
+# ademas apagaria el guard E1_MARKERS de esas tablas, que es justo el que hay
+# que dejar encendido. La normalizacion es deliberadamente estrecha — solo estas
+# dos formas — para no esconder una diferencia real.
+_CAST_ELEM = re.compile(r"\((\'[^\']*\'::character varying)\)::text")
+_CAST_ARR = re.compile(r"\(ARRAY\[(.*?)\]\)::text\[\]")
+
+
+def normalize_condef(condef):
+    if condef is None:
+        return None
+    out = _CAST_ELEM.sub(r"\1", condef)
+    out = _CAST_ARR.sub(r"ARRAY[\1]", out)
+    return out
+
+
 def diff_section(label, dev_map, test_map):
     """Retorna lista de (es_baseline, texto) por cada divergencia."""
     problems = []
@@ -166,6 +191,8 @@ def diff_section(label, dev_map, test_map):
         for name in sorted(set(dev_items) | set(test_items)):
             in_dev, in_test = dev_items.get(name), test_items.get(name)
             if in_dev == in_test:
+                continue
+            if label == "constraint" and normalize_condef(in_dev) == normalize_condef(in_test):
                 continue
             if in_dev is None:
                 txt = f"  [{label}] {t}.{name}: SOLO en test-create_all -> {in_test}"

@@ -35,6 +35,8 @@ export const ROUTES = {
   INBOUND_NEW: "/inbound/new",
   INBOUND_DETAIL: "/inbound/:id",
   INBOUND_EDIT: "/inbound/:id/edit",
+  /** #93: reparto de proveedores (liquidación de la entrada) */
+  INBOUND_LIQUIDATE: "/inbound/:id/liquidate",
   TRANSFERS: "/transfers",
   TRANSFER_NEW: "/transfers/new",
   TRANSFER_DETAIL: "/transfers/:id",
@@ -100,6 +102,7 @@ export const ROUTES = {
   CONFIG_TARIFFS: "/config/tariffs",
   CONFIG_FORMULAS: "/config/formulas",
   CONFIG_FLEET: "/config/fleet",
+  CONFIG_SUPPLIER_PRICE_LISTS: "/config/listas-precios",
   CONFIG_WILLARD_CENTERS: "/config/centros-willard",
 
   // Admin

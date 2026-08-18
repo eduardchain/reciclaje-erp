@@ -710,3 +710,75 @@ class TestSuperuserBypassOrgMembership:
         _, headers = self._make_superuser(db_session)
         r = client.get(f"/api/v1/organizations/{test_organization.id}", headers=headers)
         assert r.status_code == 404
+
+
+class TestInactiveOrganizationHidden:
+    """Pruebas de usuario 2026-08-11: tras `seed_sac_org.py --reset` (que da de
+    baja la org y crea otra) el selector mostraba DOS "SAC". El filtro
+    `is_active` existia en la rama de superusuario y en el GET individual, pero
+    faltaba en la de MIEMBRO — asi que el soft delete de #29 no se aplicaba de
+    verdad: la org seguia visible y, peor, operable."""
+
+    def test_inactive_org_disappears_from_selector(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        db_session,
+        test_organization: Organization,
+        test_organization2: Organization,
+    ):
+        assert len(client.get("/api/v1/organizations", headers=auth_headers).json()) == 2
+
+        test_organization2.is_active = False
+        db_session.commit()
+
+        data = client.get("/api/v1/organizations", headers=auth_headers).json()
+        assert [o["id"] for o in data] == [str(test_organization.id)]
+
+    def test_member_cannot_operate_in_inactive_org(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        db_session,
+        test_organization: Organization,
+    ):
+        """Quitarla del selector no basta: el org_id vive en el authStore y en
+        los deep-links. Con la org de baja, cualquier endpoint con contexto de
+        organizacion responde 403 — el miembro deja de poder trabajar dentro."""
+        headers = {**auth_headers, "X-Organization-ID": str(test_organization.id)}
+        assert client.get("/api/v1/materials", headers=headers).status_code == 200
+
+        test_organization.is_active = False
+        db_session.commit()
+
+        resp = client.get("/api/v1/materials", headers=headers)
+        assert resp.status_code == 403, resp.text
+
+    def test_superuser_branch_unchanged(
+        self,
+        client: TestClient,
+        db_session,
+        test_organization: Organization,
+    ):
+        """La rama de superusuario ya filtraba (deps.py + system.py): sigue
+        igual — este fix no la toca."""
+        from app.core.security import create_access_token
+        from app.models.user import User
+        from app.core.security import get_password_hash
+
+        su = User(
+            email="su-inactive-org@example.com",
+            hashed_password=get_password_hash("pass1234"),
+            full_name="SU", is_active=True, is_superuser=True,
+        )
+        db_session.add(su)
+        db_session.commit()
+        headers = {"Authorization": f"Bearer {create_access_token(data={'sub': str(su.id)})}"}
+
+        listed = client.get("/api/v1/organizations", headers=headers).json()
+        assert str(test_organization.id) in [o["id"] for o in listed]
+
+        test_organization.is_active = False
+        db_session.commit()
+        listed = client.get("/api/v1/organizations", headers=headers).json()
+        assert str(test_organization.id) not in [o["id"] for o in listed]

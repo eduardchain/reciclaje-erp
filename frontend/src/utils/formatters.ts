@@ -64,6 +64,20 @@ export function formatDateTime(dateStr: string | null | undefined): string {
   });
 }
 
+/**
+ * Solo la hora de un timestamp REAL (`now()`), para acompañar una fecha de
+ * negocio ya pintada con `formatDate`. NUNCA usarlo sobre un `BusinessDate`:
+ * ese es mediodía UTC y imprimiría "07:00 a. m." en Bogotá — la hora inventada
+ * que vivió en producción hasta #87.
+ */
+export function formatTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return "-";
+  return new Date(dateStr).toLocaleTimeString("es-CO", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function toISODate(date: Date): string {
   return date.toISOString().split("T")[0];
 }

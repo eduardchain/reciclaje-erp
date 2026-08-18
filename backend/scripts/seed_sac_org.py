@@ -8,7 +8,7 @@ Que crea:
     sedes deterministas Willard apuntando a las bodegas NUEVAS).
   - Usuarios: hugo@sac.com (admin, dueno de la org), johana@sac.com (admin),
     yurani@sac.com (admin) y erwin@sac.com (rol custom bascula_sac).
-  - 6 bodegas (3 receptoras + Molino + 2 transito is_transit=True con target).
+  - 6 bodegas (3 receptoras + Molino en la sede Circunvalar + 2 transito).
   - 4 UNs, 4 cuentas de dinero ($0), 8 categorias de gasto, 6 categorias de material.
   - Los 37 materiales del listado de Daniel (2026-07-23) + perfil kg + formula
     de conversion (battery_to_lead / drosses_to_lead) donde aplica.
@@ -66,6 +66,12 @@ USERS = [
      "full_name": "Yurani", "role": "admin"},
     {"key": "erwin", "email": "erwin@sac.com",
      "full_name": "Erwin", "role": "bascula_sac"},
+    # Reunion 12-ago + confirmacion telefonica de Hugo 13-ago (canon Q-19):
+    # Erwin CAPTURA en bascula, David REVISA, Johana liquida. Ojo que la
+    # grabacion dice lo contrario ("David, que es el de recepcion, confirmo;
+    # Erwin reviso") — mando la correccion telefonica.
+    {"key": "david", "email": "david@sac.com",
+     "full_name": "David", "role": "revisor_inventario"},
 ]
 
 # Rol custom de bascula: captura y edita entradas, NO liquida ni anula
@@ -81,6 +87,30 @@ BASCULA_ROLE = {
     ],
 }
 
+# #93 D10: rol de revision de entradas (confirma cantidades, habilita liquidar).
+# Custom y NO de sistema: un sexto rol de sistema apareceria en Costa/Biogreen.
+# R5: el sembrado lo crea ANTES del deploy — sin nadie con purchases.review,
+# 'revisada' frenaria la operacion.
+# El revisor trabaja sobre las MISMAS pantallas que la bascula: abre la
+# entrada, corrige lo que este mal y despues certifica. Por eso lleva el
+# mismo set que BASCULA_ROLE menos purchases.create (no captura) y mas
+# purchases.review (certifica). Sin config.*_fleet los selectores de
+# conductor y vehiculo salen vacios y el boton de crear al vuelo da error;
+# sin formulas.view no ve los kg estimados de la Willard que va a certificar.
+# El control de "certifico y despues cambio" NO depende de quitarle edicion:
+# lo cierra D17 — editar lineas des-certifica, sea quien sea.
+REVISOR_ROLE = {
+    "name": "revisor_inventario",
+    "display_name": "Revisor de Inventario",
+    "description": "Revisa entradas (certifica cantidades pesadas), corrige lo capturado y consulta compras e inventario",
+    "permission_codes": [
+        "config.manage_fleet", "config.view_fleet", "formulas.view",
+        "kg_ledger.view", "materials.view", "purchases.edit",
+        "purchases.review", "purchases.view", "third_parties.view",
+        "warehouses.view",
+    ],
+}
+
 BUSINESS_UNITS = [
     "UN1 Reciclaje Plomo",
     "UN2 Maquila Willard",
@@ -88,14 +118,22 @@ BUSINESS_UNITS = [
     "UN4 Proyectos Especiales",
 ]
 
-# (name, is_receiving, is_transit, transit_target_name)
-WAREHOUSES: list[tuple[str, bool, bool, Optional[str]]] = [
-    ("Circunvalar", True, False, None),
-    ("Juan Mina", True, False, None),
-    ("Bogota", True, False, None),
-    ("Circunvalar - Molino", False, False, None),
-    ("Juan Mina - Transito", False, True, "Juan Mina"),
-    ("Circunvalar - Transito", False, True, "Circunvalar"),
+# (name, is_receiving, is_transit, transit_target_name, sede_name)
+#
+# `sede_name` agrupa bodegas que son "un solo inventario" (Johana, 2026-08-11:
+# Circunvalar y su molino lo son). Un traslado DENTRO de una sede se completa al
+# registrarlo —no se pesa al salir ni al llegar— y no genera deuda de plomo ni
+# maquila. Cruzar de sede si: dos pasos, transito y efectos.
+#
+# Por eso el molino NO necesita bodega de transito: nada llega a el cruzando de
+# sede. Solo las sedes reales (JM, CV) tienen la suya.
+WAREHOUSES: list[tuple[str, bool, bool, Optional[str], Optional[str]]] = [
+    ("Circunvalar", True, False, None, None),
+    ("Juan Mina", True, False, None, None),
+    ("Bogota", True, False, None, None),
+    ("Circunvalar - Molino", False, False, None, "Circunvalar"),
+    ("Juan Mina - Transito", False, True, "Juan Mina", None),
+    ("Circunvalar - Transito", False, True, "Circunvalar", None),
 ]
 
 ACCOUNTS = [
@@ -187,6 +225,16 @@ THIRD_PARTIES = [
     ("PRUEBA - Cliente Nacional", "Cliente"),
 ]
 
+# SOLO en modo local con --reset (nunca contra produccion). El reparto de una
+# Entrada es multi-proveedor por naturaleza — con un unico proveedor de material
+# no se puede probar. Ojo: Willard S.A NO sirve para esto, es titular de las
+# cuentas kg y el guard de #80 lo rechaza como proveedor de compra.
+THIRD_PARTIES_LOCAL = [
+    ("PRUEBA - Chatarreria Bogota", "Proveedor Material"),
+    ("PRUEBA - Reciclados del Norte", "Proveedor Material"),
+    ("PRUEBA - Metales del Atlantico", "Proveedor Material"),
+]
+
 # (code, display_name, account_type, warehouse_name|None, titular_name|None)
 KG_ACCOUNTS = [
     ("WILLARD-BAT-CV", "Willard Baterias CV", "willard_baterias", "Circunvalar", "Willard S.A"),
@@ -196,7 +244,10 @@ KG_ACCOUNTS = [
 ]
 
 TARIFFS = [
-    {"tariff_code": "comision_green_loop", "unit_price_cop": "100", "unit": "per_kg_material"},
+    # #93 D11: kg_per_unit=14 — "14 kg por unidad, sea cual sea la unidad"
+    # (Hugo); base de la comision con unidades mezcladas, versionado con el precio
+    {"tariff_code": "comision_green_loop", "unit_price_cop": "100",
+     "unit": "per_kg_material", "kg_per_unit": "14"},
     {"tariff_code": "maquila_intersede_cv_jm", "unit_price_cop": "1500", "unit": "per_kg_lead"},
 ]
 
@@ -455,12 +506,48 @@ class SacSeeder:
 
         roles = self.api.get(f"/system/organizations/{self.api.org_id}/roles")
         by_role_name = {r["name"]: r["id"] for r in roles}
-        if BASCULA_ROLE["name"] not in by_role_name:
-            created = self.api.post("/roles", BASCULA_ROLE, label="rol-bascula")
-            by_role_name[BASCULA_ROLE["name"]] = created["id"]
+        for custom_role in (BASCULA_ROLE, REVISOR_ROLE):
+            if custom_role["name"] not in by_role_name:
+                created = self.api.post("/roles", custom_role, label=f"rol-{custom_role['name']}")
+                by_role_name[custom_role["name"]] = created["id"]
+                continue
+            # El rol ya existe: alinear sus permisos con la definicion de este
+            # script. Sin esto el sembrado era create-only para roles y agregar
+            # un permiso a la constante NO tenia ningun efecto sobre una org ya
+            # provisionada — el rol se quedaba con lo que tuviera el dia que
+            # nacio, en silencio. Mismo criterio que el PATCH de bodegas (#28).
+            role_id = by_role_name[custom_role["name"]]
+            detalle = self.api.get(f"/roles/{role_id}")
+            # `update_role` NO tiene guard de is_system_role (el de :439 es del
+            # delete), asi que hoy lo unico que impide pisar un rol de sistema
+            # es que estas dos constantes se llamen distinto — y `bascula` de
+            # sistema esta a un sufijo de `bascula_sac`. Esto convierte esa
+            # convencion de nombres en un invariante.
+            if detalle["is_system_role"]:
+                raise SystemExit(
+                    f"ABORTADO: '{custom_role['name']}' resolvio a un ROL DE SISTEMA "
+                    f"(id {role_id}). El sembrado no pisa roles de sistema."
+                )
+            actual = {p["code"] for p in detalle["permissions"]}
+            esperado = set(custom_role["permission_codes"])
+            if actual == esperado:
+                logging.info(f"  Rol {custom_role['name']}: permisos al dia")
+                continue
+            self.api.patch(
+                f"/roles/{role_id}",
+                {"permission_codes": custom_role["permission_codes"],
+                 "display_name": custom_role["display_name"],
+                 "description": custom_role["description"]},
+                label=f"rol-{custom_role['name']}-sync",
+            )
+            logging.info(
+                f"  Rol {custom_role['name']}: permisos alineados "
+                f"(+{sorted(esperado - actual)} -{sorted(actual - esperado)})"
+            )
         role_ids = {
             "admin": by_role_name["admin"],
             BASCULA_ROLE["name"]: by_role_name[BASCULA_ROLE["name"]],
+            REVISOR_ROLE["name"]: by_role_name[REVISOR_ROLE["name"]],
         }
 
         sys_users = self.api.get("/system/users")
@@ -505,7 +592,7 @@ class SacSeeder:
         existing = self.api.existing_by("/warehouses", "name")
         # 1a pasada: crear/registrar las que no son de transito (los targets
         # tienen que existir antes de apuntarles)
-        for name, is_receiving, is_transit, _target in WAREHOUSES:
+        for name, is_receiving, is_transit, _target, _sede in WAREHOUSES:
             if name in existing:
                 self.warehouses[name] = existing[name]["id"]
                 continue
@@ -513,7 +600,7 @@ class SacSeeder:
             r = self.api.post("/warehouses/", body, label=name)
             self.warehouses[name] = r["id"]
         # 2a pasada: alinear flags (PATCH solo si algo difiere)
-        for name, is_receiving, is_transit, target in WAREHOUSES:
+        for name, is_receiving, is_transit, target, sede in WAREHOUSES:
             current = existing.get(name)
             desired: dict[str, Any] = {
                 "is_receiving": is_receiving,
@@ -521,9 +608,11 @@ class SacSeeder:
                 "transit_target_warehouse_id": (
                     self.warehouses[target] if is_transit else None
                 ),
+                "sede_warehouse_id": self.warehouses[sede] if sede else None,
             }
             if current is None:
-                if is_transit:  # recien creada: faltan los flags de transito
+                # recien creada: le faltan los flags de transito y/o la sede
+                if is_transit or sede:
                     self.api.patch(
                         f"/warehouses/{self.warehouses[name]}", desired, label=name
                     )
@@ -676,7 +765,10 @@ class SacSeeder:
         if not self.api.dry_run:
             cats = self.api.get("/third-party-categories/flat")
             self.tp_categories = {c["name"]: c["id"] for c in cats["items"]}
-        for name, cat_name in THIRD_PARTIES:
+        # Los de prueba multi-proveedor SOLO en local (mismo criterio del guard
+        # de --reset): produccion no acumula terceros ficticios
+        catalog = THIRD_PARTIES + (THIRD_PARTIES_LOCAL if self.api.is_local else [])
+        for name, cat_name in catalog:
             if name in existing:
                 self.third_parties[name] = existing[name]["id"]
                 continue
@@ -711,8 +803,19 @@ class SacSeeder:
             vigentes = {t["tariff_code"]: t for t in items}
         for t in TARIFFS:
             cur = vigentes.get(t["tariff_code"])
+            # #93: kg_per_unit entra a la comparacion — la vigente de prod nacio
+            # sin el 14 y el seed debe versionar una nueva (append-only #35),
+            # no saltarsela por tener el mismo precio
+            same_kg = (
+                (cur.get("kg_per_unit") is None and t.get("kg_per_unit") is None)
+                or (
+                    cur.get("kg_per_unit") is not None
+                    and t.get("kg_per_unit") is not None
+                    and float(cur["kg_per_unit"]) == float(t["kg_per_unit"])
+                )
+            ) if cur else False
             if cur and float(cur["unit_price_cop"]) == float(t["unit_price_cop"]) \
-                    and cur["unit"] == t["unit"]:
+                    and cur["unit"] == t["unit"] and same_kg:
                 continue
             self.api.post("/service-tariffs", t, label=t["tariff_code"])
 
@@ -754,7 +857,7 @@ class SacSeeder:
         logging.info(
             f"  Org SAC: {len(WAREHOUSES)} bodegas, {len(BUSINESS_UNITS)} UNs, "
             f"{len(ACCOUNTS)} cuentas, {len(MATERIALS)} materiales, "
-            f"{len(THIRD_PARTIES)} terceros, {len(KG_ACCOUNTS)} cuentas kg, "
+            f"{len(self.third_parties)} terceros, {len(KG_ACCOUNTS)} cuentas kg, "
             f"{len(TARIFFS)} tarifas, {len(RETENTION_CONFIGS)} retenciones. "
             f"SIN transacciones."
         )

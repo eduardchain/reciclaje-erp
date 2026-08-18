@@ -52,20 +52,26 @@ def _inbound_origin_map(db: Session, purchase_ids: list, organization_id: UUID) 
     if not purchase_ids:
         return {}
     from sqlalchemy import select
-    from app.models.inbound_order import InboundOrder
+    from app.models.inbound_order import InboundOrder, InboundOrderPurchase
     from app.models.third_party import ThirdParty as TP
+    # #93 D2: el enlace vive en la PUENTE (cubre legacy 1:1 backfilleado y las
+    # N compras del reparto; UNIQUE(purchase_id) garantiza a lo sumo una
+    # entrada por compra — el dict no puede perder filas). Camino COMPARTIDO
+    # de las 7 orgs: sin flag la puente esta vacia → dict vacio, costo ~0
+    # (criterio 28: response campo por campo identico).
     rows = db.execute(
         select(
-            InboundOrder.purchase_id,
+            InboundOrderPurchase.purchase_id,
             InboundOrder.id,
             InboundOrder.order_number,
             InboundOrder.collector_id,
             TP.name,
         )
+        .join(InboundOrder, InboundOrderPurchase.inbound_order_id == InboundOrder.id)
         .outerjoin(TP, TP.id == InboundOrder.collector_id)
         .where(
             InboundOrder.organization_id == organization_id,
-            InboundOrder.purchase_id.in_(purchase_ids),
+            InboundOrderPurchase.purchase_id.in_(purchase_ids),
         )
     ).all()
     return {pid: (oid, num, cid, cname) for pid, oid, num, cid, cname in rows}

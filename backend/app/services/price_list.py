@@ -12,6 +12,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.models.price_list import PriceList
+from app.models.price_list_group import PriceListGroup, PriceListGroupMember
 from app.models.material import Material
 from app.models.material import MaterialCategory
 from app.models.user import User
@@ -20,7 +21,51 @@ from app.services.base import CRUDBase, Select, PaginatedResponse
 
 
 class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
-    """Operaciones CRUD para PriceList con consulta de precio vigente."""
+    """Operaciones CRUD para PriceList con consulta de precio vigente.
+
+    🔴 Listas por proveedor: cada fila pertenece a una lista via
+    `price_list_group_id`, y **NULL = la lista general de siempre**. Todo punto
+    de lectura tiene que decir a que lista pertenece la pregunta; el default
+    explicito es la general, para que agregar una consulta nueva mañana herede
+    el comportamiento historico en vez de mezclar precios de listas distintas.
+    """
+
+    def _base_query(self, organization_id: UUID) -> Select:
+        """Base SEGURA: solo la lista general.
+
+        Se sobrescribe la de `CRUDBase` a proposito. Cualquier metodo que herede
+        de aca (`get_multi`, `get_by_field`, y los que se escriban mañana) queda
+        acotado a la lista general sin que su autor tenga que acordarse. Los
+        metodos que SI saben de listas piden su scope explicito con
+        `_scoped_query`.
+        """
+        return super()._base_query(organization_id).where(
+            self.model.price_list_group_id.is_(None)
+        )
+
+    def _scoped_query(self, organization_id: UUID, group_id: Optional[UUID]) -> Select:
+        """Base para un scope explicito: `None` = lista general, o una lista."""
+        stmt = super()._base_query(organization_id)
+        if group_id is None:
+            return stmt.where(self.model.price_list_group_id.is_(None))
+        return stmt.where(self.model.price_list_group_id == group_id)
+
+    def get(
+        self,
+        db: Session,
+        id: UUID,
+        organization_id: UUID,
+    ) -> Optional[PriceList]:
+        """Una fila por su PK, SIN filtro de lista.
+
+        Es la unica lectura que deliberadamente no se acota (decidido en §4 del
+        plan): una fila pedida por su identificador es esa fila, y filtrarla por
+        grupo solo podria esconderla. Se sobrescribe para saltar el `IS NULL`
+        que `_base_query` agrega arriba — sin esto, pedir por PK un precio de
+        una lista daria 404.
+        """
+        statement = super()._base_query(organization_id).where(self.model.id == id)
+        return db.execute(statement).scalar_one_or_none()
 
     def create(
         self,
@@ -49,6 +94,25 @@ class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
                 detail="Material no encontrado en esta organizacion",
             )
 
+        # 🔴 La lista tiene que existir EN ESTA ORG. Esta validacion es tambien
+        # la barrera estructural de D6 sobre este camino: el router de grupos
+        # esta gateado por flag, asi que una org sin la funcion no puede tener
+        # ninguna lista y por lo tanto **no puede escribir un valor distinto de
+        # NULL en esta columna** — no por un chequeo de flag que alguien pueda
+        # olvidar, sino porque no existe el id que tendria que mandar.
+        if obj_in.price_list_group_id is not None:
+            group = db.execute(
+                select(PriceListGroup).where(
+                    PriceListGroup.id == obj_in.price_list_group_id,
+                    PriceListGroup.organization_id == organization_id,
+                )
+            ).scalar_one_or_none()
+            if not group:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Lista de precios no encontrada en esta organizacion",
+                )
+
         obj_data = obj_in.model_dump()
         obj_data["organization_id"] = organization_id
         obj_data["updated_by"] = user_id
@@ -65,15 +129,16 @@ class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
         db: Session,
         material_id: UUID,
         organization_id: UUID,
+        group_id: Optional[UUID] = None,
     ) -> Optional[PriceList]:
         """
         Obtener el precio vigente (mas reciente) de un material.
 
         Retorna el registro de PriceList mas reciente para el material dado,
-        ordenado por created_at descendente.
+        ordenado por created_at descendente. `group_id=None` = lista general.
         """
         statement = (
-            self._base_query(organization_id)
+            self._scoped_query(organization_id, group_id)
             .where(self.model.material_id == material_id)
             .order_by(self.model.created_at.desc())
             .limit(1)
@@ -85,27 +150,110 @@ class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
         self,
         db: Session,
         organization_id: UUID,
+        group_id: Optional[UUID] = None,
     ) -> list[PriceList]:
         """
         Obtener el precio vigente de TODOS los materiales.
         Usa DISTINCT ON para retornar solo el registro mas reciente por material.
+        `group_id=None` = lista general (comportamiento historico).
         """
         statement = (
-            self._base_query(organization_id)
+            self._scoped_query(organization_id, group_id)
             .distinct(self.model.material_id)
             .order_by(self.model.material_id, self.model.created_at.desc())
         )
         result = db.execute(statement)
         return list(result.scalars().all())
 
+    def resolve_for_supplier(
+        self,
+        db: Session,
+        organization_id: UUID,
+        third_party_id: UUID,
+    ) -> list[PriceList]:
+        """
+        🔴 EL RESOLUTOR (D3/D4). Precios que se le sugieren a UN proveedor.
+
+        Regla completa, tal como la fijo Hugo (Q-21/Q-22):
+
+        1. Proveedor CON lista -> los precios de su lista. Un material en cero
+           **no se sugiere** (el cero es una decision deliberada, porque la
+           lista trae todos los materiales).
+        2. Proveedor SIN lista -> **no se sugiere nada**.
+
+        NO hay respaldo a la lista general. Un precio heredado de otra lista
+        seria una afirmacion que nadie hizo; un campo vacio es informacion
+        honesta ("nadie definio esto").
+
+        ⚠️ Devuelve AUSENCIA, no ceros: quien consume esto no tiene que saber
+        interpretar un 0 como "sin precio".
+
+        Vive en el servidor y no en el cliente porque la misma resolucion aplica
+        en las 3 pantallas de compras y en la liquidacion de la Entrada, que es
+        otro flujo con otro estado. En JS quedaria escrita dos veces — y esta
+        regla ya cambio una vez en 24 horas.
+        """
+        membership = db.execute(
+            select(PriceListGroupMember.price_list_group_id)
+            .join(PriceListGroup, PriceListGroup.id == PriceListGroupMember.price_list_group_id)
+            .where(
+                PriceListGroupMember.third_party_id == third_party_id,
+                PriceListGroupMember.organization_id == organization_id,
+                PriceListGroup.is_active == True,  # noqa: E712
+            )
+        ).scalar_one_or_none()
+
+        if membership is None:
+            # 🔴 D10 — el parametro es INERTE si la org no usa listas.
+            #
+            # Sin esto, las 3 empresas cliente se quedan SIN NINGUNA sugerencia
+            # de precio en compras: las 3 pantallas que llaman a este resolutor
+            # son compartidas, asi que en cuanto empiezan a mandar el proveedor,
+            # cae aca, no encuentra membresia y devuelve vacio. Ningun test lo
+            # veia (todos crean una lista primero) ni el golden (no captura
+            # /price-lists) ni abrir la pantalla en SAC (ahi si hay listas).
+            #
+            # No es un parche: es la semantica correcta — **la funcionalidad
+            # esta apagada hasta que alguien cree su primera lista**. Es tambien
+            # lo que promete el dialogo de creacion: "desde que exista una, a un
+            # proveedor sin lista no se le sugiere ningun precio".
+            usa_listas = db.execute(
+                select(PriceListGroup.id)
+                .where(
+                    PriceListGroup.organization_id == organization_id,
+                    PriceListGroup.is_active == True,  # noqa: E712
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if usa_listas is None:
+                return self.get_all_current_prices(db, organization_id=organization_id)
+            return []
+
+        prices = self.get_all_current_prices(
+            db, organization_id=organization_id, group_id=membership
+        )
+        return [p for p in prices if p.purchase_price and p.purchase_price > 0]
+
     def get_table(
         self,
         db: Session,
         organization_id: UUID,
         category_id: Optional[UUID] = None,
+        group_id: Optional[UUID] = None,
     ) -> PriceTableResponse:
-        """Todos los materiales activos con su precio vigente (o null)."""
-        # Subquery: precio vigente por material (DISTINCT ON)
+        """Todos los materiales activos con su precio vigente (o null).
+
+        `group_id=None` = la lista general — byte a byte lo de hoy (D7: la
+        pantalla de Precios en modo tabla no se toca). Con `group_id`, la misma
+        hoja de calculo pero de esa lista: **todos** los materiales activos,
+        con precio o vacios, porque la lista trae el catalogo completo y el
+        usuario decide a cuales les pone precio (Q-21).
+        """
+        # Subquery: precio vigente por material (DISTINCT ON) dentro del scope
+        group_filter = (
+            PriceList.price_list_group_id.is_(None) if group_id is None
+            else PriceList.price_list_group_id == group_id
+        )
         latest_price = (
             select(
                 PriceList.material_id,
@@ -114,7 +262,7 @@ class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
                 PriceList.created_at.label("last_updated"),
                 PriceList.updated_by,
             )
-            .where(PriceList.organization_id == organization_id)
+            .where(PriceList.organization_id == organization_id, group_filter)
             .distinct(PriceList.material_id)
             .order_by(PriceList.material_id, PriceList.created_at.desc())
             .subquery("latest_price")
@@ -173,12 +321,16 @@ class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
         organization_id: UUID,
         skip: int = 0,
         limit: int = 50,
+        group_id: Optional[UUID] = None,
     ) -> PaginatedResponse:
         """
         Obtener historial de precios de un material (mas reciente primero).
         Incluye nombre del usuario que actualizo.
+
+        El historial es POR LISTA: `group_id=None` muestra el de la general, sin
+        mezclar los de las listas de proveedor (y al reves).
         """
-        base = self._base_query(organization_id).where(
+        base = self._scoped_query(organization_id, group_id).where(
             self.model.material_id == material_id
         )
 
@@ -187,6 +339,10 @@ class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
         total = db.execute(count_query).scalar_one()
 
         # Query con JOIN a User para obtener nombre
+        group_filter = (
+            PriceList.price_list_group_id.is_(None) if group_id is None
+            else PriceList.price_list_group_id == group_id
+        )
         query = (
             select(PriceList, User.full_name.label("updated_by_name"))
             .select_from(PriceList)
@@ -194,6 +350,7 @@ class CRUDPriceList(CRUDBase[PriceList, PriceListCreate, PriceListUpdate]):
             .where(
                 PriceList.organization_id == organization_id,
                 PriceList.material_id == material_id,
+                group_filter,
             )
             .order_by(PriceList.created_at.desc())
             .offset(skip)

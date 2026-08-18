@@ -25,7 +25,10 @@ class PriceListBase(BaseModel):
 
 class PriceListCreate(PriceListBase):
     """Schema para crear un registro de precios."""
-    pass
+    price_list_group_id: Optional[UUID] = Field(
+        None,
+        description="Lista a la que pertenece el precio. Omitir = lista general (comportamiento historico)",
+    )
 
 
 class PriceListUpdate(BaseModel):

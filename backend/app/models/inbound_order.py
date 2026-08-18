@@ -1,10 +1,14 @@
 """
-Modelos InboundOrder / InboundOrderLine — orden de entrada (SAC E1, v0.5 §11.1.12).
+Modelos InboundOrder / InboundOrderLine / InboundLineAllocation /
+InboundOrderPurchase — orden de entrada (SAC E1 §11.1.12, rediseño #93).
 
-Documento central de la "captura unica" de Fase 1: cubre compra propia,
-postconsumo Willard, drosses, recoleccion en ruta y reventa. Las compras
-derivan de ella (una InboundOrder de compra propia genera su Purchase en
-'registered' — logica de E2; E1 solo crea la estructura).
+Documento central de la "captura unica" en patio. Desde #93 la Entrada tipo
+compra NO conoce el proveedor al capturar (en el patio nadie sabe todavia de
+quien es el material): el proveedor aparece al LIQUIDAR, cuando el reparto
+(InboundLineAllocation) distribuye cada linea entre N proveedores y de ahi
+nacen N compras atomicamente (puente InboundOrderPurchase). La diferencia
+entre lo pesado y lo repartido es el descuadre de entrada (D5-D7).
+Willard intacto (D13): sigue con proveedor fijo y flujo 2 pasos (#81).
 """
 from datetime import datetime
 from decimal import Decimal
@@ -13,6 +17,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -60,11 +65,14 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
         comment="Sede de recepcion fisica — inmutable post-registro (v0.5 §7.2)",
     )
 
-    third_party_id: Mapped[UUID] = mapped_column(
+    # #93 D1: nullable — la Entrada tipo compra se captura SIN proveedor (el
+    # reparto al liquidar lo asigna por linea). Willard lo sigue exigiendo,
+    # pero en el SERVICIO (titular de la cuenta kg, addendum Ciclo B), no aca.
+    third_party_id: Mapped[Optional[UUID]] = mapped_column(
         GUID(),
         ForeignKey("third_parties.id", ondelete="RESTRICT"),
-        nullable=False,
-        comment="Proveedor real (una entrada POR proveedor, v0.5 §7.3)",
+        nullable=True,
+        comment="Willard: titular de la cuenta kg. Tipo compra: NULL desde #93 (el proveedor vive en el reparto)",
     )
 
     date: Mapped[datetime] = mapped_column(
@@ -116,29 +124,67 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
     )
 
     # Ajustes reunion 2026-08-03 (A, D1): factura de la captura — SOLO tipo
-    # willard. En tipo compra la factura vive en purchases.invoice_number (el
-    # documento comercial) y esta columna queda NULL: una sola fuente de verdad
-    # POR TIPO, jamas dos para la misma fila. La lectura del response es
-    # condicional (purchase si existe, si no esta columna).
+    # willard. En tipo compra la factura vive POR PROVEEDOR (#93 D12: en el
+    # reparto — InboundLineAllocation.invoice_number; legacy 1:1 en
+    # purchases.invoice_number). Una sola fuente de verdad POR TIPO.
     invoice_number: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
-        comment="Factura de recepciones Willard (tipo compra: vive en purchases.invoice_number)",
+        comment="Factura de recepciones Willard (tipo compra: vive en el reparto por proveedor, #93 D12)",
     )
 
+    # #93 D12: remision del camion — UNA por Entrada, se captura en el patio.
+    # NO confundir con la factura (que llega con la liquidacion, por proveedor).
+    # Columna propia y no invoice_number reciclada: #87 acaba de pagar el costo
+    # de un campo con dos semanticas.
+    remission_number: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Remision del camion (documento de patio, D12) — una por entrada",
+    )
+
+    # #93 D4: el estado es COLUMNA, ya no se deriva de las compras (se cayo el
+    # espejo SQL<->Python del Ciclo C). Vocabularios por tipo:
+    #   compra : draft (registrada) -> reviewed (revisada) -> liquidated | annulled
+    #   willard: draft (registrada) -> confirmed (liquidada en display) | annulled
+    # 'confirmed' queda EXCLUSIVO de willard; las filas legacy tipo compra las
+    # re-mapea la migracion b8c9d0e1f2a3 desde el estado de su compra derivada.
     status: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
         default="draft",
-        comment="draft | confirmed | annulled",
+        comment="draft | reviewed | liquidated | confirmed (solo willard) | annulled",
     )
 
-    # SAC E2 (espejo migracion e8f1a2b3c4d5)
+    # #93 D10: quien reviso (permiso purchases.review) — auditoria minima
+    reviewed_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Hora REAL del clic de liquidar (pruebas de usuario 2026-08-11). No se
+    # confunde con `Purchase.liquidated_at`, que es fecha de NEGOCIO (mediodia
+    # UTC, #42/#87) y es por donde cortan los reportes. La hora vive aca y no
+    # en las 3 tablas compartidas de operaciones porque inbound_orders es
+    # exclusiva de SAC: cero riesgo para las otras organizaciones (la deuda
+    # declarada en #87 sigue abierta para compras/ventas/DP).
+    # Se limpia al des-liquidar y se re-estampa al re-liquidar.
+    liquidated_ts: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Instante real de la liquidacion (auditoria) — NO usar para cortes",
+    )
+
+    # Columna INERTE desde #93 (regla sin-DROP): el enlace entrada<->compras
+    # vive en la puente inbound_order_purchases (1:N). La migracion backfillea
+    # las filas legacy 1:1 hacia la puente y esta FK no se vuelve a escribir.
     purchase_id: Mapped[Optional[UUID]] = mapped_column(
         GUID(),
         ForeignKey("purchases.id", ondelete="SET NULL"),
         nullable=True,
-        comment="Purchase(registered) derivada para tipos purchase/ruta (D7)",
+        comment="INERTE desde #93 — usar inbound_order_purchases",
     )
 
     annul_cost_adjustment: Mapped[Decimal] = mapped_column(
@@ -167,13 +213,18 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
 
     # --- Relationships ---
     warehouse: Mapped["Warehouse"] = relationship("Warehouse", foreign_keys=[warehouse_id])
-    third_party: Mapped["ThirdParty"] = relationship("ThirdParty", foreign_keys=[third_party_id])
+    third_party: Mapped[Optional["ThirdParty"]] = relationship("ThirdParty", foreign_keys=[third_party_id])
     collector: Mapped[Optional["ThirdParty"]] = relationship("ThirdParty", foreign_keys=[collector_id])
     driver: Mapped[Optional["Driver"]] = relationship("Driver", foreign_keys=[driver_id])
     vehicle: Mapped[Optional["Vehicle"]] = relationship("Vehicle", foreign_keys=[vehicle_id])
     purchase: Mapped[Optional["Purchase"]] = relationship("Purchase", foreign_keys=[purchase_id])
     lines: Mapped[list["InboundOrderLine"]] = relationship(
         "InboundOrderLine",
+        back_populates="inbound_order",
+        cascade="all, delete-orphan",
+    )
+    purchase_links: Mapped[list["InboundOrderPurchase"]] = relationship(
+        "InboundOrderPurchase",
         back_populates="inbound_order",
         cascade="all, delete-orphan",
     )
@@ -230,8 +281,33 @@ class InboundOrderLine(Base, OrganizationMixin, TimestampMixin):
 
     quality_notes: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # #93 D3/D6: precio del material EN ESTA ENTRADA — el que la UI pre-llena
+    # en cada reparto nuevo y el que valora el descuadre (ambos sentidos).
+    # Nace al liquidar; obligatorio si la linea queda con descuadre != 0 (D16).
+    reference_unit_price: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Precio de referencia del material en esta entrada — valora el descuadre (D6)",
+    )
+
+    # #93 D8: una linea SIN asignaciones bloquea la liquidacion (descuido, no
+    # descuadre) salvo que Johana declare explicitamente que no es de nadie.
+    unallocated_intentional: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        comment="Declaracion explicita 'este material no es de nadie' — habilita liquidar sin reparto (D8)",
+    )
+
     __table_args__ = (
         Index("ix_inbound_order_lines_order", "inbound_order_id"),
+        # #93 D3: una fila por material — sin esto el mismo material tendria dos
+        # precios de referencia el mismo dia y dos descuadres que no conmutan.
+        UniqueConstraint(
+            "inbound_order_id", "material_id",
+            name="uq_inbound_lines_order_material",
+        ),
     )
 
     # --- Relationships ---
@@ -239,6 +315,124 @@ class InboundOrderLine(Base, OrganizationMixin, TimestampMixin):
         "InboundOrder", back_populates="lines"
     )
     material: Mapped["Material"] = relationship("Material", foreign_keys=[material_id])
+    allocations: Mapped[list["InboundLineAllocation"]] = relationship(
+        "InboundLineAllocation",
+        back_populates="line",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<InboundOrderLine material={self.material_id} qty={self.quantity}>"
+
+
+class InboundLineAllocation(Base, OrganizationMixin, TimestampMixin):
+    """
+    Reparto de una linea entre proveedores (#93 D1).
+
+    Un material se reparte entre hasta N proveedores (8 sobre un mismo material
+    en el Excel real de Johana). quantity es lo que ese proveedor reporta;
+    unit_price el precio pactado (normalmente uno por material — la UI lo
+    replica — pero la excepcion por proveedor se registra aca, respuesta 7).
+    invoice_number es la factura DEL PROVEEDOR (D12: la remision es de la
+    Entrada, la factura del reparto).
+    """
+
+    __tablename__ = "inbound_line_allocations"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=uuid4)
+
+    inbound_line_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("inbound_order_lines.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    third_party_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("third_parties.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+
+    # Q-15 (reunion 12-ago): Johana puede digitar el VALOR TOTAL de la
+    # asignacion en vez del precio unitario — "el precio unitario seria una
+    # formula, costo total dividido unidades" (Hugo). Se PERSISTE, no solo se
+    # deriva: #93 D20 promete que el reparto sobrevive el round-trip de
+    # desliquidar/re-liquidar, y un modo de captura que no sobrevive es un
+    # reparto que en realidad no se conservo. NULL = se digito el unitario.
+    total_price: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Valor total digitado (Q-15). NULL = se digito el unit_price",
+    )
+
+    invoice_number: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Factura del proveedor (D12) — llega con la liquidacion",
+    )
+
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_inbound_alloc_qty_positive"),
+        CheckConstraint("unit_price >= 0", name="ck_inbound_alloc_price_non_negative"),
+        UniqueConstraint(
+            "inbound_line_id", "third_party_id",
+            name="uq_inbound_alloc_line_third_party",
+        ),
+        Index("ix_inbound_line_allocations_line", "inbound_line_id"),
+    )
+
+    # --- Relationships ---
+    line: Mapped["InboundOrderLine"] = relationship(
+        "InboundOrderLine", back_populates="allocations"
+    )
+    third_party: Mapped["ThirdParty"] = relationship(
+        "ThirdParty", foreign_keys=[third_party_id]
+    )
+
+    def __repr__(self) -> str:
+        return f"<InboundLineAllocation tp={self.third_party_id} qty={self.quantity}>"
+
+
+class InboundOrderPurchase(Base, OrganizationMixin, TimestampMixin):
+    """
+    Puente entrada <-> compras derivadas (#93 D2, heredada de #89).
+
+    1:N — de una Entrada liquidada nacen N compras (una por proveedor del
+    reparto). Exclusiva de SAC: cero filas en orgs sin kg_ledger_enabled.
+    UNIQUE(purchase_id): una compra pertenece a lo sumo a una entrada.
+
+    🔴 Trampa 1:N (R2): PROHIBIDO outerjoin(Purchase) en el listado de
+    entradas — una de 13 proveedores saldria 13 veces y la paginacion
+    perderia filas. Enrich por lookup por pagina (patron #87 B1).
+    """
+
+    __tablename__ = "inbound_order_purchases"
+
+    inbound_order_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("inbound_orders.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    purchase_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("purchases.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("purchase_id", name="uq_inbound_order_purchases_purchase"),
+    )
+
+    # --- Relationships ---
+    inbound_order: Mapped["InboundOrder"] = relationship(
+        "InboundOrder", back_populates="purchase_links"
+    )
+    purchase: Mapped["Purchase"] = relationship("Purchase", foreign_keys=[purchase_id])
+
+    def __repr__(self) -> str:
+        return f"<InboundOrderPurchase order={self.inbound_order_id} purchase={self.purchase_id}>"

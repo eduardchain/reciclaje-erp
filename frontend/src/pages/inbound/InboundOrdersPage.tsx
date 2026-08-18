@@ -21,7 +21,12 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { OperationListCard } from "@/components/shared/OperationListCard";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSuppliers, useWarehouses } from "@/hooks/useMasterData";
-import { useConfirmInboundOrder, useInboundOrders, usePendingEntriesCount } from "@/hooks/useInboundOrders";
+import {
+  useConfirmInboundOrder,
+  useEntriesStatusCounts,
+  useInboundOrders,
+  useReviewInboundOrder,
+} from "@/hooks/useInboundOrders";
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { formatLinesTotalQuantity } from "@/utils/operationLines";
@@ -40,13 +45,15 @@ const PAGE_SIZE = 20;
 const TABS: { value: string; label: string }[] = [
   { value: "all", label: "Todas" },
   { value: "registered", label: "Registradas" },
+  { value: "reviewed", label: "Revisadas" },
   { value: "liquidated", label: "Liquidadas" },
   { value: "annulled", label: "Anuladas" },
 ];
 
-// Estado UNICO visible (Ciclo C): deriva orden+compra — femenino para "entrada"
+// Estado UNICO visible (#93, columna-driven) — femenino para "entrada"
 const DISPLAY_STATUS_STYLES: Record<InboundDisplayStatus, string> = {
   registered: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  reviewed: "bg-sky-100 text-sky-800 border-sky-200",
   liquidated: "bg-emerald-100 text-emerald-800 border-emerald-200",
   annulled: "bg-red-100 text-red-800 border-red-200",
 };
@@ -108,9 +115,22 @@ function AgingBadge({ createdAt }: { createdAt: string }) {
   );
 }
 
-/** Total $ de una entrada tipo compra (suma de lineas capturadas) */
+/** Total $ de una entrada tipo compra: liquidada = Σ compras del reparto;
+ *  pendiente = referencia capturada (puede ser 0 — #93 captura sin precios) */
 function purchaseTotal(order: InboundOrderResponse): number {
+  const live = order.purchases.filter((p) => p.status !== "cancelled");
+  if (live.length > 0) return live.reduce((acc, p) => acc + p.total_amount, 0);
   return order.lines.reduce((acc, l) => acc + l.quantity * (l.unit_price ?? 0), 0);
+}
+
+/** #93: el tercero de una entrada tipo compra vive en el REPARTO —
+ *  "Varios (N)" cuando hay más de un proveedor */
+export function entradaPartyLabel(order: InboundOrderResponse): string {
+  if (order.third_party_name) return order.third_party_name;
+  const live = order.purchases.filter((p) => p.status !== "cancelled");
+  if (live.length === 0) return order.display_status === "liquidated" ? "Sin proveedor" : "—";
+  if (live.length === 1) return live[0].supplier_name ?? "—";
+  return `Varios (${live.length})`;
 }
 
 export default function InboundOrdersPage() {
@@ -119,6 +139,7 @@ export default function InboundOrdersPage() {
   const { hasPermission } = usePermissions();
   const canCreate = hasPermission("purchases.create");
   const canLiquidate = hasPermission("purchases.liquidate");
+  const canReview = hasPermission("purchases.review");
   const canViewPrices = hasPermission("purchases.view_prices");
 
   const { data: warehousesData } = useWarehouses();
@@ -147,7 +168,7 @@ export default function InboundOrdersPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  const isBandeja = tab === "registered";
+  const isBandeja = tab === "registered" || tab === "reviewed";
 
   // Selector combinado tipo/mundo (feedback Daniel): "willard_postconsumo" y
   // "willard_drosses" mapean a inbound_type + willard_world
@@ -174,7 +195,8 @@ export default function InboundOrdersPage() {
     date_to: dateTo || undefined,
   });
 
-  const pendingCount = usePendingEntriesCount();
+  const { registered: registeredCount, reviewed: reviewedCount } = useEntriesStatusCounts();
+  const pendingCount = registeredCount + reviewedCount;
 
   useScrollRestoration(!isLoading);
 
@@ -185,18 +207,25 @@ export default function InboundOrdersPage() {
     navigate(buildRoute(ROUTES.INBOUND_DETAIL, { id: order.id }));
   };
 
-  // Liquidar desde la fila: willard = dialogo inline; compra = formulario
-  // de liquidacion existente con retorno a esta lista (W-C1)
+  // Liquidar desde la fila: willard = dialogo inline; compra #93 = reparto;
+  // legacy 1:1 = formulario de la compra derivada (W-C1)
   const confirmOrder = useConfirmInboundOrder();
+  const reviewOrder = useReviewInboundOrder();
   const [willardToLiquidate, setWillardToLiquidate] = useState<InboundOrderResponse | null>(null);
 
   const startLiquidate = (order: InboundOrderResponse) => {
     if (WILLARD_INBOUND_TYPES.includes(order.inbound_type)) {
       setWillardToLiquidate(order);
     } else if (order.purchase_id) {
+      // Legacy 1:1 (ciclos B-D): su cara financiera es la compra derivada
       saveScroll(location.pathname + location.search);
       const returnTo = encodeURIComponent(location.pathname + location.search);
       navigate(`/purchases/${order.purchase_id}/liquidate?returnTo=${returnTo}`);
+    } else {
+      // #93: reparto de proveedores
+      saveScroll(location.pathname + location.search);
+      const returnTo = encodeURIComponent(location.pathname + location.search);
+      navigate(`/inbound/${order.id}/liquidate?returnTo=${returnTo}`);
     }
   };
 
@@ -220,7 +249,7 @@ export default function InboundOrdersPage() {
       {
         accessorKey: "third_party_name",
         header: "Tercero",
-        cell: ({ row }) => <span className="font-medium">{row.original.third_party_name ?? "—"}</span>,
+        cell: ({ row }) => <span className="font-medium">{entradaPartyLabel(row.original)}</span>,
       },
       { accessorKey: "warehouse_name", header: "Sede" },
       {
@@ -298,13 +327,38 @@ export default function InboundOrdersPage() {
       cell: ({ row }) => <EntradaStatusBadge status={row.original.display_status} />,
     });
 
-    if (canLiquidate) {
+    if (canLiquidate || canReview) {
       cols.push({
         id: "acciones",
         header: "",
         cell: ({ row }) => {
           const o = row.original;
-          if (o.display_status !== "registered") return null;
+          const isWillardRow = WILLARD_INBOUND_TYPES.includes(o.inbound_type);
+          const isLegacyRow = !isWillardRow && !!o.purchase_id;
+          // Registrada -> Revisar; revisada -> Liquidar. Desde el ciclo de
+          // Entradas aplica también a Willard (ítem 4); solo la legacy 1:1
+          // conserva Liquidar directo desde registrada.
+          if (o.display_status === "registered" && !isLegacyRow) {
+            if (!canReview) return null;
+            return (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 border-sky-200 text-sky-700 hover:bg-sky-50"
+                disabled={reviewOrder.isPending}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  reviewOrder.mutate(o.id);
+                }}
+              >
+                Revisar
+              </Button>
+            );
+          }
+          const liquidatable =
+            (o.display_status === "registered" && isLegacyRow) ||
+            o.display_status === "reviewed";
+          if (!liquidatable || !canLiquidate) return null;
           return (
             <Button
               size="sm"
@@ -324,7 +378,7 @@ export default function InboundOrdersPage() {
 
     return cols;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canLiquidate, canViewPrices, isBandeja, location.pathname, location.search]);
+  }, [canLiquidate, canReview, canViewPrices, isBandeja, location.pathname, location.search, reviewOrder.isPending]);
 
   return (
     <div className="space-y-4">
@@ -352,16 +406,25 @@ export default function InboundOrdersPage() {
       <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="inline-flex w-max sm:w-auto">
-            {TABS.map((t) => (
-              <TabsTrigger key={t.value} value={t.value}>
-                {t.label}
-                {t.value === "registered" && pendingCount > 0 && (
-                  <span className="ml-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-semibold inline-flex items-center justify-center tabular-nums">
-                    {pendingCount > 99 ? "99+" : pendingCount}
-                  </span>
-                )}
-              </TabsTrigger>
-            ))}
+            {TABS.map((t) => {
+              const badge =
+                t.value === "registered" ? registeredCount :
+                t.value === "reviewed" ? reviewedCount : 0;
+              const badgeColor = t.value === "registered" ? "bg-amber-500" : "bg-sky-500";
+              return (
+                <TabsTrigger key={t.value} value={t.value}>
+                  {t.label}
+                  {badge > 0 && (
+                    <span className={cn(
+                      "ml-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[10px] font-semibold inline-flex items-center justify-center tabular-nums",
+                      badgeColor,
+                    )}>
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  )}
+                </TabsTrigger>
+              );
+            })}
           </TabsList>
         </Tabs>
       </div>
@@ -387,7 +450,7 @@ export default function InboundOrdersPage() {
           <OperationListCard
             operationNumber={o.order_number}
             date={o.date}
-            partyName={o.third_party_name ?? "—"}
+            partyName={entradaPartyLabel(o)}
             statusBadge={<EntradaStatusBadge status={o.display_status} />}
             cancelled={o.display_status === "annulled"}
             description={`${
@@ -411,19 +474,44 @@ export default function InboundOrdersPage() {
                   </span>
                 ) : null}
                 {isBandeja && <AgingBadge createdAt={o.created_at} />}
-                {canLiquidate && o.display_status === "registered" && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 px-2 text-[11px] border-emerald-200 text-emerald-700"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startLiquidate(o);
-                    }}
-                  >
-                    Liquidar
-                  </Button>
-                )}
+                {(() => {
+                  const isWillardRow = WILLARD_INBOUND_TYPES.includes(o.inbound_type);
+                  const isLegacyRow = !isWillardRow && !!o.purchase_id;
+                  // Espejo mobile de la columna de acciones (ítem 4: Willard
+                  // también pasa por Revisar)
+                  if (o.display_status === "registered" && !isLegacyRow) {
+                    return canReview ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-2 text-[11px] border-sky-200 text-sky-700"
+                        disabled={reviewOrder.isPending}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          reviewOrder.mutate(o.id);
+                        }}
+                      >
+                        Revisar
+                      </Button>
+                    ) : null;
+                  }
+                  const liquidatable =
+                    (o.display_status === "registered" && isLegacyRow) ||
+                    o.display_status === "reviewed";
+                  return canLiquidate && liquidatable ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-[11px] border-emerald-200 text-emerald-700"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startLiquidate(o);
+                      }}
+                    >
+                      Liquidar
+                    </Button>
+                  ) : null;
+                })()}
               </span>
             }
           />

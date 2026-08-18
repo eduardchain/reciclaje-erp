@@ -73,7 +73,7 @@ export default function PurchaseLiquidatePage() {
   const returnTo = rawReturnTo && rawReturnTo.startsWith("/") ? rawReturnTo : null;
   const exitTo = returnTo ?? `/purchases/${id}`;
   const { data: purchase, isLoading } = usePurchase(id!);
-  const { getSuggestedPrice } = usePriceSuggestions();
+  const { getSuggestedPrice } = usePriceSuggestions(purchase?.supplier_id || null);
   const liquidate = useLiquidatePurchase();
   const { data: payableData } = usePayableProviders();
   const payableProviders = payableData?.items ?? [];

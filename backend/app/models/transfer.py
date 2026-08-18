@@ -77,11 +77,14 @@ class Transfer(Base, OrganizationMixin, TimestampMixin):
         comment="Sede destino fisica final (JM)",
     )
 
-    transit_warehouse_id: Mapped[UUID] = mapped_column(
+    # NULL = traslado INTRA-SEDE: no hubo transito porque no hubo dos pasos.
+    # Dentro de una sede no se pesa al salir ni al llegar, asi que el material
+    # va origen -> destino en un solo salto y el traslado nace `received`.
+    transit_warehouse_id: Mapped[Optional[UUID]] = mapped_column(
         GUID(),
         ForeignKey("warehouses.id", ondelete="RESTRICT"),
-        nullable=False,
-        comment="Bodega virtual de transito resuelta al despacho (is_transit=True)",
+        nullable=True,
+        comment="Bodega de transito (NULL = traslado intra-sede, sin transito)",
     )
 
     dispatch_date: Mapped[datetime] = mapped_column(

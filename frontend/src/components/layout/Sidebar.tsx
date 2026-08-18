@@ -270,6 +270,7 @@ const orgNavItems: NavItem[] = [
       { name: "Materiales (kg)", path: ROUTES.CONFIG_FORMULAS, icon: <Calculator className="w-4 h-4" />, permission: "formulas.view", orgFlag: "kg_ledger_enabled" },
       { name: "Conductores y Vehiculos", path: ROUTES.CONFIG_FLEET, icon: <Truck className="w-4 h-4" />, permission: "config.view_fleet", orgFlag: "kg_ledger_enabled" },
       { name: "Centros Willard", path: ROUTES.CONFIG_WILLARD_CENTERS, icon: <MapPin className="w-4 h-4" />, permission: "config.manage_sac_settings", orgFlag: "kg_ledger_enabled" },
+      { name: "Listas por Proveedor", path: ROUTES.CONFIG_SUPPLIER_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" />, permission: "materials.view_prices", orgFlag: "kg_ledger_enabled" },
     ],
   },
   {

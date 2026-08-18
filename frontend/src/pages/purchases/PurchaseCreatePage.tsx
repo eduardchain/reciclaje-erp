@@ -72,7 +72,6 @@ export default function PurchaseCreatePage() {
   };
   const warehouses = warehousesData?.items ?? [];
   const accounts = accountsData?.items ?? [];
-  const { getSuggestedPrice } = usePriceSuggestions();
   const { hasPermission } = usePermissions();
   const canLiquidate = hasPermission("purchases.liquidate");
   const canViewPrices = hasPermission("purchases.view_prices");
@@ -95,6 +94,9 @@ export default function PurchaseCreatePage() {
   }, [kgHeaderWarehouse, navigate]);
 
   const [supplierId, setSupplierId] = useState("");
+  // 🔴 Va DESPUES de `supplierId`: el hook lo consume. Con listas por
+  // proveedor trae SUS precios; sin listas, la general de siempre.
+  const { getSuggestedPrice } = usePriceSuggestions(supplierId || null);
   const [date, setDate] = useState(toLocalDateInput());
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");

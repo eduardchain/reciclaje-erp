@@ -10,6 +10,8 @@ Tests all 5 read-only endpoints:
 """
 import pytest
 from datetime import datetime, timedelta, timezone
+
+from app.utils.dates import business_today_noon
 from decimal import Decimal
 from uuid import uuid4
 
@@ -196,7 +198,7 @@ class TestStockDetail:
             quantity=Decimal("100.000"),
             unit_cost=Decimal("30.00"),
             reference_type="purchase",
-            date=datetime.now(timezone.utc),
+            date=business_today_noon(),
         )
         mov2 = InventoryMovement(
             id=uuid4(),
@@ -207,7 +209,7 @@ class TestStockDetail:
             quantity=Decimal("150.000"),
             unit_cost=Decimal("30.00"),
             reference_type="purchase",
-            date=datetime.now(timezone.utc),
+            date=business_today_noon(),
         )
         db_session.add_all([mov1, mov2])
         db_session.commit()
@@ -330,7 +332,7 @@ class TestMovements:
             quantity=Decimal("50.000"),
             unit_cost=Decimal("10.00"),
             reference_type="purchase",
-            date=datetime.now(timezone.utc),
+            date=business_today_noon(),
         )
         mov_a2 = InventoryMovement(
             id=uuid4(),
@@ -341,7 +343,7 @@ class TestMovements:
             quantity=Decimal("30.000"),
             unit_cost=Decimal("12.00"),
             reference_type="purchase",
-            date=datetime.now(timezone.utc),
+            date=business_today_noon(),
         )
         mov_b1 = InventoryMovement(
             id=uuid4(),
@@ -352,7 +354,7 @@ class TestMovements:
             quantity=Decimal("70.000"),
             unit_cost=Decimal("15.00"),
             reference_type="purchase",
-            date=datetime.now(timezone.utc),
+            date=business_today_noon(),
         )
         db_session.add_all([mov_a1, mov_a2, mov_b1])
         db_session.commit()

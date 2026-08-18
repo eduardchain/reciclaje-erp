@@ -15,8 +15,14 @@ import { useCreateWarehouse, useUpdateWarehouse } from "@/hooks/useCrudData";
 import ConfigLayout from "./ConfigLayout";
 import type { WarehouseResponse } from "@/types/warehouse";
 
+const NO_SEDE = "__none__";
+
 // Q-12: la columna "Recibe" solo aparece con kg_ledger (SAC) — prod identica
-function getColumns(showReceiving: boolean): ColumnDef<WarehouseResponse, unknown>[] {
+function getColumns(
+  showReceiving: boolean,
+  showSede: boolean,
+  nameById: Map<string, string>
+): ColumnDef<WarehouseResponse, unknown>[] {
   return [
     { accessorKey: "name", header: "Nombre", cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
     { accessorKey: "description", header: "Descripcion", cell: ({ row }) => row.original.description ?? "-" },
@@ -35,6 +41,24 @@ function getColumns(showReceiving: boolean): ColumnDef<WarehouseResponse, unknow
             ),
         } as ColumnDef<WarehouseResponse, unknown>]
       : []),
+    // Solo con traslados 2 pasos: la sede es lo que decide si un traslado
+    // genera deuda de plomo intersede y maquila
+    ...(showSede
+      ? [{
+          id: "sede",
+          header: "Sede",
+          cell: ({ row }: { row: { original: WarehouseResponse } }) => {
+            const w = row.original;
+            if (w.is_transit) return <span className="text-slate-400">-</span>;
+            const sede = w.sede_warehouse_id ? nameById.get(w.sede_warehouse_id) : null;
+            return sede ? (
+              <span className="text-slate-600">{sede}</span>
+            ) : (
+              <span className="text-slate-400">Sede propia</span>
+            );
+          },
+        } as ColumnDef<WarehouseResponse, unknown>]
+      : []),
   ];
 }
 
@@ -47,7 +71,14 @@ export default function WarehousesPage() {
   const { data, isLoading } = useWarehouses();
   const create = useCreateWarehouse();
   const update = useUpdateWarehouse();
-  const columns = useMemo(() => getColumns(showReceiving), [showReceiving]);
+  const nameById = useMemo(
+    () => new Map((data?.items ?? []).map((w) => [w.id, w.name])),
+    [data]
+  );
+  const columns = useMemo(
+    () => getColumns(showReceiving, showTransit, nameById),
+    [showReceiving, showTransit, nameById]
+  );
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<WarehouseResponse | null>(null);
@@ -57,6 +88,7 @@ export default function WarehousesPage() {
   const [isReceiving, setIsReceiving] = useState(true);
   const [isTransit, setIsTransit] = useState(false);
   const [transitTarget, setTransitTarget] = useState("");
+  const [sede, setSede] = useState(NO_SEDE);
 
   const openDialog = (item: WarehouseResponse | null) => {
     setEditItem(item);
@@ -64,8 +96,20 @@ export default function WarehousesPage() {
     setIsReceiving(item?.is_receiving ?? true);
     setIsTransit(item?.is_transit ?? false);
     setTransitTarget(item?.transit_target_warehouse_id ?? "");
+    setSede(item?.sede_warehouse_id ?? NO_SEDE);
     setDialogOpen(true);
   };
+
+  // Candidatas a sede: activas, no de transito, no ella misma y que sean su
+  // propia sede (un solo nivel — el backend lo defiende con 400)
+  const sedeOptions = useMemo(
+    () =>
+      (data?.items ?? []).filter(
+        (w) =>
+          w.is_active && !w.is_transit && w.id !== editItem?.id && !w.sede_warehouse_id
+      ),
+    [data, editItem]
+  );
 
   const handleSubmit = () => {
     const payload = {
@@ -76,7 +120,13 @@ export default function WarehousesPage() {
       ...(showReceiving ? { is_receiving: isReceiving } : {}),
       // E3.1: idem — sin two_step el payload no gana claves nuevas
       ...(showTransit
-        ? { is_transit: isTransit, transit_target_warehouse_id: isTransit && transitTarget ? transitTarget : null }
+        ? {
+            is_transit: isTransit,
+            transit_target_warehouse_id: isTransit && transitTarget ? transitTarget : null,
+            // Una bodega de transito no pertenece a ninguna sede: nunca es
+            // origen ni destino de un traslado, asi que el dato no aplica
+            sede_warehouse_id: !isTransit && sede !== NO_SEDE ? sede : null,
+          }
         : {}),
     };
     const opts = { onSuccess: () => setDialogOpen(false) };
@@ -116,14 +166,14 @@ export default function WarehousesPage() {
                       Bodega de tránsito intersede
                     </Label>
                     <p className="text-xs text-slate-400">
-                      Solo opera vía traslados dos pasos. Debe apuntar a su sede destino.
+                      Solo opera vía traslados dos pasos. Debe apuntar a su bodega destino.
                     </p>
                   </div>
                 </div>
                 {isTransit && (
                   <Select value={transitTarget} onValueChange={setTransitTarget}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Sede destino del tránsito…" />
+                      <SelectValue placeholder="Bodega destino del tránsito…" />
                     </SelectTrigger>
                     <SelectContent>
                       {(data?.items ?? [])
@@ -133,6 +183,28 @@ export default function WarehousesPage() {
                         ))}
                     </SelectContent>
                   </Select>
+                )}
+                {!isTransit && (
+                  <div className="space-y-1 pt-1">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Pertenece a la sede
+                    </Label>
+                    <Select value={sede} onValueChange={setSede}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_SEDE}>Es su propia sede</SelectItem>
+                        {sedeOptions.map((w) => (
+                          <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-slate-400">
+                      Bodegas de la misma sede son un solo inventario: trasladar entre
+                      ellas mueve el material, pero no genera plomo intersede ni maquila.
+                    </p>
+                  </div>
                 )}
               </div>
             )}

@@ -994,3 +994,112 @@ class TestPurchaseCharges:
         response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
         assert response.status_code == 201
         assert response.json()["commissions"][0]["charge_type"] == "commission"
+
+
+# ============================================================================
+# Estado de cuenta del comisionista
+# ============================================================================
+
+class TestCommissionRecipientStatement:
+    """El estado de cuenta de quien recibe la comision de una compra.
+
+    🔴 Regresion de 7a9dff2b (#93): el fix de retenciones — que hizo que el
+    evento y su reversa siguieran a la FILA (`reverted_at`) en vez de al status
+    de la compra — se aplico de mas y toco tambien este bloque, que no tiene
+    retenciones. `ret` no existe en este scope: primera comision en el
+    statement -> UnboundLocalError -> 500. Ningun test pedia el estado de
+    cuenta de un comisionista, por eso 1593 tests pasaron en verde.
+    """
+
+    def _purchase_with_commission(
+        self, client, org_headers, test_supplier, test_commission_recipient,
+        test_material, test_warehouse, business_date,
+    ):
+        payload = {
+            "supplier_id": str(test_supplier.id),
+            "date": f"{business_date.isoformat()}T12:00:00",
+            "lines": [{
+                "material_id": str(test_material.id),
+                "quantity": 100,
+                "unit_price": 50,
+                "warehouse_id": str(test_warehouse.id),
+            }],
+            "commissions": [{
+                "third_party_id": str(test_commission_recipient.id),
+                "concept": "Intermediacion",
+                "commission_type": "fixed",
+                "commission_value": 50,
+            }],
+            "auto_liquidate": True,
+        }
+        response = client.post("/api/v1/purchases", json=payload, headers=org_headers)
+        assert response.status_code == 201
+        return response.json()
+
+    def test_statement_of_commission_recipient(
+        self, client, org_headers, test_supplier, test_commission_recipient,
+        test_material, test_warehouse,
+    ):
+        """El estado de cuenta responde 200 y muestra la comision viva."""
+        from app.utils.dates import business_today
+        from datetime import timedelta
+
+        self._purchase_with_commission(
+            client, org_headers, test_supplier, test_commission_recipient,
+            test_material, test_warehouse, business_today() - timedelta(days=5),
+        )
+
+        response = client.get(
+            f"/api/v1/money-movements/third-party/{test_commission_recipient.id}",
+            headers=org_headers,
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+
+        comm_events = [i for i in data["items"] if i["event_type"] == "purchase_commission"]
+        assert len(comm_events) == 1
+        assert comm_events[0]["status"] == "confirmed"
+        assert comm_events[0]["amount"] == 50.0
+        # Le debemos la comision: saldo negativo
+        assert data["current_balance"] == -50.0
+        assert comm_events[0]["balance_after"] == -50.0
+
+    def test_statement_shows_cancellation_par_when_purchase_cancelled(
+        self, client, org_headers, db_session, test_supplier,
+        test_commission_recipient, test_material, test_warehouse,
+    ):
+        """Compra cancelada -> par evento+reversa y saldo corrido de vuelta a 0.
+
+        Guarda la semantica que 7a9dff2b piso: la reversa de la comision se
+        dispara por el status de la COMPRA (no tiene `reverted_at` propio).
+        """
+        from app.utils.dates import business_today
+        from datetime import timedelta
+
+        purchase = self._purchase_with_commission(
+            client, org_headers, test_supplier, test_commission_recipient,
+            test_material, test_warehouse, business_today() - timedelta(days=5),
+        )
+
+        cancel = client.patch(
+            f"/api/v1/purchases/{purchase['id']}/cancel",
+            params={"reason": "Prueba de reversa de comision"},
+            headers=org_headers,
+        )
+        assert cancel.status_code == 200, cancel.text
+
+        response = client.get(
+            f"/api/v1/money-movements/third-party/{test_commission_recipient.id}",
+            headers=org_headers,
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+
+        types = [i["event_type"] for i in data["items"]]
+        assert "purchase_commission" in types
+        assert "purchase_commission_cancellation" in types
+
+        # El saldo vuelve a 0: ni el evento ni su reversa lo mueven (ambos
+        # quedan fuera del corrido por status cancelled/annulled).
+        assert data["current_balance"] == 0.0
+        assert data["items"][-1]["balance_after"] == 0.0

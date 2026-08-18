@@ -26,7 +26,7 @@ import { MoneyInput } from "@/components/shared/MoneyInput";
 import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { useCreateInboundOrder } from "@/hooks/useInboundOrders";
 import { useKgAccounts } from "@/hooks/useKgLedger";
-import { useMaterials, usePayableProviders, useSuppliers, useWarehouses } from "@/hooks/useMasterData";
+import { useMaterials, usePayableProviders, useWarehouses } from "@/hooks/useMasterData";
 import {
   useCreateDriver,
   useCreateVehicle,
@@ -104,8 +104,7 @@ export default function InboundCreatePage() {
   const createOrder = useCreateInboundOrder();
   const { getSetting } = useOrgSettings();
 
-  const { data: suppliersData } = useSuppliers();
-  // Ciclo D: recolectores por comision (service_provider) — solo tipo compra
+  // Ciclo D: recolectores por comision (service_provider) — ambos tipos
   const { data: collectorsData } = usePayableProviders();
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
@@ -114,7 +113,6 @@ export default function InboundCreatePage() {
   const { data: formulasData } = useCurrentFormulas();
   const { data: profilesData } = useKgProfiles();
 
-  const suppliers = suppliersData?.items ?? [];
   const collectors = collectorsData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const warehouses = (warehousesData?.items ?? []) as { id: string; name: string; is_receiving?: boolean }[];
@@ -145,6 +143,8 @@ export default function InboundCreatePage() {
   const [willardCenter, setWillardCenter] = useState("none");
   const [notes, setNotes] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  // #93 D12: remision del camion — el documento de patio de la captura
+  const [remissionNumber, setRemissionNumber] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
 
   // Quick-create de conductor/vehiculo (feedback Daniel: "deben ser creados
@@ -223,18 +223,8 @@ export default function InboundCreatePage() {
     return { id: account.third_party_id, name: account.third_party_name ?? "Willard" };
   }, [isWillard, willardWorld, warehouseId, batAccounts, drossAccounts]);
 
-  // Y en compra regular, los terceros Willard NO aparecen (son de otro canal)
-  const willardTpIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const a of [...(batAccounts ?? []), ...(drossAccounts ?? [])]) {
-      if (a.is_active && a.third_party_id) set.add(a.third_party_id);
-    }
-    return set;
-  }, [batAccounts, drossAccounts]);
-  const supplierOptions = useMemo(
-    () => (isWillard ? suppliers : suppliers.filter((s) => !willardTpIds.has(s.id))),
-    [suppliers, isWillard, willardTpIds]
-  );
+  // #93: en compra regular ya no hay selector de tercero en la captura —
+  // el filtro anti-Willard de proveedores vive ahora en la pagina de reparto
 
   // Willard: el sub-selector de mundo filtra el picker (una recepcion = UN
   // mundo, Q-10; sin mundo elegido no hay materiales). Compra: como siempre.
@@ -308,8 +298,11 @@ export default function InboundCreatePage() {
     });
   };
 
+  const unitOf = (materialId: string) =>
+    materials.find((m) => m.id === materialId)?.default_unit || "";
+
   const unitSuffix = (materialId: string) => {
-    const u = materials.find((m) => m.id === materialId)?.default_unit;
+    const u = unitOf(materialId);
     return u ? ` (${u})` : "";
   };
 
@@ -342,7 +335,9 @@ export default function InboundCreatePage() {
 
   const canSubmit =
     !!warehouseId &&
-    !!thirdPartyId &&
+    // #93 D1: el tercero es SOLO de willard (titular cuenta kg) — la captura
+    // tipo compra no registra proveedor (llega con el reparto al liquidar)
+    (!isWillard || !!thirdPartyId) &&
     !!date &&
     !isFutureDate &&
     (!isWillard || !!willardWorld) &&
@@ -356,14 +351,16 @@ export default function InboundCreatePage() {
       {
         inbound_type: inboundType,
         warehouse_id: warehouseId,
-        third_party_id: thirdPartyId,
+        third_party_id: isWillard ? thirdPartyId : null,
         date,
         driver_id: driverId || null,
         vehicle_id: vehicleId || null,
         collector_id: collectorId || null,
         willard_distribution_center: isWillard && willardCenter !== "none" ? willardCenter : null,
         notes: notes.trim() || null,
-        invoice_number: invoiceNumber.trim() || null,
+        // #93 D12: factura SOLO willard — en compra llega por proveedor al liquidar
+        invoice_number: isWillard ? invoiceNumber.trim() || null : null,
+        remission_number: remissionNumber.trim() || null,
         lines: lines.map((l) => ({
           material_id: l.material_id,
           quantity: l.quantity,
@@ -444,11 +441,13 @@ export default function InboundCreatePage() {
                 </p>
               )}
             </div>
-            <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero *</Label>
-              {isWillard ? (
-                // Feedback Daniel: en Willard el tercero es el titular de la
-                // cuenta kg — fijo e inamovible (como la sede en drosses)
+            {isWillard && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tercero *</Label>
+                {/* Feedback Daniel: en Willard el tercero es el titular de la
+                    cuenta kg — fijo e inamovible (como la sede en drosses).
+                    #93: en tipo compra NO hay tercero en la captura — el
+                    proveedor se asigna al liquidar, con el reparto. */}
                 <Input
                   value={
                     willardTitular?.name ??
@@ -456,15 +455,8 @@ export default function InboundCreatePage() {
                   }
                   disabled
                 />
-              ) : (
-                <EntitySelect
-                  value={thirdPartyId}
-                  onChange={setThirdPartyId}
-                  options={supplierOptions.map((s) => ({ id: s.id, label: s.name }))}
-                  placeholder="Proveedor / tercero..."
-                />
-              )}
-            </div>
+              </div>
+            )}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha *</Label>
               <Input
@@ -541,17 +533,36 @@ export default function InboundCreatePage() {
                   : "Green Loop u otro recolector — la comisión se define al liquidar (va a gastos, no al costo)"}
               </p>
             </div>
+            {isWillard && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  N° Factura
+                </Label>
+                <Input
+                  value={invoiceNumber}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                  maxLength={50}
+                  className="w-full"
+                  placeholder="Opcional"
+                />
+              </div>
+            )}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                N° Factura
+                N° Remisión
               </Label>
               <Input
-                value={invoiceNumber}
-                onChange={(e) => setInvoiceNumber(e.target.value)}
+                value={remissionNumber}
+                onChange={(e) => setRemissionNumber(e.target.value)}
                 maxLength={50}
                 className="w-full"
-                placeholder="Opcional"
+                placeholder="Remisión del camión (opcional)"
               />
+              {isPurchaseType && (
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  La factura llega al liquidar, por proveedor
+                </p>
+              )}
             </div>
             <div className="md:col-span-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
@@ -671,8 +682,9 @@ export default function InboundCreatePage() {
           </span>
         ) : (
           <span>
-            Esta entrada crea una <strong>Compra registrada</strong> (inventario en tránsito, sin tocar
-            cuentas kg). Los precios definitivos se fijan al liquidar la compra.
+            La entrada registra <strong>lo que pesó la báscula</strong> — sin proveedor ni efectos.
+            El proveedor (uno o varios) se asigna al <strong>liquidar</strong>, con el reparto;
+            el precio de acá es referencia para ese momento.
           </span>
         )}
       </div>
@@ -710,16 +722,27 @@ export default function InboundCreatePage() {
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>
                     Cantidad{unitSuffix(line.material_id)} *
                   </Label>
-                  <MoneyInput
-                    value={line.quantity}
-                    onChange={(v) => updateLine(line._key, "quantity", v)}
-                    decimals={4}
-                    placeholder="0"
-                  />
+                  {/* La unidad va DENTRO del input: en desktop el label se oculta
+                      de la 2a fila en adelante (lineLabelClass) y kg vs unidad
+                      dejaba de verse — pruebas de usuario */}
+                  <div className="relative">
+                    <MoneyInput
+                      value={line.quantity}
+                      onChange={(v) => updateLine(line._key, "quantity", v)}
+                      decimals={4}
+                      placeholder="0"
+                      className={unitOf(line.material_id) ? "pr-16" : undefined}
+                    />
+                    {unitOf(line.material_id) && (
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400">
+                        {unitOf(line.material_id)}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 {isPurchaseType && (
                   <div className="md:col-span-2">
-                    <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Precio Unit.</Label>
+                    <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Precio (ref.)</Label>
                     <MoneyInput
                       value={line.unit_price}
                       onChange={(v) => updateLine(line._key, "unit_price", v)}
@@ -736,6 +759,18 @@ export default function InboundCreatePage() {
                     decimals={2}
                     placeholder="0,00"
                   />
+                  {/* D1/D2: opcional al capturar, obligatorio al REVISAR. Si el
+                      material se mide en kg el revisor lo autocompleta con la
+                      cantidad; si se mide por unidad (baterías) no hay de dónde
+                      sacarlo y la revisión se rechaza. Sin este aviso el
+                      pesador se entera cuando ya no está frente a la báscula. */}
+                  {unitOf(line.material_id) &&
+                    unitOf(line.material_id) !== "kg" &&
+                    line.scale_weight_kg <= 0 && (
+                      <p className="text-xs text-amber-600 mt-0.5">
+                        Sin este peso no se puede revisar
+                      </p>
+                    )}
                 </div>
                 <div className={isPurchaseType ? "md:col-span-2" : "md:col-span-3"}>
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Notas Calidad</Label>

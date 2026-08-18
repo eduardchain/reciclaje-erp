@@ -18,6 +18,8 @@ const SETTING_DEFAULTS: Record<string, unknown> = {
   // SAC Ciclo B (B2) — sedes deterministas Willard (warehouse IDs como str)
   willard_sede_drosses: null,
   willard_sede_postconsumo_default: null,
+  // SAC #93 (D8) — tolerancia del descuadre de entrada (fraccion, no %)
+  inbound_discrepancy_tolerance_pct: 0.05,
 };
 
 /**

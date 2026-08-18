@@ -67,6 +67,15 @@ export default function TransferCreatePage() {
     lines.every((ln) => ln.material_id && ln.quantity > 0) &&
     !dispatch.isPending;
 
+  // Aviso, nunca bloqueo: la sede decide si el traslado genera deuda de plomo
+  // intersede y maquila. Sin decirlo, el operador solo lo descubre despues.
+  const sedeOf = (id: string) => {
+    const w = warehouses.find((x) => x.id === id);
+    return w ? w.sede_warehouse_id || w.id : null;
+  };
+  const bothPicked = !!fromId && !!toId && fromId !== toId;
+  const sameSede = bothPicked && sedeOf(fromId) === sedeOf(toId);
+
   const submit = () => {
     dispatch.mutate(
       {
@@ -85,7 +94,7 @@ export default function TransferCreatePage() {
 
   return (
     <div>
-      <PageHeader title="Nuevo Traslado" description="Despacho intersede — el material queda en tránsito hasta confirmar la recepción">
+      <PageHeader title="Nuevo Traslado" description="Entre sedes va en dos pasos; dentro de una misma sede se completa al registrarlo">
         <Button variant="outline" onClick={() => navigate(ROUTES.TRANSFERS)} className="w-full sm:w-auto">
           <ArrowLeft className="w-4 h-4 mr-2" /> Volver
         </Button>
@@ -98,7 +107,7 @@ export default function TransferCreatePage() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             <div className="space-y-1.5">
-              <Label>Sede origen *</Label>
+              <Label>Bodega origen *</Label>
               <Select value={fromId} onValueChange={setFromId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Seleccionar…" />
@@ -113,7 +122,7 @@ export default function TransferCreatePage() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Sede destino *</Label>
+              <Label>Bodega destino *</Label>
               <Select value={toId} onValueChange={setToId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Seleccionar…" />
@@ -137,6 +146,32 @@ export default function TransferCreatePage() {
               />
             </div>
           </div>
+
+          {bothPicked && (
+            <div
+              className={`rounded-md border px-3 py-2 text-xs ${
+                sameSede
+                  ? "border-slate-200 bg-slate-50 text-slate-600"
+                  : "border-indigo-200 bg-indigo-50 text-indigo-700"
+              }`}
+            >
+              {sameSede ? (
+                <>
+                  <span className="font-semibold">
+                    Traslado dentro de la misma sede: se completa de inmediato.
+                  </span>{" "}
+                  No pasa por tránsito ni requiere confirmar recepción, y no genera
+                  plomo intersede ni cargo de maquila.
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold">Traslado entre sedes: en dos pasos.</span>{" "}
+                  El material queda en tránsito hasta confirmar la recepción, y los
+                  materiales con fórmula generan plomo intersede y cargo de maquila.
+                </>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label>Materiales *</Label>
@@ -193,7 +228,11 @@ export default function TransferCreatePage() {
           Cancelar
         </Button>
         <Button className="w-full sm:w-auto" disabled={!canSubmit} onClick={submit}>
-          {dispatch.isPending ? "Despachando…" : "Despachar"}
+          {dispatch.isPending
+            ? "Guardando…"
+            : sameSede
+              ? "Registrar Traslado"
+              : "Despachar"}
         </Button>
       </div>
     </div>

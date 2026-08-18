@@ -896,7 +896,10 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         self,
         db: Session,
         customer_id: UUID,
-        date: datetime,
+        # noqa deliberado: el parametro tapa el `date` del import de modulo.
+        # No se renombra porque los callers pueden pasarlo por keyword; queda
+        # anotado aca, que es donde alguien lo va a leer (#96).
+        date: datetime,  # noqa: F811
         organization_id: UUID
     ) -> int:
         """Contar ventas del mismo cliente en la misma fecha (no canceladas)."""
