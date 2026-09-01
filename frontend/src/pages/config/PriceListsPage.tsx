@@ -1,5 +1,5 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { CheckCircle2, History, Loader2 } from "lucide-react";
+import { useState, useMemo } from "react";
+import { History } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -11,100 +11,13 @@ import { useMaterialCategories } from "@/hooks/useCrudData";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import ConfigLayout from "./ConfigLayout";
 import type { PriceTableItem } from "@/types/config";
+import { EditablePriceCell, priceCellKey, type PriceCellField } from "@/components/shared/EditablePriceCell";
 
-type CellField = "purchase_price" | "sale_price";
+type CellField = PriceCellField;
 
 interface EditingCell {
   materialId: string;
   field: CellField;
-}
-
-function EditableCell({
-  item,
-  field,
-  canEdit,
-  isEditing,
-  onStartEdit,
-  onSave,
-  onCancel,
-  savingCell,
-  savedCell,
-}: {
-  item: PriceTableItem;
-  field: CellField;
-  canEdit: boolean;
-  isEditing: boolean;
-  onStartEdit: () => void;
-  onSave: (value: number) => void;
-  onCancel: () => void;
-  savingCell: string | null;
-  savedCell: string | null;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [editValue, setEditValue] = useState("");
-  const cellKey = `${item.material_id}-${field}`;
-  const isSaving = savingCell === cellKey;
-  const isSaved = savedCell === cellKey;
-  const currentValue = item[field];
-
-  useEffect(() => {
-    if (isEditing) {
-      setEditValue(currentValue != null ? String(currentValue) : "");
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }
-  }, [isEditing, currentValue]);
-
-  const handleSave = useCallback(() => {
-    const parsed = parseFloat(editValue) || 0;
-    const final = Math.max(0, parsed);
-    if (final !== (currentValue ?? 0)) {
-      onSave(final);
-    } else {
-      onCancel();
-    }
-  }, [editValue, currentValue, onSave, onCancel]);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleSave();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      onCancel();
-    } else if (e.key === "Tab") {
-      handleSave();
-    }
-  }, [handleSave, onCancel]);
-
-  if (isEditing) {
-    return (
-      <input
-        ref={inputRef}
-        type="text"
-        inputMode="numeric"
-        value={editValue}
-        onChange={(e) => {
-          if (e.target.value === "" || /^\d*\.?\d*$/.test(e.target.value)) {
-            setEditValue(e.target.value);
-          }
-        }}
-        onBlur={handleSave}
-        onKeyDown={handleKeyDown}
-        className="w-full h-8 px-2 text-right text-sm border border-emerald-400 rounded bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300"
-      />
-    );
-  }
-
-  return (
-    <div
-      className={`flex items-center justify-end gap-1 h-8 px-2 rounded text-sm tabular-nums ${canEdit ? "cursor-pointer hover:bg-emerald-50" : ""} ${currentValue == null ? "text-slate-400 italic" : ""}`}
-      onClick={canEdit ? onStartEdit : undefined}
-    >
-      {isSaving && <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />}
-      {isSaved && <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
-      <span>{currentValue != null ? formatCurrency(currentValue) : "$0"}</span>
-    </div>
-  );
 }
 
 export default function PriceListsPage() {
@@ -141,8 +54,30 @@ export default function PriceListsPage() {
     );
   }, [tableData, searchQuery]);
 
+  // Orden de tabulacion tipo hoja de calculo: Compra -> Venta de la misma fila
+  // -> Compra de la fila siguiente. Se deriva de las filas VISIBLES, asi que
+  // respeta el filtro de categoria y la busqueda.
+  const cellSequence = useMemo(
+    () =>
+      filteredItems.flatMap((i) => [
+        { materialId: i.material_id, field: "purchase_price" as CellField },
+        { materialId: i.material_id, field: "sale_price" as CellField },
+      ]),
+    [filteredItems],
+  );
+
+  const moveEdit = (from: EditingCell, direction: 1 | -1) => {
+    const idx = cellSequence.findIndex(
+      (c) => c.materialId === from.materialId && c.field === from.field,
+    );
+    if (idx === -1) return;
+    const next = cellSequence[idx + direction];
+    // En los extremos de la hoja no se envuelve: se sale de edicion (ya guardado).
+    if (next) setEditingCell(next);
+  };
+
   const handleSaveCell = (item: PriceTableItem, field: CellField, newValue: number) => {
-    const cellKey = `${item.material_id}-${field}`;
+    const cellKey = priceCellKey(item.material_id, field);
     setSavingCell(cellKey);
     setEditingCell(null);
 
@@ -220,7 +155,7 @@ export default function PriceListsPage() {
                       <TableCell className="font-medium">{item.material_name}</TableCell>
                       <TableCell className="text-xs text-slate-500">{item.category_name ?? "-"}</TableCell>
                       <TableCell className="p-1">
-                        <EditableCell
+                        <EditablePriceCell
                           item={item}
                           field="purchase_price"
                           canEdit={canEdit}
@@ -228,12 +163,13 @@ export default function PriceListsPage() {
                           onStartEdit={() => setEditingCell({ materialId: item.material_id, field: "purchase_price" })}
                           onSave={(v) => handleSaveCell(item, "purchase_price", v)}
                           onCancel={() => setEditingCell(null)}
+                          onNavigate={(dir) => moveEdit({ materialId: item.material_id, field: "purchase_price" }, dir)}
                           savingCell={savingCell}
                           savedCell={savedCell}
                         />
                       </TableCell>
                       <TableCell className="p-1">
-                        <EditableCell
+                        <EditablePriceCell
                           item={item}
                           field="sale_price"
                           canEdit={canEdit}
@@ -241,6 +177,7 @@ export default function PriceListsPage() {
                           onStartEdit={() => setEditingCell({ materialId: item.material_id, field: "sale_price" })}
                           onSave={(v) => handleSaveCell(item, "sale_price", v)}
                           onCancel={() => setEditingCell(null)}
+                          onNavigate={(dir) => moveEdit({ materialId: item.material_id, field: "sale_price" }, dir)}
                           savingCell={savingCell}
                           savedCell={savedCell}
                         />
