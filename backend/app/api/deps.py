@@ -240,6 +240,11 @@ def require_permission(*perms: str):
 
 def require_any_permission(*perms: str):
     """
+    ⚠️ `api/v1/endpoints/attachments.py::_check` REPLICA esta semantica a mano
+    (el modulo dueno del adjunto se conoce en runtime, no al declarar la ruta).
+    Si cambia la LOGICA de aca — no las llaves del contexto, que ya las consume
+    todo el sistema — hay que cambiarla alla tambien.
+
     Factory que retorna un Depends que verifica que el usuario tenga AL MENOS UNO
     de los permisos dados (logica OR). Admin bypassa todos los permisos.
 

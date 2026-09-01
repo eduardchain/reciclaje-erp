@@ -26,6 +26,7 @@ import { CHARGE_TYPE_LABELS } from "@/utils/constants";
 import { RETENTION_TYPE_LABELS } from "@/types/purchase";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
+import { AttachmentsPanel } from "@/components/shared/AttachmentsPanel";
 
 const statusBorderMap: Record<string, string> = {
   registered: "border-t-[3px] border-t-amber-400",
@@ -425,6 +426,17 @@ export default function PurchaseDetailPage() {
               </div>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-6">
+          <AttachmentsPanel
+            ownerType="purchase"
+            ownerId={id!}
+            canUpload={hasPermission("purchases.create") || hasPermission("purchases.edit")}
+            canDelete={hasPermission("purchases.edit")}
+          />
         </CardContent>
       </Card>
 
