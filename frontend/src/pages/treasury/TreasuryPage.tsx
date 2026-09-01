@@ -56,6 +56,7 @@ const typeLabels: Record<MoneyMovementType, string> = {
   collection_from_client: "Cobro Cliente",
   expense: "Gasto",
   service_income: "Ingreso Servicio",
+  service_income_accrual: "Servicio Facturado (Por Cobrar)",
   transfer_out: "Transferencia Salida",
   transfer_in: "Transferencia Entrada",
   capital_injection: "Aporte Capital",
@@ -104,6 +105,7 @@ const typeColors: Record<string, string> = {
   collection_from_client: "bg-emerald-100 text-emerald-800",
   expense: "bg-orange-100 text-orange-800",
   service_income: "bg-blue-100 text-blue-800",
+  service_income_accrual: "bg-blue-100 text-blue-800",
   transfer_out: "bg-purple-100 text-purple-800",
   transfer_in: "bg-purple-100 text-purple-800",
   capital_injection: "bg-teal-100 text-teal-800",
@@ -207,12 +209,18 @@ export default function TreasuryPage() {
     });
   };
 
-  // Tab compuesto `tp_adjustment` mapea a CSV de tipos
+  // Tabs compuestos -> CSV de tipos.
+  // `service_income`: desde W1 la linea del P&L suma tambien la factura de
+  // maquila/flete de las Salidas a Willard (service_income_accrual). Si el
+  // listado consultara un solo tipo, el drill-down dejaria de cuadrar contra el
+  // P&L — que es justo lo que `test_service_income_parity` vigila.
+  const COMPOSITE_TYPES: Record<string, string> = {
+    tp_adjustment: "tp_adjustment_credit,tp_adjustment_debit",
+    service_income: "service_income,service_income_accrual",
+  };
   const movementTypeQuery = typeFilter === "all"
     ? undefined
-    : typeFilter === "tp_adjustment"
-      ? "tp_adjustment_credit,tp_adjustment_debit"
-      : typeFilter;
+    : COMPOSITE_TYPES[typeFilter] ?? typeFilter;
 
   const { data, isLoading } = useMoneyMovements({
     skip: page * PAGE_SIZE,

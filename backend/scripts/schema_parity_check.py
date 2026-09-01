@@ -23,6 +23,17 @@ nueva cuyo comportamiento dependa de un server_default (filas insertadas por SQL
 crudo, backfills, clientes fuera del ORM) debe declarar el default TAMBIEN en el
 modelo — la suite corre contra create_all y es la unica red que lo delata.
 
+🔴 Y la direccion CONTRARIA no la cubre NADA (hallazgo W1, 2026-08-24): si el MODELO
+declara el server_default (via un mixin, tipicamente) y la MIGRACION lo omite, la BD
+de test nace bien (viene de create_all) y dev/prod nacen mal (vienen de las
+migraciones). Costo real: `created_at` sin default en `willard_deliveries` -> 1671
+tests en verde y 500 (NotNullViolation) en el primer POST contra la BD migrada. Solo
+lo vio un smoke.
+
+PROPUESTA anotada, no implementada: comparar server_default SOLO en las tablas fuera
+del baseline (las nuevas), donde no hay ruido historico que silenciar. Con eso este
+gate cubriria las dos direcciones sin reabrir la divergencia pre-existente.
+
 Uso (desde backend/):
   ./venv/bin/python3 scripts/schema_parity_check.py
 Recrea el schema de la BD de TEST desde los modelos (5433, disposable) y diffea

@@ -11,7 +11,7 @@ from .endpoints import (
     inventory_adjustments, material_transformations, inventory_views,
     reports,
     service_tariffs, material_conversion_formulas, fleet,
-    kg_ledger, inbound_orders, material_kg_profiles,
+    kg_ledger, inbound_orders, material_kg_profiles, willard_deliveries,
     transfers,
 )
 
@@ -52,5 +52,6 @@ api_router.include_router(fleet.vehicles_router, prefix="/vehicles", tags=["sac-
 # SAC E2 (plan-sac-e2-kgledger-inbound.md §4.1-§4.2)
 api_router.include_router(kg_ledger.router, prefix="/kg-ledger", tags=["kg-ledger"])
 api_router.include_router(inbound_orders.router, prefix="/inbound-orders", tags=["inbound-orders"])
+api_router.include_router(willard_deliveries.router, prefix="/willard-deliveries", tags=["willard-deliveries"])
 # SAC E3.1 (plan-sac-e3-1-traslados-maquila.md §2.4) — gated two_step_transfers_enabled
 api_router.include_router(transfers.router, prefix="/transfers", tags=["transfers"])

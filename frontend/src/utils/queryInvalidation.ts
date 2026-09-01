@@ -106,6 +106,20 @@ export const invalidateAfterTransfer = (qc: QueryClient) => {
   invalidateInventory(qc);
 };
 
+// W1 — una Salida a Willard toca casi todo: saca inventario (venta derivada o
+// ajuste), descarga cuentas en kg, factura a Willard (saldo del tercero + P&L)
+// y reparte el ingreso entre sedes.
+export const invalidateAfterWillardDelivery = (qc: QueryClient) => {
+  qc.invalidateQueries({ queryKey: ["willard-deliveries"] });
+  qc.invalidateQueries({ queryKey: ["kg-ledger"] });
+  qc.invalidateQueries({ queryKey: ["sales"] });
+  qc.invalidateQueries({ queryKey: ["money-movements"] });
+  qc.invalidateQueries({ queryKey: ["third-parties"] });
+  qc.invalidateQueries({ queryKey: ["reports"] });
+  qc.invalidateQueries({ queryKey: ["treasury-dashboard"] });
+  invalidateInventory(qc);
+};
+
 export const invalidateAfterFixedAsset = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["fixed-assets"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });

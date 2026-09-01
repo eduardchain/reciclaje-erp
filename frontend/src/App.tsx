@@ -89,6 +89,9 @@ const InboundCreatePage = lazy(() => import("@/pages/inbound/InboundCreatePage")
 const InboundDetailPage = lazy(() => import("@/pages/inbound/InboundDetailPage"));
 const InboundEditPage = lazy(() => import("@/pages/inbound/InboundEditPage"));
 const InboundLiquidatePage = lazy(() => import("@/pages/inbound/InboundLiquidatePage"));
+const WillardDeliveriesPage = lazy(() => import("@/pages/willard/WillardDeliveriesPage"));
+const WillardDeliveryCreatePage = lazy(() => import("@/pages/willard/WillardDeliveryCreatePage"));
+const WillardDeliveryDetailPage = lazy(() => import("@/pages/willard/WillardDeliveryDetailPage"));
 const TransfersPage = lazy(() => import("@/pages/transfers/TransfersPage"));
 const TransferCreatePage = lazy(() => import("@/pages/transfers/TransferCreatePage"));
 const TransferDetailPage = lazy(() => import("@/pages/transfers/TransferDetailPage"));
@@ -154,6 +157,9 @@ function App() {
               <Route path={ROUTES.SALE_DETAIL} element={<P permission="sales.view"><SaleDetailPage /></P>} />
               {/* SAC E2: Recepcion + Plomo (kg) — gated flag + permiso */}
               <Route path={ROUTES.INBOUND} element={<FP flag="kg_ledger_enabled" permission="purchases.view"><InboundOrdersPage /></FP>} />
+              <Route path={ROUTES.WILLARD_DELIVERIES} element={<FP flag="kg_ledger_enabled" permission="sales.view"><WillardDeliveriesPage /></FP>} />
+              <Route path={ROUTES.WILLARD_DELIVERY_NEW} element={<FP flag="kg_ledger_enabled" permission="sales.create"><WillardDeliveryCreatePage /></FP>} />
+              <Route path={ROUTES.WILLARD_DELIVERY_DETAIL} element={<FP flag="kg_ledger_enabled" permission="sales.view"><WillardDeliveryDetailPage /></FP>} />
               <Route path={ROUTES.INBOUND_NEW} element={<FP flag="kg_ledger_enabled" permission="purchases.create"><InboundCreatePage /></FP>} />
               <Route path={ROUTES.INBOUND_EDIT} element={<FP flag="kg_ledger_enabled" permission="purchases.edit"><InboundEditPage /></FP>} />
               <Route path={ROUTES.INBOUND_LIQUIDATE} element={<FP flag="kg_ledger_enabled" permission="purchases.liquidate"><InboundLiquidatePage /></FP>} />

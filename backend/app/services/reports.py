@@ -146,6 +146,7 @@ THIRD_PARTY_BALANCE_DIRECTION = {
     "asset_revaluation_credit": -1,     # Revalorizacion alza a credito: le debemos
     "asset_devaluation_receivable": 1,  # Devaluacion a cargo del tercero: nos debe
     "asset_sale_receivable": 1,         # Venta de activo a credito: nos debe (CxC)
+    "service_income_accrual": 1,        # Servicio facturado sin cobrar (W1): nos debe (CxC)
     "obligation_disbursement": -1,      # Nos prestan: les debemos mas
     "obligation_interest_accrual": -1,  # Interes causado por pagar: debemos mas
     "obligation_interest_payment": 1,   # Pago de intereses: debemos menos
@@ -657,6 +658,55 @@ class ReportService:
             )
         ))
 
+        # W1 (ronda 2 de QA) — el costo del plomo de un abono a Willard SI se
+        # atribuye a sede, igual que su ingreso.
+        #
+        # El abono descarga inventario valorizado sin venta, y ese costo viaja
+        # por un `decrease` (adjustment_net). Dejarlo org-level mientras el
+        # reparto de la maquila fragmenta (D4b) INVIERTE el signo del P&L de la
+        # sede que entrega: el plomo vale su costo promedio y el reparto es una
+        # tarifa por kg, o sea que no son del mismo orden. Es el primer
+        # ingreso-sin-su-costo del P&L por sede — todo lo que #84 fragmento eran
+        # pares completos (venta con su COGS, comision con su venta, el par de
+        # maquila). La incompletitud declarada de #84 es "faltan cosas"; esto
+        # seria "hay una cosa mal".
+        #
+        # El gate `by_sede` es DEFENSIVO, no load-bearing: sin el, en consolidado
+        # `warehouse_id` es None y `== None` degenera en `IS NULL` sobre una
+        # columna NOT NULL -> cero filas, o sea que el bloque queda inerte (no
+        # duplica: suma cero). Verificado plantando el defecto — los 29 tests
+        # pasan igual. Se deja porque es barato y porque el dia que
+        # `warehouse_id` se vuelva nullable pasa a importar de verdad.
+        #
+        # Lo que SI hay que tener presente: este bloque suma ajustes que el
+        # consolidado ya cuenta por su cuenta (`adj_filters` solo los apaga
+        # cuando by_sede), a diferencia del hermano de `service_income`, que
+        # suma un movement_type que el otro nunca vio.
+        if by_sede:
+            willard_adj_filters = [
+                InventoryAdjustment.organization_id == organization_id,
+                self._active_at_cutoff(InventoryAdjustment.status, "confirmed"),
+                InventoryAdjustment.willard_delivery_id.isnot(None),
+                InventoryAdjustment.warehouse_id == warehouse_id,
+            ]
+            if has_dates:
+                willard_adj_filters += [
+                    InventoryAdjustment.date >= dt_from,
+                    InventoryAdjustment.date < dt_to,
+                ]
+            adjustment_net += Decimal(str(
+                db.scalar(
+                    select(func.coalesce(
+                        func.sum(
+                            case(
+                                (InventoryAdjustment.quantity > 0, InventoryAdjustment.total_value),
+                                else_=-InventoryAdjustment.total_value,
+                            )
+                        ), 0
+                    )).where(*willard_adj_filters)
+                )
+            ))
+
         # 3.8 Ajuste de costo por sobreventa (Modelo L, decision #65): al liquidar
         # una compra que rellena un hueco de oversell (liquidated < 0), la
         # diferencia entre el COGS ya cargado a las ventas del hueco y el costo
@@ -953,6 +1003,38 @@ class ReportService:
                     source_type=mt,
                     pnl_section=section,
                 ))
+
+        # W1 (D4b) — la factura de maquila/flete de una Salida a Willard SI se
+        # atribuye a sede: su writer captura warehouse_id. Va en un bloque PROPIO
+        # porque `_not_by_sede` se aplica a la lista de filtros entera del bloque
+        # de arriba, no a la linea de salida. Query separada != linea separada:
+        # suma al MISMO acumulador `service_income`, asi que la conciliacion #59
+        # sigue en 7 lineas y ni el schema ni el frontend cambian.
+        #
+        # Auto-corrige a futuro: fragmenta porque su writer captura la bodega. Un
+        # writer que no la capture deja warehouse_id NULL -> $0 por sede, que es
+        # el default seguro.
+        accrual_filters = [
+            MoneyMovement.organization_id == organization_id,
+            self._active_at_cutoff(MoneyMovement.status, "confirmed"),
+            MoneyMovement.movement_type == "service_income_accrual",
+        ]
+        if has_dates:
+            accrual_filters += [
+                MoneyMovement.date >= dt_from,
+                MoneyMovement.date < dt_to,
+            ]
+        if by_sede:
+            accrual_filters.append(MoneyMovement.warehouse_id == warehouse_id)
+        service_income += Decimal(
+            str(
+                db.execute(
+                    select(func.coalesce(func.sum(MoneyMovement.amount), 0)).where(
+                        *accrual_filters
+                    )
+                ).scalar_one()
+            )
+        )
 
         # Comisiones causadas (commission_accrual) — split por origen:
         # - Sale.double_entry_id IS NULL → comision de venta regular
