@@ -211,13 +211,15 @@ def _review(client, headers, order_id, expect=200):
     return resp.json()
 
 
-def _alloc(tp, qty, price=None, invoice=None, total=None):
-    """Q-15: o precio unitario o valor total, nunca ambos."""
+def _alloc(tp, qty, price=None, invoice=None, total=None, per_kg=None):
+    """Q-15 + modo por kg: EXACTAMENTE uno de los tres precios."""
     body = {"third_party_id": str(tp.id), "quantity": str(qty)}
     if price is not None:
         body["unit_price"] = str(price)
     if total is not None:
         body["total_price"] = str(total)
+    if per_kg is not None:
+        body["price_per_kg"] = str(per_kg)
     if invoice:
         body["invoice_number"] = invoice
     return body
@@ -2307,3 +2309,286 @@ class TestLiquidarPorValorTotal:
         assert r.status_code == 422, r.text
         assert "demasiado pequena" in r.json()["detail"]
         assert mat_balancin.code in r.json()["detail"]
+
+
+# ------------------------------------------------- modo por kg (Q-15 v2) ---
+
+def _allocs_de(client, headers, order_id, material_id):
+    """Las asignaciones persistidas de un material, leidas por la API.
+
+    Se lee por la API y no por el ORM a proposito: la trampa de #95 fue que el
+    endpoint arma InboundAllocationResponse campo por campo, asi que la columna
+    puede estar bien en la BD y llegar en None a la pantalla.
+    """
+    r = client.get(f"{INBOUND_URL}/{order_id}", headers=headers)
+    assert r.status_code == 200, r.text
+    for line in r.json()["lines"]:
+        if line["material_id"] == str(material_id):
+            return line["allocations"]
+    raise AssertionError(f"material {material_id} no esta en la entrada")
+
+
+class TestPrecioPorKg:
+    """Hugo: 'no le va a pagar 100 unidades, le va a pagar por peso'."""
+
+    def test_caso_canonico(
+        self, client, org_headers, db_session, wh, sup1, mat_balancin
+    ):
+        """10 baterias, 100 kg, $1.000/kg -> $10.000 c/u en inventario.
+
+        El ejemplo de Daniel al pie de la letra. El inventario entra por
+        UNIDAD y se costea por unidad (Hugo), aunque el pago sea por peso.
+        """
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, "10", per_kg="1000")])],
+        )
+        (purchase,) = _order_purchases(db_session, order["id"])
+        (line,) = purchase.lines
+        assert line.quantity == Decimal("10.000")
+        assert line.unit_price == Decimal("10000.00")
+        assert line.total_price == Decimal("100000.00")
+
+    def test_asignaciones_independientes(
+        self, client, org_headers, db_session, wh, sup1, sup2, mat_balancin
+    ):
+        """El argumento que decide el denominador (QA).
+
+        El estimador es kg/unidad de la LINEA, asi que el pago de cada
+        proveedor depende solo de su propia cantidad. Con la suma de las
+        asignaciones como denominador, agregar el segundo proveedor cambiaria
+        el pago del primero — que ya tiene su compra y su factura.
+        """
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [
+                _alloc(sup1, "6", per_kg="1000"),
+                _alloc(sup2, "4", per_kg="1000"),
+            ])],
+        )
+        allocs = {a["third_party_name"]: a for a in
+                  _allocs_de(client, org_headers, order["id"], mat_balancin.id)}
+        # ⚠️ Este test NO discrimina el denominador y hay que saberlo: con el
+        # reparto COMPLETO (6+4=10) la suma de asignaciones iguala lo pesado,
+        # asi que los dos criterios dan lo mismo — verificado plantando el
+        # defecto: este pasa. Los que lo atrapan son `test_reparto_parcial`
+        # (60 vs 100) y `test_sobre_reparto...` (120 vs 100). Lo que si clava
+        # este son los numeros de negocio del caso normal.
+        assert Decimal(allocs[sup1.name]["weight_kg_used"]) == Decimal("60.000")
+        assert Decimal(allocs[sup2.name]["weight_kg_used"]) == Decimal("40.000")
+        assert Decimal(allocs[sup1.name]["unit_price"]) == Decimal("10000.00")
+        assert Decimal(allocs[sup2.name]["unit_price"]) == Decimal("10000.00")
+
+    def test_precios_distintos_por_proveedor(
+        self, client, org_headers, db_session, wh, sup1, sup2, mat_balancin
+    ):
+        """El caso real: cada proveedor paga SU peso a SU precio."""
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [
+                _alloc(sup1, "6", per_kg="1000"),
+                _alloc(sup2, "4", per_kg="1500"),
+            ])],
+        )
+        allocs = {a["third_party_name"]: a for a in
+                  _allocs_de(client, org_headers, order["id"], mat_balancin.id)}
+        # sup1: 60 kg x 1.000 = 60.000 / 6 unidades = 10.000 c/u
+        # sup2: 40 kg x 1.500 = 60.000 / 4 unidades = 15.000 c/u
+        assert Decimal(allocs[sup1.name]["unit_price"]) == Decimal("10000.00")
+        assert Decimal(allocs[sup2.name]["unit_price"]) == Decimal("15000.00")
+
+    def test_reparto_parcial(
+        self, client, org_headers, db_session, wh, sup1, mat_balancin
+    ):
+        """6 de 10: el proveedor paga 60 kg, los otros 40 son del descuadre."""
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, "6", per_kg="1000")],
+                       ref_price="10000")],
+        )
+        (alloc,) = _allocs_de(client, org_headers, order["id"], mat_balancin.id)
+        assert Decimal(alloc["weight_kg_used"]) == Decimal("60.000")
+
+    def test_sobre_reparto_conserva_kg_por_unidad(
+        self, client, org_headers, db_session, wh, sup1, mat_balancin
+    ):
+        """12 unidades repartidas sobre 10 pesadas -> 120 kg, NO 100.
+
+        🔴 Es el test que separa el denominador correcto del incorrecto, y
+        hay que mirarle el NUMERO: con sum(allocations) daria 100,000 y
+        tambien 'pasaria' cualquier assert que solo pida que exista un peso.
+        """
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, "12", per_kg="1000")],
+                       ref_price="10000")],
+        )
+        (alloc,) = _allocs_de(client, org_headers, order["id"], mat_balancin.id)
+        assert Decimal(alloc["weight_kg_used"]) == Decimal("120.000"), (
+            "el estimador es kg/unidad de la linea: 12 unidades x 10 kg/u. "
+            "Si dice 100 el denominador quedo en sum(allocations)"
+        )
+
+    def test_material_en_kg_con_diferencia_de_bascula(
+        self, client, org_headers, db_session, wh, sup1, mat_moto
+    ):
+        """D4: el modo NO es redundante en materiales por kg.
+
+        Se declaran 100 kg y la bascula certifica 98. Por unidad se pagaria
+        sobre 100 declarados; por kg sobre 98 pesados, que es lo que Hugo
+        pidio. Sin este test alguien 'simplifica' el modo de vuelta a la
+        version equivocada del plan (no ofrecerlo en materiales por kg).
+        """
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_moto, "100", weight="98")]
+        )
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_moto, [_alloc(sup1, "100", per_kg="1000")])],
+        )
+        (alloc,) = _allocs_de(client, org_headers, order["id"], mat_moto.id)
+        assert Decimal(alloc["weight_kg_used"]) == Decimal("98.000")
+        (purchase,) = _order_purchases(db_session, order["id"])
+        (line,) = purchase.lines
+        # 98 kg x 1.000 = 98.000 sobre 100 unidades declaradas = 980 c/u
+        assert line.total_price == Decimal("98000.00")
+        assert line.unit_price == Decimal("980.00")
+
+    def test_truncamiento_sin_cantidad_pesada(
+        self, client, org_headers, wh, sup1, mat_balancin, mat_grupo4
+    ):
+        """D4b guard 1 — el del DENOMINADOR: sin unidades no hay kg/unidad."""
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        r = client.post(
+            f"{INBOUND_URL}/{order['id']}/liquidate", headers=org_headers,
+            json={"lines": [
+                _liq_line(mat_balancin, [_alloc(sup1, "10", per_kg="1000")]),
+                _liq_line(mat_grupo4, [_alloc(sup1, "5", per_kg="1000")],
+                          ref_price="100"),
+            ]},
+        )
+        assert r.status_code == 422, r.text
+        assert "GRUPO4-93" in r.text
+        assert "cantidad pesada" in r.text
+
+    def test_linea_sin_peso_de_bascula(
+        self, client, org_headers, db_session, wh, sup1, mat_balancin
+    ):
+        """D4b guard 2 — el del peso.
+
+        Hoy nunca se alcanza por la via normal (el peso es obligatorio al
+        revisar), asi que se fuerza el estado: es justamente el punto de D4b —
+        que los dos guards existan por separado, porque hoy coinciden SOLO por
+        el orden del flujo y no por un invariante.
+        """
+        from app.models.inbound_order import InboundOrderLine
+
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        line = db_session.execute(
+            select(InboundOrderLine).where(
+                InboundOrderLine.inbound_order_id == UUID(str(order["id"]))
+            )
+        ).scalars().one()
+        line.scale_weight_kg = None
+        db_session.commit()
+
+        r = client.post(
+            f"{INBOUND_URL}/{order['id']}/liquidate", headers=org_headers,
+            json={"lines": [
+                _liq_line(mat_balancin, [_alloc(sup1, "10", per_kg="1000")])
+            ]},
+        )
+        assert r.status_code == 422, r.text
+        assert "peso de bascula" in r.text
+
+    def test_xor_de_tres(self, client, org_headers, wh, sup1, mat_balancin):
+        """Exactamente uno de los tres precios."""
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        for alloc in (
+            _alloc(sup1, "10", price="100", per_kg="1000"),   # dos
+            _alloc(sup1, "10", total="1000", per_kg="1000"),  # dos
+            _alloc(sup1, "10"),                               # ninguno
+        ):
+            r = client.post(
+                f"{INBOUND_URL}/{order['id']}/liquidate", headers=org_headers,
+                json={"lines": [_liq_line(mat_balancin, [alloc])]},
+            )
+            assert r.status_code == 422, r.text
+
+    def test_trazabilidad_sobrevive_el_round_trip(
+        self, client, org_headers, db_session, wh, sup1, mat_balancin
+    ):
+        """#93 D20: des-liquidar conserva el reparto — CON su modo e insumos.
+
+        Es la razon de fondo para persistir: un modo de captura que no
+        sobrevive el round-trip es un reparto que en realidad no se conservo.
+        """
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, "10", per_kg="1000")])],
+        )
+        r = client.post(f"{INBOUND_URL}/{order['id']}/unliquidate",
+                        headers=org_headers)
+        assert r.status_code == 200, r.text
+
+        (alloc,) = _allocs_de(client, org_headers, order["id"], mat_balancin.id)
+        assert Decimal(alloc["price_per_kg"]) == Decimal("1000.00")
+        assert Decimal(alloc["weight_kg_used"]) == Decimal("100.000")
+
+    def test_reliquidar_igual_no_dispara_revert_and_reapply(
+        self, client, org_headers, db_session, wh, sup1, mat_balancin
+    ):
+        """La propiedad gratis de D1: el modo kg deriva el MISMO unit_price,
+        asi que la firma de #93 no cambia y la compra se reusa tal cual."""
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        lines = [_liq_line(mat_balancin, [_alloc(sup1, "10", per_kg="1000")])]
+        _liquidate(client, org_headers, order["id"], lines)
+        (antes,) = _order_purchases(db_session, order["id"])
+        numero, pid = antes.purchase_number, antes.id
+
+        client.post(f"{INBOUND_URL}/{order['id']}/unliquidate", headers=org_headers)
+        _liquidate(client, org_headers, order["id"], lines)
+
+        (despues,) = _order_purchases(db_session, order["id"])
+        assert despues.id == pid and despues.purchase_number == numero
+
+    def test_modo_unitario_no_escribe_los_campos_nuevos(
+        self, client, org_headers, wh, sup1, mat_balancin
+    ):
+        """No-regresion: una asignacion que no usa el modo kg queda igual."""
+        order = _captured_reviewed(
+            client, org_headers, wh, [_line(mat_balancin, "10", weight="100")]
+        )
+        _liquidate(
+            client, org_headers, order["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, "10", price="10000")])],
+        )
+        (alloc,) = _allocs_de(client, org_headers, order["id"], mat_balancin.id)
+        assert alloc["price_per_kg"] is None
+        assert alloc["weight_kg_used"] is None

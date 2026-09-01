@@ -369,6 +369,29 @@ class InboundLineAllocation(Base, OrganizationMixin, TimestampMixin):
         comment="Valor total digitado (Q-15). NULL = se digito el unit_price",
     )
 
+    # Modo por kg (correccion de Q-15): Johana digita $/kg y el sistema
+    # multiplica por el peso PRORRATEADO de la asignacion. Los dos campos se
+    # PERSISTEN — no son un cache de un derivado, son los INSUMOS del documento:
+    # el peso es funcion de dos campos mutables (scale_weight_kg y quantity de
+    # la linea, ambos editables), asi que sin guardarlos, editar la linea
+    # despues reescribiria en silencio la historia de una liquidacion anterior.
+    # Es la trazabilidad que Hugo pidio explicitamente: "no habia trazabilidad
+    # de lo que yo estoy liquidando... no el peso ni el precio unitario".
+    # NULL en los dos = se digito el unitario o el total.
+    price_per_kg: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Precio por kg digitado. NULL = se digito unit_price o total_price",
+    )
+
+    weight_kg_used: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 3),
+        nullable=True,
+        comment="Peso prorrateado con el que se calculo el total (kg/unidad de "
+                "la linea x cantidad asignada). Se persiste para que la pantalla "
+                "LEA y no re-derive",
+    )
+
     invoice_number: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,

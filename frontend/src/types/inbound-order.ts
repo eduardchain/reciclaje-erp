@@ -76,11 +76,13 @@ export interface InboundOrderUpdate {
 
 export interface InboundAllocationCreate {
   third_party_id: string;
-  /** Q-15: o el unitario O el total, nunca ambos ni ninguno (422 del backend).
-   *  El unitario es una fórmula: total / cantidad. */
+  /** EXACTAMENTE uno de los tres precios (422 del backend si van varios o
+   *  ninguno). El unitario es el que llega al inventario; los otros dos son
+   *  formas de llegar a él — total/cantidad, o (peso prorrateado × $/kg)/cantidad. */
   quantity: number;
   unit_price?: number | null;
   total_price?: number | null;
+  price_per_kg?: number | null;
   /** Factura del proveedor (D12) */
   invoice_number?: string | null;
 }
@@ -144,6 +146,12 @@ export interface InboundAllocationResponse {
    *  El backend serializa Decimal como string — coercionar con num() antes de
    *  hacer aritmética (lección #93). */
   total_price: number | null;
+  /** Modo por kg: los dos presentes solo si se digitó $/kg. `weight_kg_used`
+   *  es el peso prorrateado con el que se calculó — se LEE, no se re-deriva
+   *  (es función de campos mutables de la línea, así que recalcular mostraría
+   *  un número distinto al guardado si la línea se editó después). */
+  price_per_kg: number | null;
+  weight_kg_used: number | null;
   invoice_number: string | null;
 }
 
