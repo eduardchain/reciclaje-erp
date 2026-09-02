@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AttachmentsPicker } from "@/components/shared/AttachmentsPicker";
+import { uploadPendingAttachments } from "@/hooks/useAttachments";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -101,6 +103,7 @@ export default function PurchaseCreatePage() {
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [autoLiquidate, setAutoLiquidate] = useState(false);
   const [immediatePayment, setImmediatePayment] = useState(false);
   const [paymentAccountId, setPaymentAccountId] = useState("");
@@ -194,7 +197,8 @@ export default function PurchaseCreatePage() {
         commissions: commissions.map(({ _key, ...rest }) => rest),
       },
       {
-        onSuccess: (purchase) => {
+        onSuccess: async (purchase) => {
+          await uploadPendingAttachments("purchase", purchase.id, pendingFiles);
           navigate(`/purchases/${purchase.id}`);
         },
       },
@@ -308,6 +312,9 @@ export default function PurchaseCreatePage() {
                 placeholder="Observaciones..."
                 rows={2}
               />
+            </div>
+            <div className="md:col-span-2">
+              <AttachmentsPicker files={pendingFiles} onChange={setPendingFiles} />
             </div>
           </div>
         </CardContent>

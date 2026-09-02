@@ -76,6 +76,23 @@ Ninguna la habría marcado un gate; las tres son de la familia "solo se ve al us
 
 ---
 
+## 3.d Segunda superficie: adjuntar desde el formulario (pregunta de Daniel al probar)
+
+*"Al registrar una compra no se puede adjuntar? o en qué parte se adjunta?"* — y la pregunta destapó un hueco que ni el plan ni la revisión habían mirado.
+
+**Lo que había**: solo el panel del detalle. Al guardar, el sistema lleva a `/purchases/{id}`, así que se podía adjuntar inmediatamente después… pero como paso aparte y **sin ninguna señal en el formulario**. Quien carga 20 compras al día podía no descubrirlo nunca. El plan decía "v1 = solo detalle" y QA lo aprobó, pero la pregunta que faltaba era otra: *¿puede adjuntar quien REGISTRA?* — que para la báscula, con el material enfrente, es el momento que importa.
+
+**Lo que se agregó** (frontend puro, sin backend ni migración):
+
+- `AttachmentsPicker` — acumula los archivos en memoria dentro del formulario (un adjunto necesita dueño y la operación todavía no existe), con miniatura local y validación de extensión y tamaño **al elegir**: enterarse de que el archivo no servía *después* de guardar la compra sería el peor momento posible.
+  > **Precisión que pidió QA, porque yo había prometido de más.** Dije que el selector "nunca acepta algo que el servidor vaya a rechazar" y no es cierto: el tope de tamaño solo se aplica a no-imágenes (a una foto la dejamos pasar apostando a que la compresión la achique), así que **un HEIC de más de 5 MB en Chrome de escritorio** —que no sabe decodificarlo y por lo tanto no lo comprime— pasa el selector y lo rechaza el servidor. Es "casi nunca", con ese borde nombrado. La consecuencia está manejada: cae en el toast de "N no se pudieron adjuntar" y el reintento desde el detalle sí da el mensaje específico de tamaño.
+- `uploadPendingAttachments` — los sube en el `onSuccess`, ya con el id recién nacido. **Regla dura: nunca hace fallar la operación.** Para cuando corre, la compra ya movió inventario y saldos; un archivo que no sube es una molestia que se reintenta desde el detalle, no un motivo para dejar al usuario creyendo que no guardó nada. Se avisa cuántos quedaron.
+- Cableado en las tres páginas de creación. Verificado que cada una tiene **un solo** camino de creación, así que no queda un bypass que suba la operación sin sus archivos.
+
+Las dos superficies se reparten el trabajo: el formulario para lo que se tiene en la mano, el detalle para lo que llega tarde. **Fuera de alcance**: las páginas de edición no llevan selector — para una operación que ya existe, el panel del detalle es el lugar.
+
+---
+
 ## 4. Backup de `uploads/` (decisión del cliente: sí)
 
 Un `pg_dump` no incluye los archivos en disco: hasta hoy, restaurar devolvía las filas y perdía las evidencias.

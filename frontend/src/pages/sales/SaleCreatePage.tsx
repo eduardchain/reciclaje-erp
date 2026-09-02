@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AttachmentsPicker } from "@/components/shared/AttachmentsPicker";
+import { uploadPendingAttachments } from "@/hooks/useAttachments";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -105,6 +107,7 @@ export default function SaleCreatePage() {
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [notes, setNotes] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [autoLiquidate, setAutoLiquidate] = useState(false);
   const [immediateCollection, setImmediateCollection] = useState(false);
   const [collectionAccountId, setCollectionAccountId] = useState("");
@@ -185,7 +188,12 @@ export default function SaleCreatePage() {
         lines: lines.map(({ _key, ...rest }) => rest),
         commissions: commissions.map(({ _key, ...rest }) => rest),
       },
-      { onSuccess: (sale) => navigate(`/sales/${sale.id}`) },
+      {
+        onSuccess: async (sale) => {
+          await uploadPendingAttachments("sale", sale.id, pendingFiles);
+          navigate(`/sales/${sale.id}`);
+        },
+      },
     );
   };
 
@@ -258,6 +266,9 @@ export default function SaleCreatePage() {
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observaciones..." rows={2} />
+            </div>
+            <div className="md:col-span-2">
+              <AttachmentsPicker files={pendingFiles} onChange={setPendingFiles} />
             </div>
           </div>
         </CardContent>
