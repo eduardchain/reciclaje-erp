@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AttachmentsPicker } from "@/components/shared/AttachmentsPicker";
+import { uploadPendingAttachments } from "@/hooks/useAttachments";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -48,6 +50,7 @@ export default function TransformationCreatePage() {
   const [date, setDate] = useState(toLocalDateInput());
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
   const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
   const sourceUnit = materialById.get(sourceMaterialId)?.default_unit ?? "";
@@ -91,7 +94,12 @@ export default function TransformationCreatePage() {
         reason,
         notes: notes || undefined,
       },
-      { onSuccess: () => navigate(ROUTES.INVENTORY_TRANSFORMATIONS) },
+      {
+        onSuccess: async (t) => {
+          await uploadPendingAttachments("transformation", t.id, pendingFiles);
+          navigate(ROUTES.INVENTORY_TRANSFORMATIONS);
+        },
+      },
     );
   };
 
@@ -240,6 +248,9 @@ export default function TransformationCreatePage() {
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Notas</Label>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={1} />
+            </div>
+            <div className="md:col-span-2">
+              <AttachmentsPicker files={pendingFiles} onChange={setPendingFiles} />
             </div>
           </div>
         </CardContent>

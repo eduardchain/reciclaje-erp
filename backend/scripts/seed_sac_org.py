@@ -12,7 +12,7 @@ Que crea:
   - 4 UNs, 4 cuentas de dinero ($0), 8 categorias de gasto, 6 categorias de material.
   - Los 37 materiales del listado de Daniel (2026-07-23) + perfil kg + formula
     de conversion (battery_to_lead / drosses_to_lead) donde aplica.
-  - 5 terceros (Willard S.A, Green Loop, 3 PRUEBA-*).
+  - 5 terceros (Willard S.A = proveedor Y cliente, Green Loop, 3 PRUEBA-*).
   - 4 cuentas kg (WILLARD-BAT-CV, WILL-BAT-JM, WILL-DROSS, INTERSEDE).
   - 2 tarifas (comision_green_loop $100 per_kg_material,
     maquila_intersede_cv_jm $1.500 per_kg_lead).
@@ -102,11 +102,12 @@ BASCULA_ROLE = {
 REVISOR_ROLE = {
     "name": "revisor_inventario",
     "display_name": "Revisor de Inventario",
-    "description": "Revisa entradas (certifica cantidades pesadas), corrige lo capturado y consulta compras e inventario",
+    "description": "Revisa entradas y salidas (certifica cantidades pesadas), corrige lo capturado y consulta compras e inventario",
     "permission_codes": [
         "config.manage_fleet", "config.view_fleet", "formulas.view",
         "kg_ledger.view", "materials.view", "purchases.edit",
-        "purchases.review", "purchases.view", "third_parties.view",
+        "purchases.review", "purchases.view", "sales.review", "sales.view",
+        "third_parties.view",
         "warehouses.view",
     ],
 }
@@ -216,13 +217,15 @@ MATERIALS: list[tuple[str, str, str, str, str, bool, Optional[str], Optional[flo
     ("MR23", "CENIZAS DE OXIDACIÓN", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.65),
 ]
 
-# (name, default_tp_category_name)
+# (name, categorias) — Willard lleva DOS: entrega baterias (proveedor de
+# material) y COMPRA plomo (cliente). Sin "Cliente" el tipo `venta` de una
+# Salida (W1) no puede derivar su venta: el guard de #32/#33 lo rechaza.
 THIRD_PARTIES = [
-    ("Willard S.A", "Proveedor Material"),
-    ("PRUEBA - Proveedor de Chatarra", "Proveedor Material"),
-    ("Green Loop", "Proveedor Servicios"),
-    ("PRUEBA - Transportes del Caribe", "Proveedor Servicios"),
-    ("PRUEBA - Cliente Nacional", "Cliente"),
+    ("Willard S.A", ["Proveedor Material", "Cliente"]),
+    ("PRUEBA - Proveedor de Chatarra", ["Proveedor Material"]),
+    ("Green Loop", ["Proveedor Servicios"]),
+    ("PRUEBA - Transportes del Caribe", ["Proveedor Servicios"]),
+    ("PRUEBA - Cliente Nacional", ["Cliente"]),
 ]
 
 # SOLO en modo local con --reset (nunca contra produccion). El reparto de una
@@ -230,9 +233,9 @@ THIRD_PARTIES = [
 # no se puede probar. Ojo: Willard S.A NO sirve para esto, es titular de las
 # cuentas kg y el guard de #80 lo rechaza como proveedor de compra.
 THIRD_PARTIES_LOCAL = [
-    ("PRUEBA - Chatarreria Bogota", "Proveedor Material"),
-    ("PRUEBA - Reciclados del Norte", "Proveedor Material"),
-    ("PRUEBA - Metales del Atlantico", "Proveedor Material"),
+    ("PRUEBA - Chatarreria Bogota", ["Proveedor Material"]),
+    ("PRUEBA - Reciclados del Norte", ["Proveedor Material"]),
+    ("PRUEBA - Metales del Atlantico", ["Proveedor Material"]),
 ]
 
 # (code, display_name, account_type, warehouse_name|None, titular_name|None)
@@ -249,6 +252,14 @@ TARIFFS = [
     {"tariff_code": "comision_green_loop", "unit_price_cop": "100",
      "unit": "per_kg_material", "kg_per_unit": "14"},
     {"tariff_code": "maquila_intersede_cv_jm", "unit_price_cop": "1500", "unit": "per_kg_lead"},
+    # W1 — los $1.500 son lo que se le FACTURA a Willard en la entrega (Hugo,
+    # 24-ago). De ahi sale la tajada de planta: `abono_planta_por_kg`.
+    # ⚠️ Los dos valores de abajo son PLACEHOLDER: falta el numero real del
+    # abono a planta y el del flete. Se ajustan en Config → Tarifas (append-only
+    # #35, o sea que cambiarlos no re-escribe el historico).
+    {"tariff_code": "maquila_willard", "unit_price_cop": "1500", "unit": "per_kg_lead"},
+    {"tariff_code": "abono_planta_por_kg", "unit_price_cop": "600", "unit": "per_kg_lead"},
+    {"tariff_code": "flete_willard_planta_planta", "unit_price_cop": "200", "unit": "per_kg_lead"},
 ]
 
 RETENTION_CONFIGS = [
@@ -629,13 +640,21 @@ class SacSeeder:
         settings = {
             "kg_ledger_enabled": True,
             "two_step_transfers_enabled": True,
-            "internal_maquila_enabled": True,
+            # W1 (Hugo, 24-ago): es UN solo cobro y ocurre en la ENTREGA a
+            # Willard, no en el traslado interno. Este flag gobierna SOLO el
+            # cobro del traslado (2 sitios, ambos en transfer.py); el reparto
+            # de la Salida gatea por su cuenta (D11), asi que apagarlo aca no
+            # lo toca.
+            "internal_maquila_enabled": False,
             "transfer_tolerance_pct": 0.05,
             "intersede_stale_days": 30,
             "aging_buckets": [30, 60, 90],
             "willard_distribution_centers": WILLARD_DISTRIBUTION_CENTERS,
             "willard_sede_drosses": self.warehouses["Juan Mina"],
             "willard_sede_postconsumo_default": self.warehouses["Circunvalar"],
+            # W1 (D4c): Circunvalar factura a Willard y le abona a planta. Sin
+            # esta clave el reparto no se emite y la factura nace sin bodega.
+            "willard_sede_facturacion": self.warehouses["Circunvalar"],
         }
         self.api.patch(
             f"/system/organizations/{self.api.org_id}", {"settings": settings},
@@ -768,13 +787,13 @@ class SacSeeder:
         # Los de prueba multi-proveedor SOLO en local (mismo criterio del guard
         # de --reset): produccion no acumula terceros ficticios
         catalog = THIRD_PARTIES + (THIRD_PARTIES_LOCAL if self.api.is_local else [])
-        for name, cat_name in catalog:
+        for name, cat_names in catalog:
             if name in existing:
                 self.third_parties[name] = existing[name]["id"]
                 continue
             body = {"name": name}
             if not self.api.dry_run:
-                body["category_ids"] = [self.tp_categories[cat_name]]
+                body["category_ids"] = [self.tp_categories[c] for c in cat_names]
             r = self.api.post("/third-parties/", body, label=name)
             self.third_parties[name] = r["id"]
 

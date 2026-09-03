@@ -315,6 +315,60 @@ class InboundOrderService:
             "hay que revisarla de nuevo"
         )
 
+    # Escala del peso prorrateado: la columna es Numeric(15,3) — gramos, la
+    # misma que ALLOC_Q usa para la cantidad. Cuantizar aca y no al persistir
+    # es lo que hace que el total calculado y el peso guardado sean coherentes
+    # entre si (si se guardara el peso sin cuantizar, el documento diria un
+    # numero y la multiplicacion daria otro).
+    _WEIGHT_Q = Decimal("0.001")
+
+    @staticmethod
+    def _total_desde_kg(db: Session, material_id, alloc, order_line):
+        """Modo por kg -> (total_price, peso_prorrateado).
+
+        El estimador es **kg por unidad de la LINEA**, no una proporcion del
+        total repartido:
+
+            estimador = linea.scale_weight_kg / linea.quantity
+            peso      = estimador x asignacion.quantity
+            total     = peso x price_per_kg
+
+        El denominador es `linea.quantity` (lo pesado) y NO la suma de las
+        asignaciones, porque eso es lo que hace que **cada asignacion sea
+        independiente de las demas**: con la suma, agregar un segundo proveedor
+        cambiaria en silencio el pago del primero, que ya tiene su compra y su
+        factura. Como efecto derivado, un sobre-reparto (12 unidades repartidas
+        sobre 10 pesadas) conserva el peso estimado por unidad -> 120 kg, en vez
+        de apretar 12 unidades dentro de los 100 kg pesados, que volveria al
+        precio por kg una cosa distinta de lo que dice.
+        """
+        def _falta(motivo: str):
+            material = db.get(Material, material_id)
+            code = material.code if material else material_id
+            return _err(
+                f"No se puede liquidar {code} por precio por kg: {motivo}. "
+                f"Use precio unitario o valor total."
+            )
+
+        # Los DOS guards, y el del denominador es el honesto: no se pueden
+        # estimar kg por unidad sin unidades. Hoy los dos casos coinciden (las
+        # lineas de truncamiento #93 D5 nacen con quantity=0 y peso NULL porque
+        # se crean DESPUES de la revision, o sea que nunca pasan por
+        # _require_scale_weights), pero eso es una propiedad del ORDEN del
+        # flujo, no un invariante — y un guard que descansa en el orden se
+        # rompe el dia que alguien lo cambia.
+        if order_line is None or not order_line.quantity:
+            raise _falta("no tiene cantidad pesada (se agrego en la liquidacion)")
+        if not order_line.scale_weight_kg:
+            raise _falta("no tiene peso de bascula")
+
+        estimador = Decimal(str(order_line.scale_weight_kg)) / Decimal(str(order_line.quantity))
+        peso = (estimador * alloc.quantity).quantize(InboundOrderService._WEIGHT_Q)
+        if peso <= 0:
+            raise _falta("el peso prorrateado queda en 0 al redondear a gramos")
+        return (peso * alloc.price_per_kg), peso
+
+
     def liquidate(
         self,
         db: Session,
@@ -368,6 +422,15 @@ class InboundOrderService:
         # kg (Q-13) dejo de ser hipotetico.
         ALLOC_Q = Decimal("0.001")
 
+        # El mapa se arma aca (y no en la fase de validacion, donde estaba)
+        # porque el modo por kg necesita el peso y la cantidad de la linea para
+        # prorratear ANTES de que exista un unit_price.
+        lines_by_material = {l.material_id: l for l in order.lines}
+
+        # Peso prorrateado de cada asignacion liquidada por kg — se persiste
+        # junto al price_per_kg (es un INSUMO del documento, no un cache).
+        pesos_prorrateados: dict[tuple, Decimal] = {}
+
         # ---------- Normalizacion del reparto (ANTES de cualquier calculo) ----
         # Que la cantidad y el precio que se validan, se persisten, se comparan
         # en la firma de re-liquidacion y llegan al inventario sean el MISMO
@@ -386,6 +449,21 @@ class InboundOrderService:
                         f"La cantidad repartida de {code} es demasiado pequena: "
                         f"queda en 0 al redondear a gramos"
                     )
+                if a.price_per_kg is not None:
+                    # Modo por kg: se resuelve a total_price y DESEMBOCA en la
+                    # rama de abajo — un solo camino hacia unit_price, asi que
+                    # la firma de re-liquidacion (#93) ve el mismo numero.
+                    #
+                    # El peso derivado NO se puede colgar del payload (schema
+                    # con extra="forbid"), asi que viaja en un mapa con clave de
+                    # negocio: el material aparece una sola vez en el reparto
+                    # (D3) y la asignacion es unica por (linea, tercero).
+                    total, peso = self._total_desde_kg(
+                        db, pl.material_id, a, lines_by_material.get(pl.material_id)
+                    )
+                    a.total_price = total
+                    pesos_prorrateados[(pl.material_id, a.third_party_id)] = peso
+
                 if a.total_price is not None:
                     # Q-15: el unitario es una formula — "costo total dividido
                     # unidades" (Hugo). Se cuantiza a PRICE_Q para que la firma
@@ -402,7 +480,6 @@ class InboundOrderService:
 
         # ---------- Fase de validacion COMPLETA (criterio 15: fallar ANTES ----
         # de escribir nada, no a mitad de las compras) ----------
-        lines_by_material = {l.material_id: l for l in order.lines}
         payload_materials: set = set()
         new_material_lines: list = []
         plan: list[dict] = []  # [{line(payload), order_line|None, material, disc}]
@@ -598,6 +675,13 @@ class InboundOrderService:
                     # round-trip de D20 devolveria el unitario derivado y
                     # Johana veria otra cosa de la que guardo
                     total_price=a.total_price,
+                    # Modo por kg: los INSUMOS con los que se calculo. El peso
+                    # sale del mapa y no se re-deriva aca, para que lo guardado
+                    # sea exactamente lo que se uso.
+                    price_per_kg=a.price_per_kg,
+                    weight_kg_used=pesos_prorrateados.get(
+                        (pl.material_id, a.third_party_id)
+                    ),
                     invoice_number=a.invoice_number,
                 ))
         db.flush()

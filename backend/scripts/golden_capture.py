@@ -22,6 +22,10 @@ import requests
 
 API = "/api/v1"
 
+# Sentinela de corrida COMPLETA. Se escribe solo si `failures == 0`; su ausencia
+# es lo que le permite a golden_diff distinguir "no corrio" de "paso".
+MANIFEST = "_manifest.json"
+
 ORGS = {
     "costa": "7888fbe3-d317-400b-a122-dfdd422654dc",
     "biogreen": "02b110cc-4d96-41ca-9b5e-6e31090fa037",
@@ -157,10 +161,16 @@ def main() -> None:
 
         print(f"  {org_name}: OK")
 
-    n = len(list(out.glob("*.json")))
-    print(f"Capturas escritas: {n} en {out}")
+    escritas = sorted(f.name for f in out.glob("*.json") if f.name != MANIFEST)
+    print(f"Capturas escritas: {len(escritas)} en {out}")
     if failures:
+        # Sin manifiesto: golden_diff aborta en vez de diffear una superficie
+        # incompleta. Un lado a medias que coincide con el otro a medias sale
+        # verde y el gate se estrecha en silencio.
         sys.exit(f"{failures} capturas fallaron")
+    (out / MANIFEST).write_text(json.dumps(
+        {"capturas": len(escritas), "archivos": escritas, "base_url": args.base_url},
+        indent=1, sort_keys=True, ensure_ascii=False))
 
 
 if __name__ == "__main__":

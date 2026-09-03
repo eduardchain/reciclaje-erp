@@ -1056,14 +1056,38 @@ class CRUDMoneyMovement:
             )
 
         # SAC E3.1 (E5/E9): el par de maquila intersede se anula desde el
-        # traslado (cascade con inventario fisico + kg). Anular un solo lado
-        # aqui dejaria el par asimetrico y el consolidado dejaria de netear $0.
+        # documento que lo emitio (cascade con inventario fisico + kg). Anular un
+        # solo lado aqui dejaria el par asimetrico y el consolidado dejaria de
+        # netear $0.
+        #
+        # W1 D10 — el modulo se DERIVA del source_type, no se hardcodea. Con un
+        # segundo emisor (la Salida a Willard), el texto fijo "Anule el traslado"
+        # mandaba al usuario al modulo equivocado: la clase "el formateador que
+        # miente" (#97), que ninguna herramienta estatica ve.
         from app.models.money_movement import INTERNAL_MAQUILA_MOVEMENT_TYPES
+        _OWNER_MODULE = {
+            "transfer": ("el traslado", "Traslados"),
+            "willard_delivery": ("la salida", "Salidas a Willard"),
+        }
         if movement.movement_type in INTERNAL_MAQUILA_MOVEMENT_TYPES:
+            doc, module = _OWNER_MODULE.get(
+                movement.source_type or "", ("el documento de origen", "su módulo")
+            )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="No se puede anular un movimiento de maquila intersede desde "
-                "Tesorería. Anule el traslado desde el módulo de Traslados.",
+                f"Tesorería. Anule {doc} desde el módulo de {module}.",
+            )
+
+        # W1 — la factura de maquila/flete de una Salida se anula desde la Salida
+        # (cascade con inventario, kg y el par). Guard por CAMPO y no por tipo
+        # (la leccion de #86): un service_income_accrual creado a mano en
+        # Tesoreria, si algun dia existe, sigue siendo anulable desde ahi.
+        if movement.source_type == "willard_delivery":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No se puede anular un movimiento generado por una Salida a "
+                "Willard desde Tesorería. Anule la salida desde su módulo.",
             )
 
         now = datetime.now(timezone.utc)
@@ -1856,6 +1880,12 @@ class CRUDMoneyMovement:
             # Reversa: habia hecho -=, ahora +=
             if third_party:
                 third_party.current_balance += amt
+
+        elif mt == "service_income_accrual":
+            # W1: servicio facturado sin cobrar — sin cuenta, solo reversa tercero
+            # (el efecto habia sido third_party.balance += amt)
+            if third_party:
+                third_party.current_balance -= amt
 
         elif mt in ("internal_maquila_expense", "internal_maquila_income"):
             # SAC E3.1 (E9): par de maquila intersede — account y tercero NULL,

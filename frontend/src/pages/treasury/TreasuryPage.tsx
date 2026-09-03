@@ -14,6 +14,7 @@ import { DataTable } from "@/components/shared/DataTable";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { SearchInput } from "@/components/shared/SearchInput";
+import { EntitySelect } from "@/components/shared/EntitySelect";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useMoneyMovements } from "@/hooks/useMoneyMovements";
@@ -56,6 +57,7 @@ const typeLabels: Record<MoneyMovementType, string> = {
   collection_from_client: "Cobro Cliente",
   expense: "Gasto",
   service_income: "Ingreso Servicio",
+  service_income_accrual: "Servicio Facturado (Por Cobrar)",
   transfer_out: "Transferencia Salida",
   transfer_in: "Transferencia Entrada",
   capital_injection: "Aporte Capital",
@@ -104,6 +106,7 @@ const typeColors: Record<string, string> = {
   collection_from_client: "bg-emerald-100 text-emerald-800",
   expense: "bg-orange-100 text-orange-800",
   service_income: "bg-blue-100 text-blue-800",
+  service_income_accrual: "bg-blue-100 text-blue-800",
   transfer_out: "bg-purple-100 text-purple-800",
   transfer_in: "bg-purple-100 text-purple-800",
   capital_injection: "bg-teal-100 text-teal-800",
@@ -207,12 +210,36 @@ export default function TreasuryPage() {
     });
   };
 
-  // Tab compuesto `tp_adjustment` mapea a CSV de tipos
+  // Tabs compuestos -> CSV de tipos.
+  // `service_income`: desde W1 la linea del P&L suma tambien la factura de
+  // maquila/flete de las Salidas a Willard (service_income_accrual). Si el
+  // listado consultara un solo tipo, el drill-down dejaria de cuadrar contra el
+  // P&L — que es justo lo que `test_service_income_parity` vigila.
+  // Tipos que ya tienen su propio tab: si el filtro activo NO esta aca, se
+  // muestra un badge para que el usuario vea que hay un filtro puesto (ningun
+  // tab queda resaltado en ese caso).
+  const typeFilterOptions = useMemo(
+    () =>
+      Object.entries(typeLabels)
+        .map(([key, label]) => ({ id: key, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, "es")),
+    [],
+  );
+
+  const TAB_TYPES = new Set([
+    "payment_to_supplier", "collection_from_client", "expense", "transfer_out",
+    "provision_deposit", "service_income", "provision_expense", "expense_accrual",
+    "deferred_expense", "depreciation_expense", "commission_accrual",
+    "obligation_interest_accrual", "loan_interest_accrual", "tp_adjustment",
+  ]);
+
+  const COMPOSITE_TYPES: Record<string, string> = {
+    tp_adjustment: "tp_adjustment_credit,tp_adjustment_debit",
+    service_income: "service_income,service_income_accrual",
+  };
   const movementTypeQuery = typeFilter === "all"
     ? undefined
-    : typeFilter === "tp_adjustment"
-      ? "tp_adjustment_credit,tp_adjustment_debit"
-      : typeFilter;
+    : COMPOSITE_TYPES[typeFilter] ?? typeFilter;
 
   const { data, isLoading } = useMoneyMovements({
     skip: page * PAGE_SIZE,
@@ -319,6 +346,32 @@ export default function TreasuryPage() {
           </TabsList>
         </div>
       </Tabs>
+
+      {/* Buscador de tipo: los tabs cubren 15 de los 47 tipos del catalogo.
+          Escribe en el MISMO parametro `tab` que los tabs — un solo filtro,
+          sin dos fuentes de verdad que puedan discrepar. */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+        <div className="w-full sm:w-80">
+          <EntitySelect
+            value={typeFilter === "all" ? "" : typeFilter}
+            onChange={(v) => setParam({ tab: v || "all", page: null, search: null, status: null, adjustment_class: null, commission_source: null, pnl_section: null })}
+            options={typeFilterOptions}
+            placeholder="Buscar tipo de movimiento..."
+          />
+        </div>
+        {typeFilter !== "all" && !TAB_TYPES.has(typeFilter) && (
+          <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-1 rounded border border-indigo-200 self-start">
+            Tipo: {typeLabels[typeFilter as MoneyMovementType] ?? typeFilter}
+            <button
+              onClick={() => setParam({ tab: "all", page: null })}
+              className="hover:bg-indigo-100 rounded px-1"
+              aria-label="Limpiar filtro de tipo"
+            >
+              ×
+            </button>
+          </span>
+        )}
+      </div>
 
       {/* Filtros activos del drill-down de P&L */}
       {(statusFromUrl || adjustmentClassFromUrl || commissionSourceFromUrl || pnlSectionFromUrl || hasUrlDateOverride) && (

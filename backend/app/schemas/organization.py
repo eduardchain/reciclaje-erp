@@ -55,6 +55,12 @@ class OrgSettingsPayload(BaseModel):
         None,
         description="Warehouse ID (str) default del selector en recepcion postconsumo (Q-05: Circunvalar); editable entre sedes con cuenta de baterias",
     )
+    # W1 (D4c) — la sede que factura a Willard no se puede deducir: la salida
+    # sale de planta (D8), pero la otra punta hay que decirla.
+    willard_sede_facturacion: str | None = Field(
+        None,
+        description="Warehouse ID (str) de la sede que factura a Willard (Circunvalar)",
+    )
     # SAC #93 (D8): tolerancia del descuadre pesado vs repartido al liquidar
     # una Entrada — FRACCION igual que transfer_tolerance_pct. Nunca bloquea.
     inbound_discrepancy_tolerance_pct: float | None = Field(

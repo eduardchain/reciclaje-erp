@@ -234,6 +234,15 @@ class InventoryAdjustment(Base, OrganizationMixin, TimestampMixin):
         comment="Entrada padre cuando el ajuste es descuadre de entrada (SAC #93)",
     )
 
+    # W1: el abono a Willard saca inventario valorizado sin venta — este
+    # `decrease` es el vehiculo que lleva ese costo al P&L. NO se serializa
+    # (mismo precedente que transfer_id e inbound_order_id).
+    willard_delivery_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("willard_deliveries.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
     # --- Relationships ---
     material: Mapped["Material"] = relationship(
         "Material",

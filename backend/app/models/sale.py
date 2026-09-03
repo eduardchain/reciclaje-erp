@@ -127,6 +127,17 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
         nullable=True,
         comment="baterias | drosses — cuenta kg destino de la entrega Willard",
     )
+
+    # W1 — la venta a Willard nace de una Salida (patron #93 Entrada->Purchase).
+    # NULL = venta normal, o sea el comportamiento de las 6 orgs que no son SAC.
+    # Supersede el diseno de E1 (las dos columnas willard_* de arriba asumian que
+    # la venta MISMA era la entrega); quedan inertes por la regla sin-DROP.
+    willard_delivery_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("willard_deliveries.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     
     total_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),

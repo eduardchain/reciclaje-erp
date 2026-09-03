@@ -40,6 +40,10 @@ SETTING_DEFAULTS: dict = {
     # con cuenta willard_baterias — el frontend filtra por cuenta).
     "willard_sede_drosses": None,
     "willard_sede_postconsumo_default": None,
+    # W1 (D4c): sede que FACTURA a Willard (Circunvalar). None = sin
+    # configurar -> no se emite el par de reparto y la factura nace sin
+    # bodega ($0 por sede). Default inerte, patron D1.
+    "willard_sede_facturacion": None,
     # SAC #93 (D8): tolerancia del descuadre de entrada — FRACCION, no
     # porcentaje (igual que transfer_tolerance_pct). Dentro: aviso suave;
     # fuera: resaltado. JAMAS bloquea por monto (#17/#76).

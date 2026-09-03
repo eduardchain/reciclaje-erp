@@ -125,21 +125,28 @@ class InboundAllocationCreate(BaseModel):
     # gt=0 en el API (purchase.liquidate exige precios > 0 — V-LIQ-01);
     # el CHECK de BD queda >= 0 per D1
     unit_price: Optional[Decimal] = Field(None, gt=0)
-    # Q-15: o el unitario, o el TOTAL — Johana elige por asignacion. El
-    # unitario se deriva como total/cantidad (Hugo: "el precio unitario seria
-    # una formula, costo total dividido unidades"). El peso NO participa del
-    # calculo: ella lo mira para decidir, el sistema no computa desde el.
+    # Q-15: el unitario se deriva como total/cantidad (Hugo: "el precio
+    # unitario seria una formula, costo total dividido unidades").
     total_price: Optional[Decimal] = Field(None, gt=0)
+    # Modo por kg: Johana digita $/kg y el sistema multiplica por el peso
+    # PRORRATEADO (kg/unidad de la linea x cantidad asignada). Es lo que Hugo
+    # pidio — "no le va a pagar 100 unidades, le va a pagar por peso... tu
+    # cogerias y multiplicarias kilos por el valor" — y desemboca en el modo
+    # anterior: calcula total_price y de ahi cae en la misma formula, asi que
+    # la firma de re-liquidacion de #93 ve el MISMO unit_price y no dispara un
+    # revert-and-reapply de mas.
+    price_per_kg: Optional[Decimal] = Field(None, gt=0)
     invoice_number: Optional[str] = Field(
         None, max_length=50, description="Factura del proveedor (D12)"
     )
 
     @model_validator(mode="after")
     def _exactly_one_price(self):
-        if (self.unit_price is None) == (self.total_price is None):
+        modos = [self.unit_price, self.total_price, self.price_per_kg]
+        if sum(m is not None for m in modos) != 1:
             raise ValueError(
-                "Cada asignacion lleva precio unitario O valor total, no ambos "
-                "ni ninguno"
+                "Cada asignacion lleva UNO de: precio unitario, valor total o "
+                "precio por kg — no varios ni ninguno"
             )
         return self
 
@@ -225,6 +232,12 @@ class InboundAllocationResponse(BaseModel):
     # re-abrir el reparto en el modo en que se guardo (D20: el reparto
     # sobrevive el round-trip, y el MODO es parte del reparto)
     total_price: Optional[Decimal] = None
+    # Modo por kg: los dos presentes solo si se digito $/kg. La pantalla los
+    # LEE, no los re-deriva — el peso es funcion de campos mutables de la
+    # linea, asi que recalcular mostraria un numero distinto al guardado si la
+    # linea se edito despues.
+    price_per_kg: Optional[Decimal] = None
+    weight_kg_used: Optional[Decimal] = None
     invoice_number: Optional[str] = None
 
 

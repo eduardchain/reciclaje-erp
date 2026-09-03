@@ -11,6 +11,8 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { WarningsList } from "@/components/shared/WarningsList";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { AttachmentsPanel } from "@/components/shared/AttachmentsPanel";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useTransformation, useAnnulTransformation } from "@/hooks/useInventory";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 
@@ -21,6 +23,7 @@ const statusBorderMap: Record<string, string> = {
 
 export default function TransformationDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { hasPermission } = usePermissions();
   const handleBack = useReturnToBack();
   const { data: t, isLoading } = useTransformation(id!);
   const annul = useAnnulTransformation();
@@ -134,6 +137,17 @@ export default function TransformationDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card className="shadow-sm">
+        <CardContent className="pt-6">
+          <AttachmentsPanel
+            ownerType="transformation"
+            ownerId={id!}
+            canUpload={hasPermission("transformations.create")}
+            canDelete={hasPermission("transformations.create")}
+          />
+        </CardContent>
+      </Card>
 
       <ConfirmDialog
         open={showAnnul}

@@ -21,6 +21,7 @@ import {
   ClipboardList,
   ArrowDownUp,
   Shuffle,
+  Send,
   Truck,
   Calculator,
   PanelLeftClose,
@@ -152,6 +153,15 @@ const orgNavItems: NavItem[] = [
     permission: "purchases.view",
     orgFlag: "kg_ledger_enabled",
     pendingBadge: true,
+  },
+  {
+    // W1: salidas de plomo a Willard (venta y abonos)
+    name: "Salidas Willard",
+    path: ROUTES.WILLARD_DELIVERIES,
+    icon: <Send className="w-5 h-5" />,
+    section: "OPERACIONES",
+    permission: "sales.view",
+    orgFlag: "kg_ledger_enabled",
   },
   {
     // E3.1: traslados intersede dos pasos (SAC)

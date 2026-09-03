@@ -126,6 +126,12 @@ def _enrich(
                     # unitario aunque se hubiera guardado por total — el campo
                     # no romperia, MENTIRIA (leccion #89)
                     total_price=a.total_price,
+                    # Idem para el modo por kg: la pantalla LEE estos dos, no
+                    # los re-deriva (el peso es funcion de campos mutables de
+                    # la linea — recalcular mostraria un numero distinto al
+                    # guardado si la linea se edito despues)
+                    price_per_kg=a.price_per_kg,
+                    weight_kg_used=a.weight_kg_used,
                     invoice_number=a.invoice_number,
                 )
                 for a in (line.allocations or [])

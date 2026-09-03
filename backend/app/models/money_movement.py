@@ -60,6 +60,7 @@ VALID_MOVEMENT_TYPES = [
     "collection_from_client",   # Cobro a cliente: account(+), customer.balance(-)
     "expense",                  # Gasto operativo: account(-)
     "service_income",           # Ingreso por servicio: account(+)
+    "service_income_accrual",   # Servicio facturado sin cobrar (W1): NO cuenta, tp.balance(+) (CxC)
     "transfer_out",             # Transferencia salida: account(-)
     "transfer_in",              # Transferencia entrada: account(+)
     "capital_injection",        # Aporte de capital: account(+), investor.balance(-)

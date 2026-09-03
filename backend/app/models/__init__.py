@@ -34,6 +34,8 @@ from .service_tariff import ServiceTariff
 from .material_conversion_formula import MaterialConversionFormula
 from .material_kg_profile import MaterialKgProfile
 from .retention_config import RetentionConfig
+from .willard_delivery import WillardDelivery, WillardDeliveryLine
+from .attachment import Attachment
 from .inbound_order import (
     InboundLineAllocation,
     InboundOrder,
@@ -95,6 +97,9 @@ __all__ = [
     "MaterialKgProfile",
     "RetentionConfig",
     "InboundLineAllocation",
+    "WillardDelivery",
+    "Attachment",
+    "WillardDeliveryLine",
     "InboundOrder",
     "InboundOrderLine",
     "InboundOrderPurchase",

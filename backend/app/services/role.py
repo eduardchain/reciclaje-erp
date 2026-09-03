@@ -36,6 +36,7 @@ PERMISSIONS_CATALOG = [
     ("sales.view_prices", "Ver Precios en Ventas", "sales", "Permite ver precios y totales", 15),
     ("sales.edit_prices", "Editar Precios en Ventas", "sales", "Permite ingresar y modificar precios al crear/editar", 16),
     ("sales.view_profit", "Ver Utilidad en Ventas", "sales", "Permite ver utilidad bruta y neta en ventas", 17),
+    ("sales.review", "Revisar Salidas", "sales", "Permite marcar una salida a Willard como revisada (certifica pesos y habilita liquidar, SAC)", 149),
 
     # Doble Partida
     ("double_entries.view", "Ver Doble Partida", "double_entries", "Permite ver dobles partidas", 20),

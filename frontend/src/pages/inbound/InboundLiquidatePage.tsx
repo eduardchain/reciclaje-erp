@@ -62,6 +62,11 @@ interface AllocRow {
   /** Q-15: si NO es null, Johana digitó el valor total y el unitario es una
    *  fórmula (total / cantidad). null = digitó el unitario, como siempre. */
   total_price: number | null;
+  /** Modo por kg: si NO es null, digitó $/kg y el sistema multiplica por el
+   *  peso PRORRATEADO de la asignación (kg/unidad de la línea × cantidad).
+   *  Es lo que pidió Hugo: "no le va a pagar 100 unidades, le va a pagar por
+   *  peso". Los tres modos son excluyentes. */
+  price_per_kg: number | null;
 }
 
 interface LineState {
@@ -75,7 +80,7 @@ interface LineState {
   /** Q-13: peso de báscula certificado en la revisión. Es literalmente la
    *  pregunta de Hugo en vivo — "¿dónde sale aquí el peso de lo que acabamos
    *  de traer?" —: se capturaba y esta pantalla nunca lo mostraba. NO entra a
-   *  ningún cálculo: Johana lo mira para decidir el precio. */
+   *  Desde el modo por kg SÍ entra al cálculo — es el insumo del prorrateo. */
   weightKg: number | null;
   isExtra: boolean;
   refPrice: number;
@@ -91,6 +96,7 @@ function newAlloc(price = 0): AllocRow {
     quantity: 0,
     unit_price: price,
     total_price: null,
+    price_per_kg: null,
   };
 }
 
@@ -105,12 +111,29 @@ function newAlloc(price = 0): AllocRow {
  *  float y Decimal difieren en la representación, no solo en el redondeo — y
  *  pintar el número del servidor exigiría un round-trip que antes de guardar
  *  no existe. Con montos en pesos el empate al medio centavo no ocurre. */
-const effUnitPrice = (a: AllocRow): number =>
-  a.total_price != null && a.quantity > 0
-    ? Math.round((a.total_price / a.quantity) * 100) / 100
-    : a.unit_price;
+/** Peso prorrateado de una asignación: el estimador es kg/unidad de la LÍNEA
+ *  (no una proporción del total repartido), así que el peso de cada proveedor
+ *  depende solo de su propia cantidad. Con el denominador puesto en la suma de
+ *  las asignaciones, agregar un segundo proveedor cambiaría el peso —y el
+ *  pago— del primero. Espeja `_total_desde_kg` del backend. */
+export const allocWeight = (a: AllocRow, l: LineState): number =>
+  l.weightKg && l.weighed > 0
+    ? Math.round((l.weightKg / l.weighed) * a.quantity * 1000) / 1000
+    : 0;
 
-const effAllocTotal = (a: AllocRow): number => a.quantity * effUnitPrice(a);
+const effUnitPrice = (a: AllocRow, l?: LineState): number => {
+  if (a.price_per_kg != null && l && a.quantity > 0) {
+    const peso = allocWeight(a, l);
+    return Math.round(((peso * a.price_per_kg) / a.quantity) * 100) / 100;
+  }
+  if (a.total_price != null && a.quantity > 0) {
+    return Math.round((a.total_price / a.quantity) * 100) / 100;
+  }
+  return a.unit_price;
+};
+
+const effAllocTotal = (a: AllocRow, l?: LineState): number =>
+  a.quantity * effUnitPrice(a, l);
 
 /** El peso colombiano se pinta sin decimales en toda la app (`formatCurrency`),
  *  y en el reparto eso BORRABA justo el dato que D8 promete mostrar: el aviso
@@ -124,7 +147,24 @@ const fmtMoney = (v: number): string =>
 /** Una asignación está completa si tiene proveedor, cantidad y ALGUNO de los
  *  dos precios — no siempre el unitario (Q-15). */
 const allocPriced = (a: AllocRow): boolean =>
-  a.total_price != null ? a.total_price > 0 : a.unit_price > 0;
+  a.price_per_kg != null
+    ? a.price_per_kg > 0
+    : a.total_price != null
+      ? a.total_price > 0
+      : a.unit_price > 0;
+
+/** El modo vigente de una asignación. Se deriva de cuál campo está lleno en
+ *  vez de guardarse aparte: así no puede quedar un modo que no corresponda al
+ *  precio digitado. */
+type AllocMode = "unit" | "total" | "kg";
+const allocMode = (a: AllocRow): AllocMode =>
+  a.price_per_kg != null ? "kg" : a.total_price != null ? "total" : "unit";
+
+const MODE_LABEL: Record<AllocMode, string> = {
+  unit: "Precio unit.",
+  total: "Valor total",
+  kg: "Precio por kg",
+};
 
 /** Fila de retención por proveedor (patrón RetentionFormData de
  *  PurchaseLiquidatePage: monto vigente solo cuando touched) */
@@ -173,6 +213,11 @@ function initLines(order: InboundOrderResponse): LineState[] {
       // El MODO es parte del reparto: si se guardó por total, se re-abre por
       // total. Sin esto Johana vería un unitario derivado en vez de lo suyo.
       total_price: a.total_price != null ? num(a.total_price) : null,
+      // Ídem el modo por kg. El PESO no se precarga: en el editor tiene que
+      // derivarse en vivo de la línea, porque Johana está cambiando las
+      // cantidades justo ahí. Lo persistido es la verdad de lo GUARDADO —
+      // se muestra en el detalle, que sí lo lee.
+      price_per_kg: a.price_per_kg != null ? num(a.price_per_kg) : null,
     })),
   }));
 }
@@ -363,14 +408,14 @@ export default function InboundLiquidatePage() {
           { name, total: 0, qtyByUnit: {}, materials: [] };
         // Q-15/D8: el resumen muestra el efecto REAL (unitario derivado y
         // re-multiplicado), no el total digitado — es donde el centavo se ve
-        entry.total += effAllocTotal(a);
+        entry.total += effAllocTotal(a, l);
         entry.qtyByUnit[l.material_unit] =
           (entry.qtyByUnit[l.material_unit] ?? 0) + a.quantity;
         entry.materials.push({
           code: l.material_code || l.material_name || "—",
           qty: a.quantity,
           unit: l.material_unit,
-          price: effUnitPrice(a),
+          price: effUnitPrice(a, l),
         });
         map.set(a.third_party_id, entry);
       }
@@ -490,7 +535,7 @@ export default function InboundLiquidatePage() {
         let refPrice = l.refPrice;
         if (!l.refTouched && refPrice <= 0) {
           const touched = allocations.find((a) => a._key === allocKey);
-          const eff = touched ? effUnitPrice(touched) : 0;
+          const eff = touched ? effUnitPrice(touched, l) : 0;
           if (eff > 0) refPrice = eff;
         }
         return { ...l, allocations, refPrice };
@@ -498,25 +543,49 @@ export default function InboundLiquidatePage() {
     );
   };
 
-  /** Q-15: cambiar entre unitario y total NO pierde el número — se convierte
-   *  con la cantidad vigente. Sin cantidad no hay conversión posible y el
-   *  campo arranca en 0 (la validación lo marca incompleto, que es honesto). */
+  /** Q-15: rotar el modo NO pierde el número — se convierte con la cantidad y
+   *  el peso vigentes. Sin cantidad no hay conversión posible y el campo
+   *  arranca en 0 (la validación lo marca incompleto, que es honesto).
+   *
+   *  El ciclo es unitario → total → por kg → unitario. El modo por kg se
+   *  SALTEA cuando la línea no tiene con qué prorratear (sin peso certificado
+   *  o sin cantidad pesada — los materiales agregados en la liquidación,
+   *  #93 D5): ofrecerlo ahí sería ofrecer un 422. */
   const toggleAllocMode = (lineKey: number, allocKey: number) => {
     setLines((prev) =>
       prev.map((l) => {
         if (l._key !== lineKey) return l;
+        const puedeKg = Boolean(l.weightKg) && l.weighed > 0;
         return {
           ...l,
           allocations: l.allocations.map((a) => {
             if (a._key !== allocKey) return a;
-            if (a.total_price != null) {
-              return { ...a, unit_price: effUnitPrice(a), total_price: null };
+            const unitario = effUnitPrice(a, l);
+            switch (allocMode(a)) {
+              case "unit":
+                return {
+                  ...a,
+                  total_price:
+                    a.quantity > 0 ? Math.round(unitario * a.quantity * 100) / 100 : 0,
+                  price_per_kg: null,
+                };
+              case "total": {
+                if (!puedeKg) {
+                  return { ...a, unit_price: unitario, total_price: null, price_per_kg: null };
+                }
+                const peso = allocWeight(a, l);
+                return {
+                  ...a,
+                  total_price: null,
+                  price_per_kg:
+                    peso > 0
+                      ? Math.round(((unitario * a.quantity) / peso) * 100) / 100
+                      : 0,
+                };
+              }
+              default:
+                return { ...a, unit_price: unitario, total_price: null, price_per_kg: null };
             }
-            return {
-              ...a,
-              total_price:
-                a.quantity > 0 ? Math.round(a.unit_price * a.quantity * 100) / 100 : 0,
-            };
           }),
         };
       })
@@ -583,7 +652,7 @@ export default function InboundLiquidatePage() {
         // NO la lista general (D3: nada se hereda de otra lista).
         const priced = l.allocations.find((a) => allocPriced(a));
         const precio = priced
-          ? effUnitPrice(priced)
+          ? effUnitPrice(priced, l)
           : precios.get(l.material_id) ?? l.refPrice;
         return {
           ...l,
@@ -595,6 +664,7 @@ export default function InboundLiquidatePage() {
               quantity: l.weighed,
               unit_price: precio,
               total_price: null,
+              price_per_kg: null,
             },
           ],
         };
@@ -736,10 +806,12 @@ export default function InboundLiquidatePage() {
       allocations: activeAllocs(l).map((a) => ({
         third_party_id: a.third_party_id,
         quantity: a.quantity,
-        // Q-15: viaja UNO de los dos — mandar ambos es 422 del backend
-        ...(a.total_price != null
-          ? { total_price: a.total_price }
-          : { unit_price: a.unit_price }),
+        // Viaja UNO de los tres — mandar más de uno es 422 del backend
+        ...(a.price_per_kg != null
+          ? { price_per_kg: a.price_per_kg }
+          : a.total_price != null
+            ? { total_price: a.total_price }
+            : { unit_price: a.unit_price }),
         invoice_number: invoiceBySupplier[a.third_party_id]?.trim() || null,
       })),
     }));
@@ -910,29 +982,40 @@ export default function InboundLiquidatePage() {
                       placeholder="0"
                     />
                   </div>
-                  {/* Q-15: Johana digita el VALOR TOTAL; el unitario es una
-                      fórmula (total / cantidad). El modo es por asignación
-                      porque cada proveedor negocia su precio. */}
+                  {/* Tres modos por asignación (cada proveedor negocia su
+                      precio): unitario, valor total, o precio por kg. El
+                      unitario siempre es el que llega al inventario — los
+                      otros dos son formas de llegar a él. */}
                   <div className="md:col-span-4">
                     <div className="flex items-baseline justify-between gap-2">
                       <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                        {a.total_price != null ? "Valor total" : "Precio unit."}
+                        {MODE_LABEL[allocMode(a)]}
                       </Label>
                       <button
                         type="button"
                         className="text-[11px] text-indigo-600 hover:underline"
                         onClick={() => toggleAllocMode(l._key, a._key)}
                       >
-                        {a.total_price != null ? "usar precio unit." : "usar valor total"}
+                        cambiar
                       </button>
                     </div>
                     <MoneyInput
-                      value={a.total_price != null ? a.total_price : a.unit_price}
+                      value={
+                        a.price_per_kg != null
+                          ? a.price_per_kg
+                          : a.total_price != null
+                            ? a.total_price
+                            : a.unit_price
+                      }
                       onChange={(v) =>
                         updateAlloc(
                           l._key,
                           a._key,
-                          a.total_price != null ? { total_price: v } : { unit_price: v }
+                          a.price_per_kg != null
+                            ? { price_per_kg: v }
+                            : a.total_price != null
+                              ? { total_price: v }
+                              : { unit_price: v }
                         )
                       }
                       decimals={2}
@@ -943,16 +1026,25 @@ export default function InboundLiquidatePage() {
                         className={cn(
                           "text-xs mt-0.5 tabular-nums",
                           a.total_price != null &&
-                            Math.abs(effAllocTotal(a) - a.total_price) >= 0.005
+                            Math.abs(effAllocTotal(a, l) - a.total_price) >= 0.005
                             ? "text-amber-600"
                             : "text-slate-400"
                         )}
                       >
-                        {a.total_price != null
-                          ? // D8: el total que realmente queda. $200.000 entre 3
-                            // vuelven como $200.000,01 — se acepta, pero se ve
-                            `${fmtMoney(effUnitPrice(a))} c/u → ${fmtMoney(effAllocTotal(a))}`
-                          : `Total ${fmtMoney(effAllocTotal(a))}`}
+                        {a.price_per_kg != null
+                          ? // La trazabilidad que pidió Hugo, a la vista antes
+                            // de guardar: cuántos kg se le pagan a ESTE
+                            // proveedor y en qué costo unitario aterrizan
+                            `${formatWeight(allocWeight(a, l), "kg")} × ${fmtMoney(
+                              a.price_per_kg
+                            )} = ${fmtMoney(effAllocTotal(a, l))} · ${fmtMoney(
+                              effUnitPrice(a, l)
+                            )} c/u`
+                          : a.total_price != null
+                            ? // D8: el total que realmente queda. $200.000 entre 3
+                              // vuelven como $200.000,01 — se acepta, pero se ve
+                              `${fmtMoney(effUnitPrice(a, l))} c/u → ${fmtMoney(effAllocTotal(a, l))}`
+                            : `Total ${fmtMoney(effAllocTotal(a, l))}`}
                       </p>
                     )}
                   </div>

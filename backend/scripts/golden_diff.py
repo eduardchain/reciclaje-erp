@@ -69,12 +69,47 @@ def diff(before, after, path, allowed, real, expected):
             real.append(f"VALOR {path}: {before!r} -> {after!r}")
 
 
+MANIFEST = "_manifest.json"
+
+
+def exigir_corrida_completa(lado: str, d: Path) -> None:
+    """Aborta si ese lado no es una corrida COMPLETA de golden_capture.
+
+    🔴 El 2026-08-18 este script dijo "0 diffs reales" comparando dos
+    directorios INEXISTENTES: golden_capture aborta por credenciales faltantes
+    antes del mkdir, y Path.glob sobre un directorio que no existe devuelve
+    vacio sin excepcion. `missing`/`extra` de abajo ya comparan por NOMBRE —mas
+    fuerte que por conteo, cualquier asimetria la cazan— pero son guardas
+    RELATIVAS: con los dos lados vacios se satisfacen vacuosamente, y con los
+    dos igualmente incompletos tambien. Este chequeo es el absoluto que faltaba.
+
+    Misma familia que el smoke `0 == 0` (#98) y que el lint que no arrancaba
+    (#97): un gate que no corrio se ve identico a uno que paso.
+    """
+    manifest = d / MANIFEST
+    if not manifest.exists():
+        sys.exit(
+            f"ABORTA: {lado} ({d}) no tiene {MANIFEST}. La captura no corrio, no "
+            f"termino, o fallo alguna. Re-corre golden_capture.py contra ese lado "
+            f"— encadenado (`capture && capture && diff`) no se puede saltar."
+        )
+    esperados = json.loads(manifest.read_text())["archivos"]
+    presentes = sorted(f.name for f in d.glob("*.json") if f.name != MANIFEST)
+    if presentes != esperados:
+        faltan = sorted(set(esperados) - set(presentes))
+        sobran = sorted(set(presentes) - set(esperados))
+        sys.exit(f"ABORTA: {lado} no coincide con su {MANIFEST} "
+                 f"(faltan={faltan}, sobran={sobran})")
+
+
 def main() -> None:
     before_dir, after_dir = Path(sys.argv[1]), Path(sys.argv[2])
+    exigir_corrida_completa("BEFORE", before_dir)
+    exigir_corrida_completa("AFTER", after_dir)
     total_real = 0
     total_expected = 0
-    files = sorted(before_dir.glob("*.json"))
-    after_names = {p.name for p in after_dir.glob("*.json")}
+    files = sorted(p for p in before_dir.glob("*.json") if p.name != MANIFEST)
+    after_names = {p.name for p in after_dir.glob("*.json") if p.name != MANIFEST}
     missing = [p.name for p in files if p.name not in after_names]
     extra = sorted(after_names - {p.name for p in files})
     if missing:

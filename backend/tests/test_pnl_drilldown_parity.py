@@ -391,14 +391,20 @@ class TestPnLDrilldownParity:
             f"DE profit parity: P&L={pnl['double_entry_profit']}, listing={listing_total}"
 
     def test_service_income_parity(self, client, org_headers, scenario):
-        """#2 Ingresos por Servicios == sum(mm.amount) con movement_type=service_income."""
+        """#2 Ingresos por Servicios == sum(mm.amount) con CSV de tipos.
+
+        Desde W1 la linea suma tambien la factura de maquila/flete de las
+        Salidas a Willard (`service_income_accrual`), que va en un bloque de
+        query propio para poder fragmentar por sede sin crear linea nueva. El
+        listado tiene que consultar los DOS o el drill-down deja de cuadrar.
+        """
         pnl = _get_pnl(client, org_headers)
 
         listing_total = _sum_listing(
             client, org_headers, "/api/v1/money-movements/",
             params={
                 "date_from": PNL_FROM, "date_to": PNL_TO,
-                "movement_type": "service_income",
+                "movement_type": "service_income,service_income_accrual",
                 "status_filter": "confirmed",
             },
         )

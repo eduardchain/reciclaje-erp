@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
@@ -129,6 +128,9 @@ export default function MovementCreatePage() {
   };
 
   const handleTypeChange = (v: string) => {
+    // El tipo es obligatorio: EntitySelect emite "" al re-clickear la opcion
+    // seleccionada (toggle), y ahi hay que conservar la actual, no vaciar el form.
+    if (!v) return;
     setType(v as MovementType);
     resetFields();
   };
@@ -345,16 +347,16 @@ export default function MovementCreatePage() {
           {isTypeLocked ? (
             <p className="text-sm font-medium text-slate-900 py-2">{typeLabels[type]}</p>
           ) : (
-            <Select value={type} onValueChange={handleTypeChange}>
-              <SelectTrigger className="w-full max-w-md">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(typeLabels).map(([key, label]) => (
-                  <SelectItem key={key} value={key}>{label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            /* Combobox con escritura: 19 tipos son demasiados para un select
+               ciego — el operador escribe "anticipo" y llega directo. */
+            <div className="w-full max-w-md">
+              <EntitySelect
+                value={type}
+                onChange={handleTypeChange}
+                options={Object.entries(typeLabels).map(([key, label]) => ({ id: key, label }))}
+                placeholder="Buscar tipo de movimiento..."
+              />
+            </div>
           )}
         </CardContent>
       </Card>

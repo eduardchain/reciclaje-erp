@@ -914,3 +914,195 @@ class TestValueDifference:
         # total_manual = 240K + 144K + 96K = 480K, distributable = 480K → diff = 0
         assert data["value_difference"] is not None
         assert abs(data["value_difference"]) < 1.0  # ~0 por tolerancia
+
+
+# ============================================================================
+# TestGuardsSedeYTransito (T0')
+# ============================================================================
+
+@pytest.fixture
+def segunda_bodega(db_session, test_organization):
+    """Otra bodega fisica. Con `sede_warehouse_id` NULL —el estado de las 6 orgs
+    que no son SAC— es una SEDE DISTINTA de 'Bodega Principal'."""
+    wh = Warehouse(
+        name="Bodega Secundaria",
+        organization_id=test_organization.id,
+        is_active=True,
+    )
+    db_session.add(wh)
+    db_session.commit()
+    db_session.refresh(wh)
+    return wh
+
+
+@pytest.fixture
+def bodega_transito(db_session, test_organization):
+    wh = Warehouse(
+        name="Transito Intersede",
+        organization_id=test_organization.id,
+        is_active=True,
+        is_transit=True,
+    )
+    db_session.add(wh)
+    db_session.commit()
+    db_session.refresh(wh)
+    return wh
+
+
+def _con_flag(db_session, org, valor=True):
+    org.settings = {"two_step_transfers_enabled": valor}
+    db_session.add(org)
+    db_session.commit()
+
+
+class TestGuardsSedeYTransito:
+    """Guards T0' — una transformacion no cruza sedes ni toca transito.
+
+    El par de tests de sede es el corazon: sin el contraste, "el guard funciona"
+    y "lo apague para todos" se ven identicos.
+    """
+
+    def test_org_sin_flag_transforma_entre_bodegas(
+        self, client, org_headers, db_session, test_organization,
+        source_material, test_warehouse, segunda_bodega,
+        dest_copper, dest_iron, dest_aluminum,
+    ):
+        """🔴 NO REGRESION de las 6 orgs que no son SAC.
+
+        Sin `two_step_transfers_enabled` el guard de sede NO corre. Es el caso
+        que Costa ya ejecuto (1 de sus 83 lineas cruza bodega) y que un guard
+        escrito sin el cortocircuito romperia: con `sede_warehouse_id` NULL,
+        dos bodegas distintas son siempre dos sedes distintas.
+        """
+        assert not (test_organization.settings or {}).get("two_step_transfers_enabled")
+        payload = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+        )
+        # destino en OTRA bodega
+        for line in payload["lines"]:
+            line["destination_warehouse_id"] = str(segunda_bodega.id)
+
+        r = client.post(BASE_URL, json=payload, headers=org_headers)
+        assert r.status_code == 201, r.text
+
+    def test_con_flag_cruzar_sedes_bloquea(
+        self, client, org_headers, db_session, test_organization,
+        source_material, test_warehouse, segunda_bodega,
+        dest_copper, dest_iron, dest_aluminum,
+    ):
+        """El mismo payload del test anterior, con el flag encendido -> 400."""
+        _con_flag(db_session, test_organization)
+        payload = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+        )
+        for line in payload["lines"]:
+            line["destination_warehouse_id"] = str(segunda_bodega.id)
+
+        r = client.post(BASE_URL, json=payload, headers=org_headers)
+        assert r.status_code == 400, r.text
+
+    def test_mensaje_nombra_las_dos_bodegas(
+        self, client, org_headers, db_session, test_organization,
+        source_material, test_warehouse, segunda_bodega,
+        dest_copper, dest_iron, dest_aluminum,
+    ):
+        """Con seis bodegas en pantalla, decir solo "sedes distintas" obliga a
+        adivinar cual. El mensaje nombra las dos y dice que hacer."""
+        _con_flag(db_session, test_organization)
+        payload = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+        )
+        for line in payload["lines"]:
+            line["destination_warehouse_id"] = str(segunda_bodega.id)
+
+        detail = client.post(BASE_URL, json=payload, headers=org_headers).json()["detail"]
+        assert segunda_bodega.name in detail
+        assert test_warehouse.name in detail
+        assert "traslado" in detail.lower()
+
+    def test_con_flag_misma_sede_pasa(
+        self, client, org_headers, db_session, test_organization,
+        source_material, test_warehouse, segunda_bodega,
+        dest_copper, dest_iron, dest_aluminum,
+    ):
+        """El flujo REAL del cliente: Circunvalar -> su Molino.
+
+        La bodega destino pertenece a la sede de la de origen, asi que no cruza
+        nada aunque sean bodegas distintas.
+        """
+        segunda_bodega.sede_warehouse_id = test_warehouse.id
+        db_session.add(segunda_bodega)
+        _con_flag(db_session, test_organization)
+
+        payload = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+        )
+        for line in payload["lines"]:
+            line["destination_warehouse_id"] = str(segunda_bodega.id)
+
+        r = client.post(BASE_URL, json=payload, headers=org_headers)
+        assert r.status_code == 201, r.text
+
+    def test_origen_en_transito_bloquea(
+        self, client, org_headers, db_session, test_organization,
+        source_material, bodega_transito, dest_copper, dest_iron, dest_aluminum,
+    ):
+        _con_flag(db_session, test_organization)
+        payload = _build_transformation_payload(
+            source_material, bodega_transito, dest_copper, dest_iron, dest_aluminum,
+        )
+        r = client.post(BASE_URL, json=payload, headers=org_headers)
+        assert r.status_code == 400, r.text
+        assert "tránsito" in r.json()["detail"].lower()
+
+    def test_destino_en_transito_bloquea(
+        self, client, org_headers, db_session, test_organization,
+        source_material, test_warehouse, bodega_transito,
+        dest_copper, dest_iron, dest_aluminum,
+    ):
+        """Por LINEA: el destino se valida dentro del loop."""
+        _con_flag(db_session, test_organization)
+        payload = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+        )
+        payload["lines"][1]["destination_warehouse_id"] = str(bodega_transito.id)
+
+        r = client.post(BASE_URL, json=payload, headers=org_headers)
+        assert r.status_code == 400, r.text
+        assert "tránsito" in r.json()["detail"].lower()
+
+    def test_transito_sin_flag_no_bloquea(
+        self, client, org_headers, test_organization,
+        source_material, bodega_transito, dest_copper, dest_iron, dest_aluminum,
+    ):
+        """El cortocircuito por flag del guard existente sigue vivo: una org sin
+        traslados dos pasos no tiene el concepto de transito."""
+        assert not (test_organization.settings or {}).get("two_step_transfers_enabled")
+        payload = _build_transformation_payload(
+            source_material, bodega_transito, dest_copper, dest_iron, dest_aluminum,
+        )
+        r = client.post(BASE_URL, json=payload, headers=org_headers)
+        assert r.status_code == 201, r.text
+
+    def test_annul_de_transformacion_vieja_no_valida(
+        self, client, org_headers, db_session, test_organization,
+        source_material, test_warehouse, segunda_bodega,
+        dest_copper, dest_iron, dest_aluminum,
+    ):
+        """D5: `annul` revierte algo que YA existe. Validar ahi dejaria
+        inanulable una transformacion creada antes del guard."""
+        payload = _build_transformation_payload(
+            source_material, test_warehouse, dest_copper, dest_iron, dest_aluminum,
+        )
+        for line in payload["lines"]:
+            line["destination_warehouse_id"] = str(segunda_bodega.id)
+        created = client.post(BASE_URL, json=payload, headers=org_headers)
+        assert created.status_code == 201, created.text
+        tid = created.json()["id"]
+
+        # el flag se enciende DESPUES: la transformacion ya no seria creable
+        _con_flag(db_session, test_organization)
+
+        r = client.post(f"{BASE_URL}/{tid}/annul",
+                        json={"reason": "correccion"}, headers=org_headers)
+        assert r.status_code == 200, r.text

@@ -671,6 +671,17 @@ export default function InboundDetailPage() {
                                     {formatWeight(a.quantity, line.material_unit || "kg")}
                                     {canViewPrices ? ` × ${fmtMoney(a.unit_price)}` : ""}
                                   </span>
+                                  {/* La trazabilidad que pidió Hugo: si se
+                                      liquidó por peso, el documento dice
+                                      cuántos kg y a qué $/kg — no solo el
+                                      unitario derivado. Se LEE lo persistido,
+                                      no se re-deriva de la línea (que pudo
+                                      editarse después). */}
+                                  {canViewPrices && a.price_per_kg != null && a.weight_kg_used != null && (
+                                    <span className="text-slate-400 tabular-nums">
+                                      ({formatWeight(num(a.weight_kg_used), "kg")} × {fmtMoney(num(a.price_per_kg))})
+                                    </span>
+                                  )}
                                   {a.invoice_number && (
                                     <span className="text-slate-400">Fact. {a.invoice_number}</span>
                                   )}
