@@ -1,7 +1,22 @@
 # Plan — Salidas de plomo a Willard (W1)
 
-**Fecha:** 2026-08-24 · **Estado:** para QA · **Origen:** reunión Johana + Hugo 24-ago
+**Fecha:** 2026-08-24 · **Estado:** ⚠️ **PARCIALMENTE SUPERADO por CC-009 (2026-09-03/04)** · **Origen:** reunión Johana + Hugo 24-ago
 **Golden:** 🔴 gate duro si se deriva `Sale` (tabla compartida)
+
+> 🔴 **Leer con esta advertencia.** Este plan se escribió antes de la demo del 28-ago y de
+> las respuestas de Hugo del 4-sep. Tres cosas que afirma **son falsas hoy**:
+>
+> 1. **D11** (el par de la entrega emite en toda salida) — revertido. Hoy la maquila interna se
+>    causa **al trasladar** y el par de la entrega emite **solo en `abono_material`**.
+> 2. **Las tarifas** ($1.500 / $200) — eran una confusión entre la maquila **interna** y la de
+>    **Willard**. Las correctas son $2.097 maquila Willard, $37 flete, $1.500 abono a planta.
+> 3. **La cita que sostiene el §2 de esta sección ("una parte de los 1500 se le abonan a planta")
+>    NO EXISTE** en ninguna transcripción. La cadena "1500" tiene cero ocurrencias en las actas
+>    del 24-ago y del 28-ago. Fue fabricada.
+>
+> Lo vigente está en `docs/soluciones ambientales del caribe/control-cambios-requerimientos.md`,
+> sección *Modelo de plomo — revisión 2026-09-03*, y en la decisión #100 de CLAUDE.md.
+> Este archivo se conserva porque explica **por qué se construyó así**, no qué hace el sistema.
 
 ---
 

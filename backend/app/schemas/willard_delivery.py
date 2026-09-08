@@ -145,6 +145,10 @@ class WillardDeliveryResponse(BaseModel):
 
     lines: list[WillardDeliveryLineResponse] = Field(default_factory=list)
 
+    # Advertencias no bloqueantes de la liquidacion (#17/#76). Sin este campo
+    # el servicio las calculaba y el endpoint las tiraba a la basura.
+    warnings: list[str] = Field(default_factory=list)
+
 
 class WillardDeliveryListResponse(BaseModel):
     items: list[WillardDeliveryResponse]

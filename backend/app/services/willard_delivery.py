@@ -14,10 +14,11 @@ que salda dos deudas encadenadas (planta -> Circunvalar -> Willard). El de
 material no toca `intersede` porque los drosses llegan derecho a planta y
 Circunvalar nunca estuvo en esa cadena.
 
-Plata (Hugo 00:29/00:31): sobre TODA entrega se factura maquila + flete a
-Willard y nace la CxC. De la maquila, una porcion se le abona a planta — no es
-plata que se mueva de cuenta, es como se reparte el ingreso entre sedes, y por
-eso viaja en el par `internal_maquila_*` de #84.
+Plata: sobre TODA entrega se factura maquila + flete a Willard y nace la CxC.
+El reparto entre sedes (`internal_maquila_*` de #84) es OTRA cosa y NO va en
+toda entrega — ver `_emit_split_pair`. CC-009 (demo 28-ago + Johana 3-sep):
+la maquila interna se causa AL TRASLADAR, una sola vez, asi que repetirla en
+la entrega la cobraria dos veces.
 """
 import logging
 from datetime import datetime
@@ -474,6 +475,20 @@ class WillardDeliveryService:
     ) -> None:
         from app.services.money_movement import money_movement
 
+        # CC-009: en una VENTA, Willard paga el precio del plomo y nada mas
+        # (Hugo 4-sep: "de venta normal, solamente el precio de venta. La
+        # maquila solamente aplica para el plomo a devolucion... y el flete
+        # afecta solamente cuando facturamos maquila. En venta no").
+        # El corte va ARRIBA DE TODO a proposito: mas abajo hay un warning de
+        # tarifa faltante que le pediria al usuario anular una salida que esta
+        # perfecta (familia de #100 D10, el mensaje que mandaba al modulo
+        # equivocado). Nada de lo que sigue tiene efectos: son lecturas puras.
+        if delivery.delivery_type == "venta":
+            delivery.maquila_amount = Decimal("0")
+            delivery.freight_amount = Decimal("0")
+            delivery.plant_credit_amount = Decimal("0")
+            return
+
         billing_wh = self._billing_warehouse_id(db, organization_id)
         willard = db.get(ThirdParty, delivery.third_party_id)
 
@@ -498,6 +513,7 @@ class WillardDeliveryService:
                 )
 
         # (a) Factura a Willard — CxC. NO entra al flujo de caja: es causado.
+        #     Solo llega aca un abono: la venta ya corto arriba.
         for concept, amount, tariff in (
             ("Maquila", maquila, maquila_tariff),
             ("Flete", freight, freight_tariff),
@@ -528,10 +544,37 @@ class WillardDeliveryService:
         delivery.maquila_amount = maquila
         delivery.freight_amount = freight
 
-        # (b) Reparto entre sedes — sin el setting no hay a quien abonarle.
-        if billing_wh is None or plant_credit <= 0:
+        # (b) Reparto entre sedes — SOLO en el abono en materiales (CC-009).
+        #     En venta y abono de baterias ese material paso por Circunvalar,
+        #     asi que la maquila interna ya se causo al trasladar.
+        if (
+            delivery.delivery_type != "abono_material"
+            or billing_wh is None
+            or plant_credit <= 0
+        ):
             delivery.plant_credit_amount = Decimal("0")
             return
+
+        # Q-27 volvio al abono una TAJADA de la maquila ("de los $2.097, $1.500
+        # van a planta"), asi que existe un invariante nuevo: el abono no puede
+        # superar lo facturado. En el codigo son dos tarifas sin relacion, y si
+        # divergen en Config la sede que factura queda en perdida en silencio
+        # — la forma exacta del defecto de #100 D13, por la otra puerta.
+        # Avisa, no bloquea (#17/#76): mientras Q-29 este abierta nadie puede
+        # afirmar que deban ser iguales, solo que esta no puede ser mayor.
+        if plant_credit > maquila:
+            # `_fmt_money` y no un f-string: `f"${x:,.0f}"` imprime $75,000 —
+            # separador ingles. En formato colombiano eso se lee 75 pesos con
+            # decimales. Es "el formateador que miente" (#102) y lo atrapo el
+            # test al exigir el NUMERO, no solo que el aviso existiera.
+            from app.services.obligation_interest import _fmt_money
+
+            warnings.append(
+                f"El abono a planta ({_fmt_money(plant_credit)}) supera la "
+                f"maquila facturada a Willard ({_fmt_money(maquila)}): la sede "
+                "que factura queda en perdida en esta salida. Revise "
+                "'abono_planta_por_kg' y 'maquila_willard' en Config → Tarifas."
+            )
         self._emit_split_pair(
             db, delivery, plant_credit, credit_tariff, billing_wh,
             organization_id, user_id, liq_dt,
@@ -550,16 +593,35 @@ class WillardDeliveryService:
         liq_dt: datetime,
     ) -> None:
         """
-        La porcion de la maquila que Circunvalar le abona a planta. Cuenta y
-        tercero NULL: no es plata que se mueva, es como se reparte el ingreso
-        entre sedes (#84).
+        La porcion que Circunvalar le abona a planta, SOLO en el abono en
+        materiales. Cuenta y tercero NULL: no es plata que se mueva, es como
+        se reparte el ingreso entre sedes (#84).
 
-        D11 — este par NO se gatea con `internal_maquila_enabled`. Ese flag
-        gobierna el cobro del TRASLADO, que segun Hugo (24-ago) cobra en el
-        momento equivocado: la maquila se gana cuando el plomo vuelve a Willard.
-        SAC lo apaga, y si compartieramos el gate apagarlo mataria tambien este
-        reparto — el modo de falla de #94/#99 donde "el guard funciona" y "lo
-        apague para todos" se ven identicos.
+        🔴 CC-009 (2026-09-03) SUPERSEDE a D11. D11 decia que este par se emite
+        en TODA entrega y que por eso no comparte gate con
+        `internal_maquila_enabled`. La demo del 28-ago lo desmintio: en venta y
+        en abono de baterias el material paso por Circunvalar, asi que la
+        maquila interna YA se causo al trasladar (Hugo: "no se le afecta maquila
+        porque ya yo la maquila la tengo causada"). Repetirla aqui la cobraria
+        dos veces. Los drosses son la excepcion porque llegan derecho a planta
+        y nunca hubo traslado.
+
+        El gate por TIPO se conserva separado del flag a proposito: son dos
+        preguntas distintas (que tipo de salida reparte / si el traslado cobra),
+        y compartirlo reproduciria el modo de falla de #94/#99.
+
+        Q-27 CERRADA (Hugo, 4-sep): esta rama existe y el numero es $1.500/kg
+        — "cuando facturamos, si le cobramos la maquila a Willard se le factura
+        y se le abona una parte a planta y la otra le queda a la Circunvalar".
+        No contradice a Johana (3-sep): ella dice que Circunvalar no le debe una
+        MAQUILA a planta, y es cierto — no hubo traslado; esto es repartir el
+        ingreso de Willard, que es otra cosa.
+
+        ⚠️ Abierto, y a proposito: `abono_planta_por_kg` vale hoy lo mismo que
+        `maquila_intersede_cv_jm` ($1.500) y son DOS filas. Nadie ha dicho que
+        sean el mismo numero — es una coincidencia sin verificar, la tercera de
+        este ciclo con ese valor. Si Hugo confirma que se mueven juntas, se
+        unifican; mientras tanto, quien edite una en Config debe mirar la otra.
         """
         from app.services.money_movement import money_movement
         from app.services.transfer import TransferService

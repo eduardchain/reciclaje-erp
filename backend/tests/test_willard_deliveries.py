@@ -7,9 +7,10 @@ Lo que se vigila de verdad:
   la que ningun gate automatico habria descubierto.
 - La factura de maquila/flete FRAGMENTA por sede (D4b): sin eso, Circunvalar
   —la sede que factura y se queda con la parte mayor— apareceria con puro costo.
-- El par del reparto emite con `internal_maquila_enabled` APAGADO (D11): SAC
-  apaga ese flag para que el traslado deje de cobrar, y si compartieran el gate
-  apagarlo mataria tambien el reparto.
+- El par del reparto emite SOLO en el abono en materiales (CC-009): en venta y
+  en abono de baterias la maquila interna ya se causo AL TRASLADAR, y repetirla
+  en la entrega la cobraria dos veces. El PAR de tests es la prueba — con uno
+  solo, "el gate funciona" y "lo apague para todos" se ven identicos.
 """
 import pytest
 from decimal import Decimal
@@ -56,9 +57,15 @@ def wh_jm(db_session, test_organization):
 def _flags(db_session, test_organization, wh_cv, wh_jm):
     """Circunvalar factura, Juan Mina es la planta.
 
-    `internal_maquila_enabled` queda APAGADO a proposito: es el estado en el que
-    va a correr SAC (Hugo, 24-ago: la maquila se cobra en la entrega, no en el
-    traslado). Que todos los tests de efectos pasen asi ES la prueba de D11.
+    `internal_maquila_enabled` queda APAGADO a proposito, pero desde CC-009 lo
+    que prueba es lo CONTRARIO de lo que probaba antes. Bajo D11 demostraba
+    "el par emite aunque el flag este apagado"; hoy el par gatea por TIPO, asi
+    que este False es lo que hace que **re-acoplar el par al flag tumbe
+    `test_par_emite_en_abono_material`** — con el flag en True ese defecto
+    pasaria desapercibido. La red no desaparecio: cambio de lado.
+
+    En produccion SAC lo tiene en True (el traslado vuelve a cobrar); aca sigue
+    en False porque estos tests no ejercitan traslados y el contraste vale mas.
     """
     test_organization.settings = {
         "kg_ledger_enabled": True,
@@ -142,11 +149,20 @@ def _tariff(db, org_id, user_id, code, price):
 
 @pytest.fixture
 def tarifas(db_session, test_organization, test_user):
-    """Los numeros de Hugo: $1.500 facturados, de los cuales $600 van a planta."""
+    """Las tarifas reales (CC-009). Willard paga $2.097 de maquila + $37 de
+    flete; de esos $2.097, $1.500 se le abonan a planta y $597 quedan en
+    Circunvalar (Hugo, 4-sep).
+
+    ⚠️ Que esos $1.500 sean la MISMA tarifa que la maquila interna del traslado
+    (`maquila_intersede_cv_jm`, que hoy tambien vale $1.500) NO esta confirmado:
+    Hugo contesto "1500" y nada mas. Es inferencia mia, no testimonio — ver Q-29
+    en control-cambios-requerimientos.md. Los numeros de este fixture son del
+    cliente; su relacion entre si, no. NO unificar las dos tarifas apoyandose
+    en este fixture."""
     return {
-        "maquila": _tariff(db_session, test_organization.id, test_user.id, "maquila_willard", 1500),
-        "flete": _tariff(db_session, test_organization.id, test_user.id, "flete_willard_planta_planta", 200),
-        "abono": _tariff(db_session, test_organization.id, test_user.id, "abono_planta_por_kg", 600),
+        "maquila": _tariff(db_session, test_organization.id, test_user.id, "maquila_willard", 2097),
+        "flete": _tariff(db_session, test_organization.id, test_user.id, "flete_willard_planta_planta", 37),
+        "abono": _tariff(db_session, test_organization.id, test_user.id, "abono_planta_por_kg", 1500),
     }
 
 
@@ -320,14 +336,14 @@ class TestFacturacionYReparto:
         # valor del plomo y el test dejaria de aislar la factura del servicio
         before = willard.current_balance
         body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
-        # 50 kg x $1.500 maquila + 50 x $200 flete
-        assert Decimal(str(body["maquila_amount"])) == Decimal("75000.00")
-        assert Decimal(str(body["freight_amount"])) == Decimal("10000.00")
+        # 50 kg x $2.097 maquila + 50 x $37 flete
+        assert Decimal(str(body["maquila_amount"])) == Decimal("104850.00")
+        assert Decimal(str(body["freight_amount"])) == Decimal("1850.00")
         mms = _mms(db_session, test_organization.id, "service_income_accrual")
         assert len(mms) == 2
         assert all(m.account_id is None for m in mms), "es causado: sin cuenta"
         db_session.refresh(willard)
-        assert willard.current_balance == before + Decimal("85000.00")
+        assert willard.current_balance == before + Decimal("106700.00")
 
     def test_factura_no_entra_al_cash_flow(self):
         """La trampa de #86: el flujo de caja suma por tipo sin filtrar cuenta
@@ -338,19 +354,19 @@ class TestFacturacionYReparto:
         assert "service_income_accrual" not in INFLOW_TYPES
         assert "service_income_accrual" not in OUTFLOW_TYPES
 
-    def test_par_entrega_emite_con_flag_maquila_apagado(
+    def test_par_emite_en_abono_material(
         self, client, org_headers, db_session, test_organization,
-        wh_cv, wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_cv, wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
-        """D11 — el reparto NO se gatea con `internal_maquila_enabled`.
+        """CC-009 — los drosses son la UNICA rama que reparte.
 
-        Ese flag apaga el cobro del TRASLADO (que segun Hugo cobra en el momento
-        equivocado). Si compartieran el gate, apagarlo mataria tambien esto y
-        quedaria el modo de falla de #94/#99: 'el guard funciona' y 'lo apague
-        para todos' viendose identicos. El fixture lo deja en False.
+        Llegan derecho a planta, asi que nunca hubo traslado y la maquila
+        interna nunca se causo. Este test es la mitad viva del contraste: sin el,
+        `test_par_no_emite_en_venta_ni_abono_bateria` pasaria igual con el
+        mecanismo entero roto.
         """
-        body = _flow(client, org_headers, wh_jm, willard, plomo, "venta")
-        assert Decimal(str(body["plant_credit_amount"])) == Decimal("30000.00")
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
+        assert Decimal(str(body["plant_credit_amount"])) == Decimal("75000.00")
 
         exp = _mms(db_session, test_organization.id, "internal_maquila_expense")
         inc = _mms(db_session, test_organization.id, "internal_maquila_income")
@@ -359,11 +375,49 @@ class TestFacturacionYReparto:
         assert inc[0].warehouse_id == wh_jm.id, "Juan Mina recibe"
         assert exp[0].transfer_pair_id == inc[0].id
 
+    @pytest.mark.parametrize("dtype", ["venta", "abono_bateria"])
+    def test_par_no_emite_en_venta_ni_abono_bateria(
+        self, dtype, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias,
+    ):
+        """CC-009 — ese material paso por Circunvalar, asi que la maquila
+        interna YA se causo al trasladar (Hugo, demo 28-ago: "no se le afecta
+        maquila porque ya yo la maquila la tengo causada"). Emitir el par aqui
+        la cobraria dos veces por el mismo kilo.
+
+        La factura a Willard NO se toca: sigue emitiendose (Q-28 abierta).
+        """
+        body = _flow(client, org_headers, wh_jm, willard, plomo, dtype)
+        assert Decimal(str(body["plant_credit_amount"])) == 0
+        assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
+        assert _mms(db_session, test_organization.id, "internal_maquila_income") == []
+
+    @pytest.mark.parametrize(
+        "dtype,facturas", [("venta", 0), ("abono_bateria", 2), ("abono_material", 2)]
+    )
+    def test_factura_solo_en_los_abonos(
+        self, dtype, facturas, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias, acc_drosses,
+    ):
+        """CC-009 — en una venta Willard paga el PRECIO del plomo y nada mas.
+
+        Hugo (4-sep): "de venta normal, solamente el precio de venta. La maquila
+        solamente aplica para el plomo a devolucion... el flete afecta solamente
+        cuando facturamos maquila. En venta no". Facturarlas en la venta le
+        cobraba $2.134/kg de mas ($2.097 + $37) e inflaba su cuenta por cobrar.
+        """
+        body = _flow(client, org_headers, wh_jm, willard, plomo, dtype)
+        assert len(_mms(db_session, test_organization.id, "service_income_accrual")) == facturas
+        esperado = Decimal("0") if dtype == "venta" else None
+        if esperado is not None:
+            assert Decimal(str(body["maquila_amount"])) == esperado
+            assert Decimal(str(body["freight_amount"])) == esperado
+
     def test_par_reparto_no_mueve_cuentas(
         self, client, org_headers, db_session, test_organization,
-        wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         for mtype in ("internal_maquila_expense", "internal_maquila_income"):
             for mm in _mms(db_session, test_organization.id, mtype):
                 assert mm.account_id is None
@@ -371,14 +425,19 @@ class TestFacturacionYReparto:
 
     def test_sin_setting_sede_facturacion_no_emite_par(
         self, client, org_headers, db_session, test_organization,
-        wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
-        """D4c: default inerte. Sin sede configurada no hay a quien abonarle."""
+        """D4c: sin sede configurada no hay a quien abonarle.
+
+        Se prueba sobre abono_material porque es la unica rama que reparte
+        (CC-009); en las otras dos no hay par que suprimir y el test pasaria
+        vacio.
+        """
         test_organization.settings = {
             **test_organization.settings, "willard_sede_facturacion": None
         }
         db_session.commit()
-        body = _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         assert Decimal(str(body["plant_credit_amount"])) == 0
         assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
 
@@ -412,28 +471,29 @@ class TestPorSede:
 
     def test_factura_fragmenta_por_sede(
         self, client, org_headers, db_session, test_organization,
-        wh_cv, wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_cv, wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
         """Los numeros del cliente: Circunvalar factura y le abona a planta.
 
         Sin fragmentar, Circunvalar —la sede que gana— apareceria en rojo con
-        puro costo, sin error y sin warning.
+        puro costo, sin error y sin warning. Sobre abono_material, que desde
+        CC-009 es la unica rama con reparto.
         """
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
 
         cv = self._pnl(client, org_headers, wh_cv.id)
         jm = self._pnl(client, org_headers, wh_jm.id)
 
-        # Circunvalar: factura 85.000 (maquila+flete) y abona 30.000 a planta
-        assert Decimal(str(cv["service_income"])) == Decimal("85000.00")
-        assert Decimal(str(cv["internal_maquila_expense"])) == Decimal("30000.00")
+        # Circunvalar: factura 106.700 (maquila+flete) y abona 75.000 a planta
+        assert Decimal(str(cv["service_income"])) == Decimal("106700.00")
+        assert Decimal(str(cv["internal_maquila_expense"])) == Decimal("75000.00")
         # Juan Mina: recibe el abono, no factura
         assert Decimal(str(jm["service_income"])) == 0
-        assert Decimal(str(jm["internal_maquila_income"])) == Decimal("30000.00")
+        assert Decimal(str(jm["internal_maquila_income"])) == Decimal("75000.00")
 
     def test_drilldown_service_income_cuadra_con_pnl(
         self, client, org_headers, db_session, test_organization,
-        wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
         """La promesa de #49: la suma del listado destino == el numero del P&L.
 
@@ -441,7 +501,9 @@ class TestPorSede:
         tiene datos de W1: alli el cambio a CSV pasa verde sin ejercitarse. El
         guardrail hay que ponerlo donde SI hay una factura de Salida.
         """
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        # abono_material: desde CC-009 la venta no factura, y con cero de los
+        # dos lados el test pasaria vacio sin ejercitar nada
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         pnl = self._pnl(client, org_headers)
 
         from app.utils.dates import business_today
@@ -467,12 +529,12 @@ class TestPorSede:
 
     def test_consolidado_invariante_con_y_sin_sede(
         self, client, org_headers, db_session, test_organization,
-        wh_cv, wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_cv, wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
         """El par netea $0 y la factura entera aparece una sola vez."""
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         total = self._pnl(client, org_headers)
-        assert Decimal(str(total["service_income"])) == Decimal("85000.00")
+        assert Decimal(str(total["service_income"])) == Decimal("106700.00")
         cv = self._pnl(client, org_headers, wh_cv.id)
         jm = self._pnl(client, org_headers, wh_jm.id)
         assert (
@@ -628,12 +690,12 @@ class TestGuards:
 
     def test_guard_maquila_nombra_el_modulo_correcto(
         self, client, org_headers, db_session, test_organization,
-        wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
         """D10 — el mensaje se DERIVA del source_type. Antes decia 'Anule el
         traslado desde el modulo de Traslados' hardcodeado, y con un segundo
         emisor mandaba al usuario al lugar equivocado."""
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         mm = _mms(db_session, test_organization.id, "internal_maquila_expense")[0]
         r = client.post(
             f"/api/v1/money-movements/{mm.id}/annul",
@@ -646,9 +708,10 @@ class TestGuards:
 
     def test_factura_no_se_anula_desde_tesoreria(
         self, client, org_headers, db_session, test_organization,
-        wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        # abono: desde CC-009 la venta no factura, y sin factura no hay que anular
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         mm = _mms(db_session, test_organization.id, "service_income_accrual")[0]
         r = client.post(
             f"/api/v1/money-movements/{mm.id}/annul",
@@ -684,8 +747,6 @@ class TestAnulacion:
         assert plomo.current_stock == stock_before
         assert willard.current_balance == balance_before
         assert _kg(db_session, acc_intersede.id) == 0
-        assert _mms(db_session, test_organization.id, "service_income_accrual") == []
-        assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
         sale = db_session.get(Sale, body["sale_id"])
         assert sale.status == "cancelled"
 
@@ -702,3 +763,90 @@ class TestAnulacion:
         db_session.refresh(plomo)
         assert plomo.current_stock == stock_before
         assert _kg(db_session, acc_drosses.id) == 0
+        # factura y par se revierten con la salida (aca SI hay ambos, CC-009)
+        assert _mms(db_session, test_organization.id, "service_income_accrual") == []
+        assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
+        assert _mms(db_session, test_organization.id, "internal_maquila_income") == []
+
+
+# ------------------------------------------ los warnings, que nadie veia ---
+
+class TestWarningsDeLiquidacion:
+    """Tres defectos de la misma familia, encontrados en la 2a pasada de QA.
+
+    El tercero es el que los vuelve importantes: el servicio calculaba
+    warnings y el endpoint hacia `response.notes = (response.notes or "")`
+    — se asignaba a si mismo. Ninguno llegaba nunca al usuario. O sea que
+    el warning del invariante de abajo habria nacido muerto y nosotros
+    lo habriamos reportado como mitigacion.
+    """
+
+    def test_la_venta_no_pide_anular_una_salida_perfecta(
+        self, client, org_headers, wh_jm, willard, plomo, _flags,
+        db_session, test_organization, test_user, acc_intersede,
+    ):
+        """Sin tarifa de maquila, una VENTA no debe advertir nada.
+
+        En venta no se factura por diseno (CC-009), asi que el warning de
+        'configurela y anule/rehaga la salida' le pedia deshacer algo que
+        estaba bien. Familia de #100 D10. Ojo: este test corre SIN el
+        fixture `tarifas` — esa ausencia es el escenario.
+        """
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+
+        assert out["warnings"] == []
+        assert Decimal(str(out["maquila_amount"])) == 0
+        assert Decimal(str(out["freight_amount"])) == 0
+
+    def test_el_abono_si_avisa_cuando_falta_la_tarifa(
+        self, client, org_headers, wh_jm, willard, plomo, _flags,
+        db_session, test_organization, test_user, acc_drosses,
+    ):
+        """El contraste del anterior: en un abono el aviso SI corresponde.
+
+        Sin este par, 'el gate funciona' y 'mate el warning para todos' se
+        ven identicos — la leccion de #94/#99.
+        """
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
+
+        assert any("maquila_willard" in w for w in out["warnings"]), out["warnings"]
+        assert any("flete_willard" in w for w in out["warnings"]), out["warnings"]
+
+    def test_abono_a_planta_mayor_que_la_maquila_avisa_y_no_bloquea(
+        self, client, org_headers, wh_jm, willard, plomo, _flags,
+        db_session, test_organization, test_user, acc_drosses,
+    ):
+        """Q-27 volvio el abono una TAJADA de la maquila, y nada lo verificaba.
+
+        Con la maquila en $1.000 y el abono en $1.500, Circunvalar le abona a
+        planta mas de lo que le facturo a Willard: la sede que factura queda
+        en perdida, en silencio. Es #100 D13 por la otra puerta.
+
+        El numero importa, no solo que falle: 50 kg x $1.500 = $75.000 de
+        abono contra 50 kg x $1.000 = $50.000 de factura.
+        """
+        _tariff(db_session, test_organization.id, test_user.id, "maquila_willard", 1000)
+        _tariff(db_session, test_organization.id, test_user.id, "flete_willard_planta_planta", 37)
+        _tariff(db_session, test_organization.id, test_user.id, "abono_planta_por_kg", 1500)
+
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
+
+        aviso = [w for w in out["warnings"] if "supera la maquila" in w]
+        assert len(aviso) == 1, out["warnings"]
+        assert "75.000" in aviso[0] and "50.000" in aviso[0], aviso[0]
+
+        # avisa, NO bloquea (#17/#76): el reparto se emite igual
+        assert Decimal(str(out["plant_credit_amount"])) == Decimal("75000.00")
+        assert len(_mms(db_session, test_organization.id, "internal_maquila_expense")) == 1
+
+    def test_con_tarifas_sanas_no_hay_ruido(
+        self, client, org_headers, wh_jm, willard, plomo, _flags, tarifas,
+        db_session, test_organization, acc_drosses,
+    ):
+        """$1.500 de abono contra $2.097 de maquila: el invariante se cumple.
+
+        Sin este, un warning que se disparara siempre pasaria por bueno.
+        """
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
+
+        assert out["warnings"] == [], out["warnings"]

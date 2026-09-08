@@ -226,8 +226,7 @@ def liquidate_delivery(
         db, delivery_id, data, context["organization_id"], user_id=context["user"].id
     )
     response = _enrich(db, delivery)
-    if warnings:
-        response.notes = (response.notes or "")
+    response.warnings = warnings or []
     return response
 
 

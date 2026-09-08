@@ -94,6 +94,8 @@ export interface WillardDelivery {
   total_kg_lead: string | number;
 
   lines: WillardDeliveryLine[];
+  /** Advertencias no bloqueantes de la liquidacion (#17/#76). */
+  warnings?: string[];
 }
 
 export interface WillardDeliveryListResponse {

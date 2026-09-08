@@ -72,6 +72,10 @@ export function useLiquidateWillardDelivery() {
       willardDeliveryService.liquidate(id, data),
     onSuccess: (d) => {
       toast.success(`Salida #${d.delivery_number} liquidada`);
+      // Patron de usePurchases/useInboundOrders. Sin esto el backend entrega
+      // los warnings y la pantalla los descarta — el mismo defecto que
+      // CC-009 arreglo en el endpoint, una capa mas arriba.
+      (d.warnings ?? []).forEach((w) => toast.warning(w, { duration: 10000 }));
       invalidateAfterWillardDelivery(qc);
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al liquidar")),

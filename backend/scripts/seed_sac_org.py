@@ -252,14 +252,28 @@ TARIFFS = [
     {"tariff_code": "comision_green_loop", "unit_price_cop": "100",
      "unit": "per_kg_material", "kg_per_unit": "14"},
     {"tariff_code": "maquila_intersede_cv_jm", "unit_price_cop": "1500", "unit": "per_kg_lead"},
-    # W1 — los $1.500 son lo que se le FACTURA a Willard en la entrega (Hugo,
-    # 24-ago). De ahi sale la tajada de planta: `abono_planta_por_kg`.
-    # ⚠️ Los dos valores de abajo son PLACEHOLDER: falta el numero real del
-    # abono a planta y el del flete. Se ajustan en Config → Tarifas (append-only
-    # #35, o sea que cambiarlos no re-escribe el historico).
-    {"tariff_code": "maquila_willard", "unit_price_cop": "1500", "unit": "per_kg_lead"},
-    {"tariff_code": "abono_planta_por_kg", "unit_price_cop": "600", "unit": "per_kg_lead"},
-    {"tariff_code": "flete_willard_planta_planta", "unit_price_cop": "200", "unit": "per_kg_lead"},
+    # W1 — CORREGIDO en CC-009 (2026-09-03). Los valores viejos ($1.500 y $200)
+    # venian de confundir la maquila INTERNA entre sedes con la de WILLARD. Los
+    # correctos estaban desde el 2-jul en la tabla "Tarifas confirmadas" de
+    # propuesta-alcance-cliente.md, validada por Hugo Y por Johana, y Johana los
+    # reconfirmo el 3-sep ("siguen las mismas tarifas").
+    {"tariff_code": "maquila_willard", "unit_price_cop": "2097", "unit": "per_kg_lead"},
+    {"tariff_code": "flete_willard_planta_planta", "unit_price_cop": "37", "unit": "per_kg_lead"},
+    # Q-27 RESUELTA (Hugo, 4-sep): de los $2.097 que paga Willard, $1.500 van a
+    # planta y $597 quedan en Circunvalar. Lo que Hugo contesto a "cuanto se le
+    # abona a planta por kilo" fue, literal y completo: "1500".
+    #
+    # ⚠️ NO ESTA DICHO que sea la misma tarifa que `maquila_intersede_cv_jm`,
+    # que hoy tambien vale $1.500. Coinciden, y nadie ha confirmado que se
+    # muevan juntas — es la TERCERA coincidencia de este valor en el ciclo (la
+    # cita fabricada decia "los 1500", el seeder viejo tenia $1.500 como
+    # maquila_willard, y ahora estas dos). Dos cosas equivocadas que coinciden
+    # se leen como evidencia; por eso van en codigos separados hasta que Hugo
+    # diga si suben juntas.
+    #
+    # ⚠️ Si alguien sube una de las dos en Config → Tarifas, TIENE que mirar la
+    # otra: son append-only y este archivo no las vuelve a tocar.
+    {"tariff_code": "abono_planta_por_kg", "unit_price_cop": "1500", "unit": "per_kg_lead"},
 ]
 
 RETENTION_CONFIGS = [
@@ -641,11 +655,12 @@ class SacSeeder:
             "kg_ledger_enabled": True,
             "two_step_transfers_enabled": True,
             # W1 (Hugo, 24-ago): es UN solo cobro y ocurre en la ENTREGA a
-            # Willard, no en el traslado interno. Este flag gobierna SOLO el
-            # cobro del traslado (2 sitios, ambos en transfer.py); el reparto
-            # de la Salida gatea por su cuenta (D11), asi que apagarlo aca no
-            # lo toca.
-            "internal_maquila_enabled": False,
+            # CC-009 (2026-09-03): vuelve a ON. Se habia apagado por D11 de
+            # #100, que asumia que la maquila se cobraba en la ENTREGA; la demo
+            # del 28-ago lo desmintio — se causa AL TRASLADAR, una sola vez, que
+            # es lo que ya decia la decision escrita del 2-jul. El reparto de la
+            # Salida gatea por TIPO de salida, no por este flag.
+            "internal_maquila_enabled": True,
             "transfer_tolerance_pct": 0.05,
             "intersede_stale_days": 30,
             "aging_buckets": [30, 60, 90],
