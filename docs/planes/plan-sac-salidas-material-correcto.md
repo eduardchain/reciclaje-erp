@@ -469,6 +469,22 @@ comportamiento observable que perder. Es la diferencia con `update`, donde sí l
 
 **Con la fila `i`, cada punto de entrada que puede meter un material tiene su testigo de etapa.**
 
+### La matriz es un compromiso previo, y tiene que poder auditarse
+
+La matriz solo sirve si se la trata como **compromiso escrito antes de construir**. Si al plantar
+los nueve defectos una celda observada difiere de la esperada, la respuesta **no** es mover la
+predicción para que cuadre — es entender por qué y escribirlo. Acomodar la predicción es
+exactamente lo que pasó en #101 y en #100 ronda 3.
+
+**Y para que eso sea verificable desde afuera, no una promesa:** en el informe, la columna
+*esperado* es la de **este archivo tal como quedó en el commit `c3ef149`**, no una reescrita. Si
+una predicción tiene que cambiar, se cambia con una fila nueva que diga *"esperado en `c3ef149`:
+X · observado: Y · por qué"*. Así el commit es el artefacto y nadie tiene que confiar en que la
+predicción no se retocó.
+
+⚠️ Por la misma razón, **este archivo no se `--amend`ea**: `c3ef149` es la línea base contra la
+que se compara. Toda corrección va en commit nuevo.
+
 ### Coda de método — la prosa falló tres veces, y la tercera fue en la corrección
 
 La secuencia completa, porque el patrón importa más que el resultado:
