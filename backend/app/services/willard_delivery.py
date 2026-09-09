@@ -872,10 +872,11 @@ class WillardDeliveryService:
         """
         Solo el plomo entregable sale hacia Willard.
 
-        UN validador para los CUATRO puntos de entrada (`create`, `update`,
-        `liquidate`) — `review` desaparecio en el ciclo de correcciones W1 — calco de `_validate_willard_capture` (#81). Si
-        viviera solo en la liquidacion, el material equivocado se aceptaria en el
-        patio y el error saldria dias despues, con el camion ido.
+        UN validador para los TRES puntos de entrada (`create`, `update`,
+        `liquidate`), calco de `_validate_willard_capture` (#81). Eran cuatro
+        hasta que `review` desaparecio (Hugo, demo 28-ago). Si viviera solo en la
+        liquidacion, el material equivocado se aceptaria en el patio y el error
+        saldria dias despues, con el camion ido.
 
         `annul` queda fuera A PROPOSITO (#99): anular no valida — una salida vieja
         tiene que poder anularse aunque su material hoy no pasara el guard.

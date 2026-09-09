@@ -102,13 +102,16 @@ BASCULA_ROLE = {
 REVISOR_ROLE = {
     "name": "revisor_inventario",
     "display_name": "Revisor de Inventario",
-    "description": "Revisa entradas y salidas (certifica cantidades pesadas), corrige lo capturado y consulta compras e inventario",
+    "description": "Revisa entradas (certifica cantidades pesadas), corrige lo capturado y consulta compras, salidas e inventario",
     "permission_codes": [
         "config.manage_fleet", "config.view_fleet", "formulas.view",
         "kg_ledger.view", "materials.view", "purchases.edit",
         # `sales.review` se retiro con el paso de revision de salidas (Hugo,
         # 28-ago): concedia exactamente nada. La fila del catalogo sale con la
         # migracion de los consecutivos separados (punto 17), que hace falta igual.
+        # Las salidas las liquida Johana, que es admin (decision de Daniel,
+        # 9-sep) — por eso aca queda `sales.view` a secas: el revisor las
+        # consulta pero no las liquida.
         "purchases.review", "purchases.view", "sales.view",
         "third_parties.view",
         "warehouses.view",
@@ -192,11 +195,18 @@ MATERIALS: list[tuple[str, str, str, str, str, bool, Optional[str], Optional[flo
     ("SCR-LCB", "SCRAP LIMPIO CON BORNE", "Scrap", "kg", "none", True, None, None, "none"),
     # --- Plomo / producto ---
     # Hugo (28-ago, :369): "el crudo es el que se entrega por eso" (las 3
-    # modalidades) y el puro "entregarlo a la venta". Ninguno de los dos existia
-    # como material: sin ellos el guard no tiene nada que dejar pasar.
-    ("PLO-CRU", "PLOMO CRUDO", "Plomo", "kg", "none", False, None, None, "crudo"),
+    # modalidades) y el puro "entregarlo a la venta".
+    # ⚠️ El crudo NO es un material nuevo: la §4.1 dice que el horno grande
+    # produce "plomo crudo EN LINGOTE" y Johana (9-sep) nombra la entrega como
+    # "abono a bateria plomo lingote" — o sea que PLO-LIN, que ya existia en el
+    # listado de Daniel, ES el crudo. El "PLO-CRU" que se sembro el 8-sep era un
+    # duplicado conceptual y se retiro (en dev lo desactiva el barrido de
+    # obsoletos de mas abajo; en prod nunca se creo). El puro si es nuevo: no
+    # habia ningun material para el producto del crisol.
     ("PLO-PUR", "PLOMO PURO", "Plomo", "kg", "none", False, None, None, "puro"),
-    ("PLO-LIN", "PLOMO LINGOTES", "Plomo", "kg", "none", True, None, None, "none"),
+    ("PLO-LIN", "PLOMO LINGOTES", "Plomo", "kg", "none", True, None, None, "crudo"),
+    # Retal y cascara quedan en `none` a proposito: por §4.1 son INSUMOS del
+    # horno, no producto entregable. Marcar uno de mas reabre el defecto de #103.
     ("PLO-RET", "PLOMO RETAL", "Plomo", "kg", "none", True, None, None, "none"),
     ("PLO-CAS", "PLOMO CASCARA", "Plomo", "kg", "none", True, None, None, "none"),
     ("CAJ-PLA", "CAJAS PLÁSTICAS", "Plomo", "kg", "none", True, None, None, "none"),
