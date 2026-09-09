@@ -19,6 +19,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number
 from app.utils.dates import business_today
 from app.models.purchase import Purchase, PurchaseCommission, PurchaseLine
 from app.models.inventory_movement import InventoryMovement
@@ -1812,30 +1813,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             )
 
     def _generate_purchase_number(self, db: Session, organization_id: UUID) -> int:
-        """
-        Generate next sequential purchase_number for organization.
+        """Siguiente `purchase_number` de la org (lock estable + MAX+1 en el helper unico).
 
-        Uses PostgreSQL advisory locks to prevent race conditions in concurrent requests.
-
-        Returns:
-            Next purchase number (1, 2, 3, ...)
+        Doble partida pide el MISMO nombre de secuencia: una compra directa y la
+        compra interna de un cruce se serializan entre si (defecto B del plan).
         """
-        # Use PostgreSQL advisory lock to prevent race conditions
-        # Convert UUID to integer for lock (use hash to ensure it fits in bigint)
-        lock_id = hash(str(organization_id)) % (2**63)  # Ensure positive bigint
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-        
-        # Get max purchase_number for this organization
-        max_number_query = select(func.max(Purchase.purchase_number)).where(
-            Purchase.organization_id == organization_id
-        )
-        
-        max_number = db.execute(max_number_query).scalar_one_or_none()
-        
-        next_number = (max_number or 0) + 1
-        
-        return next_number
-    
+        return next_number(db, organization_id, "purchase_number")
+
     def delete(
         self,
         db: Session,

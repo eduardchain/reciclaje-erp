@@ -2593,3 +2593,36 @@ class TestPrecioPorKg:
         (alloc,) = _allocs_de(client, org_headers, order["id"], mat_balancin.id)
         assert alloc["price_per_kg"] is None
         assert alloc["weight_kg_used"] is None
+
+
+# ===========================================================================
+# Plan advisory-locks (2026-09-09): la liquidacion de la Entrada numera compras,
+# movimientos y ajustes, y SIN pago inmediato su primer movimiento (el accrual
+# del recolector) llega DESPUES de los ajustes — orden inverso al canonico. La
+# declaracion anticipada de locks al entrar es lo que hace que este caso pase.
+# ===========================================================================
+class TestOrdenDeLocksEnLaEntrada:
+    def test_entrada_sin_pago_inmediato_con_comision_y_descuadre_liquida(
+        self, client, org_headers, db_session, wh, mat_moto, sup1, sup2, collector
+    ):
+        """T10 (P10): 100 pesadas, 95 repartidas (sobrante -> increase, #93 D6), comision
+        del recolector (expense_accrual) y NINGUN pago inmediato. Sin
+        `lock_sequences(...)` al entrar, D4b tumba la liquidacion con
+        LockOrderError (adjustment antes de movement)."""
+        body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "100")])
+        _liquidate(
+            client, org_headers, body["id"],
+            [_liq_line(
+                mat_moto,
+                [_alloc(sup1, "60", "900"), _alloc(sup2, "35", "900")],
+                ref_price="900",
+            )],
+            collector_commission={"third_party_id": str(collector.id), "amount": "1400"},
+        )
+        adjustments = _order_adjustments(db_session, body["id"])
+        assert len(adjustments) == 1 and adjustments[0].adjustment_type == "increase"
+        assert len(_entrada_accruals(db_session, body["id"])) == 1
+        pagos = db_session.execute(
+            select(MoneyMovement).where(MoneyMovement.movement_type == "payment_to_supplier")
+        ).scalars().all()
+        assert pagos == [], "este caso es SIN pago inmediato a proposito"

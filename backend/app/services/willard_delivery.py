@@ -21,7 +21,6 @@ la maquila interna se causa AL TRASLADAR, una sola vez, asi que repetirla en
 la entrega la cobraria dos veces.
 """
 import logging
-import zlib
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
@@ -31,6 +30,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
+from app.utils.advisory_locks import lock_sequences, next_number, sequence_lock_key
 from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
 from app.models.material import Material
@@ -251,6 +251,14 @@ class WillardDeliveryService:
             organization_id,
         )
         liq_dt = business_today_noon()
+
+        # Declaracion anticipada de locks (plan advisory-locks D4): la venta
+        # numera una Sale (y sus movimientos al liquidar); el abono numera el
+        # ajuste de descarga (D12) y DESPUES la factura y el par — orden inverso
+        # al canonico. Se toman aqui en orden canonico para los tres tipos.
+        lock_sequences(
+            db, organization_id, "sale_number", "movement_number", "adjustment_number"
+        )
 
         # 1. kg de plomo por linea, desde la formula VIGENTE (snapshot al liquidar)
         total_kg = self._compute_lead_kg(db, delivery, organization_id, warnings)
@@ -1086,31 +1094,14 @@ class WillardDeliveryService:
 
     @staticmethod
     def _lock_key(organization_id: UUID, series: str) -> int:
-        """Llave ESTABLE del advisory lock (#105 D3, F2 de QA).
-
-        `hash()` de un str esta aleatorizado por proceso (PYTHONHASHSEED): dos
-        workers de uvicorn calcularian llaves distintas para la misma org y el
-        lock no serializaria entre procesos (lo salvaba solo el indice unico,
-        con un 500 en vez de un duplicado). crc32 es determinista y cabe en el
-        bigint del lock. El mismo defecto vive en otros 11 sitios del repo —
-        backlog, no este ciclo.
+        """Llave ESTABLE del advisory lock (#105 D3, F2 de QA) — hoy delega en el
+        helper unico; la cadena (`org:willard_delivery:serie`) es la misma que
+        #105 estreno, asi que el test que la compara contra crc32 sigue valiendo.
         """
-        return zlib.crc32(f"{organization_id}:willard_delivery:{series}".encode("utf-8"))
-
+        return sequence_lock_key(organization_id, "willard_delivery", series)
     def _next_number(self, db: Session, organization_id: UUID, series: str) -> int:
         """Siguiente numero de la SERIE (#105 D2): venta y abono cuentan aparte."""
-        db.execute(
-            text("SELECT pg_advisory_xact_lock(:lock_id)"),
-            {"lock_id": self._lock_key(organization_id, series)},
-        )
-        current = db.execute(
-            select(func.max(WillardDelivery.delivery_number)).where(
-                WillardDelivery.organization_id == organization_id,
-                WillardDelivery.series == series,
-            )
-        ).scalar_one_or_none()
-        return (current or 0) + 1
-
+        return next_number(db, organization_id, "willard_delivery", series)
     def _get_or_404(
         self, db: Session, delivery_id: UUID, organization_id: UUID
     ) -> WillardDelivery:

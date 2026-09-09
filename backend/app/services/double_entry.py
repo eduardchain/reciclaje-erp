@@ -12,9 +12,10 @@ from typing import Optional, List
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, func, text, or_, cast, String
+from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number
 from app.utils.dates import business_today
 from app.models.double_entry import DoubleEntry, DoubleEntryLine
 from app.models.purchase import Purchase, PurchaseLine
@@ -102,7 +103,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
         print(f"🔄 Registering double-entry #{double_entry_number} ({len(obj_in.lines)} lineas)")
 
         # Step 6: Crear Purchase (registered, sin liquidar)
-        purchase_number = self._generate_purchase_number(db, organization_id)
+        purchase_number = next_number(db, organization_id, "purchase_number")
         purchase = Purchase(
             organization_id=organization_id,
             purchase_number=purchase_number,
@@ -129,7 +130,7 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             ))
 
         # Step 7: Crear Sale (registered, sin liquidar)
-        sale_number = self._generate_sale_number(db, organization_id)
+        sale_number = next_number(db, organization_id, "sale_number")
         sale = Sale(
             organization_id=organization_id,
             sale_number=sale_number,
@@ -845,28 +846,13 @@ class CRUDDoubleEntry(CRUDBase[DoubleEntry, DoubleEntryCreate, DoubleEntryUpdate
             ))
 
     def _generate_double_entry_number(self, db: Session, organization_id: UUID) -> int:
-        lock_id = hash(f"double_entries_{organization_id}") % (2**31)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-        return db.execute(
-            text("SELECT COALESCE(MAX(double_entry_number), 0) + 1 FROM double_entries WHERE organization_id = :org_id"),
-            {"org_id": str(organization_id)}
-        ).scalar()
+        """Siguiente `double_entry_number` de la org (lock estable + MAX+1 en el helper unico).
 
-    def _generate_purchase_number(self, db: Session, organization_id: UUID) -> int:
-        lock_id = hash(f"purchases_{organization_id}") % (2**31)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-        return db.execute(
-            text("SELECT COALESCE(MAX(purchase_number), 0) + 1 FROM purchases WHERE organization_id = :org_id"),
-            {"org_id": str(organization_id)}
-        ).scalar()
-
-    def _generate_sale_number(self, db: Session, organization_id: UUID) -> int:
-        lock_id = hash(f"sales_{organization_id}") % (2**31)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-        return db.execute(
-            text("SELECT COALESCE(MAX(sale_number), 0) + 1 FROM sales WHERE organization_id = :org_id"),
-            {"org_id": str(organization_id)}
-        ).scalar()
+        Los numeros de la compra y la venta internas del cruce salen de `next_number`
+        con los MISMOS nombres de secuencia que compras y ventas directas — antes este
+        servicio tenia sus propias copias con OTRA llave (defecto B del plan).
+        """
+        return next_number(db, organization_id, "double_entry_number")
 
     def _calculate_commission(
         self,

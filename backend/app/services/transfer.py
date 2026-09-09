@@ -24,6 +24,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number, lock_sequences
 from app.models.exception_task import DiscrepancyTask
 from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.inventory_movement import InventoryMovement
@@ -315,6 +316,14 @@ class TransferService:
         tolerance = Decimal(
             str(get_org_setting(db, organization_id, "transfer_tolerance_pct"))
         )
+
+        # Declaracion anticipada de locks (plan advisory-locks D4): la recepcion
+        # numera ajustes (merma) y movimientos (par de maquila) — por linea, en
+        # ese orden, que es el INVERSO del canonico. Tomandolos aqui en orden
+        # canonico, las adquisiciones de abajo son re-entrantes y ningun otro
+        # flujo (p. ej. una Entrada liquidando con pago inmediato) puede
+        # esperarnos en cruz.
+        lock_sequences(db, organization_id, "movement_number", "adjustment_number")
 
         warnings: list[str] = []
         for rl in data.lines:
@@ -633,6 +642,11 @@ class TransferService:
         warnings: list[str] = []
         now = datetime.now(timezone.utc)
         receipt_date = transfer.received_date or self._today_noon()
+
+        # Declaracion anticipada de locks (plan advisory-locks D4): resolver
+        # numera merma (decrease) y excedente (increase) ANTES del par de
+        # maquila de la linea liberada — mismo orden inverso que receive.
+        lock_sequences(db, organization_id, "movement_number", "adjustment_number")
 
         for rl in data.lines:
             line = lines_by_id.get(rl.transfer_line_id)
@@ -1222,16 +1236,8 @@ class TransferService:
             )
 
     def _generate_transfer_number(self, db: Session, organization_id: UUID) -> int:
-        # Advisory lock por org (patron inbound_order._generate_order_number)
-        lock_id = hash(str(organization_id)) % (2**63)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-        max_number = db.scalar(
-            select(func.coalesce(func.max(Transfer.transfer_number), 0)).where(
-                Transfer.organization_id == organization_id
-            )
-        )
-        return int(max_number or 0) + 1
-
+        """Siguiente `transfer_number` de la org: lock estable + MAX+1 en el helper unico (`app/utils/advisory_locks.py`)."""
+        return next_number(db, organization_id, "transfer_number")
     def _get_or_404(
         self,
         db: Session,

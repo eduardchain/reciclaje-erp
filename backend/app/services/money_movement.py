@@ -23,6 +23,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text, or_, and_, false, cast, String
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number
 from app.models.money_movement import MoneyMovement, VALID_MOVEMENT_TYPES
 from app.models.money_account import MoneyAccount
 from app.models.third_party import ThirdParty
@@ -1514,21 +1515,8 @@ class CRUDMoneyMovement:
     # ======================================================================
 
     def _generate_movement_number(self, db: Session, organization_id: UUID) -> int:
-        """
-        Generar numero secuencial por organizacion con advisory lock.
-
-        Usa pg_advisory_xact_lock para prevenir race conditions.
-        El lock se libera automaticamente al finalizar la transaccion.
-        """
-        lock_id = hash(f"{organization_id}-movements") % (2**31)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-
-        stmt = select(func.max(MoneyMovement.movement_number)).where(
-            MoneyMovement.organization_id == organization_id
-        )
-        max_number = db.scalar(stmt)
-        return (max_number or 0) + 1
-
+        """Siguiente `movement_number` de la org: lock estable + MAX+1 en el helper unico (`app/utils/advisory_locks.py`)."""
+        return next_number(db, organization_id, "movement_number")
     def _create_movement(
         self,
         db: Session,

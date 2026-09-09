@@ -20,6 +20,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number
 from app.models.material_transformation import MaterialTransformation, MaterialTransformationLine
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
@@ -597,16 +598,8 @@ class CRUDMaterialTransformation:
     # ======================================================================
 
     def _generate_transformation_number(self, db: Session, organization_id: UUID) -> int:
-        """Generar numero secuencial con advisory lock."""
-        lock_id = hash(f"{organization_id}-transformations") % (2**31)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-
-        stmt = select(func.max(MaterialTransformation.transformation_number)).where(
-            MaterialTransformation.organization_id == organization_id
-        )
-        max_number = db.scalar(stmt)
-        return (max_number or 0) + 1
-
+        """Siguiente `transformation_number` de la org: lock estable + MAX+1 en el helper unico (`app/utils/advisory_locks.py`)."""
+        return next_number(db, organization_id, "transformation_number")
     def _create_inventory_movement(
         self,
         db: Session,

@@ -23,6 +23,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number
 from app.models.sale import Sale, SaleLine, SaleCommission
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
@@ -1231,34 +1232,12 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             )
 
     def _generate_sale_number(self, db: Session, organization_id: UUID) -> int:
+        """Siguiente `sale_number` de la org (lock estable + MAX+1 en el helper unico).
+
+        Doble partida y las salidas de plomo piden el MISMO nombre de secuencia.
         """
-        Generate next sequential sale number for organization.
-        
-        Uses PostgreSQL advisory lock to prevent race conditions.
-        Lock is automatically released at transaction end.
-        
-        Args:
-            db: Database session
-            organization_id: Organization UUID
-            
-        Returns:
-            Next sale number (1, 2, 3, ...)
-        """
-        # Acquire advisory lock for this organization's sales
-        lock_id = hash(f"{organization_id}-sales") % (2**31)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-        
-        # Get max sale number
-        stmt = select(func.max(Sale.sale_number)).where(
-            Sale.organization_id == organization_id
-        )
-        max_number = db.scalar(stmt)
-        
-        next_number = (max_number or 0) + 1
-        print(f"🔢 Generated sale number: {next_number}")
-        
-        return next_number
-    
+        return next_number(db, organization_id, "sale_number")
+
     def _process_commissions(
         self,
         db: Session,
