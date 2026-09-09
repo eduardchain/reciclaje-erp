@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import { MoneyInput } from "@/components/shared/MoneyInput";
 import { FormLineGrid } from "@/components/shared/FormLineGrid";
 import { useMaterials, useThirdParties, useWarehouses } from "@/hooks/useMasterData";
 import { useCreateWillardDelivery } from "@/hooks/useWillardDeliveries";
+import { useKgAccounts } from "@/hooks/useKgLedger";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { toLocalDateInput } from "@/utils/formatters";
 import { DELIVERY_TYPE_LABELS, type WillardDeliveryType } from "@/types/willard-delivery";
 
@@ -41,6 +43,8 @@ export default function WillardDeliveryCreatePage() {
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
   const { data: thirdPartiesData } = useThirdParties();
+  const { data: kgAccounts } = useKgAccounts();
+  const { getSetting } = useOrgSettings();
 
   const materials = useMemo(() => materialsData?.items ?? [], [materialsData]);
   const warehouses = useMemo(() => {
@@ -48,6 +52,35 @@ export default function WillardDeliveryCreatePage() {
     return list.filter((w) => w.is_active && !w.is_transit);
   }, [warehousesData]);
   const thirdParties = useMemo(() => thirdPartiesData?.items ?? [], [thirdPartiesData]);
+
+  // D8 — la bodega de origen SIEMPRE es la planta. El backend ya lo defiende con
+  // un 400, pero ofrecer seis opciones donde cinco llevan a error es pedirle al
+  // usuario que descubra por ensayo y error un valor que el sistema ya conoce.
+  const plantWarehouseId = (getSetting("willard_sede_drosses") as string | null) ?? "";
+  const plantWarehouse = warehouses.find((w) => w.id === plantWarehouseId);
+
+  // D7 — el tercero de un ABONO es el titular de la cuenta kg que se descarga.
+  // La venta NO: descarga `intersede`, que no puede tener titular, y venderle
+  // plomo a otro cliente es legitimo.
+  const holderId = useMemo(() => {
+    if (deliveryType === "venta") return null;
+    const type = deliveryType === "abono_bateria" ? "willard_baterias" : "willard_drosses";
+    return (kgAccounts ?? []).find(
+      (a) => a.account_type === type && a.is_active
+    )?.third_party_id ?? null;
+  }, [deliveryType, kgAccounts]);
+  const holderName = useMemo(() => {
+    return (kgAccounts ?? []).find(
+      (a) => a.third_party_id === holderId
+    )?.third_party_name ?? null;
+  }, [holderId, kgAccounts]);
+
+  useEffect(() => {
+    if (plantWarehouseId && warehouseId !== plantWarehouseId) setWarehouseId(plantWarehouseId);
+  }, [plantWarehouseId, warehouseId]);
+  useEffect(() => {
+    if (holderId) setThirdPartyId(holderId);
+  }, [holderId]);
 
   const unitOf = (materialId: string) =>
     materials.find((m) => m.id === materialId)?.default_unit ?? "kg";
@@ -103,21 +136,37 @@ export default function WillardDeliveryCreatePage() {
           </div>
           <div className="space-y-1">
             <Label>Bodega de origen *</Label>
-            <EntitySelect
-              value={warehouseId}
-              onChange={setWarehouseId}
-              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-              placeholder="Seleccionar bodega…"
-            />
+            {plantWarehouse ? (
+              <>
+                <Input value={plantWarehouse.name} disabled />
+                <p className="text-xs text-slate-400">El plomo a Willard sale siempre de la planta.</p>
+              </>
+            ) : (
+              <EntitySelect
+                value={warehouseId}
+                onChange={setWarehouseId}
+                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                placeholder="Seleccionar bodega…"
+              />
+            )}
           </div>
           <div className="space-y-1">
-            <Label>Tercero (Willard) *</Label>
-            <EntitySelect
-              value={thirdPartyId}
-              onChange={setThirdPartyId}
-              options={thirdParties.map((t) => ({ id: t.id, label: t.name }))}
-              placeholder="Seleccionar tercero…"
-            />
+            <Label>{deliveryType === "venta" ? "Cliente *" : "Tercero (Willard) *"}</Label>
+            {holderId && holderName ? (
+              <>
+                <Input value={holderName} disabled />
+                <p className="text-xs text-slate-400">
+                  El abono salda la deuda en kg de {holderName}, así que va a ese mismo tercero.
+                </p>
+              </>
+            ) : (
+              <EntitySelect
+                value={thirdPartyId}
+                onChange={setThirdPartyId}
+                options={thirdParties.map((t) => ({ id: t.id, label: t.name }))}
+                placeholder="Seleccionar tercero…"
+              />
+            )}
           </div>
           <div className="space-y-1">
             <Label>Fecha *</Label>

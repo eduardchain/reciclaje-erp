@@ -116,6 +116,12 @@ export interface MaterialConversionFormulaListResponse {
 
 export type WillardWorld = "none" | "postconsumo" | "drosses";
 
+/** Plomo ENTREGABLE a Willard (#103). Reemplaza la heuristica "sin formula = es
+ *  plomo": ni la formula ni la categoria clasifican — el aluminio y el plastico
+ *  tampoco tienen formula, y la categoria "Plomo" de SAC contiene cajas
+ *  plasticas. Crudo se entrega en las 3 modalidades; puro normalmente se vende. */
+export type LeadProduct = "none" | "crudo" | "puro";
+
 export interface MaterialKgProfileResponse {
   id: string;
   organization_id: string;
@@ -125,12 +131,18 @@ export interface MaterialKgProfileResponse {
   material_unit: string | null;
   compra_regular: boolean;
   willard_world: WillardWorld;
+  lead_product: LeadProduct;
   created_at: string;
 }
 
 export interface MaterialKgProfileUpsert {
   compra_regular: boolean;
   willard_world: WillardWorld;
+  /** Obligatorio: el backend responde 422 si falta. No es un descuido — un
+   *  caller que lo omita borraria la marca de plomo en silencio (el PUT
+   *  reemplaza el perfil entero), y es la misma pantalla a la que el guard
+   *  manda al usuario a marcarla. */
+  lead_product: LeadProduct;
 }
 
 export interface MaterialKgProfileListResponse {

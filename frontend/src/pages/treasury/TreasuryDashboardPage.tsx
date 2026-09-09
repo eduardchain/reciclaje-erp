@@ -61,6 +61,8 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   commission_accrual: "Comisión Causada",
   depreciation_expense: "Depreciación Activo",
   profit_distribution: "Repartición Utilidades",
+  internal_maquila_expense: "Maquila Intersede (Gasto sede origen)",
+  internal_maquila_income: "Maquila Intersede (Ingreso sede destino)",
 };
 
 export default function TreasuryDashboardPage() {

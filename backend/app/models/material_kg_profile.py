@@ -57,6 +57,18 @@ class MaterialKgProfile(Base, OrganizationMixin, TimestampMixin):
         comment="none | postconsumo | drosses — ruteo de cuenta kg por linea",
     )
 
+    lead_product: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="none",
+        server_default="none",
+        comment=(
+            "none | crudo | puro — plomo entregable a Willard. Reemplaza la "
+            "heuristica 'sin formula = es plomo', que servia para CALCULAR y se "
+            "usaba para CLASIFICAR (con ella el plastico saldaba la deuda 1:1)."
+        ),
+    )
+
     created_by: Mapped[Optional[UUID]] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -71,6 +83,10 @@ class MaterialKgProfile(Base, OrganizationMixin, TimestampMixin):
             "willard_world IN ('none', 'postconsumo', 'drosses')",
             name="ck_material_kg_profiles_world",
         ),
+        CheckConstraint(
+            "lead_product IN ('none', 'crudo', 'puro')",
+            name="ck_material_kg_profiles_lead_product",
+        ),
         Index("ix_material_kg_profiles_material", "material_id"),
     )
 
@@ -80,5 +96,6 @@ class MaterialKgProfile(Base, OrganizationMixin, TimestampMixin):
     def __repr__(self) -> str:
         return (
             f"<MaterialKgProfile material={self.material_id} "
-            f"compra_regular={self.compra_regular} world={self.willard_world}>"
+            f"compra_regular={self.compra_regular} world={self.willard_world} "
+            f"lead={self.lead_product}>"
         )

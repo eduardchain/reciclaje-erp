@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ClipboardCheck, Ban, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, ClipboardCheck, Ban, CheckCircle2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -72,6 +72,15 @@ export default function WillardDeliveryDetailPage() {
             <p className="text-sm text-amber-900 flex-1">
               Registrada. Antes de liquidar hay que certificar los pesos de báscula.
             </p>
+            {hasPermission("sales.edit") && (
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/willard-deliveries/${delivery.id}/edit`)}
+                className="w-full sm:w-auto"
+              >
+                <Pencil className="h-4 w-4 mr-2" /> Editar
+              </Button>
+            )}
             {hasPermission("sales.review") && (
               <Button
                 onClick={() => reviewMutation.mutate(delivery.id)}

@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
 from app.models.material import Material
+from app.models.material_kg_profile import MaterialKgProfile
 from app.models.money_movement import MoneyMovement
 from app.models.sale import Sale
 from app.models.service_tariff import ServiceTariff
@@ -82,11 +83,20 @@ class WillardDeliveryService:
         data: WillardDeliveryCreate,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
-    ) -> WillardDelivery:
+    ) -> tuple[WillardDelivery, list[str]]:
         warehouse = self._validate_warehouse(db, data.warehouse_id, organization_id)
         self._validate_plant_origin(db, organization_id, warehouse)
         self._validate_third_party(db, data.third_party_id, organization_id)
+        self._validate_willard_holder(
+            db, data.third_party_id, data.delivery_type, organization_id
+        )
         self._validate_not_future(data.date)
+        warnings = self._validate_lead_products(
+            db,
+            [ln.material_id for ln in data.lines],
+            data.delivery_type,
+            organization_id,
+        )
 
         delivery = WillardDelivery(
             organization_id=organization_id,
@@ -109,7 +119,7 @@ class WillardDeliveryService:
         self._replace_lines(db, delivery, data.lines, organization_id)
         db.commit()
         db.refresh(delivery)
-        return delivery
+        return delivery, warnings
 
     def update(
         self,
@@ -118,7 +128,7 @@ class WillardDeliveryService:
         data: WillardDeliveryUpdate,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
-    ) -> WillardDelivery:
+    ) -> tuple[WillardDelivery, list[str]]:
         delivery = self._get_or_404(db, delivery_id, organization_id)
         if delivery.status in ("liquidated", "annulled"):
             raise _err(
@@ -133,6 +143,27 @@ class WillardDeliveryService:
             self._validate_plant_origin(db, organization_id, wh)
         if "date" in fields and fields["date"]:
             self._validate_not_future(fields["date"])
+
+        new_type = fields.get("delivery_type") or delivery.delivery_type
+        if fields.get("third_party_id"):
+            self._validate_third_party(db, fields["third_party_id"], organization_id)
+            self._validate_willard_holder(
+                db, fields["third_party_id"], new_type, organization_id
+            )
+
+        # ANTES de mutar nada. Si las lineas cambian se validan las nuevas; si no,
+        # se revalidan las vigentes, porque cambiar el TIPO tambien puede volver
+        # invalido lo que ya estaba (una salida de puro que pasa a ser un abono).
+        warnings = self._validate_lead_products(
+            db,
+            (
+                [ln["material_id"] for ln in lines]
+                if lines is not None
+                else [ln.material_id for ln in delivery.lines]
+            ),
+            new_type,
+            organization_id,
+        )
 
         for key, value in fields.items():
             setattr(delivery, key, value)
@@ -155,7 +186,7 @@ class WillardDeliveryService:
 
         db.commit()
         db.refresh(delivery)
-        return delivery
+        return delivery, warnings
 
     def review(
         self,
@@ -163,7 +194,7 @@ class WillardDeliveryService:
         delivery_id: UUID,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
-    ) -> WillardDelivery:
+    ) -> tuple[WillardDelivery, list[str]]:
         """Certifica los pesos. Sin peso no se puede revisar (#95 Q-13)."""
         delivery = self._get_or_404(db, delivery_id, organization_id)
         if delivery.status != "draft":
@@ -173,13 +204,19 @@ class WillardDeliveryService:
             )
 
         self._require_scale_weights(db, delivery)
+        warnings = self._validate_lead_products(
+            db,
+            [ln.material_id for ln in delivery.lines],
+            delivery.delivery_type,
+            organization_id,
+        )
 
         delivery.status = "reviewed"
         delivery.reviewed_by = user_id
         delivery.reviewed_at = datetime.now(tz=None).astimezone()
         db.commit()
         db.refresh(delivery)
-        return delivery
+        return delivery, warnings
 
     def liquidate(
         self,
@@ -211,7 +248,12 @@ class WillardDeliveryService:
         if delivery.delivery_type == "venta":
             self._require_customer(db, delivery)
 
-        warnings: list[str] = []
+        warnings: list[str] = self._validate_lead_products(
+            db,
+            [ln.material_id for ln in delivery.lines],
+            delivery.delivery_type,
+            organization_id,
+        )
         liq_dt = business_today_noon()
 
         # 1. kg de plomo por linea, desde la formula VIGENTE (snapshot al liquidar)
@@ -293,7 +335,12 @@ class WillardDeliveryService:
             material = db.get(Material, line.material_id)
             formula = formulas.get(line.material_id)
             if formula is None:
-                # Sin formula el material YA es plomo: la cantidad es el kg.
+                # Sin formula la conversion es 1:1: la cantidad YA esta en kg de
+                # plomo. Esto CALCULA, no clasifica — que el material sea plomo
+                # entregable lo decide `lead_product` en `_validate_lead_products`,
+                # que ya corrio. Usar esta ausencia como clasificador es el defecto
+                # que ese guard cierra: el aluminio y el plastico tampoco tienen
+                # formula, y saldaban la deuda 1:1.
                 kg = line.quantity
                 line.conversion_formula_snapshot = None
             else:
@@ -835,6 +882,115 @@ class WillardDeliveryService:
             f"'{tp.name if tp else 'El tercero'}' no está marcado como cliente, "
             "así que no se le puede facturar la venta. Agréguele la categoría de "
             "cliente en Terceros y vuelva a liquidar."
+        )
+
+    def _validate_lead_products(
+        self,
+        db: Session,
+        material_ids: list[UUID],
+        delivery_type: str,
+        organization_id: UUID,
+    ) -> list[str]:
+        """
+        Solo el plomo entregable sale hacia Willard.
+
+        UN validador para los CUATRO puntos de entrada (`create`, `update`,
+        `review`, `liquidate`) — calco de `_validate_willard_capture` (#81). Si
+        viviera solo en la liquidacion, el material equivocado se aceptaria en el
+        patio y el error saldria dias despues, con el camion ido.
+
+        `annul` queda fuera A PROPOSITO (#99): anular no valida — una salida vieja
+        tiene que poder anularse aunque su material hoy no pasara el guard.
+
+        ⚠️ La clasificacion sale de `lead_product` y de NADA MAS. NO reutilizar
+        "sin formula" (el aluminio y el plastico tampoco tienen) ni la categoria
+        (la categoria "Plomo" de SAC contiene cajas plasticas): ese atajo ES el
+        defecto que este guard cierra.
+        """
+        if not material_ids:
+            return []
+
+        profiles = {
+            p.material_id: p
+            for p in db.execute(
+                select(MaterialKgProfile).where(
+                    MaterialKgProfile.organization_id == organization_id,
+                    MaterialKgProfile.material_id.in_(material_ids),
+                )
+            ).scalars()
+        }
+
+        warnings: list[str] = []
+        for material_id in material_ids:
+            profile = profiles.get(material_id)
+            # Sin fila de perfil = sin marcar = bloqueado (fail-closed): el modo
+            # de falla correcto es no dejar pasar, con un mensaje que dice donde
+            # marcarlo, en vez de seguir calculando mal en silencio.
+            lead = profile.lead_product if profile is not None else "none"
+            material = db.get(Material, material_id)
+            label = (
+                f"'{material.code} {material.name}'" if material else "El material"
+            )
+            if lead == "none":
+                raise _err(
+                    f"{label} no esta marcado como plomo entregable a Willard. "
+                    "Solo el plomo crudo o puro salda la deuda. Marquelo en "
+                    "Config -> Materiales (kg) si corresponde."
+                )
+            if lead == "puro" and delivery_type in ("abono_bateria", "abono_material"):
+                # Avisa, no bloquea: entregar puro NO fabrica un servicio (la
+                # fundicion ocurrio, la maquila facturada es trabajo real); lo
+                # raro es regalar el margen de refinacion. Hugo describe el puro
+                # como lo que se vende, no como algo prohibido en un abono.
+                warnings.append(
+                    f"Esta abonando con PLOMO PURO ({label}). El puro normalmente "
+                    "se vende; el abono se hace con crudo."
+                )
+        return warnings
+
+    def _validate_willard_holder(
+        self,
+        db: Session,
+        third_party_id: UUID,
+        delivery_type: str,
+        organization_id: UUID,
+    ) -> None:
+        """
+        En un ABONO el tercero tiene que ser el titular de la cuenta kg que se
+        descarga. Las cuentas se resuelven por `account_type`, NO por el tercero
+        del documento: sin esto una salida contra otro tercero descarga la deuda
+        de Willard y le factura la maquila y el flete a ese otro.
+
+        La VENTA queda fuera y no es un olvido: descarga `intersede`, que por
+        CHECK no puede tener titular, y ya tiene su propia regla
+        (`_require_customer`) — venderle plomo a otro cliente es legitimo.
+
+        Si la cuenta todavia no existe NO se bloquea la captura: sin cuenta la
+        salida no se puede liquidar, o sea que no hay efecto financiero que
+        proteger, y reclamar la configuracion faltante es tarea de la liquidacion.
+        """
+        if delivery_type not in ("abono_bateria", "abono_material"):
+            return
+        account_type = next(
+            (a for a in DISCHARGE_MAP[delivery_type] if a.startswith("willard_")),
+            None,
+        )
+        if account_type is None:
+            return
+        try:
+            account = self._resolve_kg_account(db, organization_id, account_type)
+        except HTTPException:
+            return
+        if account.third_party_id is None or str(account.third_party_id) == str(
+            third_party_id
+        ):
+            return
+        holder = db.get(ThirdParty, account.third_party_id)
+        raise _err(
+            "El abono salda la deuda en kg de "
+            f"{holder.name if holder else 'el titular de la cuenta'}, "
+            "asi que la salida tiene que ir a ese mismo tercero.",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
 
     def _validate_third_party(

@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 WillardWorld = Literal["none", "postconsumo", "drosses"]
+LeadProduct = Literal["none", "crudo", "puro"]
 
 
 class MaterialKgProfileUpsert(BaseModel):
@@ -15,6 +16,15 @@ class MaterialKgProfileUpsert(BaseModel):
 
     compra_regular: bool = False
     willard_world: WillardWorld = "none"
+
+    # SIN default a proposito (C5 del QA de SAC). El schema es `extra="forbid"`
+    # pero el PUT reemplaza el perfil entero: un caller que mande solo
+    # {compra_regular, willard_world} —como hacia la pantalla de Config— borraria
+    # la marca de plomo EN SILENCIO, y es la misma pantalla a la que el guard
+    # manda al usuario a marcarla. Obligatorio => 422 si falta => ningun caller
+    # parcial puede borrarla. Es el NOT NULL de la columna aplicado al camino de
+    # escritura: hacer imposible lo incorrecto en vez de vigilarlo (#94/#102).
+    lead_product: LeadProduct
 
 
 class MaterialKgProfileResponse(BaseModel):
@@ -28,6 +38,7 @@ class MaterialKgProfileResponse(BaseModel):
     material_unit: Optional[str] = None
     compra_regular: bool
     willard_world: str
+    lead_product: str
     created_at: datetime
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Scale, Warehouse, Flame, FlaskConical, ArrowDownUp, Pencil } from "lucide-react";
+import { Plus, Scale, Warehouse, ArrowDownUp, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -194,11 +194,14 @@ export default function KgLedgerPage() {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <KpiCard label="Willard" metric={asMetric(summary?.total_willard_kg ?? 0)} icon={<Scale className="h-4 w-4" />} accentColor="sky" formatValue={(n) => formatWeight(n)} />
           <KpiCard label="Intersede" metric={asMetric(summary?.total_intersede_kg ?? 0)} icon={<Warehouse className="h-4 w-4" />} accentColor="violet" formatValue={(n) => formatWeight(n)} />
-          <KpiCard label="Horno" metric={asMetric(summary?.total_intra_horno_kg ?? 0)} icon={<Flame className="h-4 w-4" />} accentColor="amber" formatValue={(n) => formatWeight(n)} />
-          <KpiCard label="Crisol" metric={asMetric(summary?.total_crisol_kg ?? 0)} icon={<FlaskConical className="h-4 w-4" />} accentColor="teal" formatValue={(n) => formatWeight(n)} />
+          {/* Horno y Crisol OCULTAS (#103 D8): no hay servicio, endpoint ni siembra
+              que escriba en esas cuentas — `plant_process.py` solo lo importa
+              `models/__init__.py`, para crear las tablas. Dirian 0 para siempre, y
+              la lectura natural es "todavia no hemos cargado el horno", no "esto no
+              existe". Vuelven con el circuito de planta, que es su ciclo propio. */}
         </div>
       )}
 

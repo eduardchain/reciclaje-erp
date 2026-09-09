@@ -30,6 +30,10 @@ def _mat(db, org_id, code, unit="kg"):
 
 
 def _put(client, headers, material_id, **body):
+    # #103: `lead_product` es obligatorio en el schema. El default de este helper
+    # es "none" para que los tests del CRUD sigan probando lo suyo; el test que
+    # vigila la obligatoriedad lo omite a proposito.
+    body.setdefault("lead_product", "none")
     return client.put(f"{PROFILES_URL}/{material_id}", headers=headers, json=body)
 
 
@@ -126,3 +130,34 @@ class TestMaterialKgProfile:
         assert client.get(PROFILES_URL, headers=org_headers2).status_code == 200
         resp = _put(client, org_headers2, mat.id, willard_world="drosses")
         assert resp.status_code == 403
+
+
+class TestLeadProductObligatorio:
+    """#103 C5 — el PUT reemplaza el perfil entero.
+
+    Con `lead_product` opcional, un caller parcial (la propia pantalla de Config,
+    que mandaba solo dos campos) borraria la marca de plomo EN SILENCIO — y es la
+    misma pantalla a la que el guard manda al usuario a marcarla. Obligatorio
+    convierte ese modo de falla en un 422 imposible de ignorar.
+    """
+
+    def test_omitirlo_es_422(self, client, org_headers, db_session, test_organization):
+        mat = _mat(db_session, test_organization.id, "PB-X", unit="kg")
+        resp = client.put(
+            f"{PROFILES_URL}/{mat.id}",
+            headers=org_headers,
+            json={"compra_regular": True, "willard_world": "none"},
+        )
+        assert resp.status_code == 422, resp.text
+
+    def test_la_marca_sobrevive_una_edicion_del_mundo(
+        self, client, org_headers, db_session, test_organization
+    ):
+        """El escenario exacto de C5: marcar crudo y despues editar el mundo."""
+        mat = _mat(db_session, test_organization.id, "PB-Y", unit="kg")
+        assert _put(client, org_headers, mat.id, compra_regular=False,
+                    willard_world="none", lead_product="crudo").status_code == 200
+        r = _put(client, org_headers, mat.id, compra_regular=True,
+                 willard_world="drosses", lead_product="crudo")
+        assert r.status_code == 200, r.text
+        assert r.json()["lead_product"] == "crudo"

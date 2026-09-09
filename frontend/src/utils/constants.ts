@@ -40,6 +40,7 @@ export const ROUTES = {
   /** W1 — salidas de plomo a Willard */
   WILLARD_DELIVERIES: "/willard-deliveries",
   WILLARD_DELIVERY_NEW: "/willard-deliveries/new",
+  WILLARD_DELIVERY_EDIT: "/willard-deliveries/:id/edit",
   WILLARD_DELIVERY_DETAIL: "/willard-deliveries/:id",
   TRANSFERS: "/transfers",
   TRANSFER_NEW: "/transfers/new",

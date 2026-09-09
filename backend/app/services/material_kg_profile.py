@@ -44,6 +44,7 @@ class MaterialKgProfileService:
             db.add(profile)
         profile.compra_regular = obj_in.compra_regular
         profile.willard_world = obj_in.willard_world
+        profile.lead_product = obj_in.lead_product
 
         db.commit()
         db.refresh(profile)

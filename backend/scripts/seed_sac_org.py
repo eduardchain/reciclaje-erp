@@ -172,49 +172,54 @@ MATERIAL_CATEGORIES = ["Baterías", "Scrap", "Plomo", "Chatarra", "Aluminio", "D
 #   formula drosses_to_lead -> param = lead_percentage (fraccion 0-1)
 # UN: MR* (drosses de maquila) -> UN2 Maquila Willard; resto -> UN1 Reciclaje
 # Plomo (asignacion declarada, reclasificable en Config sin migracion).
-MATERIALS: list[tuple[str, str, str, str, str, bool, Optional[str], Optional[float]]] = [
+MATERIALS: list[tuple[str, str, str, str, str, bool, Optional[str], Optional[float], str]] = [
     # --- Baterias (unidad, postconsumo, compra regular tambien) ---
-    ("BAT-G07", "BATERIAS GRUPO 0,7", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 5.1),
-    ("BAT-G08", "BATERIAS GRUPO 0,8", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 6.5),
-    ("BAT-G1", "BATERIAS GRUPO 1", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 7.3),
-    ("BAT-G2", "BATERIAS GRUPO 2", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 9.3),
-    ("BAT-G3", "BATERIAS GRUPO 3", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 11.3),
-    ("BAT-G4", "BATERIAS GRUPO 4", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 16.9),
-    ("BAT-G5", "BATERIAS GRUPO 5", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 22.9),
+    ("BAT-G07", "BATERIAS GRUPO 0,7", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 5.1, "none"),
+    ("BAT-G08", "BATERIAS GRUPO 0,8", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 6.5, "none"),
+    ("BAT-G1", "BATERIAS GRUPO 1", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 7.3, "none"),
+    ("BAT-G2", "BATERIAS GRUPO 2", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 9.3, "none"),
+    ("BAT-G3", "BATERIAS GRUPO 3", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 11.3, "none"),
+    ("BAT-G4", "BATERIAS GRUPO 4", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 16.9, "none"),
+    ("BAT-G5", "BATERIAS GRUPO 5", "Baterías", "unidad", "postconsumo", True, "battery_to_lead", 22.9, "none"),
     # --- Scrap ---
-    ("SCR-MOTO", "SCRAP MOTO", "Scrap", "kg", "postconsumo", True, "drosses_to_lead", 0.49),
-    ("SCR-SG", "SCRAP SECO GRANDE", "Scrap", "kg", "postconsumo", True, "drosses_to_lead", 0.59),
-    ("SCR-SP", "SCRAP SECO PEQUEÑO", "Scrap", "kg", "none", True, None, None),
-    ("SCR-LSB", "SCRAP LIMPIO SIN BORNE", "Scrap", "kg", "none", True, None, None),
-    ("SCR-LCB", "SCRAP LIMPIO CON BORNE", "Scrap", "kg", "none", True, None, None),
+    ("SCR-MOTO", "SCRAP MOTO", "Scrap", "kg", "postconsumo", True, "drosses_to_lead", 0.49, "none"),
+    ("SCR-SG", "SCRAP SECO GRANDE", "Scrap", "kg", "postconsumo", True, "drosses_to_lead", 0.59, "none"),
+    ("SCR-SP", "SCRAP SECO PEQUEÑO", "Scrap", "kg", "none", True, None, None, "none"),
+    ("SCR-LSB", "SCRAP LIMPIO SIN BORNE", "Scrap", "kg", "none", True, None, None, "none"),
+    ("SCR-LCB", "SCRAP LIMPIO CON BORNE", "Scrap", "kg", "none", True, None, None, "none"),
     # --- Plomo / producto ---
-    ("PLO-LIN", "PLOMO LINGOTES", "Plomo", "kg", "none", True, None, None),
-    ("PLO-RET", "PLOMO RETAL", "Plomo", "kg", "none", True, None, None),
-    ("PLO-CAS", "PLOMO CASCARA", "Plomo", "kg", "none", True, None, None),
-    ("CAJ-PLA", "CAJAS PLÁSTICAS", "Plomo", "kg", "none", True, None, None),
-    ("CAJ-ACR", "CAJAS ACRILICAS", "Plomo", "kg", "none", True, None, None),
-    ("POL-DUC", "POLVODUCTO", "Plomo", "kg", "none", True, None, None),
-    ("PP-MOL", "PP MOLIDO", "Plomo", "kg", "none", True, None, None),
-    ("TAP-BOR", "TAPAS CON BORNE", "Plomo", "kg", "none", True, None, None),
-    ("GUA-RRU", "GUARRÚ", "Plomo", "kg", "none", True, None, None),
-    ("LOD-01", "LODO", "Plomo", "kg", "none", True, None, None),
+    # Hugo (28-ago, :369): "el crudo es el que se entrega por eso" (las 3
+    # modalidades) y el puro "entregarlo a la venta". Ninguno de los dos existia
+    # como material: sin ellos el guard no tiene nada que dejar pasar.
+    ("PLO-CRU", "PLOMO CRUDO", "Plomo", "kg", "none", False, None, None, "crudo"),
+    ("PLO-PUR", "PLOMO PURO", "Plomo", "kg", "none", False, None, None, "puro"),
+    ("PLO-LIN", "PLOMO LINGOTES", "Plomo", "kg", "none", True, None, None, "none"),
+    ("PLO-RET", "PLOMO RETAL", "Plomo", "kg", "none", True, None, None, "none"),
+    ("PLO-CAS", "PLOMO CASCARA", "Plomo", "kg", "none", True, None, None, "none"),
+    ("CAJ-PLA", "CAJAS PLÁSTICAS", "Plomo", "kg", "none", True, None, None, "none"),
+    ("CAJ-ACR", "CAJAS ACRILICAS", "Plomo", "kg", "none", True, None, None, "none"),
+    ("POL-DUC", "POLVODUCTO", "Plomo", "kg", "none", True, None, None, "none"),
+    ("PP-MOL", "PP MOLIDO", "Plomo", "kg", "none", True, None, None, "none"),
+    ("TAP-BOR", "TAPAS CON BORNE", "Plomo", "kg", "none", True, None, None, "none"),
+    ("GUA-RRU", "GUARRÚ", "Plomo", "kg", "none", True, None, None, "none"),
+    ("LOD-01", "LODO", "Plomo", "kg", "none", True, None, None, "none"),
     # --- Chatarra / Aluminio ---
-    ("HIE-CHA", "HIERRO CHATARRA", "Chatarra", "kg", "none", True, None, None),
-    ("ALU-01", "ALUMINIO", "Aluminio", "kg", "none", True, None, None),
+    ("HIE-CHA", "HIERRO CHATARRA", "Chatarra", "kg", "none", True, None, None, "none"),
+    ("ALU-01", "ALUMINIO", "Aluminio", "kg", "none", True, None, None, "none"),
     # --- Drosses Willard (maquila, NO compra regular) — % plomo como fraccion ---
-    ("MR01", "GUARRU HUMEDO", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.41),
-    ("MR02", "GUARRU SECO", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.72),
-    ("MR04", "JAMICHE", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.53),
-    ("MR07", "CENIZAS DE COBRE", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.35),
-    ("MR08", "CENIZAS DURAS", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.43),
-    ("MR09", "OXIDO DE PLOMO RECHAZADO", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.83),
-    ("MR10", "MEZCLA DAÑADA", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.71),
-    ("MR13", "MALLA EMPASTADA", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.60),
-    ("MR18", "CENIZAS DE SODA SOLA", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.26),
-    ("MR19", "CENIZAS DE SODA ROJA", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.26),
-    ("MR20", "CENIZAS DE 1ERA LAVADA DE MP", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.26),
-    ("MR21", "CENIZAS DE METALES PESADOS", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.26),
-    ("MR23", "CENIZAS DE OXIDACIÓN", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.65),
+    ("MR01", "GUARRU HUMEDO", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.41, "none"),
+    ("MR02", "GUARRU SECO", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.72, "none"),
+    ("MR04", "JAMICHE", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.53, "none"),
+    ("MR07", "CENIZAS DE COBRE", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.35, "none"),
+    ("MR08", "CENIZAS DURAS", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.43, "none"),
+    ("MR09", "OXIDO DE PLOMO RECHAZADO", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.83, "none"),
+    ("MR10", "MEZCLA DAÑADA", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.71, "none"),
+    ("MR13", "MALLA EMPASTADA", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.60, "none"),
+    ("MR18", "CENIZAS DE SODA SOLA", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.26, "none"),
+    ("MR19", "CENIZAS DE SODA ROJA", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.26, "none"),
+    ("MR20", "CENIZAS DE 1ERA LAVADA DE MP", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.26, "none"),
+    ("MR21", "CENIZAS DE METALES PESADOS", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.26, "none"),
+    ("MR23", "CENIZAS DE OXIDACIÓN", "Drosses", "kg", "drosses", False, "drosses_to_lead", 0.65, "none"),
 ]
 
 # (name, categorias) — Willard lleva DOS: entrega baterias (proveedor de
@@ -724,7 +729,7 @@ class SacSeeder:
             current_formulas = {str(f["material_id"]): f for f in items}
 
         n_new = n_profiles = n_formulas = 0
-        for code, name, cat, unit, world, compra, ftype, fparam in MATERIALS:
+        for code, name, cat, unit, world, compra, ftype, fparam, lead in MATERIALS:
             bu = un2 if code.startswith("MR") else un1
             if code in existing:
                 mat_id = existing[code]["id"]
@@ -743,7 +748,7 @@ class SacSeeder:
             # PUT idempotente por contrato (upsert 1:1)
             self.api.put(
                 f"/material-kg-profiles/{mat_id}",
-                {"compra_regular": compra, "willard_world": world},
+                {"compra_regular": compra, "willard_world": world, "lead_product": lead},
                 label=f"perfil-{code}",
             )
             n_profiles += 1

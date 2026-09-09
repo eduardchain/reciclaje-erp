@@ -166,13 +166,58 @@ def tarifas(db_session, test_organization, test_user):
     }
 
 
+def _mark_lead(db, org_id, material, lead):
+    """Marca el material como plomo entregable (#103 D1).
+
+    Sin fila de perfil el guard bloquea (fail-closed), asi que toda fixture que
+    entregue material a Willard tiene que pasar por aca.
+    """
+    from app.models.material_kg_profile import MaterialKgProfile
+
+    prof = db.execute(
+        select(MaterialKgProfile).where(
+            MaterialKgProfile.organization_id == org_id,
+            MaterialKgProfile.material_id == material.id,
+        )
+    ).scalar_one_or_none()
+    if prof is None:
+        prof = MaterialKgProfile(organization_id=org_id, material_id=material.id)
+        db.add(prof)
+    prof.lead_product = lead
+    db.commit()
+    return material
+
+
+def _stock(client, headers, mat, wh, qty="100", cost="2000"):
+    r = client.post(
+        f"{ADJUST_URL}/increase",
+        headers=headers,
+        json={
+            "material_id": str(mat.id),
+            "warehouse_id": str(wh.id),
+            "quantity": qty,
+            "unit_cost": cost,
+            "date": SEED_DATE,
+            "reason": "Seed",
+        },
+    )
+    assert r.status_code == 201, r.text
+    return mat
+
+
 @pytest.fixture
 def plomo(db_session, test_organization, client, org_headers, wh_jm):
-    """Plomo refinado en Juan Mina: 100 kg @ $2.000. Sin formula -> ya es plomo."""
+    """Plomo CRUDO en Juan Mina: 100 kg @ $2.000. Sin formula -> ya es plomo.
+
+    Se llama "crudo" y no "fino" a proposito (#103 C3): el fino es el PURO, y
+    marcarlo asi haria que ~20 tests de abono dispararan el aviso de D3 — el
+    ruido taparia lo que cada test prueba. El puro vive en su propia fixture.
+    """
     cat = create_material_category(db_session, test_organization.id, "Plomo")
-    mat = create_material(db_session, test_organization.id, "PB-01", "Plomo Fino", cat.id)
+    mat = create_material(db_session, test_organization.id, "PB-CRU", "Plomo Crudo", cat.id)
     mat.default_unit = "kg"
     db_session.commit()
+    _mark_lead(db_session, test_organization.id, mat, "crudo")
     resp = client.post(
         f"{ADJUST_URL}/increase",
         headers=org_headers,
@@ -626,6 +671,7 @@ class TestGuards:
         mat = create_material(db_session, test_organization.id, "BAT-9", "Bateria", cat.id)
         mat.default_unit = "unidad"
         db_session.commit()
+        _mark_lead(db_session, test_organization.id, mat, "crudo")
         d = _create(client, org_headers, wh_jm, willard, mat, "abono_bateria", qty="5")
         r = client.post(f"{URL}/{d['id']}/review", headers=org_headers)
         assert r.status_code == 400
@@ -850,3 +896,290 @@ class TestWarningsDeLiquidacion:
         out = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
 
         assert out["warnings"] == [], out["warnings"]
+
+
+# ------------------------------------- guard de material entregable (#103) ---
+#
+# El defecto que cierra: una salida aceptaba CUALQUIER material. En dev entraron
+# 1.000 kg de guarru seco de Willard y el MISMO material salio como abono — SAC
+# no fundio nada y el sistema facturo $1,5M de maquila (el cobro POR FUNDIR),
+# flete, y abono a planta por un trabajo que no ocurrio. Sin un aviso.
+#
+# La causa: `_compute_lead_kg` usaba una heuristica de CALCULO ("sin formula el
+# material ya es plomo") como CLASIFICADOR. 15 materiales activos pasaban como
+# plomo 1:1, entre ellos aluminio, hierro y cajas plasticas.
+#
+# El cuadrante que cubren estos tests — dibujado, no enumerado, porque en prosa
+# se declaro cubierto tres veces con una celda vacia:
+#
+#                  | plomo marcado          | no plomo
+#     sin formula  | test 2  (crudo)        | test 7  (plastico)
+#     con formula  | test 9  (crudo+form.)  | test 1  (guarru)
+
+@pytest.fixture
+def puro(db_session, test_organization, client, org_headers, wh_jm):
+    """Plomo PURO: pasa el guard, pero avisa si se usa para abonar."""
+    cat = create_material_category(db_session, test_organization.id, "Plomo")
+    mat = create_material(db_session, test_organization.id, "PB-PUR", "Plomo Puro", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    _mark_lead(db_session, test_organization.id, mat, "puro")
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+@pytest.fixture
+def plastico(db_session, test_organization, client, org_headers, wh_jm):
+    """CAJAS PLASTICAS: SIN formula y sin marca. Es el material que hoy saldaba
+    la deuda de plomo 1:1 — la celda que la heuristica dejaba pasar."""
+    cat = create_material_category(db_session, test_organization.id, "Plomo")
+    mat = create_material(db_session, test_organization.id, "CAJ-PLA", "Cajas Plasticas", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    _mark_lead(db_session, test_organization.id, mat, "none")
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+@pytest.fixture
+def guarru(db_session, test_organization, client, org_headers, wh_jm):
+    """GUARRU SECO: CON formula (72% de plomo) y sin marca. Es de lo que SE
+    EXTRAE plomo, o sea justo lo que NO puede pagar la deuda."""
+    cat = create_material_category(db_session, test_organization.id, "Drosses")
+    mat = create_material(db_session, test_organization.id, "MR-02", "Guarru Seco", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    _mark_lead(db_session, test_organization.id, mat, "none")
+    r = client.post(FORMULAS_URL, headers=org_headers, json={
+        "material_id": str(mat.id),
+        "formula_type": "drosses_to_lead",
+        "parameters": {"lead_percentage": 0.72},
+    })
+    assert r.status_code == 201, r.text
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+@pytest.fixture
+def sin_perfil(db_session, test_organization, client, org_headers, wh_jm):
+    """Material SIN fila de perfil: el fail-closed de D6."""
+    cat = create_material_category(db_session, test_organization.id, "Plomo")
+    mat = create_material(db_session, test_organization.id, "SIN-P", "Sin Perfil", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+@pytest.fixture
+def crudo_con_formula(db_session, test_organization, client, org_headers, wh_jm):
+    """Plomo crudo CON formula de rendimiento: la cuarta celda del cuadrante.
+    Hoy no existe en SAC, pero un guard `marcado AND sin formula` lo bloquearia
+    el dia que alguien la cree — y ese guard pasa todos los demas tests."""
+    cat = create_material_category(db_session, test_organization.id, "Plomo")
+    mat = create_material(db_session, test_organization.id, "PB-CF", "Crudo Con Formula", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    _mark_lead(db_session, test_organization.id, mat, "crudo")
+    r = client.post(FORMULAS_URL, headers=org_headers, json={
+        "material_id": str(mat.id),
+        "formula_type": "drosses_to_lead",
+        "parameters": {"lead_percentage": 0.5},
+    })
+    assert r.status_code == 201, r.text
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+def _walk_expecting_block(client, headers, wh, willard, mat, dtype, qty="10"):
+    """Camina create -> review -> liquidate y devuelve la PRIMERA respuesta que
+    bloquea, sin importar la etapa.
+
+    A proposito no afirma DONDE sale el 400: eso lo fijan los tests 8 y 11. Si
+    este afirmara la etapa, mover el guard de sitio lo rompería y no se podria
+    distinguir "el guard desaparecio" de "el guard se movio".
+    """
+    r = client.post(URL, headers=headers, json={
+        "delivery_type": dtype,
+        "warehouse_id": str(wh.id),
+        "third_party_id": str(willard.id),
+        "date": DELIVERY_DATE,
+        "lines": [{"material_id": str(mat.id), "quantity": qty}],
+    })
+    if r.status_code >= 400:
+        return r
+    did = r.json()["id"]
+    r = client.post(f"{URL}/{did}/review", headers=headers)
+    if r.status_code >= 400:
+        return r
+    body = {"line_prices": []}
+    if dtype == "venta":
+        body["line_prices"] = [
+            {"line_id": r.json()["lines"][0]["id"], "unit_price": "3000"}
+        ]
+    r = client.post(f"{URL}/{did}/liquidate", headers=headers, json=body)
+    assert r.status_code >= 400, (
+        "La salida se liquido entera: el guard no bloqueo en NINGUNA etapa."
+    )
+    return r
+
+
+class TestGuardMaterialEntregable:
+
+    def test_abono_con_material_que_no_es_plomo_bloquea(
+        self, client, org_headers, wh_jm, willard, guarru, acc_drosses, tarifas
+    ):
+        """Test 1 — con formula / no plomo. La reproduccion exacta del hallazgo:
+        guarru seco entra de Willard y sale como abono sin haberse fundido."""
+        r = _walk_expecting_block(
+            client, org_headers, wh_jm, willard, guarru, "abono_material"
+        )
+        assert r.status_code == 400, r.text
+        assert "MR-02" in r.json()["detail"], r.text
+        assert "plomo entregable" in r.json()["detail"]
+
+    def test_abono_con_plomo_crudo_pasa(
+        self, client, org_headers, wh_jm, willard, plomo, acc_drosses, tarifas
+    ):
+        """Test 2 — sin formula / plomo. La otra mitad del par: el camino bueno
+        sigue vivo. Sin este, "el guard funciona" y "bloquee todo" se ven igual."""
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
+        assert out["status"] == "liquidated"
+
+    def test_venta_tambien_exige_plomo(
+        self, client, org_headers, wh_jm, willard, plastico, acc_intersede, tarifas
+    ):
+        """Test 3 — el guard cubre los TRES tipos. La venta tambien descarga
+        `intersede` por kg, asi que la misma aritmetica perversa la afecta."""
+        r = _walk_expecting_block(
+            client, org_headers, wh_jm, willard, plastico, "venta"
+        )
+        assert r.status_code == 400, r.text
+        assert "CAJ-PLA" in r.json()["detail"]
+
+    def test_puro_en_abono_avisa_y_no_bloquea(
+        self, client, org_headers, wh_jm, willard, puro, acc_drosses, tarifas
+    ):
+        """Test 4 — el aviso de D3, leido de la RESPUESTA HTTP de liquidate.
+
+        Leerlo del retorno del servicio es lo que dejo pasar el defecto D4d de
+        #100: el servicio lo calculaba bien y el endpoint lo tiraba a la basura.
+        """
+        out = _flow(client, org_headers, wh_jm, willard, puro, "abono_material")
+        assert out["status"] == "liquidated"
+        assert any("PURO" in w for w in out["warnings"]), out["warnings"]
+
+    def test_abono_a_tercero_ajeno_rechazado(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, plomo, acc_drosses,
+    ):
+        """Test 5a — el unico hallazgo con dano financiero silencioso: las
+        cuentas kg se resuelven por `account_type`, no por el tercero del
+        documento, asi que se saldaba la deuda de uno y se le facturaba a otro."""
+        otro = create_third_party_with_category(
+            db_session, test_organization.id, "Green Loop", "customer"
+        )
+        # El helper solo hace flush: sin commit, la sesion de la API no lo ve y
+        # el POST responde 404 en vez de ejercitar el guard.
+        db_session.commit()
+        r = client.post(URL, headers=org_headers, json={
+            "delivery_type": "abono_material",
+            "warehouse_id": str(wh_jm.id),
+            "third_party_id": str(otro.id),
+            "date": DELIVERY_DATE,
+            "lines": [{"material_id": str(plomo.id), "quantity": "10"}],
+        })
+        assert r.status_code == 422, r.text
+        assert "Willard" in r.json()["detail"], r.text
+
+    def test_abono_al_titular_de_la_cuenta_pasa(
+        self, client, org_headers, wh_jm, willard, plomo, acc_drosses
+    ):
+        """Test 5b — la otra mitad del par de D7."""
+        _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="10")
+
+    def test_material_sin_perfil_kg_bloquea(
+        self, client, org_headers, wh_jm, willard, sin_perfil, acc_drosses, tarifas
+    ):
+        """Test 6 — fail-closed (D6): sin fila de perfil se trata como `none`.
+        Bloquear con un mensaje que dice donde marcarlo es el modo de falla
+        correcto; seguir calculando en silencio es el defecto."""
+        r = _walk_expecting_block(
+            client, org_headers, wh_jm, willard, sin_perfil, "abono_material"
+        )
+        assert r.status_code == 400, r.text
+        assert "SIN-P" in r.json()["detail"]
+
+    def test_material_sin_formula_que_no_es_plomo_bloquea(
+        self, client, org_headers, wh_jm, willard, plastico, acc_drosses, tarifas
+    ):
+        """Test 7 — sin formula / no plomo. EL test que faltaba.
+
+        Es el unico que cae con las DOS variantes del atajo prohibido. Con
+        `sin formula => entregable`, los tests 1, 2 y 3 quedan verdes y las
+        cajas plasticas siguen saldando la deuda 1:1 sin ningun testigo.
+        """
+        r = _walk_expecting_block(
+            client, org_headers, wh_jm, willard, plastico, "abono_material"
+        )
+        assert r.status_code == 400, r.text
+        assert "CAJ-PLA" in r.json()["detail"]
+
+    def test_guard_corre_al_capturar(
+        self, client, org_headers, wh_jm, willard, plastico, acc_drosses
+    ):
+        """Test 8 — fija la ETAPA: el rechazo sale en `create`, no despues.
+
+        Si el guard vive solo en la liquidacion, el material equivocado se acepta
+        en el patio y el error aparece dias despues, con el camion ido.
+        """
+        _create(
+            client, org_headers, wh_jm, willard, plastico,
+            "abono_material", qty="10", expect=400,
+        )
+
+    def test_plomo_marcado_con_formula_pasa_y_convierte(
+        self, client, org_headers, db_session, wh_jm, willard,
+        crudo_con_formula, acc_drosses, tarifas,
+    ):
+        """Test 9 — la cuarta celda: con formula / plomo.
+
+        Pinta dos cosas de una: que el guard lee SOLO `lead_product` (un
+        `marcado AND sin formula` bloquearia esto y pasaria los otros diez), y
+        que la heuristica de calculo sigue viva — 50 kg x 0,5 = 25 kg de plomo.
+        """
+        out = _flow(client, org_headers, wh_jm, willard, crudo_con_formula,
+                    "abono_material", qty="50")
+        assert out["status"] == "liquidated"
+        assert _kg(db_session, acc_drosses.id) == Decimal("-25.0000")
+
+    def test_aviso_de_puro_llega_al_capturar(
+        self, client, org_headers, wh_jm, willard, puro, acc_drosses
+    ):
+        """Test 10 — el aviso tambien tiene que llegar a tiempo.
+
+        D2 y D3 son hermanos: si el guard corre en `create` pero el aviso solo
+        viaja en la respuesta de `liquidate`, se descarta y el usuario se entera
+        igual de tarde. El campo `warnings` tiene que estar cableado en los
+        cuatro endpoints, no solo en el ultimo.
+        """
+        out = _create(client, org_headers, wh_jm, willard, puro,
+                      "abono_material", qty="10")
+        assert any("PURO" in w for w in out["warnings"]), out
+
+    def test_guard_corre_al_editar(
+        self, client, org_headers, wh_jm, willard, plomo, plastico, acc_drosses
+    ):
+        """Test 11 — fija la etapa de `update`, el punto de entrada que no tenia
+        testigo.
+
+        Sin este test, un validador cableado en create/review/liquidate pero SIN
+        la llamada en `update` deja los otros diez en verde: los de flujo
+        completo reciben su 400 en la liquidacion igual, el 8 valida `create`,
+        que si valida, y los avisos siguen cableados. Firma vacia.
+
+        Y es el camino mas realista de los cuatro: se registra bien, se edita
+        despues, y ahi se cuela el material equivocado.
+        """
+        d = _create(client, org_headers, wh_jm, willard, plomo,
+                    "abono_material", qty="10")
+        r = client.patch(f"{URL}/{d['id']}", headers=org_headers, json={
+            "lines": [{"material_id": str(plastico.id), "quantity": "10"}],
+        })
+        assert r.status_code == 400, r.text
+        assert "CAJ-PLA" in r.json()["detail"]

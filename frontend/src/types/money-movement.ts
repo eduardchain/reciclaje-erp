@@ -23,6 +23,8 @@ export type MoneyMovementType =
   | "asset_sale_collection"
   | "asset_sale_receivable"
   | "service_income_accrual"
+  | "internal_maquila_expense"
+  | "internal_maquila_income"
   | "expense_accrual"
   | "deferred_funding"
   | "deferred_expense"

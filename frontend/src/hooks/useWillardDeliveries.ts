@@ -34,6 +34,10 @@ export function useCreateWillardDelivery() {
     mutationFn: (data: WillardDeliveryCreate) => willardDeliveryService.create(data),
     onSuccess: (d) => {
       toast.success(`Salida #${d.delivery_number} registrada`);
+      // El backend los entrega en los 4 endpoints (#103 C2): si la
+      // pantalla los descarta, el aviso llega igual de tarde que si no
+      // existiera. D2 y D3 son hermanos — fail-fast vale para los dos.
+      (d.warnings ?? []).forEach((w) => toast.warning(w, { duration: 10000 }));
       invalidateAfterWillardDelivery(qc);
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al registrar la salida")),
@@ -45,8 +49,12 @@ export function useUpdateWillardDelivery() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: WillardDeliveryUpdate }) =>
       willardDeliveryService.update(id, data),
-    onSuccess: () => {
+    onSuccess: (d) => {
       toast.success("Salida actualizada");
+      // El backend los entrega en los 4 endpoints (#103 C2): si la
+      // pantalla los descarta, el aviso llega igual de tarde que si no
+      // existiera. D2 y D3 son hermanos — fail-fast vale para los dos.
+      (d.warnings ?? []).forEach((w) => toast.warning(w, { duration: 10000 }));
       invalidateAfterWillardDelivery(qc);
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al actualizar")),
@@ -57,8 +65,12 @@ export function useReviewWillardDelivery() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => willardDeliveryService.review(id),
-    onSuccess: () => {
+    onSuccess: (d) => {
       toast.success("Salida revisada — pesos certificados");
+      // El backend los entrega en los 4 endpoints (#103 C2): si la
+      // pantalla los descarta, el aviso llega igual de tarde que si no
+      // existiera. D2 y D3 son hermanos — fail-fast vale para los dos.
+      (d.warnings ?? []).forEach((w) => toast.warning(w, { duration: 10000 }));
       invalidateAfterWillardDelivery(qc);
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al revisar")),
