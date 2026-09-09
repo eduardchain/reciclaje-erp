@@ -29,8 +29,8 @@ interface DraftLine {
  *
  * El backend ya lo permitia mientras el estado no fuera `liquidated` ni
  * `annulled`; lo que faltaba era la pantalla. Sin ella, quien registraba una
- * salida sin peso de bascula quedaba en un callejon sin salida: `Revisar` la
- * rechazaba y la unica accion disponible era anular y volver a capturar.
+ * salida sin peso de bascula quedaba en un callejon sin salida: la liquidacion
+ * la rechazaba y la unica accion disponible era anular y volver a capturar.
  *
  * Tipo, bodega y tercero NO se editan aca: su valor lo determina la
  * configuracion (D7/D8) y cambiarlos cambiaria que deuda se salda. Para eso se
@@ -59,13 +59,20 @@ export default function WillardDeliveryEditPage() {
   const leadMaterials = useMemo(() => {
     const lead = new Map<string, string>();
     for (const prof of profilesData?.items ?? []) lead.set(prof.material_id, prof.lead_product);
+    // `is_active` explicito: GET /materials devuelve tambien los desactivados si
+    // nadie lo pide (#93, "Sin clasificar fantasma"), y un material dado de baja
+    // conserva su perfil kg — PLO-CRU siguio apareciendo como "crudo" un dia
+    // entero despues de retirarlo. El backend lo rechaza ("no esta activo"),
+    // pero ofrecerlo es la misma trampa de siempre.
+    // Mismo criterio por tipo que la captura: abonos = crudo; venta = crudo + puro.
+    const allowed = delivery?.delivery_type === "venta" ? new Set(["crudo", "puro"]) : new Set(["crudo"]);
     return materials
-      .filter((m) => (lead.get(m.id) ?? "none") !== "none")
+      .filter((m) => m.is_active !== false && allowed.has(lead.get(m.id) ?? "none"))
       .map((m) => ({
         id: m.id,
         label: `${m.code} - ${m.name} (${m.default_unit ?? "kg"}) · ${lead.get(m.id)}`,
       }));
-  }, [materials, profilesData]);
+  }, [materials, profilesData, delivery?.delivery_type]);
 
   useEffect(() => {
     if (!delivery || loaded) return;
@@ -190,8 +197,8 @@ export default function WillardDeliveryEditPage() {
           )}
           {delivery.status === "reviewed" && (
             <p className="text-xs text-amber-600">
-              Esta salida ya está revisada. Si cambia las líneas vuelve a quedar registrada y
-              habrá que certificar los pesos otra vez.
+              Esta salida quedó como "revisada" con la versión anterior del módulo. Se liquida
+              igual que una registrada.
             </p>
           )}
           {lines.map((line, idx) => (
@@ -232,7 +239,7 @@ export default function WillardDeliveryEditPage() {
                 />
                 {unitOf(line.material_id) !== "kg" && line.scale_weight_kg <= 0 && (
                   <p className="text-xs text-amber-600">
-                    Sin este peso no se puede revisar la salida.
+                    Sin este peso no se puede liquidar la salida.
                   </p>
                 )}
               </div>

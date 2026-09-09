@@ -155,8 +155,11 @@ const orgNavItems: NavItem[] = [
     pendingBadge: true,
   },
   {
-    // W1: salidas de plomo a Willard (venta y abonos)
-    name: "Salidas Willard",
+    // W1: salidas de plomo desde planta — ventas, abonos a Willard y (por
+    // venir) traslado a crisoles. Solo dos de los tipos van a Willard, y las
+    // dos personas que lo operan lo llaman "salidas de plomo" (Hugo 28-ago,
+    // Johana 9-sep); el modulo se llama como ellos.
+    name: "Salidas de Plomo",
     path: ROUTES.WILLARD_DELIVERIES,
     icon: <Send className="w-5 h-5" />,
     section: "OPERACIONES",

@@ -749,18 +749,42 @@ class TestGuards:
     ):
         """Encontrado en el smoke: Willard estaba sembrado solo como proveedor y
         la venta reventaba con "El tercero no es cliente" desde adentro de la
-        venta derivada — cierto, pero sin decir donde arreglarlo."""
+        venta derivada — cierto, pero sin decir donde arreglarlo.
+
+        Re-semantizado 9-sep: el check ahora corre AL CAPTURAR (Daniel vio que
+        el selector ofrecia a todos los terceros). La propiedad que se vigila
+        es la misma — el mensaje dice DONDE arreglarlo — solo que mas temprano.
+        Y el check de liquidate sigue vivo para su unico camino restante: que
+        al tercero le quiten la categoria de cliente despues de capturar.
+        """
+        from app.models.third_party_category import ThirdPartyCategoryAssignment
+
         proveedor = create_third_party_with_category(
             db_session, test_organization.id, "Solo Proveedor", "material_supplier"
         )
         db_session.commit()
-        d = _create(client, org_headers, wh_jm, proveedor, plomo, "venta")
-        r = client.post(
-            f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []}
+        r = _create(client, org_headers, wh_jm, proveedor, plomo, "venta", expect=400)
+        assert "Solo Proveedor" in r["detail"] and "Terceros" in r["detail"]
+
+        cliente = create_third_party_with_category(
+            db_session, test_organization.id, "Cliente Efimero", "customer"
         )
-        assert r.status_code == 400
-        detail = r.json()["detail"]
-        assert "Solo Proveedor" in detail and "Terceros" in detail
+        db_session.commit()
+        d = _create(client, org_headers, wh_jm, cliente, plomo, "venta")
+        # le quitan la categoria de cliente despues de capturar
+        for a in db_session.execute(
+            select(ThirdPartyCategoryAssignment).where(
+                ThirdPartyCategoryAssignment.third_party_id == cliente.id
+            )
+        ).scalars().all():
+            db_session.delete(a)
+        db_session.commit()
+        r = client.post(
+            f"{URL}/{d['id']}/liquidate", headers=org_headers,
+            json={"line_prices": [{"line_id": d["lines"][0]["id"], "unit_price": "3000"}]},
+        )
+        assert r.status_code == 400, r.text
+        assert "Cliente Efimero" in r.json()["detail"] and "Terceros" in r.json()["detail"]
 
     def test_guard_maquila_nombra_el_modulo_correcto(
         self, client, org_headers, db_session, test_organization,
@@ -1211,3 +1235,178 @@ class TestGuardMaterialEntregable:
         })
         assert r.status_code == 400, r.text
         assert "CAJ-PLA" in r.json()["detail"]
+
+
+# ------------------------------------- las dos puertas: Ventas vs Salidas ---
+
+SALES_URL = "/api/v1/sales"
+
+
+def _venta_normal(client, headers, customer, wh, mat, qty="10", price="5000"):
+    return client.post(
+        SALES_URL,
+        headers=headers,
+        json={
+            "customer_id": str(customer.id),
+            "warehouse_id": str(wh.id),
+            "date": DELIVERY_DATE,
+            "lines": [{"material_id": str(mat.id), "quantity": qty, "unit_price": price}],
+            "commissions": [],
+            "auto_liquidate": False,
+        },
+    )
+
+
+@pytest.fixture
+def aluminio(db_session, test_organization, client, org_headers, wh_jm):
+    """Material SIN marca de plomo: se vende por Ventas, como siempre."""
+    cat = create_material_category(db_session, test_organization.id, "Aluminio")
+    mat = create_material(db_session, test_organization.id, "ALU", "Aluminio", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+class TestGuardPlomoPorVentas:
+    """El plomo entregable NO se vende por el modulo de Ventas.
+
+    Hugo (28-ago, 00:18:54): la venta regular es una de las dos formas en que
+    planta devuelve la deuda en kg. Vendida por Ventas, el inventario sale y la
+    deuda queda colgada — sin error y sin aviso. Con este guard y con #103 (la
+    otra direccion), la regla queda con las dos puertas cerradas.
+
+    El PAR con-flag/sin-flag es la red (leccion #99): sin el contraste, "el
+    guard funciona" y "lo apague para las otras 6 orgs" se ven identicos.
+    """
+
+    def test_venta_normal_de_plomo_marcado_bloquea(
+        self, client, org_headers, wh_jm, willard, plomo,
+    ):
+        resp = _venta_normal(client, org_headers, willard, wh_jm, plomo)
+        assert resp.status_code == 400, resp.text
+        detail = resp.json()["detail"]
+        assert "PB-CRU" in detail
+        assert "Salida de Plomo" in detail
+
+    def test_venta_normal_de_puro_tambien_bloquea(
+        self, client, org_headers, db_session, test_organization, wh_jm, willard,
+    ):
+        """La marca es lo que decide, no el tipo de plomo: crudo y puro salen
+        los dos por Salidas (el puro ademas causa el diferencial del crisol)."""
+        cat = create_material_category(db_session, test_organization.id, "Plomo P")
+        mat = create_material(db_session, test_organization.id, "PB-PUR", "Plomo Puro", cat.id)
+        mat.default_unit = "kg"
+        db_session.commit()
+        _mark_lead(db_session, test_organization.id, mat, "puro")
+        _stock(client, org_headers, mat, wh_jm)
+        resp = _venta_normal(client, org_headers, willard, wh_jm, mat)
+        assert resp.status_code == 400, resp.text
+        assert "PB-PUR" in resp.json()["detail"]
+
+    def test_venta_normal_de_material_sin_marca_pasa(
+        self, client, org_headers, wh_jm, willard, aluminio,
+    ):
+        """Johana (9-sep): aluminio y chatarra son VENTA NORMAL, desde cualquier
+        bodega. Cascara y retal caen aca tambien: son insumos, no producto."""
+        resp = _venta_normal(client, org_headers, willard, wh_jm, aluminio)
+        assert resp.status_code == 201, resp.text
+
+    def test_sin_flag_el_guard_es_inerte(
+        self, client, org_headers, db_session, test_organization, wh_jm, willard, plomo,
+    ):
+        """La otra mitad del par: sin `kg_ledger_enabled` el plomo marcado se
+        vende normal — las 6 orgs que no son SAC quedan byte-identicas."""
+        test_organization.settings = {
+            **(test_organization.settings or {}),
+            "kg_ledger_enabled": False,
+        }
+        db_session.commit()
+        resp = _venta_normal(client, org_headers, willard, wh_jm, plomo)
+        assert resp.status_code == 201, resp.text
+
+    def test_editar_venta_metiendo_plomo_bloquea(
+        self, client, org_headers, wh_jm, willard, aluminio, plomo,
+    ):
+        """Sin el guard en update, el de create se esquiva editando (#80 B3)."""
+        created = _venta_normal(client, org_headers, willard, wh_jm, aluminio)
+        assert created.status_code == 201, created.text
+        resp = client.patch(
+            f"{SALES_URL}/{created.json()['id']}",
+            headers=org_headers,
+            json={"lines": [{"material_id": str(plomo.id), "quantity": "10", "unit_price": "5000"}]},
+        )
+        assert resp.status_code == 400, resp.text
+        assert "Salida de Plomo" in resp.json()["detail"]
+
+    def test_la_venta_derivada_de_la_salida_sigue_pasando(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede,
+    ):
+        """La venta que DERIVA una Salida de Plomo es la unica venta legitima de
+        plomo entregable — el guard tiene que dejarla pasar (bypass interno,
+        no viaja en el schema). Si alguien quita `from_willard_delivery` del
+        call site, este test cae con el 400 del guard."""
+        d = _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        assert d["status"] == "liquidated"
+        assert d["sale_id"] is not None
+        sale = db_session.get(Sale, d["sale_id"])
+        assert sale is not None and sale.status == "liquidated"
+        assert sale.notes == f"Salida de Plomo #{d['delivery_number']}"
+        assert _kg(db_session, acc_intersede.id) == Decimal("-50")
+
+
+class TestVentaExigeClienteAlCapturar:
+    """El check de `customer` vivia solo en liquidate: una venta a un proveedor se
+    aceptaba en el patio y reventaba dias despues. Daniel lo vio en pantalla —
+    el selector de Salidas ofrecia a TODOS los terceros y el de Ventas solo a
+    clientes. Un validador, todos los puntos de entrada (#103 D3)."""
+
+    @pytest.fixture
+    def proveedor(self, db_session, test_organization):
+        return create_third_party_with_category(
+            db_session, test_organization.id, "Chatarreria Bogota", "material_supplier"
+        )
+
+    def test_venta_a_tercero_que_no_es_cliente_bloquea_al_capturar(
+        self, client, org_headers, wh_jm, proveedor, plomo,
+    ):
+        resp = client.post(
+            URL,
+            headers=org_headers,
+            json={
+                "delivery_type": "venta",
+                "warehouse_id": str(wh_jm.id),
+                "third_party_id": str(proveedor.id),
+                "date": DELIVERY_DATE,
+                "remission_number": "REM-1",
+                "lines": [{"material_id": str(plomo.id), "quantity": "10"}],
+            },
+        )
+        assert resp.status_code == 400, resp.text
+        assert "cliente" in resp.json()["detail"].lower()
+
+    def test_venta_a_cliente_pasa(self, client, org_headers, wh_jm, willard, plomo):
+        """Willard es proveedor Y cliente: entrega baterias y compra plomo."""
+        _create(client, org_headers, wh_jm, willard, plomo, "venta", expect=201)
+
+    def test_cliente_desactivado_entre_captura_y_liquidacion_avisa_donde_arreglarlo(
+        self, client, org_headers, db_session, test_organization, wh_jm, plomo, tarifas, acc_intersede,
+    ):
+        """QA F4 (#104): la puerta que quedaba. Capturar a un cliente activo,
+        desactivarlo (se permite con saldo 0), liquidar: sin `is_active` en el
+        check, el 400 salia desde ADENTRO de la venta derivada — cierto, pero sin
+        decir donde arreglarlo (el modo de falla del smoke de #100)."""
+        cliente = create_third_party_with_category(
+            db_session, test_organization.id, "Cliente Que Se Fue", "customer"
+        )
+        db_session.commit()
+        d = _create(client, org_headers, wh_jm, cliente, plomo, "venta")
+        cliente.is_active = False
+        db_session.commit()
+        r = client.post(
+            f"{URL}/{d['id']}/liquidate", headers=org_headers,
+            json={"line_prices": [{"line_id": d["lines"][0]["id"], "unit_price": "3000"}]},
+        )
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert "Cliente Que Se Fue" in detail and "inactivo" in detail and "Terceros" in detail

@@ -79,10 +79,17 @@ export function useCreateFormula() {
 
 // --- Clasificacion Willard del material (material_kg_profile, CC-005) ---
 
-export function useKgProfiles(filters?: { compra_regular?: boolean; willard_world?: string }) {
+export function useKgProfiles(
+  filters?: { compra_regular?: boolean; willard_world?: string },
+  enabled = true,
+) {
+  // `enabled` (F2, #78/#83): las paginas COMPARTIDAS (Ventas) lo llaman con el
+  // flag de la org — sin kg_ledger_enabled no se dispara ni una request y las
+  // otras 6 orgs quedan byte-identicas en pantalla.
   return useQuery({
     queryKey: ["kg-profiles", "list", filters ?? {}],
     queryFn: () => sacConfigService.getKgProfiles(filters),
+    enabled,
   });
 }
 

@@ -69,7 +69,8 @@ export default function WillardDeliveryDetailPage() {
         <Card className="border-amber-300 bg-amber-50">
           <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center gap-3">
             <p className="text-sm text-amber-900 flex-1">
-              Registrada. Antes de liquidar hay que certificar los pesos de báscula.
+              Registrada. Antes de liquidar hay que certificar los pesos de báscula
+              {isVenta ? " y digitar el precio de venta de cada línea, en la tabla de abajo." : "."}
             </p>
             {hasPermission("sales.edit") && (
               <Button
@@ -141,7 +142,10 @@ export default function WillardDeliveryDetailPage() {
                   </TableCell>
                   {isVenta && (
                     <TableCell className="text-right">
-                      {delivery.status === "reviewed" ? (
+                      {/* El precio se digita al LIQUIDAR (demo 28-ago, 00:15:38). Antes
+                          este input vivia en `reviewed`; al retirar el paso Revisar la
+                          venta va draft -> liquidated y quedaba sin donde poner el precio. */}
+                      {(delivery.status === "draft" || delivery.status === "reviewed") ? (
                         <MoneyInput
                           value={prices[l.id] ?? 0}
                           onChange={(v) => setPrices((p) => ({ ...p, [l.id]: v }))}

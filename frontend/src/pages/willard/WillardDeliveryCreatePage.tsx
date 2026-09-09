@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { FormLineGrid } from "@/components/shared/FormLineGrid";
-import { useMaterials, useThirdParties, useWarehouses } from "@/hooks/useMasterData";
+import { useCustomers, useMaterials, useWarehouses } from "@/hooks/useMasterData";
 import { useCreateWillardDelivery } from "@/hooks/useWillardDeliveries";
 import { useKgAccounts } from "@/hooks/useKgLedger";
 import { useKgProfiles } from "@/hooks/useSacConfig";
@@ -43,7 +43,10 @@ export default function WillardDeliveryCreatePage() {
 
   const { data: materialsData } = useMaterials();
   const { data: warehousesData } = useWarehouses();
-  const { data: thirdPartiesData } = useThirdParties();
+  // Solo CLIENTES: la venta derivada exige behavior `customer` (#32) y el
+  // 400 del backend saltaria al LIQUIDAR, dias despues de capturar. En los
+  // abonos el tercero va fijo al titular de la cuenta kg, no pasa por aca.
+  const { data: thirdPartiesData } = useCustomers();
   const { data: kgAccounts } = useKgAccounts();
   const { data: profilesData } = useKgProfiles();
   const { getSetting } = useOrgSettings();
@@ -62,14 +65,24 @@ export default function WillardDeliveryCreatePage() {
   const leadMaterials = useMemo(() => {
     const lead = new Map<string, string>();
     for (const prof of profilesData?.items ?? []) lead.set(prof.material_id, prof.lead_product);
+    // `is_active` explicito: GET /materials devuelve tambien los desactivados si
+    // nadie lo pide (#93, "Sin clasificar fantasma"), y un material dado de baja
+    // conserva su perfil kg — PLO-CRU siguio apareciendo como "crudo" un dia
+    // entero despues de retirarlo. El backend lo rechaza ("no esta activo"),
+    // pero ofrecerlo es la misma trampa de siempre.
+    // Por tipo (Johana 9-sep): los ABONOS se hacen con lingote = crudo — "abono
+    // a bateria plomo lingote; abono a material: PLOMO LINGOTE". El puro se
+    // vende (Hugo 28-ago). El backend conserva el aviso de #103 D2 si alguien
+    // llega a abonar puro por API; la pantalla simplemente no lo ofrece.
+    const allowed = deliveryType === "venta" ? new Set(["crudo", "puro"]) : new Set(["crudo"]);
     return materials
-      .filter((m) => (lead.get(m.id) ?? "none") !== "none")
+      .filter((m) => m.is_active !== false && allowed.has(lead.get(m.id) ?? "none"))
       .map((m) => ({
         id: m.id,
         label: `${m.code} - ${m.name} (${m.default_unit ?? "kg"})`,
         lead: lead.get(m.id) as "crudo" | "puro",
       }));
-  }, [materials, profilesData]);
+  }, [materials, profilesData, deliveryType]);
 
   // D8 — la bodega de origen SIEMPRE es la planta. El backend ya lo defiende con
   // un 400, pero ofrecer seis opciones donde cinco llevan a error es pedirle al
@@ -131,7 +144,14 @@ export default function WillardDeliveryCreatePage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Nueva Salida a Willard" description="Entrega de plomo desde planta">
+      <PageHeader
+        title="Nueva Salida de Plomo"
+        description={
+          deliveryType === "venta"
+            ? "Venta de plomo a un cliente, desde planta"
+            : "Abono de plomo a Willard, desde planta"
+        }
+      >
         <Button variant="outline" onClick={() => navigate("/willard-deliveries")} className="w-full sm:w-auto">
           <ArrowLeft className="h-4 w-4 mr-2" /> Volver
         </Button>
@@ -158,7 +178,7 @@ export default function WillardDeliveryCreatePage() {
             {plantWarehouse ? (
               <>
                 <Input value={plantWarehouse.name} disabled />
-                <p className="text-xs text-slate-400">El plomo a Willard sale siempre de la planta.</p>
+                <p className="text-xs text-slate-400">El plomo sale siempre de la planta.</p>
               </>
             ) : (
               <EntitySelect
@@ -199,7 +219,9 @@ export default function WillardDeliveryCreatePage() {
               className={!remission.trim() ? "ring-1 ring-red-300" : undefined}
             />
             <p className="text-xs text-slate-400">
-              Es el número con el que se concilia con Willard.
+              {deliveryType === "venta"
+                ? "Consecutivo de ventas de SAC."
+                : "Consecutivo de abonos: es el número con el que se concilia con Willard."}
             </p>
           </div>
           <div className="space-y-1">
@@ -260,7 +282,7 @@ export default function WillardDeliveryCreatePage() {
                 />
                 {unitOf(line.material_id) !== "kg" && line.scale_weight_kg <= 0 && (
                   <p className="text-xs text-amber-600">
-                    Sin este peso no se puede revisar la salida.
+                    Sin este peso no se puede liquidar la salida.
                   </p>
                 )}
               </div>

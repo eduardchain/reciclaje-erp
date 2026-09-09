@@ -43,6 +43,15 @@ const TABS = [
   { value: "liquidated", label: "Liquidadas" },
 ] as const;
 
+// Segunda fila de tabs: el TIPO. El destino cambia por tipo (un cliente, Willard,
+// o el crisol de la propia planta), asi que es la primera pregunta al buscar.
+const TYPE_TABS: { value: "all" | WillardDeliveryType; label: string }[] = [
+  { value: "all", label: "Todos los tipos" },
+  { value: "venta", label: DELIVERY_TYPE_LABELS.venta },
+  { value: "abono_bateria", label: DELIVERY_TYPE_LABELS.abono_bateria },
+  { value: "abono_material", label: DELIVERY_TYPE_LABELS.abono_material },
+];
+
 export default function WillardDeliveriesPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -50,8 +59,10 @@ export default function WillardDeliveriesPage() {
   const [page] = useState(1);
 
   const tab = searchParams.get("tab") ?? "all";
+  const typeTab = searchParams.get("type") ?? "all";
   const { data, isLoading } = useWillardDeliveries({
     status: tab === "all" ? undefined : tab,
+    delivery_type: typeTab === "all" ? undefined : typeTab,
     page,
     page_size: 50,
   });
@@ -70,8 +81,8 @@ export default function WillardDeliveriesPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Salidas a Willard"
-        description="Entregas de plomo: ventas y abonos"
+        title="Salidas de Plomo"
+        description="Ventas de plomo y abonos a Willard, desde planta"
       >
         {hasPermission("sales.create") && (
           <Button onClick={() => navigate("/willard-deliveries/new")} className="w-full sm:w-auto">
@@ -98,6 +109,25 @@ export default function WillardDeliveriesPage() {
                 {t.label}
                 {t.value === "draft" && pendientes > 0 && tab === "all" ? null : null}
               </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </div>
+      <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+        <Tabs
+          value={typeTab}
+          onValueChange={(v) =>
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev);
+              if (v === "all") next.delete("type");
+              else next.set("type", v);
+              return next;
+            })
+          }
+        >
+          <TabsList className="inline-flex w-max sm:w-auto sm:flex-wrap">
+            {TYPE_TABS.map((t) => (
+              <TabsTrigger key={t.value} value={t.value}>{t.label}</TabsTrigger>
             ))}
           </TabsList>
         </Tabs>

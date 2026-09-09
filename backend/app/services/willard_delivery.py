@@ -71,7 +71,7 @@ def _err(detail: str, code: int = status.HTTP_400_BAD_REQUEST) -> HTTPException:
 
 
 class WillardDeliveryService:
-    """Salidas de plomo a Willard — 3 pasos: registrar, revisar, liquidar."""
+    """Salidas de Plomo desde planta — 2 pasos: registrar, liquidar."""
 
     # ================================================================== #
     # Escritura                                                           #
@@ -90,6 +90,15 @@ class WillardDeliveryService:
         self._validate_willard_holder(
             db, data.third_party_id, data.delivery_type, organization_id
         )
+        # Venta: el tercero tiene que ser CLIENTE ya al capturar. El check vivia
+        # solo en liquidate, o sea que una venta a un proveedor se aceptaba y
+        # reventaba dias despues (#103 D3). Daniel lo vio en pantalla: el
+        # selector ofrecia a todos. No hace falta en update: tipo y tercero son
+        # solo-lectura al editar (schema extra=forbid, #103 D9). El check de
+        # liquidate se queda para el unico camino que le queda: que al tercero
+        # le quiten la categoria de cliente DESPUES de capturar.
+        if data.delivery_type == "venta":
+            self._require_customer_id(db, data.third_party_id)
         self._validate_not_future(data.date)
         warnings = self._validate_lead_products(
             db,
@@ -169,8 +178,10 @@ class WillardDeliveryService:
             setattr(delivery, key, value)
 
         if lines is not None:
-            # D17 de #95: editar las LINEAS devuelve la salida a `draft` — la
-            # revision certifica pesos y cantidades, o sea lineas. La cabecera no.
+            # Editar las LINEAS devuelve la salida a `draft`. Venia de D17 (#95):
+            # la revision certificaba lineas. Sin paso de revision (Hugo, 28-ago)
+            # solo tiene efecto sobre las filas `reviewed` que quedaron de la
+            # version anterior; una registrada ya esta en `draft`.
             from app.schemas.willard_delivery import WillardDeliveryLineCreate
 
             self._replace_lines(
@@ -396,11 +407,14 @@ class WillardDeliveryService:
                 warehouse_id=delivery.warehouse_id,
                 date=liq_dt,
                 invoice_number=delivery.invoice_number,
-                notes=f"Salida a Willard #{delivery.delivery_number}",
+                notes=f"Salida de Plomo #{delivery.delivery_number}",
                 lines=sale_lines,
             ),
             organization_id,
             user_id=user_id,
+            # La venta derivada es la UNICA venta legitima de plomo entregable:
+            # sin esto, el guard de Ventas la rechazaria a ella tambien.
+            from_willard_delivery=True,
         )
         warnings.extend(getattr(sale, "_warnings", []) or [])
 
@@ -478,7 +492,7 @@ class WillardDeliveryService:
                     delta_kg=-total_kg,
                     transaction_date=liq_dt,
                     description=(
-                        f"Salida a Willard #{delivery.delivery_number} — "
+                        f"Salida de Plomo #{delivery.delivery_number} — "
                         f"{self._type_label(delivery.delivery_type)}"
                     ),
                     source_type=KG_SOURCE_TYPE,
@@ -553,7 +567,7 @@ class WillardDeliveryService:
                 account_id=None,
                 date=liq_dt,
                 description=(
-                    f"{concept} Salida a Willard #{delivery.delivery_number} — "
+                    f"{concept} Salida de Plomo #{delivery.delivery_number} — "
                     f"{float(total_kg):g} kg plomo"
                 ),
                 third_party_id=delivery.third_party_id,
@@ -655,7 +669,7 @@ class WillardDeliveryService:
             db, organization_id
         )
         desc = (
-            f"Abono a planta — Salida a Willard #{delivery.delivery_number}"
+            f"Abono a planta — Salida de Plomo #{delivery.delivery_number}"
         )
         mm_exp = money_movement._create_movement(
             db=db,
@@ -716,7 +730,7 @@ class WillardDeliveryService:
             inventory_adjustment.annul(
                 db,
                 adj.id,
-                f"Anulacion de Salida a Willard #{delivery.delivery_number}",
+                f"Anulacion de Salida de Plomo #{delivery.delivery_number}",
                 organization_id,
                 user_id=user_id,
                 commit=False,
@@ -753,7 +767,7 @@ class WillardDeliveryService:
             mv.annulled_at = now
             mv.annulled_by = user_id
             mv.annulled_reason = (
-                f"Anulacion de Salida a Willard #{delivery.delivery_number}"
+                f"Anulacion de Salida de Plomo #{delivery.delivery_number}"
             )
 
         delivery.maquila_amount = Decimal("0")
@@ -851,15 +865,28 @@ class WillardDeliveryService:
             )
 
     def _require_customer(self, db: Session, delivery: WillardDelivery) -> None:
+        self._require_customer_id(db, delivery.third_party_id)
+
+    def _require_customer_id(self, db: Session, third_party_id: UUID) -> None:
         from app.services.third_party import third_party as tp_service
 
-        tp = db.get(ThirdParty, delivery.third_party_id)
+        tp = db.get(ThirdParty, third_party_id)
+        # QA F4 (#104): un cliente puede DESACTIVARSE entre la captura y la
+        # liquidacion (se permite con saldo 0); sin este check el 400 salia desde
+        # adentro de la venta derivada, sin decir donde arreglarlo.
+        if tp is not None and not tp.is_active:
+            raise _err(
+                f"'{tp.name}' está inactivo, así que no se le puede facturar una "
+                "venta. Reactívelo en Terceros y vuelva a intentarlo."
+            )
         if tp is not None and tp_service.has_behavior_type(db, tp.id, ["customer"]):
             return
+        # El mismo texto sirve al capturar y al liquidar: dice DONDE arreglarlo
+        # y no presume en que paso estamos ("vuelva a liquidar" mentia al capturar).
         raise _err(
             f"'{tp.name if tp else 'El tercero'}' no está marcado como cliente, "
-            "así que no se le puede facturar la venta. Agréguele la categoría de "
-            "cliente en Terceros y vuelva a liquidar."
+            "así que no se le puede facturar una venta. Agréguele la categoría de "
+            "cliente en Terceros y vuelva a intentarlo."
         )
 
     def _validate_lead_products(

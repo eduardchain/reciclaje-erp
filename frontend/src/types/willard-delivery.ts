@@ -1,4 +1,4 @@
-// Salidas de plomo a Willard (W1).
+// Salidas de Plomo desde planta (W1): ventas y abonos a Willard.
 //
 // ⚠️ Todo lo que el backend declara como Decimal llega como STRING (FastAPI
 // serializa asi). Es el bloqueante (b) de #93: el tipo decia `number`, `acc + x`
