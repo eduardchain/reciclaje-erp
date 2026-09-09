@@ -12,6 +12,7 @@ import { FormLineGrid } from "@/components/shared/FormLineGrid";
 import { useMaterials, useThirdParties, useWarehouses } from "@/hooks/useMasterData";
 import { useCreateWillardDelivery } from "@/hooks/useWillardDeliveries";
 import { useKgAccounts } from "@/hooks/useKgLedger";
+import { useKgProfiles } from "@/hooks/useSacConfig";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { toLocalDateInput } from "@/utils/formatters";
 import { DELIVERY_TYPE_LABELS, type WillardDeliveryType } from "@/types/willard-delivery";
@@ -44,6 +45,7 @@ export default function WillardDeliveryCreatePage() {
   const { data: warehousesData } = useWarehouses();
   const { data: thirdPartiesData } = useThirdParties();
   const { data: kgAccounts } = useKgAccounts();
+  const { data: profilesData } = useKgProfiles();
   const { getSetting } = useOrgSettings();
 
   const materials = useMemo(() => materialsData?.items ?? [], [materialsData]);
@@ -52,6 +54,22 @@ export default function WillardDeliveryCreatePage() {
     return list.filter((w) => w.is_active && !w.is_transit);
   }, [warehousesData]);
   const thirdParties = useMemo(() => thirdPartiesData?.items ?? [], [thirdPartiesData]);
+
+  // Solo el plomo ENTREGABLE (#103 D1). El backend rechaza el resto con un 400
+  // que nombra el material, pero ofrecer los 39 obliga a descubrirlo despues de
+  // llenar el formulario. Mismo patron que la Entrada, que filtra por mundo.
+  // El puro NO se excluye: en abono es valido y solo avisa (D2).
+  const leadMaterials = useMemo(() => {
+    const lead = new Map<string, string>();
+    for (const prof of profilesData?.items ?? []) lead.set(prof.material_id, prof.lead_product);
+    return materials
+      .filter((m) => (lead.get(m.id) ?? "none") !== "none")
+      .map((m) => ({
+        id: m.id,
+        label: `${m.code} - ${m.name} (${m.default_unit ?? "kg"})`,
+        lead: lead.get(m.id) as "crudo" | "puro",
+      }));
+  }, [materials, profilesData]);
 
   // D8 — la bodega de origen SIEMPRE es la planta. El backend ya lo defiende con
   // un 400, pero ofrecer seis opciones donde cinco llevan a error es pedirle al
@@ -89,6 +107,7 @@ export default function WillardDeliveryCreatePage() {
     !!warehouseId &&
     !!thirdPartyId &&
     !!date &&
+    !!remission.trim() &&
     lines.length > 0 &&
     lines.every((l) => l.material_id && l.quantity > 0);
 
@@ -98,7 +117,7 @@ export default function WillardDeliveryCreatePage() {
       warehouse_id: warehouseId,
       third_party_id: thirdPartyId,
       date: `${date}T12:00:00`,
-      remission_number: remission || null,
+      remission_number: remission.trim(),
       invoice_number: invoice || null,
       notes: notes || null,
       lines: lines.map((l) => ({
@@ -173,8 +192,15 @@ export default function WillardDeliveryCreatePage() {
             <Input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
           </div>
           <div className="space-y-1">
-            <Label>Remisión</Label>
-            <Input value={remission} onChange={(e) => setRemission(e.target.value)} />
+            <Label>Remisión *</Label>
+            <Input
+              value={remission}
+              onChange={(e) => setRemission(e.target.value)}
+              className={!remission.trim() ? "ring-1 ring-red-300" : undefined}
+            />
+            <p className="text-xs text-slate-400">
+              Es el número con el que se concilia con Willard.
+            </p>
           </div>
           <div className="space-y-1">
             <Label>Factura</Label>
@@ -186,6 +212,13 @@ export default function WillardDeliveryCreatePage() {
       <Card>
         <CardHeader><CardTitle className="text-base">Materiales</CardTitle></CardHeader>
         <CardContent className="space-y-3">
+          {leadMaterials.length === 0 && (
+            <p className="text-xs text-amber-600">
+              Ningún material está marcado como plomo entregable, así que no hay nada que elegir.
+              Márquelos en <span className="font-medium">Config → Materiales (kg)</span> como plomo
+              crudo o puro.
+            </p>
+          )}
           {lines.map((line, idx) => (
             <FormLineGrid key={idx}>
               <div className="md:col-span-5 space-y-1">
@@ -195,11 +228,11 @@ export default function WillardDeliveryCreatePage() {
                   onChange={(v) =>
                     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, material_id: v } : l)))
                   }
-                  options={materials.map((m) => ({
+                  options={leadMaterials.map((m) => ({
                     id: m.id,
-                    label: `${m.code} - ${m.name} (${m.default_unit ?? "kg"})`,
+                    label: `${m.label} · ${m.lead === "crudo" ? "crudo" : "puro"}`,
                   }))}
-                  placeholder="Seleccionar material…"
+                  placeholder="Seleccionar plomo…"
                 />
               </div>
               <div className="md:col-span-3 space-y-1">

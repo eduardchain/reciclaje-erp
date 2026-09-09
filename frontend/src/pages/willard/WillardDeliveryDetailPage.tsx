@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ClipboardCheck, Ban, CheckCircle2, Pencil } from "lucide-react";
+import { ArrowLeft, Ban, CheckCircle2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +14,7 @@ import { SaleLink, ThirdPartyLink } from "@/components/shared/EntityLink";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   useAnnulWillardDelivery, useLiquidateWillardDelivery,
-  useReviewWillardDelivery, useWillardDelivery,
+  useWillardDelivery,
 } from "@/hooks/useWillardDeliveries";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
 import { num } from "@/types/willard-delivery";
@@ -26,7 +26,6 @@ export default function WillardDeliveryDetailPage() {
   const { hasPermission } = usePermissions();
 
   const { data: delivery, isLoading } = useWillardDelivery(id);
-  const reviewMutation = useReviewWillardDelivery();
   const liquidateMutation = useLiquidateWillardDelivery();
   const annulMutation = useAnnulWillardDelivery();
 
@@ -79,15 +78,6 @@ export default function WillardDeliveryDetailPage() {
                 className="w-full sm:w-auto"
               >
                 <Pencil className="h-4 w-4 mr-2" /> Editar
-              </Button>
-            )}
-            {hasPermission("sales.review") && (
-              <Button
-                onClick={() => reviewMutation.mutate(delivery.id)}
-                disabled={reviewMutation.isPending}
-                className="w-full sm:w-auto"
-              >
-                <ClipboardCheck className="h-4 w-4 mr-2" /> Revisar
               </Button>
             )}
           </CardContent>
@@ -204,7 +194,8 @@ export default function WillardDeliveryDetailPage() {
       )}
 
       <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
-        {delivery.status === "reviewed" && hasPermission("sales.liquidate") && (
+        {(delivery.status === "draft" || delivery.status === "reviewed") &&
+          hasPermission("sales.liquidate") && (
           <Button
             onClick={liquidate}
             disabled={missingPrice || liquidateMutation.isPending}

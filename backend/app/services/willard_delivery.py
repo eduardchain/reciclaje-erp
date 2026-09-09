@@ -188,36 +188,6 @@ class WillardDeliveryService:
         db.refresh(delivery)
         return delivery, warnings
 
-    def review(
-        self,
-        db: Session,
-        delivery_id: UUID,
-        organization_id: UUID,
-        user_id: Optional[UUID] = None,
-    ) -> tuple[WillardDelivery, list[str]]:
-        """Certifica los pesos. Sin peso no se puede revisar (#95 Q-13)."""
-        delivery = self._get_or_404(db, delivery_id, organization_id)
-        if delivery.status != "draft":
-            raise _err(
-                f"Solo se puede revisar una salida registrada "
-                f"(esta es {self._status_label(delivery.status)})."
-            )
-
-        self._require_scale_weights(db, delivery)
-        warnings = self._validate_lead_products(
-            db,
-            [ln.material_id for ln in delivery.lines],
-            delivery.delivery_type,
-            organization_id,
-        )
-
-        delivery.status = "reviewed"
-        delivery.reviewed_by = user_id
-        delivery.reviewed_at = datetime.now(tz=None).astimezone()
-        db.commit()
-        db.refresh(delivery)
-        return delivery, warnings
-
     def liquidate(
         self,
         db: Session,
@@ -233,13 +203,21 @@ class WillardDeliveryService:
         fecha la venta derivada, los ajustes, los kg y los movimientos de dinero.
         """
         delivery = self._get_or_404(db, delivery_id, organization_id)
-        if delivery.status != "reviewed":
+        # Hugo, demo 28-ago: en salidas no hay revisor — "esto funciona muy
+        # diferente porque inmediatamente queda la deuda: registrado y liquidar".
+        # `reviewed` se sigue aceptando por las filas que quedaron de la version
+        # anterior; ninguna nueva puede llegar a ese estado.
+        if delivery.status not in ("draft", "reviewed"):
             raise _err(
-                "Solo se puede liquidar una salida revisada "
+                "Solo se puede liquidar una salida registrada "
                 f"(esta es {self._status_label(delivery.status)})."
             )
         if not delivery.lines:
             raise _err("La salida no tiene lineas.")
+        # El peso de bascula se certificaba al revisar (#95 Q-13). Al desaparecer
+        # ese paso, la liquidacion es la unica puerta antes de que se muevan kg y
+        # pesos — la certificacion se mueve aqui, no se pierde.
+        self._require_scale_weights(db, delivery)
 
         # Fail-fast ANTES de cualquier efecto: sin esto el 422 sale desde adentro
         # de la venta derivada ("El tercero no es cliente"), que es cierto pero no
@@ -832,7 +810,7 @@ class WillardDeliveryService:
                 faltantes.append(material.code if material else str(line.material_id))
         if faltantes:
             raise _err(
-                "Sin peso de báscula no se puede revisar. Falta el peso de: "
+                "Sin peso de báscula no se puede liquidar. Falta el peso de: "
                 + ", ".join(faltantes)
             )
 
@@ -895,7 +873,7 @@ class WillardDeliveryService:
         Solo el plomo entregable sale hacia Willard.
 
         UN validador para los CUATRO puntos de entrada (`create`, `update`,
-        `review`, `liquidate`) — calco de `_validate_willard_capture` (#81). Si
+        `liquidate`) — `review` desaparecio en el ciclo de correcciones W1 — calco de `_validate_willard_capture` (#81). Si
         viviera solo en la liquidacion, el material equivocado se aceptaria en el
         patio y el error saldria dias despues, con el camion ido.
 

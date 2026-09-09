@@ -61,22 +61,6 @@ export function useUpdateWillardDelivery() {
   });
 }
 
-export function useReviewWillardDelivery() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => willardDeliveryService.review(id),
-    onSuccess: (d) => {
-      toast.success("Salida revisada — pesos certificados");
-      // El backend los entrega en los 4 endpoints (#103 C2): si la
-      // pantalla los descarta, el aviso llega igual de tarde que si no
-      // existiera. D2 y D3 son hermanos — fail-fast vale para los dos.
-      (d.warnings ?? []).forEach((w) => toast.warning(w, { duration: 10000 }));
-      invalidateAfterWillardDelivery(qc);
-    },
-    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al revisar")),
-  });
-}
-
 export function useLiquidateWillardDelivery() {
   const qc = useQueryClient();
   return useMutation({

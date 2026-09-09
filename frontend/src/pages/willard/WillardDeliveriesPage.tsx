@@ -40,7 +40,6 @@ export function DeliveryStatusBadge({ status }: { status: WillardDeliveryStatus 
 const TABS = [
   { value: "all", label: "Todas" },
   { value: "draft", label: "Registradas" },
-  { value: "reviewed", label: "Revisadas" },
   { value: "liquidated", label: "Liquidadas" },
 ] as const;
 

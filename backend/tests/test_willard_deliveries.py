@@ -243,6 +243,7 @@ def _create(client, headers, wh, willard, plomo, dtype, qty="50", expect=201):
             "warehouse_id": str(wh.id),
             "third_party_id": str(willard.id),
             "date": DELIVERY_DATE,
+            "remission_number": "REM-1",
             "lines": [{"material_id": str(plomo.id), "quantity": qty}],
         },
     )
@@ -251,14 +252,13 @@ def _create(client, headers, wh, willard, plomo, dtype, qty="50", expect=201):
 
 
 def _flow(client, headers, wh, willard, plomo, dtype, qty="50", price=None):
-    """Registrar -> revisar -> liquidar."""
-    d = _create(client, headers, wh, willard, plomo, dtype, qty)
-    r = client.post(f"{URL}/{d['id']}/review", headers=headers)
-    assert r.status_code == 200, r.text
+    """Registrar -> liquidar. El paso de revision se retiro (Hugo, 28-ago)."""
+    r_create = _create(client, headers, wh, willard, plomo, dtype, qty)
+    d = r_create
     body = {"line_prices": []}
     if dtype == "venta":
         body["line_prices"] = [
-            {"line_id": r.json()["lines"][0]["id"], "unit_price": str(price or 3000)}
+            {"line_id": d["lines"][0]["id"], "unit_price": str(price or 3000)}
         ]
     liq = client.post(f"{URL}/{d['id']}/liquidate", headers=headers, json=body)
     assert liq.status_code == 200, liq.text
@@ -656,24 +656,29 @@ class TestGuards:
                 "warehouse_id": str(wh_cv.id),
                 "third_party_id": str(willard.id),
                 "date": DELIVERY_DATE,
+                "remission_number": "REM-1",
                 "lines": [{"material_id": str(plomo.id), "quantity": "10"}],
             },
         )
         assert r.status_code == 400
         assert "planta" in r.json()["detail"].lower()
 
-    def test_peso_obligatorio_al_revisar(
+    def test_peso_obligatorio_al_liquidar(
         self, client, org_headers, db_session, test_organization, wh_jm, willard
     ):
-        """#95 Q-13: opcional al capturar, obligatorio al revisar. Un material
-        por UNIDAD no autocompleta el peso."""
+        """#95 Q-13 sigue vivo: opcional al capturar, obligatorio antes de que se
+        muevan kg y pesos. Al retirarse el paso de revision (Hugo, 28-ago) la
+        certificacion se mudo a la liquidacion — no se perdio. Un material por
+        UNIDAD no autocompleta el peso."""
         cat = create_material_category(db_session, test_organization.id, "Bat")
         mat = create_material(db_session, test_organization.id, "BAT-9", "Bateria", cat.id)
         mat.default_unit = "unidad"
         db_session.commit()
         _mark_lead(db_session, test_organization.id, mat, "crudo")
         d = _create(client, org_headers, wh_jm, willard, mat, "abono_bateria", qty="5")
-        r = client.post(f"{URL}/{d['id']}/review", headers=org_headers)
+        r = client.post(
+            f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []}
+        )
         assert r.status_code == 400
         assert "báscula" in r.json()["detail"] or "bascula" in r.json()["detail"]
 
@@ -684,35 +689,59 @@ class TestGuards:
         d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="50")
         assert Decimal(str(d["lines"][0]["scale_weight_kg"])) == Decimal("50.0000")
 
-    def test_editar_lineas_devuelve_a_registrada(
-        self, client, org_headers, wh_jm, willard, plomo
-    ):
-        """D17 de #95: la revision certifica LINEAS. Editarlas la invalida."""
-        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material")
-        client.post(f"{URL}/{d['id']}/review", headers=org_headers)
-        r = client.patch(
-            f"{URL}/{d['id']}",
-            headers=org_headers,
-            json={"lines": [{"material_id": str(plomo.id), "quantity": "30"}]},
-        )
-        assert r.status_code == 200
-        assert r.json()["status"] == "draft"
-
-    def test_editar_cabecera_conserva_revision(
-        self, client, org_headers, wh_jm, willard, plomo
-    ):
-        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material")
-        client.post(f"{URL}/{d['id']}/review", headers=org_headers)
-        r = client.patch(f"{URL}/{d['id']}", headers=org_headers, json={"notes": "x"})
-        assert r.status_code == 200
-        assert r.json()["status"] == "reviewed"
-
-    def test_liquidar_sin_revisar_400(
+    def test_se_liquida_directo_sin_paso_de_revision(
         self, client, org_headers, wh_jm, willard, plomo, tarifas, acc_drosses
     ):
+        """Hugo, demo 28-ago: "esto funciona muy diferente porque inmediatamente
+        queda la deuda: registrado y liquidar". Antes esto daba 400 exigiendo una
+        revision; ahora es el camino normal. Si alguien reintroduce el paso, este
+        test cae."""
         d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material")
-        r = client.post(f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []})
-        assert r.status_code == 400
+        assert d["status"] == "draft"
+        r = client.post(
+            f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []}
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "liquidated"
+
+    def test_la_ruta_de_revision_ya_no_existe(
+        self, client, org_headers, wh_jm, willard, plomo
+    ):
+        """El endpoint se retiro, no se dejo respondiendo 400: una ruta viva que
+        siempre falla es superficie que no hace nada y no avisa."""
+        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material")
+        r = client.post(f"{URL}/{d['id']}/review", headers=org_headers)
+        assert r.status_code in (404, 405), r.status_code
+
+    def test_remision_obligatoria(
+        self, client, org_headers, wh_jm, willard, plomo
+    ):
+        """Hugo, demo 28-ago: "que no te deje avanzar sin digitar el numero" —
+        y el motivo no es formal: "para que no me alteren el consecutivo". La
+        remision es el numero con el que el concilia con Willard."""
+        base = {
+            "delivery_type": "abono_material",
+            "warehouse_id": str(wh_jm.id),
+            "third_party_id": str(willard.id),
+            "date": DELIVERY_DATE,
+            "lines": [{"material_id": str(plomo.id), "quantity": "10"}],
+        }
+        assert client.post(URL, headers=org_headers, json=base).status_code == 422
+        # Vacia tampoco: seria la misma ausencia con otra forma.
+        assert client.post(
+            URL, headers=org_headers, json={**base, "remission_number": "  "}
+        ).status_code in (400, 422)
+        r = client.post(URL, headers=org_headers, json={**base, "remission_number": "R-77"})
+        assert r.status_code == 201, r.text
+        assert r.json()["remission_number"] == "R-77"
+
+    def test_no_se_puede_borrar_la_remision_editando(
+        self, client, org_headers, wh_jm, willard, plomo
+    ):
+        """La obligatoriedad del create no debe poder esquivarse por el PATCH."""
+        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material")
+        r = client.patch(f"{URL}/{d['id']}", headers=org_headers, json={"remission_number": ""})
+        assert r.status_code == 422, r.text
 
     def test_venta_a_no_cliente_avisa_donde_arreglarlo(
         self, client, org_headers, db_session, test_organization,
@@ -726,7 +755,6 @@ class TestGuards:
         )
         db_session.commit()
         d = _create(client, org_headers, wh_jm, proveedor, plomo, "venta")
-        client.post(f"{URL}/{d['id']}/review", headers=org_headers)
         r = client.post(
             f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []}
         )
@@ -987,8 +1015,8 @@ def crudo_con_formula(db_session, test_organization, client, org_headers, wh_jm)
 
 
 def _walk_expecting_block(client, headers, wh, willard, mat, dtype, qty="10"):
-    """Camina create -> review -> liquidate y devuelve la PRIMERA respuesta que
-    bloquea, sin importar la etapa.
+    """Camina create -> liquidate y devuelve la PRIMERA respuesta que bloquea,
+    sin importar la etapa.
 
     A proposito no afirma DONDE sale el 400: eso lo fijan los tests 8 y 11. Si
     este afirmara la etapa, mover el guard de sitio lo rompería y no se podria
@@ -999,18 +1027,17 @@ def _walk_expecting_block(client, headers, wh, willard, mat, dtype, qty="10"):
         "warehouse_id": str(wh.id),
         "third_party_id": str(willard.id),
         "date": DELIVERY_DATE,
+        "remission_number": "REM-1",
         "lines": [{"material_id": str(mat.id), "quantity": qty}],
     })
     if r.status_code >= 400:
         return r
-    did = r.json()["id"]
-    r = client.post(f"{URL}/{did}/review", headers=headers)
-    if r.status_code >= 400:
-        return r
+    created = r.json()
+    did = created["id"]
     body = {"line_prices": []}
     if dtype == "venta":
         body["line_prices"] = [
-            {"line_id": r.json()["lines"][0]["id"], "unit_price": "3000"}
+            {"line_id": created["lines"][0]["id"], "unit_price": "3000"}
         ]
     r = client.post(f"{URL}/{did}/liquidate", headers=headers, json=body)
     assert r.status_code >= 400, (
@@ -1082,6 +1109,7 @@ class TestGuardMaterialEntregable:
             "warehouse_id": str(wh_jm.id),
             "third_party_id": str(otro.id),
             "date": DELIVERY_DATE,
+            "remission_number": "REM-1",
             "lines": [{"material_id": str(plomo.id), "quantity": "10"}],
         })
         assert r.status_code == 422, r.text
@@ -1168,7 +1196,7 @@ class TestGuardMaterialEntregable:
         """Test 11 — fija la etapa de `update`, el punto de entrada que no tenia
         testigo.
 
-        Sin este test, un validador cableado en create/review/liquidate pero SIN
+        Sin este test, un validador cableado en create/liquidate pero SIN
         la llamada en `update` deja los otros diez en verde: los de flujo
         completo reciben su 400 en la liquidacion igual, el 8 valida `create`,
         que si valida, y los avisos siguen cableados. Firma vacia.

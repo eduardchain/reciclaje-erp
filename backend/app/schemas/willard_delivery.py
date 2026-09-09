@@ -6,10 +6,10 @@ El precio solo existe en el tipo `venta`. Ahi la linea acepta `unit_price` XOR
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.utils.dates import BusinessDate
 
@@ -70,7 +70,12 @@ class WillardDeliveryCreate(BaseModel):
     driver_id: Optional[UUID] = None
     vehicle_id: Optional[UUID] = None
     invoice_number: Optional[str] = Field(None, max_length=50)
-    remission_number: Optional[str] = Field(None, max_length=50)
+    # Obligatoria (Hugo, demo 28-ago): "que no te deje avanzar sin digitar el
+    # numero" — y la razon no es formal, es "para que no me alteren el
+    # consecutivo": la remision es el numero con el que el concilia con Willard.
+    remission_number: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)
+    ]
     notes: Optional[str] = Field(None, max_length=1000)
     lines: list[WillardDeliveryLineCreate] = Field(..., min_length=1)
 
@@ -83,7 +88,12 @@ class WillardDeliveryUpdate(BaseModel):
     driver_id: Optional[UUID] = None
     vehicle_id: Optional[UUID] = None
     invoice_number: Optional[str] = Field(None, max_length=50)
-    remission_number: Optional[str] = Field(None, max_length=50)
+    # Parcial: omitirla la deja como esta. Lo que no se permite es BORRARLA
+    # mandando vacio — seria esquivar la obligatoriedad del create por la puerta
+    # de atras.
+    remission_number: Optional[
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+    ] = None
     notes: Optional[str] = Field(None, max_length=1000)
     lines: Optional[list[WillardDeliveryLineCreate]] = Field(None, min_length=1)
 

@@ -2,7 +2,7 @@
 
 Router completo gated por `kg_ledger_enabled` (D7): 403 incluso para admins.
 Permisos: reusa los de ventas (la Salida ES la captura de la entrega), mas
-`sales.review` propio para el paso que certifica pesos.
+El paso de revision se retiro (Hugo, demo 28-ago): registrado -> liquidado.
 """
 from datetime import datetime
 from decimal import Decimal
@@ -203,22 +203,6 @@ def update_delivery(
 ):
     delivery, warnings = willard_delivery.update(
         db, delivery_id, data, context["organization_id"], user_id=context["user"].id
-    )
-    response = _enrich(db, delivery)
-    # El servicio los calcula; si el endpoint no los asigna, el usuario no ve
-    # ninguno — y se ve identico a "no hubo advertencias" (defecto D4d de #100).
-    response.warnings = warnings or []
-    return response
-
-
-@router.post("/{delivery_id}/review", response_model=WillardDeliveryResponse)
-def review_delivery(
-    delivery_id: UUID,
-    db: Session = Depends(get_db),
-    context=Depends(require_permission("sales.review")),
-):
-    delivery, warnings = willard_delivery.review(
-        db, delivery_id, context["organization_id"], user_id=context["user"].id
     )
     response = _enrich(db, delivery)
     # El servicio los calcula; si el endpoint no los asigna, el usuario no ve

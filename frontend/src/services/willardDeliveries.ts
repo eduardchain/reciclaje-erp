@@ -8,7 +8,7 @@ import type {
 } from "@/types/willard-delivery";
 
 // Salidas de plomo a Willard (W1). Router gated por kg_ledger_enabled en
-// backend; permisos reusan sales.* (+ sales.review para certificar pesos).
+// backend; permisos reusan sales.*. El paso de revision se retiro (Hugo, 28-ago).
 
 export interface WillardDeliveryFilters {
   status?: string;
@@ -40,11 +40,6 @@ export const willardDeliveryService = {
 
   update: async (id: string, payload: WillardDeliveryUpdate): Promise<WillardDelivery> => {
     const { data } = await apiClient.patch<WillardDelivery>(`${BASE}/${id}`, payload);
-    return data;
-  },
-
-  review: async (id: string): Promise<WillardDelivery> => {
-    const { data } = await apiClient.post<WillardDelivery>(`${BASE}/${id}/review`);
     return data;
   },
 

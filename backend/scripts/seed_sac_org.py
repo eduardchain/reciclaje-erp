@@ -106,7 +106,10 @@ REVISOR_ROLE = {
     "permission_codes": [
         "config.manage_fleet", "config.view_fleet", "formulas.view",
         "kg_ledger.view", "materials.view", "purchases.edit",
-        "purchases.review", "purchases.view", "sales.review", "sales.view",
+        # `sales.review` se retiro con el paso de revision de salidas (Hugo,
+        # 28-ago): concedia exactamente nada. La fila del catalogo sale con la
+        # migracion de los consecutivos separados (punto 17), que hace falta igual.
+        "purchases.review", "purchases.view", "sales.view",
         "third_parties.view",
         "warehouses.view",
     ],
