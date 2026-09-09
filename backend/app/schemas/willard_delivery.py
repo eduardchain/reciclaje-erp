@@ -119,6 +119,10 @@ class WillardDeliveryResponse(BaseModel):
 
     id: UUID
     delivery_number: int
+    # #105 D1/D5: el consecutivo es por serie; `label` es el numero que se ve
+    # ("Venta #n" / "Abono #n"). El endpoint los arma campo por campo (trampa #95).
+    series: Literal["venta", "abono"]
+    label: str
     delivery_type: DeliveryType
     warehouse_id: UUID
     warehouse_name: Optional[str] = None

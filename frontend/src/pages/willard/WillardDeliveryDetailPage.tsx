@@ -30,6 +30,11 @@ export default function WillardDeliveryDetailPage() {
   const annulMutation = useAnnulWillardDelivery();
 
   const [prices, setPrices] = useState<Record<string, number>>({});
+  // #105 item 5: por linea se digita el unitario O el total (el backend acepta
+  // uno de los dos, XOR — D8 de #95). Johana a veces tiene el total y no el
+  // unitario, igual que en la Entrada.
+  const [totals, setTotals] = useState<Record<string, number>>({});
+  const [priceMode, setPriceMode] = useState<Record<string, "unit" | "total">>({});
   const [annulOpen, setAnnulOpen] = useState(false);
   const [annulReason, setAnnulReason] = useState("");
 
@@ -38,8 +43,10 @@ export default function WillardDeliveryDetailPage() {
   const isVenta = delivery?.delivery_type === "venta";
   const missingPrice = useMemo(() => {
     if (!delivery || !isVenta) return false;
-    return delivery.lines.some((l) => !(prices[l.id] > 0));
-  }, [delivery, isVenta, prices]);
+    return delivery.lines.some((l) =>
+      (priceMode[l.id] ?? "unit") === "total" ? !(totals[l.id] > 0) : !(prices[l.id] > 0),
+    );
+  }, [delivery, isVenta, prices, totals, priceMode]);
 
   if (isLoading) return <div className="p-8 text-center text-slate-500">Cargando…</div>;
   if (!delivery) return <div className="p-8 text-center text-slate-500">Salida no encontrada</div>;
@@ -49,7 +56,11 @@ export default function WillardDeliveryDetailPage() {
       id: delivery.id,
       data: {
         line_prices: isVenta
-          ? delivery.lines.map((l) => ({ line_id: l.id, unit_price: String(prices[l.id]) }))
+          ? delivery.lines.map((l) =>
+              (priceMode[l.id] ?? "unit") === "total"
+                ? { line_id: l.id, total_price: String(totals[l.id]) }
+                : { line_id: l.id, unit_price: String(prices[l.id]) },
+            )
           : [],
       },
     });
@@ -57,7 +68,7 @@ export default function WillardDeliveryDetailPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={`Salida #${delivery.delivery_number}`}
+        title={delivery.label}
         description={delivery.warehouse_name ?? undefined}
       >
         <Button variant="outline" onClick={() => navigate("/willard-deliveries")} className="w-full sm:w-auto">
@@ -146,11 +157,45 @@ export default function WillardDeliveryDetailPage() {
                           este input vivia en `reviewed`; al retirar el paso Revisar la
                           venta va draft -> liquidated y quedaba sin donde poner el precio. */}
                       {(delivery.status === "draft" || delivery.status === "reviewed") ? (
-                        <MoneyInput
-                          value={prices[l.id] ?? 0}
-                          onChange={(v) => setPrices((p) => ({ ...p, [l.id]: v }))}
-                          className="w-32 ml-auto"
-                        />
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="text-[11px] text-indigo-600 hover:underline whitespace-nowrap"
+                              onClick={() =>
+                                setPriceMode((m) => ({
+                                  ...m,
+                                  [l.id]: (m[l.id] ?? "unit") === "unit" ? "total" : "unit",
+                                }))
+                              }
+                            >
+                              {(priceMode[l.id] ?? "unit") === "unit" ? "Unitario" : "Total"}
+                            </button>
+                            {(priceMode[l.id] ?? "unit") === "unit" ? (
+                              <MoneyInput
+                                value={prices[l.id] ?? 0}
+                                onChange={(v) => setPrices((p) => ({ ...p, [l.id]: v }))}
+                                className="w-32"
+                              />
+                            ) : (
+                              <MoneyInput
+                                value={totals[l.id] ?? 0}
+                                onChange={(v) => setTotals((t) => ({ ...t, [l.id]: v }))}
+                                className="w-32"
+                              />
+                            )}
+                          </div>
+                          {(priceMode[l.id] ?? "unit") === "unit" && prices[l.id] > 0 && (
+                            <span className="text-[11px] text-slate-500 tabular-nums">
+                              {formatWeight(num(l.quantity), l.material_unit)} × {formatCurrency(prices[l.id])} = {formatCurrency(num(l.quantity) * prices[l.id])}
+                            </span>
+                          )}
+                          {(priceMode[l.id] ?? "unit") === "total" && totals[l.id] > 0 && num(l.quantity) > 0 && (
+                            <span className="text-[11px] text-slate-500 tabular-nums">
+                              {formatCurrency(totals[l.id])} ÷ {formatWeight(num(l.quantity), l.material_unit)} = {formatCurrency(totals[l.id] / num(l.quantity))} c/u
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="tabular-nums">
                           {l.unit_price ? formatCurrency(num(l.unit_price)) : "—"}
@@ -218,7 +263,7 @@ export default function WillardDeliveryDetailPage() {
       <ConfirmDialog
         open={annulOpen}
         onOpenChange={setAnnulOpen}
-        title={`Anular salida #${delivery.delivery_number}`}
+        title={`Anular ${delivery.label}`}
         description="Se revierte el inventario, la deuda en kg, la factura y el reparto."
         confirmLabel="Anular"
         variant="destructive"

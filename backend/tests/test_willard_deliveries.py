@@ -1351,7 +1351,7 @@ class TestGuardPlomoPorVentas:
         assert d["sale_id"] is not None
         sale = db_session.get(Sale, d["sale_id"])
         assert sale is not None and sale.status == "liquidated"
-        assert sale.notes == f"Salida de Plomo #{d['delivery_number']}"
+        assert sale.notes == f"Salida de Plomo — {d['label']}"
         assert _kg(db_session, acc_intersede.id) == Decimal("-50")
 
 
@@ -1410,3 +1410,197 @@ class TestVentaExigeClienteAlCapturar:
         assert r.status_code == 400, r.text
         detail = r.json()["detail"]
         assert "Cliente Que Se Fue" in detail and "inactivo" in detail and "Terceros" in detail
+
+
+# --------------------------------------------- #105 — afinado de Salidas ---
+#
+# Matriz defecto x test en docs/planes/plan-sac-afinado-salidas.md §6 (compromiso
+# previo). P1 numeracion global · P2 salta anuladas · P3 unico global · P4 CHECK
+# tipo<->serie · P5 descripciones sin serie · P6 lista por numero · P7 endpoint sin
+# series/label · P8 _auto_weight fuera de update · P9 sales.review en catalogo ·
+# P10 llave del lock con hash().
+
+import zlib
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from sqlalchemy.exc import IntegrityError
+
+from app.models.willard_delivery import (
+    DELIVERY_SERIES,
+    DELIVERY_TYPES,
+    SERIES_OF_TYPE,
+    WillardDelivery,
+    series_of,
+)
+from app.services.willard_delivery import WillardDeliveryService
+
+
+def _create_dated(client, headers, wh, willard, plomo, dtype, date, qty="10"):
+    r = client.post(
+        URL,
+        headers=headers,
+        json={
+            "delivery_type": dtype,
+            "warehouse_id": str(wh.id),
+            "third_party_id": str(willard.id),
+            "date": date,
+            "remission_number": "REM-1",
+            "lines": [{"material_id": str(plomo.id), "quantity": qty}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _row(org_id, wh, willard, dtype, series, number):
+    """Fila cruda para probar lo que la BD rechaza (no pasa por el servicio)."""
+    return WillardDelivery(
+        organization_id=org_id,
+        delivery_number=number,
+        series=series,
+        delivery_type=dtype,
+        warehouse_id=wh.id,
+        third_party_id=willard.id,
+        date=datetime(2026, 7, 10, 12, tzinfo=timezone.utc),
+        status="draft",
+    )
+
+
+class TestConsecutivoPorSerie:
+    """Hugo, 28-ago: "para los abonos tenemos un consecutivo y para la venta otro
+    consecutivo [...] que es el que llevo con Willard". Decision de Daniel (9-sep):
+    el sistema numera por serie; la remision sigue siendo el numero de Willard."""
+
+    def test_series_independientes(self, client, org_headers, wh_jm, willard, plomo):
+        """T1 (P1, P3): venta, abono, abono, venta -> Venta #1, Abono #1, Abono #2, Venta #2."""
+        labels = [
+            _create(client, org_headers, wh_jm, willard, plomo, dtype, qty="5")["label"]
+            for dtype in ("venta", "abono_bateria", "abono_material", "venta")
+        ]
+        assert labels == ["Venta #1", "Abono #1", "Abono #2", "Venta #2"]
+
+    def test_anulada_conserva_su_numero(self, client, org_headers, wh_jm, willard, plomo):
+        """T2 (P2): una anulada consumio su numero; el siguiente no lo reutiliza."""
+        d1 = _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="5")
+        r = client.post(
+            f"{URL}/{d1['id']}/annul", headers=org_headers, json={"reason": "captura errada"}
+        )
+        assert r.status_code == 200, r.text
+        d2 = _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="5")
+        assert d1["label"] == "Abono #1"
+        assert d2["label"] == "Abono #2"
+
+    def test_unicidad_por_serie(self, db_session, test_organization, wh_jm, willard):
+        """T3 (P3): dos abonos con el mismo numero -> la BD lo rechaza; un abono y
+        una venta con el mismo numero -> conviven (son series distintas)."""
+        org = test_organization.id
+        db_session.add(_row(org, wh_jm, willard, "abono_material", "abono", 7))
+        db_session.flush()
+        with pytest.raises(IntegrityError):
+            with db_session.begin_nested():
+                db_session.add(_row(org, wh_jm, willard, "abono_bateria", "abono", 7))
+                db_session.flush()
+        db_session.add(_row(org, wh_jm, willard, "venta", "venta", 7))
+        db_session.flush()
+        n = db_session.execute(
+            select(func.count()).select_from(WillardDelivery).where(
+                WillardDelivery.organization_id == org,
+                WillardDelivery.delivery_number == 7,
+            )
+        ).scalar_one()
+        assert n == 2
+        db_session.rollback()
+
+    def test_check_tipo_serie(self, db_session, test_organization, wh_jm, willard):
+        """T4 (P4): una venta con serie 'abono' no puede existir — lo rechaza la BD,
+        no un test que alguien pueda borrar."""
+        with pytest.raises(IntegrityError):
+            with db_session.begin_nested():
+                db_session.add(_row(test_organization.id, wh_jm, willard, "venta", "abono", 1))
+                db_session.flush()
+        db_session.rollback()
+
+    def test_vocabulario_de_series(self):
+        """T5 (P4): cada tipo tiene serie declarada y aparece en el CHECK; un tipo
+        desconocido no cae en ninguna serie por descarte (fail-open de #103)."""
+        ck = next(
+            c for c in WillardDelivery.__table__.constraints
+            if getattr(c, "name", None) == "ck_willard_delivery_series"
+        )
+        check_text = str(ck.sqltext)
+        for dtype in DELIVERY_TYPES:
+            assert series_of(dtype) in DELIVERY_SERIES
+            assert f"'{dtype}'" in check_text
+        assert set(SERIES_OF_TYPE) == set(DELIVERY_TYPES)
+        with pytest.raises(ValueError):
+            series_of("traslado_crisol")
+
+    def test_label_en_descripciones_y_notas(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias, acc_drosses,
+    ):
+        """T6 (P5, P3): lo que Tesoreria y Ventas muestran lleva el prefijo del
+        modulo Y la serie — "Abono #1" a secas en Tesoreria es pago parcial."""
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="30")
+        descs = [m.description for m in _mms(db_session, test_organization.id, "service_income_accrual")]
+        assert descs and all("Salida de Plomo — Abono #1" in d for d in descs), descs
+        v = _flow(client, org_headers, wh_jm, willard, plomo, "venta", qty="30")
+        sale = db_session.get(Sale, v["sale_id"])
+        assert sale.notes == "Salida de Plomo — Venta #1"
+
+    def test_lista_ordena_por_fecha(self, client, org_headers, wh_jm, willard, plomo):
+        """T7 (P6, P3): entre dos series el numero no ordena nada; manda la fecha."""
+        _create_dated(client, org_headers, wh_jm, willard, plomo, "abono_material", "2026-07-01T12:00:00")
+        _create_dated(client, org_headers, wh_jm, willard, plomo, "venta", "2026-07-05T12:00:00")
+        _create_dated(client, org_headers, wh_jm, willard, plomo, "abono_bateria", "2026-07-03T12:00:00")
+        r = client.get(URL, headers=org_headers)
+        assert r.status_code == 200
+        assert [d["label"] for d in r.json()["items"]] == ["Venta #1", "Abono #2", "Abono #1"]
+
+    def test_response_trae_series_y_label(self, client, org_headers, wh_jm, willard, plomo):
+        """T8 (P7, P4*): por la API, no por el ORM — el endpoint arma la respuesta
+        campo por campo (trampa #95/#101)."""
+        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="5")
+        assert (d["series"], d["label"], d["delivery_number"]) == ("abono", "Abono #1", 1)
+        one = client.get(f"{URL}/{d['id']}", headers=org_headers).json()
+        assert (one["series"], one["label"]) == ("abono", "Abono #1")
+        lst = client.get(URL, headers=org_headers).json()["items"]
+        assert lst[0]["label"] == "Abono #1"
+
+    def test_llave_del_lock_es_estable(self):
+        """T11 (P10): la llave del advisory lock NO puede salir de `hash()` (aleatorio
+        por proceso). Se compara contra el crc32 calculado aparte: "dos llamadas
+        iguales" no atraparia `hash()`, que dentro de UN proceso es determinista."""
+        org = uuid4()
+        expected = zlib.crc32(f"{org}:willard_delivery:venta".encode("utf-8"))
+        assert WillardDeliveryService._lock_key(org, "venta") == expected
+        assert WillardDeliveryService._lock_key(org, "abono") != expected
+        assert WillardDeliveryService._lock_key(uuid4(), "venta") != expected
+
+
+class TestBasculaYCatalogo:
+    def test_peso_se_autocompleta_en_kg_al_editar(
+        self, client, org_headers, wh_jm, willard, plomo
+    ):
+        """T9 (P8): la pantalla de edicion ya no muestra la casilla en material kg;
+        el servidor tiene que llenarla tambien por el camino de UPDATE."""
+        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="50")
+        r = client.patch(
+            f"{URL}/{d['id']}",
+            headers=org_headers,
+            json={"lines": [{"material_id": str(plomo.id), "quantity": "60"}]},
+        )
+        assert r.status_code == 200, r.text
+        assert Decimal(str(r.json()["lines"][0]["scale_weight_kg"])) == Decimal("60.0000")
+
+    def test_sales_review_fuera_del_catalogo(self, client, org_headers):
+        """T10 (P9): el permiso murio con el paso Revisar; ni el catalogo Python ni
+        la API lo ofrecen."""
+        from app.services.role import PERMISSIONS_CATALOG
+
+        assert all(p[0] != "sales.review" for p in PERMISSIONS_CATALOG)
+        r = client.get("/api/v1/roles/permissions", headers=org_headers)
+        assert r.status_code == 200, r.text
+        codes = {p["code"] for m in r.json() for p in m["permissions"]}
+        assert "sales.review" not in codes

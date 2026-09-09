@@ -13,7 +13,7 @@ Que crea:
   - Los 37 materiales del listado de Daniel (2026-07-23) + perfil kg + formula
     de conversion (battery_to_lead / drosses_to_lead) donde aplica.
   - 5 terceros (Willard S.A = proveedor Y cliente, Green Loop, 3 PRUEBA-*).
-  - 4 cuentas kg (WILLARD-BAT-CV, WILL-BAT-JM, WILL-DROSS, INTERSEDE).
+  - 3 cuentas kg (WILLARD-BAT-CV, WILL-DROSS, INTERSEDE); WILL-BAT-JM se desactiva (#105).
   - 2 tarifas (comision_green_loop $100 per_kg_material,
     maquila_intersede_cv_jm $1.500 per_kg_lead).
   - 3 configs de retencion (retefuente 2.5%, reteiva 2.0%, ICA Barranquilla 0.7%).
@@ -259,10 +259,20 @@ THIRD_PARTIES_LOCAL = [
 # (code, display_name, account_type, warehouse_name|None, titular_name|None)
 KG_ACCOUNTS = [
     ("WILLARD-BAT-CV", "Willard Baterias CV", "willard_baterias", "Circunvalar", "Willard S.A"),
-    ("WILL-BAT-JM", "Willard Baterías Juan Mina", "willard_baterias", "Juan Mina", "Willard S.A"),
     ("WILL-DROSS", "Willard Drosses", "willard_drosses", None, "Willard S.A"),
     ("INTERSEDE", "Transito Intersede (kg)", "intersede", None, None),
 ]
+# Cuentas kg que se sembraron y NO responden a ninguna operacion (#105 item 4,
+# punto 19 del control de cambios). `WILL-BAT-JM` nacio en la demo del 3-ago:
+# la propuesta §2.3 pone los sub-saldos de baterias en Barranquilla y BOGOTA,
+# y Juan Mina nunca recibe baterias (recibe drosses). No era inerte: el
+# selector de sede de una Entrada postconsumo la ofrecia y ninguna salida la
+# descargaba. La provision la DESACTIVA si esta activa (con saldo != 0 el
+# backend responde 422 y se avisa sin abortar; nunca se tocan saldos). La de
+# Bogota NO se crea aqui: el summary suma por tipo y una cuenta BOG de tipo
+# baterias entraria a la deuda que Johana concilia, que ella dice que no
+# aplica hasta que el material llega a Circunvalar (F4 de QA) — ciclo propio.
+OBSOLETE_KG_ACCOUNTS = ["WILL-BAT-JM"]
 
 TARIFFS = [
     # #93 D11: kg_per_unit=14 — "14 kg por unidad, sea cual sea la unidad"
@@ -831,7 +841,7 @@ class SacSeeder:
             self.third_parties[name] = r["id"]
 
     def create_kg_accounts(self) -> None:
-        logging.info("[11] Cuentas kg (Willard x3 + INTERSEDE)")
+        logging.info("[11] Cuentas kg (Willard x2 + INTERSEDE)")
         existing = self.api.existing_by("/kg-ledger/accounts", "code")
         for code, display, acc_type, wh_name, tp_name in KG_ACCOUNTS:
             if code in existing:
@@ -844,6 +854,19 @@ class SacSeeder:
             if tp_name:
                 body["third_party_id"] = self.third_parties[tp_name]
             self.api.post("/kg-ledger/accounts", body, label=code)
+        # Obsoletas: solo desactivar (soft), nunca tocar saldos. Si el listado no
+        # la trae (ya inactiva) no hay nada que hacer — idempotente.
+        for code in OBSOLETE_KG_ACCOUNTS:
+            it = existing.get(code)
+            if not it or not it.get("is_active", True):
+                continue
+            try:
+                self.api.patch(
+                    f"/kg-ledger/accounts/{it['id']}", {"is_active": False}, label=code
+                )
+                logging.info(f"  cuenta kg obsoleta desactivada: {code}")
+            except SystemExit as e:
+                logging.warning(f"  No se pudo desactivar la cuenta kg '{code}': {e}")
 
     def create_tariffs(self) -> None:
         """Append-only (#35): solo se crea si no hay vigente igual."""

@@ -161,7 +161,7 @@ export default function WillardDeliveriesPage() {
                 <TableBody>
                   {items.map((d) => (
                     <TableRow key={d.id} className="cursor-pointer" onClick={() => open(d)}>
-                      <TableCell className="font-medium">{d.delivery_number}</TableCell>
+                      <TableCell className="font-medium whitespace-nowrap">{d.label}</TableCell>
                       <TableCell>{formatDate(d.date)}</TableCell>
                       <TableCell><DeliveryTypeBadge type={d.delivery_type} /></TableCell>
                       <TableCell>{d.warehouse_name ?? "—"}</TableCell>
@@ -185,7 +185,7 @@ export default function WillardDeliveriesPage() {
               <Card key={d.id} className="cursor-pointer" onClick={() => open(d)}>
                 <CardContent className="p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold">Salida #{d.delivery_number}</span>
+                    <span className="font-semibold">{d.label}</span>
                     <DeliveryStatusBadge status={d.status} />
                   </div>
                   <div className="flex items-center justify-between gap-2 text-sm">

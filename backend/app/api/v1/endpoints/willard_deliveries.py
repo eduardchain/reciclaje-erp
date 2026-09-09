@@ -89,6 +89,8 @@ def _enrich(db: Session, delivery: WillardDelivery) -> WillardDeliveryResponse:
     return WillardDeliveryResponse(
         id=delivery.id,
         delivery_number=delivery.delivery_number,
+        series=delivery.series,
+        label=delivery.label,
         delivery_type=delivery.delivery_type,
         warehouse_id=delivery.warehouse_id,
         warehouse_name=delivery.warehouse.name if delivery.warehouse else None,
@@ -155,7 +157,9 @@ def list_deliveries(
         select(WillardDelivery)
         .where(*filters)
         .options(selectinload(WillardDelivery.lines))
-        .order_by(WillardDelivery.delivery_number.desc())
+        # #105 D5: dos series distintas — ordenar por numero entre ellas no
+        # significa nada. Fecha de negocio y despues instante de creacion.
+        .order_by(WillardDelivery.date.desc(), WillardDelivery.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).scalars().all()

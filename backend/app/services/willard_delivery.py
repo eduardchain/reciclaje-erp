@@ -21,6 +21,7 @@ la maquila interna se causa AL TRASLADAR, una sola vez, asi que repetirla en
 la entrega la cobraria dos veces.
 """
 import logging
+import zlib
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
@@ -39,7 +40,11 @@ from app.models.sale import Sale
 from app.models.service_tariff import ServiceTariff
 from app.models.third_party import ThirdParty
 from app.models.warehouse import Warehouse
-from app.models.willard_delivery import WillardDelivery, WillardDeliveryLine
+from app.models.willard_delivery import (
+    WillardDelivery,
+    WillardDeliveryLine,
+    series_of,
+)
 from app.schemas.inventory_adjustment import DecreaseCreate
 from app.schemas.sale import SaleCreate, SaleLineCreate
 from app.schemas.willard_delivery import (
@@ -107,9 +112,11 @@ class WillardDeliveryService:
             organization_id,
         )
 
+        series = series_of(data.delivery_type)
         delivery = WillardDelivery(
             organization_id=organization_id,
-            delivery_number=self._next_number(db, organization_id),
+            delivery_number=self._next_number(db, organization_id, series),
+            series=series,
             delivery_type=data.delivery_type,
             warehouse_id=data.warehouse_id,
             third_party_id=data.third_party_id,
@@ -407,7 +414,7 @@ class WillardDeliveryService:
                 warehouse_id=delivery.warehouse_id,
                 date=liq_dt,
                 invoice_number=delivery.invoice_number,
-                notes=f"Salida de Plomo #{delivery.delivery_number}",
+                notes=f"Salida de Plomo — {delivery.label}",
                 lines=sale_lines,
             ),
             organization_id,
@@ -462,7 +469,7 @@ class WillardDeliveryService:
                     warehouse_id=delivery.warehouse_id,
                     quantity=line.quantity,
                     date=liq_dt,
-                    reason=f"{label} Willard — Salida #{delivery.delivery_number}",
+                    reason=f"{label} Willard — Salida de Plomo — {delivery.label}",
                 ),
                 organization_id,
                 user_id=user_id,
@@ -492,7 +499,7 @@ class WillardDeliveryService:
                     delta_kg=-total_kg,
                     transaction_date=liq_dt,
                     description=(
-                        f"Salida de Plomo #{delivery.delivery_number} — "
+                        f"Salida de Plomo — {delivery.label} — "
                         f"{self._type_label(delivery.delivery_type)}"
                     ),
                     source_type=KG_SOURCE_TYPE,
@@ -567,8 +574,8 @@ class WillardDeliveryService:
                 account_id=None,
                 date=liq_dt,
                 description=(
-                    f"{concept} Salida de Plomo #{delivery.delivery_number} — "
-                    f"{float(total_kg):g} kg plomo"
+                    f"{concept} Salida de Plomo — {delivery.label} "
+                    f"({float(total_kg):g} kg plomo)"
                 ),
                 third_party_id=delivery.third_party_id,
                 user_id=user_id,
@@ -669,7 +676,7 @@ class WillardDeliveryService:
             db, organization_id
         )
         desc = (
-            f"Abono a planta — Salida de Plomo #{delivery.delivery_number}"
+            f"Abono a planta — Salida de Plomo — {delivery.label}"
         )
         mm_exp = money_movement._create_movement(
             db=db,
@@ -730,7 +737,7 @@ class WillardDeliveryService:
             inventory_adjustment.annul(
                 db,
                 adj.id,
-                f"Anulacion de Salida de Plomo #{delivery.delivery_number}",
+                f"Anulacion de Salida de Plomo — {delivery.label}",
                 organization_id,
                 user_id=user_id,
                 commit=False,
@@ -767,7 +774,7 @@ class WillardDeliveryService:
             mv.annulled_at = now
             mv.annulled_by = user_id
             mv.annulled_reason = (
-                f"Anulacion de Salida de Plomo #{delivery.delivery_number}"
+                f"Anulacion de Salida de Plomo — {delivery.label}"
             )
 
         delivery.maquila_amount = Decimal("0")
@@ -1077,12 +1084,29 @@ class WillardDeliveryService:
             .limit(1)
         ).scalar_one_or_none()
 
-    def _next_number(self, db: Session, organization_id: UUID) -> int:
-        lock_id = hash(str(organization_id)) % (2**63)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
+    @staticmethod
+    def _lock_key(organization_id: UUID, series: str) -> int:
+        """Llave ESTABLE del advisory lock (#105 D3, F2 de QA).
+
+        `hash()` de un str esta aleatorizado por proceso (PYTHONHASHSEED): dos
+        workers de uvicorn calcularian llaves distintas para la misma org y el
+        lock no serializaria entre procesos (lo salvaba solo el indice unico,
+        con un 500 en vez de un duplicado). crc32 es determinista y cabe en el
+        bigint del lock. El mismo defecto vive en otros 11 sitios del repo —
+        backlog, no este ciclo.
+        """
+        return zlib.crc32(f"{organization_id}:willard_delivery:{series}".encode("utf-8"))
+
+    def _next_number(self, db: Session, organization_id: UUID, series: str) -> int:
+        """Siguiente numero de la SERIE (#105 D2): venta y abono cuentan aparte."""
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": self._lock_key(organization_id, series)},
+        )
         current = db.execute(
             select(func.max(WillardDelivery.delivery_number)).where(
-                WillardDelivery.organization_id == organization_id
+                WillardDelivery.organization_id == organization_id,
+                WillardDelivery.series == series,
             )
         ).scalar_one_or_none()
         return (current or 0) + 1

@@ -136,7 +136,7 @@ export default function WillardDeliveryEditPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={`Editar salida #${delivery.delivery_number}`}>
+      <PageHeader title={`Editar ${delivery.label}`}>
         <Button
           variant="outline"
           onClick={() => navigate(`/willard-deliveries/${id}`)}
@@ -214,7 +214,7 @@ export default function WillardDeliveryEditPage() {
                   placeholder="Seleccionar plomo…"
                 />
               </div>
-              <div className="md:col-span-3 space-y-1">
+              <div className={unitOf(line.material_id) === "kg" ? "md:col-span-6 space-y-1" : "md:col-span-3 space-y-1"}>
                 <Label className={idx > 0 ? "md:sr-only" : undefined}>
                   Cantidad ({unitOf(line.material_id)})
                 </Label>
@@ -226,23 +226,28 @@ export default function WillardDeliveryEditPage() {
                   decimals={3}
                 />
               </div>
-              <div className="md:col-span-3 space-y-1">
-                <Label className={idx > 0 ? "md:sr-only" : undefined}>Báscula (kg)</Label>
-                <MoneyInput
-                  value={line.scale_weight_kg}
-                  onChange={(v) =>
-                    setLines((prev) =>
-                      prev.map((l, i) => (i === idx ? { ...l, scale_weight_kg: v } : l)),
-                    )
-                  }
-                  decimals={3}
-                />
-                {unitOf(line.material_id) !== "kg" && line.scale_weight_kg <= 0 && (
-                  <p className="text-xs text-amber-600">
-                    Sin este peso no se puede liquidar la salida.
-                  </p>
-                )}
-              </div>
+              {/* Báscula solo si el material NO se mide en kg (#105 item 2): en kg
+                  el servidor iguala el peso a la cantidad (`_auto_weight`) y la
+                  casilla era un campo repetido (Daniel, pruebas 9-sep). */}
+              {unitOf(line.material_id) !== "kg" && (
+                <div className="md:col-span-3 space-y-1">
+                  <Label className={idx > 0 ? "md:sr-only" : undefined}>Báscula (kg)</Label>
+                  <MoneyInput
+                    value={line.scale_weight_kg}
+                    onChange={(v) =>
+                      setLines((prev) =>
+                        prev.map((l, i) => (i === idx ? { ...l, scale_weight_kg: v } : l)),
+                      )
+                    }
+                    decimals={3}
+                  />
+                  {line.scale_weight_kg <= 0 && (
+                    <p className="text-xs text-amber-600">
+                      Sin este peso no se puede liquidar la salida.
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="md:col-span-1 flex md:items-end">
                 <Button
                   type="button"

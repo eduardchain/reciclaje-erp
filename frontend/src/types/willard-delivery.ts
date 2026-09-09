@@ -58,7 +58,11 @@ export interface WillardDeliveryLine {
 
 export interface WillardDelivery {
   id: string;
+  /** Consecutivo DENTRO de su serie (#105): Venta #n y Abono #n cuentan aparte. */
   delivery_number: number;
+  series: "venta" | "abono";
+  /** El numero que ve el usuario: "Venta #n" / "Abono #n". Usar este, no delivery_number. */
+  label: string;
   delivery_type: WillardDeliveryType;
   warehouse_id: string;
   warehouse_name: string | null;

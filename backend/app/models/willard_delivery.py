@@ -53,6 +53,46 @@ if TYPE_CHECKING:
 DELIVERY_TYPES = ("venta", "abono_bateria", "abono_material")
 DELIVERY_STATUSES = ("draft", "reviewed", "liquidated", "annulled")
 
+# Consecutivo por SERIE (#105 D1). Hugo, 28-ago: "para los abonos tenemos un
+# consecutivo y para la venta otro consecutivo [...] que es el que llevo con
+# Willard". Este dict es la UNICA fuente: de aqui salen el CHECK de la tabla,
+# `series_of()` y el label que ve el usuario. Un tipo nuevo sin serie declarada
+# no puede insertarse — `series` es NOT NULL y el CHECK lo rechaza en la BD, no
+# en un test que alguien pueda borrar (F1 de QA: la version con indices
+# parciales dejaba un tipo nuevo SIN unicidad, en silencio).
+SERIES_OF_TYPE = {
+    "venta": "venta",
+    "abono_bateria": "abono",
+    "abono_material": "abono",
+}
+DELIVERY_SERIES = ("venta", "abono")
+SERIES_LABELS = {"venta": "Venta", "abono": "Abono"}
+
+
+def series_of(delivery_type: str) -> str:
+    """Serie del consecutivo para un tipo. Levanta en tipo desconocido a
+    proposito: caer en una serie por descarte es el fail-open de #103."""
+    try:
+        return SERIES_OF_TYPE[delivery_type]
+    except KeyError:
+        raise ValueError(
+            f"Tipo de salida sin serie declarada en SERIES_OF_TYPE: {delivery_type!r}"
+        ) from None
+
+
+def series_check_sql() -> str:
+    """Texto del CHECK tipo<->serie, generado del mapping (no tipeado dos veces).
+    La migracion a7b8c9d0e1f3 lleva el mismo texto congelado; el parity check
+    los compara."""
+    by_series: dict[str, list[str]] = {}
+    for dtype, serie in SERIES_OF_TYPE.items():
+        by_series.setdefault(serie, []).append(dtype)
+    parts = []
+    for serie, types in by_series.items():
+        listed = ", ".join(f"'{t}'" for t in types)
+        parts.append(f"(delivery_type IN ({listed}) AND series = '{serie}')")
+    return " OR ".join(parts)
+
 
 class WillardDelivery(Base, OrganizationMixin, TimestampMixin):
     """Salida de plomo a Willard — documento fisico de despacho."""
@@ -62,7 +102,13 @@ class WillardDelivery(Base, OrganizationMixin, TimestampMixin):
     id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=uuid4)
 
     delivery_number: Mapped[int] = mapped_column(
-        Integer, nullable=False, comment="Consecutivo por organizacion"
+        Integer, nullable=False, comment="Consecutivo por organizacion Y serie (#105)"
+    )
+
+    series: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        comment="Serie del consecutivo (#105 D1): venta | abono. Derivada del tipo; la BD la exige",
     )
 
     delivery_type: Mapped[str] = mapped_column(
@@ -180,8 +226,12 @@ class WillardDelivery(Base, OrganizationMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint(
-            "organization_id", "delivery_number", name="uq_willard_delivery_number"
+            "organization_id",
+            "series",
+            "delivery_number",
+            name="uq_willard_delivery_series_number",
         ),
+        CheckConstraint(series_check_sql(), name="ck_willard_delivery_series"),
         CheckConstraint(
             "delivery_type IN ('venta', 'abono_bateria', 'abono_material')",
             name="ck_willard_delivery_type",
@@ -194,8 +244,13 @@ class WillardDelivery(Base, OrganizationMixin, TimestampMixin):
         Index("ix_willard_deliveries_org_date", "organization_id", "date"),
     )
 
+    @property
+    def label(self) -> str:
+        """El numero que ve el usuario: "Venta #n" / "Abono #n" (#105 D5)."""
+        return f"{SERIES_LABELS[self.series]} #{self.delivery_number}"
+
     def __repr__(self) -> str:
-        return f"<WillardDelivery #{self.delivery_number} ({self.delivery_type})>"
+        return f"<WillardDelivery {self.label} ({self.delivery_type})>"
 
 
 class WillardDeliveryLine(Base, OrganizationMixin, TimestampMixin):
