@@ -19,6 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. Identificar: requisitos faltantes, contradicciones con patrones existentes, edge cases no cubiertos, side-effects con otros modulos.
 3. Si hay gaps, listarlos y esperar confirmacion antes de continuar.
 4. Si no hay gaps, decir "Requisitos validados, no encontre gaps" y proceder.
+5. **SAC (o cualquier cliente con inventario de preguntas):** antes de preguntarle algo al cliente o de planear una funcionalidad, leer `docs/soluciones ambientales del caribe/inventario-preguntas-cliente.md`. Lo que esta ✅/☑️/🟢 NO se repregunta ni se rediseña; solo lo 🟠 (abierto o contradictorio) se pregunta, y lo 📎 se pide. Toda respuesta o pregunta nueva actualiza ese archivo el mismo dia (regla de Daniel, 2026-09-09: "no preguntarle al cliente lo mismo una y otra vez").
 
 ---
 

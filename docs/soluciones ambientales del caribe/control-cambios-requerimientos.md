@@ -20,6 +20,8 @@ Registro de toda decisión que **cambia o supera** lo documentado en `requerimie
 
 ## Preguntas abiertas (aún NO decididas — no son cambios todavía)
 
+> **Inventario canónico:** el estado en una línea de TODAS las preguntas (incluidas las del spec y las de reuniones sin `Q-nn`) vive en `inventario-preguntas-cliente.md`. Aquí queda la prosa larga con citas; al cambiar un estado, se cambia también allá.
+
 | ID | Pregunta | Para | Estado |
 |----|----------|------|--------|
 | Q-01 | Lista real de referencias de material (baterías por ref + kg/unidad; drosses/seco-pinza/escurrido + %) con su clasificación de mundos | Johana | ✅ Respondida 2026-07-17: se levanta con **plantilla en Drive** ("Plantilla de Materiales - Soluciones Ambientales del Caribe", 4 hojas: Instrucciones/Baterías/Drosses-Scrap/Otros) que SAC llena con datos reales. Reseed espera la plantilla llena |

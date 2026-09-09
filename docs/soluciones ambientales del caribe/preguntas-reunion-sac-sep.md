@@ -1,5 +1,7 @@
 # Preguntas para la reunión SAC (semana del 9-sep-2026) — versión auditada
 
+> El estado permanente de cada pregunta vive en `inventario-preguntas-cliente.md` (una fila por pregunta, con estado). Esta hoja es solo la selección para ESTA reunión.
+
 Auditada el 9-sep contra `control-cambios-requerimientos.md`, `requerimientos-funcionales.md` v0.5, el briefing del 11-ago y las transcripciones del 24 y 28-ago. De 13 preguntas quedan **4**; las otras 9 ya tenían respuesta (sección E, con la cita) o son decisión nuestra.
 
 ## A. Las cuatro que sí hay que hacer
