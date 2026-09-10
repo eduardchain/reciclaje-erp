@@ -87,7 +87,7 @@
 | — | El dross que sale del crisol | Vuelve al horno grande y causa maquila otra vez (un kg puede causar dos veces) | Johana 3-sep | ☑️ | ciclo de planta |
 | — | Plomo crudo vs puro, ¿los dos salen a Willard? | Crudo en los tres tipos; puro solo en venta | Hugo 28-ago | ✅ | #103 D2, #104 (pantalla no ofrece puro en abonos) |
 | — | Exportación y venta a terceros de plomo | Cuatro destinos del crudo (venta, abono, exportación, refinación) — dichos el 26-jun y en los diagramas | Hugo 26-jun; diagramas | ☑️ | no construido (registro "Alcance conocido y NO construido") |
-| — | ¿Existe deuda en scrap o todo se convierte a plomo? | Hugo dejó abierta la salida barata ("o lo deja también en plomo") | Hugo 12-ago l.1159 | 🟠 | el libro es plomo-only por construcción; preguntar solo si aparece un caso real |
+| — | ¿Se lleva un saldo intermedio en kilos de scrap (lo que sale del molino) o todo se convierte a plomo equivalente? | Todo en plomo equivalente (Hugo mismo ofreció esa salida: "o lo deja también en plomo... que coincida plomo con plomo"); lo que se pierde entre batería y scrap es rendimiento del molino contra estándar, no una deuda | Hugo 12-ago 00:49:28; decisión 9-sep | 🟢 | libro kg plomo-only por construcción; el rendimiento va con la tabla del molino (T0/T1) |
 | D6 | Utilidad cero gerencial en Juan Mina y Bogotá | Sí ("lo que genere el gasto, la compra y la venta") | Hugo 26-jun | ☑️ | P&L por sede existe (#84); toggle consolidado no |
 
 ## E. Salidas de plomo (el módulo)
