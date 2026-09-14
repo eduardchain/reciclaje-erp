@@ -154,6 +154,8 @@ class WillardDeliveryResponse(BaseModel):
     maquila_amount: Decimal = Decimal("0")
     freight_amount: Decimal = Decimal("0")
     plant_credit_amount: Decimal = Decimal("0")
+    crucible_amount: Decimal = Decimal("0")
+    billing_warehouse_id: Optional[UUID] = None
 
     total_kg_lead: Decimal = Decimal("0")
 

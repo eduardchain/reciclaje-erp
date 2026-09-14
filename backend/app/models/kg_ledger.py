@@ -142,6 +142,15 @@ class KgLedgerMovement(Base, OrganizationMixin, TimestampMixin):
         nullable=False,
         comment="Firmado: positivo = acumula deuda / carga; negativo = descarga / entrega",
     )
+    stage: Mapped[Optional[str]] = mapped_column(
+        String(10),
+        nullable=True,
+        comment=(
+            "Etapa DENTRO de la cuenta intersede (#107 D1): horno | crisol. "
+            "Obligatoria en intersede, NULL en las demas — la regla vive en "
+            "services/kg_ledger.add_kg_movement, el UNICO escritor del libro"
+        ),
+    )
 
     transaction_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -155,7 +164,7 @@ class KgLedgerMovement(Base, OrganizationMixin, TimestampMixin):
         String(40),
         nullable=False,
         comment="postconsumo_receipt | drosses_receipt | willard_subbalance_move | intersede_* | "
-        "furnace_* | crucible_* | willard_delivery | manual_adjustment | migration_initial_load",
+        "furnace_* | crucible_charge | willard_delivery | manual_adjustment | migration_initial_load",
     )
 
     source_id: Mapped[Optional[UUID]] = mapped_column(
@@ -200,6 +209,10 @@ class KgLedgerMovement(Base, OrganizationMixin, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint("delta_kg != 0", name="ck_kg_ledger_movements_delta_nonzero"),
+        CheckConstraint(
+            "stage IS NULL OR stage IN ('horno', 'crisol')",
+            name="ck_kg_ledger_movements_stage",
+        ),
         Index("ix_kg_movement_account_date", "account_id", text("transaction_date DESC")),
         Index("ix_kg_movement_source", "source_type", "source_id"),
         Index("ix_kg_movement_org_status", "organization_id", "status"),

@@ -44,6 +44,7 @@ from app.utils.dates import business_today, business_today_noon
 from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.inventory_movement import InventoryMovement
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
+from app.services.kg_ledger import add_kg_movement
 from app.models.material import Material
 from app.models.material_conversion_formula import MaterialConversionFormula
 from app.models.material_kg_profile import MaterialKgProfile
@@ -1343,27 +1344,27 @@ class InboundOrderService:
             )
 
             # D5: un KgLedgerMovement POR LINEA con snapshot de formula propio
-            db.add(
-                KgLedgerMovement(
-                    organization_id=organization_id,
-                    account_id=account.id,
-                    delta_kg=delta_kg,
-                    transaction_date=order.date,
-                    description=(
-                        f"Recepcion {label} #{order.order_number} — "
-                        f"{material.code} x {qty:g} {material.default_unit or 'kg'}"
-                    ),
-                    source_type=kg_source,
-                    source_id=order.id,
-                    inventory_movement_id=movement.id,
-                    conversion_formula_snapshot={
-                        "formula_id": str(formula.id),
-                        "formula_type": formula.formula_type,
-                        "parameters": formula.parameters,
-                    },
-                    created_by=user_id,
-                    status="confirmed",
-                )
+            # Escritor unico del libro kg (#107 D1, F1 de QA): cuentas Willard,
+            # sin etapa (solo intersede se parte en horno y crisol).
+            add_kg_movement(
+                db,
+                organization_id=organization_id,
+                account=account,
+                delta_kg=delta_kg,
+                transaction_date=order.date,
+                description=(
+                    f"Recepcion {label} #{order.order_number} — "
+                    f"{material.code} x {qty:g} {material.default_unit or 'kg'}"
+                ),
+                source_type=kg_source,
+                source_id=order.id,
+                inventory_movement_id=movement.id,
+                conversion_formula_snapshot={
+                    "formula_id": str(formula.id),
+                    "formula_type": formula.formula_type,
+                    "parameters": formula.parameters,
+                },
+                created_by=user_id,
             )
 
     # ------------------------------------------------------------------ #

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Scale, Warehouse, ArrowDownUp, Pencil } from "lucide-react";
+import { Plus, Scale, Warehouse, ArrowDownUp, Pencil, Flame, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -194,14 +194,14 @@ export default function KgLedgerPage() {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard label="Willard" metric={asMetric(summary?.total_willard_kg ?? 0)} icon={<Scale className="h-4 w-4" />} accentColor="sky" formatValue={(n) => formatWeight(n)} />
           <KpiCard label="Intersede" metric={asMetric(summary?.total_intersede_kg ?? 0)} icon={<Warehouse className="h-4 w-4" />} accentColor="violet" formatValue={(n) => formatWeight(n)} />
-          {/* Horno y Crisol OCULTAS (#103 D8): no hay servicio, endpoint ni siembra
-              que escriba en esas cuentas — `plant_process.py` solo lo importa
-              `models/__init__.py`, para crear las tablas. Dirian 0 para siempre, y
-              la lectura natural es "todavia no hemos cargado el horno", no "esto no
-              existe". Vuelven con el circuito de planta, que es su ciclo propio. */}
+          {/* #107 D1: horno y crisol NO son cuentas aparte (las tarjetas de #103 D8
+              prometian un modelo que no existia) — son las dos ETAPAS de la deuda
+              intersede, y suman exactamente el total de arriba por construccion. */}
+          <KpiCard label="En horno (crudo)" metric={asMetric(summary?.intersede_horno_kg ?? 0)} icon={<Flame className="h-4 w-4" />} accentColor="indigo" formatValue={(n) => formatWeight(n)} />
+          <KpiCard label="En crisol" metric={asMetric(summary?.intersede_crisol_kg ?? 0)} icon={<FlaskConical className="h-4 w-4" />} accentColor="amber" formatValue={(n) => formatWeight(n)} />
         </div>
       )}
 

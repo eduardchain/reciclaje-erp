@@ -205,6 +205,10 @@ MATERIALS: list[tuple[str, str, str, str, str, bool, Optional[str], Optional[flo
     # habia ningun material para el producto del crisol.
     ("PLO-PUR", "PLOMO PURO", "Plomo", "kg", "none", False, None, None, "puro"),
     ("PLO-LIN", "PLOMO LINGOTES", "Plomo", "kg", "none", True, None, None, "crudo"),
+    # #107 D6 — el dross del crisol (~13%, Johana 3-sep) es un material propio:
+    # vuelve al horno grande por una transformacion manual (puro -> dross) y su
+    # retorno se registra como documento de crisol. `none`: no es entregable.
+    ("DROSS-CRI", "DROSS DE CRISOL", "Drosses", "kg", "none", False, None, None, "none"),
     # Retal y cascara quedan en `none` a proposito: por §4.1 son INSUMOS del
     # horno, no producto entregable. Marcar uno de mas reabre el defecto de #103.
     ("PLO-RET", "PLOMO RETAL", "Plomo", "kg", "none", True, None, None, "none"),
@@ -280,6 +284,11 @@ TARIFFS = [
     {"tariff_code": "comision_green_loop", "unit_price_cop": "100",
      "unit": "per_kg_material", "kg_per_unit": "14"},
     {"tariff_code": "maquila_intersede_cv_jm", "unit_price_cop": "1500", "unit": "per_kg_lead"},
+    # #107 D3 — diferencial del crisol: $300/kg de plomo PURO vendido, planta
+    # se lo cobra a Circunvalar (Hugo 28-ago, tres veces: "cuando el plomo
+    # sale puro, la maquila es de 300 pesos mas"). Se causa al VENDER el puro,
+    # no al pasar al crisol; la refinacion ES la unica descarga de esa etapa.
+    {"tariff_code": "maquila_crisol", "unit_price_cop": "300", "unit": "per_kg_lead"},
     # W1 — CORREGIDO en CC-009 (2026-09-03). Los valores viejos ($1.500 y $200)
     # venian de confundir la maquila INTERNA entre sedes con la de WILLARD. Los
     # correctos estaban desde el 2-jul en la tabla "Tarifas confirmadas" de

@@ -119,6 +119,8 @@ def _enrich(db: Session, delivery: WillardDelivery) -> WillardDeliveryResponse:
         maquila_amount=delivery.maquila_amount,
         freight_amount=delivery.freight_amount,
         plant_credit_amount=delivery.plant_credit_amount,
+        crucible_amount=delivery.crucible_amount,
+        billing_warehouse_id=delivery.billing_warehouse_id,
         total_kg_lead=total_kg,
         lines=lines,
     )

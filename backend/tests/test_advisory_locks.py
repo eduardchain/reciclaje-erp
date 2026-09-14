@@ -208,6 +208,7 @@ class TestMapa:
         from app.services.sale import crud_sale
         from app.services.transfer import transfer_service
         from app.services.willard_delivery import willard_delivery
+        from app.services.crucible_charge import crucible_charge_service
 
         casos = [
             (purchase._generate_purchase_number, ("purchase_number", None)),
@@ -218,6 +219,8 @@ class TestMapa:
             (material_transformation._generate_transformation_number, ("transformation_number", None)),
             (transfer_service._generate_transfer_number, ("transfer_number", None)),
             (inbound_order_service._generate_order_number, ("inbound_order_number", None)),
+            # #107 (T15): el documento de crisol numera con su propia secuencia
+            (crucible_charge_service._generate_charge_number, ("crucible_number", None)),
             (lambda db, org: willard_delivery._next_number(db, org, "venta"), ("willard_delivery", "venta")),
         ]
         org = uuid4()
@@ -306,3 +309,32 @@ class TestOrdenCanonico:
             s.rollback()
         finally:
             s.close()
+
+
+class TestCrisol:
+    """#107 T15 — el documento de crisol entra al catalogo con su rango."""
+
+    def test_crucible_number_en_el_mapa_con_rango_14(self):
+        from app.utils.advisory_locks import RANK, SEQUENCES
+
+        assert SEQUENCES["crucible_number"] == ("crucible_charges", "charge_number", None)
+        assert RANK["crucible_number"] == 14
+        assert RANK["willard_delivery"] == 13
+        assert RANK["crucible_number"] < RANK["movement_number"]
+        # F2 de QA: dos secuencias con el mismo rango se podrian tomar en
+        # cualquier orden y el orden canonico dejaria de ser total.
+        assert len(set(RANK.values())) == len(RANK)
+
+    def test_dross_return_pide_crisol_y_despues_movimiento(self, db_session, test_organization):
+        """El retorno de dross numera el documento (14) y despues el par (30):
+        declarado anticipado, y el orden inverso revienta."""
+        from app.utils.advisory_locks import LockOrderError, lock_sequence, lock_sequences
+
+        org = test_organization.id
+        lock_sequences(db_session, org, "crucible_number", "movement_number")
+        db_session.rollback()
+
+        lock_sequence(db_session, org, "movement_number")
+        with pytest.raises(LockOrderError):
+            lock_sequence(db_session, org, "crucible_number")
+        db_session.rollback()

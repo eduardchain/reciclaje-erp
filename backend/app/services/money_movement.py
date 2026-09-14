@@ -1068,7 +1068,8 @@ class CRUDMoneyMovement:
         from app.models.money_movement import INTERNAL_MAQUILA_MOVEMENT_TYPES
         _OWNER_MODULE = {
             "transfer": ("el traslado", "Traslados"),
-            "willard_delivery": ("la salida", "Salidas a Willard"),
+            "willard_delivery": ("la salida", "Salidas de Plomo"),
+            "crucible_charge": ("el documento de crisol", "Salidas de Plomo → Crisol"),
         }
         if movement.movement_type in INTERNAL_MAQUILA_MOVEMENT_TYPES:
             doc, module = _OWNER_MODULE.get(
@@ -1087,8 +1088,8 @@ class CRUDMoneyMovement:
         if movement.source_type == "willard_delivery":
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="No se puede anular un movimiento generado por una Salida a "
-                "Willard desde Tesorería. Anule la salida desde su módulo.",
+                detail="No se puede anular un movimiento generado por una Salida de "
+                "Plomo desde Tesorería. Anule la salida desde su módulo.",
             )
 
         now = datetime.now(timezone.utc)

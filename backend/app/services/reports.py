@@ -29,6 +29,7 @@ from app.models.inventory_movement import InventoryMovement
 from app.models.business_unit import BusinessUnit
 
 from app.models.sale import SaleCommission
+from app.models.willard_delivery import WillardDelivery
 from app.schemas.reports import (
     AccountAuditItem,
     AccountSummary,
@@ -522,6 +523,14 @@ class ReportService:
         # corre con WHERE false (costo ~0 en PG) y devuelve ceros — el camino
         # consolidado (by_sede=False) queda byte a byte como hoy.
         _not_by_sede = [false()] if by_sede else []
+        # #107 D5 (Q-30): la venta que DERIVA una Salida de Plomo la factura la
+        # sede de facturacion (Circunvalar, `billing_warehouse_id` estampado al
+        # liquidar), no la bodega de la que sale el plomo (Juan Mina). Ingreso,
+        # COGS y comisiones de esa venta siguen a la MISMA columna; el
+        # inventario sigue saliendo de planta. Solo dentro de `by_sede`: el
+        # consolidado no toca el outerjoin (Sale.willard_delivery_id es N:1,
+        # no duplica filas, pero la query consolidada queda byte a byte).
+        sale_sede = func.coalesce(WillardDelivery.billing_warehouse_id, Sale.warehouse_id)
 
         # 1. Sales Revenue (ventas normales, excluye DE)
         sale_filters = [
@@ -532,14 +541,17 @@ class ReportService:
         if has_dates:
             sale_filters += [Sale.liquidated_at >= dt_from, Sale.liquidated_at < dt_to]
         if by_sede:
-            sale_filters.append(Sale.warehouse_id == warehouse_id)
+            sale_filters.append(sale_sede == warehouse_id)
 
-        row = db.execute(
-            select(
-                func.coalesce(func.sum(Sale.total_amount), 0),
-                func.count(),
-            ).where(*sale_filters)
-        ).one()
+        sales_q = select(
+            func.coalesce(func.sum(Sale.total_amount), 0),
+            func.count(),
+        )
+        if by_sede:
+            sales_q = sales_q.select_from(Sale).outerjoin(
+                WillardDelivery, Sale.willard_delivery_id == WillardDelivery.id
+            )
+        row = db.execute(sales_q.where(*sale_filters)).one()
         sales_revenue = Decimal(str(row[0]))
         sales_count = row[1]
 
@@ -552,15 +564,19 @@ class ReportService:
         if has_dates:
             cogs_filters += [Sale.liquidated_at >= dt_from, Sale.liquidated_at < dt_to]
         if by_sede:
-            cogs_filters.append(Sale.warehouse_id == warehouse_id)
+            cogs_filters.append(sale_sede == warehouse_id)
 
-        cogs_val = db.scalar(
+        cogs_q = (
             select(
                 func.coalesce(func.sum(SaleLine.unit_cost * SaleLine.quantity), 0)
             ).select_from(SaleLine)
             .join(Sale, SaleLine.sale_id == Sale.id)
-            .where(*cogs_filters)
         )
+        if by_sede:
+            cogs_q = cogs_q.outerjoin(
+                WillardDelivery, Sale.willard_delivery_id == WillardDelivery.id
+            )
+        cogs_val = db.scalar(cogs_q.where(*cogs_filters))
         cogs = Decimal(str(cogs_val))
 
         # 3. Double Entry Profit (via DoubleEntryLine)
@@ -1053,9 +1069,9 @@ class ReportService:
             # MoneyMovement.warehouse_id (commission_accrual nace con sede
             # NULL → daria $0 y el test de oro pasaria en falso). Huerfanas
             # (sale_id NULL) quedan solo en consolidado.
-            comm_filters.append(Sale.warehouse_id == warehouse_id)
+            comm_filters.append(sale_sede == warehouse_id)
 
-        comm_rows = db.execute(
+        comm_q = (
             select(
                 case(
                     (Sale.double_entry_id.is_not(None), "double_entry"),
@@ -1065,9 +1081,12 @@ class ReportService:
             )
             .select_from(MoneyMovement)
             .outerjoin(Sale, MoneyMovement.sale_id == Sale.id)
-            .where(*comm_filters)
-            .group_by("source")
-        ).all()
+        )
+        if by_sede:
+            comm_q = comm_q.outerjoin(
+                WillardDelivery, Sale.willard_delivery_id == WillardDelivery.id
+            )
+        comm_rows = db.execute(comm_q.where(*comm_filters).group_by("source")).all()
 
         commissions_paid_sales = Decimal("0")
         commissions_paid_dp = Decimal("0")

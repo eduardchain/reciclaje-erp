@@ -34,6 +34,7 @@ import { cn } from "@/utils";
 import {
   KG_ACCOUNT_TYPE_LABELS,
   KG_SOURCE_TYPE_LABELS,
+  STAGE_LABELS,
   type KgLedgerStatementRow,
 } from "@/types/kg-ledger";
 
@@ -85,6 +86,8 @@ export default function KgAccountStatementPage() {
   if (isLoading) return <div className="p-8 text-center text-slate-500">Cargando...</div>;
   if (!account) return <div className="p-8 text-center text-slate-500">Cuenta no encontrada</div>;
 
+  // #107 D1: solo la cuenta intersede lleva etapa (horno | crisol).
+  const isIntersede = data?.account?.account_type === "intersede";
   return (
     <div className="space-y-4">
       <PageHeader
@@ -160,6 +163,7 @@ export default function KgAccountStatementPage() {
               <TableRow>
                 <TableHead>Fecha</TableHead>
                 <TableHead>Origen</TableHead>
+                {isIntersede && <TableHead>Etapa</TableHead>}
                 <TableHead>Descripción</TableHead>
                 <TableHead className="text-right">Δ kg</TableHead>
                 <TableHead className="text-right">Saldo (kg)</TableHead>
@@ -169,7 +173,7 @@ export default function KgAccountStatementPage() {
             <TableBody>
               {/* Fila sintetica: saldo de apertura real de la ventana (#55) */}
               <TableRow className="bg-slate-50/80">
-                <TableCell className="text-slate-500 text-sm" colSpan={3}>
+                <TableCell className="text-slate-500 text-sm" colSpan={isIntersede ? 4 : 3}>
                   Saldo Inicial
                 </TableCell>
                 <TableCell />
@@ -182,7 +186,7 @@ export default function KgAccountStatementPage() {
               </TableRow>
               {movements.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-sm text-slate-400 py-6">
+                  <TableCell colSpan={isIntersede ? 7 : 6} className="text-center text-sm text-slate-400 py-6">
                     Sin movimientos en la ventana seleccionada
                   </TableCell>
                 </TableRow>
@@ -205,8 +209,23 @@ export default function KgAccountStatementPage() {
                             Ver recepción
                           </EntityLink>
                         )}
+                        {m.source_type === "willard_delivery" && m.source_id && (
+                          <EntityLink to={buildRoute(ROUTES.WILLARD_DELIVERY_DETAIL, { id: m.source_id })}>
+                            Ver salida
+                          </EntityLink>
+                        )}
+                        {m.source_type === "crucible_charge" && m.source_id && (
+                          <EntityLink to={buildRoute(ROUTES.CRUCIBLE_CHARGE_DETAIL, { id: m.source_id })}>
+                            Ver documento
+                          </EntityLink>
+                        )}
                       </div>
                     </TableCell>
+                    {isIntersede && (
+                      <TableCell className="whitespace-nowrap text-sm">
+                        {m.stage ? STAGE_LABELS[m.stage] : "—"}
+                      </TableCell>
+                    )}
                     <TableCell className={cn("text-sm text-slate-600 max-w-[280px]", isAnnulled && "line-through")}>
                       <span className="truncate block">{m.description ?? "—"}</span>
                       {isAnnulled && m.annulled_reason && (

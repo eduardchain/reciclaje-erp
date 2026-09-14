@@ -95,6 +95,10 @@ export interface WillardDelivery {
   maquila_amount: string | number;
   freight_amount: string | number;
   plant_credit_amount: string | number;
+  /** #107 D3: $300/kg de plomo PURO vendido, planta se lo cobra a la sede que factura. */
+  crucible_amount: string | number;
+  /** #107 D5 (Q-30): sede que factura la venta derivada, estampada al liquidar. */
+  billing_warehouse_id: string | null;
   total_kg_lead: string | number;
 
   lines: WillardDeliveryLine[];

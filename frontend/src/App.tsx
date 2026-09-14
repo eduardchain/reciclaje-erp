@@ -93,6 +93,8 @@ const WillardDeliveriesPage = lazy(() => import("@/pages/willard/WillardDeliveri
 const WillardDeliveryCreatePage = lazy(() => import("@/pages/willard/WillardDeliveryCreatePage"));
 const WillardDeliveryDetailPage = lazy(() => import("@/pages/willard/WillardDeliveryDetailPage"));
 const WillardDeliveryEditPage = lazy(() => import("@/pages/willard/WillardDeliveryEditPage"));
+const CrucibleChargeCreatePage = lazy(() => import("@/pages/willard/CrucibleChargeCreatePage"));
+const CrucibleChargeDetailPage = lazy(() => import("@/pages/willard/CrucibleChargeDetailPage"));
 const TransfersPage = lazy(() => import("@/pages/transfers/TransfersPage"));
 const TransferCreatePage = lazy(() => import("@/pages/transfers/TransferCreatePage"));
 const TransferDetailPage = lazy(() => import("@/pages/transfers/TransferDetailPage"));
@@ -160,6 +162,9 @@ function App() {
               <Route path={ROUTES.INBOUND} element={<FP flag="kg_ledger_enabled" permission="purchases.view"><InboundOrdersPage /></FP>} />
               <Route path={ROUTES.WILLARD_DELIVERIES} element={<FP flag="kg_ledger_enabled" permission="sales.view"><WillardDeliveriesPage /></FP>} />
               <Route path={ROUTES.WILLARD_DELIVERY_NEW} element={<FP flag="kg_ledger_enabled" permission="sales.create"><WillardDeliveryCreatePage /></FP>} />
+              {/* #107: documentos de crisol — segmento estatico "crisol" gana sobre ":id" */}
+              <Route path={ROUTES.CRUCIBLE_CHARGE_NEW} element={<FP flag="kg_ledger_enabled" permission="sales.create"><CrucibleChargeCreatePage /></FP>} />
+              <Route path={ROUTES.CRUCIBLE_CHARGE_DETAIL} element={<FP flag="kg_ledger_enabled" permission="sales.view"><CrucibleChargeDetailPage /></FP>} />
               <Route path={ROUTES.WILLARD_DELIVERY_DETAIL} element={<FP flag="kg_ledger_enabled" permission="sales.view"><WillardDeliveryDetailPage /></FP>} />
               <Route path={ROUTES.WILLARD_DELIVERY_EDIT} element={<FP flag="kg_ledger_enabled" permission="sales.edit"><WillardDeliveryEditPage /></FP>} />
               <Route path={ROUTES.INBOUND_NEW} element={<FP flag="kg_ledger_enabled" permission="purchases.create"><InboundCreatePage /></FP>} />

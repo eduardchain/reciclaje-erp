@@ -31,6 +31,19 @@ export const KG_SOURCE_TYPE_LABELS: Record<string, string> = {
   postconsumo_receipt: "Recepción postconsumo",
   drosses_receipt: "Recepción drosses",
   migration_initial_load: "Carga inicial migración",
+  // #107 F4c: faltaban DOS escritores reales (el mapa se derivo de un grep,
+  // no de memoria) + el nuevo. Sin label la fila pintaba el codigo crudo.
+  intersede_send: "Traslado intersede",
+  willard_delivery: "Salida de Plomo",
+  crucible_charge: "Documento de crisol",
+};
+
+// #107 D1 — la cuenta intersede tiene DOS etapas (Johana 3-sep: "intersede =
+// horno grande + crisol"); el saldo total sigue siendo uno.
+export type IntersedeStage = "horno" | "crisol";
+export const STAGE_LABELS: Record<IntersedeStage, string> = {
+  horno: "En horno (crudo)",
+  crisol: "En crisol",
 };
 
 export interface KgLedgerAccountResponse {
@@ -69,6 +82,8 @@ export interface KgLedgerMovementManualCreate {
   transaction_date: string;
   description: string;
   reason: string;
+  /** Obligatoria en intersede (422 sin ella); prohibida en las demas cuentas. */
+  stage?: IntersedeStage | null;
 }
 
 export interface KgLedgerMovementResponse {
@@ -79,6 +94,8 @@ export interface KgLedgerMovementResponse {
   description: string | null;
   source_type: string;
   source_id: string | null;
+  /** Solo en intersede (#107 D1); null en el resto. */
+  stage: IntersedeStage | null;
   inventory_movement_id: string | null;
   conversion_formula_snapshot: Record<string, unknown> | null;
   status: KgMovementStatus;
@@ -115,6 +132,9 @@ export interface KgLedgerSummaryResponse {
   accounts: KgLedgerSummaryAccount[];
   total_willard_kg: number;
   total_intersede_kg: number;
+  /** Desglose por etapa: horno + crisol == total_intersede_kg por construccion. */
+  intersede_horno_kg: number;
+  intersede_crisol_kg: number;
   total_intra_horno_kg: number;
   total_crisol_kg: number;
 }

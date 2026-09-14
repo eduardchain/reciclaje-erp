@@ -20,6 +20,7 @@ import {
   DELIVERY_TYPE_COLORS, DELIVERY_TYPE_LABELS, num,
   type WillardDelivery, type WillardDeliveryStatus, type WillardDeliveryType,
 } from "@/types/willard-delivery";
+import { CrucibleChargesSection } from "./CrucibleChargesSection";
 
 export function DeliveryTypeBadge({ type }: { type: WillardDeliveryType }) {
   return (
@@ -45,11 +46,15 @@ const TABS = [
 
 // Segunda fila de tabs: el TIPO. El destino cambia por tipo (un cliente, Willard,
 // o el crisol de la propia planta), asi que es la primera pregunta al buscar.
-const TYPE_TABS: { value: "all" | WillardDeliveryType; label: string }[] = [
+// "crisol" NO es un tipo de salida: es el 4º ítem que Hugo pidió (28-ago) y
+// vive en su propia tabla (documentos de crisol, #107 D2). Comparte la pantalla
+// porque para el usuario es "otra salida de plomo de planta".
+const TYPE_TABS: { value: "all" | WillardDeliveryType | "crisol"; label: string }[] = [
   { value: "all", label: "Todos los tipos" },
   { value: "venta", label: DELIVERY_TYPE_LABELS.venta },
   { value: "abono_bateria", label: DELIVERY_TYPE_LABELS.abono_bateria },
   { value: "abono_material", label: DELIVERY_TYPE_LABELS.abono_material },
+  { value: "crisol", label: "Crisol" },
 ];
 
 export default function WillardDeliveriesPage() {
@@ -60,12 +65,16 @@ export default function WillardDeliveriesPage() {
 
   const tab = searchParams.get("tab") ?? "all";
   const typeTab = searchParams.get("type") ?? "all";
-  const { data, isLoading } = useWillardDeliveries({
-    status: tab === "all" ? undefined : tab,
-    delivery_type: typeTab === "all" ? undefined : typeTab,
-    page,
-    page_size: 50,
-  });
+  const isCrisol = typeTab === "crisol";
+  const { data, isLoading } = useWillardDeliveries(
+    {
+      status: tab === "all" ? undefined : tab,
+      delivery_type: typeTab === "all" || isCrisol ? undefined : typeTab,
+      page,
+      page_size: 50,
+    },
+    !isCrisol,
+  );
 
   // El hook de scroll va ANTES de cualquier return condicional (#93 bloqueante a)
   useScrollRestoration(!isLoading);
@@ -82,15 +91,21 @@ export default function WillardDeliveriesPage() {
     <div className="space-y-4">
       <PageHeader
         title="Salidas de Plomo"
-        description="Ventas de plomo y abonos a Willard, desde planta"
+        description="Ventas de plomo, abonos a Willard y control del crisol, desde planta"
       >
-        {hasPermission("sales.create") && (
+        {hasPermission("sales.create") && !isCrisol && (
           <Button onClick={() => navigate("/willard-deliveries/new")} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" /> Nueva Salida
           </Button>
         )}
+        {hasPermission("sales.create") && isCrisol && (
+          <Button onClick={() => navigate("/willard-deliveries/crisol/new")} className="w-full sm:w-auto">
+            <Plus className="h-4 w-4 mr-2" /> Nuevo documento de crisol
+          </Button>
+        )}
       </PageHeader>
 
+      {!isCrisol && (
       <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
         <Tabs
           value={tab}
@@ -113,6 +128,7 @@ export default function WillardDeliveriesPage() {
           </TabsList>
         </Tabs>
       </div>
+      )}
       <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
         <Tabs
           value={typeTab}
@@ -133,7 +149,9 @@ export default function WillardDeliveriesPage() {
         </Tabs>
       </div>
 
-      {isLoading ? (
+      {isCrisol ? (
+        <CrucibleChargesSection />
+      ) : isLoading ? (
         <Card><CardContent className="p-8 text-center text-slate-500">Cargando…</CardContent></Card>
       ) : items.length === 0 ? (
         <EmptyState

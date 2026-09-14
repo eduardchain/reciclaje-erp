@@ -44,6 +44,7 @@ SEQUENCES: dict[str, tuple[str, str, str | None]] = {
     "inbound_order_number": ("inbound_orders", "order_number", None),
     "transfer_number": ("transfers", "transfer_number", None),
     "willard_delivery": ("willard_deliveries", "delivery_number", "series"),
+    "crucible_number": ("crucible_charges", "charge_number", None),
     "purchase_number": ("purchases", "purchase_number", None),
     "sale_number": ("sales", "sale_number", None),
     "movement_number": ("money_movements", "movement_number", None),
@@ -59,6 +60,10 @@ RANK: dict[str, int] = {
     "inbound_order_number": 11,
     "transfer_number": 12,
     "willard_delivery": 13,
+    # 14 y no 13 (F2 de QA, #107): un empate de rango deja ciego a D4b — el sort
+    # estable de lock_sequences y la comparacion `<` no verian dos flujos que
+    # tomaran (willard, crucible) en orden cruzado.
+    "crucible_number": 14,
     "purchase_number": 20,
     "sale_number": 21,
     "movement_number": 30,
@@ -67,6 +72,7 @@ RANK: dict[str, int] = {
 }
 
 assert set(RANK) == set(SEQUENCES), "toda secuencia tiene rango y viceversa"
+assert len(set(RANK.values())) == len(RANK), "dos secuencias con el mismo rango (F2 #107)"
 
 _HELD_KEY = "advisory_locks_held"
 

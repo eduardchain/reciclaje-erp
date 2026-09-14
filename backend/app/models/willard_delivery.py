@@ -192,6 +192,19 @@ class WillardDelivery(Base, OrganizationMixin, TimestampMixin):
         server_default="0",
         comment="Porcion de la maquila que Circunvalar le abona a planta (D5)",
     )
+    crucible_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Diferencial del crisol: $300/kg de puro VENDIDO, planta->CV (#107 D4)",
+    )
+    billing_warehouse_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("warehouses.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Sede que factura, estampada al liquidar (snapshot de willard_sede_facturacion; Q-30, #107 D5)",
+    )
 
     annulled_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     annulled_at: Mapped[Optional[datetime]] = mapped_column(

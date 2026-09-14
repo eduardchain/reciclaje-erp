@@ -29,6 +29,7 @@ from app.models.exception_task import DiscrepancyTask
 from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.inventory_movement import InventoryMovement
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
+from app.services.kg_ledger import add_kg_movement
 from app.models.material import Material
 from app.models.money_movement import (
     INTERNAL_MAQUILA_MOVEMENT_TYPES,
@@ -525,22 +526,23 @@ class TransferService:
         line.kg_lead_equivalent = kg_equiv
 
         # (b) intersede_send — kg POR LINEA (D5/E2), fecha canonica receipt (E11)
-        db.add(
-            KgLedgerMovement(
-                organization_id=organization_id,
-                account_id=kg_account.id,
-                delta_kg=kg_equiv,
-                transaction_date=receipt_date,
-                description=(
-                    f"Traslado #{transfer.transfer_number} — {material.code} x "
-                    f"{float(effective_qty):g} {material.default_unit or 'kg'}"
-                ),
-                source_type=KG_SOURCE_TYPE,
-                source_id=transfer.id,
-                conversion_formula_snapshot=line.conversion_formula_snapshot,
-                created_by=user_id,
-                status="confirmed",
-            )
+        # #107 D1: el crudo que llega a planta entra a la etapa HORNO de la
+        # cuenta intersede. Escritor unico del libro (F1 de QA).
+        add_kg_movement(
+            db,
+            organization_id=organization_id,
+            account=kg_account,
+            delta_kg=kg_equiv,
+            transaction_date=receipt_date,
+            description=(
+                f"Traslado #{transfer.transfer_number} — {material.code} x "
+                f"{float(effective_qty):g} {material.default_unit or 'kg'}"
+            ),
+            source_type=KG_SOURCE_TYPE,
+            source_id=transfer.id,
+            stage="horno",
+            conversion_formula_snapshot=line.conversion_formula_snapshot,
+            created_by=user_id,
         )
 
         # (c) par de maquila — inline gate (E10), embudo _create_movement (#83)
@@ -1091,12 +1093,19 @@ class TransferService:
             )
         return tariff
 
-    def _get_or_create_maquila_category(self, db: Session, organization_id: UUID):
-        """Categoria sistema (patron #78/#83) — INDIRECTA, reclasificable."""
+    def _get_or_create_maquila_category(
+        self,
+        db: Session,
+        organization_id: UUID,
+        name: str = MAQUILA_CATEGORY_NAME,
+        description: str = "Maquila intersede causada al recibir traslados dos pasos (SAC)",
+    ):
+        """Categoria sistema (patron #78/#83) — INDIRECTA, reclasificable.
+        Parametrizada en #107 para la hermana "Crisol Refinacion" (spec §5)."""
         from app.models.expense_category import ExpenseCategory
         from app.services.retention_entities import normalize_entity_name
 
-        target = normalize_entity_name(MAQUILA_CATEGORY_NAME)
+        target = normalize_entity_name(name)
         candidates = db.execute(
             select(ExpenseCategory).where(
                 ExpenseCategory.organization_id == organization_id,
@@ -1110,8 +1119,8 @@ class TransferService:
 
         cat = ExpenseCategory(
             organization_id=organization_id,
-            name=MAQUILA_CATEGORY_NAME,
-            description="Maquila intersede causada al recibir traslados dos pasos (SAC)",
+            name=name,
+            description=description,
             is_direct_expense=False,
             is_system_entity=True,
         )

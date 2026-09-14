@@ -226,6 +226,12 @@ export default function WillardDeliveryDetailPage() {
               <span className="text-slate-500">Abonado a planta</span>
               <span className="tabular-nums">{formatCurrency(num(delivery.plant_credit_amount))}</span>
             </div>
+            {num(delivery.crucible_amount) > 0 && (
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500">Diferencial crisol (planta cobra a la sede que factura)</span>
+                <span className="tabular-nums">{formatCurrency(num(delivery.crucible_amount))}</span>
+              </div>
+            )}
             {delivery.sale_id && (
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Venta</span>

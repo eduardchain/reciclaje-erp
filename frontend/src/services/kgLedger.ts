@@ -8,6 +8,7 @@ import type {
   KgLedgerStatementResponse,
   KgLedgerSummaryResponse,
 } from "@/types/kg-ledger";
+import { num } from "@/types/willard-delivery";
 
 // KgLedger (SAC E2): cuentas en kg de plomo. Router completo gated por
 // flag kg_ledger_enabled en backend (403 si la org no tiene el modulo).
@@ -65,7 +66,20 @@ export const kgLedgerService = {
       "/api/v1/kg-ledger/summary",
       { params: asOf ? { as_of: asOf } : {} }
     );
-    return response.data;
+    // Coercion en la FRONTERA (#97): el backend declara estos kg como Decimal y
+    // viajan como string aunque el tipo diga `number`. Restar coerciona, sumar
+    // concatena — la vista previa del retorno de dross mostraba "NaN kg"
+    // (defecto encontrado en la pantalla, gate 6 de #107).
+    const d = response.data;
+    return {
+      ...d,
+      total_willard_kg: num(d.total_willard_kg),
+      total_intersede_kg: num(d.total_intersede_kg),
+      intersede_horno_kg: num(d.intersede_horno_kg),
+      intersede_crisol_kg: num(d.intersede_crisol_kg),
+      total_intra_horno_kg: num(d.total_intra_horno_kg),
+      total_crisol_kg: num(d.total_crisol_kg),
+    };
   },
 
   createManualMovement: async (

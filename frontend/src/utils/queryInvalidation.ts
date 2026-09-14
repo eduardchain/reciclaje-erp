@@ -120,6 +120,15 @@ export const invalidateAfterWillardDelivery = (qc: QueryClient) => {
   invalidateInventory(qc);
 };
 
+// #107 — un documento de crisol mueve etapas del libro kg (sin inventario) y,
+// si es retorno de dross, causa el par de maquila (Tesoreria + P&L por sede).
+export const invalidateAfterCrucibleCharge = (qc: QueryClient) => {
+  qc.invalidateQueries({ queryKey: ["crucible-charges"] });
+  qc.invalidateQueries({ queryKey: ["kg-ledger"] });
+  qc.invalidateQueries({ queryKey: ["money-movements"] });
+  qc.invalidateQueries({ queryKey: ["reports"] });
+};
+
 export const invalidateAfterFixedAsset = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["fixed-assets"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });

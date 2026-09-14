@@ -54,6 +54,12 @@ from app.schemas.willard_delivery import (
 )
 from app.utils.dates import business_today_noon
 from app.utils.org_settings import get_org_setting
+from app.services.kg_ledger import (
+    INTERSEDE_STAGES,
+    STAGE_LABELS,
+    add_kg_movement,
+    kg_ledger_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +67,9 @@ KG_SOURCE_TYPE = "willard_delivery"
 MAQUILA_TARIFF_CODE = "maquila_willard"
 FREIGHT_TARIFF_CODE = "flete_willard_planta_planta"
 PLANT_CREDIT_TARIFF_CODE = "abono_planta_por_kg"
+# #107 D4: diferencial de refinacion, causado al VENDER plomo puro (Hugo 28-ago)
+CRUCIBLE_TARIFF_CODE = "maquila_crisol"
+CRUCIBLE_CATEGORY_NAME = "Crisol Refinación"
 
 # Que cuentas kg descarga cada tipo. `intersede` es el contador interno (lo que
 # planta le debe a Circunvalar); los otros dos son las deudas con Willard.
@@ -261,7 +270,9 @@ class WillardDeliveryService:
         )
 
         # 1. kg de plomo por linea, desde la formula VIGENTE (snapshot al liquidar)
-        total_kg = self._compute_lead_kg(db, delivery, organization_id, warnings)
+        total_kg, kg_by_stage = self._compute_lead_kg(
+            db, delivery, organization_id, warnings
+        )
 
         # 2. Salida fisica del inventario
         if delivery.delivery_type == "venta":
@@ -274,7 +285,9 @@ class WillardDeliveryService:
             )
 
         # 3. Descarga de las cuentas en kg
-        self._discharge_kg(db, delivery, total_kg, organization_id, user_id, liq_dt)
+        self._discharge_kg(
+            db, delivery, total_kg, kg_by_stage, organization_id, user_id, liq_dt, warnings
+        )
 
         # 4. Facturacion a Willard + reparto entre sedes.
         #    D4d: si falta una tarifa esto avisa, pero los kg de arriba YA se
@@ -283,7 +296,19 @@ class WillardDeliveryService:
         self._bill_and_split(
             db, delivery, total_kg, organization_id, user_id, liq_dt, warnings
         )
-
+        # 4b. Diferencial del crisol (#107 D4): solo venta, solo kg de PURO.
+        self._emit_crucible_differential(
+            db,
+            delivery,
+            kg_by_stage.get("crisol", Decimal("0")),
+            organization_id,
+            user_id,
+            liq_dt,
+            warnings,
+        )
+        # Q-30 (#107 D5): la sede que factura se estampa al liquidar (snapshot
+        # del setting); el P&L por sede le atribuye la venta derivada.
+        delivery.billing_warehouse_id = self._billing_warehouse_id(db, organization_id)
         delivery.status = "liquidated"
         delivery.liquidated_by = user_id
         delivery.liquidated_at = liq_dt
@@ -327,13 +352,20 @@ class WillardDeliveryService:
         delivery: WillardDelivery,
         organization_id: UUID,
         warnings: list[str],
-    ) -> Decimal:
+    ) -> tuple[Decimal, dict[str, Decimal]]:
+        """kg de plomo por linea y, ademas, por ETAPA de intersede (#107 D4):
+        crudo -> horno, puro -> crisol. El perfil ya lo valido
+        `_validate_lead_products`; aqui solo se lee."""
         from app.services.material_conversion_formula import material_conversion_formula
 
         formulas = {
             f.material_id: f
             for f in material_conversion_formula.get_current(db, organization_id)
         }
+        leads = self._lead_products(
+            db, [ln.material_id for ln in delivery.lines], organization_id
+        )
+        by_stage: dict[str, Decimal] = {s: Decimal("0") for s in INTERSEDE_STAGES}
         total = Decimal("0")
         for line in delivery.lines:
             material = db.get(Material, line.material_id)
@@ -357,9 +389,10 @@ class WillardDeliveryService:
             line.kg_lead_equivalent = kg
             line.unit = material.default_unit if material else None
             total += kg
+            by_stage[self._stage_of(leads.get(line.material_id))] += kg
         if total <= 0:
             raise _err("La salida no equivale a ningun kg de plomo.")
-        return total
+        return total, by_stage
 
     @staticmethod
     def _kg_from_formula(formula, qty: Decimal) -> Decimal:
@@ -492,30 +525,71 @@ class WillardDeliveryService:
         db: Session,
         delivery: WillardDelivery,
         total_kg: Decimal,
+        kg_by_stage: dict[str, Decimal],
         organization_id: UUID,
         user_id: Optional[UUID],
         liq_dt: datetime,
+        warnings: list[str],
     ) -> None:
         """Los kg bajan en NEGATIVO. Los dos contadores del abono de bateria
-        bajan la MISMA cantidad: es un pago que salda dos deudas encadenadas."""
+        bajan la MISMA cantidad: es un pago que salda dos deudas encadenadas.
+
+        #107 D4: la cuenta intersede se descarga POR ETAPA segun el plomo de
+        cada linea (crudo -> horno, puro -> crisol); las cuentas Willard bajan
+        el total sin etapa. Una etapa que quede en negativo AVISA, no bloquea
+        (#17/#76): lo tipico es haber vendido puro sin registrar el traslado a
+        crisoles, y el aviso dice donde registrarlo.
+        """
+        desc = (
+            f"Salida de Plomo — {delivery.label} — "
+            f"{self._type_label(delivery.delivery_type)}"
+        )
         for account_type in DISCHARGE_MAP[delivery.delivery_type]:
             account = self._resolve_kg_account(db, organization_id, account_type)
-            db.add(
-                KgLedgerMovement(
+            if account_type != "intersede":
+                add_kg_movement(
+                    db,
                     organization_id=organization_id,
-                    account_id=account.id,
+                    account=account,
                     delta_kg=-total_kg,
                     transaction_date=liq_dt,
-                    description=(
-                        f"Salida de Plomo — {delivery.label} — "
-                        f"{self._type_label(delivery.delivery_type)}"
-                    ),
+                    description=desc,
                     source_type=KG_SOURCE_TYPE,
                     source_id=delivery.id,
                     created_by=user_id,
-                    status="confirmed",
                 )
-            )
+                continue
+            balances = kg_ledger_service.intersede_stage_balances(db, organization_id)
+            for stage in INTERSEDE_STAGES:
+                kg = kg_by_stage.get(stage, Decimal("0"))
+                if kg <= 0:
+                    continue
+                after = balances[stage] - kg
+                if after < 0 and stage == "crisol":
+                    # Solo la etapa crisol avisa (D4): vender puro sin haber
+                    # registrado el traslado a crisoles es un olvido de
+                    # captura con remedio. El horno en negativo NO avisa
+                    # aqui: es el mismo "planta entrega lo que Circunvalar
+                    # aun no le mando" de antes de este ciclo, y una venta
+                    # con todo configurado sigue siendo una salida perfecta
+                    # (test_la_venta_no_pide_anular_una_salida_perfecta).
+                    warnings.append(
+                        f"La etapa {STAGE_LABELS[stage]} de intersede queda en "
+                        f"{float(after):g} kg tras esta salida. Registre el "
+                        "Traslado a crisoles (Salidas de Plomo → Crisol)."
+                    )
+                add_kg_movement(
+                    db,
+                    organization_id=organization_id,
+                    account=account,
+                    delta_kg=-kg,
+                    transaction_date=liq_dt,
+                    description=desc,
+                    source_type=KG_SOURCE_TYPE,
+                    source_id=delivery.id,
+                    stage=stage,
+                    created_by=user_id,
+                )
 
     def _bill_and_split(
         self,
@@ -634,6 +708,101 @@ class WillardDeliveryService:
             organization_id, user_id, liq_dt,
         )
         delivery.plant_credit_amount = plant_credit
+
+    def _emit_crucible_differential(
+        self,
+        db: Session,
+        delivery: WillardDelivery,
+        kg_puro: Decimal,
+        organization_id: UUID,
+        user_id: Optional[UUID],
+        liq_dt: datetime,
+        warnings: list[str],
+    ) -> None:
+        """
+        #107 D4 — el diferencial del crisol ($300/kg, `maquila_crisol`) se causa
+        al VENDER plomo puro (Hugo 28-ago :425 "cuando resta ese plomo puro, le
+        abonas un diferencial a la maquila de planta que es de 300"), de planta
+        a Circunvalar: `internal_maquila_income` (sede de la salida) /
+        `internal_maquila_expense` (sede que factura), categoria sistema
+        "Crisol Refinacion" (spec §5). Sin tarifa o sin sede de facturacion los
+        kg ya salieron y se avisa (D4d de #100).
+
+        ⚠️ F4a de QA — en este modulo conviven DOS regimenes de gate y NO se
+        unifican: el par de `abono_material` (`_emit_split_pair`, reparto del
+        ingreso de Willard) es por TIPO e IGNORA `internal_maquila_enabled`;
+        este par y el del retorno de dross (crucible_charge) son por FLAG.
+        Contraste a tres bandas en los tests: T5b + T7b (flag OFF, sin par) +
+        test_par_emite_en_abono_material (flag OFF, par emitido).
+        """
+        delivery.crucible_amount = Decimal("0")
+        if delivery.delivery_type != "venta" or kg_puro <= 0:
+            return
+        if not get_org_setting(db, organization_id, "internal_maquila_enabled"):
+            return
+        billing_wh = self._billing_warehouse_id(db, organization_id)
+        if billing_wh is None:
+            warnings.append(
+                "Sin sede de facturacion configurada: el plomo puro salio sin "
+                "causar el diferencial del crisol. Definala en la configuracion "
+                "de la organizacion."
+            )
+            return
+        tariff = self._current_tariff(db, organization_id, CRUCIBLE_TARIFF_CODE)
+        if tariff is None:
+            warnings.append(
+                f"Sin tarifa vigente '{CRUCIBLE_TARIFF_CODE}': el plomo puro salio "
+                "sin causar el diferencial del crisol. Configurela en Config → Tarifas."
+            )
+            return
+        amount = (kg_puro * tariff.unit_price_cop).quantize(Decimal("0.01"))
+        if amount <= 0:
+            return
+        from app.services.money_movement import money_movement
+        from app.services.transfer import TransferService
+
+        category = TransferService()._get_or_create_maquila_category(
+            db,
+            organization_id,
+            name=CRUCIBLE_CATEGORY_NAME,
+            description="Diferencial de refinacion en crisol al vender plomo puro (SAC, #107)",
+        )
+        desc = (
+            f"Diferencial crisol — Salida de Plomo — {delivery.label} "
+            f"({float(kg_puro):g} kg puro)"
+        )
+        mm_exp = money_movement._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="internal_maquila_expense",
+            amount=amount,
+            account_id=None,
+            date=liq_dt,
+            description=desc,
+            user_id=user_id,
+            expense_category_id=category.id,
+            source_type=KG_SOURCE_TYPE,
+            source_id=delivery.id,
+            tariff_id=tariff.id,
+            warehouse_id=billing_wh,
+        )
+        mm_inc = money_movement._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="internal_maquila_income",
+            amount=amount,
+            account_id=None,
+            date=liq_dt,
+            description=desc,
+            user_id=user_id,
+            source_type=KG_SOURCE_TYPE,
+            source_id=delivery.id,
+            tariff_id=tariff.id,
+            warehouse_id=delivery.warehouse_id,
+        )
+        mm_exp.transfer_pair_id = mm_inc.id
+        mm_inc.transfer_pair_id = mm_exp.id
+        delivery.crucible_amount = amount
 
     def _emit_split_pair(
         self,
@@ -788,6 +957,8 @@ class WillardDeliveryService:
         delivery.maquila_amount = Decimal("0")
         delivery.freight_amount = Decimal("0")
         delivery.plant_credit_amount = Decimal("0")
+        delivery.crucible_amount = Decimal("0")
+        delivery.billing_warehouse_id = None
 
     # ================================================================== #
     # Validaciones y helpers                                              #
@@ -904,6 +1075,27 @@ class WillardDeliveryService:
             "cliente en Terceros y vuelva a intentarlo."
         )
 
+    def _lead_products(
+        self, db: Session, material_ids: list[UUID], organization_id: UUID
+    ) -> dict[UUID, str]:
+        """`lead_product` por material (#103 D1). Sin fila de perfil no hay
+        entrada en el dict: el consumidor lee 'none' (fail-closed)."""
+        if not material_ids:
+            return {}
+        rows = db.execute(
+            select(MaterialKgProfile.material_id, MaterialKgProfile.lead_product).where(
+                MaterialKgProfile.organization_id == organization_id,
+                MaterialKgProfile.material_id.in_(material_ids),
+            )
+        ).all()
+        return {r[0]: (r[1] or "none") for r in rows}
+
+    @staticmethod
+    def _stage_of(lead: Optional[str]) -> str:
+        """Etapa de intersede que descarga cada plomo (#107 D4): puro -> crisol,
+        crudo -> horno. 'none' no llega aqui: el validador lo rechazo antes."""
+        return "crisol" if lead == "puro" else "horno"
+
     def _validate_lead_products(
         self,
         db: Session,
@@ -931,23 +1123,13 @@ class WillardDeliveryService:
         if not material_ids:
             return []
 
-        profiles = {
-            p.material_id: p
-            for p in db.execute(
-                select(MaterialKgProfile).where(
-                    MaterialKgProfile.organization_id == organization_id,
-                    MaterialKgProfile.material_id.in_(material_ids),
-                )
-            ).scalars()
-        }
-
+        leads = self._lead_products(db, material_ids, organization_id)
         warnings: list[str] = []
         for material_id in material_ids:
-            profile = profiles.get(material_id)
             # Sin fila de perfil = sin marcar = bloqueado (fail-closed): el modo
             # de falla correcto es no dejar pasar, con un mensaje que dice donde
             # marcarlo, en vez de seguir calculando mal en silencio.
-            lead = profile.lead_product if profile is not None else "none"
+            lead = leads.get(material_id, "none")
             material = db.get(Material, material_id)
             label = (
                 f"'{material.code} {material.name}'" if material else "El material"

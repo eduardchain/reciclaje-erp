@@ -83,18 +83,23 @@ def intersede_account(client, org_headers):
     return resp.json()
 
 
-def _manual(client, org_headers, account_id, delta, date_str, desc="Ajuste", reason="Cuadre"):
-    return client.post(
-        f"{KG_URL}/movements",
-        headers=org_headers,
-        json={
-            "account_id": account_id,
-            "delta_kg": str(delta),
-            "transaction_date": date_str,
-            "description": desc,
-            "reason": reason,
-        },
-    )
+def _manual(
+    client, org_headers, account_id, delta, date_str, desc="Ajuste", reason="Cuadre",
+    stage="horno",
+):
+    """#107 D1: la cuenta intersede exige etapa (default "horno" porque casi
+    todos los tests de este archivo usan `intersede_account`); las cuentas
+    Willard deben llamar con `stage=None` — el escritor unico lo rechaza."""
+    payload = {
+        "account_id": account_id,
+        "delta_kg": str(delta),
+        "transaction_date": date_str,
+        "description": desc,
+        "reason": reason,
+    }
+    if stage is not None:
+        payload["stage"] = stage
+    return client.post(f"{KG_URL}/movements", headers=org_headers, json=payload)
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +468,7 @@ class TestSummary:
         self, client, org_headers, willard_account, intersede_account
     ):
         today = business_today().isoformat()
-        _manual(client, org_headers, willard_account["id"], 1200, today)
+        _manual(client, org_headers, willard_account["id"], 1200, today, stage=None)
         _manual(client, org_headers, intersede_account["id"], 340, today)
 
         body = client.get(f"{KG_URL}/summary", headers=org_headers).json()
@@ -482,9 +487,10 @@ class TestSummary:
         today = business_today()
         old = (today - timedelta(days=200)).isoformat()
         for acc in (willard_account, intersede_account):
-            _manual(client, org_headers, acc["id"], "111.25", old)
-            _manual(client, org_headers, acc["id"], "-11.25", today.isoformat())
-            mov = _manual(client, org_headers, acc["id"], 999, today.isoformat()).json()
+            st = "horno" if acc is intersede_account else None
+            _manual(client, org_headers, acc["id"], "111.25", old, stage=st)
+            _manual(client, org_headers, acc["id"], "-11.25", today.isoformat(), stage=st)
+            mov = _manual(client, org_headers, acc["id"], 999, today.isoformat(), stage=st).json()
             client.post(
                 f"{KG_URL}/movements/{mov['id']}/annul",
                 headers=org_headers,

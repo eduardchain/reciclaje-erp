@@ -801,7 +801,7 @@ class TestGuards:
             json={"reason": "prueba"},
         )
         assert r.status_code == 422
-        assert "Salidas a Willard" in r.json()["detail"]
+        assert "Salidas de Plomo" in r.json()["detail"]
         assert "Traslados" not in r.json()["detail"]
 
     def test_factura_no_se_anula_desde_tesoreria(
@@ -1604,3 +1604,280 @@ class TestBasculaYCatalogo:
         assert r.status_code == 200, r.text
         codes = {p["code"] for m in r.json() for p in m["permissions"]}
         assert "sales.review" not in codes
+
+
+# ============================================================================
+# #107 — crisol y plomo puro en las Salidas (T7–T12 del plan de planta)
+# ============================================================================
+
+# La fixture `puro` (PB-PUR, 100 kg en Juan Mina) ya existe arriba (#103).
+
+@pytest.fixture
+def tarifa_crisol(db_session, test_organization, test_user):
+    """$300/kg (Hugo 28-ago, tres veces: "cuando el plomo sale puro, la
+    maquila es de 300 pesos mas")."""
+    return _tariff(db_session, test_organization.id, test_user.id, "maquila_crisol", 300)
+
+
+def _maquila_on(db, org):
+    """Los tests flag-gated de este ciclo ENCIENDEN el flag explicito (O3 de
+    QA): el fixture `_flags` lo deja en False por la prevencion de D11."""
+    org.settings = {**org.settings, "internal_maquila_enabled": True}
+    db.commit()
+
+
+def _seed_stage(client, headers, account_id, kg, stage):
+    r = client.post(
+        "/api/v1/kg-ledger/movements",
+        headers=headers,
+        json={
+            "account_id": str(account_id),
+            "delta_kg": str(kg),
+            "transaction_date": SEED_DATE,
+            "description": "seed",
+            "reason": "seed de prueba",
+            "stage": stage,
+        },
+    )
+    assert r.status_code == 201, r.text
+
+
+def _stage_kg(db, account_id, stage) -> Decimal:
+    return Decimal(str(db.execute(
+        select(func.coalesce(func.sum(KgLedgerMovement.delta_kg), 0)).where(
+            KgLedgerMovement.account_id == account_id,
+            KgLedgerMovement.stage == stage,
+            KgLedgerMovement.status == "confirmed",
+        )
+    ).scalar_one()))
+
+
+def _pnl_today(client, headers, **params):
+    from app.utils.dates import business_today
+
+    today = business_today().isoformat()
+    r = client.get(
+        "/api/v1/reports/profit-and-loss",
+        headers=headers,
+        params={"date_from": today, "date_to": today, **params},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+class TestCrisolYPlomoPuro:
+
+    def test_venta_puro_descarga_crisol_y_causa_300(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, puro, acc_intersede, tarifa_crisol,
+    ):
+        """T7a — vender puro baja la etapa CRISOL y causa $300/kg de planta a
+        la sede que factura (categoria "Crisol Refinación"). El monto viaja
+        en la respuesta HTTP (trampa #95: el endpoint arma campo por campo)."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
+
+        out = _flow(client, org_headers, wh_jm, willard, puro, "venta", qty="20")
+
+        assert Decimal(str(out["crucible_amount"])) == Decimal("6000.00")
+        assert out["billing_warehouse_id"] == str(wh_cv.id)
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
+        assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("0")
+        org = test_organization.id
+        exp = _mms(db_session, org, "internal_maquila_expense")
+        inc = _mms(db_session, org, "internal_maquila_income")
+        assert len(exp) == 1 and len(inc) == 1
+        assert exp[0].amount == Decimal("6000.00") == inc[0].amount
+        assert exp[0].warehouse_id == wh_cv.id and inc[0].warehouse_id == wh_jm.id
+        assert exp[0].transfer_pair_id == inc[0].id
+        from app.models.expense_category import ExpenseCategory
+
+        assert db_session.get(ExpenseCategory, exp[0].expense_category_id).name == "Crisol Refinación"
+        assert out["warnings"] == []
+
+    def test_venta_puro_sin_flag_sin_par(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, puro, acc_intersede, tarifa_crisol,
+    ):
+        """T7b — flag OFF (el default del fixture): el crisol baja igual y no
+        hay pesos. El par OFF es la mitad de la red (#94/#99)."""
+        _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
+
+        out = _flow(client, org_headers, wh_jm, willard, puro, "venta", qty="20")
+
+        assert Decimal(str(out["crucible_amount"])) == 0
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
+        org = test_organization.id
+        assert _mms(db_session, org, "internal_maquila_expense") == []
+        assert _mms(db_session, org, "internal_maquila_income") == []
+
+    def test_venta_crudo_descarga_horno_sin_par(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, acc_intersede, tarifa_crisol,
+    ):
+        """T7c — el contraste: crudo baja la etapa HORNO y no causa nada, aun
+        con flag y tarifa (leccion #94: sin contraste no se distingue
+        'funciona' de 'lo apague')."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 100, "horno")
+
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "venta", qty="50")
+
+        assert Decimal(str(out["crucible_amount"])) == 0
+        assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("50")
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("0")
+        org = test_organization.id
+        assert _mms(db_session, org, "internal_maquila_expense") == []
+        assert _mms(db_session, org, "internal_maquila_income") == []
+
+    def test_venta_mixta_cada_linea_a_su_etapa(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, puro, acc_intersede, tarifa_crisol,
+    ):
+        """T8 — dos lineas (crudo 70, puro 26,1): horno −70, crisol −26,1 y el
+        par SOLO por los 26,1 kg de puro."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 100, "horno")
+        _seed_stage(client, org_headers, acc_intersede.id, 40, "crisol")
+        r = client.post(URL, headers=org_headers, json={
+            "delivery_type": "venta",
+            "warehouse_id": str(wh_jm.id),
+            "third_party_id": str(willard.id),
+            "date": DELIVERY_DATE,
+            "remission_number": "REM-MIX",
+            "lines": [
+                {"material_id": str(plomo.id), "quantity": "70"},
+                {"material_id": str(puro.id), "quantity": "26.1"},
+            ],
+        })
+        assert r.status_code == 201, r.text
+        d = r.json()
+        liq = client.post(f"{URL}/{d['id']}/liquidate", headers=org_headers, json={
+            "line_prices": [{"line_id": ln["id"], "unit_price": "3000"} for ln in d["lines"]],
+        })
+        assert liq.status_code == 200, liq.text
+        out = liq.json()
+
+        assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("30")
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("13.9")
+        assert Decimal(str(out["crucible_amount"])) == Decimal("7830.00")  # 26,1 × 300
+        exp = _mms(db_session, test_organization.id, "internal_maquila_expense")
+        assert len(exp) == 1 and exp[0].amount == Decimal("7830.00")
+
+    def test_abono_bateria_con_puro_descarga_crisol_sin_par(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, puro, acc_intersede, acc_baterias, acc_drosses, tarifa_crisol,
+    ):
+        """T9 — el aviso de #103 D2 sigue (abonar con puro es caro), la etapa
+        es la del puro (crisol) y NO hay par: el diferencial se causa solo al
+        VENDER. `abono_material` no toca ninguna etapa."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
+        _seed_stage(client, org_headers, acc_intersede.id, 100, "horno")
+
+        out = _flow(client, org_headers, wh_jm, willard, puro, "abono_bateria", qty="20")
+
+        assert any("puro" in w.lower() for w in out["warnings"]), out["warnings"]
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
+        assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("100")
+        assert _kg(db_session, acc_baterias.id) == Decimal("-20")
+        assert Decimal(str(out["crucible_amount"])) == 0
+        assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
+
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="10")
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
+        assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("100")
+        assert _kg(db_session, acc_drosses.id) == Decimal("-10")
+
+    def test_pnl_por_sede_ve_el_diferencial(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, puro, acc_intersede, tarifa_crisol,
+    ):
+        """T10 — el par entra al P&L por sede como el de maquila (#84): ingreso
+        en planta, gasto en la sede que factura; el consolidado lo netea y el
+        neto no se mueve (conciliacion por construccion)."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
+        _flow(client, org_headers, wh_jm, willard, puro, "venta", qty="20")
+
+        jm = _pnl_today(client, org_headers, warehouse_id=str(wh_jm.id))
+        cv = _pnl_today(client, org_headers, warehouse_id=str(wh_cv.id))
+        assert Decimal(str(jm["internal_maquila_income"])) == Decimal("6000.00")
+        assert Decimal(str(jm["internal_maquila_expense"])) == 0
+        assert Decimal(str(cv["internal_maquila_expense"])) == Decimal("6000.00")
+        assert Decimal(str(cv["internal_maquila_income"])) == 0
+
+        base = _pnl_today(client, org_headers)
+        with_pair = _pnl_today(client, org_headers, include_internal_maquila=True)
+        assert Decimal(str(base["internal_maquila_income"])) == 0
+        assert Decimal(str(with_pair["internal_maquila_income"])) == Decimal("6000.00")
+        assert Decimal(str(with_pair["internal_maquila_expense"])) == Decimal("6000.00")
+        assert Decimal(str(with_pair["net_profit"])) == Decimal(str(base["net_profit"]))
+
+    def test_q30_venta_derivada_se_atribuye_a_la_sede_que_factura(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, plomo, acc_intersede,
+    ):
+        """T11a — Q-30 (Hugo 24-ago: "todo lo factura Johana"): la venta que
+        deriva una Salida es ingreso y COGS de CIRCUNVALAR aunque el plomo
+        salga de Juan Mina; cv + jm == consolidado."""
+        _seed_stage(client, org_headers, acc_intersede.id, 100, "horno")
+        _flow(client, org_headers, wh_jm, willard, plomo, "venta", qty="50", price=3000)
+
+        cv = _pnl_today(client, org_headers, warehouse_id=str(wh_cv.id))
+        jm = _pnl_today(client, org_headers, warehouse_id=str(wh_jm.id))
+        total = _pnl_today(client, org_headers)
+        assert Decimal(str(cv["sales_revenue"])) == Decimal("150000.00")
+        assert Decimal(str(cv["cost_of_goods_sold"])) == Decimal("100000.00")  # 50 × 2.000
+        assert Decimal(str(jm["sales_revenue"])) == 0
+        assert Decimal(str(jm["cost_of_goods_sold"])) == 0
+        assert Decimal(str(total["sales_revenue"])) == Decimal("150000.00")
+        assert (
+            Decimal(str(cv["sales_revenue"])) + Decimal(str(jm["sales_revenue"]))
+            == Decimal(str(total["sales_revenue"]))
+        )
+
+    def test_venta_normal_sigue_en_su_bodega(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, aluminio,
+    ):
+        """T11b — no-regresion de Q-30: una venta NO derivada se queda en la
+        bodega de la venta (el coalesce cae a Sale.warehouse_id)."""
+        from app.utils.dates import business_today_noon
+
+        r = _venta_normal(client, org_headers, willard, wh_jm, aluminio, qty="10", price="5000")
+        assert r.status_code == 201, r.text
+        liq = client.patch(
+            f"{SALES_URL}/{r.json()['id']}/liquidate",
+            headers=org_headers,
+            json={"liquidation_date": business_today_noon().isoformat()},
+        )
+        assert liq.status_code == 200, liq.text
+
+        jm = _pnl_today(client, org_headers, warehouse_id=str(wh_jm.id))
+        cv = _pnl_today(client, org_headers, warehouse_id=str(wh_cv.id))
+        assert Decimal(str(jm["sales_revenue"])) == Decimal("50000.00")
+        assert Decimal(str(jm["cost_of_goods_sold"])) == Decimal("20000.00")  # 10 × 2.000
+        assert Decimal(str(cv["sales_revenue"])) == 0
+
+    def test_anular_venta_puro_devuelve_crisol_y_anula_par(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, puro, acc_intersede, tarifa_crisol,
+    ):
+        """T12 — round-trip: la etapa vuelve a 50, el par queda anulado y el
+        monto de la salida se limpia."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
+        out = _flow(client, org_headers, wh_jm, willard, puro, "venta", qty="20")
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
+
+        r = client.post(f"{URL}/{out['id']}/annul", headers=org_headers, json={"reason": "prueba"})
+        assert r.status_code == 200, r.text
+        assert Decimal(str(r.json()["crucible_amount"])) == 0
+        assert r.json()["billing_warehouse_id"] is None
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("50")
+        db_session.expire_all()
+        org = test_organization.id
+        assert _mms(db_session, org, "internal_maquila_expense") == []
+        assert len(_mms(db_session, org, "internal_maquila_expense", status="annulled")) == 1
+        assert len(_mms(db_session, org, "internal_maquila_income", status="annulled")) == 1
