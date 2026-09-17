@@ -81,8 +81,12 @@ function ActionDialog({
   const transferMutation = useObligationTransfer(kind === "interest" ? "interest" : "capital");
   // Traslado contra tercero: solo capital/intereses (el desembolso siempre es por cuenta)
   const canTransfer = kind !== "disbursement";
+  // Sin `limit` propio a proposito: el hook pone SELECT_LIMIT y con eso la
+  // guarda `assertNotTruncated` cubre este selector. Un limite explicito
+  // distinto (aca decia 1000) la deja ciega para siempre — la lista se truncaria
+  // en silencio con la guarda instalada al lado sin mirar.
   const { data: thirdParties } = useThirdParties(
-    { is_active: true, limit: 1000 },
+    { is_active: true },
     { staleTime: 60_000 }
   );
   const tpOptions = (thirdParties?.items ?? []).filter(

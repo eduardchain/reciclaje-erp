@@ -63,7 +63,7 @@ def list_third_parties(
 @router.get("/suppliers", response_model=PaginatedResponse)
 def list_suppliers(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=5000),
     is_active: Optional[bool] = Query(None),
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
@@ -91,7 +91,7 @@ def list_suppliers(
 @router.get("/payable-suppliers", response_model=PaginatedResponse)
 def list_payable_suppliers(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=5000),
     is_active: Optional[bool] = Query(None),
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
@@ -111,7 +111,7 @@ def list_payable_suppliers(
 @router.get("/customers", response_model=PaginatedResponse)
 def list_customers(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=5000),
     is_active: Optional[bool] = Query(None),
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
@@ -139,7 +139,7 @@ def list_customers(
 @router.get("/provisions", response_model=PaginatedResponse)
 def list_provisions(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=5000),
     is_active: Optional[bool] = Query(None),
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
@@ -167,7 +167,7 @@ def list_provisions(
 @router.get("/liabilities", response_model=PaginatedResponse)
 def list_liabilities(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=5000),
     is_active: Optional[bool] = Query(None),
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
@@ -197,7 +197,7 @@ def list_liabilities(
 @router.get("/payable-providers", response_model=PaginatedResponse)
 def list_payable_providers(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=5000),
     is_active: Optional[bool] = Query(None),
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
@@ -220,7 +220,7 @@ def list_payable_providers(
 @router.get("/investors", response_model=PaginatedResponse)
 def list_investors(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=5000),
     is_active: Optional[bool] = Query(None),
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),
@@ -240,7 +240,7 @@ def list_investors(
 @router.get("/generic", response_model=PaginatedResponse)
 def list_generic_third_parties(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=5000),
     is_active: Optional[bool] = Query(None),
     search: Optional[str] = Query(None),
     sort_by: str = Query("name"),

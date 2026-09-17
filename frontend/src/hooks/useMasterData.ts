@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { thirdPartyService } from "@/services/thirdParties";
+import { SELECT_LIMIT, thirdPartyService } from "@/services/thirdParties";
 import { getApiErrorMessage } from "@/utils/formatters";
 import type { RetentionConfigCreate, RetentionConfigUpdate } from "@/types/third-party";
 import { materialService } from "@/services/materials";
@@ -12,21 +12,21 @@ import { thirdPartyCategoryService } from "@/services/thirdPartyCategories";
 export function useSuppliers(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "suppliers", search],
-    queryFn: () => thirdPartyService.getSuppliers({ search, limit: 500, is_active: true }),
+    queryFn: () => thirdPartyService.getSuppliers({ search, limit: SELECT_LIMIT, is_active: true }),
   });
 }
 
 export function usePayableSuppliers(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "payable-suppliers", search],
-    queryFn: () => thirdPartyService.getPayableSuppliers({ search, limit: 500, is_active: true }),
+    queryFn: () => thirdPartyService.getPayableSuppliers({ search, limit: SELECT_LIMIT, is_active: true }),
   });
 }
 
 export function useCustomers(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "customers", search],
-    queryFn: () => thirdPartyService.getCustomers({ search, limit: 500, is_active: true }),
+    queryFn: () => thirdPartyService.getCustomers({ search, limit: SELECT_LIMIT, is_active: true }),
   });
 }
 
@@ -42,11 +42,12 @@ export function useThirdParties(
   },
   options?: { staleTime?: number }
 ) {
-  // skip/limit/sort_by/sort_dir son opcionales — dropdowns que solo pasan
-  // search/role siguen funcionando con limit=500 por default (sin cambio).
+  // skip/limit/sort_by/sort_dir son opcionales: el listado de Terceros pasa los
+  // suyos (paginacion server-side) y pisa el default; los dropdowns solo pasan
+  // search/role y se quedan con SELECT_LIMIT.
   return useQuery({
     queryKey: ["third-parties", "list", filters],
-    queryFn: () => thirdPartyService.getAll({ limit: 500, ...filters }),
+    queryFn: () => thirdPartyService.getAll({ limit: SELECT_LIMIT, ...filters }),
     ...options,
   });
 }
@@ -75,7 +76,7 @@ export function useMoneyAccounts() {
 export function useInvestors(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "investors", search],
-    queryFn: () => thirdPartyService.getAll({ role: "investor", search, limit: 500, is_active: true }),
+    queryFn: () => thirdPartyService.getAll({ role: "investor", search, limit: SELECT_LIMIT, is_active: true }),
   });
 }
 
@@ -96,7 +97,7 @@ export function useExpenseCategoriesFlat() {
 export function useProvisions(search?: string, is_active?: boolean) {
   return useQuery({
     queryKey: ["third-parties", "provisions", search, is_active],
-    queryFn: () => thirdPartyService.getProvisions({ search, limit: 500, is_active }),
+    queryFn: () => thirdPartyService.getProvisions({ search, limit: SELECT_LIMIT, is_active }),
   });
 }
 
@@ -108,7 +109,7 @@ export function useLiabilities(search?: string, is_active?: boolean, includeSyst
     queryFn: () =>
       thirdPartyService.getLiabilities({
         search,
-        limit: 500,
+        limit: SELECT_LIMIT,
         is_active,
         ...(includeSystem ? { include_system: true } : {}),
       }),
@@ -158,14 +159,14 @@ export function useUpdateRetentionConfig() {
 export function useGenericThirdParties(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "generic", search],
-    queryFn: () => thirdPartyService.getGeneric({ search, limit: 500, is_active: true }),
+    queryFn: () => thirdPartyService.getGeneric({ search, limit: SELECT_LIMIT, is_active: true }),
   });
 }
 
 export function usePayableProviders(search?: string) {
   return useQuery({
     queryKey: ["third-parties", "payable-providers", search],
-    queryFn: () => thirdPartyService.getPayableProviders({ search, limit: 500, is_active: true }),
+    queryFn: () => thirdPartyService.getPayableProviders({ search, limit: SELECT_LIMIT, is_active: true }),
   });
 }
 
