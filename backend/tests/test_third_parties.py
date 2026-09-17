@@ -949,3 +949,128 @@ class TestInvestors:
         data = response.json()
         assert data["total"] == 1
         assert data["items"][0]["name"] == "Socio 1"
+
+
+class TestOrdenSinMayusculas:
+    """El orden por nombre ignora mayusculas (defecto de produccion, sep-2026).
+
+    La collation de Postgres pone TODAS las minusculas despues de TODAS las
+    mayusculas, asi que un tercero escrito "jorge malagon" caia despues de
+    "Yesid Bolanos" — ultimo de la lista. Los selectores de tercero traen solo
+    las primeras N filas y filtran client-side, asi que el tercero quedaba
+    invisible en 6 pantallas sin producir ningun error: existia, se veia en
+    Maestros (que busca server-side) y el desplegable decia "Sin resultados".
+    """
+
+    # Nombres elegidos para que el defecto y el arreglo den ordenes DISTINTOS:
+    # con la collation cruda las dos minusculas se van al final.
+    NOMBRES = ["Ana Torres", "zulema Ruiz", "Bruno Diaz", "carlos Mejia", "Yesid Bolanos"]
+    ESPERADO = ["Ana Torres", "Bruno Diaz", "carlos Mejia", "Yesid Bolanos", "zulema Ruiz"]
+
+    def _sembrar(self, db_session, test_organization):
+        for i, nombre in enumerate(self.NOMBRES):
+            db_session.add(ThirdParty(
+                id=uuid4(),
+                name=nombre,
+                identification_number=f"ORD-{i:03d}",
+                organization_id=test_organization.id,
+                is_active=True,
+            ))
+        db_session.commit()
+
+    def test_las_minusculas_se_intercalan_alfabeticamente(
+        self, client, org_headers, db_session, test_organization
+    ):
+        """Sin el fix, 'carlos Mejia' y 'zulema Ruiz' caen al final de la lista."""
+        self._sembrar(db_session, test_organization)
+
+        response = client.get("/api/v1/third-parties?limit=100", headers=org_headers)
+
+        assert response.status_code == 200
+        nombres = [i["name"] for i in response.json()["items"] if i["name"] in self.NOMBRES]
+        assert nombres == self.ESPERADO, (
+            "El orden no ignora mayusculas: las minusculas quedaron relegadas al "
+            f"final y en un selector con tope serian invisibles. Recibido: {nombres}"
+        )
+
+    def test_el_orden_descendente_tambien_ignora_mayusculas(
+        self, client, org_headers, db_session, test_organization
+    ):
+        """El fix va sobre la columna, asi que aplica a las dos direcciones."""
+        self._sembrar(db_session, test_organization)
+
+        response = client.get(
+            "/api/v1/third-parties?limit=100&sort_by=name&sort_dir=desc", headers=org_headers
+        )
+
+        assert response.status_code == 200
+        nombres = [i["name"] for i in response.json()["items"] if i["name"] in self.NOMBRES]
+        assert nombres == list(reversed(self.ESPERADO)), f"Recibido: {nombres}"
+
+    # Las NUEVE rutas que alimentan selectores. La lista esta completa a proposito:
+    # la primera version de este test probaba SOLO la raiz y con eso se colo una
+    # regresion que dejo los selectores de Compras y Ventas VACIOS — la raiz
+    # aceptaba le=5000 y las 8 subrutas topaban en 500, asi que pedirles 5000
+    # daba 422, el hook fallaba y el desplegable decia "Sin resultados". Ningun
+    # otro gate lo vio (tsc, eslint y 1785 tests en verde); lo encontro Daniel
+    # abriendo la pantalla. Si se agrega una ruta de terceros, va en esta lista.
+    RUTAS_DE_SELECTOR = [
+        "",
+        "/suppliers",
+        "/customers",
+        "/provisions",
+        "/liabilities",
+        "/payable-providers",
+        "/payable-suppliers",
+        "/investors",
+        "/generic",
+    ]
+
+    @pytest.mark.parametrize("ruta", RUTAS_DE_SELECTOR)
+    def test_toda_ruta_de_selector_acepta_el_tope(self, client, org_headers, ruta):
+        """Las 9 rutas deben aceptar limit=SELECT_LIMIT (5000) y rechazar mas.
+
+        Un `le` mas bajo que SELECT_LIMIT en CUALQUIERA de ellas vacia su
+        desplegable por completo (422 → hook sin datos → "Sin resultados").
+        """
+        url = f"/api/v1/third-parties{ruta}"
+        assert client.get(f"{url}?limit=5000", headers=org_headers).status_code == 200, (
+            f"{url} rechaza el tope de los selectores: su desplegable queda VACIO"
+        )
+        assert client.get(f"{url}?limit=5001", headers=org_headers).status_code == 422, (
+            f"{url} acepta mas que el tope declarado"
+        )
+
+    def test_el_tope_del_endpoint_coincide_con_el_del_frontend(self):
+        """SELECT_LIMIT del frontend == el `le` de las rutas. Si divergen, 422.
+
+        El valor vive en services/thirdParties.ts y se lee de ahi: es el unico
+        acoplamiento back/front de este fix y no hay tipo que lo sostenga.
+        """
+        import re
+        from pathlib import Path
+
+        raiz = Path(__file__).resolve().parents[2]
+        ts = (raiz / "frontend/src/services/thirdParties.ts").read_text()
+        m = re.search(r"export const SELECT_LIMIT = (\d+);", ts)
+        assert m, "no se encontro SELECT_LIMIT en services/thirdParties.ts"
+        select_limit = int(m.group(1))
+
+        py = (raiz / "backend/app/api/v1/endpoints/third_parties.py").read_text()
+        encontrados = re.findall(r"limit: int = Query\(100, ge=1, le=(\d+)", py)
+        # 🔴 El conteo va ANTES de comparar el set: una ruta cuyo Query se
+        # reformatee (otro default, otro orden de kwargs, un salto de linea) no
+        # matchea el regex y quedaria FUERA del set en silencio — el set seguiria
+        # siendo {5000} y el test pasaria aunque esa ruta tope en 500. Es el
+        # patron de la guarda con agujero (#91/#92): da falsa cobertura, que es
+        # peor que no tener guarda. Asi revienta ruidosa y se arregla el regex.
+        assert len(encontrados) == len(self.RUTAS_DE_SELECTOR), (
+            f"El regex encontro {len(encontrados)} topes y hay "
+            f"{len(self.RUTAS_DE_SELECTOR)} rutas de selector: alguna cambio de forma "
+            f"y este test dejo de verla. Arreglar el patron, no el conteo."
+        )
+        topes = {int(x) for x in encontrados}
+        assert topes == {select_limit}, (
+            f"El frontend pide {select_limit} y las rutas topan en {sorted(topes)}: "
+            f"toda ruta por debajo devuelve 422 y deja su selector vacio"
+        )

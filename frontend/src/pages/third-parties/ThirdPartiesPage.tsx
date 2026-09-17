@@ -15,7 +15,7 @@ import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useThirdParties } from "@/hooks/useMasterData";
 import { useDeactivateThirdParty, useReactivateThirdParty } from "@/hooks/useCrudData";
-import { thirdPartyService } from "@/services/thirdParties";
+import { SELECT_LIMIT, thirdPartyService } from "@/services/thirdParties";
 import { toast } from "sonner";
 import ThirdPartyFormDialog from "./ThirdPartyFormDialog";
 import type { ThirdPartyResponse } from "@/types/third-party";
@@ -182,7 +182,9 @@ export default function ThirdPartiesPage() {
   const handleExportAll = async () => {
     const all = await thirdPartyService.getAll({
       skip: 0,
-      limit: 5000,
+      // La constante, no un literal: coincidian por casualidad y el dia que
+      // SELECT_LIMIT cambie este export perderia la guarda (o daria 422).
+      limit: SELECT_LIMIT,
       search: search || undefined,
       role: roleFilter === "all" ? undefined : roleFilter,
       is_active: showInactive ? undefined : true,
