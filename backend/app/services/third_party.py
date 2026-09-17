@@ -160,6 +160,13 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         total = db.execute(count_query).scalar_one()
 
         sort_column, sort_dir = self._resolve_sort_column(sort_by, sort_order)
+        # Por nombre se ordena SIN mayusculas: la collation de Postgres pone todas
+        # las minusculas DESPUES de todas las mayusculas, asi que "jorge malagon"
+        # caia despues de "Yesid Bolanos" — ultimo de la lista. En un desplegable
+        # que trae solo las primeras N filas, eso lo volvia invisible: el tercero
+        # existia, se veia en Maestros (que busca server-side) y no en el selector.
+        if sort_column is self.model.name:
+            sort_column = func.lower(sort_column)
         order_clause = sort_column.desc() if sort_dir == "desc" else sort_column.asc()
         # Tiebreaker estable: id ASC para paginacion consistente cuando hay ties.
         query = query.order_by(order_clause, self.model.id.asc())
