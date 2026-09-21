@@ -51,7 +51,7 @@ Con las cifras de Johana, planta recibe 2.066 por kilo en baterías y 1.248 en m
 - b) Si es la de Johana: los $566, ¿son un valor fijo por kilo, o son "2.097 menos 1.531"? Importa para saber cuál de los dos números cambia cuando Willard cambie la tarifa.
 - c) El flete ($11.100 en el ejemplo), ¿queda entero en Circunvalar?
 
-**Respuesta 18-sep (Johana, vía Daniel):** a) la de Johana; b) los $566 son un valor fijo por kilo; c) sí, el flete queda entero en Circunvalar. **Pedido nuevo de la misma reunión:** agregar retención e IVA a las salidas de plomo (Q-41 del inventario). Definido en la misma reunión: IVA 19 % sobre maquila, flete y venta; retenciones "cualquiera" (configurables); nacen al liquidar; los 566 y 1.531 se calculan sobre la base sin IVA.
+**Respuesta 18-sep (Johana, transcripción 00:05:50–00:11:22):** a) la de Johana: L155 «de ahí serían para planta 566», L159 «y 1531» (a); b) L183 «Sí, fijo por kilo» (a), y los 1.531 «también» fijos, «Así es» (L185-187, b); c) el flete queda entero en Circunvalar (L189-191, b; L399 «Si el flet es de circunval», a). **Pedido nuevo que introdujo ella:** L195 «Al momento de facturar, pues ahí me permite agregar IVA, retención, todo eso, ¿verdad?» (Q-41 del inventario). Firme: IVA 19 % (L277 «Sí. el 19ar», dañada; L651-653 «Correcto») que nace al facturar / liquidar, no al cobro (L279-281) (b). Con reserva (b): base maquila + flete (L267) y reparto sobre base sin IVA (L283-293). NO confirmado: IVA sobre la VENTA (lo dijo Daniel, L279; L217 es ilegible) y cuáles RETENCIONES — la palabra «cualquiera» NO está en la transcripción; Johana ofreció una factura de ejemplo con todos los impuestos (L653) y de ahí salen. _(Verificado 19-sep contra la transcripción del 18-sep; grados: (a) palabras de Johana, (b) «Correcto / Así es» a una frase de Daniel, (c) inferencia nuestra.)_
 
 ---
 
@@ -83,7 +83,7 @@ Diferencias entre las dos versiones, en el ejemplo: planta recibe 750.000 - 624.
 - b) Si los $100 no son error: ¿de quién son? ¿De planta, de Willard, o se quedan en Circunvalar?
 - c) ¿La respuesta del 4-sep ($1.500 a planta) queda sin efecto?
 
-**Respuesta 18-sep (Johana, vía Daniel):** a) no es error: los $100/kg se van quedando como utilidad en la cuenta por pagar "Materiales Willard"; b) queda contestada por a); c) sí, la del 4-sep queda sin efecto, es tal cual la columna de Johana.
+**Respuesta 18-sep (Johana, transcripción 00:13:46–00:16:12):** a) no es error (a): L323 «eso se maneja con un negocio aparte, en una cuenta aparte… hay que controlarle… ¿Qué utilidad nos está dejando?», L361 «Están quedando 100 pesos de utilidades de esa maquila dentro de la cuenta de los materiales»; b) ella dijo DÓNDE quedan los 100 (dentro de la cuenta de materiales), no de quién son: atribuirlos a Circunvalar es inferencia nuestra (c); c) las cifras de Johana valen: L237 «1248 y 749», L249 «1997» (a). «La del 4-sep queda sin efecto» lo dijo solo Daniel leyendo esta hoja (L375) y ella no respondió a eso (c); Hugo oyó 1.248 / 749 el 16-sep (L585-589) y no objetó. Sin registrar hasta el 19-sep: L335-339, un «remanente de un plomo» de fin de mes de ese negocio que ella «también» liquida (Q-43 del inventario). _(Verificado 19-sep contra la transcripción del 18-sep; grados: (a) palabras de Johana, (b) «Correcto / Así es» a una frase de Daniel, (c) inferencia nuestra.)_
 
 ---
 
@@ -103,7 +103,7 @@ Johana dijo además que "esa deuda básicamente es de planta" (00:27:57), lo que
 
 **Pregunta:** ¿cuál de las tres?
 
-**Respuesta 18-sep (Johana, vía Daniel):** la b). Es un nombre interno de la contabilidad de Circunvalar; nadie externo la cobra. Consecuencia: los $749 y los $100 son ingreso de Circunvalar ($849/kg), planta recibe $1.248, y el reporte debe separar el ingreso por materiales del de baterías.
+**Respuesta 18-sep (Johana, transcripción 00:18:19 L385-389):** «Es la B» (b) — Daniel leyó en voz alta solo la primera frase de la opción («un nombre interno para separar el negocio… dentro de la contabilidad») y dijo «baterías» donde esta hoja dice «materiales». Consecuencia, que es NUESTRA (c) y no de ella: los $749 y los $100 se muestran juntos como lo que queda en Circunvalar ($849/kg), planta recibe $1.248 (a), y el resumen separa materiales de baterías. Ella separa 749 (ingreso de Circunvalar) de 100 (utilidad del negocio de materiales). Ojo, expectativa creada: en L305-307 Daniel le dijo «lo que vamos a hacer entonces es una cuenta por pagar llamada materiales will» y ella respondió «Correcto»; lo construido en #109 es un resumen por tipo, sin cuenta. **Reabierta el 19-sep (🟠, Q-37 del inventario):** Daniel leyó la A (L375) y la descartó en voz alta, «Creo que esta no es.» (L385), antes de que ella dijera «Es la B.» (L387); y el 16-sep L577 ella había dicho, con sus palabras, que lo facturado por materiales «no es un ingreso para circunval, sino una cuenta por pagar», lo contrario de como lo registra hoy el sistema. _(Verificado 19-sep contra la transcripción del 18-sep; grados: (a) palabras de Johana, (b) «Correcto / Así es» a una frase de Daniel, (c) inferencia nuestra.)_
 
 ---
 
@@ -117,7 +117,7 @@ Johana dijo además que "esa deuda básicamente es de planta" (00:27:57), lo que
 - a) ¿En el abono a materiales también se le factura el flete a Willard?
 - b) Si sí, ¿queda entero en Circunvalar o se reparte con planta como la maquila? Los drosses viajan de planta a Willard sin pasar por Circunvalar.
 
-**Respuesta 18-sep (Johana, vía Daniel):** a) sí, se factura; b) queda entero en Circunvalar. Es como está hoy: sin cambio.
+**Respuesta 18-sep (Johana, transcripción 00:18:19 L397-403 y L263-265):** a) sí, siempre se factura (frase de Daniel, «Sí» de ella, b); b) L399 «Si el flet es de circunval» (a). Es como está hoy: sin cambio.
 
 ---
 
@@ -140,7 +140,7 @@ Johana dijo además que "esa deuda básicamente es de planta" (00:27:57), lo que
 | Diferencia por cada 20 kg de dross | | 30.000 - 21.000 = $9.000 de más hoy (6 kg x 1.500) |
 | Inventario | el documento no lo toca; la fundición se registra aparte como transformación | retornan 20 kg de dross; al inventario de planta entran 14 kg de plomo (20 - 14 = 6 kg se pierden) |
 
-**Respuesta 18-sep (Johana, vía Daniel):** la etapa crisol baja los 20 kg de dross y la etapa horno sube solo los 14 kg de plomo; lo demás de la tabla está bien. Consecuencia que hay que confirmar: la deuda total de planta con Circunvalar baja 6 kg por cada 20 kg de dross retornado (el 16-sep se había dicho que el movimiento era de los 20 en las dos etapas y el total no cambiaba). El documento pedirá kilos de dross, bajará el crisol por esos kilos, subirá el horno por el 70 % y cobrará la maquila sobre ese 70 %. **Confirmado 18-sep:** la baja de 6 kg en la deuda total es intencional, y el retorno también mueve inventario: salen 20 kg del crisol (puro) y entran 14 kg al horno grande (crudo).
+**Respuesta 18-sep (Johana, transcripción 00:20:10–00:23:50, a):** la etapa crisol baja los 20 kg de dross (L433) y la etapa horno sube solo los 14 kg de plomo — L451 «no subiría 20, sino 14», L471 «esos 20 kg se convierten en 14 porque pierde… un 30%», L505 «la deuda en el horno subiría 14 kg por esos 20 que recibió el crisol»; corrigió a Daniel tres veces. La deuda total: L517 «la deuda total cambiaría en 6 kilos» (a). El 16-sep NO se había dicho lo contrario: Hugo habló de 14 kg de «plomo a devolver» (L767, L775) y «sí retorna los 20» (L795) sobre lo que sale del crisol; el 20/20 fue lectura nuestra de un «Sí, señor» a una frase ambigua (L799). Hugo no estuvo el 18-sep. El documento pedirá kilos de dross, bajará el crisol por esos kilos, subirá el horno por el 70 % y cobrará la maquila sobre ese 70 %. **Confirmado 18-sep:** la baja de 6 kg en la deuda total (L517, a; L623-625, b — «intencional» es palabra nuestra), y el retorno también mueve inventario: L649 Johana «Salen 20 del crisol, entran 14 al horno grande» (a); «de puro» y «de crudo» lo dijo Daniel (L639, b).
 
 ---
 
@@ -163,7 +163,7 @@ Dos formas de resolverlo:
 
 **Preguntas:** ¿cuál prefieren? ¿Erwin pesa el puro al sacarlo del crisol?
 
-**Respuesta 18-sep (Johana, vía Daniel):** no hay transformación: si entran 200 kg de crudo al crisol, salen 200 kg de puro. El traslado a crisoles convierte el inventario 1:1 (crudo baja 200, puro sube 200) al mismo tiempo que mueve la etapa. Confirmado 18-sep: el retorno de dross también toca el inventario, salen 20 de puro (crisol) y entran 14 de crudo (horno grande).
+**Respuesta 18-sep (Johana, transcripción 00:25:28–00:26:56, a):** L555 «En el crisol no hay ninguna transformación,» · L559 «no hay porcentaje.» · L563 «El peso se mantiene en el crisol.» · L579 «salen 200 de crudo, ingresan 200 de puro». El ejemplo de esta hoja (200 → 175 + 20 + 5) NO se comentó: en L529-539 ella lee la pantalla. El traslado a crisoles convierte el inventario 1:1 (crudo baja 200, puro sube 200) al mismo tiempo que mueve la etapa. Confirmado 18-sep: el retorno de dross también toca el inventario, salen 20 de puro (crisol) y entran 14 de crudo (horno grande).
 
 ---
 
@@ -173,4 +173,4 @@ Dos formas de resolverlo:
 - **Q-34:** el plomo de baterías que SAC compra y el de Willard se funden juntos. ¿Quieren ver aparte cuánto ganan con el plomo propio?
 - **Cargos por compra:** fuera de la comisión de Green Loop, ¿hay flete del camión, pesaje o descargue? Y si el camión trae varios proveedores, ¿cómo se reparte el flete?
 
-**Respuestas 18-sep (Johana, vía Daniel):** Q-B: en pesos, al precio de mercado del plomo, como valor negativo que resta del inventario. Q-34: es un solo inventario, no se separa el margen del plomo propio. Cargos por compra: solo Green Loop.
+**Respuestas 18-sep (Johana, transcripción 00:26:56–00:30:04) — CORREGIDAS el 19-sep:** Q-B: SOLO sobre la deuda con Willard, L601-605 «yo siempre la coloco pues negativo en el balance, en pesos. le doy un valor de acuerdo al precio del mercado en ese momento y la tengo como un valor negativo, o sea, restando dentro de mi inventario» (a); la mitad de la pregunta sobre lo que planta le debe a Circunvalar NO se hizo — Daniel la leyó y la saltó (L585-595) → Q-44 del inventario. Q-34: L597 «Sí, es un solo inventario. Todo eso ingresa en la circunval» (a); la mitad del margen del plomo propio NO se preguntó (L595). Cargos por compra: el registro decía «solo Green Loop» y ella dijo lo contrario — L621 «eso ellos lo pasan como gastos por aparte. Es como si fueran gastos de nosotros de SA de circunval» (a): existen y van como gasto aparte de Circunvalar; siguen sin prorratearse a la compra.

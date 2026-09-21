@@ -1,5 +1,7 @@
 import apiClient from "./api";
+import { num } from "@/types/willard-delivery";
 import type {
+  WillardDeliverySummary,
   WillardDelivery,
   WillardDeliveryCreate,
   WillardDeliveryListResponse,
@@ -23,6 +25,25 @@ export interface WillardDeliveryFilters {
 const BASE = "/api/v1/willard-deliveries";
 
 export const willardDeliveryService = {
+  // Los Decimal llegan como string: se coercionan AQUÍ (regla de #107).
+  getSummary: async (dateFrom: string, dateTo: string): Promise<WillardDeliverySummary> => {
+    const { data } = await apiClient.get<WillardDeliverySummary>(`${BASE}/summary`, {
+      params: { date_from: dateFrom, date_to: dateTo },
+    });
+    return {
+      ...data,
+      rows: data.rows.map((r) => ({
+        ...r,
+        lead_kg: num(r.lead_kg),
+        maquila_amount: num(r.maquila_amount),
+        freight_amount: num(r.freight_amount),
+        plant_credit_amount: num(r.plant_credit_amount),
+        crucible_amount: num(r.crucible_amount),
+        kept_by_billing_sede: num(r.kept_by_billing_sede),
+      })),
+    };
+  },
+
   getAll: async (filters: WillardDeliveryFilters = {}): Promise<WillardDeliveryListResponse> => {
     const { data } = await apiClient.get<WillardDeliveryListResponse>(BASE, { params: filters });
     return data;

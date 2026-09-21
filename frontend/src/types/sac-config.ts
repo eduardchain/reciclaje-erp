@@ -7,7 +7,12 @@ export type TariffCode =
   | "maquila_crisol"
   | "flete_willard_bog_baq"
   | "flete_willard_planta_planta"
-  | "comision_green_loop"; // SAC E2 (D7): $100/kg material recolectado en ruta
+  | "comision_green_loop" // SAC E2 (D7): $100/kg material recolectado en ruta
+  // #109 — reparto a planta al liquidar un abono. Existian en el backend desde
+  // #100 (materiales) y nunca se agregaron aqui: la pagina de Tarifas arma su
+  // selector desde este mapa, asi que NO se podian versionar desde la pantalla.
+  | "abono_planta_por_kg"
+  | "abono_planta_bateria_por_kg";
 
 export type TariffUnit = "per_kg_lead" | "per_kg_battery" | "per_unit" | "per_kg_material";
 
@@ -18,6 +23,8 @@ export const TARIFF_CODE_LABELS: Record<TariffCode, string> = {
   flete_willard_bog_baq: "Flete Willard BOG→BAQ",
   flete_willard_planta_planta: "Flete Willard Planta→Planta",
   comision_green_loop: "Comisión Green Loop",
+  abono_planta_por_kg: "Reparto a planta — abono a materiales",
+  abono_planta_bateria_por_kg: "Reparto a planta — abono a baterías",
 };
 
 export const TARIFF_UNIT_LABELS: Record<TariffUnit, string> = {
@@ -36,6 +43,8 @@ export const CANONICAL_UNIT_BY_CODE: Record<TariffCode, TariffUnit> = {
   flete_willard_bog_baq: "per_kg_battery",
   flete_willard_planta_planta: "per_kg_lead",
   comision_green_loop: "per_kg_material",
+  abono_planta_por_kg: "per_kg_lead",
+  abono_planta_bateria_por_kg: "per_kg_lead",
 };
 
 export interface ServiceTariffResponse {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAnnulCrucibleCharge, useCrucibleCharge } from "@/hooks/useCrucibleCharges";
-import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
+import { formatCurrency, formatDate, formatDateTime, formatWeightPrecise as formatWeight } from "@/utils/formatters";
 import { CRUCIBLE_EVENT_LABELS, num } from "@/types/crucible-charge";
 import { CrucibleEventBadge, CrucibleStatusBadge } from "./CrucibleChargesSection";
 
@@ -24,12 +24,16 @@ export default function CrucibleChargeDetailPage() {
   if (isLoading) return <div className="p-8 text-center text-slate-500">Cargando…</div>;
   if (!charge) return <div className="p-8 text-center text-slate-500">Documento no encontrado</div>;
 
+  // #109 — dos cantidades, y las dos se LEEN del documento (nunca se re-derivan
+  // de la fórmula vigente: cambiarla después no puede re-presentar un documento).
   const kg = num(charge.quantity_kg);
+  const leadKg = num(charge.lead_kg);
+  const lossKg = Math.round((kg - leadKg) * 1000) / 1000;
   const isCharge = charge.event_type === "charge";
-  // Lo que hizo el documento sobre las dos etapas (D2): el neto es cero.
+  // Lo físico baja una etapa; el PLOMO sube la otra. En un traslado son iguales.
   const effect = isCharge
-    ? [["En horno (crudo)", -kg], ["En crisol", +kg]]
-    : [["En crisol", -kg], ["En horno (crudo)", +kg]];
+    ? [["En horno (crudo)", -kg], ["En crisol", +leadKg]]
+    : [["En crisol", -kg], ["En horno (crudo)", +leadKg]];
 
   return (
     <div className="space-y-4">
@@ -64,9 +68,15 @@ export default function CrucibleChargeDetailPage() {
               <span>{charge.material_code ?? "—"}{charge.material_name ? ` - ${charge.material_name}` : ""}</span>
             </div>
             <div className="flex justify-between gap-3">
-              <span className="text-slate-500">Kg de plomo</span>
+              <span className="text-slate-500">{isCharge ? "Kg de plomo crudo" : "Kg de dross"}</span>
               <span className="tabular-nums font-medium">{formatWeight(kg, "kg")}</span>
             </div>
+            {!isCharge && (
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500">Kg de plomo que vuelven al horno</span>
+                <span className="tabular-nums font-medium">{formatWeight(leadKg, "kg")}</span>
+              </div>
+            )}
             {charge.notes && (
               <div className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-3">
                 <span className="text-slate-500">Notas</span>
@@ -103,22 +113,62 @@ export default function CrucibleChargeDetailPage() {
             ))}
             <div className="flex justify-between gap-3 border-t pt-2">
               <span className="text-slate-500">Deuda total</span>
-              <span className="tabular-nums">sin cambio</span>
+              <span className="tabular-nums">
+                {lossKg > 0 ? `−${formatWeight(lossKg, "kg")} (lo que no es plomo)` : "sin cambio"}
+              </span>
             </div>
             {!isCharge && (
               <div className="flex justify-between gap-3 border-t pt-2">
-                <span className="text-slate-500">Maquila del reproceso (planta → sede que factura)</span>
+                <span className="text-slate-500">Maquila del reproceso, sobre {formatWeight(leadKg, "kg")} de plomo</span>
                 <span className="tabular-nums">
                   {num(charge.maquila_amount) > 0 ? formatCurrency(num(charge.maquila_amount)) : "—"}
                 </span>
               </div>
             )}
-            <p className="text-xs text-slate-500 pt-1">
-              Este documento no mueve inventario: la conversión física del material se registra como transformación.
-            </p>
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Efecto sobre el inventario</CardTitle></CardHeader>
+        <CardContent className="p-4 text-sm space-y-2">
+          {charge.inventory_out && charge.inventory_in ? (
+            <>
+              <div className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-3">
+                <span className="text-slate-500">
+                  Sale {charge.inventory_out.material_code} - {charge.inventory_out.material_name}
+                </span>
+                <span className="text-red-600 tabular-nums">−{formatWeight(num(charge.inventory_out.quantity), "kg")}</span>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-3">
+                <span className="text-slate-500">
+                  Entra {charge.inventory_in.material_code} - {charge.inventory_in.material_name}
+                </span>
+                <span className="text-emerald-700 tabular-nums">+{formatWeight(num(charge.inventory_in.quantity), "kg")}</span>
+              </div>
+              {lossKg > 0 && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-500">Merma</span>
+                  <span className="tabular-nums">{formatWeight(lossKg, "kg")}</span>
+                </div>
+              )}
+              {charge.transformation_id && (
+                <p className="text-xs text-slate-500 pt-1">
+                  Movido por la{" "}
+                  <Link className="text-indigo-600 hover:underline" to={`/inventory/transformations/${charge.transformation_id}`}>
+                    transformación #{charge.transformation_number}
+                  </Link>
+                  , que pertenece a este documento: se anula desde aquí, no desde Transformaciones.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Este documento es anterior al cambio del 18-sep y no movió inventario.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {charge.status !== "annulled" && hasPermission("sales.cancel") && (
         <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
@@ -132,7 +182,7 @@ export default function CrucibleChargeDetailPage() {
         open={annulOpen}
         onOpenChange={setAnnulOpen}
         title={`Anular ${charge.label}`}
-        description="Se revierten los kg entre etapas y, si la hubo, la maquila del reproceso."
+        description="Se revierten juntos los kg entre etapas, el movimiento de inventario y, si la hubo, la maquila del reproceso. Si el material ya se vendió, el inventario puede quedar en negativo: se avisa, no se bloquea."
         confirmLabel="Anular"
         variant="destructive"
         onConfirm={() => {

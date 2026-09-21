@@ -4,7 +4,7 @@ Router completo gated por `kg_ledger_enabled` (D7): 403 incluso para admins.
 Permisos: reusa los de ventas (la Salida ES la captura de la entrega), mas
 El paso de revision se retiro (Hugo, demo 28-ago): registrado -> liquidado.
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -17,11 +17,13 @@ from app.api.deps import get_db, require_org_flag, require_permission
 from app.models.material import Material
 from app.models.sale import Sale
 from app.models.user import User
-from app.models.willard_delivery import WillardDelivery
+from app.models.willard_delivery import WillardDelivery, WillardDeliveryLine
 from app.schemas.willard_delivery import (
     WillardDeliveryAnnul,
     WillardDeliveryCreate,
     WillardDeliveryLineResponse,
+    WillardDeliverySummaryResponse,
+    WillardDeliverySummaryRow,
     WillardDeliveryListResponse,
     WillardDeliveryLiquidate,
     WillardDeliveryResponse,
@@ -172,6 +174,78 @@ def list_deliveries(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/summary", response_model=WillardDeliverySummaryResponse)
+def deliveries_summary(
+    db: Session = Depends(get_db),
+    context=Depends(require_permission("sales.view")),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+):
+    """#109 D6 — totales por TIPO de salida, para ver aparte lo que dejan los
+    materiales y lo que dejan las baterias. Es decision NUESTRA sobre lo que
+    dijo Johana el 18-sep (L323: materiales es "un negocio aparte" que se
+    controla para saber que utilidad deja); ella no pidio un reporte. Solo
+    LIQUIDADAS y por fecha de
+    liquidacion (la fecha en que el efecto financiero existe, #42); una anulada
+    o un borrador no facturaron nada. Suma columnas que el documento ya
+    persiste: no toca ningun reporte compartido. Ruta estatica declarada ANTES
+    de `/{delivery_id}`."""
+    org_id = context["organization_id"]
+    filters = [
+        WillardDelivery.organization_id == org_id,
+        WillardDelivery.status == "liquidated",
+    ]
+    # `liquidated_at` es fecha de NEGOCIO (mediodia UTC, #42/#87): el rango se
+    # compara por DIA. Con un datetime, "hasta hoy" seria hoy 00:00 y dejaria
+    # afuera justo lo liquidado hoy.
+    if date_from:
+        filters.append(func.date(WillardDelivery.liquidated_at) >= date_from)
+    if date_to:
+        filters.append(func.date(WillardDelivery.liquidated_at) <= date_to)
+
+    money = db.execute(
+        select(
+            WillardDelivery.delivery_type,
+            func.count(WillardDelivery.id),
+            func.coalesce(func.sum(WillardDelivery.maquila_amount), 0),
+            func.coalesce(func.sum(WillardDelivery.freight_amount), 0),
+            func.coalesce(func.sum(WillardDelivery.plant_credit_amount), 0),
+            func.coalesce(func.sum(WillardDelivery.crucible_amount), 0),
+        )
+        .where(*filters)
+        .group_by(WillardDelivery.delivery_type)
+    ).all()
+    # Los kg van en query aparte: un join a las lineas multiplicaria los montos
+    # de la cabecera por el numero de lineas (trampa 1:N de #89/#93).
+    kg = dict(
+        db.execute(
+            select(
+                WillardDelivery.delivery_type,
+                func.coalesce(func.sum(WillardDeliveryLine.kg_lead_equivalent), 0),
+            )
+            .join(WillardDeliveryLine, WillardDeliveryLine.willard_delivery_id == WillardDelivery.id)
+            .where(*filters)
+            .group_by(WillardDelivery.delivery_type)
+        ).all()
+    )
+    order = {"venta": 0, "abono_bateria": 1, "abono_material": 2}
+    rows = [
+        WillardDeliverySummaryRow(
+            delivery_type=dtype,
+            documents=count,
+            lead_kg=Decimal(str(kg.get(dtype, 0))),
+            maquila_amount=maquila,
+            freight_amount=freight,
+            plant_credit_amount=credit,
+            crucible_amount=crucible,
+            kept_by_billing_sede=maquila + freight - credit,
+        )
+        for dtype, count, maquila, freight, credit, crucible in money
+    ]
+    rows.sort(key=lambda r: order.get(r.delivery_type, 99))
+    return WillardDeliverySummaryResponse(date_from=date_from, date_to=date_to, rows=rows)
 
 
 @router.get("/{delivery_id}", response_model=WillardDeliveryResponse)

@@ -4,7 +4,7 @@ Schemas de WillardDelivery — salida de plomo a Willard (W1).
 El precio solo existe en el tipo `venta`. Ahi la linea acepta `unit_price` XOR
 `total_price` (patron #95 D8: Johana a veces tiene el total y no el unitario).
 """
-from datetime import datetime
+from datetime import date as DateOnly, datetime
 from decimal import Decimal
 from typing import Annotated, Literal, Optional
 from uuid import UUID
@@ -171,3 +171,27 @@ class WillardDeliveryListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class WillardDeliverySummaryRow(BaseModel):
+    """#109 D6 — totales de las salidas LIQUIDADAS de un tipo en el periodo.
+
+    ⚠️ `kept_by_billing_sede` NO es un neto (F4 de QA): es lo que queda en la
+    sede que factura DE LO FACTURADO A WILLARD. En un abono a bateria planta ya
+    cobro $1.500/kg al trasladar, y esa maquila no esta aqui — restarla a mano
+    daria el economico; presentar esto como "neto" lo inflaria 20 veces."""
+
+    delivery_type: str
+    documents: int
+    lead_kg: Decimal
+    maquila_amount: Decimal
+    freight_amount: Decimal
+    plant_credit_amount: Decimal
+    crucible_amount: Decimal
+    kept_by_billing_sede: Decimal
+
+
+class WillardDeliverySummaryResponse(BaseModel):
+    date_from: Optional[DateOnly] = None
+    date_to: Optional[DateOnly] = None
+    rows: list[WillardDeliverySummaryRow]

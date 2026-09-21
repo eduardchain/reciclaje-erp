@@ -20,6 +20,16 @@ export function useWillardDeliveries(filters: WillardDeliveryFilters = {}, enabl
   });
 }
 
+// #109 D6 — resumen por tipo. `enabled`: la tarjeta nace colapsada y no pide
+// nada hasta que se abre.
+export function useWillardDeliverySummary(dateFrom: string, dateTo: string, enabled = true) {
+  return useQuery({
+    queryKey: ["willard-deliveries", "summary", dateFrom, dateTo],
+    queryFn: () => willardDeliveryService.getSummary(dateFrom, dateTo),
+    enabled: enabled && !!dateFrom && !!dateTo,
+  });
+}
+
 export function useWillardDelivery(id: string | undefined) {
   return useQuery({
     queryKey: ["willard-deliveries", "detail", id],

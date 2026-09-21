@@ -208,7 +208,10 @@ MATERIALS: list[tuple[str, str, str, str, str, bool, Optional[str], Optional[flo
     # #107 D6 — el dross del crisol (~13%, Johana 3-sep) es un material propio:
     # vuelve al horno grande por una transformacion manual (puro -> dross) y su
     # retorno se registra como documento de crisol. `none`: no es entregable.
-    ("DROSS-CRI", "DROSS DE CRISOL", "Drosses", "kg", "none", False, None, None, "none"),
+    # #109: 70 % de plomo, FACTOR FIJO (Hugo 16-sep 00:39:30). De esta formula
+    # sale cuanto sube el horno y sobre que se cobra la maquila del reproceso en
+    # un retorno de dross. `willard_world` sigue en 'none': no entra por Willard.
+    ("DROSS-CRI", "DROSS DE CRISOL", "Drosses", "kg", "none", False, "drosses_to_lead", 0.70, "none"),
     # Retal y cascara quedan en `none` a proposito: por §4.1 son INSUMOS del
     # horno, no producto entregable. Marcar uno de mas reabre el defecto de #103.
     ("PLO-RET", "PLOMO RETAL", "Plomo", "kg", "none", True, None, None, "none"),
@@ -278,6 +281,60 @@ KG_ACCOUNTS = [
 # aplica hasta que el material llega a Circunvalar (F4 de QA) — ciclo propio.
 OBSOLETE_KG_ACCOUNTS = ["WILL-BAT-JM"]
 
+# Valores que ESTE seeder sembro en el pasado y que hoy reemplaza. Es la unica
+# via por la que la provision cambia el precio de una tarifa que ya existe.
+#
+# 🔴 Esta tabla se DERIVA del historial del archivo, no de memoria (C1 de QA,
+# #109). Comando:
+#   git log -p --reverse --format='@@COMMIT %h %ad %s' -- backend/scripts/seed_sac_org.py \
+#     | grep -E '^@@COMMIT|^[+-].*tariff_code'
+# Por que importa: la regla "no pisar lo que no puse yo" se INVIERTE si la lista
+# esta incompleta. Produccion se provisiono con los valores del 01-sep (32bf2d0:
+# maquila 1500, abono 600, flete 200) y CC-009 (8e6a20b, 08-sep) nunca llego a
+# correr alla: sin estas entradas la provision los "respetaria" y a Willard se
+# le facturarian $597/kg de menos. Si algun dia se cambia un precio en TARIFFS,
+# el valor que sale ENTRA aca en el mismo commit.
+#
+#   codigo                        sembrado (commit, fecha)          hoy
+#   maquila_willard               1500 (32bf2d0, 01-sep)            2097 (8e6a20b)
+#   abono_planta_por_kg           600 (32bf2d0) -> 1500 (8e6a20b)   1248 (#109)
+#   flete_willard_planta_planta   200 (32bf2d0, 01-sep)             37 (8e6a20b)
+#   comision_green_loop 100, maquila_intersede_cv_jm 1500, maquila_crisol 300:
+#   nunca cambiaron de precio -> sin entrada.
+TARIFF_SUPERSEDED: dict[str, list[str]] = {
+    # Placeholder de W1: confundia la maquila INTERNA ($1.500) con la de Willard.
+    "maquila_willard": ["1500"],
+    # 600 = placeholder de W1; 1500 = respuesta de Hugo del 4-sep. Johana dicto
+    # 1.248 el 16-sep (Hugo presente) y el 18-sep; que el 1.500 quede sin efecto
+    # es conclusion NUESTRA, a Hugo nadie se lo ha dicho (849 en Circunvalar).
+    "abono_planta_por_kg": ["600", "1500"],
+    # Placeholder de W1.
+    "flete_willard_planta_planta": ["200"],
+}
+
+# El remedio depende del MOTIVO (O1 de QA, #109). Agregar un valor a
+# TARIFF_SUPERSEDED solo arregla una tarifa PROPIA: a una AJENA la frena la
+# autoria igual, asi que ese consejo ahi mandaria al operador a editar la tabla
+# para nada — o peor, a aflojar el predicado de autoria para que "funcione".
+RESPECTED_REMEDY: dict[str, str] = {
+    "AJENA": (
+        "la versiono OTRO usuario. Decide Daniel: si el seed es el correcto, se "
+        "versiona desde Config → Tarifas. Agregar el valor a TARIFF_SUPERSEDED NO "
+        "sirve (la autoria la frena igual) y el predicado de autoria NO se afloja."
+    ),
+    "PROPIA": (
+        "la versiono ESTA MISMA cuenta con un valor fuera de la tabla. O es un "
+        "cambio hecho desde la pantalla con esta cuenta (no hacer nada), o es un "
+        "valor viejo del seed que falta en TARIFF_SUPERSEDED (agregarlo, derivado "
+        "de `git log -p -- backend/scripts/seed_sac_org.py`, y re-correr). Si lo "
+        "que difiere es la unidad o el kg/u y no el precio: Config → Tarifas."
+    ),
+    "SIN_IDENTIDAD": (
+        "/auth/me no respondio, asi que TODO se trato como ajeno. Re-correr cuando "
+        "responda; no versionar nada a mano por este aviso."
+    ),
+}
+
 TARIFFS = [
     # #93 D11: kg_per_unit=14 — "14 kg por unidad, sea cual sea la unidad"
     # (Hugo); base de la comision con unidades mezcladas, versionado con el precio
@@ -310,7 +367,21 @@ TARIFFS = [
     #
     # ⚠️ Si alguien sube una de las dos en Config → Tarifas, TIENE que mirar la
     # otra: son append-only y este archivo no las vuelve a tocar.
-    {"tariff_code": "abono_planta_por_kg", "unit_price_cop": "1500", "unit": "per_kg_lead"},
+    #
+    # 🔴 #109 SUPERSEDE lo de arriba (cierre con el cliente, 16 y 18-sep). Johana
+    # dicto las cifras dos veces con sus palabras (16-sep L585, con Hugo
+    # presente; 18-sep L237: "1248 y 749"). Que la respuesta del 4-sep quede sin
+    # efecto es conclusion NUESTRA: a Hugo nadie se lo ha dicho. En el abono a
+    # MATERIALES, de los $2.097 facturados a Willard van $1.248 a planta y en
+    # Circunvalar quedan 2.097 − 1.248 = 849 (aritmetica nuestra: los 749 que
+    # dio Johana + los $100 de los que dijo, 18-sep L361: "Están quedando 100
+    # pesos de utilidades de esa maquila dentro de la cuenta de los materiales").
+    {"tariff_code": "abono_planta_por_kg", "unit_price_cop": "1248", "unit": "per_kg_lead"},
+    # Abono a BATERIAS: $566/kg FIJOS a planta al facturar, ADEMAS de los $1.500
+    # que ya cobro al trasladar (Johana 16-sep 00:24:10; 18-sep L155: "de ahí
+    # serían para planta 566", L159: "y 1531", L183: "Sí, fijo por kilo").
+    # Circunvalar se queda 1.531 y el flete entero.
+    {"tariff_code": "abono_planta_bateria_por_kg", "unit_price_cop": "566", "unit": "per_kg_lead"},
 ]
 
 RETENTION_CONFIGS = [
@@ -444,6 +515,13 @@ class SacSeeder:
         # True = la org ya existia y se esta COMPLETANDO (unico modo valido
         # contra produccion). False = org creada desde cero.
         self.provisioning = False
+        # Tarifas cuya vigente NO coincide con el seed y tampoco es un valor
+        # que este seeder haya sembrado: se respetan, y se listan AL FINAL de
+        # la corrida (un warning en la mitad del log se pierde en el scroll).
+        self.respected_tariffs: list[str] = []
+        # Motivos presentes (O1 de QA): el remedio que se imprime depende de
+        # ellos — a una tarifa AJENA no la arregla agregar su valor a la tabla.
+        self.respected_motives: set[str] = set()
 
     # ---------------- ORG + USUARIOS ----------------
 
@@ -878,30 +956,117 @@ class SacSeeder:
                 logging.warning(f"  No se pudo desactivar la cuenta kg '{code}': {e}")
 
     def create_tariffs(self) -> None:
-        """Append-only (#35): solo se crea si no hay vigente igual."""
+        """Append-only (#35). Regla (#109): **el seeder nunca pisa un valor que
+        no puso el**. Una tarifa se versiona SOLO si (a) no existe, o (b) la
+        vigente es un valor que este mismo seeder sembro antes y hoy reemplaza
+        (`TARIFF_SUPERSEDED`), o (c) le falta `kg_per_unit` (#93). Si la vigente
+        es cualquier otro numero, alguien la cambio desde Config → Tarifas y se
+        RESPETA, con aviso — antes de #109 la provision la devolvia al valor
+        sembrado en silencio.
+
+        🔴 "Que el mismo sembro" es AUTORIA, no solo valor (hallazgo de la
+        revision de la ronda 2): una tarifa cuyo precio coincide con un valor
+        viejo del seed pero que versiono OTRO usuario (Hugo reponiendo 1500
+        desde Config → Tarifas) es una decision del cliente y se respeta.
+        Reemplazar exige las dos cosas: precio en `TARIFF_SUPERSEDED` Y
+        `created_by` == el usuario con el que corre este seeder. Si el seeder
+        se corre con otra cuenta que la que sembro, la tarifa se RESPETA y va
+        al bloque final — la direccion segura: se detiene y se pregunta.
+
+        ⚠️ Dos residuos DECLARADOS, no arreglados (QA, ronda 2):
+        (a) "este usuario" es la cuenta de `--superuser-email`, que puede ser la
+            misma con la que Daniel entra a la pantalla: `created_by` distingue a
+            Hugo/Johana del seeder, NO a Daniel-por-pantalla del seeder.
+        (b) Desde aca nadie puede ver quien es el `created_by` de las filas de
+            produccion. Si se provisionaron con otra cuenta, el deploy sale con
+            exit 3 y los placeholders listados. Remedio: versionar 2097 / 1248 /
+            37 desde Config → Tarifas, o re-correr con la cuenta original.
+            JAMAS aflojar este predicado ni volver a clasificar por valor "solo
+            esta vez".
+
+        🔴 Se lee `/service-tariffs/current`, no el historico: el listado viene
+        ordenado del mas nuevo al mas viejo y el dict se quedaba con la ULTIMA
+        fila por codigo = la version MAS VIEJA. Con una sola version por tarifa
+        no se notaba; con dos, la provision re-versionaba en cada corrida."""
         logging.info("[12] Tarifas de servicio")
         vigentes: dict[str, dict] = {}
+        my_id: Optional[str] = None
         if not self.api.dry_run:
-            data = self.api.get("/service-tariffs", {"limit": 100})
+            data = self.api.get("/service-tariffs/current")
             items = data["items"] if isinstance(data, dict) else data
             vigentes = {t["tariff_code"]: t for t in items}
+            try:
+                my_id = str(self.api.get("/auth/me")["id"]).lower()
+            except (SystemExit, KeyError, TypeError) as e:
+                # Sin saber quien soy, TODO es ajeno: se respeta y se pregunta.
+                # Jamas al reves (tratar todo como propio seria clasificar por
+                # valor otra vez, que es el defecto que esto cierra).
+                logging.warning(f"    No se pudo leer /auth/me ({e}): toda tarifa se trata como ajena")
+
+        def desc(d: dict) -> str:
+            # Los TRES campos que se comparan: imprimir solo el precio hacia
+            # que una diferencia de kg_per_unit saliera "vigente 100 / seed 100".
+            kg = d.get("kg_per_unit")
+            return f"{d['unit_price_cop']} {d['unit']}" + (f" kg/u={kg}" if kg is not None else "")
         for t in TARIFFS:
-            cur = vigentes.get(t["tariff_code"])
-            # #93: kg_per_unit entra a la comparacion — la vigente de prod nacio
-            # sin el 14 y el seed debe versionar una nueva (append-only #35),
-            # no saltarsela por tener el mismo precio
-            same_kg = (
-                (cur.get("kg_per_unit") is None and t.get("kg_per_unit") is None)
-                or (
-                    cur.get("kg_per_unit") is not None
-                    and t.get("kg_per_unit") is not None
-                    and float(cur["kg_per_unit"]) == float(t["kg_per_unit"])
-                )
-            ) if cur else False
-            if cur and float(cur["unit_price_cop"]) == float(t["unit_price_cop"]) \
-                    and cur["unit"] == t["unit"] and same_kg:
+            code = t["tariff_code"]
+            cur = vigentes.get(code)
+            if cur is None:
+                self.api.post("/service-tariffs", t, label=code)
                 continue
-            self.api.post("/service-tariffs", t, label=t["tariff_code"])
+            same_price = float(cur["unit_price_cop"]) == float(t["unit_price_cop"])
+            same_kg = (cur.get("kg_per_unit") is None and t.get("kg_per_unit") is None) or (
+                cur.get("kg_per_unit") is not None
+                and t.get("kg_per_unit") is not None
+                and float(cur["kg_per_unit"]) == float(t["kg_per_unit"])
+            )
+            if same_price and cur["unit"] == t["unit"] and same_kg:
+                continue
+            old_value = float(cur["unit_price_cop"]) in {
+                float(v) for v in TARIFF_SUPERSEDED.get(code, [])
+            }
+            mine = bool(my_id) and str(cur.get("created_by")).lower() == my_id
+            ours = old_value and mine
+            missing_kg = same_price and cur.get("kg_per_unit") is None and t.get("kg_per_unit") is not None
+            if ours or missing_kg:
+                logging.info(
+                    "    %s: %s -> %s (valor sembrado antes por este usuario, hoy reemplazado)",
+                    code, desc(cur), desc(t),
+                )
+                self.api.post("/service-tariffs", t, label=code)
+            else:
+                who = cur.get("created_by_name") or cur.get("created_by")
+                when = str(cur.get("created_at"))[:10]
+                # El MOTIVO decide el remedio (O1 de QA) — son tres y no se
+                # arreglan igual; se imprime el que corresponde en el bloque final.
+                if not my_id:
+                    motive = "SIN_IDENTIDAD"
+                    why = (
+                        f"/auth/me no respondio: no se sabe si la version de {who} "
+                        f"del {when} es de este seeder, se trata como ajena"
+                    )
+                elif not mine:
+                    motive = "AJENA"
+                    why = (
+                        f"el precio coincide con un valor viejo del seed, pero la versiono "
+                        f"{who} el {when}, no este seeder"
+                        if old_value else f"la versiono {who} el {when}, no este seeder"
+                    )
+                else:
+                    motive = "PROPIA"
+                    why = (
+                        f"la versiono esta misma cuenta ({who}) el {when}, con un valor "
+                        "que no esta en TARIFF_SUPERSEDED"
+                    )
+                logging.warning(
+                    "    %s: la vigente es [%s] y el seed dice [%s] — se RESPETA la vigente "
+                    "[%s: %s]. El remedio va en el bloque final.",
+                    code, desc(cur), desc(t), motive, why,
+                )
+                self.respected_motives.add(motive)
+                self.respected_tariffs.append(
+                    f"[{motive}] {code}: vigente [{desc(cur)}] / seed [{desc(t)}] — {why}"
+                )
 
     def create_retention_configs(self) -> None:
         """El POST responde 409 si la tarifa ya existe (#79) — se tolera."""
@@ -921,6 +1086,28 @@ class SacSeeder:
         logging.info(f"SEED SAC ORG (solo maestros)  |  {mode}")
         logging.info("=" * 70)
 
+        try:
+            self._run_stages(reset)
+            logging.info("=" * 70)
+            logging.info(f"LISTO en {time.monotonic() - t0:.1f}s  ({mode})")
+            logging.info(
+                f"  Org SAC: {len(WAREHOUSES)} bodegas, {len(BUSINESS_UNITS)} UNs, "
+                f"{len(ACCOUNTS)} cuentas, {len(MATERIALS)} materiales, "
+                f"{len(self.third_parties)} terceros, {len(KG_ACCOUNTS)} cuentas kg, "
+                f"{len(TARIFFS)} tarifas, {len(RETENTION_CONFIGS)} retenciones. "
+                f"SIN transacciones."
+            )
+            if not self.api.dry_run:
+                logging.info(
+                    "  Usuarios: " + ", ".join(f"{u['email']} ({u['role']})" for u in USERS)
+                )
+        finally:
+            # En `finally` y DESPUES del resumen a proposito: es lo ULTIMO que
+            # imprime la corrida, y si una etapa posterior a las tarifas aborta
+            # (un 500, un corte de red) el aviso no se pierde.
+            self._report_respected_tariffs()
+
+    def _run_stages(self, reset: bool) -> None:
         self.create_or_reset_org(reset)
         self.create_users_and_roles()
         self._force_known_passwords()   # dev-only (ver docstring del metodo)
@@ -936,19 +1123,23 @@ class SacSeeder:
         self.create_tariffs()
         self.create_retention_configs()
 
-        logging.info("=" * 70)
-        logging.info(f"LISTO en {time.monotonic() - t0:.1f}s  ({mode})")
-        logging.info(
-            f"  Org SAC: {len(WAREHOUSES)} bodegas, {len(BUSINESS_UNITS)} UNs, "
-            f"{len(ACCOUNTS)} cuentas, {len(MATERIALS)} materiales, "
-            f"{len(self.third_parties)} terceros, {len(KG_ACCOUNTS)} cuentas kg, "
-            f"{len(TARIFFS)} tarifas, {len(RETENTION_CONFIGS)} retenciones. "
-            f"SIN transacciones."
-        )
-        if not self.api.dry_run:
-            logging.info(
-                "  Usuarios: " + ", ".join(f"{u['email']} ({u['role']})" for u in USERS)
+    def _report_respected_tariffs(self) -> None:
+        if self.respected_tariffs:
+            # Contra PRODUCCION esto DETIENE el deploy: decide Daniel si la
+            # vigente es un cambio real hecho desde la pantalla o un valor viejo
+            # que falta en TARIFF_SUPERSEDED (runbook del informe de #109). La
+            # corrida ademas sale con exit 3 (ver `main`): un aviso con exit 0
+            # no es un gate.
+            logging.warning("=" * 70)
+            logging.warning(
+                f"⚠️  DECISION PENDIENTE — {len(self.respected_tariffs)} tarifa(s) "
+                "RESPETADA(S), NO coinciden con el seed:"
             )
+            for line in self.respected_tariffs:
+                logging.warning(f"    {line}")
+            for motive in sorted(self.respected_motives):
+                logging.warning(f"    Remedio [{motive}]: {RESPECTED_REMEDY[motive]}")
+            logging.warning("=" * 70)
 
 
 def main() -> None:
@@ -997,7 +1188,12 @@ def main() -> None:
         logging.warning(f"*** DESTINO REMOTO: {args.api_url} ***")
 
     api.login(args.superuser_email, args.superuser_password)
-    SacSeeder(api, args.users_password).run(reset=args.reset)
+    seeder = SacSeeder(api, args.users_password)
+    seeder.run(reset=args.reset)
+    if seeder.respected_tariffs:
+        # Exit propio y distinto de 1 (fallo) para que quien encadene la
+        # provision con `&&` se detenga: hay una decision que no es del operador.
+        raise SystemExit(3)
 
 
 if __name__ == "__main__":

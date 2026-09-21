@@ -153,3 +153,30 @@ export interface WillardDeliveryLiquidate {
   line_prices: WillardDeliveryLinePrice[];
   customer_id?: string | null;
 }
+
+
+// #109 D6 — resumen por TIPO de salida (GET /willard-deliveries/summary).
+// Separa lo que dejan los materiales de lo que dejan las baterías. Johana
+// (18-sep) eligió la opción B (L385-387): "Materiales Willard" es un
+// nombre/cuenta INTERNA de su contabilidad; ella la llama "cuenta" con sus
+// palabras (L323, L335, L361). En el sistema NO se modeló como cuenta sino como
+// resumen por tipo: decisión nuestra, y expectativa creada en L305-307.
+// ⚠️ Q-37 se reabrió el 19-sep (16-sep L577: "no es un ingreso para circunval,
+// sino una cuenta por pagar"); ver el inventario de preguntas.
+export interface WillardDeliverySummaryRow {
+  delivery_type: WillardDeliveryType;
+  documents: number;
+  lead_kg: number;
+  maquila_amount: number;
+  freight_amount: number;
+  plant_credit_amount: number;
+  crucible_amount: number;
+  /** maquila + flete − reparto a planta. NO es utilidad: no descuenta el costo del plomo. */
+  kept_by_billing_sede: number;
+}
+
+export interface WillardDeliverySummary {
+  date_from: string | null;
+  date_to: string | null;
+  rows: WillardDeliverySummaryRow[];
+}

@@ -14,7 +14,8 @@ que salda dos deudas encadenadas (planta -> Circunvalar -> Willard). El de
 material no toca `intersede` porque los drosses llegan derecho a planta y
 Circunvalar nunca estuvo en esa cadena.
 
-Plata: sobre TODA entrega se factura maquila + flete a Willard y nace la CxC.
+Plata: sobre cada ABONO se factura maquila + flete a Willard y nace la CxC
+(la venta no factura maquila ni flete: corta antes, CC-009).
 El reparto entre sedes (`internal_maquila_*` de #84) es OTRA cosa y NO va en
 toda entrega — ver `_emit_split_pair`. CC-009 (demo 28-ago + Johana 3-sep):
 la maquila interna se causa AL TRASLADAR, una sola vez, asi que repetirla en
@@ -67,6 +68,19 @@ KG_SOURCE_TYPE = "willard_delivery"
 MAQUILA_TARIFF_CODE = "maquila_willard"
 FREIGHT_TARIFF_CODE = "flete_willard_planta_planta"
 PLANT_CREDIT_TARIFF_CODE = "abono_planta_por_kg"
+# #109 — que tarifa reparte a planta cada TIPO de salida. La venta no esta: no
+# factura maquila, asi que no hay nada que repartir (CC-009, corta arriba).
+#   abono_material  $1.248/kg  los drosses llegaron derecho a planta: nunca hubo
+#                              traslado, o sea que aqui se causa TODA su parte.
+#   abono_bateria   $566/kg    FIJOS, ADEMAS de los $1.500 que planta ya cobro al
+#                              trasladar (Johana 16-sep L493: "es un plus que que
+#                              se reconoce por la factura"; 18-sep L183: "Sí, fijo
+#                              por kilo", respondiendo a Daniel).
+# Un tipo nuevo de abono sin fila aqui NO reparte y avisa: fail-closed.
+PLANT_CREDIT_TARIFF_BY_TYPE = {
+    "abono_material": PLANT_CREDIT_TARIFF_CODE,
+    "abono_bateria": "abono_planta_bateria_por_kg",
+}
 # #107 D4: diferencial de refinacion, causado al VENDER plomo puro (Hugo 28-ago)
 CRUCIBLE_TARIFF_CODE = "maquila_crisol"
 CRUCIBLE_CATEGORY_NAME = "Crisol Refinación"
@@ -628,7 +642,10 @@ class WillardDeliveryService:
 
         maquila_tariff, maquila = _amount(MAQUILA_TARIFF_CODE)
         freight_tariff, freight = _amount(FREIGHT_TARIFF_CODE)
-        credit_tariff, plant_credit = _amount(PLANT_CREDIT_TARIFF_CODE)
+        credit_code = PLANT_CREDIT_TARIFF_BY_TYPE.get(delivery.delivery_type)
+        credit_tariff, plant_credit = (
+            _amount(credit_code) if credit_code else (None, Decimal("0"))
+        )
 
         for tariff, code in (
             (maquila_tariff, MAQUILA_TARIFF_CODE),
@@ -672,24 +689,40 @@ class WillardDeliveryService:
         delivery.maquila_amount = maquila
         delivery.freight_amount = freight
 
-        # (b) Reparto entre sedes — SOLO en el abono en materiales (CC-009).
-        #     En venta y abono de baterias ese material paso por Circunvalar,
-        #     asi que la maquila interna ya se causo al trasladar.
-        if (
-            delivery.delivery_type != "abono_material"
-            or billing_wh is None
-            or plant_credit <= 0
-        ):
+        # (b) Reparto entre sedes — en los DOS abonos, cada uno con SU tarifa
+        #     (`PLANT_CREDIT_TARIFF_BY_TYPE`, #109).
+        #
+        #     🔴 SUPERSEDE a CC-009 fila 4 (Hugo 28-ago: en el abono de baterias
+        #     "no se le afecta maquila porque ya la tengo causada"). Johana lo
+        #     corrigio el 16-sep con Hugo presente, y quedo confirmado el 18-sep:
+        #     ademas de los $1.500 del traslado, al FACTURAR el abono Circunvalar
+        #     le reconoce a planta $566/kg fijos y se queda con el resto y con el
+        #     flete entero. El gate sigue siendo por TIPO y sigue ignorando
+        #     `internal_maquila_enabled` (F4a de #107: dos regimenes, no se unen).
+        if credit_code is None or billing_wh is None:
+            delivery.plant_credit_amount = Decimal("0")
+            return
+        if credit_tariff is None:
+            # D4d: facturar y repartir son independientes de descargar kg. Sin
+            # tarifa los kg ya bajaron; lo que no puede pasar es que el reparto
+            # falte EN SILENCIO — antes de #109 este camino no decia nada.
+            warnings.append(
+                f"Sin tarifa vigente '{credit_code}': no se le repartio a planta "
+                "su parte de esta salida. Configurela en Config → Tarifas y "
+                "anule/rehaga la salida."
+            )
+            delivery.plant_credit_amount = Decimal("0")
+            return
+        if plant_credit <= 0:
             delivery.plant_credit_amount = Decimal("0")
             return
 
-        # Q-27 volvio al abono una TAJADA de la maquila ("de los $2.097, $1.500
-        # van a planta"), asi que existe un invariante nuevo: el abono no puede
-        # superar lo facturado. En el codigo son dos tarifas sin relacion, y si
-        # divergen en Config la sede que factura queda en perdida en silencio
-        # — la forma exacta del defecto de #100 D13, por la otra puerta.
-        # Avisa, no bloquea (#17/#76): mientras Q-29 este abierta nadie puede
-        # afirmar que deban ser iguales, solo que esta no puede ser mayor.
+        # Q-27 volvio al abono una TAJADA de la maquila (hoy $1.248 de los
+        # $2.097 en materiales y $566 en baterias, #109), asi que existe un
+        # invariante: el abono no puede superar lo facturado. En el codigo son
+        # dos tarifas sin relacion, y si divergen en Config la sede que factura
+        # queda en perdida en silencio — la forma exacta del defecto de #100
+        # D13, por la otra puerta. Avisa, no bloquea (#17/#76).
         if plant_credit > maquila:
             # `_fmt_money` y no un f-string: `f"${x:,.0f}"` imprime $75,000 —
             # separador ingles. En formato colombiano eso se lee 75 pesos con
@@ -701,7 +734,7 @@ class WillardDeliveryService:
                 f"El abono a planta ({_fmt_money(plant_credit)}) supera la "
                 f"maquila facturada a Willard ({_fmt_money(maquila)}): la sede "
                 "que factura queda en perdida en esta salida. Revise "
-                "'abono_planta_por_kg' y 'maquila_willard' en Config → Tarifas."
+                f"'{credit_code}' y 'maquila_willard' en Config → Tarifas."
             )
         self._emit_split_pair(
             db, delivery, plant_credit, credit_tariff, billing_wh,
@@ -816,8 +849,11 @@ class WillardDeliveryService:
         liq_dt: datetime,
     ) -> None:
         """
-        La porcion que Circunvalar le abona a planta, SOLO en el abono en
-        materiales. Cuenta y tercero NULL: no es plata que se mueva, es como
+        La porcion que Circunvalar le abona a planta al facturar un abono
+        (#109: los DOS abonos, cada uno con su tarifa — ver
+        `PLANT_CREDIT_TARIFF_BY_TYPE`; el texto de CC-009 de abajo se conserva
+        como historia y queda superseded en lo que toca al abono de baterias).
+        Cuenta y tercero NULL: no es plata que se mueva, es como
         se reparte el ingreso entre sedes (#84).
 
         🔴 CC-009 (2026-09-03) SUPERSEDE a D11. D11 decia que este par se emite
@@ -834,8 +870,10 @@ class WillardDeliveryService:
         y compartirlo reproduciria el modo de falla de #94/#99.
 
         Q-27 CERRADA (Hugo, 4-sep): esta rama existe y el numero es $1.500/kg
-        — "cuando facturamos, si le cobramos la maquila a Willard se le factura
-        y se le abona una parte a planta y la otra le queda a la Circunvalar".
+        — segun Hugo, al facturarle la maquila a Willard una parte se le abona
+        a planta y la otra le queda a Circunvalar. Parafrasis a proposito: cita
+        sin fuente en el repo; si Daniel aporta el WhatsApp se restaura textual
+        con fecha.
         No contradice a Johana (3-sep): ella dice que Circunvalar no le debe una
         MAQUILA a planta, y es cierto — no hubo traslado; esto es repartir el
         ingreso de Willard, que es otra cosa.
@@ -845,6 +883,14 @@ class WillardDeliveryService:
         sean el mismo numero — es una coincidencia sin verificar, la tercera de
         este ciclo con ese valor. Si Hugo confirma que se mueven juntas, se
         unifican; mientras tanto, quien edite una en Config debe mirar la otra.
+
+        🔴 #109 SUPERSEDE los parrafos «Q-27 CERRADA» y «Abierto» de arriba
+        (Q-27 resuelta el 18-sep a favor de Johana, que dicto las cifras el 16
+        y el 18): el reparto de materiales es $1.248/kg y el de baterias
+        $566/kg, cada uno con su tarifa (`PLANT_CREDIT_TARIFF_BY_TYPE`). Ya no
+        coincide con la maquila intersede ($1.500), asi que el aviso de "mirar
+        la otra" perdio su objeto (Q-29 superada). Se conservan como historia,
+        igual que en el seeder.
         """
         from app.services.money_movement import money_movement
         from app.services.transfer import TransferService

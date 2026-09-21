@@ -37,6 +37,20 @@ export function formatWeight(value: number | null | undefined, unit = "kg"): str
   return `${numberFormatter.format(value)} ${unit}`;
 }
 
+// Hasta TRES decimales: la escala del inventario (Numeric(10,3)). Los
+// documentos de crisol (#109) calculan plomo = dross × %, y 33,333 × 70 % =
+// 23,333: con `formatWeight` (2 decimales) la pantalla mostraría 23,33 y no
+// cuadraría con lo que se guardó.
+const preciseNumberFormatter = new Intl.NumberFormat("es-CO", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 3,
+});
+
+export function formatWeightPrecise(value: number | null | undefined, unit = "kg"): string {
+  if (value == null) return `0 ${unit}`;
+  return `${preciseNumberFormatter.format(value)} ${unit}`;
+}
+
 export function formatPercentage(value: number | null | undefined): string {
   if (value == null) return "0%";
   return `${value.toFixed(1)}%`;

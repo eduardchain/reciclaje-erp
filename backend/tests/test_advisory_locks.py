@@ -326,12 +326,21 @@ class TestCrisol:
         assert len(set(RANK.values())) == len(RANK)
 
     def test_dross_return_pide_crisol_y_despues_movimiento(self, db_session, test_organization):
-        """El retorno de dross numera el documento (14) y despues el par (30):
+        """El retorno de dross numera el documento (14), despues el par (30) y
+        desde #109 tambien la transformacion que mueve el inventario (41):
         declarado anticipado, y el orden inverso revienta."""
-        from app.utils.advisory_locks import LockOrderError, lock_sequence, lock_sequences
+        from app.utils.advisory_locks import RANK, LockOrderError, lock_sequence, lock_sequences
 
         org = test_organization.id
-        lock_sequences(db_session, org, "crucible_number", "movement_number")
+        assert RANK["crucible_number"] < RANK["movement_number"] < RANK["transformation_number"]
+        lock_sequences(
+            db_session, org, "crucible_number", "movement_number", "transformation_number"
+        )
+        db_session.rollback()
+
+        lock_sequence(db_session, org, "transformation_number")
+        with pytest.raises(LockOrderError):
+            lock_sequence(db_session, org, "movement_number")
         db_session.rollback()
 
         lock_sequence(db_session, org, "movement_number")

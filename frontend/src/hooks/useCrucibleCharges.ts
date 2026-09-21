@@ -42,8 +42,12 @@ export function useAnnulCrucibleCharge() {
   return useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       crucibleChargeService.annul(id, reason),
-    onSuccess: () => {
+    onSuccess: (d) => {
       toast.success("Documento de crisol anulado");
+      // #109 — anular revierte inventario y puede dejar un material en
+      // negativo (el puro ya se vendió): avisa, no bloquea, y el aviso viaja
+      // en la respuesta.
+      (d.warnings ?? []).forEach((w) => toast.warning(w, { duration: 10000 }));
       invalidateAfterCrucibleCharge(qc);
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al anular")),

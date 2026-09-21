@@ -120,13 +120,19 @@ export const invalidateAfterWillardDelivery = (qc: QueryClient) => {
   invalidateInventory(qc);
 };
 
-// #107 — un documento de crisol mueve etapas del libro kg (sin inventario) y,
-// si es retorno de dross, causa el par de maquila (Tesoreria + P&L por sede).
+// #107 — un documento de crisol mueve etapas del libro kg y, si es retorno de
+// dross, causa el par de maquila (Tesoreria + P&L por sede).
+// #109 (F3 de QA) — desde el cierre del 18-sep TAMBIEN mueve inventario, via
+// una transformacion enlazada: sin `inventory` (que cubre
+// ["inventory","transformations",…]) y `materials`, el stock y la lista de
+// transformaciones quedarian viejos en pantalla con el backend correcto — la
+// misma falla de #98: no falla, MIENTE.
 export const invalidateAfterCrucibleCharge = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["crucible-charges"] });
   qc.invalidateQueries({ queryKey: ["kg-ledger"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });
   qc.invalidateQueries({ queryKey: ["reports"] });
+  invalidateInventory(qc);
 };
 
 export const invalidateAfterFixedAsset = (qc: QueryClient) => {

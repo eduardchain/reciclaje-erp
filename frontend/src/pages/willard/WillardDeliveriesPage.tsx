@@ -21,6 +21,7 @@ import {
   type WillardDelivery, type WillardDeliveryStatus, type WillardDeliveryType,
 } from "@/types/willard-delivery";
 import { CrucibleChargesSection } from "./CrucibleChargesSection";
+import { WillardDeliverySummaryCard } from "./WillardDeliverySummaryCard";
 
 export function DeliveryTypeBadge({ type }: { type: WillardDeliveryType }) {
   return (
@@ -148,6 +149,8 @@ export default function WillardDeliveriesPage() {
           </TabsList>
         </Tabs>
       </div>
+
+      {!isCrisol && <WillardDeliverySummaryCard />}
 
       {isCrisol ? (
         <CrucibleChargesSection />

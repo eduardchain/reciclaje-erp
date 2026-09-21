@@ -17,6 +17,7 @@ from app.models.user import User
 from app.schemas.crucible_charge import (
     CrucibleChargeAnnul,
     CrucibleChargeCreate,
+    CrucibleInventoryLeg,
     CrucibleChargeListResponse,
     CrucibleChargeResponse,
 )
@@ -34,9 +35,36 @@ def _user_names(db: Session, charges: list[CrucibleCharge]) -> dict:
     return {r[0]: r[1] for r in rows}
 
 
+def _inventory_legs(charge: CrucibleCharge):
+    """Lo que el documento saco y metio al inventario, leido de SU transformacion
+    (#109 D4). Documento previo al ciclo -> (None, None, None)."""
+    t = charge.transformation
+    if t is None:
+        return None, None, None
+    src = t.source_material
+    out = CrucibleInventoryLeg(
+        material_id=t.source_material_id,
+        material_code=src.code if src else None,
+        material_name=src.name if src else None,
+        quantity=t.source_quantity,
+    )
+    line = t.lines[0] if t.lines else None
+    inn = None
+    if line is not None:
+        dest = line.destination_material
+        inn = CrucibleInventoryLeg(
+            material_id=line.destination_material_id,
+            material_code=dest.code if dest else None,
+            material_name=dest.name if dest else None,
+            quantity=line.quantity,
+        )
+    return t.transformation_number, out, inn
+
+
 def _enrich(charge: CrucibleCharge, names: dict) -> CrucibleChargeResponse:
     # Campo por campo a proposito (trampa #95): un campo nuevo en el modelo y
     # el schema que no se agregue aqui llega en None sin que nada falle.
+    t_number, inv_out, inv_in = _inventory_legs(charge)
     return CrucibleChargeResponse(
         id=charge.id,
         charge_number=charge.charge_number,
@@ -48,6 +76,13 @@ def _enrich(charge: CrucibleCharge, names: dict) -> CrucibleChargeResponse:
         material_code=charge.material.code if charge.material else None,
         material_name=charge.material.name if charge.material else None,
         quantity_kg=charge.quantity_kg,
+        # Se LEE la columna: re-derivarlo de la formula vigente cambiaria un
+        # documento viejo cuando alguien edite el porcentaje (#109 D3, T9).
+        lead_kg=charge.lead_kg,
+        transformation_id=charge.transformation_id,
+        transformation_number=t_number,
+        inventory_out=inv_out,
+        inventory_in=inv_in,
         date=charge.date,
         notes=charge.notes,
         status=charge.status,
@@ -118,7 +153,11 @@ def annul_crucible_charge(
     db: Session = Depends(get_db),
     context=Depends(require_permission("sales.cancel")),
 ):
-    charge = crucible_charge_service.annul(
+    charge, warnings = crucible_charge_service.annul(
         db, charge_id, data.reason, context["organization_id"], user_id=context["user"].id
     )
-    return _enrich(charge, _user_names(db, [charge]))
+    charge = crucible_charge_service._get_or_404(db, charge.id, context["organization_id"])
+    response = _enrich(charge, _user_names(db, [charge]))
+    # El aviso de "ese plomo ya salio" se entrega en la RESPUESTA (leccion #100 D4d).
+    response.warnings = warnings or []
+    return response

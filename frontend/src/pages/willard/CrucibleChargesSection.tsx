@@ -12,7 +12,7 @@ import {
 import { EmptyState } from "@/components/shared/EmptyState";
 import { saveScroll } from "@/hooks/useScrollRestoration";
 import { useCrucibleCharges } from "@/hooks/useCrucibleCharges";
-import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
+import { formatCurrency, formatDate, formatWeightPrecise as formatWeight } from "@/utils/formatters";
 import { cn } from "@/utils";
 import {
   CRUCIBLE_EVENT_COLORS, CRUCIBLE_EVENT_LABELS, CRUCIBLE_STATUS_LABELS, num,
@@ -43,8 +43,10 @@ export function CrucibleStatusBadge({ status }: { status: CrucibleChargeStatus }
 
 /**
  * Tab "Crisol" de Salidas de Plomo (#107 D2): los documentos que mueven el
- * plomo entre las dos etapas de la deuda de planta con Circunvalar. No mueven
- * inventario ni deuda — solo dicen DÓNDE está el plomo.
+ * plomo entre las dos etapas de la deuda de planta con Circunvalar. Desde #109
+ * cada documento mueve además el inventario con una transformación enlazada;
+ * el traslado a crisoles no cambia la deuda total y el retorno de dross la
+ * baja por la diferencia entre los kilos de dross y el plomo que contienen.
  */
 export function CrucibleChargesSection() {
   const navigate = useNavigate();
@@ -67,9 +69,12 @@ export function CrucibleChargesSection() {
   return (
     <div className="space-y-3">
       <p className="text-sm text-slate-500">
-        El traslado a crisoles y el retorno de dross no mueven inventario ni deuda: cambian la
-        etapa del plomo dentro de la deuda de planta con Circunvalar (horno ↔ crisol). El
-        retorno de dross causa otra vez la maquila del horno.
+        Cada documento mueve el inventario él mismo y cambia la etapa del plomo dentro de la
+        deuda de planta con Circunvalar (horno ↔ crisol). El traslado a crisoles no cambia la
+        deuda total. El retorno de dross sí la baja: saca del crisol los kilos de dross,
+        devuelve al horno solo el plomo que contienen según la fórmula del material, y causa
+        otra vez la maquila del horno sobre ese plomo. No registre además una transformación
+        entre plomo crudo y plomo puro.
       </p>
 
       <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center">
@@ -110,6 +115,7 @@ export function CrucibleChargesSection() {
                     <TableHead>Fecha</TableHead>
                     <TableHead>Documento</TableHead>
                     <TableHead>Material</TableHead>
+                    <TableHead className="text-right">Kg digitados</TableHead>
                     <TableHead className="text-right">Kg plomo</TableHead>
                     <TableHead className="text-right">Maquila reproceso</TableHead>
                     <TableHead>Estado</TableHead>
@@ -122,7 +128,9 @@ export function CrucibleChargesSection() {
                       <TableCell>{formatDate(c.date)}</TableCell>
                       <TableCell><CrucibleEventBadge type={c.event_type} /></TableCell>
                       <TableCell>{c.material_code ?? "—"}{c.material_name ? ` - ${c.material_name}` : ""}</TableCell>
+                      {/* #109 — dos cantidades: lo digitado (crudo o DROSS) y el plomo */}
                       <TableCell className="text-right tabular-nums">{formatWeight(num(c.quantity_kg), "kg")}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatWeight(num(c.lead_kg), "kg")}</TableCell>
                       <TableCell className="text-right tabular-nums">
                         {num(c.maquila_amount) > 0 ? formatCurrency(num(c.maquila_amount)) : "—"}
                       </TableCell>
@@ -148,8 +156,12 @@ export function CrucibleChargesSection() {
                   </div>
                   <div className="text-sm text-slate-600">{c.material_code ?? "—"} {c.material_name ?? ""}</div>
                   <div className="flex justify-between gap-3 text-sm">
-                    <span className="text-slate-500">Kg plomo</span>
+                    <span className="text-slate-500">{c.event_type === "dross_return" ? "Kg de dross" : "Kg de crudo"}</span>
                     <span className="tabular-nums">{formatWeight(num(c.quantity_kg), "kg")}</span>
+                  </div>
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-slate-500">Kg plomo</span>
+                    <span className="tabular-nums">{formatWeight(num(c.lead_kg), "kg")}</span>
                   </div>
                   {num(c.maquila_amount) > 0 && (
                     <div className="flex justify-between gap-3 text-sm">

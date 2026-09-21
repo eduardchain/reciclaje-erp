@@ -31,6 +31,7 @@ from app.models.base import Base, GUID, OrganizationMixin, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.material import Material
+    from app.models.material_transformation import MaterialTransformation
     from app.models.warehouse import Warehouse
 
 
@@ -160,6 +161,23 @@ class CrucibleCharge(Base, _PlantProcessColumns, OrganizationMixin, TimestampMix
         comment="Planta (willard_sede_drosses): el crisol vive en Juan Mina",
     )
     notes: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    # --- #109: dos cantidades + inventario. `quantity_kg` (mixin) son los kg
+    # FISICOS del material del documento; `lead_kg` son los kg de PLOMO. En un
+    # `charge` coinciden; en un `dross_return` lead_kg = quantity_kg x factor
+    # de la formula `drosses_to_lead` vigente (20 kg de dross -> 14 de plomo).
+    # NOT NULL: alimenta la maquila — un None x tarifa seria un 500 esperando.
+    lead_kg: Mapped[Decimal] = mapped_column(
+        Numeric(14, 4),
+        nullable=False,
+        comment="Kg de PLOMO del evento (charge: = quantity_kg; dross_return: x factor de la formula)",
+    )
+    transformation_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("material_transformations.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Transformacion que mueve el inventario de este documento (#109 D4). NULL = documento previo al ciclo",
+    )
     maquila_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
@@ -188,6 +206,9 @@ class CrucibleCharge(Base, _PlantProcessColumns, OrganizationMixin, TimestampMix
         CheckConstraint(
             "status IN ('confirmed', 'annulled')", name="ck_crucible_charges_status"
         ),
+        CheckConstraint(
+            "lead_kg > 0 AND lead_kg <= quantity_kg", name="ck_crucible_charges_lead_kg"
+        ),
     )
 
     # --- Relationships ---
@@ -197,6 +218,9 @@ class CrucibleCharge(Base, _PlantProcessColumns, OrganizationMixin, TimestampMix
     )
 
     warehouse: Mapped["Warehouse"] = relationship("Warehouse", foreign_keys=[warehouse_id])
+    transformation: Mapped[Optional["MaterialTransformation"]] = relationship(
+        "MaterialTransformation", foreign_keys=[transformation_id]
+    )
 
     @property
     def label(self) -> str:

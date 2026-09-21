@@ -149,20 +149,28 @@ def _tariff(db, org_id, user_id, code, price):
 
 @pytest.fixture
 def tarifas(db_session, test_organization, test_user):
-    """Las tarifas reales (CC-009). Willard paga $2.097 de maquila + $37 de
-    flete; de esos $2.097, $1.500 se le abonan a planta y $597 quedan en
-    Circunvalar (Hugo, 4-sep).
+    """Tarifas de prueba. Maquila $2.097 y flete $37 son las reales (CC-009).
+    El abono a planta de materiales NO: el real es $1.248 (Q-27, resuelta el
+    18-sep a favor de Johana) y aqui queda en 1.500 A PROPOSITO -- ver el
+    comentario #109 de abajo. Historia: Hugo (4-sep) habia contestado "1500"
+    ($1.500 a planta, $597 en Circunvalar).
 
-    ⚠️ Que esos $1.500 sean la MISMA tarifa que la maquila interna del traslado
-    (`maquila_intersede_cv_jm`, que hoy tambien vale $1.500) NO esta confirmado:
-    Hugo contesto "1500" y nada mas. Es inferencia mia, no testimonio — ver Q-29
-    en control-cambios-requerimientos.md. Los numeros de este fixture son del
-    cliente; su relacion entre si, no. NO unificar las dos tarifas apoyandose
-    en este fixture."""
+    ⚠️ Historia de Q-29: se temia que ese abono fuera la MISMA tarifa que la
+    maquila interna del traslado (`maquila_intersede_cv_jm`, tambien $1.500).
+    Quedo superada el 16-sep: son tarifas distintas y la coincidencia era solo
+    eso. NO unificarlas apoyandose en este fixture."""
+    # 🔴 #109 (cierre 18-sep): batería reparte $566/kg FIJO a planta, con tarifa
+    # PROPIA. `abono` se queda en 1.500 A PROPOSITO aunque el valor real ya es
+    # 1.248: los dos numeros tienen que ser distintos para que un mapa que lea
+    # la tarifa equivocada se vea (T3), y 38 tests de este archivo ya calculan
+    # sobre 1.500. El valor real vive en el seeder, no aqui.
     return {
         "maquila": _tariff(db_session, test_organization.id, test_user.id, "maquila_willard", 2097),
         "flete": _tariff(db_session, test_organization.id, test_user.id, "flete_willard_planta_planta", 37),
         "abono": _tariff(db_session, test_organization.id, test_user.id, "abono_planta_por_kg", 1500),
+        "abono_bateria": _tariff(
+            db_session, test_organization.id, test_user.id, "abono_planta_bateria_por_kg", 566
+        ),
     }
 
 
@@ -407,7 +415,7 @@ class TestFacturacionYReparto:
 
         Llegan derecho a planta, asi que nunca hubo traslado y la maquila
         interna nunca se causo. Este test es la mitad viva del contraste: sin el,
-        `test_par_no_emite_en_venta_ni_abono_bateria` pasaria igual con el
+        `test_venta_sigue_sin_par` pasaria igual con el
         mecanismo entero roto.
         """
         body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
@@ -420,22 +428,100 @@ class TestFacturacionYReparto:
         assert inc[0].warehouse_id == wh_jm.id, "Juan Mina recibe"
         assert exp[0].transfer_pair_id == inc[0].id
 
-    @pytest.mark.parametrize("dtype", ["venta", "abono_bateria"])
-    def test_par_no_emite_en_venta_ni_abono_bateria(
-        self, dtype, client, org_headers, db_session, test_organization,
+    def test_venta_sigue_sin_par(
+        self, client, org_headers, db_session, test_organization,
         wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias,
     ):
-        """CC-009 — ese material paso por Circunvalar, asi que la maquila
-        interna YA se causo al trasladar (Hugo, demo 28-ago: "no se le afecta
-        maquila porque ya yo la maquila la tengo causada"). Emitir el par aqui
-        la cobraria dos veces por el mismo kilo.
-
-        La factura a Willard NO se toca: sigue emitiendose (Q-28 abierta).
-        """
-        body = _flow(client, org_headers, wh_jm, willard, plomo, dtype)
+        """T5 (#109; era la mitad `venta` de
+        `test_par_no_emite_en_venta_ni_abono_bateria`) — en una venta Willard
+        paga el precio del plomo y nada mas: no hay maquila facturada de la que
+        repartir. Es el contraste de T1: sin el, 'bateria reparte' y 'ahora
+        todo reparte' se ven identicos."""
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "venta")
         assert Decimal(str(body["plant_credit_amount"])) == 0
         assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
         assert _mms(db_session, test_organization.id, "internal_maquila_income") == []
+
+    def test_abono_bateria_emite_par_566(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias,
+    ):
+        """T1 (#109) — 🔴 SUPERSEDE la fila 4 de CC-009. Johana (16-sep,
+        confirmado 18-sep): en el abono a baterias Circunvalar le reparte a
+        planta $566 por kg, FIJO, y se queda con 1.531 + todo el flete. La hoja
+        del cliente: 300 kg × 566 = $169.800.
+
+        Corre con `internal_maquila_enabled` en False (fixture): este par gatea
+        por TIPO, igual que el de materiales (#100 D11)."""
+        assert not test_organization.settings.get("internal_maquila_enabled")
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="300")
+        assert Decimal(str(body["plant_credit_amount"])) == Decimal("169800.00")
+
+        exp = _mms(db_session, test_organization.id, "internal_maquila_expense")
+        inc = _mms(db_session, test_organization.id, "internal_maquila_income")
+        assert len(exp) == 1 and len(inc) == 1
+        assert exp[0].amount == Decimal("169800.00") == inc[0].amount
+        assert exp[0].warehouse_id == wh_cv.id, "Circunvalar paga"
+        assert inc[0].warehouse_id == wh_jm.id, "Juan Mina recibe"
+        assert exp[0].transfer_pair_id == inc[0].id and inc[0].transfer_pair_id == exp[0].id
+        assert exp[0].account_id is None and exp[0].third_party_id is None
+
+    def test_abono_bateria_no_toca_factura_ni_flete(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias,
+    ):
+        """T2 (#109) — el reparto es INTERNO: a Willard se le factura igual
+        (300 × 2.097 = 629.100 de maquila + 300 × 37 = 11.100 de flete, y el
+        flete queda entero en Circunvalar). Y el consolidado no se entera:
+        `cv + jm == consolidado`."""
+        before = willard.current_balance
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="300")
+        assert Decimal(str(body["maquila_amount"])) == Decimal("629100.00")
+        assert Decimal(str(body["freight_amount"])) == Decimal("11100.00")
+        db_session.refresh(willard)
+        assert willard.current_balance == before + Decimal("640200.00")
+
+        cv = _pnl_today(client, org_headers, warehouse_id=str(wh_cv.id))
+        jm = _pnl_today(client, org_headers, warehouse_id=str(wh_jm.id))
+        total = _pnl_today(client, org_headers)
+        assert Decimal(str(cv["service_income"])) == Decimal("640200.00")
+        assert Decimal(str(cv["internal_maquila_expense"])) == Decimal("169800.00")
+        assert Decimal(str(jm["internal_maquila_income"])) == Decimal("169800.00")
+        assert (
+            Decimal(str(cv["net_profit"])) + Decimal(str(jm["net_profit"]))
+            == Decimal(str(total["net_profit"]))
+        )
+
+    def test_abono_material_usa_su_tarifa_no_la_de_bateria(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias, acc_drosses,
+    ):
+        """T3 (#109) — dos tarifas, dos tipos, valores DISTINTOS a proposito:
+        con el mismo numero en las dos, un mapa cruzado pasaria en verde."""
+        mat = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="10")
+        bat = _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="10")
+        assert Decimal(str(mat["plant_credit_amount"])) == Decimal("15000.00")  # 10 × 1.500
+        assert Decimal(str(bat["plant_credit_amount"])) == Decimal("5660.00")   # 10 × 566
+
+    def test_abono_sin_tarifa_de_reparto_avisa_en_la_respuesta(
+        self, client, org_headers, db_session, test_organization, test_user,
+        wh_jm, willard, plomo, acc_intersede, acc_baterias,
+    ):
+        """T4 (#109) — sin `abono_planta_bateria_por_kg` la salida pasa, los kg
+        se descargan y a planta no se le reparte nada: eso NO puede ser
+        silencioso. El aviso se lee del HTTP (#100: un warning que se calcula
+        y no viaja se ve identico a funcionar)."""
+        org = test_organization.id
+        _tariff(db_session, org, test_user.id, "maquila_willard", 2097)
+        _tariff(db_session, org, test_user.id, "flete_willard_planta_planta", 37)
+
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria")
+
+        assert any("abono_planta_bateria_por_kg" in w for w in body["warnings"]), body["warnings"]
+        assert Decimal(str(body["plant_credit_amount"])) == 0
+        assert Decimal(str(body["maquila_amount"])) == Decimal("104850.00")
+        assert _kg(db_session, acc_baterias.id) == Decimal("-50")
+        assert _mms(db_session, org, "internal_maquila_expense") == []
 
     @pytest.mark.parametrize(
         "dtype,facturas", [("venta", 0), ("abono_bateria", 2), ("abono_material", 2)]
@@ -485,6 +571,27 @@ class TestFacturacionYReparto:
         body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         assert Decimal(str(body["plant_credit_amount"])) == 0
         assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
+
+    def test_sin_setting_sede_facturacion_bateria_se_detiene_antes(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias,
+    ):
+        """#109 — en baterias el caso 'sin sede' NO llega al reparto: la cuenta
+        `willard_baterias` es de la sede que factura (las baterias entran por
+        Circunvalar), asi que sin el setting la liquidacion se detiene ANTES con
+        un 400 que dice que configurar. Lo descubri escribiendo este test: el
+        plan asumia que heredaba el 'no emite' de materiales y no es asi. Nada
+        queda escrito."""
+        test_organization.settings = {
+            **test_organization.settings, "willard_sede_facturacion": None
+        }
+        db_session.commit()
+        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_bateria")
+        r = client.post(f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []})
+        assert r.status_code == 400, r.text
+        assert "sede que factura" in r.json()["detail"]
+        assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
+        assert _kg(db_session, acc_baterias.id) == 0
 
     def test_kg_se_descarga_sin_tarifa(
         self, client, org_headers, db_session, test_organization,
@@ -1765,12 +1872,17 @@ class TestCrisolYPlomoPuro:
         assert len(exp) == 1 and exp[0].amount == Decimal("7830.00")
 
     def test_abono_bateria_con_puro_descarga_crisol_sin_par(
-        self, client, org_headers, db_session, test_organization,
+        self, client, org_headers, db_session, test_organization, test_user,
         wh_jm, willard, plomo, puro, acc_intersede, acc_baterias, acc_drosses, tarifa_crisol,
     ):
         """T9 — el aviso de #103 D2 sigue (abonar con puro es caro), la etapa
-        es la del puro (crisol) y NO hay par: el diferencial se causa solo al
-        VENDER. `abono_material` no toca ninguna etapa."""
+        es la del puro (crisol) y NO hay par DEL DIFERENCIAL: los $300 se
+        causan solo al VENDER. `abono_material` no toca ninguna etapa.
+
+        🔴 R2 (#109): "sin par" se re-lee. Desde el 18-sep el abono a baterias
+        SI reparte ($566/kg), asi que con la tarifa presente hay UN par y es el
+        de maquila, no el de refinacion: 20 × 566 = 11.320."""
+        _tariff(db_session, test_organization.id, test_user.id, "abono_planta_bateria_por_kg", 566)
         _maquila_on(db_session, test_organization)
         _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
         _seed_stage(client, org_headers, acc_intersede.id, 100, "horno")
@@ -1782,7 +1894,12 @@ class TestCrisolYPlomoPuro:
         assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("100")
         assert _kg(db_session, acc_baterias.id) == Decimal("-20")
         assert Decimal(str(out["crucible_amount"])) == 0
-        assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
+        assert Decimal(str(out["plant_credit_amount"])) == Decimal("11320.00")
+        exp = _mms(db_session, test_organization.id, "internal_maquila_expense")
+        assert [m.amount for m in exp] == [Decimal("11320.00")]
+        from app.models.expense_category import ExpenseCategory
+        cat = db_session.get(ExpenseCategory, exp[0].expense_category_id)
+        assert cat is None or cat.name != "Crisol Refinacion"
 
         _flow(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="10")
         assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
@@ -1881,3 +1998,87 @@ class TestCrisolYPlomoPuro:
         assert _mms(db_session, org, "internal_maquila_expense") == []
         assert len(_mms(db_session, org, "internal_maquila_expense", status="annulled")) == 1
         assert len(_mms(db_session, org, "internal_maquila_income", status="annulled")) == 1
+
+
+# ---------------------------------------------------------------------- #
+# #109 — resumen por tipo                                                 #
+# ---------------------------------------------------------------------- #
+class TestResumenPorTipo:
+    """`GET /willard-deliveries/summary` — ver separado lo que dejan las
+    baterias y lo que dejan los materiales. Johana (18-sep) eligio la opcion B
+    (L385-387): "Materiales Willard" es un nombre/cuenta INTERNA de su
+    contabilidad -- ella la llama "cuenta" con sus palabras (L323, L335, L361).
+    En el sistema NO se modelo como cuenta sino como resumen por tipo: decision
+    nuestra, y expectativa creada en L305-307. Q-37 se reabrio el 19-sep
+    (16-sep L577: "no es un ingreso para circunval, sino una cuenta por
+    pagar"); ver el inventario."""
+
+    def _summary(self, client, headers, **extra):
+        from app.utils.dates import business_today
+
+        today = business_today().isoformat()
+        r = client.get(
+            f"{URL}/summary", headers=headers,
+            params={"date_from": today, "date_to": today, **extra},
+        )
+        return r
+
+    def test_summary_por_tipo(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias, acc_drosses,
+    ):
+        """T17 — suma por tipo; una anulada y una sin liquidar NO cuentan; y
+        `kept_by_billing_sede` = maquila + flete − reparto (no es una utilidad:
+        no descuenta el costo del plomo, por eso no se llama neto, F4)."""
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="300")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="100")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="50")
+        anulada = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="70")
+        r = client.post(f"{URL}/{anulada['id']}/annul", headers=org_headers, json={"reason": "prueba"})
+        assert r.status_code == 200, r.text
+        _create(client, org_headers, wh_jm, willard, plomo, "abono_bateria", "999")  # draft
+
+        r = self._summary(client, org_headers)
+        assert r.status_code == 200, r.text
+        rows = {row["delivery_type"]: row for row in r.json()["rows"]}
+
+        bat = rows["abono_bateria"]
+        assert bat["documents"] == 2
+        assert Decimal(str(bat["lead_kg"])) == Decimal("400")
+        assert Decimal(str(bat["maquila_amount"])) == Decimal("838800.00")       # 400 × 2.097
+        assert Decimal(str(bat["freight_amount"])) == Decimal("14800.00")        # 400 × 37
+        assert Decimal(str(bat["plant_credit_amount"])) == Decimal("226400.00")  # 400 × 566
+        assert Decimal(str(bat["kept_by_billing_sede"])) == Decimal("627200.00")  # 400 × 1.568
+
+        mat = rows["abono_material"]
+        assert mat["documents"] == 1
+        assert Decimal(str(mat["lead_kg"])) == Decimal("50")
+        assert Decimal(str(mat["plant_credit_amount"])) == Decimal("75000.00")
+        assert Decimal(str(mat["kept_by_billing_sede"])) == Decimal("31700.00")  # 106.700 − 75.000
+        assert "neto" not in " ".join(bat.keys()).lower()
+
+    def test_summary_rbac(self, client, db_session, test_organization):
+        """T17b — `sales.view`: planillador no lo tiene -> 403; viewer -> 200."""
+        from app.core.security import create_access_token
+        from app.models.role import Role
+        from app.models.user import OrganizationMember, User
+
+        def _hdr(role_name, email):
+            u = User(email=email, hashed_password="x", full_name=email, is_active=True)
+            db_session.add(u)
+            db_session.flush()
+            role = db_session.query(Role).filter(
+                Role.organization_id == test_organization.id,
+                Role.name == role_name, Role.is_system_role == True,  # noqa: E712
+            ).first()
+            assert role is not None
+            db_session.add(OrganizationMember(
+                user_id=u.id, organization_id=test_organization.id, role_id=role.id,
+            ))
+            db_session.commit()
+            token = create_access_token(data={"sub": str(u.id)})
+            return {"Authorization": f"Bearer {token}",
+                    "X-Organization-ID": str(test_organization.id)}
+
+        assert self._summary(client, _hdr("planillador", "plan-sum@test.com")).status_code == 403
+        assert self._summary(client, _hdr("viewer", "view-sum@test.com")).status_code == 200
