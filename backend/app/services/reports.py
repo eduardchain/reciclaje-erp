@@ -18,6 +18,7 @@ from app.models.material import Material, MaterialCategory
 from app.models.material_cost_history import MaterialCostHistory
 from app.models.money_account import MoneyAccount
 from app.utils.dates import business_today
+from app.utils.org_settings import get_org_setting
 from app.models.money_movement import MoneyMovement, INTERNAL_MAQUILA_MOVEMENT_TYPES
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.purchase import PurchaseCommission
@@ -36,6 +37,7 @@ from app.schemas.reports import (
     AuditBalancesResponse,
     AuditSummary,
     BalanceSheetAssets,
+    LeadDebtValuation,
     BalanceSheetLiabilities,
     BalanceSheetResponse,
     CashFlowInflows,
@@ -1517,6 +1519,146 @@ class ReportService:
     # Balance Sheet — Balance General
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------ #
+    # CC-014 — deuda en plomo con Willard valorada a precio de mercado     #
+    # ------------------------------------------------------------------ #
+    def _get_lead_debt_valuation(
+        self,
+        db: Session,
+        organization_id: UUID,
+        cutoff_dt: Optional[datetime] = None,
+    ) -> Optional[LeadDebtValuation]:
+        """Kilos de deuda con Willard x precio de mercado, en negativo (Q-B).
+
+        UN solo punto de decision para los CUATRO consumidores (General y
+        Detallado, en vivo y a fecha de corte). Si hubiera dos copias se
+        desincronizarian, que es la leccion de los traslados por sede (#94).
+
+        🔴 Corta por FLAG en la primera linea y devuelve None sin ejecutar una
+        sola consulta contra `kg_ledger_*`. La promesa de no-regresion no es
+        solo "el campo llega None": es que los balances de las otras seis
+        organizaciones no adquieren una dependencia al libro de kilos. Hay un
+        test que lo asserta parcheando `balances()` para que reviente.
+
+        Con el flag encendido devuelve SIEMPRE un objeto, aunque no haya
+        cuentas Willard, aunque no haya kilos y aunque no haya precio: asi el
+        predicado de "None" es el flag y nada mas.
+        """
+        if not get_org_setting(db, organization_id, "kg_ledger_enabled"):
+            return None
+
+        from app.models.kg_ledger import KgLedgerAccount
+        from app.services.kg_ledger import _WILLARD_TYPES, kg_ledger_service
+        from app.services.lead_market_price import lead_market_price
+
+        # ⚠️ SIN filtro is_active, a proposito y en las DOS vias: `balances()`
+        # ya lo omite, pero para saber cuales cuentas son de Willard hay que
+        # listarlas, y si se filtra ahi el agujero vuelve a entrar por la otra
+        # puerta — un corte viejo perderia una cuenta que hoy esta inactiva y
+        # que a esa fecha tenia saldo.
+        willard_account_ids = set(db.scalars(
+            select(KgLedgerAccount.id).where(
+                KgLedgerAccount.organization_id == organization_id,
+                KgLedgerAccount.account_type.in_(_WILLARD_TYPES),
+            )
+        ).all())
+
+        # La frontera del corte se escribe UNA vez, aqui: kilos con
+        # `transaction_date <= cutoff_dt` (lo que hace `balances()`) y precio
+        # con `effective_date < cutoff_dt`. `cutoff_dt` son las 00:00 del dia
+        # siguiente al corte; como las dos fechas se guardan a mediodia UTC,
+        # el conjunto es el mismo.
+        bals = kg_ledger_service.balances(db, organization_id, as_of=cutoff_dt)
+        kg = sum(
+            (bal for acc_id, bal in bals.items() if acc_id in willard_account_ids),
+            Decimal("0"),
+        )
+
+        price_row = lead_market_price.get_current(db, organization_id, cutoff_dt=cutoff_dt)
+        if price_row is None:
+            # Kilos sin valorar: la pantalla avisa. No se inventa un cero —
+            # un cero diria que la deuda no vale nada.
+            return LeadDebtValuation(kg=float(kg), price=None, price_date=None, value=None)
+
+        # Signo respetado, sin abs(): saldo positivo del libro = SAC debe
+        # plomo = resta del inventario. Si algun dia Willard le debiera a SAC,
+        # la linea sale positiva sola.
+        value = (-(kg * price_row.price_per_kg)).quantize(Decimal("0.01"))
+        return LeadDebtValuation(
+            kg=float(kg),
+            price=float(price_row.price_per_kg),
+            price_date=price_row.effective_date.date(),
+            value=float(value),
+        )
+
+    @staticmethod
+    def _lead_debt_detailed_item(valuation: Optional[LeadDebtValuation]):
+        """El mismo dato como item del Balance Detallado (D7), o None.
+
+        Va DENTRO de la seccion de inventario, que es literal lo que ella
+        describe ("restando dentro de mi inventario"), y reutiliza los campos
+        que la seccion ya pinta: stock=kg, avg_cost=precio, balance=valor. Asi
+        el Detallado no gana ni una clave nueva, o sea que su captura del
+        golden tiene que salir identica en las tres organizaciones cliente.
+
+        🔴 C1 de QA: el item EXISTE tambien con kilos y SIN precio cargado.
+        Mi version anterior lo omitia y dejaba el aviso solo en el General —
+        que es la falla de #100 D4d y #109 F4 por la puerta que faltaba: el
+        Detallado es el documento que Johana exporta, asi que un aviso que no
+        esta ahi no existe para ella, y un balance que esconde una deuda es
+        peor que uno que la muestra sin valorar.
+
+        Sin precio va `avg_cost=None` (NO 0, que se leeria como un precio de
+        cero pesos) y `balance=0`. Con `avg_cost` en None ni `ItemDetail` ni el
+        Excel pintan la linea "{code} | {stock} kg x {avg_cost}" — las dos
+        exigen stock y avg_cost no nulos —, asi que los kilos van dentro del
+        nombre; y `balance` 0 no mueve el total de la seccion, que suma
+        `i.balance`.
+
+        Se omite solo cuando no hay NADA que decir: sin flag (valuation None),
+        o sin kilos y sin valor — igual que los materiales con stock 0, que la
+        seccion ya filtra.
+
+        Dos consecuencias declaradas: con el filtro `hideBelow` > 0 del
+        Detallado (#51) la fila sin precio se oculta, y se acepta; y el largo
+        de la seccion en SAC cambia entre con precio y sin precio, irrelevante
+        para el golden porque SAC no es una de las tres organizaciones que se
+        capturan.
+        """
+        if valuation is None:
+            return None
+        sin_valor = valuation.value is None or valuation.value == 0
+        if sin_valor and valuation.kg == 0:
+            return None
+        if valuation.value is None:
+            # Separador colombiano: `f"{x:,.2f}"` imprime 2,000.00 y en Colombia
+            # eso se lee "2 con 2 decimales" (el formateador que miente, #102).
+            kg_txt = f"{valuation.kg:,.2f}".rstrip("0").rstrip(".")
+            kg_txt = kg_txt.replace(",", "\u00a7").replace(".", ",").replace("\u00a7", ".")
+            return BalanceDetailedItem(
+                id="lead-debt-willard",
+                code="WILLARD",
+                name=(
+                    f"Deuda en plomo con Willard — {kg_txt} kg "
+                    "SIN PRECIO DE MERCADO CARGADO"
+                ),
+                stock=valuation.kg,
+                avg_cost=None,
+                balance=0.0,
+            )
+        fecha = valuation.price_date.strftime("%d/%m/%Y") if valuation.price_date else "?"
+        return BalanceDetailedItem(
+            id="lead-debt-willard",
+            # ⚠️ `code` y `name` se pintan como "{code} | {stock} kg x {avg_cost}",
+            # que es el formato del costo promedio: sin decir WILLARD y "precio
+            # de mercado" se leeria como si el plomo costara eso.
+            code="WILLARD",
+            name=f"Deuda en plomo con Willard — precio de mercado del {fecha}",
+            stock=valuation.kg,
+            avg_cost=valuation.price,
+            balance=valuation.value,
+        )
+
     def get_balance_sheet(
         self,
         db: Session,
@@ -1555,6 +1697,11 @@ class ReportService:
                 )
             )
         ))
+
+        # CC-014: deuda en plomo con Willard a precio de mercado (resta del
+        # inventario). None sin `kg_ledger_enabled` — ver el helper.
+        lead_debt = self._get_lead_debt_valuation(db, organization_id)
+        lead_debt_value = Decimal(str(lead_debt.value)) if lead_debt and lead_debt.value is not None else Decimal("0")
 
         # Activos fijos (valor actual de activos no dados de baja ni cancelados)
         fixed_assets_value = Decimal(str(
@@ -1611,7 +1758,8 @@ class ReportService:
         provision_funds = tp_buckets["provision_funds"]
 
         total_assets = (cash_and_bank + accounts_receivable + inventory + advances
-                        + investor_receivable + loans_receivable + prepaid_expenses + provision_funds + fixed_assets_value)
+                        + investor_receivable + loans_receivable + prepaid_expenses + provision_funds + fixed_assets_value
+                        + lead_debt_value)  # CC-014: negativo, resta
 
         accounts_payable = tp_buckets["suppliers_payable"]
         # Simetrico al split del activo (#73): obligaciones financieras payable
@@ -1644,6 +1792,7 @@ class ReportService:
                 prepaid_expenses=float(prepaid_expenses),
                 provision_funds=float(provision_funds),
                 fixed_assets=float(fixed_assets_value),
+                lead_debt_willard=lead_debt,
                 total=float(total_assets),
             ),
             total_assets=float(total_assets),
@@ -1680,6 +1829,11 @@ class ReportService:
         # Activos: inventario
         inventory_by_mat = self._get_inventory_as_of(db, organization_id, cutoff_dt)
         inventory = sum((stock * avg_cost for stock, avg_cost in inventory_by_mat.values()), Decimal("0"))
+
+        # CC-014: misma valoracion al corte — kilos de esa fecha y precio
+        # vigente a esa fecha, con la frontera decidida dentro del helper.
+        lead_debt = self._get_lead_debt_valuation(db, organization_id, cutoff_dt)
+        lead_debt_value = Decimal(str(lead_debt.value)) if lead_debt and lead_debt.value is not None else Decimal("0")
 
         # Activos fijos
         fixed_assets_value = self._get_fixed_assets_as_of(db, organization_id, cutoff_dt)
@@ -1731,7 +1885,8 @@ class ReportService:
         provision_funds = tp_buckets["provision_funds"]
 
         total_assets = (cash_and_bank + accounts_receivable + inventory + advances
-                        + investor_receivable + loans_receivable + prepaid_expenses + provision_funds + fixed_assets_value)
+                        + investor_receivable + loans_receivable + prepaid_expenses + provision_funds + fixed_assets_value
+                        + lead_debt_value)  # CC-014: negativo, resta
 
         accounts_payable = tp_buckets["suppliers_payable"]
         # Simetrico al split del activo (#73): obligaciones financieras payable
@@ -1768,6 +1923,7 @@ class ReportService:
                 prepaid_expenses=float(prepaid_expenses),
                 provision_funds=float(provision_funds),
                 fixed_assets=float(fixed_assets_value),
+                lead_debt_willard=lead_debt,
                 total=float(total_assets),
             ),
             total_assets=float(total_assets),
@@ -1852,6 +2008,14 @@ class ReportService:
                 balance=round(float(m.current_stock_liquidated * m.current_average_cost), 2),
             ) for m in materials
         ]
+        # CC-014: la deuda en plomo con Willard entra como un item mas de esta
+        # seccion, en negativo. El total de la seccion lo baja solo (_section
+        # suma i.balance), asi que no hay un segundo sitio que mantener.
+        _lead_item = self._lead_debt_detailed_item(
+            self._get_lead_debt_valuation(db, organization_id)
+        )
+        if _lead_item is not None:
+            inv_liq_items.append(_lead_item)
 
         # 3. Activos Fijos
         fixed_assets = db.execute(
@@ -2075,6 +2239,12 @@ class ReportService:
             )
             for mat_id, (stock, avg_cost) in inventory_by_mat.items()
         ]
+        # CC-014: espejo del vivo, al corte.
+        _lead_item = self._lead_debt_detailed_item(
+            self._get_lead_debt_valuation(db, organization_id, cutoff_dt)
+        )
+        if _lead_item is not None:
+            inv_liq_items.append(_lead_item)
 
         # 3. Activos fijos historicos
         fa_items = self._get_fixed_assets_detailed_as_of(db, organization_id, cutoff_dt)

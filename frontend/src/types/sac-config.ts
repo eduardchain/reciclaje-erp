@@ -71,6 +71,35 @@ export interface ServiceTariffCreate {
   notes?: string | null;
 }
 
+// --- CC-014: precio de mercado del plomo ---
+// Append-only como las tarifas, con UNA diferencia: la vigencia se decide por
+// `effective_date` (fecha de NEGOCIO), no por `created_at`. El balance de fin
+// de mes siempre se calcula despues, asi que Johana carga el precio de
+// septiembre en octubre y el corte del 30 lo encuentra.
+// ⚠️ `effective_date` es un BusinessDate (mediodia UTC): se pinta con
+// formatDate, JAMAS con formatDateTime — imprimiria "07:00 a. m." (#87).
+export interface LeadMarketPriceResponse {
+  id: string;
+  organization_id: string;
+  price_per_kg: number;
+  effective_date: string;
+  notes: string | null;
+  created_by: string;
+  created_by_name: string | null;
+  created_at: string;
+}
+
+export interface LeadMarketPriceCreate {
+  price_per_kg: number;
+  effective_date: string;
+  notes?: string | null;
+}
+
+export interface LeadMarketPriceListResponse {
+  items: LeadMarketPriceResponse[];
+  total: number;
+}
+
 export interface ServiceTariffListResponse {
   items: ServiceTariffResponse[];
   total: number;

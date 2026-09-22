@@ -654,6 +654,15 @@ export function exportBalanceSheetExcel(data: BalanceSheetResponse) {
   if (data.assets.prepaid_expenses > 0) rows.push(["Gastos Prepagados", data.assets.prepaid_expenses]);
   if (data.assets.provision_funds > 0) rows.push(["Fondos Provision", data.assets.provision_funds]);
   if (data.assets.fixed_assets > 0) rows.push(["Activos Fijos", data.assets.fixed_assets]);
+  // CC-014: negativo, resta. El guard es != null porque `> 0` nunca se
+  // cumple para esta linea; sin valor se escribe el aviso, no un cero.
+  if (data.assets.lead_debt_willard != null) {
+    const ld = data.assets.lead_debt_willard;
+    const etiqueta = ld.price != null
+      ? `Deuda en plomo con Willard (${ld.kg.toLocaleString("es-CO")} kg x precio de mercado del ${formatDate(ld.price_date!)})`
+      : `Deuda en plomo con Willard (${ld.kg.toLocaleString("es-CO")} kg sin precio de mercado)`;
+    rows.push([etiqueta, ld.value ?? 0]);
+  }
   rows.push(["Total Activos", data.total_assets]);
   rows.push([]);
   rows.push(["PASIVOS", ""]);

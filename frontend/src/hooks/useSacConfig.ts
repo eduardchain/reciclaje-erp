@@ -7,6 +7,7 @@ import type {
   DriverUpdate,
   MaterialConversionFormulaCreate,
   MaterialKgProfileUpsert,
+  LeadMarketPriceCreate,
   ServiceTariffCreate,
   VehicleCreate,
   VehicleUpdate,
@@ -43,6 +44,42 @@ export function useCreateTariff() {
       qc.invalidateQueries({ queryKey: ["service-tariffs"] });
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al registrar tarifa")),
+  });
+}
+
+// --- CC-014: precio de mercado del plomo ---
+
+export function useCurrentLeadPrice(enabled = true) {
+  return useQuery({
+    queryKey: ["lead-market-prices", "current"],
+    queryFn: sacConfigService.getCurrentLeadPrice,
+    // F2: las paginas compartidas gatean por flag — cero requests en las
+    // organizaciones que no tienen libro de kilos.
+    enabled,
+  });
+}
+
+export function useLeadPriceHistory(enabled = true) {
+  return useQuery({
+    queryKey: ["lead-market-prices", "list"],
+    queryFn: sacConfigService.getLeadPrices,
+    enabled,
+  });
+}
+
+export function useCreateLeadPrice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: LeadMarketPriceCreate) => sacConfigService.createLeadPrice(data),
+    onSuccess: () => {
+      toast.success("Precio registrado — la deuda en plomo se revalora");
+      qc.invalidateQueries({ queryKey: ["lead-market-prices"] });
+      // El precio cambia el Balance General y el Detallado, en vivo y en
+      // cortes historicos: sin esto la pantalla muestra el valor viejo con el
+      // backend ya correcto, que es como falla mas caro (#98).
+      qc.invalidateQueries({ queryKey: ["reports"] });
+    },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al registrar el precio")),
   });
 }
 

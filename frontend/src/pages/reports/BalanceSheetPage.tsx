@@ -43,6 +43,30 @@ export default function BalanceSheetPage() {
                 <div className="flex justify-between"><span>Efectivo y Bancos</span><span>{formatCurrency(data.assets.cash_and_bank)}</span></div>
                 <div className="flex justify-between"><span>Cuentas por Cobrar</span><span>{formatCurrency(data.assets.accounts_receivable)}</span></div>
                 <div className="flex justify-between"><span>Inventario</span><span>{formatCurrency(data.assets.inventory)}</span></div>
+                {/* CC-014: la deuda en plomo con Willard, restando del inventario.
+                    ⚠️ El guard es `!= null`, NO `> 0` como las lineas vecinas: el
+                    valor es negativo por definicion y `> 0` lo esconderia siempre. */}
+                {data.assets.lead_debt_willard != null && (
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex justify-between">
+                      <span>Deuda en plomo con Willard</span>
+                      <span className={data.assets.lead_debt_willard.value == null ? "text-slate-400" : "text-red-700"}>
+                        {data.assets.lead_debt_willard.value == null
+                          ? "Sin valorar"
+                          : formatCurrency(data.assets.lead_debt_willard.value)}
+                      </span>
+                    </div>
+                    <span className="text-xs text-slate-400">
+                      {data.assets.lead_debt_willard.kg.toLocaleString("es-CO")} kg
+                      {data.assets.lead_debt_willard.price != null ? (
+                        <> x {formatCurrency(data.assets.lead_debt_willard.price)} · precio del{" "}
+                          {formatDate(data.assets.lead_debt_willard.price_date!)}</>
+                      ) : (
+                        <> sin precio de mercado cargado — cárgalo en Config → Precio del Plomo</>
+                      )}
+                    </span>
+                  </div>
+                )}
                 {data.assets.advances > 0 && (
                   <div className="flex justify-between"><span>Anticipos</span><span>{formatCurrency(data.assets.advances)}</span></div>
                 )}

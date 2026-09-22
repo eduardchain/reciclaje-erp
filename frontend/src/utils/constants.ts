@@ -108,6 +108,7 @@ export const ROUTES = {
   CONFIG_PRICE_LISTS: "/config/price-lists",
   CONFIG_THIRD_PARTY_CATEGORIES: "/config/third-party-categories",
   CONFIG_TARIFFS: "/config/tariffs",
+  CONFIG_LEAD_PRICE: "/config/lead-price",
   CONFIG_FORMULAS: "/config/formulas",
   CONFIG_FLEET: "/config/fleet",
   CONFIG_SUPPLIER_PRICE_LISTS: "/config/listas-precios",

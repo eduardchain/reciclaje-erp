@@ -31,6 +31,7 @@ from .role import Role, RolePermission
 from .third_party_category import ThirdPartyCategory, ThirdPartyCategoryAssignment
 from .kg_ledger import KgLedgerAccount, KgLedgerMovement, KgLedgerReconciliationSeal
 from .service_tariff import ServiceTariff
+from .lead_market_price import LeadMarketPrice
 from .material_conversion_formula import MaterialConversionFormula
 from .material_kg_profile import MaterialKgProfile
 from .retention_config import RetentionConfig
@@ -93,6 +94,7 @@ __all__ = [
     "KgLedgerMovement",
     "KgLedgerReconciliationSeal",
     "ServiceTariff",
+    "LeadMarketPrice",
     "MaterialConversionFormula",
     "MaterialKgProfile",
     "RetentionConfig",

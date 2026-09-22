@@ -16,6 +16,7 @@ const tabs = [
   { value: ROUTES.CONFIG_PRICE_LISTS, label: "Precios", permission: "materials.view_prices" },
   { value: ROUTES.CONFIG_THIRD_PARTY_CATEGORIES, label: "Cat. Terceros", permission: "third_parties.create" },
   { value: ROUTES.CONFIG_TARIFFS, label: "Tarifas", permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
+  { value: ROUTES.CONFIG_LEAD_PRICE, label: "Precio del Plomo", permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
   { value: ROUTES.CONFIG_FORMULAS, label: "Materiales (kg)", permission: "formulas.view", orgFlag: "kg_ledger_enabled" },
   { value: ROUTES.CONFIG_FLEET, label: "Conductores y Vehiculos", permission: "config.view_fleet", orgFlag: "kg_ledger_enabled" },
   { value: ROUTES.CONFIG_WILLARD_CENTERS, label: "Centros Willard", permission: "config.manage_sac_settings", orgFlag: "kg_ledger_enabled" },

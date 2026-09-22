@@ -10,7 +10,7 @@ from .endpoints import (
     profit_distributions, financial_obligations,
     inventory_adjustments, material_transformations, inventory_views,
     reports,
-    service_tariffs, material_conversion_formulas, fleet,
+    service_tariffs, material_conversion_formulas, fleet, lead_market_prices,
     kg_ledger, inbound_orders, material_kg_profiles, willard_deliveries,
     crucible_charges,
     attachments,
@@ -49,6 +49,8 @@ api_router.include_router(system.router, prefix="/system", tags=["system"])
 api_router.include_router(service_tariffs.router, prefix="/service-tariffs", tags=["sac-config"])
 api_router.include_router(material_conversion_formulas.router, prefix="/material-conversion-formulas", tags=["sac-config"])
 api_router.include_router(material_kg_profiles.router, prefix="/material-kg-profiles", tags=["sac-config"])
+# CC-014 (plan-cc014-deuda-plomo-balance.md §4)
+api_router.include_router(lead_market_prices.router, prefix="/lead-market-prices", tags=["sac-config"])
 api_router.include_router(fleet.drivers_router, prefix="/drivers", tags=["sac-config"])
 api_router.include_router(fleet.vehicles_router, prefix="/vehicles", tags=["sac-config"])
 # SAC E2 (plan-sac-e2-kgledger-inbound.md §4.1-§4.2)

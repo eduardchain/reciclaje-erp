@@ -930,6 +930,9 @@ export function exportBalanceSheetPDF(data: BalanceSheetResponse, orgName?: stri
     ["Gastos Prepagados", data.assets.prepaid_expenses],
     ["Fondos de Provisión", data.assets.provision_funds],
     ["Activos Fijos", data.assets.fixed_assets],
+    // CC-014: negativo, resta. Con valor null se omite (el bucle salta los
+    // ceros) — el aviso de "sin valorar" vive en pantalla, no en el PDF.
+    ["Deuda en plomo con Willard", data.assets.lead_debt_willard?.value ?? 0],
   ];
 
   for (const [label, value] of assetItems) {

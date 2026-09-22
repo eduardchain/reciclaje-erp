@@ -1,4 +1,5 @@
 import apiClient from "./api";
+import { num } from "@/types/willard-delivery";
 import type {
   DriverCreate,
   DriverResponse,
@@ -10,6 +11,9 @@ import type {
   MaterialKgProfileListResponse,
   MaterialKgProfileResponse,
   MaterialKgProfileUpsert,
+  LeadMarketPriceCreate,
+  LeadMarketPriceListResponse,
+  LeadMarketPriceResponse,
   ServiceTariffCreate,
   ServiceTariffListResponse,
   ServiceTariffResponse,
@@ -20,6 +24,10 @@ import type {
 
 // Configuracion SAC E1: tarifas y formulas son APPEND-ONLY (sin update/delete
 // — corregir = crear nueva version); flota es CRUD estandar con soft delete.
+
+function coerceLeadPrice(p: LeadMarketPriceResponse): LeadMarketPriceResponse {
+  return { ...p, price_per_kg: num(p.price_per_kg) };
+}
 
 export const sacConfigService = {
   // --- Tarifas ---
@@ -44,6 +52,35 @@ export const sacConfigService = {
       data
     );
     return response.data;
+  },
+
+  // --- CC-014: precio de mercado del plomo ---
+  // ⚠️ El backend serializa Decimal como STRING. El tipo dice number, asi que
+  // se coerciona aqui, en la FRONTERA del servicio, y no en la pantalla: sin
+  // esto `acc + x` concatena texto y el total sale "NaN" o pegado (#93/#107).
+  getLeadPrices: async (): Promise<LeadMarketPriceListResponse> => {
+    const response = await apiClient.get<LeadMarketPriceListResponse>(
+      "/api/v1/lead-market-prices"
+    );
+    return {
+      ...response.data,
+      items: (response.data.items ?? []).map(coerceLeadPrice),
+    };
+  },
+
+  getCurrentLeadPrice: async (): Promise<LeadMarketPriceResponse | null> => {
+    const response = await apiClient.get<LeadMarketPriceResponse | null>(
+      "/api/v1/lead-market-prices/current"
+    );
+    return response.data ? coerceLeadPrice(response.data) : null;
+  },
+
+  createLeadPrice: async (data: LeadMarketPriceCreate): Promise<LeadMarketPriceResponse> => {
+    const response = await apiClient.post<LeadMarketPriceResponse>(
+      "/api/v1/lead-market-prices",
+      data
+    );
+    return coerceLeadPrice(response.data);
   },
 
   // --- Formulas de conversion ---
