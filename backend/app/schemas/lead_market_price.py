@@ -10,7 +10,9 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.utils.dates import BusinessDate, business_today
 
@@ -39,6 +41,18 @@ class LeadMarketPriceCreate(BaseModel):
         return v
 
 
+class LeadMarketPriceAnnul(BaseModel):
+    """Anular un precio cargado por error.
+
+    El motivo es OBLIGATORIO y con `strip_whitespace`: sin el strip, `"  "`
+    satisface `min_length=1` y el motivo queda vacio — la trampa que encontro
+    el test de la remision en #100. Es el dato que hace auditable la correccion,
+    porque la fila no se borra: queda tachada en el historico con esta razon.
+    """
+
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
 class LeadMarketPriceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -50,6 +64,14 @@ class LeadMarketPriceResponse(BaseModel):
     created_by: UUID
     created_by_name: Optional[str] = None
     created_at: datetime
+
+    # Anulacion: `annulled_at` no nulo = la fila ya no rige, pero SIGUE en el
+    # historico. La pantalla la pinta tachada; el selector del vigente la
+    # descarta. Que estos campos viajen es lo que permite las dos cosas.
+    annulled_at: Optional[datetime] = None
+    annulled_by: Optional[UUID] = None
+    annulled_by_name: Optional[str] = None
+    annulled_reason: Optional[str] = None
 
 
 class LeadMarketPriceListResponse(BaseModel):

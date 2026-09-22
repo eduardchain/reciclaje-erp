@@ -83,6 +83,14 @@ export const sacConfigService = {
     return coerceLeadPrice(response.data);
   },
 
+  annulLeadPrice: async (id: string, reason: string): Promise<LeadMarketPriceResponse> => {
+    const response = await apiClient.post<LeadMarketPriceResponse>(
+      `/api/v1/lead-market-prices/${id}/annul`,
+      { reason }
+    );
+    return coerceLeadPrice(response.data);
+  },
+
   // --- Formulas de conversion ---
   getFormulas: async (filters?: {
     material_id?: string;

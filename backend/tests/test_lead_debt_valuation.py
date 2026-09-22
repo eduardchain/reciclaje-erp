@@ -598,3 +598,313 @@ class TestNoTocaResultados:
         assert detallado["total_assets"] == pytest.approx(general["total_assets"], abs=0.01)
         assert detallado["equity"] == pytest.approx(general["equity"], abs=0.01)
         assert detallado["verification"]["is_balanced"] is True
+
+
+# ---------------------------------------------------------------------------
+# Anulacion de un precio (ciclo corto sobre CC-014)
+#
+# Lo motiva un error real de Daniel el 22-sep: cargo una fecha equivocada y no
+# habia forma de corregirla. La tabla es append-only y lo sigue siendo — anular
+# no borra la fila, la saca de la seleccion del vigente y la deja tachada.
+#
+# 🔴 El test estrella es A1 y lee LAS DOS superficies POR HTTP en el mismo
+# escenario: `/lead-market-prices/current` (lo que pinta Config) y el balance
+# (lo que usa el reporte). Antes de este ciclo el filtro del vigente estaba
+# escrito en dos lugares, y el modo de falla era silencioso: una superficie con
+# el precio bueno y la otra con el anulado, con todo test de UNA superficie en
+# verde. Por HTTP y no contra el servicio porque el endpoint arma la respuesta
+# campo por campo (trampa de #95): un test contra el servicio no ve una
+# reescritura del select dentro del endpoint.
+# ---------------------------------------------------------------------------
+
+def _hace(dias):
+    return str(business_today() - timedelta(days=dias))
+
+
+def _annul(client, headers, price_id, reason="Cargado con la fecha equivocada", expect=200):
+    resp = client.post(
+        f"{PRICE_URL}/{price_id}/annul", headers=headers, json={"reason": reason}
+    )
+    assert resp.status_code == expect, resp.text
+    return resp.json() if resp.content else None
+
+
+def _current(client, headers):
+    resp = client.get(f"{PRICE_URL}/current", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+class TestAnulacionDePrecio:
+    def test_a1_anular_el_vigente_en_las_dos_superficies(
+        self, client, org_headers, willard_account
+    ):
+        """🔴 Estrella: al anular el vigente, Config y el balance tienen que
+        volver AL MISMO precio anterior. Si discrepan, este test cae."""
+        _kg(client, org_headers, willard_account["id"], 100, _hace(30))
+        viejo = _price(client, org_headers, 2000, _hace(20))
+        nuevo = _price(client, org_headers, 3000, _hace(5))
+
+        # Con el nuevo vigente, las dos superficies coinciden.
+        assert Decimal(_current(client, org_headers)["price_per_kg"]) == 3000
+        assert _bs(client, org_headers)["assets"]["lead_debt_willard"]["value"] == -300_000
+
+        _annul(client, org_headers, nuevo["id"])
+
+        # Las dos vuelven al anterior. LAS DOS, en el mismo escenario.
+        current = _current(client, org_headers)
+        assert current["id"] == viejo["id"]
+        assert Decimal(current["price_per_kg"]) == 2000
+        deuda = _bs(client, org_headers)["assets"]["lead_debt_willard"]
+        assert deuda["price"] == 2000
+        assert deuda["value"] == -200_000
+
+    def test_a1b_anular_reescribe_un_corte_pasado(
+        self, client, org_headers, willard_account
+    ):
+        """T1b — el camino as-of pasa por `get_current` con `cutoff_dt`.
+
+        Existe porque D4 hay que AFIRMARLO: un filtro que quede DENTRO de la
+        rama `if cutoff_dt` (o fuera de ella) protege un solo camino del
+        balance y deja el otro usando el precio anulado, con A1 en verde.
+        """
+        _kg(client, org_headers, willard_account["id"], 100, _hace(40))
+        _price(client, org_headers, 2000, _hace(30))
+        medio = _price(client, org_headers, 2500, _hace(20))
+        _price(client, org_headers, 3000, _hace(5))
+
+        corte = _hace(10)
+        assert _bs(client, org_headers, as_of=corte)["assets"]["lead_debt_willard"]["price"] == 2500
+
+        _annul(client, org_headers, medio["id"])
+
+        # El corte YA IMPRESO cambia: es back-dating, y es lo aprobado (D4).
+        deuda = _bs(client, org_headers, as_of=corte)["assets"]["lead_debt_willard"]
+        assert deuda["price"] == 2000
+        assert deuda["value"] == -200_000
+
+    def test_a2_anular_uno_no_vigente_no_mueve_nada(
+        self, client, org_headers, willard_account
+    ):
+        _kg(client, org_headers, willard_account["id"], 100, _hace(30))
+        viejo = _price(client, org_headers, 2000, _hace(20))
+        _price(client, org_headers, 3000, _hace(5))
+        antes = _bs(client, org_headers)["assets"]["lead_debt_willard"]
+
+        _annul(client, org_headers, viejo["id"])
+
+        assert _bs(client, org_headers)["assets"]["lead_debt_willard"] == antes
+        assert Decimal(_current(client, org_headers)["price_per_kg"]) == 3000
+
+    def test_a3_anular_el_unico_precio_deja_sin_valorar(
+        self, client, org_headers, willard_account
+    ):
+        """D7/D6 de #110: SIN VALORAR, no ausencia y no cero.
+
+        Un cero diria que la deuda no vale nada; la ausencia la escondería.
+        Los kilos siguen visibles porque la deuda existe igual.
+        """
+        _kg(client, org_headers, willard_account["id"], 100, _hace(30))
+        unico = _price(client, org_headers, 2000, _hace(20))
+
+        _annul(client, org_headers, unico["id"])
+
+        assert _current(client, org_headers) is None
+        deuda = _bs(client, org_headers)["assets"]["lead_debt_willard"]
+        assert deuda is not None          # el objeto llega igual (D6)
+        assert deuda["value"] is None     # sin valorar, NO cero
+        assert deuda["price"] is None
+        assert deuda["kg"] == 100
+
+        item, _ = _lead_item(_bd(client, org_headers))
+        assert item is not None and "SIN PRECIO DE MERCADO CARGADO" in item["name"]
+
+    def test_a4_el_historico_sigue_mostrando_el_anulado(self, client, org_headers):
+        """Append-only: la fila NO se borra. Si desapareciera, la anulacion
+        dejaria de ser auditable, que es justo lo que se quiere evitar."""
+        p = _price(client, org_headers, 2000, _hace(20))
+        _annul(client, org_headers, p["id"], reason="Fecha equivocada al cargar")
+
+        items = client.get(PRICE_URL, headers=org_headers).json()["items"]
+        assert len(items) == 1
+        fila = items[0]
+        assert fila["id"] == p["id"]
+        assert fila["annulled_at"] is not None
+        assert fila["annulled_reason"] == "Fecha equivocada al cargar"
+        assert fila["annulled_by_name"] is not None
+
+    def test_a5_doble_anulacion_400(self, client, org_headers):
+        p = _price(client, org_headers, 2000, _hace(20))
+        _annul(client, org_headers, p["id"])
+        _annul(client, org_headers, p["id"], expect=400)
+
+    def test_a6_precio_de_otra_org_404(
+        self, client, org_headers, db_session, test_organization2, test_user
+    ):
+        """Aislamiento REAL, no un UUID inventado.
+
+        Con un id inexistente, quitar el filtro por organizacion no haria caer
+        este test — la fila seguiria sin existir. La fila se siembra por ORM en
+        la OTRA organizacion a proposito: sin el filtro, se encontraria y se
+        anularia con 200.
+        """
+        from app.models.lead_market_price import LeadMarketPrice
+        from app.utils.dates import business_today_noon
+
+        ajeno = LeadMarketPrice(
+            organization_id=test_organization2.id,
+            price_per_kg=Decimal("9999"),
+            effective_date=business_today_noon(),
+            created_by=test_user.id,
+        )
+        db_session.add(ajeno)
+        db_session.commit()
+
+        _annul(client, org_headers, str(ajeno.id), expect=404)
+        db_session.refresh(ajeno)
+        assert ajeno.annulled_at is None
+
+    def test_a7_sin_flag_403_aunque_sea_admin(
+        self, client, org_headers, db_session, test_organization
+    ):
+        p = _price(client, org_headers, 2000, _hace(20))
+        test_organization.settings = {}
+        db_session.commit()
+        _annul(client, org_headers, p["id"], expect=403)
+
+    def test_a8_sin_permiso_403(self, client, org_headers, org_headers2):
+        p = _price(client, org_headers, 2000, _hace(20))
+        _annul(client, org_headers2, p["id"], expect=403)
+
+    @pytest.mark.parametrize("motivo", ["", "   ", "\t\n "])
+    def test_a9_motivo_vacio_o_solo_espacios_422(self, client, org_headers, motivo):
+        """Con `min_length` y sin `strip`, "  " pasa y el motivo queda vacio.
+        Es la trampa que encontro el test de la remision en #100."""
+        p = _price(client, org_headers, 2000, _hace(20))
+        _annul(client, org_headers, p["id"], reason=motivo, expect=422)
+
+    def test_a10_sigue_sin_patch_ni_delete(self, client, org_headers):
+        """Anular no es editar: el recurso NO afloja su append-only."""
+        p = _price(client, org_headers, 2000, _hace(20))
+        assert client.patch(
+            f"{PRICE_URL}/{p['id']}", headers=org_headers, json={"price_per_kg": "1"}
+        ).status_code in (404, 405)
+        assert client.delete(f"{PRICE_URL}/{p['id']}", headers=org_headers).status_code in (404, 405)
+
+    def test_a11_annulled_at_es_auditoria_y_no_ordena(self, client, org_headers):
+        """D6: `annulled_at` decide SI una fila participa, no en que posicion.
+
+        Anular el del medio no puede reordenar el historico, que va por fecha
+        de vigencia. Y el timestamp es de auditoria (`now utc`), no una fecha
+        de negocio (#91): responde *cuando exactamente*, no *que dia*.
+        """
+        from datetime import datetime, timezone
+
+        viejo = _price(client, org_headers, 2000, _hace(30))
+        medio = _price(client, org_headers, 2500, _hace(20))
+        nuevo = _price(client, org_headers, 3000, _hace(5))
+
+        fila = _annul(client, org_headers, medio["id"])
+        marca = datetime.fromisoformat(fila["annulled_at"].replace("Z", "+00:00"))
+        assert abs((datetime.now(timezone.utc) - marca).total_seconds()) < 120
+
+        orden = [i["id"] for i in client.get(PRICE_URL, headers=org_headers).json()["items"]]
+        assert orden == [nuevo["id"], medio["id"], viejo["id"]]
+
+
+@pytest.fixture
+def solo_lectura_headers(client, db_session, test_organization):
+    """Usuario con `tariffs.view` y SIN `tariffs.manage`, en la org CON flag.
+
+    🔴 Existe porque el plantado de defectos lo exigio. `test_a8` usaba
+    `org_headers2`, calcando `test_t11`, y ahi el usuario de la otra org es un
+    viewer SIN ningun `tariffs.*`: ese 403 no distingue `view` de `manage`, asi
+    que cambiar el permiso de anular a `tariffs.view` dejaba los 38 tests en
+    verde. El nombre del test prometia mas de lo que cubria (#110).
+
+    El admin tampoco sirve: bypassa todo (#29). La unica forma de probar un
+    permiso granular es un rol custom que tenga uno y no el otro.
+    """
+    from app.core.security import create_access_token, get_password_hash
+    from app.models.permission import Permission
+    from app.models.role import Role, RolePermission
+    from app.models.user import OrganizationMember, User
+    from sqlalchemy import select
+
+    user = User(
+        email="solo-lectura-precio@example.com",
+        hashed_password=get_password_hash("pass1234"),
+        full_name="Solo Lectura",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.flush()
+    role = Role(
+        organization_id=test_organization.id,
+        name="lector_precios_test",
+        display_name="Lector de Precios",
+        is_system_role=False,
+    )
+    db_session.add(role)
+    db_session.flush()
+    perms = db_session.execute(
+        select(Permission).where(Permission.code == "tariffs.view")
+    ).scalars().all()
+    assert len(perms) == 1, "catalogo sin tariffs.view"
+    for p in perms:
+        db_session.add(RolePermission(role_id=role.id, permission_id=p.id))
+    db_session.add(OrganizationMember(
+        user_id=user.id, organization_id=test_organization.id, role_id=role.id,
+    ))
+    db_session.commit()
+    return {
+        "Authorization": f"Bearer {create_access_token(data={'sub': str(user.id)})}",
+        "X-Organization-ID": str(test_organization.id),
+    }
+
+
+class TestEscribirExigeManage:
+    """Escribir exige `tariffs.manage`; leer alcanza con `tariffs.view`.
+
+    Cubre los DOS verbos que escriben. El de anular (A8b) nacio del plantado
+    de P7; el de cargar (A8c) lo encontro QA buscando el MISMO agujero en el
+    verbo hermano, y estaba en codigo ya commiteado de CC-014. La leccion es
+    de alcance, no de este ciclo: cuando un test de permiso resulta vacuo,
+    el barrido correcto es enumerar TODOS los endpoints que piden ese
+    permiso, no arreglar el que salto (#92/#96, #108).
+    """
+
+    def test_a8b_leer_si_anular_no(self, client, org_headers, solo_lectura_headers):
+        """El GET en 200 es el CONTROL POSITIVO del 403.
+
+        Sin el, un 403 al anular podria venir del flag de la org, de que el
+        usuario no sea miembro o de cualquier otra puerta, y el test diria
+        "el permiso funciona" sin haberlo tocado. Que el MISMO usuario lea
+        bien y no pueda anular es lo que aisla el permiso como la causa.
+        """
+        p = _price(client, org_headers, 2000, _hace(20))
+
+        assert client.get(PRICE_URL, headers=solo_lectura_headers).status_code == 200
+        _annul(client, solo_lectura_headers, p["id"], expect=403)
+
+        # Y el precio sigue vigente: el 403 no dejo un efecto a medias.
+        assert _current(client, org_headers)["id"] == p["id"]
+
+    def test_a8c_cargar_tambien_exige_manage(self, client, org_headers, solo_lectura_headers):
+        """C4 de QA — el mismo agujero del lado de CARGAR (codigo de CC-014).
+
+        `POST /lead-market-prices` exige `tariffs.manage` y ningun test lo
+        ponia a prueba con un usuario que tuviera `tariffs.view`: cambiarlo a
+        `view` pasaba la suite entera. Mismo control positivo que A8b — el
+        GET en 200 aisla el permiso como la causa del 403.
+        """
+        assert client.get(PRICE_URL, headers=solo_lectura_headers).status_code == 200
+
+        resp = client.post(
+            PRICE_URL, headers=solo_lectura_headers,
+            json={"price_per_kg": "2400", "effective_date": _ayer()},
+        )
+        assert resp.status_code == 403, resp.text
+
+        # Y no se colo la fila: el 403 no puede dejar un efecto a medias.
+        assert client.get(PRICE_URL, headers=org_headers).json()["total"] == 0

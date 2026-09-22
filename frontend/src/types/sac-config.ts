@@ -87,6 +87,13 @@ export interface LeadMarketPriceResponse {
   created_by: string;
   created_by_name: string | null;
   created_at: string;
+  // Anulacion: la fila sigue en el historico, tachada. ⚠️ El vigente NO es
+  // `items[0]` — el historico incluye anulados. Se pregunta a /current y se
+  // compara por id.
+  annulled_at: string | null;
+  annulled_by: string | null;
+  annulled_by_name: string | null;
+  annulled_reason: string | null;
 }
 
 export interface LeadMarketPriceCreate {

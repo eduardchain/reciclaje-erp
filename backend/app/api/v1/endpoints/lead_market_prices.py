@@ -1,8 +1,11 @@
-"""Endpoints de LeadMarketPrice (CC-014, Q-B).
+"""Endpoints de LeadMarketPrice (CC-014, Q-B; anulacion en el ciclo corto que sigue).
 
-Append-only: GET historico / GET current / POST. Sin PATCH ni DELETE — la
-ruta no existe, asi que la coleccion da 405 y /{id} da 404, igual que
-tarifas. `/current` es ruta literal declarada antes de cualquier /{id}.
+Append-only: GET historico / GET current / POST / POST /{id}/annul. **Sigue sin
+PATCH ni DELETE** — la coleccion da 405 y /{id} da 404, igual que tarifas: anular
+no es editar, es un evento mas sobre una fila que no se toca. Por eso el verbo es
+POST /{id}/annul, que es el patron del repo (crucible_charges, fixed_assets,
+inbound_orders, financial_obligations, inventory_adjustments).
+`/current` es ruta literal declarada antes de cualquier /{id}.
 
 Permisos reutilizados `tariffs.view` / `tariffs.manage`: ya existen, estan
 gateados por el mismo flag y los administra la misma gente. ⚠️ Ningun rol
@@ -14,7 +17,10 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_org_flag, require_permission
+from uuid import UUID
+
 from app.schemas.lead_market_price import (
+    LeadMarketPriceAnnul,
     LeadMarketPriceCreate,
     LeadMarketPriceListResponse,
     LeadMarketPriceResponse,
@@ -57,6 +63,27 @@ def create_lead_market_price(
     return lead_market_price.create(
         db=db,
         obj_in=price_in,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+
+
+@router.post("/{price_id}/annul", response_model=LeadMarketPriceResponse)
+def annul_lead_market_price(
+    price_id: UUID,
+    payload: LeadMarketPriceAnnul,
+    org_context: dict = Depends(require_permission("tariffs.manage")),
+    db: Session = Depends(get_db),
+):
+    """Anular un precio cargado por error: deja de regir y queda en el historico.
+
+    Mismo permiso que cargarlo — quien puede poner un precio puede retirarlo.
+    ⚠️ Anular reescribe cortes ya impresos, igual que cargar con fecha vieja.
+    """
+    return lead_market_price.annul(
+        db=db,
+        price_id=price_id,
+        reason=payload.reason,
         organization_id=org_context["organization_id"],
         user_id=org_context["user_id"],
     )

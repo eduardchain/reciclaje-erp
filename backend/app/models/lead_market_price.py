@@ -17,6 +17,12 @@ y la linea saldria vacia justo en el caso que motivo el requerimiento.
 costos a la vista: cargar un precio con fecha anterior CAMBIA cortes historicos
 ya impresos. Es la #61 al reves, a proposito — alla el pasado cambiaba sin que
 nadie lo viera; aca el balance muestra siempre que precio uso y de que fecha.
+
+Append-only NO significa inmutable: una fila se puede ANULAR (`annulled_at`),
+y entonces deja de regir pero sigue en el historico, tachada y con su motivo.
+Nace de un error real de Daniel el 22-sep (cargo una fecha equivocada y no habia
+como corregirla). Anular es OTRO back-dating — reescribe cortes ya impresos
+igual que la carga — y eso esta cubierto por la misma decision de arriba.
 """
 from typing import Optional
 from uuid import UUID, uuid4
@@ -62,6 +68,33 @@ class LeadMarketPrice(Base, OrganizationMixin, TimestampMixin):
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )
+
+    # --- Anulacion (ciclo corto sobre CC-014) ---
+    # `annulled_at IS NULL` ES el predicado de vigencia, y la unica forma en que
+    # esta columna participa de la seleccion: el ORDEN no se toca (D6 del plan).
+    # Es un timestamp de AUDITORIA (`now(timezone.utc)`), no una fecha de
+    # negocio — responde *cuando exactamente*, no *que dia* (#91).
+    annulled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp de auditoria de la anulacion. NULL = vigente",
+    )
+
+    annulled_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
+    annulled_reason: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Por que se anulo: el dato que hace auditable la correccion",
+    )
+
+    @property
+    def is_annulled(self) -> bool:
+        return self.annulled_at is not None
 
     __table_args__ = (
         CheckConstraint("price_per_kg > 0", name="ck_lead_market_prices_price_positive"),

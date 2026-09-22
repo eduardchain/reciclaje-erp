@@ -83,6 +83,24 @@ export function useCreateLeadPrice() {
   });
 }
 
+export function useAnnulLeadPrice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      sacConfigService.annulLeadPrice(id, reason),
+    onSuccess: () => {
+      toast.success("Precio anulado — la deuda en plomo se revalora");
+      qc.invalidateQueries({ queryKey: ["lead-market-prices"] });
+      // Las MISMAS dos invalidaciones que el create, y por el mismo motivo:
+      // anular cambia el Balance General y el Detallado, en vivo y en cortes
+      // historicos. Sin esto la pantalla muestra el valor viejo con el backend
+      // ya correcto, que es como falla mas caro (#98).
+      qc.invalidateQueries({ queryKey: ["reports"] });
+    },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al anular el precio")),
+  });
+}
+
 // --- Formulas de conversion ---
 
 export function useCurrentFormulas(materialId?: string, enabled = true) {

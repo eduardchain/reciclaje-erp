@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Ban, Plus } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +8,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useCreateLeadPrice, useLeadPriceHistory } from "@/hooks/useSacConfig";
+import {
+  useAnnulLeadPrice,
+  useCreateLeadPrice,
+  useCurrentLeadPrice,
+  useLeadPriceHistory,
+} from "@/hooks/useSacConfig";
 import { formatCurrencyDecimals, formatDate, formatDateTime, toLocalDateInput } from "@/utils/formatters";
+import type { LeadMarketPriceResponse } from "@/types/sac-config";
 import ConfigLayout from "./ConfigLayout";
 
 /**
@@ -21,20 +27,33 @@ import ConfigLayout from "./ConfigLayout";
  * mes siempre se calcula despues.
  *
  * ⚠️ `effective_date` es fecha de negocio: se pinta con formatDate. Solo
- * `created_at`, que si es un instante real, lleva hora (#87).
+ * `created_at` y `annulled_at`, que si son instantes reales, llevan hora (#87).
+ *
+ * 🔴 EL VIGENTE NO ES `items[0]`. El historico incluye los ANULADOS, asi que la
+ * primera fila puede ser una que ya no rige. La v1 de esta pantalla lo hacia por
+ * indice y, en cuanto existio la anulacion, la tarjeta habria mostrado como
+ * vigente un precio anulado MIENTRAS el balance usaba el correcto — el modo de
+ * falla que el ciclo de anulacion existia para prevenir, en la unica superficie
+ * donde ningun test lo ve. Lo encontro QA leyendo la pantalla, no un gate.
+ * Por eso el vigente se le pregunta a `/current`, que es el MISMO selector que
+ * usa el balance, y el badge se decide por `p.id === current?.id`. Nunca por
+ * posicion.
  */
 export default function LeadPricePage() {
   const { hasPermission } = usePermissions();
   const { data, isLoading } = useLeadPriceHistory();
+  const { data: current } = useCurrentLeadPrice();
   const create = useCreateLeadPrice();
+  const annul = useAnnulLeadPrice();
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [annulTarget, setAnnulTarget] = useState<LeadMarketPriceResponse | null>(null);
+  const [annulReason, setAnnulReason] = useState("");
   const [price, setPrice] = useState(0);
   const [effectiveDate, setEffectiveDate] = useState("");
   const [notes, setNotes] = useState("");
 
   const items = data?.items ?? [];
-  const vigente = items[0];
   const canManage = hasPermission("tariffs.manage");
   const hoy = toLocalDateInput(new Date());
 
@@ -73,17 +92,27 @@ export default function LeadPricePage() {
         )}
       </div>
 
-      {vigente && (
+      {current ? (
         <div className="rounded-lg border bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio vigente</p>
           <p className="text-2xl font-semibold text-slate-900 mt-1">
-            {formatCurrencyDecimals(Number(vigente.price_per_kg))}
+            {formatCurrencyDecimals(Number(current.price_per_kg))}
             <span className="text-base font-normal text-slate-500"> por kg</span>
           </p>
           <p className="text-sm text-slate-500 mt-1">
-            Rige desde el {formatDate(vigente.effective_date)}
+            Rige desde el {formatDate(current.effective_date)}
           </p>
         </div>
+      ) : (
+        items.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm text-amber-900">
+              <span className="font-medium">Ningun precio vigente.</span> Todos los
+              precios del historial estan anulados, asi que el balance muestra los
+              kilos de la deuda con Willard sin valorar.
+            </p>
+          </div>
+        )
       )}
 
       {!isLoading && items.length === 0 ? (
@@ -101,23 +130,76 @@ export default function LeadPricePage() {
                 <TableHead>Notas</TableHead>
                 <TableHead>Cargado</TableHead>
                 <TableHead>Por</TableHead>
+                {canManage && <TableHead className="w-10" />}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((p, i) => (
-                <TableRow key={p.id} className={i === 0 ? "bg-emerald-50/60" : undefined}>
-                  <TableCell className="text-right font-medium">
-                    {formatCurrencyDecimals(Number(p.price_per_kg))}
-                    {i === 0 && (
-                      <span className="ml-2 text-xs font-normal text-emerald-700">vigente</span>
+              {items.map((p) => {
+                const esVigente = p.id === current?.id;
+                const anulado = p.annulled_at !== null;
+                return (
+                  <TableRow
+                    key={p.id}
+                    className={
+                      anulado ? "text-slate-400" : esVigente ? "bg-emerald-50/60" : undefined
+                    }
+                  >
+                    <TableCell className="text-right font-medium">
+                      <span className={anulado ? "line-through" : undefined}>
+                        {formatCurrencyDecimals(Number(p.price_per_kg))}
+                      </span>
+                      {esVigente && (
+                        <span className="ml-2 text-xs font-normal text-emerald-700">vigente</span>
+                      )}
+                      {anulado && (
+                        <span className="ml-2 text-xs font-normal text-slate-500">anulado</span>
+                      )}
+                    </TableCell>
+                    <TableCell className={anulado ? "line-through" : undefined}>
+                      {formatDate(p.effective_date)}
+                    </TableCell>
+                    <TableCell className="text-slate-500">
+                      {anulado ? (
+                        <span title={`Anulado el ${formatDateTime(p.annulled_at!)}`}>
+                          {p.annulled_reason}
+                        </span>
+                      ) : (
+                        p.notes ?? "—"
+                      )}
+                    </TableCell>
+                    <TableCell className="text-slate-500">{formatDateTime(p.created_at)}</TableCell>
+                    <TableCell className="text-slate-500">
+                      {/* Los DOS nombres, no uno en lugar del otro: el historico
+                          existe para auditar, y una fila que dice quien anulo
+                          pero ya no dice quien cargo deja la auditoria a medias.
+                          Esta pantalla es el unico lugar donde ese dato se ve. */}
+                      <div>{p.created_by_name ?? "—"}</div>
+                      {anulado && (
+                        <div className="text-xs text-red-700">
+                          Anulado por {p.annulled_by_name ?? "—"}
+                        </div>
+                      )}
+                    </TableCell>
+                    {canManage && (
+                      <TableCell className="text-right">
+                        {!anulado && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-slate-500 hover:text-red-700"
+                            onClick={() => {
+                              setAnnulTarget(p);
+                              setAnnulReason("");
+                            }}
+                          >
+                            <Ban className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
                     )}
-                  </TableCell>
-                  <TableCell>{formatDate(p.effective_date)}</TableCell>
-                  <TableCell className="text-slate-500">{p.notes ?? "—"}</TableCell>
-                  <TableCell className="text-slate-500">{formatDateTime(p.created_at)}</TableCell>
-                  <TableCell className="text-slate-500">{p.created_by_name ?? "—"}</TableCell>
-                </TableRow>
-              ))}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
@@ -175,6 +257,55 @@ export default function LeadPricePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={annulTarget !== null} onOpenChange={(o) => !o && setAnnulTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Anular precio</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {annulTarget && (
+              <p className="text-sm text-slate-600">
+                {formatCurrencyDecimals(Number(annulTarget.price_per_kg))} por kg, vigente
+                desde el {formatDate(annulTarget.effective_date)}.
+              </p>
+            )}
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              El precio deja de regir en <span className="font-medium">todos los cortes</span>,
+              incluidos los balances que ya se imprimieron. La fila no se borra: queda en el
+              historial, tachada y con este motivo.
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Motivo *
+              </Label>
+              <Input
+                value={annulReason}
+                onChange={(e) => setAnnulReason(e.target.value)}
+                placeholder="Por ejemplo: cargado con la fecha equivocada"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAnnulTarget(null)}>
+              Cancelar
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700"
+              disabled={annulReason.trim().length === 0 || annul.isPending}
+              onClick={() =>
+                annulTarget &&
+                annul.mutate(
+                  { id: annulTarget.id, reason: annulReason.trim() },
+                  { onSuccess: () => setAnnulTarget(null) }
+                )
+              }
+            >
+              Anular precio
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </ConfigLayout>
   );
 }
