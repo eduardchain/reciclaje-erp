@@ -122,3 +122,50 @@ class TestCorridaCompleta:
             assert exc.value.code == 0, "el manifiesto se colo al diff"
         finally:
             sys.argv = argv
+
+
+class TestClaveAditivaCC014:
+    """La guarda de la guarda: una clave se perdona SOLO con su valor exacto.
+
+    `ALLOWED_ADDED` existe para que una clave aditiva nueva no haga fallar el
+    golden en las organizaciones cliente. Ese permiso es lo unico que separa
+    "el campo llega None como prometi" de "el campo llega con datos y nadie se
+    entero", asi que el permiso mismo necesita un test.
+    """
+
+    def test_lead_debt_willard_en_none_se_perdona(self):
+        mod = _load()
+        real, expected = [], []
+        mod.diff(
+            {"assets": {"inventory": 10.0}},
+            {"assets": {"inventory": 10.0, "lead_debt_willard": None}},
+            "", mod.classify("balance_sheet"), real, expected,
+        )
+        assert real == [], real
+        assert expected == ["assets.lead_debt_willard"]
+
+    def test_lead_debt_willard_con_datos_es_diff_real(self):
+        """Si el corte por flag se moviera, una org cliente traeria un objeto."""
+        mod = _load()
+        real, expected = [], []
+        mod.diff(
+            {"assets": {"inventory": 10.0}},
+            {"assets": {"inventory": 10.0,
+                        "lead_debt_willard": {"kg": 0.0, "value": None}}},
+            "", mod.classify("balance_sheet"), real, expected,
+        )
+        assert len(real) == 1 and "CLAVE NUEVA" in real[0], real
+
+    def test_el_corte_asof_tambien_la_perdona(self):
+        mod = _load()
+        assert mod.classify("balance_sheet_asof") == {"lead_debt_willard": None}
+
+    def test_el_detallado_NO_la_perdona(self):
+        """F5: su item viaja dentro de una seccion que ya existe y no gana
+        claves. Si ahi aparece algo, es un diff real y tiene que romper."""
+        for captura in ("balance_detailed", "balance_detailed_asof"):
+            assert mod_classify(captura) == {}, captura
+
+
+def mod_classify(nombre: str) -> dict:
+    return _load().classify(nombre)

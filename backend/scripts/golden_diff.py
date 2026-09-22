@@ -34,6 +34,12 @@ ALLOWED_ADDED = {
         "warehouse_id": None, "tariff_id": None,
         "source_type": None, "source_id": None,
     },
+    # CC-014: la deuda en plomo con Willard valorada a precio de mercado. En
+    # las organizaciones cliente llega SIEMPRE None, porque el helper corta por
+    # `kg_ledger_enabled` antes de consultar nada. Cualquier otro valor tiene
+    # que salir como CLAVE NUEVA: si aparece un objeto ahi, el corte por flag
+    # se movio y el gate es lo unico que lo diria.
+    "balance_sheet": {"lead_debt_willard": None},
 }
 
 
@@ -42,6 +48,12 @@ def classify(capture_name: str) -> dict:
         return ALLOWED_ADDED["pnl"]
     if capture_name in ("warehouses", "money_accounts", "money_movements"):
         return ALLOWED_ADDED[capture_name]
+    # CC-014: SOLO el Balance General, vivo y a fecha de corte. El Detallado
+    # queda FUERA a proposito — su item viaja dentro de una seccion que ya
+    # existe y no gana ni una clave ni una fila en estas organizaciones, asi
+    # que si ahi aparece algo es un diff REAL y tiene que romper.
+    if capture_name in ("balance_sheet", "balance_sheet_asof"):
+        return ALLOWED_ADDED["balance_sheet"]
     return {}
 
 
