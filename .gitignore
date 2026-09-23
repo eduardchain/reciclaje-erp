@@ -307,3 +307,9 @@ presentacion/propuesta-comercial.md
 # Evidencia de corridas del golden: reproducible y crece sin techo. No debe
 # viajar de polizon dentro de un commit de codigo.
 docs/planes/evidencia-golden-*/
+
+# Facturas reales de clientes (NIT, CUFE, montos). Decision de Daniel 2026-09-22:
+# se consultan desde el disco, no entran al repo. Los numeros que el diseno
+# necesita viven transcritos en docs/planes/plan-sac-impuestos-en-ventas.md.
+docs/soluciones ambientales del caribe/*.PDF
+docs/soluciones ambientales del caribe/*.pdf

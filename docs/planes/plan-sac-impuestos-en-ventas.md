@@ -1,6 +1,7 @@
 # Plan — IVA y retenciones en lo que SAC factura (CC-013 / Q-41)
 
-**Estado:** v1.0, para revisión de QA. Nada construido.
+**Estado:** v1.1, para segunda revisión de QA. Nada construido.
+**v1.1 corrige un error mío en D4, que era la única afirmación que el plan hacía como medida, y cierra C3–C9.**
 **Base:** `1327d32` (develop, #111).
 **Evidencia:** dos facturas reales que Johana envió el 2026-09-22, extraídas y verificadas al centavo.
 
@@ -84,22 +85,42 @@ Nada se exige y nada se infiere. Hay ventas sin IVA (exentas, excluidas, cliente
 
 **No se tocan `sales`, `sale_lines` ni `money_movements`.** El golden sigue siendo gate duro porque el saldo de terceros y el balance sí cambian de forma, pero la superficie de esquema compartido es **cero**.
 
-### D4 — Entidades separadas, y el balance las ubica por signo
-Son dos cuentas contables distintas y juntarlas las netearía:
+### D4 — Entidades separadas, y el clasificador se corrige en los dos sitios
 
-| Concepto | Qué es | Entidad | Saldo |
-|---|---|---|---|
-| IVA generado | SAC le debe a la DIAN | `[Impuestos] IVA por Pagar` | en contra |
-| Retención practicada a SAC | SAC ya pagó impuesto | `[Impuestos] ReteFuente a Favor`, etc. | a favor |
+🔴 **La v1.0 afirmaba algo FALSO, y era lo único que afirmaba como medido.** Decía que el balance ubica una entidad de pasivo por el signo de su saldo, y de ahí colgaba todo. Lo desmintió QA y lo verifiqué: en `reports.py:2352`, **veinte líneas antes** del bloque que yo leí, hay una regla que gana:
 
-**Medido, no supuesto**: `_classify_third_party` manda una entidad `liability` con saldo a favor a `liability_advances`, que es **activo**, y con saldo en contra a `liability_debt`, que es **pasivo**. O sea que el balance ya las ubica bien por signo, sin tocar el clasificador.
+```python
+if tp.is_system_entity and bal > 0:
+    return "prepaid_expenses"
+```
 
-⚠️ Y por eso las entidades de venta son **distintas** de las de compra: la retefuente que SAC practica a un chatarrero es un pasivo, y la que Willard le practica a SAC es un activo. Reutilizar `[Retenciones] ReteFuente` para las dos las netearía y perdería la distinción.
+Las entidades de impuestos nacerían de sistema (`retention_entities.py:87`), así que una retención **a favor** caería en **Gastos Prepagados**, no en el activo por anticipos. Y está en **dos** clasificadores: `_classify_third_party` (vivo, :2352) y `_classify_tp_by_balance` (as-of, :3094).
+
+**Cómo lo cometí**: el grep me llevó a la línea donde estaba lo que buscaba y no leí la función desde arriba. Es #111 en su forma exacta, un día después de escribirla.
+
+**Decisión de Daniel (2026-09-22): se corrige el clasificador**, con una regla **específica de impuestos** en los dos sitios. Razones:
+
+1. **Contablemente es otra cuenta.** En el PUC, la retención que nos practican es anticipo de impuestos (1355) y los gastos prepagados son otra cosa. El balance que Johana le muestra a su contador tiene que decirlo bien. La retención que SAC practica sí es pasivo (2365/2367/2368) y el IVA generado también (2408).
+2. **Medido: no mueve nada de las otras empresas.** Hoy solo hay **dos** entidades de sistema con saldo a favor en las tres organizaciones, y las dos son prepagos legítimos: un seguro anual de bodegas y una cartera perdida. Ninguna es de impuestos. Por eso la regla nueva es específica y no invierte la existente.
+3. El marcador de sistema **protege** a las entidades de aparecer en selectores y de ser editadas o desactivadas. La alternativa (quitarles ese marcador) las dejaba sueltas en Maestros.
+
+| Concepto | Qué es | Entidad | Saldo | Sección |
+|---|---|---|---|---|
+| IVA generado | SAC le debe a la DIAN | `[Impuestos] IVA por Pagar` | en contra | pasivo, sin tocar nada |
+| Retención practicada a SAC | anticipo de impuesto | `[Impuestos] ReteFuente a Favor`, etc. | a favor | **activo, por la regla nueva** |
+
+⚠️ **Consecuencia que cambia un gate**: `reports.py` **se toca**, así que *"superficie compartida cero"* deja de ser cierto y el golden pasa de gate por forma a **gate por código**, con prueba de vida y control positivo (ver §7).
+
+⚠️ Las entidades de venta son **distintas** de las de compra: la retefuente que SAC le practica a un chatarrero es pasivo y la que Willard le practica a SAC es activo. Compartir entidad las netearía, y QA confirmó que netearlas es un error contable real, no una preferencia.
+
+⚠️ **El panel de Dinero Inactivo (#68) excluye `prepaid_expenses` a propósito.** Con la corrección, las retenciones a favor quedan fuera de esa exclusión, y eso **es lo que se quiere**: a la DIAN no se le persigue un cobro, la retención se descuenta en la declaración. Queda declarado para que nadie lo lea como un olvido.
 
 ### D5 — La base se declara, no se asume
 `base_amount` se persiste siempre, y **cada tipo dice sobre qué se aplica**: retefuente e ICA sobre el subtotal, reteIVA sobre el IVA. El precálculo del frontend usa la base correcta.
 
 Sin esto, la reteIVA se podría configurar como "2,85 % del subtotal" y daría el número correcto **solo mientras el IVA sea 19 %**. El día que cambie, el número queda mal en silencio. Un valor que parece configuración y es en realidad otra fórmula.
+
+**C3 — qué pasa con COMPRAS.** El precálculo `rate × subtotal` vive en dos pantallas compartidas, `PurchaseLiquidatePage` e `InboundLiquidatePage` (medido por grep, no de memoria). El campo de base nace con **default `subtotal`**, que es exactamente lo que esas dos hacen hoy, así que **compras queda byte a byte**. Solo cambiaría si alguien configurara una reteIVA con base en el IVA y la usara en una compra, y ahí el precálculo daría cero — que es lo correcto, porque en una compra de chatarra no hay IVA que retener (el chatarrero no es responsable de IVA, y por eso la reteIVA sembrada dice "sin uso aún"). Hoy ese caso daría un porcentaje del subtotal, o sea un número inventado.
 
 ### D6 — El IVA se precalcula por línea
 Redondeando cada línea y sumando, que es lo que hace Siigo. Con el sistema registrando, el precálculo es una ayuda y el usuario podría corregir el centavo a mano; hacerlo bien cuesta lo mismo y evita esa fricción todos los días.
@@ -109,6 +130,25 @@ El IVA no es ingreso y la retención no es gasto. `sale.total_amount` sigue sien
 
 ### D8 — El concepto se deriva donde se puede
 Venta de un bien → concepto de venta; maquila y flete → concepto de servicios. El usuario lo puede cambiar. Derivarlo es menos superficie y menos error que preguntarlo, y las facturas muestran que la correspondencia es estable.
+
+### D10 — Dueño único cuando la Salida deriva una venta (C5 de QA)
+
+La Salida tipo venta **crea una `Sale`**, así que hay dos documentos para una sola factura y el CHECK de una fila no impide que los dos lleven impuestos. **El dueño es la Salida**, que es el documento que el usuario liquida y el que conoce el tipo y el concepto.
+
+Guard explícito: una venta con `willard_delivery_id` **rechaza** el payload de impuestos, con un mensaje que manda a la Salida. Es el patrón del guard de #93 D7b, donde cancelar una compra derivada manda a anular la Entrada. Fila propia en la matriz.
+
+### D11 — Los puntos que revierten, enumerados por grep (C6 de QA)
+
+No de memoria. `grep` sobre los servicios da **exactamente dos**:
+
+| Camino | Dónde |
+|---|---|
+| Cancelar una venta | `sale.py:500` |
+| Anular una Salida de Plomo | `willard_delivery.py:335` → `_reverse_liquidation` en `:936` |
+
+**No existe des-liquidar en ventas**, a diferencia de compras, que lo tiene desde #93 D20. Si algún día se agrega, tiene que revertir impuestos y esta tabla es donde se mira.
+
+Los dos revierten con `reverted_at`, sin borrado físico, igual que las retenciones de compra.
 
 ### D9 — Rige hacia adelante
 No reescribe documentos ya liquidados (#61). Los saldos existentes no se mueven.
@@ -142,18 +182,27 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 
 **Se commitea antes de plantar nada.** La columna de lo esperado sale de ese commit y no se reescribe (#105). ⚠️ Los defectos que vivan en vía compartida se predicen como *"al menos estos"*, que es la regla que me salté dos veces en #111.
 
-| | T1 conservación | T2 sin impuestos = hoy | T3 base de reteIVA | T4 P&L intacto | T5 balance por signo | T6 anulación | T7 sin flag | T8 permiso | T9 por línea | G pantalla |
-|---|---|---|---|---|---|---|---|---|---|---|
-| P1 el IVA no acredita al cliente | cae | — | — | — | cae | — | — | — | — | — |
-| P2 la retención suma en vez de restar | cae | — | — | — | cae | — | — | — | — | — |
-| P3 reteIVA sobre el subtotal | — | — | **cae** | — | — | — | — | — | — | — |
-| P4 el IVA entra a `total_amount` | — | — | — | **cae** | — | — | — | — | — | — |
-| P5 la entidad a favor nace `liability` en contra | — | — | — | — | **cae** | — | — | — | — | — |
-| P6 la anulación no revierte | — | — | — | — | — | **cae** | — | — | — | — |
-| P7 sin bandera el payload pasa | — | **cae** | — | — | — | — | **cae** | — | — | — |
-| P8 el permiso cambia a solo lectura | — | — | — | — | — | — | — | **cae** | — | — |
-| P9 el IVA se precalcula sobre el total | — | — | — | — | — | — | — | — | **cae** | — |
-| P10 el formulario compartido pide impuestos sin bandera | — | — | — | — | — | — | — | — | — | **cae, y solo acá** |
+| | T1 conservación | T2 sin impuestos = hoy | T3 base de reteIVA | T4 P&L intacto | T5 balance ×4 caminos | T6 reversión | T7 sin flag | T8 permiso | T9 por línea | T10 statement | T11 dueño único | G pantalla |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| P1 el IVA no acredita al cliente | al menos | — | — | — | al menos | — | — | — | — | al menos | — | — |
+| P2 la retención suma en vez de restar | al menos | — | — | — | al menos | — | — | — | — | al menos | — | — |
+| P3 reteIVA sobre el subtotal | — | — | **cae** | — | — | — | — | — | — | — | — | — |
+| P4 el IVA entra a `total_amount` | — | — | — | al menos | — | — | — | — | — | — | — | — |
+| P5 la regla nueva del clasificador no se aplica | — | — | — | — | **al menos** | — | — | — | — | — | — | — |
+| P5b la regla se aplica solo en el clasificador vivo | — | — | — | — | **cae, y solo en el as-of** | — | — | — | — | — | — | — |
+| P6 la reversión no revierte | — | — | — | — | — | **cae** | — | — | — | al menos | — | — |
+| P7 sin bandera el payload pasa | — | al menos | — | — | — | — | **cae** | — | — | — | — | — |
+| P8 el permiso cambia a solo lectura | — | — | — | — | — | — | — | **cae** | — | — | — | — |
+| P9 el IVA se precalcula sobre el total | — | — | — | — | — | — | — | — | **cae** | — | — | — |
+| P10 el statement no emite el evento | — | — | — | — | — | — | — | — | — | **cae** | — | — |
+| P11 la venta derivada acepta impuestos | — | — | — | — | — | — | — | — | — | — | **cae** | — |
+| P12 el formulario compartido pide impuestos sin bandera | — | — | — | — | — | — | — | — | — | — | — | **cae, y solo acá** |
+
+⚠️ **C8 de QA, y es la regla que me salté dos veces en #111**: las filas que viven en el camino compartido de liquidación y saldos se predicen como **"al menos estos"**, nunca "y solo". Solo P12 lleva *"y solo acá"*, porque es pantalla y no hay otra vía que la toque.
+
+**T10 es el que QA exigió y faltaba (C4)**: el cliente y cada entidad ganan movimientos de saldo que **no son `MoneyMovement`**. Si el estado de cuenta no emite sus eventos, el saldo corrido deja de cerrar contra el saldo vivo, que es el invariante de #55 — y fue exactamente el bloqueante de QA en #93 con las retenciones de compra. Se prueba en **las dos superficies**: el estado de cuenta del CLIENTE y el de una ENTIDAD de impuestos.
+
+**T5 recorre los CUATRO caminos**: Balance General y Detallado, vivo y a fecha de corte. Son dos clasificadores distintos, y P5b existe justamente para que corregir uno solo no pase en verde.
 
 **T8 se escribe con el control positivo de #111**: un rol con lectura y sin gestión, que debe **leer en 200** antes de que se le niegue la escritura. Sin ese 200, el 403 puede venir de la bandera y el test no prueba el permiso.
 
@@ -163,7 +212,7 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 
 | Gate | Por qué |
 |---|---|
-| **Golden ×3 organizaciones** | **Gate duro.** El saldo de terceros y el balance cambian de forma. Control positivo obligatorio: se declara **antes** cuántas claves aditivas se esperan y en qué capturas, y una prueba de vida que demuestre que los dos puertos corren códigos distintos (#110) |
+| **Golden ×3 organizaciones** | **Gate duro, y desde D4 lo es POR CÓDIGO y no solo por forma**: `reports.py` cambia. **C7 declarado antes de correr**: para Costa, Biogreen y Meta se esperan **0 diffs y 0 claves aditivas** — nada de esto les llega y ninguna respuesta compartida gana un campo. Como #110 demostró que ese resultado **no distingue** "no rompió nada" de "comparé viejo contra juntos", el control positivo es obligatorio y es contra **SAC**: una entidad de impuestos a favor cae en la sección nueva en el puerto nuevo y en Gastos Prepagados en el viejo. Más la prueba de vida escrita en el log de que los dos puertos corren códigos distintos |
 | Suite completa a archivo | con `EXIT` dentro del bloque y mtime sobre los cinco directorios, excluyendo `__pycache__` |
 | Parity check a archivo | hay migración nueva |
 | Plantado de los 10 defectos | matriz commiteada antes, cierre por sha256 |
