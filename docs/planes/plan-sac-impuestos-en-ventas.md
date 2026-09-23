@@ -1,9 +1,10 @@
 # Plan — IVA y retenciones en lo que SAC factura (CC-013 / Q-41)
 
-**Estado:** v1.3, con GO condicionado de QA. Nada construido todavía.
+**Estado:** v1.4, con **GO para construir**. Nada construido todavía.
 **v1.1** corrigió un error mío en D4, la única afirmación que el plan hacía como medida.
 **v1.2** especifica la regla nueva, que era el centro del ciclo y no estaba escrita, y corrige una conclusión mía que contradecía su propia razón (C10–C13).
 **v1.3** incorpora las cuatro condiciones del GO (C14–C17): borra el párrafo que había quedado contradiciendo a D4c, reconoce que sí hay esquema compartido y lo trata como tal, agrega los guards de la categoría de sistema y nombra el loader que cambia. De paso corrige una **quinta** afirmación mía que tampoco era cierta.
+**v1.4** suma los tres agregados del GO (A1–A3), declara el `behavior_type` de la categoría y corrige el nombre del código de sistema. Se commitea **antes** de plantar nada.
 **Base:** `1327d32` (develop, #111).
 **Evidencia:** dos facturas reales que Johana envió el 2026-09-22, extraídas y verificadas al centavo.
 
@@ -132,9 +133,20 @@ Las entidades de impuestos nacerían de sistema (`retention_entities.py:87`), as
 
 La v1.1 decidía *corregir el clasificador* sin decir **cómo reconoce** la entidad ni **a qué sección** la manda. Las dos cosas deciden el ciclo.
 
-**Reconocimiento: por código, nunca por texto.** `third_party_categories` gana `system_code` (nullable, índice), y las entidades de impuestos se asignan a una categoría con `system_code='tax_advance'`. Es el patrón de **#58**, que eligió `system_code` en vez del nombre justamente porque un nombre es renombrable; y el repo ya tiene un caso que clasifica por texto —`"obligaci"` en el nombre de la categoría— que no conviene imitar.
+**Reconocimiento: por código, nunca por texto.** `third_party_categories` gana `system_code` (nullable), y las entidades de impuestos se asignan a la categoría con `system_code='taxes'`. Es el patrón de **#58**, que eligió `system_code` en vez del nombre justamente porque un nombre es renombrable; y el repo ya tiene un caso que clasifica por texto —`"obligaci"` en el nombre de la categoría— que no conviene imitar.
 
-🔴 **Un solo predicado, no tres expresiones escritas a mano.** Helper `_is_tax_advance(tp, category_codes)` usado en los **tres** consumidores: `_classify_third_party` (:2352), `_classify_tp_by_balance` (:3094) y el panel de Dinero Inactivo (:416). Si fueran tres copias, P5b solo atraparía que **falte** una, no que **diverjan**, que es el modo de falla más difícil de ver.
+⚠️ **El código se llama `taxes`, no `tax_advance`** (corrección de nomenclatura de v1.4, no de diseño). Una **sola** categoría alberga las dos clases de entidad, la que debe y la que tiene a favor, y el **signo** decide la sección: el `bal > 0` ya está en el contexto de los tres consumidores, así que el IVA por pagar nunca llega a la rama de activos. Un código llamado `tax_advance` sobre una categoría que también contiene el IVA por pagar **miente al que lo lea después**. Regla: *el código nombra lo que la categoría ES, no el efecto que dispara.* La sección del balance sí se llama `tax_advances`, porque eso es lo que el contador lee ahí.
+
+🔴 **A1 — la unicidad no se documenta, se hace imposible.** #58 dejó escrito que dos filas con el mismo código revientan con `MultipleResultsFound` y ahí quedó, como advertencia. Acá va un **índice único parcial** `(organization_id, system_code) WHERE system_code IS NOT NULL`: en las seis organizaciones que no son SAC todas las filas son `NULL`, así que el índice no las toca, y la segunda fila con el mismo código **no se puede insertar**. El get-or-create busca **por código**, nunca por nombre. Fila P propia.
+
+**`behavior_type = 'liability'`** (QA pidió declararlo), y esa elección paga dos cosas gratis, verificadas en `ThirdPartyFormDialog.tsx`:
+
+- **Ya está oculta del multi-select**: `HIDDEN_BEHAVIORS = ["liability", "provision"]` (:90) — no hay que agregar lógica nueva al diálogo, y el tercero aparece con el copy *"se administra desde su módulo correspondiente"* (:117/:123). Sin esto, la pantalla ofrecería una categoría que el servidor rechaza, que es la clase de defecto de #97 y #104.
+- **Es el precedente de #75**, donde la categoría "Retenciones" de compras ya nace `liability`.
+
+⚠️ **Consecuencia declarada, no resuelta acá**: una entidad a favor es `liability` + sistema, así que aparece en el selector de **Pago de pasivo** (`useLiabilities(includeSystem=true)`, W5 de #78). Pagarle a un anticipo de impuestos no tiene sentido y aumentaría el saldo a favor. **No bloquea** porque el nombre de la entidad dice "a Favor" y porque filtrarlo es el mismo predicado en una línea; se decide con Daniel al ver la pantalla.
+
+🔴 **Un solo predicado, no tres expresiones escritas a mano.** Helper `_is_tax_entity(tp, category_codes)` usado en los **tres** consumidores: `_classify_third_party` (:2352), `_classify_tp_by_balance` (:3094) y el panel de Dinero Inactivo (:416). Si fueran tres copias, P5b solo atraparía que **falte** una, no que **diverjan**, que es el modo de falla más difícil de ver.
 
 **Sección: `tax_advances`, nueva.** Reusar `liability_advances` haría que el balance diga *"anticipos de pasivos"*, que no es lo que el contador espera leer.
 
@@ -165,7 +177,7 @@ Por eso la exclusión del panel se **amplía** con el mismo predicado de D4b, y 
 
 ### D4d — La categoría de impuestos es de sistema, y se defiende (C16 de QA)
 
-#58 le puso **cuatro** guards a la unidad de negocio de sistema. Esta categoría necesita los suyos, porque hoy **cualquier usuario asigna categorías** desde el formulario de terceros (#37, multi-select). Sin guard, ponerle a un proveedor normal la categoría con `system_code='tax_advance'` manda su saldo a favor a la sección de impuestos **y lo saca del panel de cobro**, las dos cosas en silencio.
+#58 le puso **cuatro** guards a la unidad de negocio de sistema. Esta categoría necesita los suyos, porque hoy **cualquier usuario asigna categorías** desde el formulario de terceros (#37, multi-select). Sin guard, ponerle a un proveedor normal la categoría con `system_code='taxes'` manda su saldo a favor a la sección de impuestos **y lo saca del panel de cobro**, las dos cosas en silencio.
 
 **Lo medido primero, porque cambia el diseño del guard:**
 
@@ -176,7 +188,12 @@ Por eso la exclusión del panel se **amplía** con el mismo predicado de D4b, y 
 | Desactivar la categoría por `PATCH` | `is_active` **sí** se puede cambiar | **sí** |
 | Eliminar la categoría | `delete` bloquea con terceros asignados, pero **no antes** de la primera venta con retención | **sí** |
 | Renombrarla | libre | **no**, y es deliberado: el reconocimiento es por código (#58) |
-| Escribir `system_code` a mano | no se expone en los schemas de create ni update | no — queda así |
+| Escribir `system_code` a mano | no se expone en los schemas de create ni update | no — pero **sí test** (A2) |
+| Reparentar la categoría (`parent_id`) | `ThirdPartyCategoryUpdate` **sí** lo expone | **sí** (A3) |
+
+**A2 — la protección por ausencia se fija con un test.** Verificado: `ThirdPartyCategoryCreate` no declara `model_config` y `Update` solo trae `from_attributes`, o sea que **ninguno** tiene `extra="forbid"` y Pydantic **ignora el campo en silencio**. Eso hoy alcanza, pero es una propiedad que nadie enunció y que se pierde el día que alguien agregue `system_code` al schema. El test manda `system_code='taxes'` por `POST` y por `PATCH` y exige que la fila quede en `NULL`: así la ausencia deja de ser un accidente y pasa a ser un invariante que revienta si cambia.
+
+**A3 — reparentar se bloquea junto con desactivar.** No rompe la clasificación, que va por código, pero **cambia el `display_name`** de la categoría en el balance y en el estado de cuenta, y una categoría de sistema no cuelga de otra: es raíz por definición. Renombrar **sí** se permite, que es exactamente la asimetría de #58 y la razón de ser del código.
 
 🔴 **El guard tiene que ser SIMÉTRICO, y eso lo decide un detalle de implementación.** `_sync_category_assignments` **borra todas las asignaciones y las recrea**. Entonces hay dos formas de romper la clasificación y las dos pasan por la misma línea:
 
@@ -188,6 +205,10 @@ Se rechazan las dos, con `422` que explica. Nada de conservar la asignación por
 🟢 **El flujo legítimo no pasa por el guard, y eso es estructura y no suerte:** `retention_entities.py:109` crea la asignación **directo**, sin `_sync_category_assignments`. Mismo reparto que #58, donde la unidad de sistema se siembra en `create_organization` y los guards viven en los puntos de entrada del usuario.
 
 ⚠️ **El test tiene que probar las dos mitades**, y esa es la parte que QA subrayó: que el usuario **no** pueda asignarla **y** que la entidad nacida del flujo de impuestos **sí** la tenga. Sin la segunda mitad, un guard que rechace absolutamente todo pasa en verde — es el control positivo de #111 aplicado acá.
+
+🟢 **Y el guard no estorba la edición normal, medido en el diálogo**: `ThirdPartyFormDialog` inicializa `categoryIds` con **todas** las categorías del tercero, incluidas las ocultas (:59), y las devuelve enteras al guardar (:76). O sea que editarle el teléfono a una entidad de impuestos manda la categoría de vuelta sin quitarla → el delta es vacío → pasa. **La mitad positiva del test usa ese mismo payload**, el que arma el diálogo, y no uno inventado: un test que mande `category_ids` sin la categoría probaría el rechazo, no la convivencia.
+
+🟢 **Dato que ayuda a la robustez**: el loader **no filtra categorías por `is_active`** (verificado con QA), así que una categoría de impuestos desactivada a mano seguiría clasificando bien. El guard de `is_active` se mantiene igual, pero por claridad de la configuración, no porque el balance dependa de él.
 
 ### D5 — La base se declara, no se asume
 `base_amount` se persiste siempre, y **cada tipo dice sobre qué se aplica**: retefuente e ICA sobre el subtotal, reteIVA sobre el IVA. El precálculo del frontend usa la base correcta.
@@ -256,31 +277,36 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 
 **Se commitea antes de plantar nada.** La columna de lo esperado sale de ese commit y no se reescribe (#105). ⚠️ Los defectos que vivan en vía compartida se predicen como *"al menos estos"*, que es la regla que me salté dos veces en #111.
 
-| | T1 conservación | T2 sin impuestos = hoy | T3 base de reteIVA | T4 P&L intacto | T5 balance ×4 caminos | T6 reversión | T7 sin flag | T8 permiso | T9 por línea | T10 statement | T11 dueño único | T12 fuera del panel | T13 guard de la categoría | G pantalla |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| P1 el IVA no acredita al cliente | al menos | — | — | — | al menos | — | — | — | — | al menos | — | — | — | — |
-| P2 la retención suma en vez de restar | al menos | — | — | — | al menos | — | — | — | — | al menos | — | — | — | — |
-| P3 reteIVA sobre el subtotal | — | — | **cae** | — | — | — | — | — | — | — | — | — | — | — |
-| P4 el IVA entra a `total_amount` | — | — | — | al menos | — | — | — | — | — | — | — | — | — | — |
-| P5 la regla nueva del clasificador no se aplica | — | — | — | — | **al menos** | — | — | — | — | — | — | — | — | — |
-| P5b la regla se aplica solo en el clasificador vivo | — | — | — | — | **cae, y solo en el as-of** | — | — | — | — | — | — | — | — | — |
-| P6 la reversión no revierte | — | — | — | — | — | **cae** | — | — | — | al menos | — | — | — | — |
-| P7 sin bandera el payload pasa | — | al menos | — | — | — | — | **cae** | — | — | — | — | — | — | — |
-| P8 el permiso cambia a solo lectura | — | — | — | — | — | — | — | **cae** | — | — | — | — | — | — |
-| P9 el IVA se precalcula sobre el total | — | — | — | — | — | — | — | — | **cae** | — | — | — | — | — |
-| P10 el statement no emite el evento | — | — | — | — | — | — | — | — | — | **cae** | — | — | — | — |
-| P11 la venta derivada acepta impuestos | — | — | — | — | — | — | — | — | — | — | **cae** | — | — | — |
-| P13 la entidad de impuestos aparece en el panel de cobro | — | — | — | — | — | — | — | — | — | — | — | **cae** | — | — |
-| P14 el reconocimiento va por nombre y alguien renombra | — | — | — | — | **al menos** | — | — | — | — | — | — | — | — | — |
-| P15 el guard de la categoría de sistema no está | — | — | — | — | — | — | — | — | — | — | — | — | **al menos** | — |
-| P15b el guard rechaza también la vía del sistema | — | — | — | — | al menos | — | — | — | — | — | — | — | **al menos** | — |
-| P12 el formulario compartido pide impuestos sin bandera | — | — | — | — | — | — | — | — | — | — | — | — | — | **cae, y solo acá** |
+| | T1 conservación | T2 sin impuestos = hoy | T3 base de reteIVA | T4 P&L intacto | T5 balance ×4 caminos | T6 reversión | T7 sin flag | T8 permiso | T9 por línea | T10 statement | T11 dueño único | T12 fuera del panel | T13 guard de asignación | T14 categoría blindada | G pantalla |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| P1 el IVA no acredita al cliente | al menos | — | — | — | al menos | — | — | — | — | al menos | — | — | — | — | — |
+| P2 la retención suma en vez de restar | al menos | — | — | — | al menos | — | — | — | — | al menos | — | — | — | — | — |
+| P3 reteIVA sobre el subtotal | — | — | **cae** | — | — | — | — | — | — | — | — | — | — | — | — |
+| P4 el IVA entra a `total_amount` | — | — | — | al menos | — | — | — | — | — | — | — | — | — | — | — |
+| P5 la regla nueva del clasificador no se aplica | — | — | — | — | **al menos** | — | — | — | — | — | — | — | — | — | — |
+| P5b la regla se aplica solo en el clasificador vivo | — | — | — | — | **cae, y solo en el as-of** | — | — | — | — | — | — | — | — | — | — |
+| P6 la reversión no revierte | — | — | — | — | — | **cae** | — | — | — | al menos | — | — | — | — | — |
+| P7 sin bandera el payload pasa | — | al menos | — | — | — | — | **cae** | — | — | — | — | — | — | — | — |
+| P8 el permiso cambia a solo lectura | — | — | — | — | — | — | — | **cae** | — | — | — | — | — | — | — |
+| P9 el IVA se precalcula sobre el total | — | — | — | — | — | — | — | — | **cae** | — | — | — | — | — | — |
+| P10 el statement no emite el evento | — | — | — | — | — | — | — | — | — | **cae** | — | — | — | — | — |
+| P11 la venta derivada acepta impuestos | — | — | — | — | — | — | — | — | — | — | **cae** | — | — | — | — |
+| P13 la entidad de impuestos aparece en el panel de cobro | — | — | — | — | — | — | — | — | — | — | — | **cae** | — | — | — |
+| P14 el reconocimiento va por nombre y alguien renombra | — | — | — | — | **al menos** | — | — | — | — | — | — | — | — | — | — |
+| P15 el guard de la categoría de sistema no está | — | — | — | — | — | — | — | — | — | — | — | — | **al menos** | — | — |
+| P15b el guard rechaza también la vía del sistema | — | — | — | — | al menos | — | — | — | — | — | — | — | **al menos** | — | — |
+| P16 sin el índice único, dos categorías con el mismo código | — | — | — | — | al menos | — | — | — | — | — | — | — | — | **al menos** | — |
+| P17 `system_code` se vuelve escribible desde la API | — | — | — | — | — | — | — | — | — | — | — | — | — | **al menos** | — |
+| P18 el guard del PATCH no cubre `parent_id` | — | — | — | — | — | — | — | — | — | — | — | — | — | **al menos** | — |
+| P12 el formulario compartido pide impuestos sin bandera | — | — | — | — | — | — | — | — | — | — | — | — | — | — | **cae, y solo acá** |
 
 ⚠️ **C8 de QA, y es la regla que me salté dos veces en #111**: las filas que viven en el camino compartido de liquidación y saldos se predicen como **"al menos estos"**, nunca "y solo". Solo P12 lleva *"y solo acá"*, porque es pantalla y no hay otra vía que la toque.
 
 **T10 es el que QA exigió y faltaba (C4)**: el cliente y cada entidad ganan movimientos de saldo que **no son `MoneyMovement`**. Si el estado de cuenta no emite sus eventos, el saldo corrido deja de cerrar contra el saldo vivo, que es el invariante de #55 — y fue exactamente el bloqueante de QA en #93 con las retenciones de compra. Se prueba en **las dos superficies**: el estado de cuenta del CLIENTE y el de una ENTIDAD de impuestos.
 
 **T5 recorre los CUATRO caminos**: Balance General y Detallado, vivo y a fecha de corte. Son dos clasificadores distintos, y P5b existe justamente para que corregir uno solo no pase en verde.
+
+**T14 blinda la categoría misma** (A1–A3): la segunda fila con el mismo código **no entra** (índice único parcial), `system_code` mandado por la API queda en `NULL`, y el `PATCH` no la desactiva ni la reparenta — pero **sí la renombra**, que es la asimetría de #58 y la razón de que el reconocimiento sea por código.
 
 **T13 son dos mitades y las dos hacen falta (D4d)**: que un usuario **no** pueda asignar ni quitar la categoría de impuestos desde el formulario de terceros (`422` en las dos direcciones, porque `_sync_category_assignments` borra y recrea), **y** que la entidad nacida del flujo de impuestos **sí** la tenga. P15b existe por la segunda mitad: un guard escrito de más — que bloquee también a `retention_entities.py` — dejaría al ciclo sin poder crear sus propias entidades, y sin esa fila el plantado no lo distingue de un guard correcto.
 
@@ -296,19 +322,20 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 | Suite completa a archivo | con `EXIT` dentro del bloque y mtime sobre los cinco directorios, excluyendo `__pycache__` |
 | Parity check a archivo | hay dos migraciones nuevas: `document_taxes` y la columna de D4b |
 | **Smoke contra la base ya migrada, con `POST` real a categorías** | **C15**: la columna nueva vive en una tabla de las siete organizaciones, y un `server_default` que falte en la migración **no lo ve ningún otro gate** — la base de test nace de los modelos y la de producción de las migraciones (#100) |
-| **Plantado de los 17 defectos** | matriz commiteada antes, cierre por sha256 y respaldo **por ruta completa**, nunca por basename (#106) |
-| Pantalla | las dos vías, con y sin impuestos, **y una organización que no sea SAC** para ver que el formulario no cambió |
+| **Plantado de los 20 defectos** | matriz commiteada antes, cierre por sha256 y respaldo **por ruta completa**, nunca por basename (#106) |
+| Pantalla | las dos vías, con y sin impuestos, **y una organización que no sea SAC** para ver que el formulario no cambió. Además: el selector de **Pago de pasivo**, donde las entidades a favor van a aparecer por ser `liability` + sistema (ver D4b) — es lo que Daniel decide ahí mismo |
 
 ---
 
 ## 8. Fuera de alcance, declarado
 
 1. 🔴 **Cómo se SALDA un anticipo de impuestos (C12 de QA, y Daniel tiene que saberlo).** Contablemente se cruza contra el IVA por pagar al presentar la declaración. Ese cruce **hoy no se puede registrar**: `money_movement.py:902` y `:909` rechazan con 400 cualquier traslado entre terceros donde participe una entidad de sistema, y el pago normal solo sirve para el lado en contra. Consecuencia declarada: **este ciclo crea saldos a favor que el sistema no tiene cómo cerrar, y van a crecer indefinidamente.** Queda fuera de alcance porque abrir el cruce toca una validación compartida por todas las organizaciones, pero es deuda con fecha de vencimiento: el día que SAC presente su primera declaración, la va a necesitar.
-2. **El IVA descontable en compras.** Si un proveedor le factura IVA a SAC es un activo, y hoy no existe. Nadie lo pidió.
-3. **Emitir la factura electrónica.** D1.
-4. **Conciliar contra Siigo.** El número de factura amarra los dos, pero nadie compara los totales. Si divergen, no hay alarma.
-5. **Corregir las tres tarifas sembradas.** Se ajustan desde la pantalla y el sembrado no las pisa.
-6. **El resto de las organizaciones.** Todo detrás de la bandera.
+2. **Filtrar las entidades a favor del selector de Pago de pasivo.** Aparecen ahí por ser `liability` + sistema (D4b). Pagarle a un anticipo de impuestos no tiene sentido y **aumentaría** el saldo a favor. No bloquea: el nombre dice *"a Favor"* y filtrarlo es el mismo predicado en una línea. Se mira en la pantalla y lo decide Daniel.
+3. **El IVA descontable en compras.** Si un proveedor le factura IVA a SAC es un activo, y hoy no existe. Nadie lo pidió.
+4. **Emitir la factura electrónica.** D1.
+5. **Conciliar contra Siigo.** El número de factura amarra los dos, pero nadie compara los totales. Si divergen, no hay alarma.
+6. **Corregir las tres tarifas sembradas.** Se ajustan desde la pantalla y el sembrado no las pisa.
+7. **El resto de las organizaciones.** Todo detrás de la bandera.
 
 ---
 
