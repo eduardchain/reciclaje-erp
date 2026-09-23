@@ -148,6 +148,8 @@ La v1.1 decidía *corregir el clasificador* sin decir **cómo reconoce** la enti
 
 🔴 **Un solo predicado, no tres expresiones escritas a mano.** Helper `_is_tax_entity(tp, category_codes)` usado en los **tres** consumidores: `_classify_third_party` (:2352), `_classify_tp_by_balance` (:3094) y el panel de Dinero Inactivo (:416). Si fueran tres copias, P5b solo atraparía que **falte** una, no que **diverjan**, que es el modo de falla más difícil de ver.
 
+🟢 **Declarado para que nadie lo lea después como defecto**: el día que el IVA por pagar quede con saldo **a favor** —SAC le pagó de más a la DIAN, o pagó por adelantado— va a caer en `tax_advances`. Es lo correcto: un saldo a favor de IVA es un activo. La sección no depende de qué entidad es sino de para qué lado está el saldo, y esa es justamente la razón por la que una sola categoría alcanza.
+
 **Sección: `tax_advances`, nueva.** Reusar `liability_advances` haría que el balance diga *"anticipos de pasivos"*, que no es lo que el contador espera leer.
 
 **Qué loader cambia, y por qué el helper único no alcanza solo (C17 de QA).** Medido: `_load_tp_behavior_map` (`reports.py:222`) devuelve **nombres** de categoría, no códigos — `(tp_behaviors, tp_cat_names, tp_cat_by_behavior)` —, así que un helper único alimentado con lo que hay hoy no puede reconocer nada por código.
@@ -298,6 +300,7 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 | P16 sin el índice único, dos categorías con el mismo código | — | — | — | — | al menos | — | — | — | — | — | — | — | — | **al menos** | — |
 | P17 `system_code` se vuelve escribible desde la API | — | — | — | — | — | — | — | — | — | — | — | — | — | **al menos** | — |
 | P18 el guard del PATCH no cubre `parent_id` | — | — | — | — | — | — | — | — | — | — | — | — | — | **al menos** | — |
+| P19 la regla de impuestos se evalúa FUERA de la rama del signo | — | — | — | — | **al menos** | — | — | — | — | — | — | — | — | — | — |
 | P12 el formulario compartido pide impuestos sin bandera | — | — | — | — | — | — | — | — | — | — | — | — | — | — | **cae, y solo acá** |
 
 ⚠️ **C8 de QA, y es la regla que me salté dos veces en #111**: las filas que viven en el camino compartido de liquidación y saldos se predicen como **"al menos estos"**, nunca "y solo". Solo P12 lleva *"y solo acá"*, porque es pantalla y no hay otra vía que la toque.
@@ -305,6 +308,8 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 **T10 es el que QA exigió y faltaba (C4)**: el cliente y cada entidad ganan movimientos de saldo que **no son `MoneyMovement`**. Si el estado de cuenta no emite sus eventos, el saldo corrido deja de cerrar contra el saldo vivo, que es el invariante de #55 — y fue exactamente el bloqueante de QA en #93 con las retenciones de compra. Se prueba en **las dos superficies**: el estado de cuenta del CLIENTE y el de una ENTIDAD de impuestos.
 
 **T5 recorre los CUATRO caminos**: Balance General y Detallado, vivo y a fecha de corte. Son dos clasificadores distintos, y P5b existe justamente para que corregir uno solo no pase en verde.
+
+🔴 **Y T5 afirma SECCIONES, no totales** (P19). Con una sola categoría, el IVA por pagar **es miembro** de `taxes`: si el helper se llama antes del `bal > 0` —que es la forma natural de escribir *"la regla nueva va primero"*— ese pasivo aterriza en `tax_advances` como un **activo negativo**. Ningún test de totales lo ve: el patrimonio es residual en los cuatro caminos (#110), así que activos −x y pasivos −x dejan el patrimonio igual y la conservación de T1 cuadra lo mismo. Es el `0 == 0` de #98 con otra cara. Los asserts son dos y explícitos: el IVA por pagar **está en** `liability_debt`, y `tax_advances` **no lo contiene**.
 
 **T14 blinda la categoría misma** (A1–A3): la segunda fila con el mismo código **no entra** (índice único parcial), `system_code` mandado por la API queda en `NULL`, y el `PATCH` no la desactiva ni la reparenta — pero **sí la renombra**, que es la asimetría de #58 y la razón de que el reconocimiento sea por código.
 
@@ -322,7 +327,7 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 | Suite completa a archivo | con `EXIT` dentro del bloque y mtime sobre los cinco directorios, excluyendo `__pycache__` |
 | Parity check a archivo | hay dos migraciones nuevas: `document_taxes` y la columna de D4b |
 | **Smoke contra la base ya migrada, con `POST` real a categorías** | **C15**: la columna nueva vive en una tabla de las siete organizaciones, y un `server_default` que falte en la migración **no lo ve ningún otro gate** — la base de test nace de los modelos y la de producción de las migraciones (#100) |
-| **Plantado de los 20 defectos** | matriz commiteada antes, cierre por sha256 y respaldo **por ruta completa**, nunca por basename (#106) |
+| **Plantado de los 21 defectos** | matriz commiteada antes, cierre por sha256 y respaldo **por ruta completa**, nunca por basename (#106) |
 | Pantalla | las dos vías, con y sin impuestos, **y una organización que no sea SAC** para ver que el formulario no cambió. Además: el selector de **Pago de pasivo**, donde las entidades a favor van a aparecer por ser `liability` + sistema (ver D4b) — es lo que Daniel decide ahí mismo |
 
 ---
