@@ -1,7 +1,8 @@
 # Plan — IVA y retenciones en lo que SAC factura (CC-013 / Q-41)
 
-**Estado:** v1.1, para segunda revisión de QA. Nada construido.
-**v1.1 corrige un error mío en D4, que era la única afirmación que el plan hacía como medida, y cierra C3–C9.**
+**Estado:** v1.2, para tercera revisión de QA. Nada construido.
+**v1.1** corrigió un error mío en D4, la única afirmación que el plan hacía como medida.
+**v1.2** especifica la regla nueva, que era el centro del ciclo y no estaba escrita, y corrige una conclusión mía que contradecía su propia razón (C10–C13).
 **Base:** `1327d32` (develop, #111).
 **Evidencia:** dos facturas reales que Johana envió el 2026-09-22, extraídas y verificadas al centavo.
 
@@ -102,6 +103,8 @@ Las entidades de impuestos nacerían de sistema (`retention_entities.py:87`), as
 
 1. **Contablemente es otra cuenta.** En el PUC, la retención que nos practican es anticipo de impuestos (1355) y los gastos prepagados son otra cosa. El balance que Johana le muestra a su contador tiene que decirlo bien. La retención que SAC practica sí es pasivo (2365/2367/2368) y el IVA generado también (2408).
 2. **Medido: no mueve nada de las otras empresas.** Hoy solo hay **dos** entidades de sistema con saldo a favor en las tres organizaciones, y las dos son prepagos legítimos: un seguro anual de bodegas y una cartera perdida. Ninguna es de impuestos. Por eso la regla nueva es específica y no invierte la existente.
+
+   **De dónde salió el dato (C13 de QA)**: de la base de **desarrollo, puerto 5434**, que tiene réplica de las organizaciones cliente con movimientos hasta el **17 de septiembre de 2026**. **Producción no se consultó** — está prohibido y no se hizo. Si el dato se quiere fresco al día del deploy, se vuelve a medir contra una réplica nueva, no contra producción.
 3. El marcador de sistema **protege** a las entidades de aparecer en selectores y de ser editadas o desactivadas. La alternativa (quitarles ese marcador) las dejaba sueltas en Maestros.
 
 | Concepto | Qué es | Entidad | Saldo | Sección |
@@ -114,6 +117,33 @@ Las entidades de impuestos nacerían de sistema (`retention_entities.py:87`), as
 ⚠️ Las entidades de venta son **distintas** de las de compra: la retefuente que SAC le practica a un chatarrero es pasivo y la que Willard le practica a SAC es activo. Compartir entidad las netearía, y QA confirmó que netearlas es un error contable real, no una preferencia.
 
 ⚠️ **El panel de Dinero Inactivo (#68) excluye `prepaid_expenses` a propósito.** Con la corrección, las retenciones a favor quedan fuera de esa exclusión, y eso **es lo que se quiere**: a la DIAN no se le persigue un cobro, la retención se descuenta en la declaración. Queda declarado para que nadie lo lea como un olvido.
+
+### D4b — Cómo se reconoce una entidad de impuestos, y a dónde va (C10 de QA)
+
+La v1.1 decidía *corregir el clasificador* sin decir **cómo reconoce** la entidad ni **a qué sección** la manda. Las dos cosas deciden el ciclo.
+
+**Reconocimiento: por código, nunca por texto.** `third_party_categories` gana `system_code` (nullable, índice), y las entidades de impuestos se asignan a una categoría con `system_code='tax_advance'`. Es el patrón de **#58**, que eligió `system_code` en vez del nombre justamente porque un nombre es renombrable; y el repo ya tiene un caso que clasifica por texto —`"obligaci"` en el nombre de la categoría— que no conviene imitar.
+
+🔴 **Un solo predicado, no tres expresiones escritas a mano.** Helper `_is_tax_advance(tp, category_codes)` usado en los **tres** consumidores: `_classify_third_party` (:2352), `_classify_tp_by_balance` (:3094) y el panel de Dinero Inactivo (:416). Si fueran tres copias, P5b solo atraparía que **falte** una, no que **diverjan**, que es el modo de falla más difícil de ver.
+
+**Sección: `tax_advances`, nueva.** Reusar `liability_advances` haría que el balance diga *"anticipos de pasivos"*, que no es lo que el contador espera leer.
+
+**La superficie real, enumerada por grep y no de memoria** (es lo que QA pidió medir):
+
+| Dónde | Cuánto |
+|---|---|
+| `services/reports.py` y `schemas/reports.py` | 16 apariciones de `prepaid_expenses`: buckets del General vivo y as-of, los dos del Detallado, los totales de activos y el schema |
+| Frontend | 5 archivos: `types/reports.ts`, `BalanceSheetPage`, `BalanceDetailedPage`, `excelExport`, `pdfExport` |
+
+⚠️ **Esto corrige §7**: una sección nueva es una **clave aditiva** en `BalanceSheetAssets`, así que las tres organizaciones cliente la reciben en `0.0`. El golden ya **no** espera *"0 diffs y 0 aditivas"*.
+
+### D4c — La entidad de impuestos sigue FUERA del panel de cobro (C11 de QA)
+
+🔴 **La v1.1 concluía al revés de su propia razón.** Escribí *"a la DIAN no se le persigue un cobro, la retención se descuenta en la declaración"* y de ahí saqué que **entrara** al panel de Dinero Inactivo. Es exactamente lo contrario: esa razón es el argumento para que **siga excluida**.
+
+Verificado: el panel usa el **mismo** clasificador (`reports.py:416`) y su docstring dice que excluye los prepagados *"entidades de sistema, no perseguibles"*. Al mover la retención a una sección activa, aparecería como saldo a cobrar con su semáforo de días, del tipo *"ReteFuente a Favor — 60 días"*, invitando a llamar a la DIAN.
+
+Por eso la exclusión del panel se **amplía** con el mismo predicado de D4b, y hay fila P propia con su test: *la entidad de impuestos aparece en el panel*.
 
 ### D5 — La base se declara, no se asume
 `base_amount` se persiste siempre, y **cada tipo dice sobre qué se aplica**: retefuente e ICA sobre el subtotal, reteIVA sobre el IVA. El precálculo del frontend usa la base correcta.
@@ -182,7 +212,7 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 
 **Se commitea antes de plantar nada.** La columna de lo esperado sale de ese commit y no se reescribe (#105). ⚠️ Los defectos que vivan en vía compartida se predicen como *"al menos estos"*, que es la regla que me salté dos veces en #111.
 
-| | T1 conservación | T2 sin impuestos = hoy | T3 base de reteIVA | T4 P&L intacto | T5 balance ×4 caminos | T6 reversión | T7 sin flag | T8 permiso | T9 por línea | T10 statement | T11 dueño único | G pantalla |
+| | T1 conservación | T2 sin impuestos = hoy | T3 base de reteIVA | T4 P&L intacto | T5 balance ×4 caminos | T6 reversión | T7 sin flag | T8 permiso | T9 por línea | T10 statement | T11 dueño único | T12 fuera del panel · G pantalla |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | P1 el IVA no acredita al cliente | al menos | — | — | — | al menos | — | — | — | — | al menos | — | — |
 | P2 la retención suma en vez de restar | al menos | — | — | — | al menos | — | — | — | — | al menos | — | — |
@@ -196,6 +226,8 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 | P9 el IVA se precalcula sobre el total | — | — | — | — | — | — | — | — | **cae** | — | — | — |
 | P10 el statement no emite el evento | — | — | — | — | — | — | — | — | — | **cae** | — | — |
 | P11 la venta derivada acepta impuestos | — | — | — | — | — | — | — | — | — | — | **cae** | — |
+| P13 la entidad de impuestos aparece en el panel de cobro | — | — | — | — | — | — | — | — | — | — | — | **cae, T12** |
+| P14 el reconocimiento va por nombre y alguien renombra | — | — | — | — | **al menos** | — | — | — | — | — | — | — |
 | P12 el formulario compartido pide impuestos sin bandera | — | — | — | — | — | — | — | — | — | — | — | **cae, y solo acá** |
 
 ⚠️ **C8 de QA, y es la regla que me salté dos veces en #111**: las filas que viven en el camino compartido de liquidación y saldos se predicen como **"al menos estos"**, nunca "y solo". Solo P12 lleva *"y solo acá"*, porque es pantalla y no hay otra vía que la toque.
@@ -212,7 +244,7 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 
 | Gate | Por qué |
 |---|---|
-| **Golden ×3 organizaciones** | **Gate duro, y desde D4 lo es POR CÓDIGO y no solo por forma**: `reports.py` cambia. **C7 declarado antes de correr**: para Costa, Biogreen y Meta se esperan **0 diffs y 0 claves aditivas** — nada de esto les llega y ninguna respuesta compartida gana un campo. Como #110 demostró que ese resultado **no distingue** "no rompió nada" de "comparé viejo contra juntos", el control positivo es obligatorio y es contra **SAC**: una entidad de impuestos a favor cae en la sección nueva en el puerto nuevo y en Gastos Prepagados en el viejo. Más la prueba de vida escrita en el log de que los dos puertos corren códigos distintos |
+| **Golden ×3 organizaciones** | **Gate duro, y desde D4 lo es POR CÓDIGO y no solo por forma**: `reports.py` cambia. 🔴 **C7 corregido en v1.2**: la sección nueva de D4b **es una clave aditiva**, así que lo que se declara antes de correr es **2 claves aditivas de valor `0.0`** — `tax_advances` en la captura del Balance General vivo y en la del corte histórico —, **0 diffs reales** y el resto byte a byte. Eso es además un **control positivo por construcción**: si esas dos claves no aparecen, el golden comparó dos códigos iguales. Se verifica antes si el Detallado emite secciones vacías; si las emite, son dos aditivas más y se declaran igual. Más el control positivo contra **SAC** (una entidad de impuestos a favor cae en la sección nueva en un puerto y en Gastos Prepagados en el otro) y la prueba de vida en el log |
 | Suite completa a archivo | con `EXIT` dentro del bloque y mtime sobre los cinco directorios, excluyendo `__pycache__` |
 | Parity check a archivo | hay migración nueva |
 | Plantado de los 10 defectos | matriz commiteada antes, cierre por sha256 |
@@ -222,11 +254,12 @@ La suma de todo da cero: lo que el cliente deja de deber es exactamente lo que S
 
 ## 8. Fuera de alcance, declarado
 
-1. **El IVA descontable en compras.** Si un proveedor le factura IVA a SAC es un activo, y hoy no existe. Nadie lo pidió.
-2. **Emitir la factura electrónica.** D1.
-3. **Conciliar contra Siigo.** El número de factura amarra los dos, pero nadie compara los totales. Si divergen, no hay alarma.
-4. **Corregir las tres tarifas sembradas.** Se ajustan desde la pantalla y el sembrado no las pisa.
-5. **El resto de las organizaciones.** Todo detrás de la bandera.
+1. 🔴 **Cómo se SALDA un anticipo de impuestos (C12 de QA, y Daniel tiene que saberlo).** Contablemente se cruza contra el IVA por pagar al presentar la declaración. Ese cruce **hoy no se puede registrar**: `money_movement.py:902` y `:909` rechazan con 400 cualquier traslado entre terceros donde participe una entidad de sistema, y el pago normal solo sirve para el lado en contra. Consecuencia declarada: **este ciclo crea saldos a favor que el sistema no tiene cómo cerrar, y van a crecer indefinidamente.** Queda fuera de alcance porque abrir el cruce toca una validación compartida por todas las organizaciones, pero es deuda con fecha de vencimiento: el día que SAC presente su primera declaración, la va a necesitar.
+2. **El IVA descontable en compras.** Si un proveedor le factura IVA a SAC es un activo, y hoy no existe. Nadie lo pidió.
+3. **Emitir la factura electrónica.** D1.
+4. **Conciliar contra Siigo.** El número de factura amarra los dos, pero nadie compara los totales. Si divergen, no hay alarma.
+5. **Corregir las tres tarifas sembradas.** Se ajustan desde la pantalla y el sembrado no las pisa.
+6. **El resto de las organizaciones.** Todo detrás de la bandera.
 
 ---
 
