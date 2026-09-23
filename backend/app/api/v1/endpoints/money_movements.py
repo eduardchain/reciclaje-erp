@@ -1244,6 +1244,109 @@ def get_by_third_party(
                  source="commission", source_id=str(comm.id), source_number=sale.sale_number,
                  **_null_ops)
 
+    # 4b. IVA y retenciones de VENTA (CC-013). Eventos sinteticos, hermanos de
+    # 2c y por la misma razon: el evento de la venta carga +subtotal al cliente
+    # pero la liquidacion lo dejo debiendo el TOTAL A PAGAR de la factura. Sin
+    # estos eventos el saldo corrido diverge del saldo vivo, que es el
+    # invariante de #55 — y fue exactamente el bloqueante de QA en #93.
+    #
+    # Se emiten en las DOS superficies: el estado de cuenta del CLIENTE y el de
+    # cada entidad "[Impuestos] X".
+    #
+    # ⚠️ El bloque va DESPUES del de ventas a proposito. Todos estos eventos
+    # empatan en la llave de orden (#96) —mismo dia, misma clase, mismo
+    # instante real, mismo numero de documento— asi que el desempate final es
+    # el ORDEN DE EMISION. Emitirlos antes pintaba el IVA encima de una venta
+    # que todavia no aparecia, con un saldo corrido que arrancaba en el IVA.
+    from sqlalchemy import func as sa_func
+
+    from app.models.document_tax import TAX_SIGN_ON_CUSTOMER, DocumentTax
+    from app.models.willard_delivery import WillardDelivery
+    from app.services.tax_entities import tax_label
+
+    def _tax_owner(tax) -> tuple:
+        """(fecha de negocio, instante, etiqueta del documento, numero) del dueno.
+
+        El dueno es la venta O la Salida de Plomo (D3: CHECK de exactamente
+        uno). En una Salida tipo venta hay dos documentos para UNA factura y el
+        impuesto cuelga de la Salida — por eso se pregunta por el dueno y no se
+        asume la venta.
+        """
+        if tax.sale_id:
+            sale = db.get(Sale, tax.sale_id)
+            if sale is None or sale.liquidated_at is None:
+                return None
+            return (sale.liquidated_at, sale.created_at, sale.date,
+                    f"Venta #{sale.sale_number}", sale.sale_number,
+                    sale.status == "cancelled")
+        delivery = db.get(WillardDelivery, tax.willard_delivery_id)
+        if delivery is None or delivery.liquidated_at is None:
+            return None
+        return (delivery.liquidated_at, delivery.created_at, delivery.date,
+                f"Salida de Plomo — {delivery.label}", delivery.delivery_number,
+                delivery.status == "annulled")
+
+    # `side` decide el signo: el cliente recibe TAX_SIGN_ON_CUSTOMER y la
+    # entidad SIEMPRE el contrario. Un solo mapa para las dos superficies.
+    tax_queries = [
+        # Lado CLIENTE: por las ventas y salidas cuyo tercero es este
+        (1, sa_select(DocumentTax)
+            .join(Sale, DocumentTax.sale_id == Sale.id)
+            .where(DocumentTax.organization_id == org_id,
+                   Sale.customer_id == third_party_id)),
+        (1, sa_select(DocumentTax)
+            .join(WillardDelivery, DocumentTax.willard_delivery_id == WillardDelivery.id)
+            .outerjoin(Sale, WillardDelivery.sale_id == Sale.id)
+            .where(DocumentTax.organization_id == org_id,
+                   sa_func.coalesce(Sale.customer_id, WillardDelivery.third_party_id)
+                   == third_party_id)),
+        # Lado ENTIDAD "[Impuestos] X"
+        (-1, sa_select(DocumentTax).where(
+            DocumentTax.organization_id == org_id,
+            DocumentTax.third_party_id == third_party_id)),
+    ]
+    seen_tax_events: set[str] = set()
+    for side, query in tax_queries:
+        for tax in db.execute(query).scalars().all():
+            owner = _tax_owner(tax)
+            if owner is None:
+                continue
+            liq_at, created_at, doc_date, doc_label, doc_number, doc_dead = owner
+            key = f"{side}-{tax.id}"
+            if key in seen_tax_events:
+                continue  # una entidad que ademas fuera el cliente
+            seen_tax_events.add(key)
+
+            direction = side * TAX_SIGN_ON_CUSTOMER[tax.tax_type]
+            label = tax_label(tax.tax_type, tax.municipality)
+            # El estado del evento sigue a la FILA (`reverted_at`), no al status
+            # del documento — es la regla que QA bloqueo en #93: un documento
+            # puede quedar vivo con filas viejas revertidas.
+            alive = tax.reverted_at is None
+            _evt(liq_at, created_at, 0,
+                 id=f"doctax-{side}-{tax.id}", date=liq_at.isoformat(),
+                 document_date=doc_date.isoformat(),
+                 event_type="document_tax",
+                 description=f"{label} {doc_label}",
+                 amount=float(tax.amount), direction=direction,
+                 status="confirmed" if alive else "cancelled",
+                 reference_number=None, movement_number=None,
+                 source="document_tax", source_id=str(tax.id),
+                 source_number=doc_number,
+                 **_null_ops)
+            if not alive:
+                verbo = "cancelada (reversa)" if doc_dead else "revertida"
+                _evt(liq_at, tax.reverted_at, 2,
+                     id=f"doctax-cancel-{side}-{tax.id}", date=liq_at.isoformat(),
+                     document_date=doc_date.isoformat(),
+                     event_type="document_tax_cancellation",
+                     description=f"{label} {doc_label} {verbo}",
+                     amount=float(tax.amount), direction=-direction,
+                     status="annulled", reference_number=None, movement_number=None,
+                     source="document_tax", source_id=str(tax.id),
+                     source_number=doc_number,
+                     **_null_ops)
+
     # 5. Doble partida — usa created_at como timestamp, Purchase/Sale para montos
     de_query = (
         sa_select(DoubleEntry)

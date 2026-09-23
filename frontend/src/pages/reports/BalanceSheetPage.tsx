@@ -82,6 +82,9 @@ export default function BalanceSheetPage() {
                 {data.assets.prepaid_expenses > 0 && (
                   <div className="flex justify-between"><span>Gastos Prepagados</span><span>{formatCurrency(data.assets.prepaid_expenses)}</span></div>
                 )}
+                {data.assets.tax_advances > 0 && (
+                  <div className="flex justify-between"><span>Anticipos de Impuestos</span><span>{formatCurrency(data.assets.tax_advances)}</span></div>
+                )}
                 {data.assets.fixed_assets > 0 && (
                   <div className="flex justify-between"><span>Activos Fijos (Neto)</span><span>{formatCurrency(data.assets.fixed_assets)}</span></div>
                 )}

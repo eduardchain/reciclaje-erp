@@ -11,7 +11,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import cast, or_, String
+from sqlalchemy import cast, or_, select, String
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,35 @@ router = APIRouter()
 # ============================================================================
 # Helper Functions
 # ============================================================================
+
+def _tax_rows(db: Session, *, sale_id=None, willard_delivery_id=None) -> list[dict]:
+    """IVA y retenciones de un documento, con el nombre de cada entidad.
+
+    Detail-only a proposito: en el listado seria un N+1 por fila. El schema lo
+    devuelve como lista vacia ahi, no como null — un campo que solo se llena en
+    un camino y en el otro dice `null` se lee como "no tiene" (trampa de #89).
+    """
+    from app.models.document_tax import DocumentTax
+    from app.models.third_party import ThirdParty
+
+    query = select(DocumentTax, ThirdParty).join(
+        ThirdParty, DocumentTax.third_party_id == ThirdParty.id
+    )
+    if sale_id is not None:
+        query = query.where(DocumentTax.sale_id == sale_id)
+    else:
+        query = query.where(DocumentTax.willard_delivery_id == willard_delivery_id)
+    return [
+        {
+            "id": tax.id, "third_party_id": tax.third_party_id,
+            "third_party_name": tp.name, "tax_type": tax.tax_type,
+            "municipality": tax.municipality, "concept": tax.concept,
+            "rate": tax.rate, "base_amount": tax.base_amount,
+            "amount": tax.amount, "reverted_at": tax.reverted_at,
+        }
+        for tax, tp in db.execute(query.order_by(DocumentTax.created_at)).all()
+    ]
+
 
 def _enrich_sale_response(sale: Sale, db: Session = None, warnings: list[str] | None = None) -> dict:
     """
@@ -351,6 +380,7 @@ async def get_sale_by_number(
     response_data["linked_payment_total"] = float(
         crud_sale.get_linked_payment_total(db, sale.id, org_context["organization_id"])
     )
+    response_data["taxes"] = _tax_rows(db, sale_id=sale.id)
     return SaleResponse(**response_data)
 
 
@@ -474,6 +504,7 @@ async def get_sale(
     response_data["linked_payment_total"] = float(
         crud_sale.get_linked_payment_total(db, sale.id, org_context["organization_id"])
     )
+    response_data["taxes"] = _tax_rows(db, sale_id=sale.id)
     return SaleResponse(**response_data)
 
 
@@ -589,6 +620,7 @@ async def liquidate_sale(
             immediate_collection=liquidate_in.immediate_collection,
             collection_account_id=liquidate_in.collection_account_id,
             liquidation_date=liquidate_in.liquidation_date,
+            taxes_data=liquidate_in.taxes,
         )
         
         db.commit()
@@ -602,6 +634,7 @@ async def liquidate_sale(
         )
         
         response_data = _enrich_sale_response(sale, db=db)
+        response_data["taxes"] = _tax_rows(db, sale_id=sale.id)
         
         logger.info(
             f"Sale #{sale.sale_number} liquidated by user {org_context['user_id']}"
@@ -666,6 +699,7 @@ async def cancel_sale(
         )
         
         response_data = _enrich_sale_response(sale, db=db)
+        response_data["taxes"] = _tax_rows(db, sale_id=sale.id)
         
         logger.info(
             f"Sale #{sale.sale_number} cancelled by user {org_context['user_id']}"

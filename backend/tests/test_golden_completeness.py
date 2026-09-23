@@ -157,14 +157,78 @@ class TestClaveAditivaCC014:
         assert len(real) == 1 and "CLAVE NUEVA" in real[0], real
 
     def test_el_corte_asof_tambien_la_perdona(self):
+        """Igualdad EXACTA a proposito, no `in`: asi un permiso nuevo que nadie
+        declaro aca hace fallar esto. Es lo que paso con CC-013 — agrego
+        `tax_advances` a `ALLOWED_ADDED` y esta guarda lo obligo a venir a
+        declararlo donde se lee."""
         mod = _load()
-        assert mod.classify("balance_sheet_asof") == {"lead_debt_willard": None}
+        assert mod.classify("balance_sheet_asof") == {
+            "lead_debt_willard": None,   # CC-014
+            "tax_advances": 0.0,         # CC-013
+        }
 
-    def test_el_detallado_NO_la_perdona(self):
-        """F5: su item viaja dentro de una seccion que ya existe y no gana
-        claves. Si ahi aparece algo, es un diff real y tiene que romper."""
+    def test_el_detallado_NO_perdona_la_de_CC014(self):
+        """F5 de CC-014: su item viaja DENTRO de una seccion que ya existe, asi
+        que el Detallado no gana ninguna clave por ese ciclo.
+
+        ⚠️ El assert era `== {}` y CC-013 lo cambio legitimamente: esa seccion
+        SI es nueva en el Detallado. Lo que CC-014 protege no es el vacio sino
+        que `lead_debt_willard` no este, y eso se afirma por nombre. La
+        igualdad exacta se conserva al lado porque es lo que atrapa a un
+        tercer permiso que entre sin pasar por aca."""
+        seccion_vacia = {"label": "Anticipos de Impuestos", "total": 0.0,
+                         "items": [], "groups": None}
         for captura in ("balance_detailed", "balance_detailed_asof"):
-            assert mod_classify(captura) == {}, captura
+            perdonadas = mod_classify(captura)
+            assert "lead_debt_willard" not in perdonadas, captura
+            assert perdonadas == {"tax_advances": seccion_vacia}, captura
+
+
+class TestClaveAditivaCC013:
+    """Espejo de la de CC-014: el permiso que introduce un ciclo necesita su
+    propio test, o es un permiso que nadie vigila.
+
+    `tax_advances` llega en 0.0 en las tres organizaciones cliente porque
+    ninguna tiene entidades de impuestos — no pueden tenerlas, el router es
+    flag-gated. Si ese corte se moviera, una de ellas traeria un numero y el
+    golden tiene que romper en vez de perdonarlo."""
+
+    def test_tax_advances_en_cero_se_perdona(self):
+        mod = _load()
+        real, expected = [], []
+        mod.diff(
+            {"assets": {"inventory": 10.0}},
+            {"assets": {"inventory": 10.0, "tax_advances": 0.0}},
+            "", mod.classify("balance_sheet"), real, expected,
+        )
+        assert real == [], real
+        assert expected == ["assets.tax_advances"]
+
+    def test_tax_advances_con_saldo_es_diff_real(self):
+        mod = _load()
+        real, expected = [], []
+        mod.diff(
+            {"assets": {"inventory": 10.0}},
+            {"assets": {"inventory": 10.0, "tax_advances": 1500.0}},
+            "", mod.classify("balance_sheet"), real, expected,
+        )
+        assert len(real) == 1 and "CLAVE NUEVA" in real[0], real
+
+    def test_la_seccion_del_detallado_con_items_es_diff_real(self):
+        """La del Detallado se perdona como OBJETO, asi que el valor exacto
+        incluye `items: []`. Una seccion con un tercero adentro es otro objeto
+        y no la cubre el permiso."""
+        mod = _load()
+        real, expected = [], []
+        mod.diff(
+            {"assets": {}},
+            {"assets": {"tax_advances": {"label": "Anticipos de Impuestos",
+                                         "total": 900.0,
+                                         "items": [{"name": "[Impuestos] ReteFuente a Favor"}],
+                                         "groups": None}}},
+            "", mod.classify("balance_detailed"), real, expected,
+        )
+        assert len(real) == 1 and "CLAVE NUEVA" in real[0], real
 
 
 def mod_classify(nombre: str) -> dict:

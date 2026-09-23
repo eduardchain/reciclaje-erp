@@ -294,6 +294,10 @@ export default function PurchaseLiquidatePage() {
                   const cfg = configById.get(r.config_id)!;
                   return {
                     retention_type: cfg.retention_type,
+                    // CC-013 C2: la tarifa usada, para que el servidor pueda
+                    // rechazar una `base_kind='iva'` (el filtro de arriba evita
+                    // llegar hasta alla, pero la pantalla es cortesia).
+                    config_id: cfg.config_id,
                     ...(cfg.retention_type === "ica" && cfg.municipality
                       ? { municipality: cfg.municipality }
                       : {}),
@@ -652,11 +656,29 @@ export default function PurchaseLiquidatePage() {
                         <SelectValue placeholder="Seleccionar retención..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {retentionConfigs.map((cfg) => (
-                          <SelectItem key={cfg.config_id} value={cfg.config_id as string}>
-                            {retentionRowLabel(cfg)} ({cfg.rate_pct}%)
-                          </SelectItem>
-                        ))}
+                        {retentionConfigs
+                          // CC-013: una tarifa "sobre el IVA" no tiene base en una
+                          // COMPRA — el documento no lleva IVA capturado. Esta
+                          // pantalla precalcula `% x subtotal` sin mirar
+                          // `base_kind`, asi que ofrecerla aplicaria la tasa sobre
+                          // otra base y el copy afirmaria "% de {total}": un numero
+                          // plausible que contradice la configuracion en silencio.
+                          // La regla del repo es que la pantalla no ofrece lo que el
+                          // dominio no soporta (#103 D9, #104).
+                          //
+                          // La que YA esta elegida en esta fila se sigue ofreciendo,
+                          // porque un Select sin su propia opcion se rompe (#104).
+                          //
+                          // Hoy es INERTE: las 6 tarifas de las 7 organizaciones
+                          // estan en 'subtotal' y la columna nace con ese
+                          // server_default, asi que esto no le quita una opcion a
+                          // nadie — no-regresion demostrable, no verificable.
+                          .filter((cfg) => cfg.base_kind !== "iva" || cfg.config_id === ret.config_id)
+                          .map((cfg) => (
+                            <SelectItem key={cfg.config_id} value={cfg.config_id as string}>
+                              {retentionRowLabel(cfg)} ({cfg.rate_pct}%)
+                            </SelectItem>
+                          ))}
                         <SelectItem value="__add__" className="text-indigo-600 font-medium">
                           + Agregar retención…
                         </SelectItem>

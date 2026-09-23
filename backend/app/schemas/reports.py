@@ -289,6 +289,9 @@ class BalanceSheetAssets(BaseModel):
     investor_receivable: float = 0.0
     loans_receivable: float = 0.0  # prestamos activos (obligaciones receivable, split de CxC Inversionistas)
     prepaid_expenses: float = 0.0
+    #: CC-013 D4b — anticipos de impuesto (retenciones que nos practicaron).
+    #: Clave ADITIVA: llega en 0.0 a las tres organizaciones cliente.
+    tax_advances: float = 0.0
     provision_funds: float = 0.0
     fixed_assets: float = 0.0
     # CC-014: deuda en plomo con Willard a precio de mercado, RESTANDO.

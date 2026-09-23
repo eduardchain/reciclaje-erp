@@ -258,6 +258,34 @@ export default function SaleDetailPage() {
       )}
 
       {/* Resumen Financiero */}
+      {/* IVA y retenciones (CC-013). Sin impuestos la tarjeta no existe, asi
+          que en las otras organizaciones el detalle queda igual que hoy. */}
+      {canViewPrices && sale.taxes.length > 0 && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+              IVA y Retenciones
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            {sale.taxes.map((t) => (
+              <div key={t.id} className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-3">
+                <span className="text-slate-500">
+                  {t.third_party_name}
+                  {t.rate != null && (
+                    <span className="text-xs text-slate-400">
+                      {" "}({Number(t.rate)}% de {formatCurrency(Number(t.base_amount))})
+                    </span>
+                  )}
+                  {t.reverted_at && <span className="text-xs text-red-500"> · revertida</span>}
+                </span>
+                <span className="tabular-nums">{formatCurrency(Number(t.amount))}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {canViewPrices && <Card className="shadow-sm">
         <CardHeader>
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Resumen Financiero</CardTitle>

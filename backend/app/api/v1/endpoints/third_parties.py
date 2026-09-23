@@ -312,6 +312,7 @@ def create_retention_config_endpoint(
         municipality=data.municipality.strip() if data.municipality else None,
         concept=data.concept.strip() if data.concept else None,
         rate_pct=data.rate_pct,
+        base_kind=data.base_kind,  # CC-013 D5
         is_active=True,
     )
     db.add(cfg)
@@ -324,6 +325,7 @@ def create_retention_config_endpoint(
         municipality=cfg.municipality,
         concept=cfg.concept,
         rate_pct=float(cfg.rate_pct),
+        base_kind=cfg.base_kind,
         name=None,
         current_balance=0.0,
         is_active=cfg.is_active,
@@ -352,6 +354,8 @@ def update_retention_config_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tarifa no encontrada")
     if data.rate_pct is not None:
         cfg.rate_pct = data.rate_pct
+    if data.base_kind is not None:
+        cfg.base_kind = data.base_kind
     if data.is_active is not None:
         if data.is_active and not cfg.is_active:
             clash = find_active_config(
@@ -372,6 +376,7 @@ def update_retention_config_endpoint(
         municipality=cfg.municipality,
         concept=cfg.concept,
         rate_pct=float(cfg.rate_pct),
+        base_kind=cfg.base_kind,
         name=None,
         current_balance=0.0,
         is_active=cfg.is_active,

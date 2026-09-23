@@ -35,6 +35,11 @@ class OrgSettingsPayload(BaseModel):
         None, ge=1,
         description="Dias sin movimiento para alertar saldo intersede huerfano",
     )
+    # CC-013 (D6): float, no Decimal — es la regla dura de este payload.
+    iva_rate_pct: float | None = Field(
+        None, ge=0, le=100,
+        description="Tasa de IVA para el precalculo de la factura (19 = 19%)",
+    )
     aging_buckets: list[int] | None = Field(
         None,
         description="Cortes de antiguedad para cartera y deuda kg (ej [30,60,90])",

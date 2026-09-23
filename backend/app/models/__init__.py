@@ -37,6 +37,7 @@ from .material_kg_profile import MaterialKgProfile
 from .retention_config import RetentionConfig
 from .willard_delivery import WillardDelivery, WillardDeliveryLine
 from .attachment import Attachment
+from .document_tax import DocumentTax
 from .inbound_order import (
     InboundLineAllocation,
     InboundOrder,
@@ -114,4 +115,5 @@ __all__ = [
     "DailyOkSeal",
     "Driver",
     "Vehicle",
+    "DocumentTax",
 ]

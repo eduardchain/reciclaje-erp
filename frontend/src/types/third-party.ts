@@ -54,19 +54,27 @@ export interface RetentionRow {
   municipality: string | null;
   concept: string | null;
   rate_pct: number | null;
+  /** CC-013 D5: `subtotal` | `iva` — sobre que se aplica la tasa. */
+  base_kind: string | null;
   name: string | null;
   current_balance: number;
   is_active: boolean;
 }
+
+export type RetentionBaseKind = "subtotal" | "iva";
 
 export interface RetentionConfigCreate {
   retention_type: RetentionConfigType;
   municipality?: string; // obligatorio si ica
   concept?: string; // opcional (F3: ReteFuente compras vs servicios...)
   rate_pct: number;
+  /** CC-013 D5. Ausente = `subtotal`, que es lo que hacen hoy las dos
+   * pantallas de compras: por eso compras queda byte a byte. */
+  base_kind?: RetentionBaseKind;
 }
 
 export interface RetentionConfigUpdate {
   rate_pct?: number;
+  base_kind?: RetentionBaseKind;
   is_active?: boolean;
 }

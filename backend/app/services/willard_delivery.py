@@ -320,6 +320,11 @@ class WillardDeliveryService:
             liq_dt,
             warnings,
         )
+        # 5. IVA y retenciones de la factura (CC-013, data-gated D2).
+        #    D10: la Salida es la DUENA aunque derive una venta — hay dos
+        #    documentos para UNA factura y este es el que el usuario liquida.
+        self._apply_document_taxes(db, delivery, data, organization_id)
+
         # Q-30 (#107 D5): la sede que factura se estampa al liquidar (snapshot
         # del setting); el P&L por sede le atribuye la venta derivada.
         delivery.billing_warehouse_id = self._billing_warehouse_id(db, organization_id)
@@ -420,6 +425,50 @@ class WillardDeliveryService:
                 f"Tipo de formula '{formula.formula_type}' no soportado en salidas"
             )
         return (qty * factor).quantize(Decimal("0.0001"))
+
+    def _tax_context(
+        self, db: Session, delivery: WillardDelivery
+    ) -> tuple[Optional[ThirdParty], Decimal]:
+        """Sobre QUE y a QUIEN se le facturan los impuestos, por tipo de salida.
+
+        Son dos facturas distintas y por eso son dos bases distintas: en la
+        venta se factura el plomo (FE 2127) y en el abono se factura la maquila
+        mas el flete (FE 2118). Tomar una base por la otra daria un IVA que
+        cuadra con la pantalla y no con la factura.
+        """
+        if delivery.delivery_type == "venta":
+            sale = db.get(Sale, delivery.sale_id) if delivery.sale_id else None
+            if sale is None:
+                return None, Decimal("0")
+            return db.get(ThirdParty, sale.customer_id), sale.total_amount
+        billed = (delivery.maquila_amount or Decimal("0")) + (
+            delivery.freight_amount or Decimal("0")
+        )
+        return db.get(ThirdParty, delivery.third_party_id), billed
+
+    def _apply_document_taxes(
+        self,
+        db: Session,
+        delivery: WillardDelivery,
+        data: WillardDeliveryLiquidate,
+        organization_id: UUID,
+    ) -> None:
+        """Aplica los impuestos capturados. Payload ausente = cero efecto."""
+        if not data.taxes:
+            return
+        from app.services.document_tax import apply_taxes
+
+        customer, subtotal = self._tax_context(db, delivery)
+        if customer is None or subtotal <= 0:
+            raise _err(
+                "Esta salida no factura nada, asi que no hay sobre que aplicar "
+                "impuestos. Revise los precios o las tarifas.",
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        apply_taxes(
+            db, organization_id, data.taxes, customer,
+            subtotal=subtotal, willard_delivery_id=delivery.id,
+        )
 
     def _create_derived_sale(
         self,
@@ -999,6 +1048,14 @@ class WillardDeliveryService:
             mv.annulled_reason = (
                 f"Anulacion de Salida de Plomo — {delivery.label}"
             )
+
+        # 5. IVA y retenciones (CC-013 D11 — el segundo de los dos unicos
+        #    puntos que revierten). Las filas son del DELIVERY, asi que el
+        #    cancel de la venta derivada no las toca: no hay doble reversion.
+        from app.services.document_tax import revert_taxes
+
+        tax_customer, _ = self._tax_context(db, delivery)
+        revert_taxes(db, tax_customer, willard_delivery_id=delivery.id)
 
         delivery.maquila_amount = Decimal("0")
         delivery.freight_amount = Decimal("0")

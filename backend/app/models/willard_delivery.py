@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from app.models.sale import Sale
     from app.models.third_party import ThirdParty
     from app.models.warehouse import Warehouse
+    from app.models.document_tax import DocumentTax
 
 
 DELIVERY_TYPES = ("venta", "abono_bateria", "abono_material")
@@ -231,6 +232,16 @@ class WillardDelivery(Base, OrganizationMixin, TimestampMixin):
         "Vehicle", foreign_keys=[vehicle_id]
     )
     sale: Mapped[Optional["Sale"]] = relationship("Sale", foreign_keys=[sale_id])
+    # CC-013: la Salida es el DUENO de los impuestos cuando deriva una venta
+    # (D10) — hay dos documentos para una sola factura y el que el usuario
+    # liquida es este.
+    taxes: Mapped[list["DocumentTax"]] = relationship(
+        "DocumentTax",
+        back_populates="willard_delivery",
+        cascade="all, delete-orphan",
+        order_by="DocumentTax.created_at",
+    )
+
     lines: Mapped[list["WillardDeliveryLine"]] = relationship(
         "WillardDeliveryLine",
         back_populates="delivery",

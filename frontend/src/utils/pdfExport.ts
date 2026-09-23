@@ -928,6 +928,7 @@ export function exportBalanceSheetPDF(data: BalanceSheetResponse, orgName?: stri
     ["CxC Inversionistas", data.assets.investor_receivable],
     ["Préstamos por Cobrar", data.assets.loans_receivable],
     ["Gastos Prepagados", data.assets.prepaid_expenses],
+    ["Anticipos de Impuestos", data.assets.tax_advances],
     ["Fondos de Provisión", data.assets.provision_funds],
     ["Activos Fijos", data.assets.fixed_assets],
     // CC-014: negativo, resta. Con valor null se omite (el bucle salta los
@@ -1034,7 +1035,7 @@ export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?
     "cash_and_bank", "inventory_liquidated",
     "customers_receivable", "supplier_advances", "service_provider_advances",
     "liability_advances", "investor_receivable", "loans_receivable",
-    "provision_funds", "prepaid_expenses", "generic_receivable", "fixed_assets",
+    "provision_funds", "prepaid_expenses", "tax_advances", "generic_receivable", "fixed_assets",
   ];
 
   const LIABILITY_ORDER = [

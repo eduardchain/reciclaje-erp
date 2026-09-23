@@ -12,6 +12,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.utils.dates import BusinessDate
+from app.schemas.document_tax import DocumentTaxCreate, DocumentTaxResponse
 
 DeliveryType = Literal["venta", "abono_bateria", "abono_material"]
 
@@ -108,6 +109,13 @@ class WillardDeliveryLiquidate(BaseModel):
     customer_id: Optional[UUID] = Field(
         None, description="Solo tipo `venta`: cliente de la venta derivada (default Willard)"
     )
+    taxes: Optional[list[DocumentTaxCreate]] = Field(
+        None,
+        description=(
+            "IVA y retenciones de la factura (CC-013). En venta se aplican sobre el "
+            "plomo; en abono sobre la maquila mas el flete — son dos facturas distintas"
+        ),
+    )
 
 
 class WillardDeliveryAnnul(BaseModel):
@@ -158,6 +166,10 @@ class WillardDeliveryResponse(BaseModel):
     billing_warehouse_id: Optional[UUID] = None
 
     total_kg_lead: Decimal = Decimal("0")
+    #: IVA y retenciones de la factura (CC-013). El endpoint arma este
+    #: response CAMPO POR CAMPO, asi que declararlo aca no basta — hay que
+    #: llenarlo o llega vacio (trampa #95).
+    taxes: list[DocumentTaxResponse] = Field(default_factory=list)
 
     lines: list[WillardDeliveryLineResponse] = Field(default_factory=list)
 

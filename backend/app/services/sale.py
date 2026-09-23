@@ -316,6 +316,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         immediate_collection: bool = False,
         collection_account_id: Optional[UUID] = None,
         liquidation_date: Optional[datetime] = None,
+        taxes_data: Optional[List] = None,
     ) -> Sale:
         """
         Liquidar venta registrada: confirmar precios, actualizar saldo cliente, pagar comisiones.
@@ -456,6 +457,28 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         customer.current_balance += sale.total_amount
         print(f"  💰 Customer '{customer.name}' balance: ${customer.current_balance - sale.total_amount} -> ${customer.current_balance}")
 
+        # Step 6b: IVA y retenciones (CC-013, data-gated D2 — ausente = byte a byte).
+        # ADITIVO encima del credito estandar: el cliente queda debiendo el total
+        # a pagar de la factura y las entidades de impuestos el contrapeso exacto.
+        collection_amount = sale.total_amount
+        if taxes_data:
+            # D10: la Salida de Plomo deriva esta venta y es ELLA la que conoce el
+            # tipo y el concepto — dos documentos para UNA factura.
+            if sale.willard_delivery_id is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        "Esta venta la genero una Salida de Plomo. "
+                        "Registre el IVA y las retenciones al liquidar la Salida."
+                    ),
+                )
+            from app.services.document_tax import apply_taxes
+
+            collection_amount += apply_taxes(
+                db, organization_id, taxes_data, customer,
+                subtotal=sale.total_amount, sale_id=sale.id,
+            )
+
         # Step 7: Pay commissions (increase recipient balances — les debemos la comision)
         self._pay_commissions(db, sale)
 
@@ -474,11 +497,13 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     detail="Cuenta de cobro no encontrada",
                 )
 
+            # Con impuestos se cobra el NETO, que es el "total a pagar" impreso en
+            # la factura — simetrico con el pago inmediato de compras (#75).
             mm_service._create_movement(
                 db=db,
                 organization_id=organization_id,
                 movement_type="collection_from_client",
-                amount=sale.total_amount,
+                amount=collection_amount,
                 account_id=collection_account_id,
                 date=sale.liquidated_at,
                 description=f"Cobro venta #{sale.sale_number}",
@@ -487,9 +512,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 user_id=user_id,
             )
 
-            account.current_balance += sale.total_amount
-            customer.current_balance -= sale.total_amount
-            print(f"  💳 Cobro inmediato: ${sale.total_amount} a {account.name}")
+            account.current_balance += collection_amount
+            customer.current_balance -= collection_amount
+            print(f"  💳 Cobro inmediato: ${collection_amount} a {account.name}")
 
         db.flush()
 
@@ -624,6 +649,14 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             customer = db.get(ThirdParty, sale.customer_id)
             customer.current_balance -= sale.total_amount
             print(f"👤 Customer '{customer.name}' balance reverted: ${customer.current_balance + sale.total_amount} → ${customer.current_balance}")
+
+            # Revertir IVA y retenciones (CC-013 D11 — uno de los dos unicos
+            # puntos que revierten; el otro es la anulacion de Salida de Plomo).
+            # Estampa reverted_at sin borrado fisico: el estado de cuenta
+            # necesita la fila para emitir su par de eventos (#55).
+            from app.services.document_tax import revert_taxes
+
+            revert_taxes(db, customer, sale_id=sale_id)
 
             # Anular movimientos commission_accrual
             comm_movements = db.scalars(

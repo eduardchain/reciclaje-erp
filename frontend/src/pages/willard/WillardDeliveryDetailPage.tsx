@@ -18,6 +18,12 @@ import {
 } from "@/hooks/useWillardDeliveries";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
 import { num } from "@/types/willard-delivery";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { useRetentionRows } from "@/hooks/useMasterData";
+import {
+  DocumentTaxesCard, buildTaxPayload, taxRowsValid,
+} from "@/components/shared/DocumentTaxesCard";
+import type { TaxFormRow } from "@/components/shared/DocumentTaxesCard";
 import { DeliveryStatusBadge, DeliveryTypeBadge } from "./WillardDeliveriesPage";
 
 export default function WillardDeliveryDetailPage() {
@@ -38,6 +44,14 @@ export default function WillardDeliveryDetailPage() {
   const [annulOpen, setAnnulOpen] = useState(false);
   const [annulReason, setAnnulReason] = useState("");
 
+  // CC-013: IVA y retenciones de la factura. Todo el modulo ya vive detras de
+  // `kg_ledger_enabled`, asi que acá no hay pantalla compartida que proteger.
+  const { getSetting } = useOrgSettings();
+  const ivaRatePct = Number(getSetting("iva_rate_pct") ?? 19);
+  const { data: retentionRows } = useRetentionRows(true);
+  const taxConfigs = useMemo(() => retentionRows ?? [], [retentionRows]);
+  const [taxRows, setTaxRows] = useState<TaxFormRow[]>([]);
+
   // ⚠️ Todos los hooks ANTES del primer return condicional (#93 bloqueante a:
   // un useMemo despues de un `return` dejo la pantalla en blanco).
   const isVenta = delivery?.delivery_type === "venta";
@@ -47,6 +61,21 @@ export default function WillardDeliveryDetailPage() {
       (priceMode[l.id] ?? "unit") === "total" ? !(totals[l.id] > 0) : !(prices[l.id] > 0),
     );
   }, [delivery, isVenta, prices, totals, priceMode]);
+
+  // Base de la factura. En una VENTA es el plomo y la pantalla la conoce; en un
+  // ABONO es la maquila mas el flete, que salen de las tarifas vigentes AL
+  // liquidar — por eso acá vale 0 y la sugerencia es 0. El monto de la base lo
+  // deriva el servidor (D5); lo que se pierde es solo el precalculo.
+  const taxLineAmounts = useMemo(() => {
+    if (!delivery || !isVenta) return [];
+    return delivery.lines.map((l) => {
+      const mode = priceMode[l.id] ?? "unit";
+      return mode === "total"
+        ? (totals[l.id] ?? 0)
+        : (prices[l.id] ?? 0) * num(l.quantity);
+    });
+  }, [delivery, isVenta, prices, totals, priceMode]);
+  const taxesValid = taxRowsValid(taxRows, taxLineAmounts, ivaRatePct, taxConfigs);
 
   if (isLoading) return <div className="p-8 text-center text-slate-500">Cargando…</div>;
   if (!delivery) return <div className="p-8 text-center text-slate-500">Salida no encontrada</div>;
@@ -62,6 +91,10 @@ export default function WillardDeliveryDetailPage() {
                 : { line_id: l.id, unit_price: String(prices[l.id]) },
             )
           : [],
+        ...(() => {
+          const taxes = buildTaxPayload(taxRows, taxLineAmounts, ivaRatePct, taxConfigs);
+          return taxes ? { taxes } : {};
+        })(),
       },
     });
 
@@ -248,12 +281,53 @@ export default function WillardDeliveryDetailPage() {
         </Card>
       )}
 
+      {/* IVA y retenciones de la factura (CC-013). Solo antes de liquidar: la
+          liquidacion es la unica puerta, igual que el peso de bascula (#95). */}
+      {(delivery.status === "draft" || delivery.status === "reviewed") &&
+        hasPermission("sales.liquidate") && (
+        <DocumentTaxesCard
+          lineAmounts={taxLineAmounts}
+          ivaRatePct={ivaRatePct}
+          configs={taxConfigs}
+          rows={taxRows}
+          onChange={setTaxRows}
+          baseHint={
+            isVenta
+              ? "Se aplican sobre el valor del plomo vendido."
+              : "Se aplican sobre lo que se le factura a Willard (maquila y flete). Esos montos salen de las tarifas vigentes al liquidar, asi que acá no hay sugerencia: digite lo que dice la factura."
+          }
+        />
+      )}
+
+      {delivery.status === "liquidated" && delivery.taxes.length > 0 && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+              IVA y Retenciones
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            {delivery.taxes.map((t) => (
+              <div key={t.id} className="flex justify-between gap-3">
+                <span className="text-slate-500">
+                  {t.third_party_name}
+                  {t.rate != null && (
+                    <span className="text-xs text-slate-400"> ({num(t.rate)}% de {formatCurrency(num(t.base_amount))})</span>
+                  )}
+                </span>
+                <span className="tabular-nums">{formatCurrency(num(t.amount))}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
         {(delivery.status === "draft" || delivery.status === "reviewed") &&
           hasPermission("sales.liquidate") && (
           <Button
             onClick={liquidate}
-            disabled={missingPrice || liquidateMutation.isPending}
+            disabled={missingPrice || !taxesValid || liquidateMutation.isPending}
             className="w-full sm:w-auto"
           >
             <CheckCircle2 className="h-4 w-4 mr-2" /> Liquidar

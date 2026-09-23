@@ -15,11 +15,16 @@ import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { cn } from "@/utils";
 import { useSale, useLiquidateSale } from "@/hooks/useSales";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
-import { useMaterials, usePayableProviders, useMoneyAccounts } from "@/hooks/useMasterData";
+import { useMaterials, usePayableProviders, useMoneyAccounts, useRetentionRows } from "@/hooks/useMasterData";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { SaleCommissionCreate } from "@/types/sale";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
+import {
+  DocumentTaxesCard, buildTaxPayload, taxNetDelta, taxRowsValid,
+} from "@/components/shared/DocumentTaxesCard";
+import type { TaxFormRow } from "@/components/shared/DocumentTaxesCard";
 
 interface LiquidationLine {
   line_id: string;
@@ -138,8 +143,23 @@ export default function SaleLiquidatePage() {
     );
   };
 
+  // CC-013: IVA y retenciones. Pantalla COMPARTIDA — sin la bandera no se
+  // muestra la tarjeta, no se pide el catalogo (el hook va con `enabled`) y el
+  // payload no lleva `taxes`. Es la leccion de #98 D10: lo que decide la
+  // no-regresion de las otras seis organizaciones es que no manden nada nuevo.
+  const { getSetting } = useOrgSettings();
+  const taxesEnabled = getSetting("kg_ledger_enabled") === true;
+  const ivaRatePct = Number(getSetting("iva_rate_pct") ?? 19);
+  const { data: retentionRows } = useRetentionRows(taxesEnabled);
+  const taxConfigs = useMemo(() => retentionRows ?? [], [retentionRows]);
+  const [taxRows, setTaxRows] = useState<TaxFormRow[]>([]);
+
   // Cálculos — subtotal usa received_quantity para facturación
-  const subtotal = lines.reduce((sum, l) => sum + l.received_quantity * l.unit_price, 0);
+  const lineAmounts = useMemo(
+    () => lines.map((l) => l.received_quantity * l.unit_price),
+    [lines],
+  );
+  const subtotal = lineAmounts.reduce((sum, a) => sum + a, 0);
   const totalCost = lines.reduce((sum, l) => sum + l.unit_cost * l.quantity, 0);
   const totalProfit = subtotal - totalCost;
   const marginPct = subtotal > 0 ? (totalProfit / subtotal) * 100 : 0;
@@ -167,8 +187,17 @@ export default function SaleLiquidatePage() {
 
   const allPricesValid = lines.every((l) => l.unit_price > 0);
   const allReceivedValid = lines.every((l) => l.received_quantity > 0);
+  // El neto es lo que el cliente termina debiendo: el "total a pagar" de la
+  // factura. Con impuestos, el cobro inmediato cobra ESE numero.
+  const taxNet = taxesEnabled
+    ? taxNetDelta(taxRows, lineAmounts, ivaRatePct, taxConfigs)
+    : 0;
+  const totalToCollect = subtotal + taxNet;
+  const taxesValid = !taxesEnabled
+    || (taxRowsValid(taxRows, lineAmounts, ivaRatePct, taxConfigs) && totalToCollect > 0);
   const canSubmit = allPricesValid && allReceivedValid && lines.length > 0
     && (!immediateCollection || !!collectionAccountId)
+    && taxesValid
     && !!liquidationDate;
 
   const handleSubmit = () => {
@@ -191,6 +220,12 @@ export default function SaleLiquidatePage() {
             ? { immediate_collection: true, collection_account_id: collectionAccountId }
             : {}),
           ...(liquidationDate ? { liquidation_date: liquidationDate } : {}),
+          ...(taxesEnabled
+            ? (() => {
+                const taxes = buildTaxPayload(taxRows, lineAmounts, ivaRatePct, taxConfigs);
+                return taxes ? { taxes } : {};
+              })()
+            : {}),
         },
       },
       { onSuccess: () => navigate(`/sales/${id}`) },
@@ -452,6 +487,18 @@ export default function SaleLiquidatePage() {
         </CardContent>
       </Card>
 
+      {/* IVA y retenciones (CC-013 — solo con bandera) */}
+      {taxesEnabled && (
+        <DocumentTaxesCard
+          lineAmounts={lineAmounts}
+          ivaRatePct={ivaRatePct}
+          configs={taxConfigs}
+          rows={taxRows}
+          onChange={setTaxRows}
+          baseHint="Se aplican sobre el total de la venta. Digite los montos tal como los imprime la factura."
+        />
+      )}
+
       {/* Resumen Financiero */}
       <Card className="shadow-sm bg-slate-50/50">
         <CardHeader>
@@ -463,6 +510,23 @@ export default function SaleLiquidatePage() {
               <span className="text-slate-600">Total Venta</span>
               <span className="font-bold tabular-nums text-base">{formatCurrency(subtotal)}</span>
             </div>
+            {taxesEnabled && taxNet !== 0 && (
+              <>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">
+                    {taxNet >= 0 ? "(+)" : "(-)"} IVA y retenciones
+                  </span>
+                  <span className={cn("tabular-nums", taxNet >= 0 ? "text-slate-500" : "text-amber-600")}>
+                    {taxNet >= 0 ? "+" : "-"}{formatCurrency(Math.abs(taxNet))}
+                  </span>
+                </div>
+                <div className="border-t border-dashed border-slate-200" />
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium text-slate-700">Total a Pagar</span>
+                  <span className="font-bold tabular-nums text-base">{formatCurrency(totalToCollect)}</span>
+                </div>
+              </>
+            )}
             {canViewProfit && (
               <>
                 <div className="border-t border-slate-200 pt-2" />

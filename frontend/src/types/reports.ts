@@ -202,6 +202,8 @@ export interface BalanceSheetAssets {
   investor_receivable: number;
   loans_receivable: number;
   prepaid_expenses: number;
+  /** CC-013: anticipos de impuesto (retenciones que nos practicaron al facturar). */
+  tax_advances: number;
   provision_funds: number;
   fixed_assets: number;
   // null si y solo si la organizacion no tiene `kg_ledger_enabled`.

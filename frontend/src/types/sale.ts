@@ -1,3 +1,4 @@
+import type { DocumentTax } from "@/types/document-tax";
 import type { BaseEntity, PaginatedResponse } from "./common";
 
 export type SaleStatus = "registered" | "liquidated" | "cancelled";
@@ -110,6 +111,8 @@ export interface SaleResponse extends BaseEntity {
   commissions: SaleCommissionResponse[];
   total_quantity_difference: number | null;
   total_amount_difference: number | null;
+  /** CC-013: IVA y retenciones registrados (solo en el detalle). */
+  taxes: DocumentTax[];
   linked_payment_total: number | null;
   warnings: string[];
 }

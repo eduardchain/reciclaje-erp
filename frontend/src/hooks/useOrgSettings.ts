@@ -20,6 +20,11 @@ const SETTING_DEFAULTS: Record<string, unknown> = {
   willard_sede_postconsumo_default: null,
   // SAC #93 (D8) — tolerancia del descuadre de entrada (fraccion, no %)
   inbound_discrepancy_tolerance_pct: 0.05,
+  // W1 (D4c) — sede que factura a Willard. Faltaba en este espejo desde #100;
+  // no tenia consumidor en el frontend, asi que la deriva no se veia.
+  willard_sede_facturacion: null,
+  // CC-013 (D6) — tasa de IVA para el precalculo de la factura (19 = 19%)
+  iva_rate_pct: 19,
 };
 
 /**

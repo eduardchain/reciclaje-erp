@@ -2626,3 +2626,108 @@ class TestOrdenDeLocksEnLaEntrada:
             select(MoneyMovement).where(MoneyMovement.movement_type == "payment_to_supplier")
         ).scalars().all()
         assert pagos == [], "este caso es SIN pago inmediato a proposito"
+
+
+class TestTarifaSobreIvaEnLaEntrada:
+    """CC-013 C2 — la mitad que faltaba, y es la que le importa a SAC.
+
+    El catalogo de tarifas es compartido con las ventas y CC-013 le agrego
+    `base_kind`. Una tarifa "15 % del IVA" no cabe en una COMPRA: el documento
+    no lleva IVA, la pantalla precalcula `% x subtotal` sin mirar la columna y
+    el monto que manda es la verdad (#79 F1) — o sea que daria un numero
+    plausible y falso sin que nada lo atrape.
+
+    🔴 El guard nacio en `PurchaseLiquidatePage`, que **SAC no usa**: Compras
+    esta oculta en SAC desde #80/#82 y SAC compra por Entradas. Un guard en la
+    pantalla que el cliente no abre es un guard que no existe. Se probo aca por
+    HTTP para que sea el CAMINO el que quede afirmado, no el metodo.
+    """
+
+    @pytest.fixture
+    def cfg_iva(self, db_session, test_organization):
+        from app.models.retention_config import RetentionConfig
+
+        cfg = RetentionConfig(
+            organization_id=test_organization.id, retention_type="reteiva",
+            concept="15 % del IVA", rate_pct=Decimal("15"),
+            base_kind="iva", is_active=True,
+        )
+        db_session.add(cfg)
+        db_session.commit()
+        db_session.refresh(cfg)
+        return cfg
+
+    def test_la_entrada_rechaza_una_tarifa_sobre_el_iva(
+        self, client, org_headers, wh, sup1, mat_moto, cfg_iva,
+    ):
+        body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "1000")])
+        resp = client.post(
+            f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
+            json={
+                "lines": [_liq_line(mat_moto, [_alloc(sup1, "1000", "1000")])],
+                "supplier_retentions": [{
+                    "third_party_id": str(sup1.id),
+                    "retentions": [{"retention_type": "reteiva",
+                                    "config_id": str(cfg_iva.id),
+                                    "amount": "15000"}],
+                }],
+            },
+        )
+        assert resp.status_code == 422, resp.text
+        assert "sobre el IVA" in resp.text and "subtotal" in resp.text, resp.text
+
+    def test_nada_se_escribio_a_medias(
+        self, client, org_headers, db_session, wh, sup1, mat_moto, cfg_iva,
+    ):
+        """D14 de #93: la liquidacion es atomica. El 422 llega desde
+        `_apply_retentions`, o sea DESPUES de que las compras nacieron dentro de
+        la transaccion — asi que lo que se prueba no es el rechazo sino que el
+        rollback lo alcance."""
+        body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "1000")])
+        client.post(
+            f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
+            json={
+                "lines": [_liq_line(mat_moto, [_alloc(sup1, "1000", "1000")])],
+                "supplier_retentions": [{
+                    "third_party_id": str(sup1.id),
+                    "retentions": [{"retention_type": "reteiva",
+                                    "config_id": str(cfg_iva.id),
+                                    "amount": "15000"}],
+                }],
+            },
+        )
+        db_session.expire_all()
+        assert db_session.get(ThirdParty, sup1.id).current_balance == Decimal("0")
+        orden = client.get(f"{INBOUND_URL}/{body['id']}", headers=org_headers).json()
+        assert orden["status"] == "reviewed", orden["status"]
+        assert orden["purchases"] == [], orden["purchases"]
+
+    def test_con_una_tarifa_sobre_el_subtotal_liquida(
+        self, client, org_headers, db_session, wh, sup1, mat_moto, test_organization,
+    ):
+        """🟢 Control positivo: sin esto, "el guard funciona" y "rompi las
+        retenciones de la Entrada" se ven identicos (#94/#99)."""
+        from app.models.retention_config import RetentionConfig
+
+        cfg = RetentionConfig(
+            organization_id=test_organization.id, retention_type="retefuente",
+            concept="2,5 % compras", rate_pct=Decimal("2.5"),
+            base_kind="subtotal", is_active=True,
+        )
+        db_session.add(cfg)
+        db_session.commit()
+        db_session.refresh(cfg)
+
+        body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "1000")])
+        _liquidate(
+            client, org_headers, body["id"],
+            [_liq_line(mat_moto, [_alloc(sup1, "1000", "1000")])],
+            supplier_retentions=[{
+                "third_party_id": str(sup1.id),
+                "retentions": [{"retention_type": "retefuente",
+                                "config_id": str(cfg.id), "amount": "25000"}],
+            }],
+        )
+        db_session.expire_all()
+        # 1.000.000 acreditado menos 25.000 retenidos: NETO (#75 D9)
+        assert db_session.get(ThirdParty, sup1.id).current_balance == Decimal("-975000")

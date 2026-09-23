@@ -1,3 +1,4 @@
+import type { DocumentTax } from "@/types/document-tax";
 // Salidas de Plomo desde planta (W1): ventas y abonos a Willard.
 //
 // ⚠️ Todo lo que el backend declara como Decimal llega como STRING (FastAPI
@@ -100,6 +101,8 @@ export interface WillardDelivery {
   /** #107 D5 (Q-30): sede que factura la venta derivada, estampada al liquidar. */
   billing_warehouse_id: string | null;
   total_kg_lead: string | number;
+  /** CC-013: IVA y retenciones registrados (solo en el detalle). */
+  taxes: DocumentTax[];
 
   lines: WillardDeliveryLine[];
   /** Advertencias no bloqueantes de la liquidacion (#17/#76). */

@@ -826,6 +826,9 @@ export default function InboundLiquidatePage() {
             const cfg = configById.get(r.config_id)!;
             return {
               retention_type: cfg.retention_type,
+              // CC-013 C2: la tarifa usada, para que el servidor pueda rechazar
+              // una `base_kind='iva'`. Sin esto solo puede juzgar lo que ve.
+              config_id: cfg.config_id,
               ...(cfg.retention_type === "ica" && cfg.municipality
                 ? { municipality: cfg.municipality }
                 : {}),
@@ -1317,11 +1320,20 @@ export default function InboundLiquidatePage() {
                               <SelectValue placeholder="Tarifa..." />
                             </SelectTrigger>
                             <SelectContent>
-                              {retentionConfigs.map((cfg) => (
-                                <SelectItem key={cfg.config_id} value={cfg.config_id as string}>
-                                  {retentionRowLabel(cfg)} ({cfg.rate_pct}%)
-                                </SelectItem>
-                              ))}
+                          // 🔴 CC-013 C2: una tarifa "sobre el IVA" no cabe en una
+                          // COMPRA — el documento no lleva IVA capturado. Esta
+                          // pantalla precalcula `% x subtotal` sin mirar `base_kind`,
+                          // asi que ofrecerla daria un numero plausible y falso, y el
+                          // monto que se manda es la verdad (#79 F1). El servidor la
+                          // rechaza con 422; esto evita que el usuario llegue hasta
+                          // alla. La YA elegida se sigue ofreciendo (#104).
+                              {retentionConfigs
+                                .filter((cfg) => cfg.base_kind !== "iva" || cfg.config_id === r.config_id)
+                                .map((cfg) => (
+                                  <SelectItem key={cfg.config_id} value={cfg.config_id as string}>
+                                    {retentionRowLabel(cfg)} ({cfg.rate_pct}%)
+                                  </SelectItem>
+                                ))}
                             </SelectContent>
                           </Select>
                           <button

@@ -219,14 +219,24 @@ class ReportService:
         )
 
     @staticmethod
-    def _load_tp_behavior_map(db: Session, organization_id: UUID) -> tuple[dict, dict, dict]:
-        """Pre-carga behavior_types, category_names y categoria por behavior para terceros.
+    def _load_tp_behavior_map(db: Session, organization_id: UUID) -> tuple[dict, dict, dict, dict]:
+        """Pre-carga behavior_types, category_names, categoria por behavior y CODIGOS.
 
         Returns:
-            (tp_behaviors, tp_cat_names, tp_cat_by_behavior)
+            (tp_behaviors, tp_cat_names, tp_cat_by_behavior, tp_cat_codes)
             - tp_behaviors: dict[UUID, set[str]] — behavior_types del tercero
             - tp_cat_names: dict[UUID, set[str]] — nombres de categorias
             - tp_cat_by_behavior: dict[UUID, dict[str, str]] — {tp_id: {behavior_type: display_name}}
+            - tp_cat_codes: dict[UUID, set[str]] — `system_code` de las categorias (CC-013 D4b)
+
+        ⚠️ El cuarto elemento es lo que permite clasificar POR CODIGO y no por
+        texto: un nombre es renombrable y el codigo no (patron #58). Agregarlo
+        revienta con `ValueError` a los seis llamadores que desempaquetan la
+        tupla hasta que se actualicen — o sea que no se puede dejar uno a medias
+        en silencio, que es justo el modo de falla que persigue P5b.
+
+        No filtra por `is_active`: una categoria de sistema desactivada a mano
+        sigue clasificando bien.
         """
         from sqlalchemy.orm import aliased
         ParentCat = aliased(ThirdPartyCategory)
@@ -236,6 +246,7 @@ class ReportService:
                 ThirdPartyCategory.behavior_type,
                 ThirdPartyCategory.name,
                 ParentCat.name.label("parent_name"),
+                ThirdPartyCategory.system_code,
             )
             .join(ThirdPartyCategory, ThirdPartyCategoryAssignment.category_id == ThirdPartyCategory.id)
             .outerjoin(ParentCat, ThirdPartyCategory.parent_id == ParentCat.id)
@@ -244,13 +255,29 @@ class ReportService:
         tp_behaviors: dict[UUID, set[str]] = {}
         tp_cat_names: dict[UUID, set[str]] = {}
         tp_cat_by_behavior: dict[UUID, dict[str, str]] = {}
-        for tp_id, bt, name, parent_name in rows:
+        tp_cat_codes: dict[UUID, set[str]] = {}
+        for tp_id, bt, name, parent_name, system_code in rows:
             tp_behaviors.setdefault(tp_id, set()).add(bt)
             tp_cat_names.setdefault(tp_id, set()).add(name)
             display = f"{parent_name} > {name}" if parent_name else name
             # Solo guardar la primera categoria por behavior_type (evitar duplicados M:N)
             tp_cat_by_behavior.setdefault(tp_id, {}).setdefault(bt, display)
-        return tp_behaviors, tp_cat_names, tp_cat_by_behavior
+            if system_code:
+                tp_cat_codes.setdefault(tp_id, set()).add(system_code)
+        return tp_behaviors, tp_cat_names, tp_cat_by_behavior, tp_cat_codes
+
+    @staticmethod
+    def _is_tax_entity(category_codes) -> bool:
+        """Entidad de impuestos de venta (CC-013 D4b) — UN SOLO predicado.
+
+        Lo consumen los TRES sitios que deciden a donde va el saldo de un
+        tercero: el clasificador vivo, el de corte historico y el panel de
+        Dinero Inactivo. Tres copias escritas a mano no se distinguirian de
+        tres copias DIVERGENTES, que es el modo de falla mas dificil de ver.
+        """
+        from app.services.tax_entities import TAX_CATEGORY_CODE
+
+        return TAX_CATEGORY_CODE in (category_codes or ())
 
     # ------------------------------------------------------------------
     # Dinero Inactivo (R1) — saldos a favor sin movimiento en N dias
@@ -384,6 +411,18 @@ class ReportService:
         "loans_receivable": "investor",
         "provision_funds": "provision",
         "generic_receivable": "generic",
+        # 🔴 `tax_advances` NO va acá, y es deliberado (CC-013 D4c).
+        #
+        # A la DIAN no se le persigue un cobro: la retencion que nos practican se
+        # cruza en la declaracion. Si la seccion entrara a este mapa, el anticipo
+        # aparecia como saldo a cobrar con su semaforo de dias —"ReteFuente a
+        # Favor — 60 dias"— invitando a llamar a la DIAN.
+        #
+        # La exclusion es por OMISION, que es el mismo mecanismo con el que este
+        # panel ya deja afuera a `prepaid_expenses` y a todo el lado pasivo. Un
+        # predicado extra acá seria una segunda maquinaria diciendo lo mismo, y
+        # dos mecanismos para una regla se desincronizan. El test T12 lo fija:
+        # agregar la clave a este dict lo tumba.
     }
 
     def get_inactive_balances(
@@ -407,14 +446,15 @@ class ReportService:
                 ThirdParty.current_balance != 0,
             )
         ).scalars().all()
-        tp_behaviors, tp_cat_names, _ = self._load_tp_behavior_map(db, organization_id)
+        tp_behaviors, tp_cat_names, _, tp_cat_codes = self._load_tp_behavior_map(db, organization_id)
         last_activity = self._get_last_activity_map(db, organization_id)
 
         active_sections = set(self._INACTIVE_SECTION_TYPE.keys())
         items: list[InactiveBalanceItem] = []
         for tp in tps:
             section = self._classify_third_party(
-                tp, tp_behaviors.get(tp.id, set()), tp_cat_names.get(tp.id, set())
+                tp, tp_behaviors.get(tp.id, set()), tp_cat_names.get(tp.id, set()),
+                tp_cat_codes.get(tp.id, set()),
             )
             if section not in active_sections:
                 continue
@@ -1723,12 +1763,13 @@ class ReportService:
                 ThirdParty.current_balance != 0,
             )
         ).all())
-        tp_behaviors, tp_cat_names, _ = self._load_tp_behavior_map(db, organization_id)
+        tp_behaviors, tp_cat_names, _, tp_cat_codes = self._load_tp_behavior_map(db, organization_id)
 
         ASSET_SECTIONS = {
             "customers_receivable", "supplier_advances", "service_provider_advances",
             "liability_advances", "investor_receivable", "loans_receivable",
             "provision_funds", "prepaid_expenses", "generic_receivable",
+            "tax_advances",  # CC-013 D4b
         }
         LIABILITY_SECTIONS = {
             "suppliers_payable", "service_provider_payable", "liability_debt",
@@ -1741,7 +1782,9 @@ class ReportService:
         for tp in all_tps:
             behaviors = tp_behaviors.get(tp.id, set())
             cat_names = tp_cat_names.get(tp.id, set())
-            section = self._classify_third_party(tp, behaviors, cat_names)
+            section = self._classify_third_party(
+                tp, behaviors, cat_names, tp_cat_codes.get(tp.id, set())
+            )
             balance = Decimal(str(tp.current_balance))
             if section in ASSET_SECTIONS:
                 tp_buckets[section] += abs(balance) if section == "provision_funds" else balance
@@ -1755,10 +1798,13 @@ class ReportService:
         investor_receivable = tp_buckets["investor_receivable"]
         loans_receivable = tp_buckets["loans_receivable"]
         prepaid_expenses = tp_buckets["prepaid_expenses"]
+        # CC-013 D4b: retenciones que nos practicaron y que se cruzan en la
+        # declaracion (PUC 1355). $0 en toda organizacion sin impuestos de venta.
+        tax_advances = tp_buckets["tax_advances"]
         provision_funds = tp_buckets["provision_funds"]
 
         total_assets = (cash_and_bank + accounts_receivable + inventory + advances
-                        + investor_receivable + loans_receivable + prepaid_expenses + provision_funds + fixed_assets_value
+                        + investor_receivable + loans_receivable + prepaid_expenses + tax_advances + provision_funds + fixed_assets_value
                         + lead_debt_value)  # CC-014: negativo, resta
 
         accounts_payable = tp_buckets["suppliers_payable"]
@@ -1790,6 +1836,7 @@ class ReportService:
                 investor_receivable=float(investor_receivable),
                 loans_receivable=float(loans_receivable),
                 prepaid_expenses=float(prepaid_expenses),
+                tax_advances=float(tax_advances),
                 provision_funds=float(provision_funds),
                 fixed_assets=float(fixed_assets_value),
                 lead_debt_willard=lead_debt,
@@ -1842,7 +1889,7 @@ class ReportService:
         tp_balances = self._get_tp_balances_as_of(db, organization_id, cutoff_dt)
 
         # Pre-cargar metadatos de terceros (incluye inactivos — existían al corte)
-        tp_behaviors, tp_cat_names, _ = self._load_tp_behavior_map(db, organization_id)
+        tp_behaviors, tp_cat_names, _, tp_cat_codes = self._load_tp_behavior_map(db, organization_id)
         tp_objs = {
             tp.id: tp for tp in db.scalars(
                 select(ThirdParty).where(
@@ -1855,6 +1902,7 @@ class ReportService:
             "customers_receivable", "supplier_advances", "service_provider_advances",
             "liability_advances", "investor_receivable", "loans_receivable",
             "provision_funds", "prepaid_expenses", "generic_receivable",
+            "tax_advances",  # CC-013 D4b
         }
         LIABILITY_SECTIONS = {
             "suppliers_payable", "service_provider_payable", "liability_debt",
@@ -1870,7 +1918,9 @@ class ReportService:
                 continue
             behaviors = tp_behaviors.get(tp_id, set())
             cat_names = tp_cat_names.get(tp_id, set())
-            section = self._classify_tp_by_balance(tp, balance, behaviors, cat_names)
+            section = self._classify_tp_by_balance(
+                tp, balance, behaviors, cat_names, tp_cat_codes.get(tp_id, set())
+            )
             if section in ASSET_SECTIONS:
                 tp_buckets[section] += abs(balance) if section == "provision_funds" else balance
             elif section in LIABILITY_SECTIONS:
@@ -1882,10 +1932,13 @@ class ReportService:
         investor_receivable = tp_buckets["investor_receivable"]
         loans_receivable = tp_buckets["loans_receivable"]
         prepaid_expenses = tp_buckets["prepaid_expenses"]
+        # CC-013 D4b: retenciones que nos practicaron y que se cruzan en la
+        # declaracion (PUC 1355). $0 en toda organizacion sin impuestos de venta.
+        tax_advances = tp_buckets["tax_advances"]
         provision_funds = tp_buckets["provision_funds"]
 
         total_assets = (cash_and_bank + accounts_receivable + inventory + advances
-                        + investor_receivable + loans_receivable + prepaid_expenses + provision_funds + fixed_assets_value
+                        + investor_receivable + loans_receivable + prepaid_expenses + tax_advances + provision_funds + fixed_assets_value
                         + lead_debt_value)  # CC-014: negativo, resta
 
         accounts_payable = tp_buckets["suppliers_payable"]
@@ -1921,6 +1974,7 @@ class ReportService:
                 investor_receivable=float(investor_receivable),
                 loans_receivable=float(loans_receivable),
                 prepaid_expenses=float(prepaid_expenses),
+                tax_advances=float(tax_advances),
                 provision_funds=float(provision_funds),
                 fixed_assets=float(fixed_assets_value),
                 lead_debt_willard=lead_debt,
@@ -2069,7 +2123,7 @@ class ReportService:
         ).scalars().all()
 
         # Pre-cargar behavior_types y category_names
-        tp_behaviors, tp_cat_names, tp_cat_by_behavior = self._load_tp_behavior_map(db, organization_id)
+        tp_behaviors, tp_cat_names, tp_cat_by_behavior, tp_cat_codes = self._load_tp_behavior_map(db, organization_id)
 
         # Buckets para clasificacion
         tp_buckets: dict[str, list[BalanceDetailedItem]] = {
@@ -2081,7 +2135,7 @@ class ReportService:
             "investor_receivable": [],
             "loans_receivable": [],
             "provision_funds": [],
-            "prepaid_expenses": [],
+            "prepaid_expenses": [], "tax_advances": [],
             "generic_receivable": [],
             # pasivos
             "suppliers_payable": [],
@@ -2098,7 +2152,9 @@ class ReportService:
         for tp in third_parties:
             behaviors = tp_behaviors.get(tp.id, set())
             cat_names = tp_cat_names.get(tp.id, set())
-            section = self._classify_third_party(tp, behaviors, cat_names)
+            section = self._classify_third_party(
+                tp, behaviors, cat_names, tp_cat_codes.get(tp.id, set())
+            )
             if section and section in tp_buckets:
                 bal = float(tp.current_balance)
                 tp_buckets[section].append(BalanceDetailedItem(
@@ -2119,6 +2175,7 @@ class ReportService:
             ("loans_receivable", "Préstamos por Cobrar", tp_buckets["loans_receivable"]),
             ("provision_funds", "Fondos en Provisiones", tp_buckets["provision_funds"]),
             ("prepaid_expenses", "Gastos Prepagados", tp_buckets["prepaid_expenses"]),
+            ("tax_advances", "Anticipos de Impuestos", tp_buckets["tax_advances"]),
             ("generic_receivable", "Otras Cuentas por Cobrar", tp_buckets["generic_receivable"]),
             ("fixed_assets", "Activos Fijos", fa_items),
         ]
@@ -2179,7 +2236,7 @@ class ReportService:
         cutoff_dt = datetime.combine(as_of_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
 
         # Pre-cargar metadatos de terceros (incluye inactivos — existían al corte)
-        tp_behaviors, tp_cat_names, tp_cat_by_behavior = self._load_tp_behavior_map(db, organization_id)
+        tp_behaviors, tp_cat_names, tp_cat_by_behavior, tp_cat_codes = self._load_tp_behavior_map(db, organization_id)
         tp_objs = {
             tp.id: tp for tp in db.scalars(
                 select(ThirdParty).where(
@@ -2256,7 +2313,7 @@ class ReportService:
             "customers_receivable": [], "supplier_advances": [],
             "service_provider_advances": [], "liability_advances": [],
             "investor_receivable": [], "loans_receivable": [], "provision_funds": [],
-            "prepaid_expenses": [], "generic_receivable": [],
+            "prepaid_expenses": [], "tax_advances": [], "generic_receivable": [],
             "suppliers_payable": [], "service_provider_payable": [],
             "liability_debt": [], "investors_partners": [],
             "investors_obligations": [], "investors_legacy": [],
@@ -2268,7 +2325,9 @@ class ReportService:
                 continue
             behaviors = tp_behaviors.get(tp_id, set())
             cat_names = tp_cat_names.get(tp_id, set())
-            section = self._classify_tp_by_balance(tp, balance, behaviors, cat_names)
+            section = self._classify_tp_by_balance(
+                tp, balance, behaviors, cat_names, tp_cat_codes.get(tp_id, set())
+            )
             if section and section in tp_buckets:
                 tp_buckets[section].append(BalanceDetailedItem(
                     id=str(tp_id), name=tp.name,
@@ -2288,6 +2347,7 @@ class ReportService:
             ("loans_receivable", "Préstamos por Cobrar", tp_buckets["loans_receivable"]),
             ("provision_funds", "Fondos en Provisiones", tp_buckets["provision_funds"]),
             ("prepaid_expenses", "Gastos Prepagados", tp_buckets["prepaid_expenses"]),
+            ("tax_advances", "Anticipos de Impuestos", tp_buckets["tax_advances"]),
             ("generic_receivable", "Otras Cuentas por Cobrar", tp_buckets["generic_receivable"]),
             ("fixed_assets", "Activos Fijos", fa_items),
         ]
@@ -2343,11 +2403,24 @@ class ReportService:
         tp: ThirdParty,
         behavior_types: set[str],
         category_names: set[str],
+        category_codes: set[str],
     ) -> str | None:
         """Clasifica un tercero en una unica seccion del balance segun prioridad."""
         bal = float(tp.current_balance)
         if bal == 0:
             return None
+        # CC-013 D4b: una entidad de impuestos A FAVOR es anticipo de impuesto
+        # (PUC 1355), no gasto prepagado. Va ANTES del marcador de sistema
+        # porque estas entidades SON de sistema y esa regla se las llevaria.
+        #
+        # 🔴 El `bal > 0` es LOAD-BEARING, no una guarda de mas (P19): la MISMA
+        # categoria alberga el IVA por pagar, que tiene saldo EN CONTRA y tiene
+        # que caer en el pasivo. Sin esta condicion ese pasivo aterriza en
+        # `tax_advances` como un activo NEGATIVO, y ningun test de totales lo
+        # ve — el patrimonio es residual en los cuatro caminos del balance
+        # (#110), asi que activos −x y pasivos −x dejan todo cuadrado.
+        if bal > 0 and ReportService._is_tax_entity(category_codes):
+            return "tax_advances"
         # System entities (prepagados)
         if tp.is_system_entity and bal > 0:
             return "prepaid_expenses"
@@ -2618,6 +2691,69 @@ class ReportService:
         ).all()
         for tp_id, total in sale_comm_rows:
             balances[tp_id] -= Decimal(str(total))
+
+        # Fuente 6: IVA y retenciones de venta (CC-013).
+        #
+        # 🔴 Sin esta fuente, el saldo historico de las entidades "[Impuestos] X"
+        # seria CERO y el del cliente quedaria en el subtotal en vez del total a
+        # pagar. Y el modo de falla es el peor: los dos errores se CANCELAN en el
+        # total del balance, asi que activos y pasivos cuadran igual y lo unico
+        # que queda mal es el reparto por seccion — la misma clase de defecto que
+        # P19, en otro lugar.
+        #
+        # Los dos lados salen de la MISMA tabla y con el mismo mapa de signos,
+        # asi que no pueden desincronizarse.
+        from app.models.document_tax import TAX_SIGN_ON_CUSTOMER, DocumentTax
+        from app.models.willard_delivery import WillardDelivery
+
+        # (a) Impuestos de una venta directa: el dueno es la Sale.
+        tax_sale_rows = db.execute(
+            select(
+                DocumentTax.tax_type,
+                Sale.customer_id,
+                DocumentTax.third_party_id,
+                func.sum(DocumentTax.amount),
+            ).join(Sale, DocumentTax.sale_id == Sale.id)
+            .where(
+                Sale.organization_id == organization_id,
+                Sale.liquidated_at < cutoff_dt,
+                DocumentTax.reverted_at.is_(None),
+                self._active_at_cutoff(Sale.status),
+            ).group_by(DocumentTax.tax_type, Sale.customer_id, DocumentTax.third_party_id)
+        ).all()
+
+        # (b) Impuestos de una Salida de Plomo: el dueno es la Salida, y el
+        #     tercero que paga es el cliente de su venta derivada si la hay
+        #     (tipo `venta`) o el titular de la cuenta (tipo `abono`).
+        tax_delivery_rows = db.execute(
+            select(
+                DocumentTax.tax_type,
+                func.coalesce(Sale.customer_id, WillardDelivery.third_party_id),
+                DocumentTax.third_party_id,
+                func.sum(DocumentTax.amount),
+            ).join(
+                WillardDelivery,
+                DocumentTax.willard_delivery_id == WillardDelivery.id,
+            )
+            .outerjoin(Sale, WillardDelivery.sale_id == Sale.id)
+            .where(
+                WillardDelivery.organization_id == organization_id,
+                WillardDelivery.liquidated_at < cutoff_dt,
+                DocumentTax.reverted_at.is_(None),
+                self._active_at_cutoff(WillardDelivery.status, "liquidated"),
+            ).group_by(
+                DocumentTax.tax_type,
+                func.coalesce(Sale.customer_id, WillardDelivery.third_party_id),
+                DocumentTax.third_party_id,
+            )
+        ).all()
+
+        for tax_type, customer_id, entity_id, total in tax_sale_rows + tax_delivery_rows:
+            sign = TAX_SIGN_ON_CUSTOMER[tax_type]
+            amount = Decimal(str(total))
+            if customer_id is not None:
+                balances[customer_id] += sign * amount
+            balances[entity_id] -= sign * amount
 
         return {k: v for k, v in balances.items() if v != 0}
 
@@ -3086,11 +3222,24 @@ class ReportService:
         balance: Decimal,
         behavior_types: set[str],
         category_names: set[str],
+        category_codes: set[str],
     ) -> str | None:
         """Como _classify_third_party pero usa balance externo (historico)."""
         bal = float(balance)
         if bal == 0:
             return None
+        # CC-013 D4b: una entidad de impuestos A FAVOR es anticipo de impuesto
+        # (PUC 1355), no gasto prepagado. Va ANTES del marcador de sistema
+        # porque estas entidades SON de sistema y esa regla se las llevaria.
+        #
+        # 🔴 El `bal > 0` es LOAD-BEARING, no una guarda de mas (P19): la MISMA
+        # categoria alberga el IVA por pagar, que tiene saldo EN CONTRA y tiene
+        # que caer en el pasivo. Sin esta condicion ese pasivo aterriza en
+        # `tax_advances` como un activo NEGATIVO, y ningun test de totales lo
+        # ve — el patrimonio es residual en los cuatro caminos del balance
+        # (#110), asi que activos −x y pasivos −x dejan todo cuadrado.
+        if bal > 0 and ReportService._is_tax_entity(category_codes):
+            return "tax_advances"
         if tp.is_system_entity and bal > 0:
             return "prepaid_expenses"
         if "provision" in behavior_types:
@@ -4192,7 +4341,7 @@ class ReportService:
             .order_by(ThirdParty.name)
         ).all())
 
-        tp_behaviors, _, _ = self._load_tp_behavior_map(db, organization_id)
+        tp_behaviors, _, _, _ = self._load_tp_behavior_map(db, organization_id)
 
         # Dict acumulador {third_party_id: calculated_balance}
         tp_calc: dict[UUID, Decimal] = {}

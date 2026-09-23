@@ -48,6 +48,15 @@ SETTING_DEFAULTS: dict = {
     # porcentaje (igual que transfer_tolerance_pct). Dentro: aviso suave;
     # fuera: resaltado. JAMAS bloquea por monto (#17/#76).
     "inbound_discrepancy_tolerance_pct": 0.05,
+    # CC-013 (D6): tasa de IVA para el PRECALCULO de la factura. Es un setting y
+    # NO una fila de `retention_configs` porque el IVA no es una retencion —
+    # meterlo ahi obligaria a abrir el CHECK de esa tabla para admitir una fila
+    # que no es lo que la tabla dice que contiene. Mismo argumento que renombro
+    # el codigo de categoria a `taxes`: el nombre no puede mentir.
+    #
+    # El monto se digita y es editable (D1: el sistema REGISTRA lo que Siigo
+    # emitio), asi que este numero solo ayuda a llenar el campo.
+    "iva_rate_pct": 19.0,
 }
 
 

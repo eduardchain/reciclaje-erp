@@ -112,6 +112,13 @@ class RetentionConfigCreate(BaseModel):
     municipality: Optional[str] = Field(None, min_length=1, max_length=60)
     concept: Optional[str] = Field(None, min_length=1, max_length=60)
     rate_pct: Decimal = Field(..., gt=0, le=100)
+    base_kind: Literal["subtotal", "iva"] = Field(
+        "subtotal",
+        description=(
+            "Sobre que se aplica la tasa (CC-013 D5). El default es lo que hacen "
+            "hoy las dos pantallas de compras, asi que compras queda byte a byte"
+        ),
+    )
 
     @model_validator(mode="after")
     def _municipality_iff_ica(self):
@@ -124,6 +131,7 @@ class RetentionConfigCreate(BaseModel):
 
 class RetentionConfigUpdate(BaseModel):
     rate_pct: Optional[Decimal] = Field(None, gt=0, le=100)
+    base_kind: Optional[Literal["subtotal", "iva"]] = None
     is_active: Optional[bool] = None
 
 
@@ -137,6 +145,10 @@ class RetentionRowResponse(BaseModel):
     municipality: Optional[str] = None
     concept: Optional[str] = None
     rate_pct: Optional[float] = None
+    #: CC-013 D5 — `subtotal` o `iva`. Una reteIVA se aplica sobre el IVA y
+    #: guardarla como "2,85 % del subtotal" da el numero correcto SOLO mientras
+    #: el IVA sea 19 %, y queda mal en silencio el dia que cambie.
+    base_kind: Optional[str] = None
     name: Optional[str] = None
     current_balance: float
     is_active: bool

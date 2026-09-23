@@ -1598,6 +1598,48 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         pasivo total conservado. Cero P&L, cero costo de material."""
         from app.utils.org_settings import get_org_setting
         from app.models.purchase_retention import PurchaseRetention
+        from app.models.retention_config import RetentionConfig
+
+        # 🔴 CC-013 C2 — una tarifa "sobre el IVA" no cabe en una COMPRA.
+        #
+        # El catalogo de tarifas es COMPARTIDO con las ventas a proposito (un
+        # porcentaje legal no depende de la direccion), y CC-013 le agrego
+        # `base_kind`. Pero una compra no lleva IVA capturado: aplicar ahi una
+        # tarifa "15 % del IVA" daria 15 % del subtotal, un numero plausible y
+        # falso — y el monto que manda la pantalla es la verdad (#79 F1), asi
+        # que nada mas lo atraparia.
+        #
+        # Va ACA porque este metodo es el unico punto por el que pasan las DOS
+        # puertas: la compra directa y la Entrada, que liquida via
+        # `purchase.liquidate(retentions_data=...)`. Un validador, todos los
+        # puntos de entrada (#103 D3) — y cubre tambien la API cruda.
+        #
+        # ⚠️ Solo puede juzgar lo que puede identificar: sin `config_id` el
+        # servidor no sabe que tarifa se uso y no inventa un rechazo. Las dos
+        # pantallas lo mandan.
+        ids = {r.config_id for r in retentions_data if getattr(r, "config_id", None)}
+        if ids:
+            sobre_iva = db.execute(
+                select(RetentionConfig).where(
+                    RetentionConfig.id.in_(ids),
+                    RetentionConfig.organization_id == organization_id,
+                    RetentionConfig.base_kind == "iva",
+                )
+            ).scalars().first()
+            if sobre_iva is not None:
+                etiqueta = sobre_iva.retention_type.upper()
+                if sobre_iva.municipality:
+                    etiqueta += f" {sobre_iva.municipality}"
+                if sobre_iva.concept:
+                    etiqueta += f" ({sobre_iva.concept})"
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"La retencion '{etiqueta}' se calcula sobre el IVA y una compra "
+                        "no lleva IVA. Use una tarifa sobre el subtotal, o cree una en "
+                        "Tesoreria → Retenciones."
+                    ),
+                )
 
         # Guard de flag: sin el, una org no-SAC podria crear terceros sistema
         # indelebles via API cruda (D9/D10)

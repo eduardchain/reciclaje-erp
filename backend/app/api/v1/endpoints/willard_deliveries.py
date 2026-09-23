@@ -34,6 +34,29 @@ from app.services.willard_delivery import willard_delivery
 router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])
 
 
+def _tax_rows(db: Session, delivery_id) -> list[dict]:
+    """IVA y retenciones de la Salida, con el nombre de cada entidad (CC-013)."""
+    from app.models.document_tax import DocumentTax
+    from app.models.third_party import ThirdParty
+
+    rows = db.execute(
+        select(DocumentTax, ThirdParty)
+        .join(ThirdParty, DocumentTax.third_party_id == ThirdParty.id)
+        .where(DocumentTax.willard_delivery_id == delivery_id)
+        .order_by(DocumentTax.created_at)
+    ).all()
+    return [
+        {
+            "id": tax.id, "third_party_id": tax.third_party_id,
+            "third_party_name": tp.name, "tax_type": tax.tax_type,
+            "municipality": tax.municipality, "concept": tax.concept,
+            "rate": tax.rate, "base_amount": tax.base_amount,
+            "amount": tax.amount, "reverted_at": tax.reverted_at,
+        }
+        for tax, tp in rows
+    ]
+
+
 def _user_names(db: Session, delivery: WillardDelivery) -> dict:
     ids = {
         delivery.created_by,
@@ -124,6 +147,7 @@ def _enrich(db: Session, delivery: WillardDelivery) -> WillardDeliveryResponse:
         crucible_amount=delivery.crucible_amount,
         billing_warehouse_id=delivery.billing_warehouse_id,
         total_kg_lead=total_kg,
+        taxes=_tax_rows(db, delivery.id),
         lines=lines,
     )
 
