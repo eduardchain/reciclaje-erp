@@ -16,7 +16,12 @@ TariffCode = Literal[
     "maquila_crisol",
     "flete_willard_bog_baq",
     "flete_willard_planta_planta",
-    "abono_planta_por_kg",  # W1: porcion de la maquila que Circunvalar le abona a planta
+    "abono_planta_por_kg",  # W1: porcion de la maquila que Circunvalar le abona a planta (abono a MATERIALES)
+    # #109: porcion FIJA que Circunvalar le reconoce a planta al facturar un abono a
+    # BATERIAS (Johana 16-sep; 18-sep L183: "Sí, fijo por kilo"). Tarifa propia, no
+    # "2.097 menos 1.531": que este numero no se mueva cuando Willard cambie su
+    # maquila es decision NUESTRA (ella acepto que los 1.531 tambien son fijos).
+    "abono_planta_bateria_por_kg",
     "comision_green_loop",  # SAC E2 D7: $100/kg material recolectado en ruta (Johana 2026-07-16)
 ]
 
@@ -31,6 +36,7 @@ CANONICAL_UNIT_BY_CODE: dict = {
     "flete_willard_bog_baq": "per_kg_battery",
     "flete_willard_planta_planta": "per_kg_lead",
     "abono_planta_por_kg": "per_kg_lead",
+    "abono_planta_bateria_por_kg": "per_kg_lead",
     "comision_green_loop": "per_kg_material",
 }
 

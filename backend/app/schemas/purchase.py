@@ -246,6 +246,11 @@ class PurchaseRetentionCreate(BaseModel):
     """
     retention_type: Literal["retefuente", "reteiva", "ica"]
     municipality: Optional[str] = Field(None, min_length=1, max_length=60)
+    # CC-013 C2: la tarifa del catalogo con la que se precalculo. OPCIONAL y
+    # sin persistir — sirve para UNA sola cosa: que el servidor pueda rechazar
+    # una tarifa `base_kind='iva'` en un documento que no lleva IVA. Ausente =
+    # camino de siempre byte a byte (ningun payload previo lo manda).
+    config_id: Optional[UUID] = None
     rate: Optional[Decimal] = Field(None, gt=0, description="Tasa informativa")
     base: Optional[Decimal] = Field(None, gt=0, description="Base informativa")
     amount: Decimal = Field(..., gt=0)

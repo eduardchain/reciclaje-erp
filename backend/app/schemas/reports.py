@@ -252,6 +252,35 @@ class CashFlowResponse(BaseModel):
 # Balance Sheet - Balance General (Section 18.3)
 # ---------------------------------------------------------------------------
 
+class LeadDebtValuation(BaseModel):
+    """Deuda en plomo con Willard valorada a precio de mercado (CC-014, Q-B).
+
+    Johana la lleva hoy a mano: "le doy un valor de acuerdo al precio del
+    mercado en ese momento y la tengo como un valor negativo, o sea, restando
+    dentro de mi inventario". Los cuatro campos viajan juntos y no sueltos
+    porque el numero tiene que ser auditable en pantalla — "1.234 kg x $2.400,
+    precio del 5 de septiembre" — y porque el comparador del golden perdona
+    UNA clave nueva por captura, no cuatro.
+
+    `value` es negativo cuando SAC debe plomo: es `-(kg x precio)`, sin abs().
+    `price`, `price_date` y `value` llegan en None cuando hay kilos pero
+    ningun precio vigente a la fecha: la pantalla avisa "X kg sin valorar".
+    Un cero ahi diria que la deuda no vale nada.
+    """
+    kg: float
+    price: Optional[float] = None
+    price_date: Optional[date] = None
+    value: Optional[float] = None
+
+    @field_serializer("price_date")
+    def serialize_price_date(self, v: Optional[date], _info) -> Optional[str]:
+        # Mediodia UTC explicito: sin esto, JS parsea "2026-09-05" como
+        # medianoche UTC y en Colombia se ve el dia anterior (#24).
+        if v is None:
+            return None
+        return f"{v.year:04d}-{v.month:02d}-{v.day:02d}T12:00:00Z"
+
+
 class BalanceSheetAssets(BaseModel):
     cash_and_bank: float
     accounts_receivable: float
@@ -260,8 +289,17 @@ class BalanceSheetAssets(BaseModel):
     investor_receivable: float = 0.0
     loans_receivable: float = 0.0  # prestamos activos (obligaciones receivable, split de CxC Inversionistas)
     prepaid_expenses: float = 0.0
+    #: CC-013 D4b — anticipos de impuesto (retenciones que nos practicaron).
+    #: Clave ADITIVA: llega en 0.0 a las tres organizaciones cliente.
+    tax_advances: float = 0.0
     provision_funds: float = 0.0
     fixed_assets: float = 0.0
+    # CC-014: deuda en plomo con Willard a precio de mercado, RESTANDO.
+    # None si y solo si la organizacion no tiene `kg_ledger_enabled` — con el
+    # flag encendido llega siempre objeto, aunque no haya cuentas, kilos ni
+    # precio. Ese predicado unico es lo que hace demostrable que las otras
+    # seis organizaciones ven exactamente lo que ven hoy.
+    lead_debt_willard: Optional[LeadDebtValuation] = None
     total: float
 
 

@@ -166,6 +166,7 @@ def list_retention_rows(db: Session, organization_id: UUID) -> list[dict]:
             "municipality": cfg.municipality,
             "concept": cfg.concept,
             "rate_pct": float(cfg.rate_pct),
+            "base_kind": cfg.base_kind,  # CC-013 D5
             "name": tp.name if tp is not None else None,
             "current_balance": float(tp.current_balance) if tp is not None else 0.0,
             "is_active": cfg.is_active,
@@ -183,6 +184,7 @@ def list_retention_rows(db: Session, organization_id: UUID) -> list[dict]:
             "municipality": parsed[1] if parsed else None,
             "concept": None,
             "rate_pct": None,
+            "base_kind": None,
             "name": tp.name,
             "current_balance": float(tp.current_balance),
             "is_active": tp.is_active,

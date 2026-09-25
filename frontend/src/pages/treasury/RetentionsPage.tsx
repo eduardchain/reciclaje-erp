@@ -18,7 +18,7 @@ import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { useRetentionRows, useCreateRetentionConfig, useUpdateRetentionConfig } from "@/hooks/useMasterData";
 import { ROUTES } from "@/utils/constants";
 import { RETENTION_TYPE_LABELS } from "@/types/purchase";
-import type { RetentionRow, RetentionConfigType } from "@/types/third-party";
+import type { RetentionRow, RetentionConfigType, RetentionBaseKind } from "@/types/third-party";
 
 export function retentionRowLabel(r: RetentionRow): string {
   let label: string = RETENTION_TYPE_LABELS[r.retention_type];
@@ -52,11 +52,15 @@ export default function RetentionsPage() {
   const [newMunicipality, setNewMunicipality] = useState("");
   const [newConcept, setNewConcept] = useState("");
   const [newRate, setNewRate] = useState("");
+  // CC-013 D5: sobre QUE se aplica la tarifa. `subtotal` es lo que hacen hoy
+  // las dos pantallas de compras, asi que ese default deja compras byte a byte.
+  const [newBaseKind, setNewBaseKind] = useState<RetentionBaseKind>("subtotal");
   const openAdd = (prefill?: RetentionRow) => {
     setNewType(prefill?.retention_type ?? "retefuente");
     setNewMunicipality(prefill?.municipality ?? "");
     setNewConcept("");
     setNewRate("");
+    setNewBaseKind("subtotal");
     setShowAdd(true);
   };
   const newRateNum = parseFloat(newRate);
@@ -70,6 +74,7 @@ export default function RetentionsPage() {
         ...(newType === "ica" ? { municipality: newMunicipality.trim() } : {}),
         ...(newConcept.trim() ? { concept: newConcept.trim() } : {}),
         rate_pct: newRateNum,
+        base_kind: newBaseKind,
       },
       {
         onSuccess: (created) => {
@@ -80,15 +85,19 @@ export default function RetentionsPage() {
     );
   };
 
-  // Dialog editar %
+  // Dialog editar % y base
   const [editTarget, setEditTarget] = useState<RetentionRow | null>(null);
   const [editRate, setEditRate] = useState("");
+  // La base se edita igual que el %: sin esto, una tarifa sembrada con el
+  // default `subtotal` no se podia corregir desde ninguna pantalla, que es
+  // justo lo que el runbook manda hacer con las tres tarifas de sistema.
+  const [editBaseKind, setEditBaseKind] = useState<RetentionBaseKind>("subtotal");
   const editRateNum = parseFloat(editRate);
   const editValid = !Number.isNaN(editRateNum) && editRateNum > 0 && editRateNum <= 100;
   const handleEdit = () => {
     if (!editTarget?.config_id) return;
     updateConfig.mutate(
-      { configId: editTarget.config_id, data: { rate_pct: editRateNum } },
+      { configId: editTarget.config_id, data: { rate_pct: editRateNum, base_kind: editBaseKind } },
       {
         onSuccess: () => {
           toast.success("Tarifa actualizada");
@@ -119,8 +128,8 @@ export default function RetentionsPage() {
         </Button>
       )}
       {canManage && r.config_id && (
-        <Button variant="outline" size="sm" className={mobile ? "w-full" : ""} onClick={() => { setEditTarget(r); setEditRate(String(r.rate_pct ?? "")); }}>
-          <Pencil className="h-3 w-3 mr-1" />% Tarifa
+        <Button variant="outline" size="sm" className={mobile ? "w-full" : ""} onClick={() => { setEditTarget(r); setEditRate(String(r.rate_pct ?? "")); setEditBaseKind(r.base_kind === "iva" ? "iva" : "subtotal"); }}>
+          <Pencil className="h-3 w-3 mr-1" />Editar
         </Button>
       )}
       {canManage && !r.config_id && (
@@ -188,6 +197,9 @@ export default function RetentionsPage() {
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {r.rate_pct != null ? `${r.rate_pct}%` : "—"}
+                        {r.base_kind === "iva" && (
+                          <span className="text-xs text-slate-400 ml-1">sobre IVA</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         {r.entity_id ? <MoneyDisplay amount={r.current_balance} /> : <span className="text-slate-400">—</span>}
@@ -259,7 +271,28 @@ export default function RetentionsPage() {
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">% Tarifa *</Label>
               <Input type="number" min={0.01} max={100} step="0.01" value={newRate} onChange={(e) => setNewRate(e.target.value)} placeholder="Ej: 2.5" />
-              <p className="text-xs text-slate-500 mt-1">Al liquidar, el monto se pre-calcula con este % sobre el subtotal — siempre editable.</p>
+              <p className="text-xs text-slate-500 mt-1">Al liquidar, el monto se pre-calcula con este % — siempre editable.</p>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Se aplica sobre *</Label>
+              <Select value={newBaseKind} onValueChange={(v) => setNewBaseKind(v as RetentionBaseKind)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="subtotal">El subtotal del documento</SelectItem>
+                  <SelectItem value="iva">El IVA de la factura</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-500 mt-1">
+                La reteIVA se aplica sobre el IVA; la retefuente y el ICA sobre el subtotal.
+                Guardar una reteIVA como un % del subtotal da el número correcto solo
+                mientras el IVA no cambie.
+              </p>
+              {newBaseKind === "iva" && (
+                <p className="text-xs text-amber-700 mt-1">
+                  Una tarifa sobre el IVA deja de ofrecerse al liquidar Entradas y compras:
+                  una compra no lleva IVA.
+                </p>
+              )}
             </div>
           </div>
           <div className="flex justify-end gap-2">
@@ -282,6 +315,27 @@ export default function RetentionsPage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">% Tarifa *</Label>
               <Input type="number" min={0.01} max={100} step="0.01" value={editRate} onChange={(e) => setEditRate(e.target.value)} autoFocus />
               <p className="text-xs text-slate-500 mt-1">Aplica a liquidaciones futuras; las pasadas conservan el % con que se liquidaron.</p>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Se aplica sobre *</Label>
+              <Select value={editBaseKind} onValueChange={(v) => setEditBaseKind(v as RetentionBaseKind)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="subtotal">El subtotal del documento</SelectItem>
+                  <SelectItem value="iva">El IVA de la factura</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-500 mt-1">
+                La reteIVA se aplica sobre el IVA; la retefuente y el ICA sobre el subtotal.
+                Guardar una reteIVA como un % del subtotal da el número correcto solo
+                mientras el IVA no cambie.
+              </p>
+              {editBaseKind === "iva" && (
+                <p className="text-xs text-amber-700 mt-1">
+                  Una tarifa sobre el IVA deja de ofrecerse al liquidar Entradas y compras:
+                  una compra no lleva IVA.
+                </p>
+              )}
             </div>
             {editTarget?.config_id && (
               <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => { if (editTarget) toggleActive(editTarget); setEditTarget(null); }}>

@@ -35,10 +35,71 @@ from app.schemas.kg_ledger import (
 _WILLARD_TYPES = {"willard_baterias", "willard_drosses"}
 _INTERNAL_TYPES = {"intersede", "intra_horno", "crisol"}
 _WAREHOUSE_REQUIRED = {"willard_baterias", "intra_horno", "crisol"}
+# Etapas DENTRO de la cuenta intersede (#107 D1): la deuda de planta con
+# Circunvalar es UNA (Hugo: "la deuda es una sola, dos procesos"; Johana:
+# "intersede = horno grande + crisol"). Sub-saldos = SUM GROUP BY stage.
+INTERSEDE_STAGES = ("horno", "crisol")
+STAGE_LABELS = {"horno": "en horno (crudo)", "crisol": "en crisol"}
 
 
 def _err(detail: str, code: int = status.HTTP_422_UNPROCESSABLE_ENTITY):
     return HTTPException(status_code=code, detail=detail)
+
+
+def add_kg_movement(
+    db: Session,
+    *,
+    organization_id: UUID,
+    account: KgLedgerAccount,
+    delta_kg: Decimal,
+    transaction_date: datetime,
+    source_type: str,
+    source_id: Optional[UUID] = None,
+    description: Optional[str] = None,
+    stage: Optional[str] = None,
+    inventory_movement_id: Optional[UUID] = None,
+    conversion_formula_snapshot: Optional[dict] = None,
+    created_by: Optional[UUID] = None,
+) -> KgLedgerMovement:
+    """
+    El UNICO escritor del libro kg (#107 D1, F1 de QA). Los cuatro emisores
+    (manual, Entrada, traslado, Salida) y el documento de crisol pasan por aca;
+    `KgLedgerMovement(` no se construye en ningun otro archivo de `app/`
+    (guarda en tests/test_crucible_charges.py, calco de TestGuarda #106).
+
+    Regla de la etapa, en un solo punto para que no pueda divergir:
+      - cuenta `intersede`  -> `stage` OBLIGATORIA (horno | crisol)
+      - cualquier otra      -> `stage` debe ser NULL
+    Con eso `intersede == horno + crisol` es por construccion, no algo que se
+    vigile: los sub-saldos son SUM GROUP BY stage sobre la misma cuenta.
+    """
+    if account.account_type == "intersede":
+        if stage not in INTERSEDE_STAGES:
+            raise _err(
+                "La cuenta intersede exige la etapa del plomo: 'horno' (crudo) o "
+                "'crisol'. Sin etapa el sub-saldo no sabe donde esta el plomo."
+            )
+    elif stage is not None:
+        raise _err(
+            f"La cuenta '{account.code}' ({account.account_type}) no tiene etapas: "
+            "solo intersede se parte en horno y crisol."
+        )
+    mov = KgLedgerMovement(
+        organization_id=organization_id,
+        account_id=account.id,
+        delta_kg=delta_kg,
+        transaction_date=transaction_date,
+        description=description,
+        source_type=source_type,
+        source_id=source_id,
+        stage=stage,
+        inventory_movement_id=inventory_movement_id,
+        conversion_formula_snapshot=conversion_formula_snapshot,
+        created_by=created_by,
+        status="confirmed",
+    )
+    db.add(mov)
+    return mov
 
 
 class KgLedgerService:
@@ -64,6 +125,32 @@ class KgLedgerService:
         if as_of is not None:
             q = q.where(KgLedgerMovement.transaction_date <= as_of)
         return {row[0]: row[1] or Decimal("0") for row in db.execute(q).all()}
+
+    def intersede_stage_balances(
+        self,
+        db: Session,
+        organization_id: UUID,
+        as_of: Optional[datetime] = None,
+    ) -> dict[str, Decimal]:
+        """Sub-saldos de la cuenta intersede por etapa (#107 D1). Siempre
+        devuelve las dos llaves; su suma es el saldo de la cuenta."""
+        q = (
+            select(KgLedgerMovement.stage, func.sum(KgLedgerMovement.delta_kg))
+            .join(KgLedgerAccount, KgLedgerAccount.id == KgLedgerMovement.account_id)
+            .where(
+                KgLedgerMovement.organization_id == organization_id,
+                KgLedgerMovement.status == "confirmed",
+                KgLedgerAccount.account_type == "intersede",
+            )
+            .group_by(KgLedgerMovement.stage)
+        )
+        if as_of is not None:
+            q = q.where(KgLedgerMovement.transaction_date <= as_of)
+        out = {s: Decimal("0") for s in INTERSEDE_STAGES}
+        for stage, total in db.execute(q).all():
+            if stage in out:
+                out[stage] = Decimal(str(total or 0))
+        return out
 
     def account_balance(self, db: Session, organization_id: UUID, account_id: UUID) -> Decimal:
         return self.balances(db, organization_id).get(account_id, Decimal("0"))
@@ -261,6 +348,7 @@ class KgLedgerService:
                     description=m.description,
                     source_type=m.source_type,
                     source_id=m.source_id,
+                    stage=m.stage,
                     inventory_movement_id=m.inventory_movement_id,
                     conversion_formula_snapshot=m.conversion_formula_snapshot,
                     status=m.status,
@@ -295,6 +383,7 @@ class KgLedgerService:
         ).scalars().all()
 
         bals = self.balances(db, organization_id, as_of=as_of)
+        stages = self.intersede_stage_balances(db, organization_id, as_of=as_of)
 
         last_q = (
             select(
@@ -345,6 +434,8 @@ class KgLedgerService:
             total_intersede_kg=totals["intersede"],
             total_intra_horno_kg=totals["intra_horno"],
             total_crisol_kg=totals["crisol"],
+            intersede_horno_kg=stages["horno"],
+            intersede_crisol_kg=stages["crisol"],
         )
 
     # ------------------------------------------------------------------ #
@@ -361,18 +452,17 @@ class KgLedgerService:
         if not acc.is_active:
             raise _err("La cuenta esta inactiva")
 
-        mov = KgLedgerMovement(
+        mov = add_kg_movement(
+            db,
             organization_id=organization_id,
-            account_id=acc.id,
+            account=acc,
             delta_kg=data.delta_kg,
             transaction_date=data.transaction_date,
             description=f"{data.description} — Motivo: {data.reason}",
             source_type="manual_adjustment",
-            source_id=None,
+            stage=data.stage,
             created_by=user_id,
-            status="confirmed",
         )
-        db.add(mov)
         db.commit()
         db.refresh(mov)
         return mov

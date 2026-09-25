@@ -1225,3 +1225,59 @@ class TestDoubleEntryCharges:
         resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
         assert resp.status_code == 400
         assert "receptor del cargo" in resp.json()["detail"]
+
+
+# ===========================================================================
+# Plan advisory-locks (2026-09-09): el cruce pide sus tres contadores por el
+# helper unico, y la BD rechaza dos cruces con el mismo numero (D5).
+# ===========================================================================
+class TestLocksDeNumeracionEnElCruce:
+    def test_el_cruce_pide_las_tres_secuencias_en_orden(
+        self, client, org_headers, test_supplier, test_customer, test_material
+    ):
+        """T5 (P2, P6): se graba que secuencias pide `double_entry.create`.
+        Compra directa y compra de cruce piden el MISMO nombre (`purchase_number`)
+        — el defecto B era justamente dos nombres para un contador — y en el
+        orden canonico (documento -> compra -> venta)."""
+        from unittest.mock import patch
+
+        import app.services.double_entry as de_mod
+        import app.utils.advisory_locks as al
+
+        vistos = []
+
+        def grabar(db, organization_id, sequence, partition=None):
+            vistos.append((sequence, partition))
+            return al.next_number(db, organization_id, sequence, partition)
+
+        with patch.object(de_mod, "next_number", side_effect=grabar):
+            payload = _create_payload(test_supplier.id, test_customer.id, test_material.id)
+            resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+        assert resp.status_code == 201, resp.text
+        assert vistos == [
+            ("double_entry_number", None),
+            ("purchase_number", None),
+            ("sale_number", None),
+        ]
+
+    def test_dos_cruces_con_el_mismo_numero_no_caben(
+        self, client, org_headers, db_session, test_supplier, test_customer, test_material
+    ):
+        """T7b (P5): con filas reales, forzar el mismo numero en el segundo cruce
+        revienta contra `uq_double_entries_org_number` — antes de este ciclo el
+        UPDATE pasaba y quedaban dos cruces #1 en silencio."""
+        from sqlalchemy import text
+        from sqlalchemy.exc import IntegrityError
+
+        ids = []
+        for _ in range(2):
+            payload = _create_payload(test_supplier.id, test_customer.id, test_material.id)
+            resp = client.post("/api/v1/double-entries", json=payload, headers=org_headers)
+            assert resp.status_code == 201, resp.text
+            ids.append(resp.json()["id"])
+        with pytest.raises(IntegrityError, match="uq_double_entries_org_number"):
+            db_session.execute(
+                text("UPDATE double_entries SET double_entry_number = 1 WHERE id = :id"),
+                {"id": ids[1]},
+            )
+        db_session.rollback()

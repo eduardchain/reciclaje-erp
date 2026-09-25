@@ -22,6 +22,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text, or_, cast, String
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number
 from app.models.inventory_adjustment import InventoryAdjustment, VALID_ADJUSTMENT_TYPES
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
@@ -764,16 +765,8 @@ class CRUDInventoryAdjustment:
     # ======================================================================
 
     def _generate_adjustment_number(self, db: Session, organization_id: UUID) -> int:
-        """Generar numero secuencial con advisory lock."""
-        lock_id = hash(f"{organization_id}-adjustments") % (2**31)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-
-        stmt = select(func.max(InventoryAdjustment.adjustment_number)).where(
-            InventoryAdjustment.organization_id == organization_id
-        )
-        max_number = db.scalar(stmt)
-        return (max_number or 0) + 1
-
+        """Siguiente `adjustment_number` de la org: lock estable + MAX+1 en el helper unico (`app/utils/advisory_locks.py`)."""
+        return next_number(db, organization_id, "adjustment_number")
     def _create_adjustment(
         self,
         db: Session,

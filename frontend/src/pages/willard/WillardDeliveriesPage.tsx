@@ -20,6 +20,8 @@ import {
   DELIVERY_TYPE_COLORS, DELIVERY_TYPE_LABELS, num,
   type WillardDelivery, type WillardDeliveryStatus, type WillardDeliveryType,
 } from "@/types/willard-delivery";
+import { CrucibleChargesSection } from "./CrucibleChargesSection";
+import { WillardDeliverySummaryCard } from "./WillardDeliverySummaryCard";
 
 export function DeliveryTypeBadge({ type }: { type: WillardDeliveryType }) {
   return (
@@ -40,9 +42,21 @@ export function DeliveryStatusBadge({ status }: { status: WillardDeliveryStatus 
 const TABS = [
   { value: "all", label: "Todas" },
   { value: "draft", label: "Registradas" },
-  { value: "reviewed", label: "Revisadas" },
   { value: "liquidated", label: "Liquidadas" },
 ] as const;
+
+// Segunda fila de tabs: el TIPO. El destino cambia por tipo (un cliente, Willard,
+// o el crisol de la propia planta), asi que es la primera pregunta al buscar.
+// "crisol" NO es un tipo de salida: es el 4º ítem que Hugo pidió (28-ago) y
+// vive en su propia tabla (documentos de crisol, #107 D2). Comparte la pantalla
+// porque para el usuario es "otra salida de plomo de planta".
+const TYPE_TABS: { value: "all" | WillardDeliveryType | "crisol"; label: string }[] = [
+  { value: "all", label: "Todos los tipos" },
+  { value: "venta", label: DELIVERY_TYPE_LABELS.venta },
+  { value: "abono_bateria", label: DELIVERY_TYPE_LABELS.abono_bateria },
+  { value: "abono_material", label: DELIVERY_TYPE_LABELS.abono_material },
+  { value: "crisol", label: "Crisol" },
+];
 
 export default function WillardDeliveriesPage() {
   const navigate = useNavigate();
@@ -51,11 +65,17 @@ export default function WillardDeliveriesPage() {
   const [page] = useState(1);
 
   const tab = searchParams.get("tab") ?? "all";
-  const { data, isLoading } = useWillardDeliveries({
-    status: tab === "all" ? undefined : tab,
-    page,
-    page_size: 50,
-  });
+  const typeTab = searchParams.get("type") ?? "all";
+  const isCrisol = typeTab === "crisol";
+  const { data, isLoading } = useWillardDeliveries(
+    {
+      status: tab === "all" ? undefined : tab,
+      delivery_type: typeTab === "all" || isCrisol ? undefined : typeTab,
+      page,
+      page_size: 50,
+    },
+    !isCrisol,
+  );
 
   // El hook de scroll va ANTES de cualquier return condicional (#93 bloqueante a)
   useScrollRestoration(!isLoading);
@@ -71,16 +91,22 @@ export default function WillardDeliveriesPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Salidas a Willard"
-        description="Entregas de plomo: ventas y abonos"
+        title="Salidas de Plomo"
+        description="Ventas de plomo, abonos a Willard y control del crisol, desde planta"
       >
-        {hasPermission("sales.create") && (
+        {hasPermission("sales.create") && !isCrisol && (
           <Button onClick={() => navigate("/willard-deliveries/new")} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" /> Nueva Salida
           </Button>
         )}
+        {hasPermission("sales.create") && isCrisol && (
+          <Button onClick={() => navigate("/willard-deliveries/crisol/new")} className="w-full sm:w-auto">
+            <Plus className="h-4 w-4 mr-2" /> Nuevo documento de crisol
+          </Button>
+        )}
       </PageHeader>
 
+      {!isCrisol && (
       <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
         <Tabs
           value={tab}
@@ -103,8 +129,32 @@ export default function WillardDeliveriesPage() {
           </TabsList>
         </Tabs>
       </div>
+      )}
+      <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+        <Tabs
+          value={typeTab}
+          onValueChange={(v) =>
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev);
+              if (v === "all") next.delete("type");
+              else next.set("type", v);
+              return next;
+            })
+          }
+        >
+          <TabsList className="inline-flex w-max sm:w-auto sm:flex-wrap">
+            {TYPE_TABS.map((t) => (
+              <TabsTrigger key={t.value} value={t.value}>{t.label}</TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </div>
 
-      {isLoading ? (
+      {!isCrisol && <WillardDeliverySummaryCard />}
+
+      {isCrisol ? (
+        <CrucibleChargesSection />
+      ) : isLoading ? (
         <Card><CardContent className="p-8 text-center text-slate-500">Cargando…</CardContent></Card>
       ) : items.length === 0 ? (
         <EmptyState
@@ -132,7 +182,7 @@ export default function WillardDeliveriesPage() {
                 <TableBody>
                   {items.map((d) => (
                     <TableRow key={d.id} className="cursor-pointer" onClick={() => open(d)}>
-                      <TableCell className="font-medium">{d.delivery_number}</TableCell>
+                      <TableCell className="font-medium whitespace-nowrap">{d.label}</TableCell>
                       <TableCell>{formatDate(d.date)}</TableCell>
                       <TableCell><DeliveryTypeBadge type={d.delivery_type} /></TableCell>
                       <TableCell>{d.warehouse_name ?? "—"}</TableCell>
@@ -156,7 +206,7 @@ export default function WillardDeliveriesPage() {
               <Card key={d.id} className="cursor-pointer" onClick={() => open(d)}>
                 <CardContent className="p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold">Salida #{d.delivery_number}</span>
+                    <span className="font-semibold">{d.label}</span>
                     <DeliveryStatusBadge status={d.status} />
                   </div>
                   <div className="flex items-center justify-between gap-2 text-sm">

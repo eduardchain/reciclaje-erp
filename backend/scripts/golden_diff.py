@@ -6,6 +6,10 @@ Diffs esperados (aditivos, documentados):
     transit_target_warehouse_id=null (E3.1), sede_warehouse_id=null (sedes).
   - pnl_*: gana internal_maquila_income=0.0 e internal_maquila_expense=0.0 (E3.1),
     tambien dentro de periods[]/totals del monthly.
+  - balance_sheet / balance_sheet_asof: ganan tax_advances=0.0 (CC-013).
+  - balance_detailed / balance_detailed_asof: ganan la seccion tax_advances
+    vacia (CC-013). Las CUATRO son el control positivo del ciclo: si no
+    aparecen, los dos puertos corrieron el mismo codigo.
 Cualquier otra diferencia = FALLO del golden.
 """
 import json
@@ -34,6 +38,29 @@ ALLOWED_ADDED = {
         "warehouse_id": None, "tariff_id": None,
         "source_type": None, "source_id": None,
     },
+    # CC-014: la deuda en plomo con Willard valorada a precio de mercado. En
+    # las organizaciones cliente llega SIEMPRE None, porque el helper corta por
+    # `kg_ledger_enabled` antes de consultar nada. Cualquier otro valor tiene
+    # que salir como CLAVE NUEVA: si aparece un objeto ahi, el corte por flag
+    # se movio y el gate es lo unico que lo diria.
+    "balance_sheet": {"lead_debt_willard": None},
+    # CC-013 D4b: seccion nueva de activos para los anticipos de impuesto
+    # (retenciones que nos practicaron al facturar). Llega en 0.0 a las tres
+    # organizaciones cliente porque ninguna tiene una entidad "[Impuestos] X":
+    # la categoria con `system_code='taxes'` nace SOLO al registrar el primer
+    # impuesto, y eso vive detras de `kg_ledger_enabled`.
+    #
+    # 🔴 Estas claves son el CONTROL POSITIVO del golden de este ciclo (#110):
+    # si NO aparecen, los dos puertos corrieron el mismo codigo y el golden no
+    # comparo nada. Un valor distinto de 0.0 seria un diff real.
+    "balance_detailed": {
+        "tax_advances": {
+            "label": "Anticipos de Impuestos",
+            "total": 0.0,
+            "items": [],
+            "groups": None,
+        }
+    },
 }
 
 
@@ -42,6 +69,17 @@ def classify(capture_name: str) -> dict:
         return ALLOWED_ADDED["pnl"]
     if capture_name in ("warehouses", "money_accounts", "money_movements"):
         return ALLOWED_ADDED[capture_name]
+    # CC-014: SOLO el Balance General, vivo y a fecha de corte. El Detallado
+    # queda FUERA a proposito — su item viaja dentro de una seccion que ya
+    # existe y no gana ni una clave ni una fila en estas organizaciones, asi
+    # que si ahi aparece algo es un diff REAL y tiene que romper.
+    if capture_name in ("balance_sheet", "balance_sheet_asof"):
+        # CC-013 suma `tax_advances` a las dos capturas del General.
+        return {**ALLOWED_ADDED["balance_sheet"], "tax_advances": 0.0}
+    # CC-013: el Detallado SI gana una clave, a diferencia de CC-014 — la
+    # seccion es nueva y se emite vacia igual que las otras once.
+    if capture_name in ("balance_detailed", "balance_detailed_asof"):
+        return ALLOWED_ADDED["balance_detailed"]
     return {}
 
 

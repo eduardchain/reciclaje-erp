@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from app.models.money_account import MoneyAccount
     from app.models.material import Material
     from app.models.warehouse import Warehouse
+    from app.models.document_tax import DocumentTax
 
 
 class Sale(Base, OrganizationMixin, TimestampMixin):
@@ -244,6 +245,15 @@ class Sale(Base, OrganizationMixin, TimestampMixin):
         order_by="SaleLine.created_at"
     )
     
+    # CC-013: IVA y retenciones de la factura. Vacio para las 3 organizaciones
+    # cliente y para toda venta sin impuestos (data-gated, D2).
+    taxes: Mapped[List["DocumentTax"]] = relationship(
+        "DocumentTax",
+        back_populates="sale",
+        cascade="all, delete-orphan",
+        order_by="DocumentTax.created_at",
+    )
+
     commissions: Mapped[List["SaleCommission"]] = relationship(
         "SaleCommission",
         back_populates="sale",

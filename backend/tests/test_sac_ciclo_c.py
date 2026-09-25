@@ -69,7 +69,8 @@ def _set_profile(client, headers, material_id, *, compra_regular=False, willard_
     resp = client.put(
         f"{PROFILES_URL}/{material_id}",
         headers=headers,
-        json={"compra_regular": compra_regular, "willard_world": willard_world},
+        json={"compra_regular": compra_regular, "willard_world": willard_world,
+              "lead_product": "none"},  # #103: obligatorio; estos no son plomo entregable
     )
     assert resp.status_code == 200, resp.text
 

@@ -14,6 +14,7 @@ from typing import Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    UniqueConstraint,
     Numeric,
     String,
     Text,
@@ -215,6 +216,11 @@ class DoubleEntry(Base, OrganizationMixin, TimestampMixin):
     )
 
     __table_args__ = (
+        # D5 del plan de locks: los otros 8 contadores ya lo tenian; sin el, una
+        # colision de numero en cruces era un duplicado SILENCIOSO (no un 500).
+        UniqueConstraint(
+            "organization_id", "double_entry_number", name="uq_double_entries_org_number"
+        ),
         Index("ix_double_entries_org_supplier", "organization_id", "supplier_id"),
         Index("ix_double_entries_org_customer", "organization_id", "customer_id"),
         Index("ix_double_entries_org_date", "organization_id", "date"),

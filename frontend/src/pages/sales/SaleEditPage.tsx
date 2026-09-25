@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Plus } from "lucide-react";
@@ -18,6 +18,8 @@ import { useSale, useUpdateSale } from "@/hooks/useSales";
 import { inventoryService } from "@/services/inventory";
 import { usePriceSuggestions } from "@/hooks/usePriceSuggestions";
 import { useCustomers, usePayableProviders, useMaterials, useWarehouses } from "@/hooks/useMasterData";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { useKgProfiles } from "@/hooks/useSacConfig";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { formatCurrency, formatWeight, utcToLocalDateInput, toLocalDateInput } from "@/utils/formatters";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -83,7 +85,27 @@ export default function SaleEditPage() {
 
   const customers = customersData?.items ?? [];
   const payableProviders = payableData?.items ?? [];
+  // SAC (#104, la tercera puerta): el plomo entregable NO se vende por aca — sale
+  // por Salidas de Plomo, que descarga la deuda en kg. El backend lo rechaza con
+  // 400, pero ofrecerlo obliga a descubrirlo despues de llenar el formulario.
+  // Argumento #98 D10, escrito en el codigo: (1) sin `kg_ledger_enabled` el hook
+  // NO dispara request (F2) y la rama es "no se filtra" — no "se filtra con un
+  // mapa vacio" (el PAR tiene que leerse, #99); (2) fail-OPEN mientras los
+  // perfiles cargan o fallan: el 400 del servidor sigue siendo la red, una
+  // venta de Costa no se bloquea por un fetch pendiente; (3) `materials` queda
+  // COMPLETA para los lookups (costo promedio, unidad) — solo se filtran las
+  // OPCIONES del selector, y una linea existente conserva la suya.
+  const { flagEnabled } = useOrgSettings();
+  const kgEnabled = flagEnabled("kg_ledger_enabled");
+  const { data: kgProfiles } = useKgProfiles(undefined, kgEnabled);
+  const leadIds = useMemo(
+    () => new Set((kgProfiles?.items ?? []).filter((p) => p.lead_product !== "none").map((p) => p.material_id)),
+    [kgProfiles],
+  );
   const materials = materialsData?.items ?? [];
+  const materialOptions = (keepId?: string) =>
+    (kgEnabled && kgProfiles ? materials.filter((m) => !leadIds.has(m.id) || m.id === keepId) : materials)
+      .map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }));
   const warehouses = warehousesData?.items ?? [];
   const { getSuggestedPrice } = usePriceSuggestions();
   // Unidad de medida por linea (kg, unidad, etc.) — resuelta desde el material elegido.
@@ -306,7 +328,7 @@ export default function SaleEditPage() {
                 <EntitySelect
                   value={line.material_id}
                   onChange={(v) => handleMaterialChange(line._key, v)}
-                  options={materials.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
+                  options={materialOptions(line.material_id)}
                   placeholder="Material..."
                 />
               </div>

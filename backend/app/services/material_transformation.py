@@ -20,6 +20,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number
 from app.models.material_transformation import MaterialTransformation, MaterialTransformationLine
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
@@ -66,6 +67,9 @@ class CRUDMaterialTransformation:
         data: MaterialTransformationCreate,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
+        *,
+        commit: bool = True,
+        from_crucible: bool = False,
     ) -> tuple[MaterialTransformation, list[str]]:
         """
         Crear transformacion de material.
@@ -115,6 +119,14 @@ class CRUDMaterialTransformation:
                 )
             dest_material_ids.add(line.destination_material_id)
             dest_units.add((dest_material.default_unit or "").strip().lower())
+
+        # #109 D5 — con SAC el paso crudo<->puro lo hace el documento de crisol,
+        # que mueve inventario Y etapa de la deuda intersede en una transaccion.
+        # Hacerlo a mano aqui moveria el inventario y dejaria la etapa quieta.
+        if not from_crucible:
+            self._guard_lead_conversion(
+                db, organization_id, source_material, dest_material_ids
+            )
 
         # V-TRANS-03: Balance de cantidades — SOLO aplica cuando origen y destinos
         # comparten unidad de medida (conservacion de masa, ej: kg->kg). Si difieren
@@ -335,8 +347,11 @@ class CRUDMaterialTransformation:
                 notes=f"Transformacion #{number}: entrada de {dest_material.name}",
             )
 
-        db.commit()
-        db.refresh(transformation)
+        if commit:
+            db.commit()
+            db.refresh(transformation)
+        else:
+            db.flush()
         return transformation, warnings
 
     def annul(
@@ -346,9 +361,19 @@ class CRUDMaterialTransformation:
         reason: str,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
+        *,
+        commit: bool = True,
+        from_module: bool = False,
     ) -> MaterialTransformation:
         """
         Anular transformacion — revierte stock con conservacion de valor (Fase 5).
+
+        #109: una transformacion que nacio de un documento de crisol NO se anula
+        desde aqui (`from_module=False` -> 400 que nombra el documento): anularla
+        suelta devolveria el inventario y dejaria la etapa de la deuda donde
+        estaba. El predicado es "existe un documento confirmado que la enlaza",
+        SIN flag a proposito: se auto-configura sin falsos positivos, y detras
+        de `kg_ledger_enabled` apagar el flag liberaria la anulacion directa.
 
         Nunca bloquea. Fuente: reingreso PONDERADO a source_unit_cost (el valor
         que salio vuelve como valor, puede rellenar hueco). Destinos: remocion
@@ -364,6 +389,8 @@ class CRUDMaterialTransformation:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"No se puede anular: transformacion esta en estado '{transformation.status}'",
             )
+        if not from_module:
+            self._guard_owned_by_crucible(db, transformation)
 
         # Cargar lineas
         stmt = (
@@ -471,8 +498,11 @@ class CRUDMaterialTransformation:
         transformation.annulled_at = datetime.now(timezone.utc)
         transformation.annulled_by = user_id
 
-        db.commit()
-        db.refresh(transformation)
+        if commit:
+            db.commit()
+            db.refresh(transformation)
+        else:
+            db.flush()
         return transformation
 
     # ======================================================================
@@ -596,17 +626,79 @@ class CRUDMaterialTransformation:
     # Helpers internos
     # ======================================================================
 
+    @staticmethod
+    def _guard_owned_by_crucible(db: Session, transformation: MaterialTransformation) -> None:
+        """#109 D4 — ver docstring de `annul`. Import local: `plant_process` no
+        depende de este modulo y asi sigue."""
+        from app.models.plant_process import CrucibleCharge
+
+        # `.first()` y no `scalar_one_or_none()` (C3 de QA): `transformation_id`
+        # no es UNIQUE, asi que dos documentos confirmados enlazando la misma
+        # transformacion darian MultipleResultsFound -> 500 en vez del 400 guia.
+        # Imposible por el flujo de hoy; blindarlo cuesta una linea.
+        owner = db.execute(
+            select(CrucibleCharge)
+            .where(
+                CrucibleCharge.transformation_id == transformation.id,
+                CrucibleCharge.status == "confirmed",
+            )
+            .order_by(CrucibleCharge.charge_number)
+        ).scalars().first()
+        if owner is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"La transformacion #{transformation.transformation_number} la genero "
+                    f"el documento {owner.label}. Anulelo desde Salidas de Plomo → "
+                    f"Crisol ({owner.label}): ahi se revierten juntos el inventario y "
+                    "la etapa de la deuda."
+                ),
+            )
+
+    @staticmethod
+    def _guard_lead_conversion(
+        db: Session,
+        organization_id: UUID,
+        source_material: Material,
+        dest_material_ids: set,
+    ) -> None:
+        """#109 D5 — origen Y algun destino marcados como plomo entregable
+        (`lead_product` crudo|puro) = conversion crudo<->puro a mano -> 400.
+
+        El flag va PRIMERO (leccion #99/#104): sin `kg_ledger_enabled` no se
+        consulta nada y las orgs sin SAC quedan byte a byte. La fundicion del
+        horno grande (aportantes -> crudo) NO cae: su origen es 'none'. Solo en
+        `create`: anular no valida (#99)."""
+        from app.models.material_kg_profile import MaterialKgProfile
+        from app.utils.org_settings import get_org_setting
+
+        if not get_org_setting(db, organization_id, "kg_ledger_enabled"):
+            return
+        ids = {source_material.id, *dest_material_ids}
+        leads = {
+            r[0]: r[1]
+            for r in db.execute(
+                select(MaterialKgProfile.material_id, MaterialKgProfile.lead_product).where(
+                    MaterialKgProfile.organization_id == organization_id,
+                    MaterialKgProfile.material_id.in_(ids),
+                )
+            ).all()
+        }
+        is_lead = lambda mid: leads.get(mid, "none") in ("crudo", "puro")  # noqa: E731
+        if is_lead(source_material.id) and any(is_lead(d) for d in dest_material_ids):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "El paso entre plomo crudo y plomo puro no se registra como "
+                    "transformacion: use Salidas de Plomo → Crisol (Traslado a crisoles "
+                    "o Retorno de dross), que mueve el inventario y la etapa de la "
+                    "deuda en un solo documento."
+                ),
+            )
+
     def _generate_transformation_number(self, db: Session, organization_id: UUID) -> int:
-        """Generar numero secuencial con advisory lock."""
-        lock_id = hash(f"{organization_id}-transformations") % (2**31)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-
-        stmt = select(func.max(MaterialTransformation.transformation_number)).where(
-            MaterialTransformation.organization_id == organization_id
-        )
-        max_number = db.scalar(stmt)
-        return (max_number or 0) + 1
-
+        """Siguiente `transformation_number` de la org: lock estable + MAX+1 en el helper unico (`app/utils/advisory_locks.py`)."""
+        return next_number(db, organization_id, "transformation_number")
     def _create_inventory_movement(
         self,
         db: Session,

@@ -99,6 +99,8 @@ const typeLabels: Record<MoneyMovementType, string> = {
   tp_transfer_in: "Cruce Terceros (Destino)",
   tp_adjustment_credit: "Ajuste Saldo (Credito)",
   tp_adjustment_debit: "Ajuste Saldo (Debito)",
+  internal_maquila_expense: "Maquila Intersede (Gasto sede origen)",
+  internal_maquila_income: "Maquila Intersede (Ingreso sede destino)",
 };
 
 const typeColors: Record<string, string> = {

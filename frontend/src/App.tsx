@@ -92,10 +92,14 @@ const InboundLiquidatePage = lazy(() => import("@/pages/inbound/InboundLiquidate
 const WillardDeliveriesPage = lazy(() => import("@/pages/willard/WillardDeliveriesPage"));
 const WillardDeliveryCreatePage = lazy(() => import("@/pages/willard/WillardDeliveryCreatePage"));
 const WillardDeliveryDetailPage = lazy(() => import("@/pages/willard/WillardDeliveryDetailPage"));
+const WillardDeliveryEditPage = lazy(() => import("@/pages/willard/WillardDeliveryEditPage"));
+const CrucibleChargeCreatePage = lazy(() => import("@/pages/willard/CrucibleChargeCreatePage"));
+const CrucibleChargeDetailPage = lazy(() => import("@/pages/willard/CrucibleChargeDetailPage"));
 const TransfersPage = lazy(() => import("@/pages/transfers/TransfersPage"));
 const TransferCreatePage = lazy(() => import("@/pages/transfers/TransferCreatePage"));
 const TransferDetailPage = lazy(() => import("@/pages/transfers/TransferDetailPage"));
 const TariffsPage = lazy(() => import("@/pages/config/TariffsPage"));
+const LeadPricePage = lazy(() => import("@/pages/config/LeadPricePage"));
 const FormulasPage = lazy(() => import("@/pages/config/FormulasPage"));
 const FleetPage = lazy(() => import("@/pages/config/FleetPage"));
 const WillardCentersPage = lazy(() => import("@/pages/config/WillardCentersPage"));
@@ -159,7 +163,11 @@ function App() {
               <Route path={ROUTES.INBOUND} element={<FP flag="kg_ledger_enabled" permission="purchases.view"><InboundOrdersPage /></FP>} />
               <Route path={ROUTES.WILLARD_DELIVERIES} element={<FP flag="kg_ledger_enabled" permission="sales.view"><WillardDeliveriesPage /></FP>} />
               <Route path={ROUTES.WILLARD_DELIVERY_NEW} element={<FP flag="kg_ledger_enabled" permission="sales.create"><WillardDeliveryCreatePage /></FP>} />
+              {/* #107: documentos de crisol — segmento estatico "crisol" gana sobre ":id" */}
+              <Route path={ROUTES.CRUCIBLE_CHARGE_NEW} element={<FP flag="kg_ledger_enabled" permission="sales.create"><CrucibleChargeCreatePage /></FP>} />
+              <Route path={ROUTES.CRUCIBLE_CHARGE_DETAIL} element={<FP flag="kg_ledger_enabled" permission="sales.view"><CrucibleChargeDetailPage /></FP>} />
               <Route path={ROUTES.WILLARD_DELIVERY_DETAIL} element={<FP flag="kg_ledger_enabled" permission="sales.view"><WillardDeliveryDetailPage /></FP>} />
+              <Route path={ROUTES.WILLARD_DELIVERY_EDIT} element={<FP flag="kg_ledger_enabled" permission="sales.edit"><WillardDeliveryEditPage /></FP>} />
               <Route path={ROUTES.INBOUND_NEW} element={<FP flag="kg_ledger_enabled" permission="purchases.create"><InboundCreatePage /></FP>} />
               <Route path={ROUTES.INBOUND_EDIT} element={<FP flag="kg_ledger_enabled" permission="purchases.edit"><InboundEditPage /></FP>} />
               <Route path={ROUTES.INBOUND_LIQUIDATE} element={<FP flag="kg_ledger_enabled" permission="purchases.liquidate"><InboundLiquidatePage /></FP>} />
@@ -236,6 +244,7 @@ function App() {
               <Route path={ROUTES.CONFIG_PRICE_LISTS} element={<P permission="materials.view_prices"><PriceListsPage /></P>} />
               <Route path={ROUTES.CONFIG_THIRD_PARTY_CATEGORIES} element={<P permission="third_parties.create"><ThirdPartyCategoriesPage /></P>} />
               <Route path={ROUTES.CONFIG_TARIFFS} element={<FP flag="kg_ledger_enabled" permission="tariffs.view"><TariffsPage /></FP>} />
+              <Route path={ROUTES.CONFIG_LEAD_PRICE} element={<FP flag="kg_ledger_enabled" permission="tariffs.view"><LeadPricePage /></FP>} />
               <Route path={ROUTES.CONFIG_FORMULAS} element={<FP flag="kg_ledger_enabled" permission="formulas.view"><FormulasPage /></FP>} />
               <Route path={ROUTES.CONFIG_FLEET} element={<FP flag="kg_ledger_enabled" permission="config.view_fleet"><FleetPage /></FP>} />
               <Route path={ROUTES.CONFIG_WILLARD_CENTERS} element={<FP flag="kg_ledger_enabled" permission="config.manage_sac_settings"><WillardCentersPage /></FP>} />

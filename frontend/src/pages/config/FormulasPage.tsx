@@ -25,6 +25,7 @@ import {
   formulaTypeForUnit,
   type MaterialConversionFormulaResponse,
   type MaterialKgProfileResponse,
+  type LeadProduct,
   type WillardWorld,
 } from "@/types/sac-config";
 import type { MaterialResponse } from "@/types/material";
@@ -175,6 +176,7 @@ export default function FormulasPage() {
   const [businessUnitId, setBusinessUnitId] = useState("");
   const [classification, setClassification] = useState<Classification>("compra");
   const [alsoCompra, setAlsoCompra] = useState(false);
+  const [leadProduct, setLeadProduct] = useState<LeadProduct>("none");
   const [kgPerUnit, setKgPerUnit] = useState("");
   const [batteryRef, setBatteryRef] = useState<string>("none");
   const [leadPct, setLeadPct] = useState("");
@@ -194,6 +196,7 @@ export default function FormulasPage() {
     setCategoryId("");
     setBusinessUnitId("");
     setClassification("compra");
+    setLeadProduct("none");
     setAlsoCompra(false);
     setKgPerUnit("");
     setBatteryRef("none");
@@ -213,6 +216,7 @@ export default function FormulasPage() {
     const cls = classificationOf(row);
     setClassification(cls === "unclassified" ? "compra" : cls);
     setAlsoCompra(cls !== "compra" && cls !== "unclassified" ? (row.profile?.compra_regular ?? false) : false);
+    setLeadProduct(row.profile?.lead_product ?? "none");
     const f = row.formula;
     if (f?.formula_type === "battery_to_lead") {
       const p = f.parameters as Record<string, unknown>;
@@ -322,12 +326,14 @@ export default function FormulasPage() {
       const profileChanged =
         !prevProfile ||
         prevProfile.willard_world !== willardWorld ||
-        prevProfile.compra_regular !== compraRegular;
+        prevProfile.compra_regular !== compraRegular ||
+        prevProfile.lead_product !== leadProduct;
       if (profileChanged) {
         try {
           await sacConfigService.upsertKgProfile(materialId, {
             compra_regular: compraRegular,
             willard_world: willardWorld,
+            lead_product: leadProduct,
           });
         } catch (e) {
           toast.error(
@@ -592,6 +598,24 @@ export default function FormulasPage() {
                 {isWillard
                   ? "Los kg de una recepción Willard van a la cuenta kg según esta clasificación."
                   : "Se recibe como Compra regular (deriva una compra registrada)."}
+              </p>
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Plomo entregable a Willard
+              </Label>
+              <Select value={leadProduct} onValueChange={(v) => setLeadProduct(v as LeadProduct)}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No es plomo entregable</SelectItem>
+                  <SelectItem value="crudo">Plomo crudo</SelectItem>
+                  <SelectItem value="puro">Plomo puro</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-400 mt-1">
+                Solo el plomo marcado acá puede salir hacia Willard a saldar la deuda en kg.
+                El crudo se entrega en las tres modalidades; el puro normalmente se vende.
               </p>
             </div>
 

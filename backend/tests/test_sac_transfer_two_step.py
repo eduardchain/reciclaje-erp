@@ -1238,3 +1238,36 @@ class TestSedeValidation:
         self._patch(client, org_headers, wh_jm.id, None, 200)
         db_session.expire_all()
         assert db_session.get(Warehouse, wh_jm.id).sede_warehouse_id is None
+
+
+# ---------------------------------------------------------------------------
+# #107 — la etapa de la deuda intersede
+# ---------------------------------------------------------------------------
+
+class TestEtapasIntersede:
+    def test_intersede_send_nace_en_etapa_horno(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, wh_transit, intersede_account, maquila_tariff, mat_contrib,
+    ):
+        """T1 — lo que llega a planta entra al horno grande (Johana 3-sep:
+        "intersede = horno grande + crisol"): el `intersede_send` nace con
+        `stage='horno'` y el summary lo desglosa; crisol en cero."""
+        t = _dispatch(client, org_headers, wh_cv, wh_jm,
+                      [{"material_id": str(mat_contrib.id), "quantity_dispatched": 40}])
+        _receive(client, org_headers, t, {0: 40})
+
+        mv = db_session.execute(
+            select(KgLedgerMovement).where(
+                KgLedgerMovement.account_id == intersede_account.id,
+                KgLedgerMovement.source_type == "intersede_send",
+            )
+        ).scalar_one()
+        assert mv.stage == "horno"
+        assert mv.delta_kg == Decimal("20.0000")
+
+        r = client.get("/api/v1/kg-ledger/summary", headers=org_headers)
+        assert r.status_code == 200, r.text
+        s = r.json()
+        assert Decimal(str(s["intersede_horno_kg"])) == Decimal("20")
+        assert Decimal(str(s["intersede_crisol_kg"])) == 0
+        assert Decimal(str(s["intersede_horno_kg"])) == Decimal(str(s["total_intersede_kg"]))

@@ -32,7 +32,7 @@ const ASSET_SECTION_ORDER = [
   "cash_and_bank", "inventory_liquidated",
   "customers_receivable", "supplier_advances", "service_provider_advances",
   "liability_advances", "investor_receivable", "loans_receivable",
-  "provision_funds", "prepaid_expenses", "generic_receivable", "fixed_assets",
+  "provision_funds", "prepaid_expenses", "tax_advances", "generic_receivable", "fixed_assets",
 ];
 
 const LIABILITY_SECTION_ORDER = [
@@ -49,7 +49,12 @@ function fmtBalance(value: number) {
 
 function getItemLink(sectionKey: string, item: BalanceDetailedItem): string | null {
   if (sectionKey === "cash_and_bank") return `/treasury/account-movements?account_id=${item.id}&returnTo=/reports/balance-detailed`;
-  if (sectionKey === "inventory_liquidated") return `/inventory/movements?material_id=${item.id}`;
+  // CC-014: la deuda en plomo vive en esta seccion pero NO es un material —
+  // su id es un centinela, no un UUID, y el link apuntaria a la nada.
+  if (sectionKey === "inventory_liquidated") {
+    if (item.id === "lead-debt-willard") return null;
+    return `/inventory/movements?material_id=${item.id}`;
+  }
   if (sectionKey === "fixed_assets") return `/treasury/fixed-assets`;
   // Terceros → estado de cuenta
   return `/treasury/account-statement?third_party_id=${item.id}&returnTo=/reports/balance-detailed`;

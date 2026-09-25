@@ -15,13 +15,24 @@ from decimal import Decimal
 from typing import Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, GUID, OrganizationMixin, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.material import Material
+    from app.models.material_transformation import MaterialTransformation
+    from app.models.warehouse import Warehouse
 
 
 class _PlantProcessColumns:
@@ -131,6 +142,49 @@ class CrucibleCharge(Base, _PlantProcessColumns, OrganizationMixin, TimestampMix
         nullable=True,
         comment="Solo discharge: plomo puro producido",
     )
+    # --- Ciclo de planta (#107 D2): el documento de crisol cobra vida. ---
+    # `charge` = traslado a crisoles (Hugo 28-ago: "salida a crisoles"),
+    # `dross_return` = retorno de dross al horno (Johana 3-sep). `discharge`
+    # (cierre de refinacion de la spec) queda RESERVADO: el servicio lo
+    # rechaza con 422 — en el modelo de Hugo el crisol no se cierra, baja al
+    # vender puro y al devolver dross. Estas columnas viven SOLO aqui, no en
+    # el mixin: furnace_charges no cambia.
+    charge_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Consecutivo por org: secuencia `crucible_number` del helper de locks (rango 14)",
+    )
+    warehouse_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("warehouses.id", ondelete="RESTRICT"),
+        nullable=False,
+        comment="Planta (willard_sede_drosses): el crisol vive en Juan Mina",
+    )
+    notes: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    # --- #109: dos cantidades + inventario. `quantity_kg` (mixin) son los kg
+    # FISICOS del material del documento; `lead_kg` son los kg de PLOMO. En un
+    # `charge` coinciden; en un `dross_return` lead_kg = quantity_kg x factor
+    # de la formula `drosses_to_lead` vigente (20 kg de dross -> 14 de plomo).
+    # NOT NULL: alimenta la maquila — un None x tarifa seria un 500 esperando.
+    lead_kg: Mapped[Decimal] = mapped_column(
+        Numeric(14, 4),
+        nullable=False,
+        comment="Kg de PLOMO del evento (charge: = quantity_kg; dross_return: x factor de la formula)",
+    )
+    transformation_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("material_transformations.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Transformacion que mueve el inventario de este documento (#109 D4). NULL = documento previo al ciclo",
+    )
+    maquila_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Solo dross_return: par de maquila interna emitido (display; los MM se buscan por source)",
+    )
 
     annulled_by: Mapped[Optional[UUID]] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -142,6 +196,19 @@ class CrucibleCharge(Base, _PlantProcessColumns, OrganizationMixin, TimestampMix
 
     __table_args__ = (
         Index("ix_crucible_charges_org_date", "organization_id", "date"),
+        UniqueConstraint(
+            "organization_id", "charge_number", name="uq_crucible_charges_org_number"
+        ),
+        CheckConstraint(
+            "event_type IN ('charge', 'dross_return', 'discharge')",
+            name="ck_crucible_charges_event_type",
+        ),
+        CheckConstraint(
+            "status IN ('confirmed', 'annulled')", name="ck_crucible_charges_status"
+        ),
+        CheckConstraint(
+            "lead_kg > 0 AND lead_kg <= quantity_kg", name="ck_crucible_charges_lead_kg"
+        ),
     )
 
     # --- Relationships ---
@@ -149,6 +216,15 @@ class CrucibleCharge(Base, _PlantProcessColumns, OrganizationMixin, TimestampMix
     output_material: Mapped[Optional["Material"]] = relationship(
         "Material", foreign_keys=[output_material_id]
     )
+
+    warehouse: Mapped["Warehouse"] = relationship("Warehouse", foreign_keys=[warehouse_id])
+    transformation: Mapped[Optional["MaterialTransformation"]] = relationship(
+        "MaterialTransformation", foreign_keys=[transformation_id]
+    )
+
+    @property
+    def label(self) -> str:
+        return f"Crisol #{self.charge_number}"
 
     def __repr__(self) -> str:
         return f"<CrucibleCharge {self.event_type} {self.quantity_kg}kg ({self.status})>"

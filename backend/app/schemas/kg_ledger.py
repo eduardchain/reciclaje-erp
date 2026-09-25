@@ -67,6 +67,10 @@ class KgLedgerMovementManualCreate(BaseModel):
     transaction_date: BusinessDate
     description: str = Field(..., min_length=1, max_length=300)
     reason: str = Field(..., min_length=1, max_length=180, description="Motivo obligatorio")
+    stage: Optional[Literal["horno", "crisol"]] = Field(
+        None,
+        description="Etapa: obligatoria si la cuenta es intersede, prohibida en las demas (#107 D1)",
+    )
 
     @field_validator("delta_kg")
     @classmethod
@@ -94,6 +98,7 @@ class KgLedgerMovementResponse(BaseModel):
     description: Optional[str] = None
     source_type: str
     source_id: Optional[UUID] = None
+    stage: Optional[str] = None
     inventory_movement_id: Optional[UUID] = None
     conversion_formula_snapshot: Optional[dict] = None
     status: str
@@ -132,6 +137,9 @@ class KgLedgerSummaryResponse(BaseModel):
     total_intersede_kg: Decimal
     total_intra_horno_kg: Decimal
     total_crisol_kg: Decimal
+    # Sub-saldos de intersede por etapa (#107 D1); suman total_intersede_kg
+    intersede_horno_kg: Decimal = Decimal("0")
+    intersede_crisol_kg: Decimal = Decimal("0")
 
 
 class KgLedgerAnnulRequest(BaseModel):

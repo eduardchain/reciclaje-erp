@@ -23,6 +23,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text, or_, and_, false, cast, String
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number
 from app.models.money_movement import MoneyMovement, VALID_MOVEMENT_TYPES
 from app.models.money_account import MoneyAccount
 from app.models.third_party import ThirdParty
@@ -1067,7 +1068,8 @@ class CRUDMoneyMovement:
         from app.models.money_movement import INTERNAL_MAQUILA_MOVEMENT_TYPES
         _OWNER_MODULE = {
             "transfer": ("el traslado", "Traslados"),
-            "willard_delivery": ("la salida", "Salidas a Willard"),
+            "willard_delivery": ("la salida", "Salidas de Plomo"),
+            "crucible_charge": ("el documento de crisol", "Salidas de Plomo → Crisol"),
         }
         if movement.movement_type in INTERNAL_MAQUILA_MOVEMENT_TYPES:
             doc, module = _OWNER_MODULE.get(
@@ -1086,8 +1088,8 @@ class CRUDMoneyMovement:
         if movement.source_type == "willard_delivery":
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="No se puede anular un movimiento generado por una Salida a "
-                "Willard desde Tesorería. Anule la salida desde su módulo.",
+                detail="No se puede anular un movimiento generado por una Salida de "
+                "Plomo desde Tesorería. Anule la salida desde su módulo.",
             )
 
         now = datetime.now(timezone.utc)
@@ -1514,21 +1516,8 @@ class CRUDMoneyMovement:
     # ======================================================================
 
     def _generate_movement_number(self, db: Session, organization_id: UUID) -> int:
-        """
-        Generar numero secuencial por organizacion con advisory lock.
-
-        Usa pg_advisory_xact_lock para prevenir race conditions.
-        El lock se libera automaticamente al finalizar la transaccion.
-        """
-        lock_id = hash(f"{organization_id}-movements") % (2**31)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-
-        stmt = select(func.max(MoneyMovement.movement_number)).where(
-            MoneyMovement.organization_id == organization_id
-        )
-        max_number = db.scalar(stmt)
-        return (max_number or 0) + 1
-
+        """Siguiente `movement_number` de la org: lock estable + MAX+1 en el helper unico (`app/utils/advisory_locks.py`)."""
+        return next_number(db, organization_id, "movement_number")
     def _create_movement(
         self,
         db: Session,

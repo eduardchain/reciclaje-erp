@@ -40,6 +40,10 @@ export const ROUTES = {
   /** W1 — salidas de plomo a Willard */
   WILLARD_DELIVERIES: "/willard-deliveries",
   WILLARD_DELIVERY_NEW: "/willard-deliveries/new",
+  /** #107 — documentos de crisol (tab "Crisol" de Salidas de Plomo) */
+  CRUCIBLE_CHARGE_NEW: "/willard-deliveries/crisol/new",
+  CRUCIBLE_CHARGE_DETAIL: "/willard-deliveries/crisol/:id",
+  WILLARD_DELIVERY_EDIT: "/willard-deliveries/:id/edit",
   WILLARD_DELIVERY_DETAIL: "/willard-deliveries/:id",
   TRANSFERS: "/transfers",
   TRANSFER_NEW: "/transfers/new",
@@ -104,6 +108,7 @@ export const ROUTES = {
   CONFIG_PRICE_LISTS: "/config/price-lists",
   CONFIG_THIRD_PARTY_CATEGORIES: "/config/third-party-categories",
   CONFIG_TARIFFS: "/config/tariffs",
+  CONFIG_LEAD_PRICE: "/config/lead-price",
   CONFIG_FORMULAS: "/config/formulas",
   CONFIG_FLEET: "/config/fleet",
   CONFIG_SUPPLIER_PRICE_LISTS: "/config/listas-precios",

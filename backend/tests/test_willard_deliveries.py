@@ -7,9 +7,10 @@ Lo que se vigila de verdad:
   la que ningun gate automatico habria descubierto.
 - La factura de maquila/flete FRAGMENTA por sede (D4b): sin eso, Circunvalar
   —la sede que factura y se queda con la parte mayor— apareceria con puro costo.
-- El par del reparto emite con `internal_maquila_enabled` APAGADO (D11): SAC
-  apaga ese flag para que el traslado deje de cobrar, y si compartieran el gate
-  apagarlo mataria tambien el reparto.
+- El par del reparto emite SOLO en el abono en materiales (CC-009): en venta y
+  en abono de baterias la maquila interna ya se causo AL TRASLADAR, y repetirla
+  en la entrega la cobraria dos veces. El PAR de tests es la prueba — con uno
+  solo, "el gate funciona" y "lo apague para todos" se ven identicos.
 """
 import pytest
 from decimal import Decimal
@@ -56,9 +57,15 @@ def wh_jm(db_session, test_organization):
 def _flags(db_session, test_organization, wh_cv, wh_jm):
     """Circunvalar factura, Juan Mina es la planta.
 
-    `internal_maquila_enabled` queda APAGADO a proposito: es el estado en el que
-    va a correr SAC (Hugo, 24-ago: la maquila se cobra en la entrega, no en el
-    traslado). Que todos los tests de efectos pasen asi ES la prueba de D11.
+    `internal_maquila_enabled` queda APAGADO a proposito, pero desde CC-009 lo
+    que prueba es lo CONTRARIO de lo que probaba antes. Bajo D11 demostraba
+    "el par emite aunque el flag este apagado"; hoy el par gatea por TIPO, asi
+    que este False es lo que hace que **re-acoplar el par al flag tumbe
+    `test_par_emite_en_abono_material`** — con el flag en True ese defecto
+    pasaria desapercibido. La red no desaparecio: cambio de lado.
+
+    En produccion SAC lo tiene en True (el traslado vuelve a cobrar); aca sigue
+    en False porque estos tests no ejercitan traslados y el contraste vale mas.
     """
     test_organization.settings = {
         "kg_ledger_enabled": True,
@@ -142,21 +149,83 @@ def _tariff(db, org_id, user_id, code, price):
 
 @pytest.fixture
 def tarifas(db_session, test_organization, test_user):
-    """Los numeros de Hugo: $1.500 facturados, de los cuales $600 van a planta."""
+    """Tarifas de prueba. Maquila $2.097 y flete $37 son las reales (CC-009).
+    El abono a planta de materiales NO: el real es $1.248 (Q-27, resuelta el
+    18-sep a favor de Johana) y aqui queda en 1.500 A PROPOSITO -- ver el
+    comentario #109 de abajo. Historia: Hugo (4-sep) habia contestado "1500"
+    ($1.500 a planta, $597 en Circunvalar).
+
+    ⚠️ Historia de Q-29: se temia que ese abono fuera la MISMA tarifa que la
+    maquila interna del traslado (`maquila_intersede_cv_jm`, tambien $1.500).
+    Quedo superada el 16-sep: son tarifas distintas y la coincidencia era solo
+    eso. NO unificarlas apoyandose en este fixture."""
+    # 🔴 #109 (cierre 18-sep): batería reparte $566/kg FIJO a planta, con tarifa
+    # PROPIA. `abono` se queda en 1.500 A PROPOSITO aunque el valor real ya es
+    # 1.248: los dos numeros tienen que ser distintos para que un mapa que lea
+    # la tarifa equivocada se vea (T3), y 38 tests de este archivo ya calculan
+    # sobre 1.500. El valor real vive en el seeder, no aqui.
     return {
-        "maquila": _tariff(db_session, test_organization.id, test_user.id, "maquila_willard", 1500),
-        "flete": _tariff(db_session, test_organization.id, test_user.id, "flete_willard_planta_planta", 200),
-        "abono": _tariff(db_session, test_organization.id, test_user.id, "abono_planta_por_kg", 600),
+        "maquila": _tariff(db_session, test_organization.id, test_user.id, "maquila_willard", 2097),
+        "flete": _tariff(db_session, test_organization.id, test_user.id, "flete_willard_planta_planta", 37),
+        "abono": _tariff(db_session, test_organization.id, test_user.id, "abono_planta_por_kg", 1500),
+        "abono_bateria": _tariff(
+            db_session, test_organization.id, test_user.id, "abono_planta_bateria_por_kg", 566
+        ),
     }
+
+
+def _mark_lead(db, org_id, material, lead):
+    """Marca el material como plomo entregable (#103 D1).
+
+    Sin fila de perfil el guard bloquea (fail-closed), asi que toda fixture que
+    entregue material a Willard tiene que pasar por aca.
+    """
+    from app.models.material_kg_profile import MaterialKgProfile
+
+    prof = db.execute(
+        select(MaterialKgProfile).where(
+            MaterialKgProfile.organization_id == org_id,
+            MaterialKgProfile.material_id == material.id,
+        )
+    ).scalar_one_or_none()
+    if prof is None:
+        prof = MaterialKgProfile(organization_id=org_id, material_id=material.id)
+        db.add(prof)
+    prof.lead_product = lead
+    db.commit()
+    return material
+
+
+def _stock(client, headers, mat, wh, qty="100", cost="2000"):
+    r = client.post(
+        f"{ADJUST_URL}/increase",
+        headers=headers,
+        json={
+            "material_id": str(mat.id),
+            "warehouse_id": str(wh.id),
+            "quantity": qty,
+            "unit_cost": cost,
+            "date": SEED_DATE,
+            "reason": "Seed",
+        },
+    )
+    assert r.status_code == 201, r.text
+    return mat
 
 
 @pytest.fixture
 def plomo(db_session, test_organization, client, org_headers, wh_jm):
-    """Plomo refinado en Juan Mina: 100 kg @ $2.000. Sin formula -> ya es plomo."""
+    """Plomo CRUDO en Juan Mina: 100 kg @ $2.000. Sin formula -> ya es plomo.
+
+    Se llama "crudo" y no "fino" a proposito (#103 C3): el fino es el PURO, y
+    marcarlo asi haria que ~20 tests de abono dispararan el aviso de D3 — el
+    ruido taparia lo que cada test prueba. El puro vive en su propia fixture.
+    """
     cat = create_material_category(db_session, test_organization.id, "Plomo")
-    mat = create_material(db_session, test_organization.id, "PB-01", "Plomo Fino", cat.id)
+    mat = create_material(db_session, test_organization.id, "PB-CRU", "Plomo Crudo", cat.id)
     mat.default_unit = "kg"
     db_session.commit()
+    _mark_lead(db_session, test_organization.id, mat, "crudo")
     resp = client.post(
         f"{ADJUST_URL}/increase",
         headers=org_headers,
@@ -182,6 +251,7 @@ def _create(client, headers, wh, willard, plomo, dtype, qty="50", expect=201):
             "warehouse_id": str(wh.id),
             "third_party_id": str(willard.id),
             "date": DELIVERY_DATE,
+            "remission_number": "REM-1",
             "lines": [{"material_id": str(plomo.id), "quantity": qty}],
         },
     )
@@ -190,14 +260,13 @@ def _create(client, headers, wh, willard, plomo, dtype, qty="50", expect=201):
 
 
 def _flow(client, headers, wh, willard, plomo, dtype, qty="50", price=None):
-    """Registrar -> revisar -> liquidar."""
-    d = _create(client, headers, wh, willard, plomo, dtype, qty)
-    r = client.post(f"{URL}/{d['id']}/review", headers=headers)
-    assert r.status_code == 200, r.text
+    """Registrar -> liquidar. El paso de revision se retiro (Hugo, 28-ago)."""
+    r_create = _create(client, headers, wh, willard, plomo, dtype, qty)
+    d = r_create
     body = {"line_prices": []}
     if dtype == "venta":
         body["line_prices"] = [
-            {"line_id": r.json()["lines"][0]["id"], "unit_price": str(price or 3000)}
+            {"line_id": d["lines"][0]["id"], "unit_price": str(price or 3000)}
         ]
     liq = client.post(f"{URL}/{d['id']}/liquidate", headers=headers, json=body)
     assert liq.status_code == 200, liq.text
@@ -320,14 +389,14 @@ class TestFacturacionYReparto:
         # valor del plomo y el test dejaria de aislar la factura del servicio
         before = willard.current_balance
         body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
-        # 50 kg x $1.500 maquila + 50 x $200 flete
-        assert Decimal(str(body["maquila_amount"])) == Decimal("75000.00")
-        assert Decimal(str(body["freight_amount"])) == Decimal("10000.00")
+        # 50 kg x $2.097 maquila + 50 x $37 flete
+        assert Decimal(str(body["maquila_amount"])) == Decimal("104850.00")
+        assert Decimal(str(body["freight_amount"])) == Decimal("1850.00")
         mms = _mms(db_session, test_organization.id, "service_income_accrual")
         assert len(mms) == 2
         assert all(m.account_id is None for m in mms), "es causado: sin cuenta"
         db_session.refresh(willard)
-        assert willard.current_balance == before + Decimal("85000.00")
+        assert willard.current_balance == before + Decimal("106700.00")
 
     def test_factura_no_entra_al_cash_flow(self):
         """La trampa de #86: el flujo de caja suma por tipo sin filtrar cuenta
@@ -338,19 +407,19 @@ class TestFacturacionYReparto:
         assert "service_income_accrual" not in INFLOW_TYPES
         assert "service_income_accrual" not in OUTFLOW_TYPES
 
-    def test_par_entrega_emite_con_flag_maquila_apagado(
+    def test_par_emite_en_abono_material(
         self, client, org_headers, db_session, test_organization,
-        wh_cv, wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_cv, wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
-        """D11 — el reparto NO se gatea con `internal_maquila_enabled`.
+        """CC-009 — los drosses son la UNICA rama que reparte.
 
-        Ese flag apaga el cobro del TRASLADO (que segun Hugo cobra en el momento
-        equivocado). Si compartieran el gate, apagarlo mataria tambien esto y
-        quedaria el modo de falla de #94/#99: 'el guard funciona' y 'lo apague
-        para todos' viendose identicos. El fixture lo deja en False.
+        Llegan derecho a planta, asi que nunca hubo traslado y la maquila
+        interna nunca se causo. Este test es la mitad viva del contraste: sin el,
+        `test_venta_sigue_sin_par` pasaria igual con el
+        mecanismo entero roto.
         """
-        body = _flow(client, org_headers, wh_jm, willard, plomo, "venta")
-        assert Decimal(str(body["plant_credit_amount"])) == Decimal("30000.00")
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
+        assert Decimal(str(body["plant_credit_amount"])) == Decimal("75000.00")
 
         exp = _mms(db_session, test_organization.id, "internal_maquila_expense")
         inc = _mms(db_session, test_organization.id, "internal_maquila_income")
@@ -359,11 +428,127 @@ class TestFacturacionYReparto:
         assert inc[0].warehouse_id == wh_jm.id, "Juan Mina recibe"
         assert exp[0].transfer_pair_id == inc[0].id
 
+    def test_venta_sigue_sin_par(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias,
+    ):
+        """T5 (#109; era la mitad `venta` de
+        `test_par_no_emite_en_venta_ni_abono_bateria`) — en una venta Willard
+        paga el precio del plomo y nada mas: no hay maquila facturada de la que
+        repartir. Es el contraste de T1: sin el, 'bateria reparte' y 'ahora
+        todo reparte' se ven identicos."""
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        assert Decimal(str(body["plant_credit_amount"])) == 0
+        assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
+        assert _mms(db_session, test_organization.id, "internal_maquila_income") == []
+
+    def test_abono_bateria_emite_par_566(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias,
+    ):
+        """T1 (#109) — 🔴 SUPERSEDE la fila 4 de CC-009. Johana (16-sep,
+        confirmado 18-sep): en el abono a baterias Circunvalar le reparte a
+        planta $566 por kg, FIJO, y se queda con 1.531 + todo el flete. La hoja
+        del cliente: 300 kg × 566 = $169.800.
+
+        Corre con `internal_maquila_enabled` en False (fixture): este par gatea
+        por TIPO, igual que el de materiales (#100 D11)."""
+        assert not test_organization.settings.get("internal_maquila_enabled")
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="300")
+        assert Decimal(str(body["plant_credit_amount"])) == Decimal("169800.00")
+
+        exp = _mms(db_session, test_organization.id, "internal_maquila_expense")
+        inc = _mms(db_session, test_organization.id, "internal_maquila_income")
+        assert len(exp) == 1 and len(inc) == 1
+        assert exp[0].amount == Decimal("169800.00") == inc[0].amount
+        assert exp[0].warehouse_id == wh_cv.id, "Circunvalar paga"
+        assert inc[0].warehouse_id == wh_jm.id, "Juan Mina recibe"
+        assert exp[0].transfer_pair_id == inc[0].id and inc[0].transfer_pair_id == exp[0].id
+        assert exp[0].account_id is None and exp[0].third_party_id is None
+
+    def test_abono_bateria_no_toca_factura_ni_flete(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias,
+    ):
+        """T2 (#109) — el reparto es INTERNO: a Willard se le factura igual
+        (300 × 2.097 = 629.100 de maquila + 300 × 37 = 11.100 de flete, y el
+        flete queda entero en Circunvalar). Y el consolidado no se entera:
+        `cv + jm == consolidado`."""
+        before = willard.current_balance
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="300")
+        assert Decimal(str(body["maquila_amount"])) == Decimal("629100.00")
+        assert Decimal(str(body["freight_amount"])) == Decimal("11100.00")
+        db_session.refresh(willard)
+        assert willard.current_balance == before + Decimal("640200.00")
+
+        cv = _pnl_today(client, org_headers, warehouse_id=str(wh_cv.id))
+        jm = _pnl_today(client, org_headers, warehouse_id=str(wh_jm.id))
+        total = _pnl_today(client, org_headers)
+        assert Decimal(str(cv["service_income"])) == Decimal("640200.00")
+        assert Decimal(str(cv["internal_maquila_expense"])) == Decimal("169800.00")
+        assert Decimal(str(jm["internal_maquila_income"])) == Decimal("169800.00")
+        assert (
+            Decimal(str(cv["net_profit"])) + Decimal(str(jm["net_profit"]))
+            == Decimal(str(total["net_profit"]))
+        )
+
+    def test_abono_material_usa_su_tarifa_no_la_de_bateria(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias, acc_drosses,
+    ):
+        """T3 (#109) — dos tarifas, dos tipos, valores DISTINTOS a proposito:
+        con el mismo numero en las dos, un mapa cruzado pasaria en verde."""
+        mat = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="10")
+        bat = _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="10")
+        assert Decimal(str(mat["plant_credit_amount"])) == Decimal("15000.00")  # 10 × 1.500
+        assert Decimal(str(bat["plant_credit_amount"])) == Decimal("5660.00")   # 10 × 566
+
+    def test_abono_sin_tarifa_de_reparto_avisa_en_la_respuesta(
+        self, client, org_headers, db_session, test_organization, test_user,
+        wh_jm, willard, plomo, acc_intersede, acc_baterias,
+    ):
+        """T4 (#109) — sin `abono_planta_bateria_por_kg` la salida pasa, los kg
+        se descargan y a planta no se le reparte nada: eso NO puede ser
+        silencioso. El aviso se lee del HTTP (#100: un warning que se calcula
+        y no viaja se ve identico a funcionar)."""
+        org = test_organization.id
+        _tariff(db_session, org, test_user.id, "maquila_willard", 2097)
+        _tariff(db_session, org, test_user.id, "flete_willard_planta_planta", 37)
+
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria")
+
+        assert any("abono_planta_bateria_por_kg" in w for w in body["warnings"]), body["warnings"]
+        assert Decimal(str(body["plant_credit_amount"])) == 0
+        assert Decimal(str(body["maquila_amount"])) == Decimal("104850.00")
+        assert _kg(db_session, acc_baterias.id) == Decimal("-50")
+        assert _mms(db_session, org, "internal_maquila_expense") == []
+
+    @pytest.mark.parametrize(
+        "dtype,facturas", [("venta", 0), ("abono_bateria", 2), ("abono_material", 2)]
+    )
+    def test_factura_solo_en_los_abonos(
+        self, dtype, facturas, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias, acc_drosses,
+    ):
+        """CC-009 — en una venta Willard paga el PRECIO del plomo y nada mas.
+
+        Hugo (4-sep): "de venta normal, solamente el precio de venta. La maquila
+        solamente aplica para el plomo a devolucion... el flete afecta solamente
+        cuando facturamos maquila. En venta no". Facturarlas en la venta le
+        cobraba $2.134/kg de mas ($2.097 + $37) e inflaba su cuenta por cobrar.
+        """
+        body = _flow(client, org_headers, wh_jm, willard, plomo, dtype)
+        assert len(_mms(db_session, test_organization.id, "service_income_accrual")) == facturas
+        esperado = Decimal("0") if dtype == "venta" else None
+        if esperado is not None:
+            assert Decimal(str(body["maquila_amount"])) == esperado
+            assert Decimal(str(body["freight_amount"])) == esperado
+
     def test_par_reparto_no_mueve_cuentas(
         self, client, org_headers, db_session, test_organization,
-        wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         for mtype in ("internal_maquila_expense", "internal_maquila_income"):
             for mm in _mms(db_session, test_organization.id, mtype):
                 assert mm.account_id is None
@@ -371,16 +556,42 @@ class TestFacturacionYReparto:
 
     def test_sin_setting_sede_facturacion_no_emite_par(
         self, client, org_headers, db_session, test_organization,
-        wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
-        """D4c: default inerte. Sin sede configurada no hay a quien abonarle."""
+        """D4c: sin sede configurada no hay a quien abonarle.
+
+        Se prueba sobre abono_material porque es la unica rama que reparte
+        (CC-009); en las otras dos no hay par que suprimir y el test pasaria
+        vacio.
+        """
         test_organization.settings = {
             **test_organization.settings, "willard_sede_facturacion": None
         }
         db_session.commit()
-        body = _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        body = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         assert Decimal(str(body["plant_credit_amount"])) == 0
         assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
+
+    def test_sin_setting_sede_facturacion_bateria_se_detiene_antes(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias,
+    ):
+        """#109 — en baterias el caso 'sin sede' NO llega al reparto: la cuenta
+        `willard_baterias` es de la sede que factura (las baterias entran por
+        Circunvalar), asi que sin el setting la liquidacion se detiene ANTES con
+        un 400 que dice que configurar. Lo descubri escribiendo este test: el
+        plan asumia que heredaba el 'no emite' de materiales y no es asi. Nada
+        queda escrito."""
+        test_organization.settings = {
+            **test_organization.settings, "willard_sede_facturacion": None
+        }
+        db_session.commit()
+        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_bateria")
+        r = client.post(f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []})
+        assert r.status_code == 400, r.text
+        assert "sede que factura" in r.json()["detail"]
+        assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
+        assert _kg(db_session, acc_baterias.id) == 0
 
     def test_kg_se_descarga_sin_tarifa(
         self, client, org_headers, db_session, test_organization,
@@ -412,28 +623,29 @@ class TestPorSede:
 
     def test_factura_fragmenta_por_sede(
         self, client, org_headers, db_session, test_organization,
-        wh_cv, wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_cv, wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
         """Los numeros del cliente: Circunvalar factura y le abona a planta.
 
         Sin fragmentar, Circunvalar —la sede que gana— apareceria en rojo con
-        puro costo, sin error y sin warning.
+        puro costo, sin error y sin warning. Sobre abono_material, que desde
+        CC-009 es la unica rama con reparto.
         """
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
 
         cv = self._pnl(client, org_headers, wh_cv.id)
         jm = self._pnl(client, org_headers, wh_jm.id)
 
-        # Circunvalar: factura 85.000 (maquila+flete) y abona 30.000 a planta
-        assert Decimal(str(cv["service_income"])) == Decimal("85000.00")
-        assert Decimal(str(cv["internal_maquila_expense"])) == Decimal("30000.00")
+        # Circunvalar: factura 106.700 (maquila+flete) y abona 75.000 a planta
+        assert Decimal(str(cv["service_income"])) == Decimal("106700.00")
+        assert Decimal(str(cv["internal_maquila_expense"])) == Decimal("75000.00")
         # Juan Mina: recibe el abono, no factura
         assert Decimal(str(jm["service_income"])) == 0
-        assert Decimal(str(jm["internal_maquila_income"])) == Decimal("30000.00")
+        assert Decimal(str(jm["internal_maquila_income"])) == Decimal("75000.00")
 
     def test_drilldown_service_income_cuadra_con_pnl(
         self, client, org_headers, db_session, test_organization,
-        wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
         """La promesa de #49: la suma del listado destino == el numero del P&L.
 
@@ -441,7 +653,9 @@ class TestPorSede:
         tiene datos de W1: alli el cambio a CSV pasa verde sin ejercitarse. El
         guardrail hay que ponerlo donde SI hay una factura de Salida.
         """
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        # abono_material: desde CC-009 la venta no factura, y con cero de los
+        # dos lados el test pasaria vacio sin ejercitar nada
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         pnl = self._pnl(client, org_headers)
 
         from app.utils.dates import business_today
@@ -467,12 +681,12 @@ class TestPorSede:
 
     def test_consolidado_invariante_con_y_sin_sede(
         self, client, org_headers, db_session, test_organization,
-        wh_cv, wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_cv, wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
         """El par netea $0 y la factura entera aparece una sola vez."""
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         total = self._pnl(client, org_headers)
-        assert Decimal(str(total["service_income"])) == Decimal("85000.00")
+        assert Decimal(str(total["service_income"])) == Decimal("106700.00")
         cv = self._pnl(client, org_headers, wh_cv.id)
         jm = self._pnl(client, org_headers, wh_jm.id)
         assert (
@@ -549,23 +763,29 @@ class TestGuards:
                 "warehouse_id": str(wh_cv.id),
                 "third_party_id": str(willard.id),
                 "date": DELIVERY_DATE,
+                "remission_number": "REM-1",
                 "lines": [{"material_id": str(plomo.id), "quantity": "10"}],
             },
         )
         assert r.status_code == 400
         assert "planta" in r.json()["detail"].lower()
 
-    def test_peso_obligatorio_al_revisar(
+    def test_peso_obligatorio_al_liquidar(
         self, client, org_headers, db_session, test_organization, wh_jm, willard
     ):
-        """#95 Q-13: opcional al capturar, obligatorio al revisar. Un material
-        por UNIDAD no autocompleta el peso."""
+        """#95 Q-13 sigue vivo: opcional al capturar, obligatorio antes de que se
+        muevan kg y pesos. Al retirarse el paso de revision (Hugo, 28-ago) la
+        certificacion se mudo a la liquidacion — no se perdio. Un material por
+        UNIDAD no autocompleta el peso."""
         cat = create_material_category(db_session, test_organization.id, "Bat")
         mat = create_material(db_session, test_organization.id, "BAT-9", "Bateria", cat.id)
         mat.default_unit = "unidad"
         db_session.commit()
+        _mark_lead(db_session, test_organization.id, mat, "crudo")
         d = _create(client, org_headers, wh_jm, willard, mat, "abono_bateria", qty="5")
-        r = client.post(f"{URL}/{d['id']}/review", headers=org_headers)
+        r = client.post(
+            f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []}
+        )
         assert r.status_code == 400
         assert "báscula" in r.json()["detail"] or "bascula" in r.json()["detail"]
 
@@ -576,35 +796,59 @@ class TestGuards:
         d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="50")
         assert Decimal(str(d["lines"][0]["scale_weight_kg"])) == Decimal("50.0000")
 
-    def test_editar_lineas_devuelve_a_registrada(
-        self, client, org_headers, wh_jm, willard, plomo
-    ):
-        """D17 de #95: la revision certifica LINEAS. Editarlas la invalida."""
-        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material")
-        client.post(f"{URL}/{d['id']}/review", headers=org_headers)
-        r = client.patch(
-            f"{URL}/{d['id']}",
-            headers=org_headers,
-            json={"lines": [{"material_id": str(plomo.id), "quantity": "30"}]},
-        )
-        assert r.status_code == 200
-        assert r.json()["status"] == "draft"
-
-    def test_editar_cabecera_conserva_revision(
-        self, client, org_headers, wh_jm, willard, plomo
-    ):
-        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material")
-        client.post(f"{URL}/{d['id']}/review", headers=org_headers)
-        r = client.patch(f"{URL}/{d['id']}", headers=org_headers, json={"notes": "x"})
-        assert r.status_code == 200
-        assert r.json()["status"] == "reviewed"
-
-    def test_liquidar_sin_revisar_400(
+    def test_se_liquida_directo_sin_paso_de_revision(
         self, client, org_headers, wh_jm, willard, plomo, tarifas, acc_drosses
     ):
+        """Hugo, demo 28-ago: "esto funciona muy diferente porque inmediatamente
+        queda la deuda: registrado y liquidar". Antes esto daba 400 exigiendo una
+        revision; ahora es el camino normal. Si alguien reintroduce el paso, este
+        test cae."""
         d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material")
-        r = client.post(f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []})
-        assert r.status_code == 400
+        assert d["status"] == "draft"
+        r = client.post(
+            f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []}
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "liquidated"
+
+    def test_la_ruta_de_revision_ya_no_existe(
+        self, client, org_headers, wh_jm, willard, plomo
+    ):
+        """El endpoint se retiro, no se dejo respondiendo 400: una ruta viva que
+        siempre falla es superficie que no hace nada y no avisa."""
+        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material")
+        r = client.post(f"{URL}/{d['id']}/review", headers=org_headers)
+        assert r.status_code in (404, 405), r.status_code
+
+    def test_remision_obligatoria(
+        self, client, org_headers, wh_jm, willard, plomo
+    ):
+        """Hugo, demo 28-ago: "que no te deje avanzar sin digitar el numero" —
+        y el motivo no es formal: "para que no me alteren el consecutivo". La
+        remision es el numero con el que el concilia con Willard."""
+        base = {
+            "delivery_type": "abono_material",
+            "warehouse_id": str(wh_jm.id),
+            "third_party_id": str(willard.id),
+            "date": DELIVERY_DATE,
+            "lines": [{"material_id": str(plomo.id), "quantity": "10"}],
+        }
+        assert client.post(URL, headers=org_headers, json=base).status_code == 422
+        # Vacia tampoco: seria la misma ausencia con otra forma.
+        assert client.post(
+            URL, headers=org_headers, json={**base, "remission_number": "  "}
+        ).status_code in (400, 422)
+        r = client.post(URL, headers=org_headers, json={**base, "remission_number": "R-77"})
+        assert r.status_code == 201, r.text
+        assert r.json()["remission_number"] == "R-77"
+
+    def test_no_se_puede_borrar_la_remision_editando(
+        self, client, org_headers, wh_jm, willard, plomo
+    ):
+        """La obligatoriedad del create no debe poder esquivarse por el PATCH."""
+        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material")
+        r = client.patch(f"{URL}/{d['id']}", headers=org_headers, json={"remission_number": ""})
+        assert r.status_code == 422, r.text
 
     def test_venta_a_no_cliente_avisa_donde_arreglarlo(
         self, client, org_headers, db_session, test_organization,
@@ -612,28 +856,51 @@ class TestGuards:
     ):
         """Encontrado en el smoke: Willard estaba sembrado solo como proveedor y
         la venta reventaba con "El tercero no es cliente" desde adentro de la
-        venta derivada — cierto, pero sin decir donde arreglarlo."""
+        venta derivada — cierto, pero sin decir donde arreglarlo.
+
+        Re-semantizado 9-sep: el check ahora corre AL CAPTURAR (Daniel vio que
+        el selector ofrecia a todos los terceros). La propiedad que se vigila
+        es la misma — el mensaje dice DONDE arreglarlo — solo que mas temprano.
+        Y el check de liquidate sigue vivo para su unico camino restante: que
+        al tercero le quiten la categoria de cliente despues de capturar.
+        """
+        from app.models.third_party_category import ThirdPartyCategoryAssignment
+
         proveedor = create_third_party_with_category(
             db_session, test_organization.id, "Solo Proveedor", "material_supplier"
         )
         db_session.commit()
-        d = _create(client, org_headers, wh_jm, proveedor, plomo, "venta")
-        client.post(f"{URL}/{d['id']}/review", headers=org_headers)
-        r = client.post(
-            f"{URL}/{d['id']}/liquidate", headers=org_headers, json={"line_prices": []}
+        r = _create(client, org_headers, wh_jm, proveedor, plomo, "venta", expect=400)
+        assert "Solo Proveedor" in r["detail"] and "Terceros" in r["detail"]
+
+        cliente = create_third_party_with_category(
+            db_session, test_organization.id, "Cliente Efimero", "customer"
         )
-        assert r.status_code == 400
-        detail = r.json()["detail"]
-        assert "Solo Proveedor" in detail and "Terceros" in detail
+        db_session.commit()
+        d = _create(client, org_headers, wh_jm, cliente, plomo, "venta")
+        # le quitan la categoria de cliente despues de capturar
+        for a in db_session.execute(
+            select(ThirdPartyCategoryAssignment).where(
+                ThirdPartyCategoryAssignment.third_party_id == cliente.id
+            )
+        ).scalars().all():
+            db_session.delete(a)
+        db_session.commit()
+        r = client.post(
+            f"{URL}/{d['id']}/liquidate", headers=org_headers,
+            json={"line_prices": [{"line_id": d["lines"][0]["id"], "unit_price": "3000"}]},
+        )
+        assert r.status_code == 400, r.text
+        assert "Cliente Efimero" in r.json()["detail"] and "Terceros" in r.json()["detail"]
 
     def test_guard_maquila_nombra_el_modulo_correcto(
         self, client, org_headers, db_session, test_organization,
-        wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
         """D10 — el mensaje se DERIVA del source_type. Antes decia 'Anule el
         traslado desde el modulo de Traslados' hardcodeado, y con un segundo
         emisor mandaba al usuario al lugar equivocado."""
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         mm = _mms(db_session, test_organization.id, "internal_maquila_expense")[0]
         r = client.post(
             f"/api/v1/money-movements/{mm.id}/annul",
@@ -641,14 +908,15 @@ class TestGuards:
             json={"reason": "prueba"},
         )
         assert r.status_code == 422
-        assert "Salidas a Willard" in r.json()["detail"]
+        assert "Salidas de Plomo" in r.json()["detail"]
         assert "Traslados" not in r.json()["detail"]
 
     def test_factura_no_se_anula_desde_tesoreria(
         self, client, org_headers, db_session, test_organization,
-        wh_jm, willard, plomo, tarifas, acc_intersede,
+        wh_jm, willard, plomo, tarifas, acc_drosses,
     ):
-        _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        # abono: desde CC-009 la venta no factura, y sin factura no hay que anular
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
         mm = _mms(db_session, test_organization.id, "service_income_accrual")[0]
         r = client.post(
             f"/api/v1/money-movements/{mm.id}/annul",
@@ -684,8 +952,6 @@ class TestAnulacion:
         assert plomo.current_stock == stock_before
         assert willard.current_balance == balance_before
         assert _kg(db_session, acc_intersede.id) == 0
-        assert _mms(db_session, test_organization.id, "service_income_accrual") == []
-        assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
         sale = db_session.get(Sale, body["sale_id"])
         assert sale.status == "cancelled"
 
@@ -702,3 +968,1117 @@ class TestAnulacion:
         db_session.refresh(plomo)
         assert plomo.current_stock == stock_before
         assert _kg(db_session, acc_drosses.id) == 0
+        # factura y par se revierten con la salida (aca SI hay ambos, CC-009)
+        assert _mms(db_session, test_organization.id, "service_income_accrual") == []
+        assert _mms(db_session, test_organization.id, "internal_maquila_expense") == []
+        assert _mms(db_session, test_organization.id, "internal_maquila_income") == []
+
+
+# ------------------------------------------ los warnings, que nadie veia ---
+
+class TestWarningsDeLiquidacion:
+    """Tres defectos de la misma familia, encontrados en la 2a pasada de QA.
+
+    El tercero es el que los vuelve importantes: el servicio calculaba
+    warnings y el endpoint hacia `response.notes = (response.notes or "")`
+    — se asignaba a si mismo. Ninguno llegaba nunca al usuario. O sea que
+    el warning del invariante de abajo habria nacido muerto y nosotros
+    lo habriamos reportado como mitigacion.
+    """
+
+    def test_la_venta_no_pide_anular_una_salida_perfecta(
+        self, client, org_headers, wh_jm, willard, plomo, _flags,
+        db_session, test_organization, test_user, acc_intersede,
+    ):
+        """Sin tarifa de maquila, una VENTA no debe advertir nada.
+
+        En venta no se factura por diseno (CC-009), asi que el warning de
+        'configurela y anule/rehaga la salida' le pedia deshacer algo que
+        estaba bien. Familia de #100 D10. Ojo: este test corre SIN el
+        fixture `tarifas` — esa ausencia es el escenario.
+        """
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+
+        assert out["warnings"] == []
+        assert Decimal(str(out["maquila_amount"])) == 0
+        assert Decimal(str(out["freight_amount"])) == 0
+
+    def test_el_abono_si_avisa_cuando_falta_la_tarifa(
+        self, client, org_headers, wh_jm, willard, plomo, _flags,
+        db_session, test_organization, test_user, acc_drosses,
+    ):
+        """El contraste del anterior: en un abono el aviso SI corresponde.
+
+        Sin este par, 'el gate funciona' y 'mate el warning para todos' se
+        ven identicos — la leccion de #94/#99.
+        """
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
+
+        assert any("maquila_willard" in w for w in out["warnings"]), out["warnings"]
+        assert any("flete_willard" in w for w in out["warnings"]), out["warnings"]
+
+    def test_abono_a_planta_mayor_que_la_maquila_avisa_y_no_bloquea(
+        self, client, org_headers, wh_jm, willard, plomo, _flags,
+        db_session, test_organization, test_user, acc_drosses,
+    ):
+        """Q-27 volvio el abono una TAJADA de la maquila, y nada lo verificaba.
+
+        Con la maquila en $1.000 y el abono en $1.500, Circunvalar le abona a
+        planta mas de lo que le facturo a Willard: la sede que factura queda
+        en perdida, en silencio. Es #100 D13 por la otra puerta.
+
+        El numero importa, no solo que falle: 50 kg x $1.500 = $75.000 de
+        abono contra 50 kg x $1.000 = $50.000 de factura.
+        """
+        _tariff(db_session, test_organization.id, test_user.id, "maquila_willard", 1000)
+        _tariff(db_session, test_organization.id, test_user.id, "flete_willard_planta_planta", 37)
+        _tariff(db_session, test_organization.id, test_user.id, "abono_planta_por_kg", 1500)
+
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
+
+        aviso = [w for w in out["warnings"] if "supera la maquila" in w]
+        assert len(aviso) == 1, out["warnings"]
+        assert "75.000" in aviso[0] and "50.000" in aviso[0], aviso[0]
+
+        # avisa, NO bloquea (#17/#76): el reparto se emite igual
+        assert Decimal(str(out["plant_credit_amount"])) == Decimal("75000.00")
+        assert len(_mms(db_session, test_organization.id, "internal_maquila_expense")) == 1
+
+    def test_con_tarifas_sanas_no_hay_ruido(
+        self, client, org_headers, wh_jm, willard, plomo, _flags, tarifas,
+        db_session, test_organization, acc_drosses,
+    ):
+        """$1.500 de abono contra $2.097 de maquila: el invariante se cumple.
+
+        Sin este, un warning que se disparara siempre pasaria por bueno.
+        """
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
+
+        assert out["warnings"] == [], out["warnings"]
+
+
+# ------------------------------------- guard de material entregable (#103) ---
+#
+# El defecto que cierra: una salida aceptaba CUALQUIER material. En dev entraron
+# 1.000 kg de guarru seco de Willard y el MISMO material salio como abono — SAC
+# no fundio nada y el sistema facturo $1,5M de maquila (el cobro POR FUNDIR),
+# flete, y abono a planta por un trabajo que no ocurrio. Sin un aviso.
+#
+# La causa: `_compute_lead_kg` usaba una heuristica de CALCULO ("sin formula el
+# material ya es plomo") como CLASIFICADOR. 15 materiales activos pasaban como
+# plomo 1:1, entre ellos aluminio, hierro y cajas plasticas.
+#
+# El cuadrante que cubren estos tests — dibujado, no enumerado, porque en prosa
+# se declaro cubierto tres veces con una celda vacia:
+#
+#                  | plomo marcado          | no plomo
+#     sin formula  | test 2  (crudo)        | test 7  (plastico)
+#     con formula  | test 9  (crudo+form.)  | test 1  (guarru)
+
+@pytest.fixture
+def puro(db_session, test_organization, client, org_headers, wh_jm):
+    """Plomo PURO: pasa el guard, pero avisa si se usa para abonar."""
+    cat = create_material_category(db_session, test_organization.id, "Plomo")
+    mat = create_material(db_session, test_organization.id, "PB-PUR", "Plomo Puro", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    _mark_lead(db_session, test_organization.id, mat, "puro")
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+@pytest.fixture
+def plastico(db_session, test_organization, client, org_headers, wh_jm):
+    """CAJAS PLASTICAS: SIN formula y sin marca. Es el material que hoy saldaba
+    la deuda de plomo 1:1 — la celda que la heuristica dejaba pasar."""
+    cat = create_material_category(db_session, test_organization.id, "Plomo")
+    mat = create_material(db_session, test_organization.id, "CAJ-PLA", "Cajas Plasticas", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    _mark_lead(db_session, test_organization.id, mat, "none")
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+@pytest.fixture
+def guarru(db_session, test_organization, client, org_headers, wh_jm):
+    """GUARRU SECO: CON formula (72% de plomo) y sin marca. Es de lo que SE
+    EXTRAE plomo, o sea justo lo que NO puede pagar la deuda."""
+    cat = create_material_category(db_session, test_organization.id, "Drosses")
+    mat = create_material(db_session, test_organization.id, "MR-02", "Guarru Seco", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    _mark_lead(db_session, test_organization.id, mat, "none")
+    r = client.post(FORMULAS_URL, headers=org_headers, json={
+        "material_id": str(mat.id),
+        "formula_type": "drosses_to_lead",
+        "parameters": {"lead_percentage": 0.72},
+    })
+    assert r.status_code == 201, r.text
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+@pytest.fixture
+def sin_perfil(db_session, test_organization, client, org_headers, wh_jm):
+    """Material SIN fila de perfil: el fail-closed de D6."""
+    cat = create_material_category(db_session, test_organization.id, "Plomo")
+    mat = create_material(db_session, test_organization.id, "SIN-P", "Sin Perfil", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+@pytest.fixture
+def crudo_con_formula(db_session, test_organization, client, org_headers, wh_jm):
+    """Plomo crudo CON formula de rendimiento: la cuarta celda del cuadrante.
+    Hoy no existe en SAC, pero un guard `marcado AND sin formula` lo bloquearia
+    el dia que alguien la cree — y ese guard pasa todos los demas tests."""
+    cat = create_material_category(db_session, test_organization.id, "Plomo")
+    mat = create_material(db_session, test_organization.id, "PB-CF", "Crudo Con Formula", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    _mark_lead(db_session, test_organization.id, mat, "crudo")
+    r = client.post(FORMULAS_URL, headers=org_headers, json={
+        "material_id": str(mat.id),
+        "formula_type": "drosses_to_lead",
+        "parameters": {"lead_percentage": 0.5},
+    })
+    assert r.status_code == 201, r.text
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+def _walk_expecting_block(client, headers, wh, willard, mat, dtype, qty="10"):
+    """Camina create -> liquidate y devuelve la PRIMERA respuesta que bloquea,
+    sin importar la etapa.
+
+    A proposito no afirma DONDE sale el 400: eso lo fijan los tests 8 y 11. Si
+    este afirmara la etapa, mover el guard de sitio lo rompería y no se podria
+    distinguir "el guard desaparecio" de "el guard se movio".
+    """
+    r = client.post(URL, headers=headers, json={
+        "delivery_type": dtype,
+        "warehouse_id": str(wh.id),
+        "third_party_id": str(willard.id),
+        "date": DELIVERY_DATE,
+        "remission_number": "REM-1",
+        "lines": [{"material_id": str(mat.id), "quantity": qty}],
+    })
+    if r.status_code >= 400:
+        return r
+    created = r.json()
+    did = created["id"]
+    body = {"line_prices": []}
+    if dtype == "venta":
+        body["line_prices"] = [
+            {"line_id": created["lines"][0]["id"], "unit_price": "3000"}
+        ]
+    r = client.post(f"{URL}/{did}/liquidate", headers=headers, json=body)
+    assert r.status_code >= 400, (
+        "La salida se liquido entera: el guard no bloqueo en NINGUNA etapa."
+    )
+    return r
+
+
+class TestGuardMaterialEntregable:
+
+    def test_abono_con_material_que_no_es_plomo_bloquea(
+        self, client, org_headers, wh_jm, willard, guarru, acc_drosses, tarifas
+    ):
+        """Test 1 — con formula / no plomo. La reproduccion exacta del hallazgo:
+        guarru seco entra de Willard y sale como abono sin haberse fundido."""
+        r = _walk_expecting_block(
+            client, org_headers, wh_jm, willard, guarru, "abono_material"
+        )
+        assert r.status_code == 400, r.text
+        assert "MR-02" in r.json()["detail"], r.text
+        assert "plomo entregable" in r.json()["detail"]
+
+    def test_abono_con_plomo_crudo_pasa(
+        self, client, org_headers, wh_jm, willard, plomo, acc_drosses, tarifas
+    ):
+        """Test 2 — sin formula / plomo. La otra mitad del par: el camino bueno
+        sigue vivo. Sin este, "el guard funciona" y "bloquee todo" se ven igual."""
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material")
+        assert out["status"] == "liquidated"
+
+    def test_venta_tambien_exige_plomo(
+        self, client, org_headers, wh_jm, willard, plastico, acc_intersede, tarifas
+    ):
+        """Test 3 — el guard cubre los TRES tipos. La venta tambien descarga
+        `intersede` por kg, asi que la misma aritmetica perversa la afecta."""
+        r = _walk_expecting_block(
+            client, org_headers, wh_jm, willard, plastico, "venta"
+        )
+        assert r.status_code == 400, r.text
+        assert "CAJ-PLA" in r.json()["detail"]
+
+    def test_puro_en_abono_avisa_y_no_bloquea(
+        self, client, org_headers, wh_jm, willard, puro, acc_drosses, tarifas
+    ):
+        """Test 4 — el aviso de D3, leido de la RESPUESTA HTTP de liquidate.
+
+        Leerlo del retorno del servicio es lo que dejo pasar el defecto D4d de
+        #100: el servicio lo calculaba bien y el endpoint lo tiraba a la basura.
+        """
+        out = _flow(client, org_headers, wh_jm, willard, puro, "abono_material")
+        assert out["status"] == "liquidated"
+        assert any("PURO" in w for w in out["warnings"]), out["warnings"]
+
+    def test_abono_a_tercero_ajeno_rechazado(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, plomo, acc_drosses,
+    ):
+        """Test 5a — el unico hallazgo con dano financiero silencioso: las
+        cuentas kg se resuelven por `account_type`, no por el tercero del
+        documento, asi que se saldaba la deuda de uno y se le facturaba a otro."""
+        otro = create_third_party_with_category(
+            db_session, test_organization.id, "Green Loop", "customer"
+        )
+        # El helper solo hace flush: sin commit, la sesion de la API no lo ve y
+        # el POST responde 404 en vez de ejercitar el guard.
+        db_session.commit()
+        r = client.post(URL, headers=org_headers, json={
+            "delivery_type": "abono_material",
+            "warehouse_id": str(wh_jm.id),
+            "third_party_id": str(otro.id),
+            "date": DELIVERY_DATE,
+            "remission_number": "REM-1",
+            "lines": [{"material_id": str(plomo.id), "quantity": "10"}],
+        })
+        assert r.status_code == 422, r.text
+        assert "Willard" in r.json()["detail"], r.text
+
+    def test_abono_al_titular_de_la_cuenta_pasa(
+        self, client, org_headers, wh_jm, willard, plomo, acc_drosses
+    ):
+        """Test 5b — la otra mitad del par de D7."""
+        _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="10")
+
+    def test_material_sin_perfil_kg_bloquea(
+        self, client, org_headers, wh_jm, willard, sin_perfil, acc_drosses, tarifas
+    ):
+        """Test 6 — fail-closed (D6): sin fila de perfil se trata como `none`.
+        Bloquear con un mensaje que dice donde marcarlo es el modo de falla
+        correcto; seguir calculando en silencio es el defecto."""
+        r = _walk_expecting_block(
+            client, org_headers, wh_jm, willard, sin_perfil, "abono_material"
+        )
+        assert r.status_code == 400, r.text
+        assert "SIN-P" in r.json()["detail"]
+
+    def test_material_sin_formula_que_no_es_plomo_bloquea(
+        self, client, org_headers, wh_jm, willard, plastico, acc_drosses, tarifas
+    ):
+        """Test 7 — sin formula / no plomo. EL test que faltaba.
+
+        Es el unico que cae con las DOS variantes del atajo prohibido. Con
+        `sin formula => entregable`, los tests 1, 2 y 3 quedan verdes y las
+        cajas plasticas siguen saldando la deuda 1:1 sin ningun testigo.
+        """
+        r = _walk_expecting_block(
+            client, org_headers, wh_jm, willard, plastico, "abono_material"
+        )
+        assert r.status_code == 400, r.text
+        assert "CAJ-PLA" in r.json()["detail"]
+
+    def test_guard_corre_al_capturar(
+        self, client, org_headers, wh_jm, willard, plastico, acc_drosses
+    ):
+        """Test 8 — fija la ETAPA: el rechazo sale en `create`, no despues.
+
+        Si el guard vive solo en la liquidacion, el material equivocado se acepta
+        en el patio y el error aparece dias despues, con el camion ido.
+        """
+        _create(
+            client, org_headers, wh_jm, willard, plastico,
+            "abono_material", qty="10", expect=400,
+        )
+
+    def test_plomo_marcado_con_formula_pasa_y_convierte(
+        self, client, org_headers, db_session, wh_jm, willard,
+        crudo_con_formula, acc_drosses, tarifas,
+    ):
+        """Test 9 — la cuarta celda: con formula / plomo.
+
+        Pinta dos cosas de una: que el guard lee SOLO `lead_product` (un
+        `marcado AND sin formula` bloquearia esto y pasaria los otros diez), y
+        que la heuristica de calculo sigue viva — 50 kg x 0,5 = 25 kg de plomo.
+        """
+        out = _flow(client, org_headers, wh_jm, willard, crudo_con_formula,
+                    "abono_material", qty="50")
+        assert out["status"] == "liquidated"
+        assert _kg(db_session, acc_drosses.id) == Decimal("-25.0000")
+
+    def test_aviso_de_puro_llega_al_capturar(
+        self, client, org_headers, wh_jm, willard, puro, acc_drosses
+    ):
+        """Test 10 — el aviso tambien tiene que llegar a tiempo.
+
+        D2 y D3 son hermanos: si el guard corre en `create` pero el aviso solo
+        viaja en la respuesta de `liquidate`, se descarta y el usuario se entera
+        igual de tarde. El campo `warnings` tiene que estar cableado en los
+        cuatro endpoints, no solo en el ultimo.
+        """
+        out = _create(client, org_headers, wh_jm, willard, puro,
+                      "abono_material", qty="10")
+        assert any("PURO" in w for w in out["warnings"]), out
+
+    def test_guard_corre_al_editar(
+        self, client, org_headers, wh_jm, willard, plomo, plastico, acc_drosses
+    ):
+        """Test 11 — fija la etapa de `update`, el punto de entrada que no tenia
+        testigo.
+
+        Sin este test, un validador cableado en create/liquidate pero SIN
+        la llamada en `update` deja los otros diez en verde: los de flujo
+        completo reciben su 400 en la liquidacion igual, el 8 valida `create`,
+        que si valida, y los avisos siguen cableados. Firma vacia.
+
+        Y es el camino mas realista de los cuatro: se registra bien, se edita
+        despues, y ahi se cuela el material equivocado.
+        """
+        d = _create(client, org_headers, wh_jm, willard, plomo,
+                    "abono_material", qty="10")
+        r = client.patch(f"{URL}/{d['id']}", headers=org_headers, json={
+            "lines": [{"material_id": str(plastico.id), "quantity": "10"}],
+        })
+        assert r.status_code == 400, r.text
+        assert "CAJ-PLA" in r.json()["detail"]
+
+
+# ------------------------------------- las dos puertas: Ventas vs Salidas ---
+
+SALES_URL = "/api/v1/sales"
+
+
+def _venta_normal(client, headers, customer, wh, mat, qty="10", price="5000"):
+    return client.post(
+        SALES_URL,
+        headers=headers,
+        json={
+            "customer_id": str(customer.id),
+            "warehouse_id": str(wh.id),
+            "date": DELIVERY_DATE,
+            "lines": [{"material_id": str(mat.id), "quantity": qty, "unit_price": price}],
+            "commissions": [],
+            "auto_liquidate": False,
+        },
+    )
+
+
+@pytest.fixture
+def aluminio(db_session, test_organization, client, org_headers, wh_jm):
+    """Material SIN marca de plomo: se vende por Ventas, como siempre."""
+    cat = create_material_category(db_session, test_organization.id, "Aluminio")
+    mat = create_material(db_session, test_organization.id, "ALU", "Aluminio", cat.id)
+    mat.default_unit = "kg"
+    db_session.commit()
+    return _stock(client, org_headers, mat, wh_jm)
+
+
+class TestGuardPlomoPorVentas:
+    """El plomo entregable NO se vende por el modulo de Ventas.
+
+    Hugo (28-ago, 00:18:54): la venta regular es una de las dos formas en que
+    planta devuelve la deuda en kg. Vendida por Ventas, el inventario sale y la
+    deuda queda colgada — sin error y sin aviso. Con este guard y con #103 (la
+    otra direccion), la regla queda con las dos puertas cerradas.
+
+    El PAR con-flag/sin-flag es la red (leccion #99): sin el contraste, "el
+    guard funciona" y "lo apague para las otras 6 orgs" se ven identicos.
+    """
+
+    def test_venta_normal_de_plomo_marcado_bloquea(
+        self, client, org_headers, wh_jm, willard, plomo,
+    ):
+        resp = _venta_normal(client, org_headers, willard, wh_jm, plomo)
+        assert resp.status_code == 400, resp.text
+        detail = resp.json()["detail"]
+        assert "PB-CRU" in detail
+        assert "Salida de Plomo" in detail
+
+    def test_venta_normal_de_puro_tambien_bloquea(
+        self, client, org_headers, db_session, test_organization, wh_jm, willard,
+    ):
+        """La marca es lo que decide, no el tipo de plomo: crudo y puro salen
+        los dos por Salidas (el puro ademas causa el diferencial del crisol)."""
+        cat = create_material_category(db_session, test_organization.id, "Plomo P")
+        mat = create_material(db_session, test_organization.id, "PB-PUR", "Plomo Puro", cat.id)
+        mat.default_unit = "kg"
+        db_session.commit()
+        _mark_lead(db_session, test_organization.id, mat, "puro")
+        _stock(client, org_headers, mat, wh_jm)
+        resp = _venta_normal(client, org_headers, willard, wh_jm, mat)
+        assert resp.status_code == 400, resp.text
+        assert "PB-PUR" in resp.json()["detail"]
+
+    def test_venta_normal_de_material_sin_marca_pasa(
+        self, client, org_headers, wh_jm, willard, aluminio,
+    ):
+        """Johana (9-sep): aluminio y chatarra son VENTA NORMAL, desde cualquier
+        bodega. Cascara y retal caen aca tambien: son insumos, no producto."""
+        resp = _venta_normal(client, org_headers, willard, wh_jm, aluminio)
+        assert resp.status_code == 201, resp.text
+
+    def test_sin_flag_el_guard_es_inerte(
+        self, client, org_headers, db_session, test_organization, wh_jm, willard, plomo,
+    ):
+        """La otra mitad del par: sin `kg_ledger_enabled` el plomo marcado se
+        vende normal — las 6 orgs que no son SAC quedan byte-identicas."""
+        test_organization.settings = {
+            **(test_organization.settings or {}),
+            "kg_ledger_enabled": False,
+        }
+        db_session.commit()
+        resp = _venta_normal(client, org_headers, willard, wh_jm, plomo)
+        assert resp.status_code == 201, resp.text
+
+    def test_editar_venta_metiendo_plomo_bloquea(
+        self, client, org_headers, wh_jm, willard, aluminio, plomo,
+    ):
+        """Sin el guard en update, el de create se esquiva editando (#80 B3)."""
+        created = _venta_normal(client, org_headers, willard, wh_jm, aluminio)
+        assert created.status_code == 201, created.text
+        resp = client.patch(
+            f"{SALES_URL}/{created.json()['id']}",
+            headers=org_headers,
+            json={"lines": [{"material_id": str(plomo.id), "quantity": "10", "unit_price": "5000"}]},
+        )
+        assert resp.status_code == 400, resp.text
+        assert "Salida de Plomo" in resp.json()["detail"]
+
+    def test_la_venta_derivada_de_la_salida_sigue_pasando(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede,
+    ):
+        """La venta que DERIVA una Salida de Plomo es la unica venta legitima de
+        plomo entregable — el guard tiene que dejarla pasar (bypass interno,
+        no viaja en el schema). Si alguien quita `from_willard_delivery` del
+        call site, este test cae con el 400 del guard."""
+        d = _flow(client, org_headers, wh_jm, willard, plomo, "venta")
+        assert d["status"] == "liquidated"
+        assert d["sale_id"] is not None
+        sale = db_session.get(Sale, d["sale_id"])
+        assert sale is not None and sale.status == "liquidated"
+        assert sale.notes == f"Salida de Plomo — {d['label']}"
+        assert _kg(db_session, acc_intersede.id) == Decimal("-50")
+
+
+class TestVentaExigeClienteAlCapturar:
+    """El check de `customer` vivia solo en liquidate: una venta a un proveedor se
+    aceptaba en el patio y reventaba dias despues. Daniel lo vio en pantalla —
+    el selector de Salidas ofrecia a TODOS los terceros y el de Ventas solo a
+    clientes. Un validador, todos los puntos de entrada (#103 D3)."""
+
+    @pytest.fixture
+    def proveedor(self, db_session, test_organization):
+        return create_third_party_with_category(
+            db_session, test_organization.id, "Chatarreria Bogota", "material_supplier"
+        )
+
+    def test_venta_a_tercero_que_no_es_cliente_bloquea_al_capturar(
+        self, client, org_headers, wh_jm, proveedor, plomo,
+    ):
+        resp = client.post(
+            URL,
+            headers=org_headers,
+            json={
+                "delivery_type": "venta",
+                "warehouse_id": str(wh_jm.id),
+                "third_party_id": str(proveedor.id),
+                "date": DELIVERY_DATE,
+                "remission_number": "REM-1",
+                "lines": [{"material_id": str(plomo.id), "quantity": "10"}],
+            },
+        )
+        assert resp.status_code == 400, resp.text
+        assert "cliente" in resp.json()["detail"].lower()
+
+    def test_venta_a_cliente_pasa(self, client, org_headers, wh_jm, willard, plomo):
+        """Willard es proveedor Y cliente: entrega baterias y compra plomo."""
+        _create(client, org_headers, wh_jm, willard, plomo, "venta", expect=201)
+
+    def test_cliente_desactivado_entre_captura_y_liquidacion_avisa_donde_arreglarlo(
+        self, client, org_headers, db_session, test_organization, wh_jm, plomo, tarifas, acc_intersede,
+    ):
+        """QA F4 (#104): la puerta que quedaba. Capturar a un cliente activo,
+        desactivarlo (se permite con saldo 0), liquidar: sin `is_active` en el
+        check, el 400 salia desde ADENTRO de la venta derivada — cierto, pero sin
+        decir donde arreglarlo (el modo de falla del smoke de #100)."""
+        cliente = create_third_party_with_category(
+            db_session, test_organization.id, "Cliente Que Se Fue", "customer"
+        )
+        db_session.commit()
+        d = _create(client, org_headers, wh_jm, cliente, plomo, "venta")
+        cliente.is_active = False
+        db_session.commit()
+        r = client.post(
+            f"{URL}/{d['id']}/liquidate", headers=org_headers,
+            json={"line_prices": [{"line_id": d["lines"][0]["id"], "unit_price": "3000"}]},
+        )
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert "Cliente Que Se Fue" in detail and "inactivo" in detail and "Terceros" in detail
+
+
+# --------------------------------------------- #105 — afinado de Salidas ---
+#
+# Matriz defecto x test en docs/planes/plan-sac-afinado-salidas.md §6 (compromiso
+# previo). P1 numeracion global · P2 salta anuladas · P3 unico global · P4 CHECK
+# tipo<->serie · P5 descripciones sin serie · P6 lista por numero · P7 endpoint sin
+# series/label · P8 _auto_weight fuera de update · P9 sales.review en catalogo ·
+# P10 llave del lock con hash().
+
+import zlib
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from sqlalchemy.exc import IntegrityError
+
+from app.models.willard_delivery import (
+    DELIVERY_SERIES,
+    DELIVERY_TYPES,
+    SERIES_OF_TYPE,
+    WillardDelivery,
+    series_of,
+)
+from app.services.willard_delivery import WillardDeliveryService
+
+
+def _create_dated(client, headers, wh, willard, plomo, dtype, date, qty="10"):
+    r = client.post(
+        URL,
+        headers=headers,
+        json={
+            "delivery_type": dtype,
+            "warehouse_id": str(wh.id),
+            "third_party_id": str(willard.id),
+            "date": date,
+            "remission_number": "REM-1",
+            "lines": [{"material_id": str(plomo.id), "quantity": qty}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _row(org_id, wh, willard, dtype, series, number):
+    """Fila cruda para probar lo que la BD rechaza (no pasa por el servicio)."""
+    return WillardDelivery(
+        organization_id=org_id,
+        delivery_number=number,
+        series=series,
+        delivery_type=dtype,
+        warehouse_id=wh.id,
+        third_party_id=willard.id,
+        date=datetime(2026, 7, 10, 12, tzinfo=timezone.utc),
+        status="draft",
+    )
+
+
+class TestConsecutivoPorSerie:
+    """Hugo, 28-ago: "para los abonos tenemos un consecutivo y para la venta otro
+    consecutivo [...] que es el que llevo con Willard". Decision de Daniel (9-sep):
+    el sistema numera por serie; la remision sigue siendo el numero de Willard."""
+
+    def test_series_independientes(self, client, org_headers, wh_jm, willard, plomo):
+        """T1 (P1, P3): venta, abono, abono, venta -> Venta #1, Abono #1, Abono #2, Venta #2."""
+        labels = [
+            _create(client, org_headers, wh_jm, willard, plomo, dtype, qty="5")["label"]
+            for dtype in ("venta", "abono_bateria", "abono_material", "venta")
+        ]
+        assert labels == ["Venta #1", "Abono #1", "Abono #2", "Venta #2"]
+
+    def test_anulada_conserva_su_numero(self, client, org_headers, wh_jm, willard, plomo):
+        """T2 (P2): una anulada consumio su numero; el siguiente no lo reutiliza."""
+        d1 = _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="5")
+        r = client.post(
+            f"{URL}/{d1['id']}/annul", headers=org_headers, json={"reason": "captura errada"}
+        )
+        assert r.status_code == 200, r.text
+        d2 = _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="5")
+        assert d1["label"] == "Abono #1"
+        assert d2["label"] == "Abono #2"
+
+    def test_unicidad_por_serie(self, db_session, test_organization, wh_jm, willard):
+        """T3 (P3): dos abonos con el mismo numero -> la BD lo rechaza; un abono y
+        una venta con el mismo numero -> conviven (son series distintas)."""
+        org = test_organization.id
+        db_session.add(_row(org, wh_jm, willard, "abono_material", "abono", 7))
+        db_session.flush()
+        with pytest.raises(IntegrityError):
+            with db_session.begin_nested():
+                db_session.add(_row(org, wh_jm, willard, "abono_bateria", "abono", 7))
+                db_session.flush()
+        db_session.add(_row(org, wh_jm, willard, "venta", "venta", 7))
+        db_session.flush()
+        n = db_session.execute(
+            select(func.count()).select_from(WillardDelivery).where(
+                WillardDelivery.organization_id == org,
+                WillardDelivery.delivery_number == 7,
+            )
+        ).scalar_one()
+        assert n == 2
+        db_session.rollback()
+
+    def test_check_tipo_serie(self, db_session, test_organization, wh_jm, willard):
+        """T4 (P4): una venta con serie 'abono' no puede existir — lo rechaza la BD,
+        no un test que alguien pueda borrar."""
+        with pytest.raises(IntegrityError):
+            with db_session.begin_nested():
+                db_session.add(_row(test_organization.id, wh_jm, willard, "venta", "abono", 1))
+                db_session.flush()
+        db_session.rollback()
+
+    def test_vocabulario_de_series(self):
+        """T5 (P4): cada tipo tiene serie declarada y aparece en el CHECK; un tipo
+        desconocido no cae en ninguna serie por descarte (fail-open de #103)."""
+        ck = next(
+            c for c in WillardDelivery.__table__.constraints
+            if getattr(c, "name", None) == "ck_willard_delivery_series"
+        )
+        check_text = str(ck.sqltext)
+        for dtype in DELIVERY_TYPES:
+            assert series_of(dtype) in DELIVERY_SERIES
+            assert f"'{dtype}'" in check_text
+        assert set(SERIES_OF_TYPE) == set(DELIVERY_TYPES)
+        with pytest.raises(ValueError):
+            series_of("traslado_crisol")
+
+    def test_label_en_descripciones_y_notas(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias, acc_drosses,
+    ):
+        """T6 (P5, P3): lo que Tesoreria y Ventas muestran lleva el prefijo del
+        modulo Y la serie — "Abono #1" a secas en Tesoreria es pago parcial."""
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="30")
+        descs = [m.description for m in _mms(db_session, test_organization.id, "service_income_accrual")]
+        assert descs and all("Salida de Plomo — Abono #1" in d for d in descs), descs
+        v = _flow(client, org_headers, wh_jm, willard, plomo, "venta", qty="30")
+        sale = db_session.get(Sale, v["sale_id"])
+        assert sale.notes == "Salida de Plomo — Venta #1"
+
+    def test_lista_ordena_por_fecha(self, client, org_headers, wh_jm, willard, plomo):
+        """T7 (P6, P3): entre dos series el numero no ordena nada; manda la fecha."""
+        _create_dated(client, org_headers, wh_jm, willard, plomo, "abono_material", "2026-07-01T12:00:00")
+        _create_dated(client, org_headers, wh_jm, willard, plomo, "venta", "2026-07-05T12:00:00")
+        _create_dated(client, org_headers, wh_jm, willard, plomo, "abono_bateria", "2026-07-03T12:00:00")
+        r = client.get(URL, headers=org_headers)
+        assert r.status_code == 200
+        assert [d["label"] for d in r.json()["items"]] == ["Venta #1", "Abono #2", "Abono #1"]
+
+    def test_response_trae_series_y_label(self, client, org_headers, wh_jm, willard, plomo):
+        """T8 (P7, P4*): por la API, no por el ORM — el endpoint arma la respuesta
+        campo por campo (trampa #95/#101)."""
+        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="5")
+        assert (d["series"], d["label"], d["delivery_number"]) == ("abono", "Abono #1", 1)
+        one = client.get(f"{URL}/{d['id']}", headers=org_headers).json()
+        assert (one["series"], one["label"]) == ("abono", "Abono #1")
+        lst = client.get(URL, headers=org_headers).json()["items"]
+        assert lst[0]["label"] == "Abono #1"
+
+    def test_llave_del_lock_es_estable(self):
+        """T11 (P10): la llave del advisory lock NO puede salir de `hash()` (aleatorio
+        por proceso). Se compara contra el crc32 calculado aparte: "dos llamadas
+        iguales" no atraparia `hash()`, que dentro de UN proceso es determinista."""
+        org = uuid4()
+        expected = zlib.crc32(f"{org}:willard_delivery:venta".encode("utf-8"))
+        assert WillardDeliveryService._lock_key(org, "venta") == expected
+        assert WillardDeliveryService._lock_key(org, "abono") != expected
+        assert WillardDeliveryService._lock_key(uuid4(), "venta") != expected
+
+
+class TestBasculaYCatalogo:
+    def test_peso_se_autocompleta_en_kg_al_editar(
+        self, client, org_headers, wh_jm, willard, plomo
+    ):
+        """T9 (P8): la pantalla de edicion ya no muestra la casilla en material kg;
+        el servidor tiene que llenarla tambien por el camino de UPDATE."""
+        d = _create(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="50")
+        r = client.patch(
+            f"{URL}/{d['id']}",
+            headers=org_headers,
+            json={"lines": [{"material_id": str(plomo.id), "quantity": "60"}]},
+        )
+        assert r.status_code == 200, r.text
+        assert Decimal(str(r.json()["lines"][0]["scale_weight_kg"])) == Decimal("60.0000")
+
+    def test_sales_review_fuera_del_catalogo(self, client, org_headers):
+        """T10 (P9): el permiso murio con el paso Revisar; ni el catalogo Python ni
+        la API lo ofrecen."""
+        from app.services.role import PERMISSIONS_CATALOG
+
+        assert all(p[0] != "sales.review" for p in PERMISSIONS_CATALOG)
+        r = client.get("/api/v1/roles/permissions", headers=org_headers)
+        assert r.status_code == 200, r.text
+        codes = {p["code"] for m in r.json() for p in m["permissions"]}
+        assert "sales.review" not in codes
+
+
+# ============================================================================
+# #107 — crisol y plomo puro en las Salidas (T7–T12 del plan de planta)
+# ============================================================================
+
+# La fixture `puro` (PB-PUR, 100 kg en Juan Mina) ya existe arriba (#103).
+
+@pytest.fixture
+def tarifa_crisol(db_session, test_organization, test_user):
+    """$300/kg (Hugo 28-ago, tres veces: "cuando el plomo sale puro, la
+    maquila es de 300 pesos mas")."""
+    return _tariff(db_session, test_organization.id, test_user.id, "maquila_crisol", 300)
+
+
+def _maquila_on(db, org):
+    """Los tests flag-gated de este ciclo ENCIENDEN el flag explicito (O3 de
+    QA): el fixture `_flags` lo deja en False por la prevencion de D11."""
+    org.settings = {**org.settings, "internal_maquila_enabled": True}
+    db.commit()
+
+
+def _seed_stage(client, headers, account_id, kg, stage):
+    r = client.post(
+        "/api/v1/kg-ledger/movements",
+        headers=headers,
+        json={
+            "account_id": str(account_id),
+            "delta_kg": str(kg),
+            "transaction_date": SEED_DATE,
+            "description": "seed",
+            "reason": "seed de prueba",
+            "stage": stage,
+        },
+    )
+    assert r.status_code == 201, r.text
+
+
+def _stage_kg(db, account_id, stage) -> Decimal:
+    return Decimal(str(db.execute(
+        select(func.coalesce(func.sum(KgLedgerMovement.delta_kg), 0)).where(
+            KgLedgerMovement.account_id == account_id,
+            KgLedgerMovement.stage == stage,
+            KgLedgerMovement.status == "confirmed",
+        )
+    ).scalar_one()))
+
+
+def _pnl_today(client, headers, **params):
+    from app.utils.dates import business_today
+
+    today = business_today().isoformat()
+    r = client.get(
+        "/api/v1/reports/profit-and-loss",
+        headers=headers,
+        params={"date_from": today, "date_to": today, **params},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+class TestCrisolYPlomoPuro:
+
+    def test_venta_puro_descarga_crisol_y_causa_300(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, puro, acc_intersede, tarifa_crisol,
+    ):
+        """T7a — vender puro baja la etapa CRISOL y causa $300/kg de planta a
+        la sede que factura (categoria "Crisol Refinación"). El monto viaja
+        en la respuesta HTTP (trampa #95: el endpoint arma campo por campo)."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
+
+        out = _flow(client, org_headers, wh_jm, willard, puro, "venta", qty="20")
+
+        assert Decimal(str(out["crucible_amount"])) == Decimal("6000.00")
+        assert out["billing_warehouse_id"] == str(wh_cv.id)
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
+        assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("0")
+        org = test_organization.id
+        exp = _mms(db_session, org, "internal_maquila_expense")
+        inc = _mms(db_session, org, "internal_maquila_income")
+        assert len(exp) == 1 and len(inc) == 1
+        assert exp[0].amount == Decimal("6000.00") == inc[0].amount
+        assert exp[0].warehouse_id == wh_cv.id and inc[0].warehouse_id == wh_jm.id
+        assert exp[0].transfer_pair_id == inc[0].id
+        from app.models.expense_category import ExpenseCategory
+
+        assert db_session.get(ExpenseCategory, exp[0].expense_category_id).name == "Crisol Refinación"
+        assert out["warnings"] == []
+
+    def test_venta_puro_sin_flag_sin_par(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, puro, acc_intersede, tarifa_crisol,
+    ):
+        """T7b — flag OFF (el default del fixture): el crisol baja igual y no
+        hay pesos. El par OFF es la mitad de la red (#94/#99)."""
+        _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
+
+        out = _flow(client, org_headers, wh_jm, willard, puro, "venta", qty="20")
+
+        assert Decimal(str(out["crucible_amount"])) == 0
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
+        org = test_organization.id
+        assert _mms(db_session, org, "internal_maquila_expense") == []
+        assert _mms(db_session, org, "internal_maquila_income") == []
+
+    def test_venta_crudo_descarga_horno_sin_par(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, acc_intersede, tarifa_crisol,
+    ):
+        """T7c — el contraste: crudo baja la etapa HORNO y no causa nada, aun
+        con flag y tarifa (leccion #94: sin contraste no se distingue
+        'funciona' de 'lo apague')."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 100, "horno")
+
+        out = _flow(client, org_headers, wh_jm, willard, plomo, "venta", qty="50")
+
+        assert Decimal(str(out["crucible_amount"])) == 0
+        assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("50")
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("0")
+        org = test_organization.id
+        assert _mms(db_session, org, "internal_maquila_expense") == []
+        assert _mms(db_session, org, "internal_maquila_income") == []
+
+    def test_venta_mixta_cada_linea_a_su_etapa(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, puro, acc_intersede, tarifa_crisol,
+    ):
+        """T8 — dos lineas (crudo 70, puro 26,1): horno −70, crisol −26,1 y el
+        par SOLO por los 26,1 kg de puro."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 100, "horno")
+        _seed_stage(client, org_headers, acc_intersede.id, 40, "crisol")
+        r = client.post(URL, headers=org_headers, json={
+            "delivery_type": "venta",
+            "warehouse_id": str(wh_jm.id),
+            "third_party_id": str(willard.id),
+            "date": DELIVERY_DATE,
+            "remission_number": "REM-MIX",
+            "lines": [
+                {"material_id": str(plomo.id), "quantity": "70"},
+                {"material_id": str(puro.id), "quantity": "26.1"},
+            ],
+        })
+        assert r.status_code == 201, r.text
+        d = r.json()
+        liq = client.post(f"{URL}/{d['id']}/liquidate", headers=org_headers, json={
+            "line_prices": [{"line_id": ln["id"], "unit_price": "3000"} for ln in d["lines"]],
+        })
+        assert liq.status_code == 200, liq.text
+        out = liq.json()
+
+        assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("30")
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("13.9")
+        assert Decimal(str(out["crucible_amount"])) == Decimal("7830.00")  # 26,1 × 300
+        exp = _mms(db_session, test_organization.id, "internal_maquila_expense")
+        assert len(exp) == 1 and exp[0].amount == Decimal("7830.00")
+
+    def test_abono_bateria_con_puro_descarga_crisol_sin_par(
+        self, client, org_headers, db_session, test_organization, test_user,
+        wh_jm, willard, plomo, puro, acc_intersede, acc_baterias, acc_drosses, tarifa_crisol,
+    ):
+        """T9 — el aviso de #103 D2 sigue (abonar con puro es caro), la etapa
+        es la del puro (crisol) y NO hay par DEL DIFERENCIAL: los $300 se
+        causan solo al VENDER. `abono_material` no toca ninguna etapa.
+
+        🔴 R2 (#109): "sin par" se re-lee. Desde el 18-sep el abono a baterias
+        SI reparte ($566/kg), asi que con la tarifa presente hay UN par y es el
+        de maquila, no el de refinacion: 20 × 566 = 11.320."""
+        _tariff(db_session, test_organization.id, test_user.id, "abono_planta_bateria_por_kg", 566)
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
+        _seed_stage(client, org_headers, acc_intersede.id, 100, "horno")
+
+        out = _flow(client, org_headers, wh_jm, willard, puro, "abono_bateria", qty="20")
+
+        assert any("puro" in w.lower() for w in out["warnings"]), out["warnings"]
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
+        assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("100")
+        assert _kg(db_session, acc_baterias.id) == Decimal("-20")
+        assert Decimal(str(out["crucible_amount"])) == 0
+        assert Decimal(str(out["plant_credit_amount"])) == Decimal("11320.00")
+        exp = _mms(db_session, test_organization.id, "internal_maquila_expense")
+        assert [m.amount for m in exp] == [Decimal("11320.00")]
+        from app.models.expense_category import ExpenseCategory
+        cat = db_session.get(ExpenseCategory, exp[0].expense_category_id)
+        assert cat is None or cat.name != "Crisol Refinacion"
+
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="10")
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
+        assert _stage_kg(db_session, acc_intersede.id, "horno") == Decimal("100")
+        assert _kg(db_session, acc_drosses.id) == Decimal("-10")
+
+    def test_pnl_por_sede_ve_el_diferencial(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, puro, acc_intersede, tarifa_crisol,
+    ):
+        """T10 — el par entra al P&L por sede como el de maquila (#84): ingreso
+        en planta, gasto en la sede que factura; el consolidado lo netea y el
+        neto no se mueve (conciliacion por construccion)."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
+        _flow(client, org_headers, wh_jm, willard, puro, "venta", qty="20")
+
+        jm = _pnl_today(client, org_headers, warehouse_id=str(wh_jm.id))
+        cv = _pnl_today(client, org_headers, warehouse_id=str(wh_cv.id))
+        assert Decimal(str(jm["internal_maquila_income"])) == Decimal("6000.00")
+        assert Decimal(str(jm["internal_maquila_expense"])) == 0
+        assert Decimal(str(cv["internal_maquila_expense"])) == Decimal("6000.00")
+        assert Decimal(str(cv["internal_maquila_income"])) == 0
+
+        base = _pnl_today(client, org_headers)
+        with_pair = _pnl_today(client, org_headers, include_internal_maquila=True)
+        assert Decimal(str(base["internal_maquila_income"])) == 0
+        assert Decimal(str(with_pair["internal_maquila_income"])) == Decimal("6000.00")
+        assert Decimal(str(with_pair["internal_maquila_expense"])) == Decimal("6000.00")
+        assert Decimal(str(with_pair["net_profit"])) == Decimal(str(base["net_profit"]))
+
+    def test_q30_venta_derivada_se_atribuye_a_la_sede_que_factura(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, plomo, acc_intersede,
+    ):
+        """T11a — Q-30 (Hugo 24-ago: "todo lo factura Johana"): la venta que
+        deriva una Salida es ingreso y COGS de CIRCUNVALAR aunque el plomo
+        salga de Juan Mina; cv + jm == consolidado."""
+        _seed_stage(client, org_headers, acc_intersede.id, 100, "horno")
+        _flow(client, org_headers, wh_jm, willard, plomo, "venta", qty="50", price=3000)
+
+        cv = _pnl_today(client, org_headers, warehouse_id=str(wh_cv.id))
+        jm = _pnl_today(client, org_headers, warehouse_id=str(wh_jm.id))
+        total = _pnl_today(client, org_headers)
+        assert Decimal(str(cv["sales_revenue"])) == Decimal("150000.00")
+        assert Decimal(str(cv["cost_of_goods_sold"])) == Decimal("100000.00")  # 50 × 2.000
+        assert Decimal(str(jm["sales_revenue"])) == 0
+        assert Decimal(str(jm["cost_of_goods_sold"])) == 0
+        assert Decimal(str(total["sales_revenue"])) == Decimal("150000.00")
+        assert (
+            Decimal(str(cv["sales_revenue"])) + Decimal(str(jm["sales_revenue"]))
+            == Decimal(str(total["sales_revenue"]))
+        )
+
+    def test_venta_normal_sigue_en_su_bodega(
+        self, client, org_headers, db_session, test_organization,
+        wh_cv, wh_jm, willard, aluminio,
+    ):
+        """T11b — no-regresion de Q-30: una venta NO derivada se queda en la
+        bodega de la venta (el coalesce cae a Sale.warehouse_id)."""
+        from app.utils.dates import business_today_noon
+
+        r = _venta_normal(client, org_headers, willard, wh_jm, aluminio, qty="10", price="5000")
+        assert r.status_code == 201, r.text
+        liq = client.patch(
+            f"{SALES_URL}/{r.json()['id']}/liquidate",
+            headers=org_headers,
+            json={"liquidation_date": business_today_noon().isoformat()},
+        )
+        assert liq.status_code == 200, liq.text
+
+        jm = _pnl_today(client, org_headers, warehouse_id=str(wh_jm.id))
+        cv = _pnl_today(client, org_headers, warehouse_id=str(wh_cv.id))
+        assert Decimal(str(jm["sales_revenue"])) == Decimal("50000.00")
+        assert Decimal(str(jm["cost_of_goods_sold"])) == Decimal("20000.00")  # 10 × 2.000
+        assert Decimal(str(cv["sales_revenue"])) == 0
+
+    def test_anular_venta_puro_devuelve_crisol_y_anula_par(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, puro, acc_intersede, tarifa_crisol,
+    ):
+        """T12 — round-trip: la etapa vuelve a 50, el par queda anulado y el
+        monto de la salida se limpia."""
+        _maquila_on(db_session, test_organization)
+        _seed_stage(client, org_headers, acc_intersede.id, 50, "crisol")
+        out = _flow(client, org_headers, wh_jm, willard, puro, "venta", qty="20")
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("30")
+
+        r = client.post(f"{URL}/{out['id']}/annul", headers=org_headers, json={"reason": "prueba"})
+        assert r.status_code == 200, r.text
+        assert Decimal(str(r.json()["crucible_amount"])) == 0
+        assert r.json()["billing_warehouse_id"] is None
+        assert _stage_kg(db_session, acc_intersede.id, "crisol") == Decimal("50")
+        db_session.expire_all()
+        org = test_organization.id
+        assert _mms(db_session, org, "internal_maquila_expense") == []
+        assert len(_mms(db_session, org, "internal_maquila_expense", status="annulled")) == 1
+        assert len(_mms(db_session, org, "internal_maquila_income", status="annulled")) == 1
+
+
+# ---------------------------------------------------------------------- #
+# #109 — resumen por tipo                                                 #
+# ---------------------------------------------------------------------- #
+class TestResumenPorTipo:
+    """`GET /willard-deliveries/summary` — ver separado lo que dejan las
+    baterias y lo que dejan los materiales. Johana (18-sep) eligio la opcion B
+    (L385-387): "Materiales Willard" es un nombre/cuenta INTERNA de su
+    contabilidad -- ella la llama "cuenta" con sus palabras (L323, L335, L361).
+    En el sistema NO se modelo como cuenta sino como resumen por tipo: decision
+    nuestra, y expectativa creada en L305-307. Q-37 se reabrio el 19-sep
+    (16-sep L577: "no es un ingreso para circunval, sino una cuenta por
+    pagar"); ver el inventario."""
+
+    def _summary(self, client, headers, **extra):
+        from app.utils.dates import business_today
+
+        today = business_today().isoformat()
+        r = client.get(
+            f"{URL}/summary", headers=headers,
+            params={"date_from": today, "date_to": today, **extra},
+        )
+        return r
+
+    def test_summary_por_tipo(
+        self, client, org_headers, db_session, test_organization,
+        wh_jm, willard, plomo, tarifas, acc_intersede, acc_baterias, acc_drosses,
+    ):
+        """T17 — suma por tipo; una anulada y una sin liquidar NO cuentan; y
+        `kept_by_billing_sede` = maquila + flete − reparto (no es una utilidad:
+        no descuenta el costo del plomo, por eso no se llama neto, F4)."""
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="300")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_bateria", qty="100")
+        _flow(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="50")
+        anulada = _flow(client, org_headers, wh_jm, willard, plomo, "abono_material", qty="70")
+        r = client.post(f"{URL}/{anulada['id']}/annul", headers=org_headers, json={"reason": "prueba"})
+        assert r.status_code == 200, r.text
+        _create(client, org_headers, wh_jm, willard, plomo, "abono_bateria", "999")  # draft
+
+        r = self._summary(client, org_headers)
+        assert r.status_code == 200, r.text
+        rows = {row["delivery_type"]: row for row in r.json()["rows"]}
+
+        bat = rows["abono_bateria"]
+        assert bat["documents"] == 2
+        assert Decimal(str(bat["lead_kg"])) == Decimal("400")
+        assert Decimal(str(bat["maquila_amount"])) == Decimal("838800.00")       # 400 × 2.097
+        assert Decimal(str(bat["freight_amount"])) == Decimal("14800.00")        # 400 × 37
+        assert Decimal(str(bat["plant_credit_amount"])) == Decimal("226400.00")  # 400 × 566
+        assert Decimal(str(bat["kept_by_billing_sede"])) == Decimal("627200.00")  # 400 × 1.568
+
+        mat = rows["abono_material"]
+        assert mat["documents"] == 1
+        assert Decimal(str(mat["lead_kg"])) == Decimal("50")
+        assert Decimal(str(mat["plant_credit_amount"])) == Decimal("75000.00")
+        assert Decimal(str(mat["kept_by_billing_sede"])) == Decimal("31700.00")  # 106.700 − 75.000
+        assert "neto" not in " ".join(bat.keys()).lower()
+
+    def test_summary_rbac(self, client, db_session, test_organization):
+        """T17b — `sales.view`: planillador no lo tiene -> 403; viewer -> 200."""
+        from app.core.security import create_access_token
+        from app.models.role import Role
+        from app.models.user import OrganizationMember, User
+
+        def _hdr(role_name, email):
+            u = User(email=email, hashed_password="x", full_name=email, is_active=True)
+            db_session.add(u)
+            db_session.flush()
+            role = db_session.query(Role).filter(
+                Role.organization_id == test_organization.id,
+                Role.name == role_name, Role.is_system_role == True,  # noqa: E712
+            ).first()
+            assert role is not None
+            db_session.add(OrganizationMember(
+                user_id=u.id, organization_id=test_organization.id, role_id=role.id,
+            ))
+            db_session.commit()
+            token = create_access_token(data={"sub": str(u.id)})
+            return {"Authorization": f"Bearer {token}",
+                    "X-Organization-ID": str(test_organization.id)}
+
+        assert self._summary(client, _hdr("planillador", "plan-sum@test.com")).status_code == 403
+        assert self._summary(client, _hdr("viewer", "view-sum@test.com")).status_code == 200

@@ -176,6 +176,24 @@ export interface CashFlowResponse {
 
 // --- Balance Sheet ---
 
+/**
+ * CC-014: deuda en plomo con Willard valorada a precio de mercado (Q-B).
+ *
+ * `value` es NEGATIVO cuando SAC debe plomo: resta del inventario. Llega en
+ * null, junto con `price` y `price_date`, cuando hay kilos pero ningun precio
+ * vigente a la fecha — la pantalla avisa "sin valorar". Un cero ahi diria que
+ * la deuda no vale nada.
+ *
+ * ⚠️ `price_date` es una fecha de negocio (mediodia UTC): formatDate, nunca
+ * formatDateTime (#87).
+ */
+export interface LeadDebtValuation {
+  kg: number;
+  price: number | null;
+  price_date: string | null;
+  value: number | null;
+}
+
 export interface BalanceSheetAssets {
   cash_and_bank: number;
   accounts_receivable: number;
@@ -184,8 +202,12 @@ export interface BalanceSheetAssets {
   investor_receivable: number;
   loans_receivable: number;
   prepaid_expenses: number;
+  /** CC-013: anticipos de impuesto (retenciones que nos practicaron al facturar). */
+  tax_advances: number;
   provision_funds: number;
   fixed_assets: number;
+  // null si y solo si la organizacion no tiene `kg_ledger_enabled`.
+  lead_debt_willard: LeadDebtValuation | null;
   total: number;
 }
 

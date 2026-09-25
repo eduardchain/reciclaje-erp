@@ -1226,7 +1226,8 @@ class TestInventoryStressWalk:
         resp = client.put(
             f"/api/v1/material-kg-profiles/{ml_material.id}",
             headers=org_headers,
-            json={"compra_regular": True, "willard_world": "drosses"},
+            json={"compra_regular": True, "willard_world": "drosses",
+                  "lead_product": "none"},  # #103: obligatorio
         )
         assert resp.status_code == 200, resp.text
         resp = client.post(

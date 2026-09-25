@@ -23,6 +23,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number
 from app.models.sale import Sale, SaleLine, SaleCommission
 from app.models.inventory_movement import InventoryMovement
 from app.models.material import Material
@@ -65,10 +66,18 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         db: Session,
         obj_in: SaleCreate,
         organization_id: UUID,
-        user_id: Optional[UUID] = None
+        user_id: Optional[UUID] = None,
+        *,
+        from_willard_delivery: bool = False,
     ) -> Sale:
         """
         Create sale with lines, inventory movements, commissions, and balance updates.
+
+        `from_willard_delivery`: la venta que DERIVA una Salida de Plomo (W1 D2)
+        entra por aca con el flag en True para saltarse `_guard_lead_products`
+        — es la unica venta legitima de plomo entregable, porque es la que
+        descarga la deuda en kg. Ningun caller HTTP puede ponerlo (no viaja en
+        el schema).
         
         Workflow:
         1. Generate sequential sale_number per organization
@@ -110,6 +119,14 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         
         # Check if this is a double-entry sale (skip inventory movements)
         is_double_entry = hasattr(obj_in, 'double_entry_id') and obj_in.double_entry_id is not None
+
+        # SAC: el plomo entregable NO se vende por aca — sale por Salidas de
+        # Plomo, que es lo que descarga la deuda en kg. DPs excluidas (no tocan
+        # inventario); la venta derivada de W1 pasa con `from_willard_delivery`.
+        if not is_double_entry and not from_willard_delivery:
+            self._guard_lead_products(
+                db, organization_id, [l.material_id for l in obj_in.lines]
+            )
         
         # Step 2: Validate customer
         customer = db.get(ThirdParty, obj_in.customer_id)
@@ -299,6 +316,7 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         immediate_collection: bool = False,
         collection_account_id: Optional[UUID] = None,
         liquidation_date: Optional[datetime] = None,
+        taxes_data: Optional[List] = None,
     ) -> Sale:
         """
         Liquidar venta registrada: confirmar precios, actualizar saldo cliente, pagar comisiones.
@@ -439,6 +457,28 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         customer.current_balance += sale.total_amount
         print(f"  💰 Customer '{customer.name}' balance: ${customer.current_balance - sale.total_amount} -> ${customer.current_balance}")
 
+        # Step 6b: IVA y retenciones (CC-013, data-gated D2 — ausente = byte a byte).
+        # ADITIVO encima del credito estandar: el cliente queda debiendo el total
+        # a pagar de la factura y las entidades de impuestos el contrapeso exacto.
+        collection_amount = sale.total_amount
+        if taxes_data:
+            # D10: la Salida de Plomo deriva esta venta y es ELLA la que conoce el
+            # tipo y el concepto — dos documentos para UNA factura.
+            if sale.willard_delivery_id is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        "Esta venta la genero una Salida de Plomo. "
+                        "Registre el IVA y las retenciones al liquidar la Salida."
+                    ),
+                )
+            from app.services.document_tax import apply_taxes
+
+            collection_amount += apply_taxes(
+                db, organization_id, taxes_data, customer,
+                subtotal=sale.total_amount, sale_id=sale.id,
+            )
+
         # Step 7: Pay commissions (increase recipient balances — les debemos la comision)
         self._pay_commissions(db, sale)
 
@@ -457,11 +497,13 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                     detail="Cuenta de cobro no encontrada",
                 )
 
+            # Con impuestos se cobra el NETO, que es el "total a pagar" impreso en
+            # la factura — simetrico con el pago inmediato de compras (#75).
             mm_service._create_movement(
                 db=db,
                 organization_id=organization_id,
                 movement_type="collection_from_client",
-                amount=sale.total_amount,
+                amount=collection_amount,
                 account_id=collection_account_id,
                 date=sale.liquidated_at,
                 description=f"Cobro venta #{sale.sale_number}",
@@ -470,9 +512,9 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
                 user_id=user_id,
             )
 
-            account.current_balance += sale.total_amount
-            customer.current_balance -= sale.total_amount
-            print(f"  💳 Cobro inmediato: ${sale.total_amount} a {account.name}")
+            account.current_balance += collection_amount
+            customer.current_balance -= collection_amount
+            print(f"  💳 Cobro inmediato: ${collection_amount} a {account.name}")
 
         db.flush()
 
@@ -607,6 +649,14 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             customer = db.get(ThirdParty, sale.customer_id)
             customer.current_balance -= sale.total_amount
             print(f"👤 Customer '{customer.name}' balance reverted: ${customer.current_balance + sale.total_amount} → ${customer.current_balance}")
+
+            # Revertir IVA y retenciones (CC-013 D11 — uno de los dos unicos
+            # puntos que revierten; el otro es la anulacion de Salida de Plomo).
+            # Estampa reverted_at sin borrado fisico: el estado de cuenta
+            # necesita la fila para emitir su par de eventos (#55).
+            from app.services.document_tax import revert_taxes
+
+            revert_taxes(db, customer, sale_id=sale_id)
 
             # Anular movimientos commission_accrual
             comm_movements = db.scalars(
@@ -759,6 +809,12 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
 
         # Step 3: Si hay lineas nuevas, hacer revert+reapply
         if obj_in.lines is not None:
+            # SAC: mismo guard que create — una venta valida se editaria a plomo
+            # entregable por la puerta de atras. La derivada de W1 nace ya
+            # liquidada, asi que nunca llega aca (update exige `registered`).
+            self._guard_lead_products(
+                db, organization_id, [l.material_id for l in obj_in.lines]
+            )
             # 3a. Revertir efectos de lineas actuales (devolver stock)
             for line in sale.lines:
                 material = line.material
@@ -1162,35 +1218,59 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
     # Helper Methods
     # ========================================================================
     
+    def _guard_lead_products(
+        self, db: Session, organization_id: UUID, material_ids: list
+    ) -> None:
+        """SAC: un material marcado como plomo entregable (`lead_product` !=
+        'none', #103) NO se vende por el modulo de Ventas — sale por Salidas de
+        Plomo, que ademas de mover inventario y plata DESCARGA la deuda en kg
+        (intersede para el crudo; crisol + diferencial para el puro). Vendido
+        por aca, el inventario sale, la plata entra y la deuda queda colgada:
+        sin error y sin aviso. Espejo del guard Willard-puro de compras (#80
+        B3) y de #103 en la otra direccion (Salidas rechaza lo NO marcado):
+        con las dos puertas, la regla es imposible de romper por accidente.
+
+        Hugo (28-ago, 00:18:54): "¿como se lo devuelvo yo? En ventas regulares
+        y en abono a baterias... si disminuye el saldo del plomo a devolver".
+
+        Solo aplica con kg_ledger_enabled: sin flag no hay perfiles -> inerte,
+        las otras 6 orgs byte-identicas. Costo sin flag: `get_org_setting` es
+        un `db.get` por PK — gratis si la Organization ya esta en la sesion,
+        una query trivial si no (un POST /sales pelado, QA N3). Lo que decide es la MARCA y nada mas — ni la
+        formula ni la categoria clasifican (leccion #103). Cascara y retal
+        quedan en `none` y se venden normal: son insumos, no producto.
+        """
+        from app.utils.org_settings import get_org_setting
+        if not get_org_setting(db, organization_id, "kg_ledger_enabled"):
+            return
+        from app.models.material_kg_profile import MaterialKgProfile
+        codes = db.execute(
+            select(Material.code)
+            .join(MaterialKgProfile, MaterialKgProfile.material_id == Material.id)
+            .where(
+                MaterialKgProfile.organization_id == organization_id,
+                MaterialKgProfile.material_id.in_(material_ids),
+                MaterialKgProfile.lead_product != "none",
+            )
+        ).scalars().all()
+        if codes:
+            listed = ", ".join(sorted(set(codes)))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"El material {listed} es plomo entregable a Willard y no se "
+                    "vende por aca — registrelo como Salida de Plomo, que es la "
+                    "que descarga la deuda en kg"
+                ),
+            )
+
     def _generate_sale_number(self, db: Session, organization_id: UUID) -> int:
+        """Siguiente `sale_number` de la org (lock estable + MAX+1 en el helper unico).
+
+        Doble partida y las salidas de plomo piden el MISMO nombre de secuencia.
         """
-        Generate next sequential sale number for organization.
-        
-        Uses PostgreSQL advisory lock to prevent race conditions.
-        Lock is automatically released at transaction end.
-        
-        Args:
-            db: Database session
-            organization_id: Organization UUID
-            
-        Returns:
-            Next sale number (1, 2, 3, ...)
-        """
-        # Acquire advisory lock for this organization's sales
-        lock_id = hash(f"{organization_id}-sales") % (2**31)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-        
-        # Get max sale number
-        stmt = select(func.max(Sale.sale_number)).where(
-            Sale.organization_id == organization_id
-        )
-        max_number = db.scalar(stmt)
-        
-        next_number = (max_number or 0) + 1
-        print(f"🔢 Generated sale number: {next_number}")
-        
-        return next_number
-    
+        return next_number(db, organization_id, "sale_number")
+
     def _process_commissions(
         self,
         db: Session,

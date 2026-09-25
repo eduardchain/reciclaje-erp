@@ -105,6 +105,33 @@ class CRUDThirdPartyCategory(
         db_obj = self.get_or_404(db=db, id=id, organization_id=organization_id)
         update_data = obj_in.model_dump(exclude_unset=True)
 
+        # CC-013 D4d (A3): una categoria de sistema no se desactiva ni se
+        # reparenta. Reparentar no rompe la clasificacion — que va por codigo —
+        # pero CAMBIA el display_name de la categoria en el balance y en el
+        # estado de cuenta, y una categoria de sistema es raiz por definicion.
+        #
+        # 🟢 RENOMBRAR SI SE PERMITE, y es exactamente la asimetria de #58: el
+        # reconocimiento va por `system_code` justamente para que el nombre sea
+        # libre. Si algun dia esto bloqueara el nombre, el codigo habria dejado
+        # de tener razon de ser.
+        if db_obj.system_code:
+            if update_data.get("is_active") is False:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"'{db_obj.name}' es una categoria del sistema y no se "
+                        "puede desactivar. Puede renombrarla."
+                    ),
+                )
+            if "parent_id" in update_data and update_data["parent_id"] is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"'{db_obj.name}' es una categoria del sistema y es raiz: "
+                        "no puede colgar de otra."
+                    ),
+                )
+
         if "parent_id" in update_data:
             new_parent_id = update_data["parent_id"]
             if new_parent_id is not None:
@@ -145,6 +172,18 @@ class CRUDThirdPartyCategory(
     ) -> ThirdPartyCategory:
         """Soft delete con validacion de hijos y asignaciones."""
         db_obj = self.get_or_404(db=db, id=id, organization_id=organization_id)
+
+        # CC-013 D4d: el guard de "terceros asignados" de mas abajo NO alcanza
+        # — no cubre la ventana entre que la categoria nace y la primera venta
+        # con impuestos, que es justo cuando esta vacia y se puede borrar.
+        if db_obj.system_code:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"'{db_obj.name}' es una categoria del sistema y no se puede "
+                    "eliminar. La administra el modulo que la usa."
+                ),
+            )
 
         # No eliminar si tiene subcategorias activas
         has_children = db.execute(

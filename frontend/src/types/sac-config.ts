@@ -7,7 +7,12 @@ export type TariffCode =
   | "maquila_crisol"
   | "flete_willard_bog_baq"
   | "flete_willard_planta_planta"
-  | "comision_green_loop"; // SAC E2 (D7): $100/kg material recolectado en ruta
+  | "comision_green_loop" // SAC E2 (D7): $100/kg material recolectado en ruta
+  // #109 — reparto a planta al liquidar un abono. Existian en el backend desde
+  // #100 (materiales) y nunca se agregaron aqui: la pagina de Tarifas arma su
+  // selector desde este mapa, asi que NO se podian versionar desde la pantalla.
+  | "abono_planta_por_kg"
+  | "abono_planta_bateria_por_kg";
 
 export type TariffUnit = "per_kg_lead" | "per_kg_battery" | "per_unit" | "per_kg_material";
 
@@ -18,6 +23,8 @@ export const TARIFF_CODE_LABELS: Record<TariffCode, string> = {
   flete_willard_bog_baq: "Flete Willard BOG→BAQ",
   flete_willard_planta_planta: "Flete Willard Planta→Planta",
   comision_green_loop: "Comisión Green Loop",
+  abono_planta_por_kg: "Reparto a planta — abono a materiales",
+  abono_planta_bateria_por_kg: "Reparto a planta — abono a baterías",
 };
 
 export const TARIFF_UNIT_LABELS: Record<TariffUnit, string> = {
@@ -36,6 +43,8 @@ export const CANONICAL_UNIT_BY_CODE: Record<TariffCode, TariffUnit> = {
   flete_willard_bog_baq: "per_kg_battery",
   flete_willard_planta_planta: "per_kg_lead",
   comision_green_loop: "per_kg_material",
+  abono_planta_por_kg: "per_kg_lead",
+  abono_planta_bateria_por_kg: "per_kg_lead",
 };
 
 export interface ServiceTariffResponse {
@@ -60,6 +69,42 @@ export interface ServiceTariffCreate {
   /** #93 D11: solo comision_green_loop (422 en otros códigos) */
   kg_per_unit?: number | null;
   notes?: string | null;
+}
+
+// --- CC-014: precio de mercado del plomo ---
+// Append-only como las tarifas, con UNA diferencia: la vigencia se decide por
+// `effective_date` (fecha de NEGOCIO), no por `created_at`. El balance de fin
+// de mes siempre se calcula despues, asi que Johana carga el precio de
+// septiembre en octubre y el corte del 30 lo encuentra.
+// ⚠️ `effective_date` es un BusinessDate (mediodia UTC): se pinta con
+// formatDate, JAMAS con formatDateTime — imprimiria "07:00 a. m." (#87).
+export interface LeadMarketPriceResponse {
+  id: string;
+  organization_id: string;
+  price_per_kg: number;
+  effective_date: string;
+  notes: string | null;
+  created_by: string;
+  created_by_name: string | null;
+  created_at: string;
+  // Anulacion: la fila sigue en el historico, tachada. ⚠️ El vigente NO es
+  // `items[0]` — el historico incluye anulados. Se pregunta a /current y se
+  // compara por id.
+  annulled_at: string | null;
+  annulled_by: string | null;
+  annulled_by_name: string | null;
+  annulled_reason: string | null;
+}
+
+export interface LeadMarketPriceCreate {
+  price_per_kg: number;
+  effective_date: string;
+  notes?: string | null;
+}
+
+export interface LeadMarketPriceListResponse {
+  items: LeadMarketPriceResponse[];
+  total: number;
 }
 
 export interface ServiceTariffListResponse {
@@ -116,6 +161,12 @@ export interface MaterialConversionFormulaListResponse {
 
 export type WillardWorld = "none" | "postconsumo" | "drosses";
 
+/** Plomo ENTREGABLE a Willard (#103). Reemplaza la heuristica "sin formula = es
+ *  plomo": ni la formula ni la categoria clasifican — el aluminio y el plastico
+ *  tampoco tienen formula, y la categoria "Plomo" de SAC contiene cajas
+ *  plasticas. Crudo se entrega en las 3 modalidades; puro normalmente se vende. */
+export type LeadProduct = "none" | "crudo" | "puro";
+
 export interface MaterialKgProfileResponse {
   id: string;
   organization_id: string;
@@ -125,12 +176,18 @@ export interface MaterialKgProfileResponse {
   material_unit: string | null;
   compra_regular: boolean;
   willard_world: WillardWorld;
+  lead_product: LeadProduct;
   created_at: string;
 }
 
 export interface MaterialKgProfileUpsert {
   compra_regular: boolean;
   willard_world: WillardWorld;
+  /** Obligatorio: el backend responde 422 si falta. No es un descuido — un
+   *  caller que lo omita borraria la marca de plomo en silencio (el PUT
+   *  reemplaza el perfil entero), y es la misma pantalla a la que el guard
+   *  manda al usuario a marcarla. */
+  lead_product: LeadProduct;
 }
 
 export interface MaterialKgProfileListResponse {

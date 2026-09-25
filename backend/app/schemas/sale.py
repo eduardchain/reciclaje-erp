@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, model_validator
 
+from app.schemas.document_tax import DocumentTaxCreate, DocumentTaxResponse
 from app.utils.dates import BusinessDate
 
 
@@ -220,6 +221,12 @@ class SaleResponse(SaleBase):
     total_quantity_difference: Optional[float] = Field(None, description="Suma de diferencias de cantidad")
     total_amount_difference: Optional[float] = Field(None, description="Impacto total en monto por diferencias")
 
+    # IVA y retenciones de la factura (CC-013). SOLO en el detalle, por costo:
+    # el listado devuelve [] — mismo criterio que `discrepancy_adjustments` (#93).
+    taxes: List[DocumentTaxResponse] = Field(
+        default_factory=list, description="IVA y retenciones registrados (solo detalle)"
+    )
+
     # Cobro inmediato enlazado vivo (solo en detalle) — para el diálogo de cancelación (decisión #63)
     linked_payment_total: Optional[float] = Field(None, description="Suma de cobros inmediatos enlazados confirmados (collection_from_client con sale_id). null/0 = ninguno")
 
@@ -248,6 +255,13 @@ class SaleLiquidateRequest(BaseModel):
     immediate_collection: bool = Field(False, description="Crear cobro inmediato al liquidar")
     collection_account_id: Optional[UUID] = Field(None, description="Cuenta para cobro inmediato")
     liquidation_date: Optional[BusinessDate] = Field(None, description="Fecha de liquidacion (default: fecha del documento)")
+    taxes: Optional[List[DocumentTaxCreate]] = Field(
+        None,
+        description=(
+            "IVA y retenciones de la factura (CC-013, solo SAC). Ausente = camino "
+            "actual byte a byte: las otras organizaciones nunca lo mandan"
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_immediate_collection(self):

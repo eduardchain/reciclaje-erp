@@ -16,7 +16,7 @@ import enum
 from uuid import UUID, uuid4
 from typing import Optional
 
-from sqlalchemy import String, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Boolean, ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, OrganizationMixin, GUID
@@ -74,6 +74,33 @@ class ThirdPartyCategory(Base, TimestampMixin, OrganizationMixin):
 
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False,
+    )
+
+    system_code: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        nullable=True,
+        comment=(
+            "Codigo estable de categoria de sistema. NULL en todas las categorias "
+            "normales, que son todas las de las seis organizaciones que no son SAC "
+            "(CC-013 D4b). Se clasifica por CODIGO y nunca por nombre, porque un "
+            "nombre es renombrable — patron #58; el repo ya tiene un caso que "
+            "clasifica por texto ('obligaci' dentro del nombre) que no conviene imitar."
+        ),
+    )
+
+    __table_args__ = (
+        # A1 de QA: la unicidad NO se documenta, se hace imposible. #58 dejo
+        # escrito que dos filas con el mismo codigo revientan con
+        # MultipleResultsFound y ahi quedo, como advertencia. Parcial sobre
+        # NOT NULL: en las seis organizaciones que no son SAC todas las filas
+        # tienen system_code NULL, asi que el indice no las toca.
+        Index(
+            "uq_third_party_categories_system_code",
+            "organization_id",
+            "system_code",
+            unique=True,
+            postgresql_where=text("system_code IS NOT NULL"),
+        ),
     )
 
     parent: Mapped[Optional["ThirdPartyCategory"]] = relationship(

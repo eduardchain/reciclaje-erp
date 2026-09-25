@@ -2,9 +2,9 @@
 
 Router completo gated por `kg_ledger_enabled` (D7): 403 incluso para admins.
 Permisos: reusa los de ventas (la Salida ES la captura de la entrega), mas
-`sales.review` propio para el paso que certifica pesos.
+El paso de revision se retiro (Hugo, demo 28-ago): registrado -> liquidado.
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -17,11 +17,13 @@ from app.api.deps import get_db, require_org_flag, require_permission
 from app.models.material import Material
 from app.models.sale import Sale
 from app.models.user import User
-from app.models.willard_delivery import WillardDelivery
+from app.models.willard_delivery import WillardDelivery, WillardDeliveryLine
 from app.schemas.willard_delivery import (
     WillardDeliveryAnnul,
     WillardDeliveryCreate,
     WillardDeliveryLineResponse,
+    WillardDeliverySummaryResponse,
+    WillardDeliverySummaryRow,
     WillardDeliveryListResponse,
     WillardDeliveryLiquidate,
     WillardDeliveryResponse,
@@ -30,6 +32,29 @@ from app.schemas.willard_delivery import (
 from app.services.willard_delivery import willard_delivery
 
 router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])
+
+
+def _tax_rows(db: Session, delivery_id) -> list[dict]:
+    """IVA y retenciones de la Salida, con el nombre de cada entidad (CC-013)."""
+    from app.models.document_tax import DocumentTax
+    from app.models.third_party import ThirdParty
+
+    rows = db.execute(
+        select(DocumentTax, ThirdParty)
+        .join(ThirdParty, DocumentTax.third_party_id == ThirdParty.id)
+        .where(DocumentTax.willard_delivery_id == delivery_id)
+        .order_by(DocumentTax.created_at)
+    ).all()
+    return [
+        {
+            "id": tax.id, "third_party_id": tax.third_party_id,
+            "third_party_name": tp.name, "tax_type": tax.tax_type,
+            "municipality": tax.municipality, "concept": tax.concept,
+            "rate": tax.rate, "base_amount": tax.base_amount,
+            "amount": tax.amount, "reverted_at": tax.reverted_at,
+        }
+        for tax, tp in rows
+    ]
 
 
 def _user_names(db: Session, delivery: WillardDelivery) -> dict:
@@ -89,6 +114,8 @@ def _enrich(db: Session, delivery: WillardDelivery) -> WillardDeliveryResponse:
     return WillardDeliveryResponse(
         id=delivery.id,
         delivery_number=delivery.delivery_number,
+        series=delivery.series,
+        label=delivery.label,
         delivery_type=delivery.delivery_type,
         warehouse_id=delivery.warehouse_id,
         warehouse_name=delivery.warehouse.name if delivery.warehouse else None,
@@ -117,7 +144,10 @@ def _enrich(db: Session, delivery: WillardDelivery) -> WillardDeliveryResponse:
         maquila_amount=delivery.maquila_amount,
         freight_amount=delivery.freight_amount,
         plant_credit_amount=delivery.plant_credit_amount,
+        crucible_amount=delivery.crucible_amount,
+        billing_warehouse_id=delivery.billing_warehouse_id,
         total_kg_lead=total_kg,
+        taxes=_tax_rows(db, delivery.id),
         lines=lines,
     )
 
@@ -155,7 +185,9 @@ def list_deliveries(
         select(WillardDelivery)
         .where(*filters)
         .options(selectinload(WillardDelivery.lines))
-        .order_by(WillardDelivery.delivery_number.desc())
+        # #105 D5: dos series distintas — ordenar por numero entre ellas no
+        # significa nada. Fecha de negocio y despues instante de creacion.
+        .order_by(WillardDelivery.date.desc(), WillardDelivery.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).scalars().all()
@@ -166,6 +198,78 @@ def list_deliveries(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/summary", response_model=WillardDeliverySummaryResponse)
+def deliveries_summary(
+    db: Session = Depends(get_db),
+    context=Depends(require_permission("sales.view")),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+):
+    """#109 D6 — totales por TIPO de salida, para ver aparte lo que dejan los
+    materiales y lo que dejan las baterias. Es decision NUESTRA sobre lo que
+    dijo Johana el 18-sep (L323: materiales es "un negocio aparte" que se
+    controla para saber que utilidad deja); ella no pidio un reporte. Solo
+    LIQUIDADAS y por fecha de
+    liquidacion (la fecha en que el efecto financiero existe, #42); una anulada
+    o un borrador no facturaron nada. Suma columnas que el documento ya
+    persiste: no toca ningun reporte compartido. Ruta estatica declarada ANTES
+    de `/{delivery_id}`."""
+    org_id = context["organization_id"]
+    filters = [
+        WillardDelivery.organization_id == org_id,
+        WillardDelivery.status == "liquidated",
+    ]
+    # `liquidated_at` es fecha de NEGOCIO (mediodia UTC, #42/#87): el rango se
+    # compara por DIA. Con un datetime, "hasta hoy" seria hoy 00:00 y dejaria
+    # afuera justo lo liquidado hoy.
+    if date_from:
+        filters.append(func.date(WillardDelivery.liquidated_at) >= date_from)
+    if date_to:
+        filters.append(func.date(WillardDelivery.liquidated_at) <= date_to)
+
+    money = db.execute(
+        select(
+            WillardDelivery.delivery_type,
+            func.count(WillardDelivery.id),
+            func.coalesce(func.sum(WillardDelivery.maquila_amount), 0),
+            func.coalesce(func.sum(WillardDelivery.freight_amount), 0),
+            func.coalesce(func.sum(WillardDelivery.plant_credit_amount), 0),
+            func.coalesce(func.sum(WillardDelivery.crucible_amount), 0),
+        )
+        .where(*filters)
+        .group_by(WillardDelivery.delivery_type)
+    ).all()
+    # Los kg van en query aparte: un join a las lineas multiplicaria los montos
+    # de la cabecera por el numero de lineas (trampa 1:N de #89/#93).
+    kg = dict(
+        db.execute(
+            select(
+                WillardDelivery.delivery_type,
+                func.coalesce(func.sum(WillardDeliveryLine.kg_lead_equivalent), 0),
+            )
+            .join(WillardDeliveryLine, WillardDeliveryLine.willard_delivery_id == WillardDelivery.id)
+            .where(*filters)
+            .group_by(WillardDelivery.delivery_type)
+        ).all()
+    )
+    order = {"venta": 0, "abono_bateria": 1, "abono_material": 2}
+    rows = [
+        WillardDeliverySummaryRow(
+            delivery_type=dtype,
+            documents=count,
+            lead_kg=Decimal(str(kg.get(dtype, 0))),
+            maquila_amount=maquila,
+            freight_amount=freight,
+            plant_credit_amount=credit,
+            crucible_amount=crucible,
+            kept_by_billing_sede=maquila + freight - credit,
+        )
+        for dtype, count, maquila, freight, credit, crucible in money
+    ]
+    rows.sort(key=lambda r: order.get(r.delivery_type, 99))
+    return WillardDeliverySummaryResponse(date_from=date_from, date_to=date_to, rows=rows)
 
 
 @router.get("/{delivery_id}", response_model=WillardDeliveryResponse)
@@ -184,10 +288,14 @@ def create_delivery(
     db: Session = Depends(get_db),
     context=Depends(require_permission("sales.create")),
 ):
-    delivery = willard_delivery.create(
+    delivery, warnings = willard_delivery.create(
         db, data, context["organization_id"], user_id=context["user"].id
     )
-    return _enrich(db, delivery)
+    response = _enrich(db, delivery)
+    # El servicio los calcula; si el endpoint no los asigna, el usuario no ve
+    # ninguno — y se ve identico a "no hubo advertencias" (defecto D4d de #100).
+    response.warnings = warnings or []
+    return response
 
 
 @router.patch("/{delivery_id}", response_model=WillardDeliveryResponse)
@@ -197,22 +305,14 @@ def update_delivery(
     db: Session = Depends(get_db),
     context=Depends(require_permission("sales.edit")),
 ):
-    delivery = willard_delivery.update(
+    delivery, warnings = willard_delivery.update(
         db, delivery_id, data, context["organization_id"], user_id=context["user"].id
     )
-    return _enrich(db, delivery)
-
-
-@router.post("/{delivery_id}/review", response_model=WillardDeliveryResponse)
-def review_delivery(
-    delivery_id: UUID,
-    db: Session = Depends(get_db),
-    context=Depends(require_permission("sales.review")),
-):
-    delivery = willard_delivery.review(
-        db, delivery_id, context["organization_id"], user_id=context["user"].id
-    )
-    return _enrich(db, delivery)
+    response = _enrich(db, delivery)
+    # El servicio los calcula; si el endpoint no los asigna, el usuario no ve
+    # ninguno — y se ve identico a "no hubo advertencias" (defecto D4d de #100).
+    response.warnings = warnings or []
+    return response
 
 
 @router.post("/{delivery_id}/liquidate", response_model=WillardDeliveryResponse)
@@ -226,8 +326,7 @@ def liquidate_delivery(
         db, delivery_id, data, context["organization_id"], user_id=context["user"].id
     )
     response = _enrich(db, delivery)
-    if warnings:
-        response.notes = (response.notes or "")
+    response.warnings = warnings or []
     return response
 
 

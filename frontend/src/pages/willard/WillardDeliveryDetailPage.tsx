@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ClipboardCheck, Ban, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Ban, CheckCircle2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,10 +14,16 @@ import { SaleLink, ThirdPartyLink } from "@/components/shared/EntityLink";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   useAnnulWillardDelivery, useLiquidateWillardDelivery,
-  useReviewWillardDelivery, useWillardDelivery,
+  useWillardDelivery,
 } from "@/hooks/useWillardDeliveries";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
 import { num } from "@/types/willard-delivery";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { useRetentionRows } from "@/hooks/useMasterData";
+import {
+  DocumentTaxesCard, buildTaxPayload, taxRowsValid,
+} from "@/components/shared/DocumentTaxesCard";
+import type { TaxFormRow } from "@/components/shared/DocumentTaxesCard";
 import { DeliveryStatusBadge, DeliveryTypeBadge } from "./WillardDeliveriesPage";
 
 export default function WillardDeliveryDetailPage() {
@@ -26,21 +32,50 @@ export default function WillardDeliveryDetailPage() {
   const { hasPermission } = usePermissions();
 
   const { data: delivery, isLoading } = useWillardDelivery(id);
-  const reviewMutation = useReviewWillardDelivery();
   const liquidateMutation = useLiquidateWillardDelivery();
   const annulMutation = useAnnulWillardDelivery();
 
   const [prices, setPrices] = useState<Record<string, number>>({});
+  // #105 item 5: por linea se digita el unitario O el total (el backend acepta
+  // uno de los dos, XOR — D8 de #95). Johana a veces tiene el total y no el
+  // unitario, igual que en la Entrada.
+  const [totals, setTotals] = useState<Record<string, number>>({});
+  const [priceMode, setPriceMode] = useState<Record<string, "unit" | "total">>({});
   const [annulOpen, setAnnulOpen] = useState(false);
   const [annulReason, setAnnulReason] = useState("");
+
+  // CC-013: IVA y retenciones de la factura. Todo el modulo ya vive detras de
+  // `kg_ledger_enabled`, asi que acá no hay pantalla compartida que proteger.
+  const { getSetting } = useOrgSettings();
+  const ivaRatePct = Number(getSetting("iva_rate_pct") ?? 19);
+  const { data: retentionRows } = useRetentionRows(true);
+  const taxConfigs = useMemo(() => retentionRows ?? [], [retentionRows]);
+  const [taxRows, setTaxRows] = useState<TaxFormRow[]>([]);
 
   // ⚠️ Todos los hooks ANTES del primer return condicional (#93 bloqueante a:
   // un useMemo despues de un `return` dejo la pantalla en blanco).
   const isVenta = delivery?.delivery_type === "venta";
   const missingPrice = useMemo(() => {
     if (!delivery || !isVenta) return false;
-    return delivery.lines.some((l) => !(prices[l.id] > 0));
-  }, [delivery, isVenta, prices]);
+    return delivery.lines.some((l) =>
+      (priceMode[l.id] ?? "unit") === "total" ? !(totals[l.id] > 0) : !(prices[l.id] > 0),
+    );
+  }, [delivery, isVenta, prices, totals, priceMode]);
+
+  // Base de la factura. En una VENTA es el plomo y la pantalla la conoce; en un
+  // ABONO es la maquila mas el flete, que salen de las tarifas vigentes AL
+  // liquidar — por eso acá vale 0 y la sugerencia es 0. El monto de la base lo
+  // deriva el servidor (D5); lo que se pierde es solo el precalculo.
+  const taxLineAmounts = useMemo(() => {
+    if (!delivery || !isVenta) return [];
+    return delivery.lines.map((l) => {
+      const mode = priceMode[l.id] ?? "unit";
+      return mode === "total"
+        ? (totals[l.id] ?? 0)
+        : (prices[l.id] ?? 0) * num(l.quantity);
+    });
+  }, [delivery, isVenta, prices, totals, priceMode]);
+  const taxesValid = taxRowsValid(taxRows, taxLineAmounts, ivaRatePct, taxConfigs);
 
   if (isLoading) return <div className="p-8 text-center text-slate-500">Cargando…</div>;
   if (!delivery) return <div className="p-8 text-center text-slate-500">Salida no encontrada</div>;
@@ -50,15 +85,23 @@ export default function WillardDeliveryDetailPage() {
       id: delivery.id,
       data: {
         line_prices: isVenta
-          ? delivery.lines.map((l) => ({ line_id: l.id, unit_price: String(prices[l.id]) }))
+          ? delivery.lines.map((l) =>
+              (priceMode[l.id] ?? "unit") === "total"
+                ? { line_id: l.id, total_price: String(totals[l.id]) }
+                : { line_id: l.id, unit_price: String(prices[l.id]) },
+            )
           : [],
+        ...(() => {
+          const taxes = buildTaxPayload(taxRows, taxLineAmounts, ivaRatePct, taxConfigs);
+          return taxes ? { taxes } : {};
+        })(),
       },
     });
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title={`Salida #${delivery.delivery_number}`}
+        title={delivery.label}
         description={delivery.warehouse_name ?? undefined}
       >
         <Button variant="outline" onClick={() => navigate("/willard-deliveries")} className="w-full sm:w-auto">
@@ -70,15 +113,16 @@ export default function WillardDeliveryDetailPage() {
         <Card className="border-amber-300 bg-amber-50">
           <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center gap-3">
             <p className="text-sm text-amber-900 flex-1">
-              Registrada. Antes de liquidar hay que certificar los pesos de báscula.
+              Registrada. Antes de liquidar hay que certificar los pesos de báscula
+              {isVenta ? " y digitar el precio de venta de cada línea, en la tabla de abajo." : "."}
             </p>
-            {hasPermission("sales.review") && (
+            {hasPermission("sales.edit") && (
               <Button
-                onClick={() => reviewMutation.mutate(delivery.id)}
-                disabled={reviewMutation.isPending}
+                variant="outline"
+                onClick={() => navigate(`/willard-deliveries/${delivery.id}/edit`)}
                 className="w-full sm:w-auto"
               >
-                <ClipboardCheck className="h-4 w-4 mr-2" /> Revisar
+                <Pencil className="h-4 w-4 mr-2" /> Editar
               </Button>
             )}
           </CardContent>
@@ -142,12 +186,49 @@ export default function WillardDeliveryDetailPage() {
                   </TableCell>
                   {isVenta && (
                     <TableCell className="text-right">
-                      {delivery.status === "reviewed" ? (
-                        <MoneyInput
-                          value={prices[l.id] ?? 0}
-                          onChange={(v) => setPrices((p) => ({ ...p, [l.id]: v }))}
-                          className="w-32 ml-auto"
-                        />
+                      {/* El precio se digita al LIQUIDAR (demo 28-ago, 00:15:38). Antes
+                          este input vivia en `reviewed`; al retirar el paso Revisar la
+                          venta va draft -> liquidated y quedaba sin donde poner el precio. */}
+                      {(delivery.status === "draft" || delivery.status === "reviewed") ? (
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="text-[11px] text-indigo-600 hover:underline whitespace-nowrap"
+                              onClick={() =>
+                                setPriceMode((m) => ({
+                                  ...m,
+                                  [l.id]: (m[l.id] ?? "unit") === "unit" ? "total" : "unit",
+                                }))
+                              }
+                            >
+                              {(priceMode[l.id] ?? "unit") === "unit" ? "Unitario" : "Total"}
+                            </button>
+                            {(priceMode[l.id] ?? "unit") === "unit" ? (
+                              <MoneyInput
+                                value={prices[l.id] ?? 0}
+                                onChange={(v) => setPrices((p) => ({ ...p, [l.id]: v }))}
+                                className="w-32"
+                              />
+                            ) : (
+                              <MoneyInput
+                                value={totals[l.id] ?? 0}
+                                onChange={(v) => setTotals((t) => ({ ...t, [l.id]: v }))}
+                                className="w-32"
+                              />
+                            )}
+                          </div>
+                          {(priceMode[l.id] ?? "unit") === "unit" && prices[l.id] > 0 && (
+                            <span className="text-[11px] text-slate-500 tabular-nums">
+                              {formatWeight(num(l.quantity), l.material_unit)} × {formatCurrency(prices[l.id])} = {formatCurrency(num(l.quantity) * prices[l.id])}
+                            </span>
+                          )}
+                          {(priceMode[l.id] ?? "unit") === "total" && totals[l.id] > 0 && num(l.quantity) > 0 && (
+                            <span className="text-[11px] text-slate-500 tabular-nums">
+                              {formatCurrency(totals[l.id])} ÷ {formatWeight(num(l.quantity), l.material_unit)} = {formatCurrency(totals[l.id] / num(l.quantity))} c/u
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="tabular-nums">
                           {l.unit_price ? formatCurrency(num(l.unit_price)) : "—"}
@@ -178,6 +259,12 @@ export default function WillardDeliveryDetailPage() {
               <span className="text-slate-500">Abonado a planta</span>
               <span className="tabular-nums">{formatCurrency(num(delivery.plant_credit_amount))}</span>
             </div>
+            {num(delivery.crucible_amount) > 0 && (
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500">Diferencial crisol (planta cobra a la sede que factura)</span>
+                <span className="tabular-nums">{formatCurrency(num(delivery.crucible_amount))}</span>
+              </div>
+            )}
             {delivery.sale_id && (
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Venta</span>
@@ -194,11 +281,53 @@ export default function WillardDeliveryDetailPage() {
         </Card>
       )}
 
+      {/* IVA y retenciones de la factura (CC-013). Solo antes de liquidar: la
+          liquidacion es la unica puerta, igual que el peso de bascula (#95). */}
+      {(delivery.status === "draft" || delivery.status === "reviewed") &&
+        hasPermission("sales.liquidate") && (
+        <DocumentTaxesCard
+          lineAmounts={taxLineAmounts}
+          ivaRatePct={ivaRatePct}
+          configs={taxConfigs}
+          rows={taxRows}
+          onChange={setTaxRows}
+          baseHint={
+            isVenta
+              ? "Se aplican sobre el valor del plomo vendido."
+              : "Se aplican sobre lo que se le factura a Willard (maquila y flete). Esos montos salen de las tarifas vigentes al liquidar, asi que acá no hay sugerencia: digite lo que dice la factura."
+          }
+        />
+      )}
+
+      {delivery.status === "liquidated" && delivery.taxes.length > 0 && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+              IVA y Retenciones
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            {delivery.taxes.map((t) => (
+              <div key={t.id} className="flex justify-between gap-3">
+                <span className="text-slate-500">
+                  {t.third_party_name}
+                  {t.rate != null && (
+                    <span className="text-xs text-slate-400"> ({num(t.rate)}% de {formatCurrency(num(t.base_amount))})</span>
+                  )}
+                </span>
+                <span className="tabular-nums">{formatCurrency(num(t.amount))}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
-        {delivery.status === "reviewed" && hasPermission("sales.liquidate") && (
+        {(delivery.status === "draft" || delivery.status === "reviewed") &&
+          hasPermission("sales.liquidate") && (
           <Button
             onClick={liquidate}
-            disabled={missingPrice || liquidateMutation.isPending}
+            disabled={missingPrice || !taxesValid || liquidateMutation.isPending}
             className="w-full sm:w-auto"
           >
             <CheckCircle2 className="h-4 w-4 mr-2" /> Liquidar
@@ -214,7 +343,7 @@ export default function WillardDeliveryDetailPage() {
       <ConfirmDialog
         open={annulOpen}
         onOpenChange={setAnnulOpen}
-        title={`Anular salida #${delivery.delivery_number}`}
+        title={`Anular ${delivery.label}`}
         description="Se revierte el inventario, la deuda en kg, la factura y el reparto."
         confirmLabel="Anular"
         variant="destructive"

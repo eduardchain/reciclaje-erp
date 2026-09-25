@@ -33,6 +33,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import String as SAString, and_, cast, func, or_, select, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.utils.advisory_locks import next_number, lock_sequences
 from app.models.inbound_order import (
     InboundLineAllocation,
     InboundOrder,
@@ -43,6 +44,7 @@ from app.utils.dates import business_today, business_today_noon
 from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.inventory_movement import InventoryMovement
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
+from app.services.kg_ledger import add_kg_movement
 from app.models.material import Material
 from app.models.material_conversion_formula import MaterialConversionFormula
 from app.models.material_kg_profile import MaterialKgProfile
@@ -685,6 +687,16 @@ class InboundOrderService:
                     invoice_number=a.invoice_number,
                 ))
         db.flush()
+
+        # Declaracion anticipada de locks (plan advisory-locks D4): esta
+        # transaccion numera compras, movimientos (pago inmediato / accrual del
+        # recolector) y ajustes (descuadres). SIN pago inmediato, el primer
+        # movimiento se numera DESPUES de los ajustes (el accrual) — orden
+        # inverso al canonico y dependiente de los datos. Se toman aqui, en
+        # orden canonico, y todo lo de abajo es re-entrante.
+        lock_sequences(
+            db, organization_id, "purchase_number", "movement_number", "adjustment_number"
+        )
 
         # 2. Agrupar por proveedor -> sincronizar/crear las N compras
         groups: dict = {}
@@ -1332,27 +1344,27 @@ class InboundOrderService:
             )
 
             # D5: un KgLedgerMovement POR LINEA con snapshot de formula propio
-            db.add(
-                KgLedgerMovement(
-                    organization_id=organization_id,
-                    account_id=account.id,
-                    delta_kg=delta_kg,
-                    transaction_date=order.date,
-                    description=(
-                        f"Recepcion {label} #{order.order_number} — "
-                        f"{material.code} x {qty:g} {material.default_unit or 'kg'}"
-                    ),
-                    source_type=kg_source,
-                    source_id=order.id,
-                    inventory_movement_id=movement.id,
-                    conversion_formula_snapshot={
-                        "formula_id": str(formula.id),
-                        "formula_type": formula.formula_type,
-                        "parameters": formula.parameters,
-                    },
-                    created_by=user_id,
-                    status="confirmed",
-                )
+            # Escritor unico del libro kg (#107 D1, F1 de QA): cuentas Willard,
+            # sin etapa (solo intersede se parte en horno y crisol).
+            add_kg_movement(
+                db,
+                organization_id=organization_id,
+                account=account,
+                delta_kg=delta_kg,
+                transaction_date=order.date,
+                description=(
+                    f"Recepcion {label} #{order.order_number} — "
+                    f"{material.code} x {qty:g} {material.default_unit or 'kg'}"
+                ),
+                source_type=kg_source,
+                source_id=order.id,
+                inventory_movement_id=movement.id,
+                conversion_formula_snapshot={
+                    "formula_id": str(formula.id),
+                    "formula_type": formula.formula_type,
+                    "parameters": formula.parameters,
+                },
+                created_by=user_id,
             )
 
     # ------------------------------------------------------------------ #
@@ -2161,16 +2173,8 @@ class InboundOrderService:
         return (qty * factor).quantize(Decimal("0.0001"))
 
     def _generate_order_number(self, db: Session, organization_id: UUID) -> int:
-        # Advisory lock por org (patron _generate_purchase_number)
-        lock_id = hash(str(organization_id)) % (2**63)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-        max_number = db.execute(
-            select(func.max(InboundOrder.order_number)).where(
-                InboundOrder.organization_id == organization_id
-            )
-        ).scalar_one_or_none()
-        return (max_number or 0) + 1
-
+        """Siguiente `inbound_order_number` de la org: lock estable + MAX+1 en el helper unico (`app/utils/advisory_locks.py`)."""
+        return next_number(db, organization_id, "inbound_order_number")
     def _validate_material(self, db: Session, material_id: UUID, organization_id: UUID) -> Material:
         material = db.get(Material, material_id)
         if not material or material.organization_id != organization_id:

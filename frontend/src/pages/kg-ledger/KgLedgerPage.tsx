@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Scale, Warehouse, Flame, FlaskConical, ArrowDownUp, Pencil } from "lucide-react";
+import { Plus, Scale, Warehouse, ArrowDownUp, Pencil, Flame, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -197,8 +197,11 @@ export default function KgLedgerPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard label="Willard" metric={asMetric(summary?.total_willard_kg ?? 0)} icon={<Scale className="h-4 w-4" />} accentColor="sky" formatValue={(n) => formatWeight(n)} />
           <KpiCard label="Intersede" metric={asMetric(summary?.total_intersede_kg ?? 0)} icon={<Warehouse className="h-4 w-4" />} accentColor="violet" formatValue={(n) => formatWeight(n)} />
-          <KpiCard label="Horno" metric={asMetric(summary?.total_intra_horno_kg ?? 0)} icon={<Flame className="h-4 w-4" />} accentColor="amber" formatValue={(n) => formatWeight(n)} />
-          <KpiCard label="Crisol" metric={asMetric(summary?.total_crisol_kg ?? 0)} icon={<FlaskConical className="h-4 w-4" />} accentColor="teal" formatValue={(n) => formatWeight(n)} />
+          {/* #107 D1: horno y crisol NO son cuentas aparte (las tarjetas de #103 D8
+              prometian un modelo que no existia) — son las dos ETAPAS de la deuda
+              intersede, y suman exactamente el total de arriba por construccion. */}
+          <KpiCard label="En horno (crudo)" metric={asMetric(summary?.intersede_horno_kg ?? 0)} icon={<Flame className="h-4 w-4" />} accentColor="indigo" formatValue={(n) => formatWeight(n)} />
+          <KpiCard label="En crisol" metric={asMetric(summary?.intersede_crisol_kg ?? 0)} icon={<FlaskConical className="h-4 w-4" />} accentColor="amber" formatValue={(n) => formatWeight(n)} />
         </div>
       )}
 

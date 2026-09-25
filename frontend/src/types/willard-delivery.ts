@@ -1,4 +1,5 @@
-// Salidas de plomo a Willard (W1).
+import type { DocumentTax } from "@/types/document-tax";
+// Salidas de Plomo desde planta (W1): ventas y abonos a Willard.
 //
 // ⚠️ Todo lo que el backend declara como Decimal llega como STRING (FastAPI
 // serializa asi). Es el bloqueante (b) de #93: el tipo decia `number`, `acc + x`
@@ -58,7 +59,11 @@ export interface WillardDeliveryLine {
 
 export interface WillardDelivery {
   id: string;
+  /** Consecutivo DENTRO de su serie (#105): Venta #n y Abono #n cuentan aparte. */
   delivery_number: number;
+  series: "venta" | "abono";
+  /** El numero que ve el usuario: "Venta #n" / "Abono #n". Usar este, no delivery_number. */
+  label: string;
   delivery_type: WillardDeliveryType;
   warehouse_id: string;
   warehouse_name: string | null;
@@ -91,9 +96,17 @@ export interface WillardDelivery {
   maquila_amount: string | number;
   freight_amount: string | number;
   plant_credit_amount: string | number;
+  /** #107 D3: $300/kg de plomo PURO vendido, planta se lo cobra a la sede que factura. */
+  crucible_amount: string | number;
+  /** #107 D5 (Q-30): sede que factura la venta derivada, estampada al liquidar. */
+  billing_warehouse_id: string | null;
   total_kg_lead: string | number;
+  /** CC-013: IVA y retenciones registrados (solo en el detalle). */
+  taxes: DocumentTax[];
 
   lines: WillardDeliveryLine[];
+  /** Advertencias no bloqueantes de la liquidacion (#17/#76). */
+  warnings?: string[];
 }
 
 export interface WillardDeliveryListResponse {
@@ -142,4 +155,31 @@ export interface WillardDeliveryLinePrice {
 export interface WillardDeliveryLiquidate {
   line_prices: WillardDeliveryLinePrice[];
   customer_id?: string | null;
+}
+
+
+// #109 D6 — resumen por TIPO de salida (GET /willard-deliveries/summary).
+// Separa lo que dejan los materiales de lo que dejan las baterías. Johana
+// (18-sep) eligió la opción B (L385-387): "Materiales Willard" es un
+// nombre/cuenta INTERNA de su contabilidad; ella la llama "cuenta" con sus
+// palabras (L323, L335, L361). En el sistema NO se modeló como cuenta sino como
+// resumen por tipo: decisión nuestra, y expectativa creada en L305-307.
+// ⚠️ Q-37 se reabrió el 19-sep (16-sep L577: "no es un ingreso para circunval,
+// sino una cuenta por pagar"); ver el inventario de preguntas.
+export interface WillardDeliverySummaryRow {
+  delivery_type: WillardDeliveryType;
+  documents: number;
+  lead_kg: number;
+  maquila_amount: number;
+  freight_amount: number;
+  plant_credit_amount: number;
+  crucible_amount: number;
+  /** maquila + flete − reparto a planta. NO es utilidad: no descuenta el costo del plomo. */
+  kept_by_billing_sede: number;
+}
+
+export interface WillardDeliverySummary {
+  date_from: string | null;
+  date_to: string | null;
+  rows: WillardDeliverySummaryRow[];
 }

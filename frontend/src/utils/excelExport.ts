@@ -135,7 +135,7 @@ const ASSET_ORDER = [
   "cash_and_bank", "inventory_liquidated",
   "customers_receivable", "supplier_advances", "service_provider_advances",
   "liability_advances", "investor_receivable", "loans_receivable",
-  "provision_funds", "prepaid_expenses", "fixed_assets",
+  "provision_funds", "prepaid_expenses", "tax_advances", "fixed_assets",
 ];
 
 const LIABILITY_ORDER = [
@@ -652,8 +652,18 @@ export function exportBalanceSheetExcel(data: BalanceSheetResponse) {
   if (data.assets.investor_receivable > 0) rows.push(["CxC Inversionistas", data.assets.investor_receivable]);
   if (data.assets.loans_receivable > 0) rows.push(["Préstamos por Cobrar", data.assets.loans_receivable]);
   if (data.assets.prepaid_expenses > 0) rows.push(["Gastos Prepagados", data.assets.prepaid_expenses]);
+  if (data.assets.tax_advances > 0) rows.push(["Anticipos de Impuestos", data.assets.tax_advances]);
   if (data.assets.provision_funds > 0) rows.push(["Fondos Provision", data.assets.provision_funds]);
   if (data.assets.fixed_assets > 0) rows.push(["Activos Fijos", data.assets.fixed_assets]);
+  // CC-014: negativo, resta. El guard es != null porque `> 0` nunca se
+  // cumple para esta linea; sin valor se escribe el aviso, no un cero.
+  if (data.assets.lead_debt_willard != null) {
+    const ld = data.assets.lead_debt_willard;
+    const etiqueta = ld.price != null
+      ? `Deuda en plomo con Willard (${ld.kg.toLocaleString("es-CO")} kg x precio de mercado del ${formatDate(ld.price_date!)})`
+      : `Deuda en plomo con Willard (${ld.kg.toLocaleString("es-CO")} kg sin precio de mercado)`;
+    rows.push([etiqueta, ld.value ?? 0]);
+  }
   rows.push(["Total Activos", data.total_assets]);
   rows.push([]);
   rows.push(["PASIVOS", ""]);

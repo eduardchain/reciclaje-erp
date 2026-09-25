@@ -51,6 +51,21 @@ class RetentionConfig(Base, OrganizationMixin, TimestampMixin):
         comment="Tarifa % (0 < x <= 100); el monto final es editable al liquidar",
     )
 
+    base_kind: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="subtotal",
+        server_default=text("'subtotal'"),
+        comment=(
+            "Sobre que se aplica la tasa: subtotal | iva (CC-013 D5). El default "
+            "'subtotal' es exactamente lo que hacen hoy las dos pantallas de "
+            "compras, asi que COMPRAS queda byte a byte. Sin este campo una "
+            "reteIVA se configuraria como '2,85 % del subtotal' y daria el numero "
+            "correcto SOLO mientras el IVA sea 19 %: un valor que parece "
+            "configuracion y es en realidad otra formula."
+        ),
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
@@ -69,6 +84,10 @@ class RetentionConfig(Base, OrganizationMixin, TimestampMixin):
         CheckConstraint(
             "rate_pct > 0 AND rate_pct <= 100",
             name="ck_retention_configs_rate_range",
+        ),
+        CheckConstraint(
+            "base_kind IN ('subtotal', 'iva')",
+            name="ck_retention_configs_base_kind",
         ),
     )
 

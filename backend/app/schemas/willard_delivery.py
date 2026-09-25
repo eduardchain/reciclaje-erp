@@ -4,14 +4,15 @@ Schemas de WillardDelivery — salida de plomo a Willard (W1).
 El precio solo existe en el tipo `venta`. Ahi la linea acepta `unit_price` XOR
 `total_price` (patron #95 D8: Johana a veces tiene el total y no el unitario).
 """
-from datetime import datetime
+from datetime import date as DateOnly, datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.utils.dates import BusinessDate
+from app.schemas.document_tax import DocumentTaxCreate, DocumentTaxResponse
 
 DeliveryType = Literal["venta", "abono_bateria", "abono_material"]
 
@@ -70,7 +71,12 @@ class WillardDeliveryCreate(BaseModel):
     driver_id: Optional[UUID] = None
     vehicle_id: Optional[UUID] = None
     invoice_number: Optional[str] = Field(None, max_length=50)
-    remission_number: Optional[str] = Field(None, max_length=50)
+    # Obligatoria (Hugo, demo 28-ago): "que no te deje avanzar sin digitar el
+    # numero" — y la razon no es formal, es "para que no me alteren el
+    # consecutivo": la remision es el numero con el que el concilia con Willard.
+    remission_number: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)
+    ]
     notes: Optional[str] = Field(None, max_length=1000)
     lines: list[WillardDeliveryLineCreate] = Field(..., min_length=1)
 
@@ -83,7 +89,12 @@ class WillardDeliveryUpdate(BaseModel):
     driver_id: Optional[UUID] = None
     vehicle_id: Optional[UUID] = None
     invoice_number: Optional[str] = Field(None, max_length=50)
-    remission_number: Optional[str] = Field(None, max_length=50)
+    # Parcial: omitirla la deja como esta. Lo que no se permite es BORRARLA
+    # mandando vacio — seria esquivar la obligatoriedad del create por la puerta
+    # de atras.
+    remission_number: Optional[
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+    ] = None
     notes: Optional[str] = Field(None, max_length=1000)
     lines: Optional[list[WillardDeliveryLineCreate]] = Field(None, min_length=1)
 
@@ -98,6 +109,13 @@ class WillardDeliveryLiquidate(BaseModel):
     customer_id: Optional[UUID] = Field(
         None, description="Solo tipo `venta`: cliente de la venta derivada (default Willard)"
     )
+    taxes: Optional[list[DocumentTaxCreate]] = Field(
+        None,
+        description=(
+            "IVA y retenciones de la factura (CC-013). En venta se aplican sobre el "
+            "plomo; en abono sobre la maquila mas el flete — son dos facturas distintas"
+        ),
+    )
 
 
 class WillardDeliveryAnnul(BaseModel):
@@ -109,6 +127,10 @@ class WillardDeliveryResponse(BaseModel):
 
     id: UUID
     delivery_number: int
+    # #105 D1/D5: el consecutivo es por serie; `label` es el numero que se ve
+    # ("Venta #n" / "Abono #n"). El endpoint los arma campo por campo (trampa #95).
+    series: Literal["venta", "abono"]
+    label: str
     delivery_type: DeliveryType
     warehouse_id: UUID
     warehouse_name: Optional[str] = None
@@ -140,10 +162,20 @@ class WillardDeliveryResponse(BaseModel):
     maquila_amount: Decimal = Decimal("0")
     freight_amount: Decimal = Decimal("0")
     plant_credit_amount: Decimal = Decimal("0")
+    crucible_amount: Decimal = Decimal("0")
+    billing_warehouse_id: Optional[UUID] = None
 
     total_kg_lead: Decimal = Decimal("0")
+    #: IVA y retenciones de la factura (CC-013). El endpoint arma este
+    #: response CAMPO POR CAMPO, asi que declararlo aca no basta — hay que
+    #: llenarlo o llega vacio (trampa #95).
+    taxes: list[DocumentTaxResponse] = Field(default_factory=list)
 
     lines: list[WillardDeliveryLineResponse] = Field(default_factory=list)
+
+    # Advertencias no bloqueantes de la liquidacion (#17/#76). Sin este campo
+    # el servicio las calculaba y el endpoint las tiraba a la basura.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class WillardDeliveryListResponse(BaseModel):
@@ -151,3 +183,27 @@ class WillardDeliveryListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class WillardDeliverySummaryRow(BaseModel):
+    """#109 D6 — totales de las salidas LIQUIDADAS de un tipo en el periodo.
+
+    ⚠️ `kept_by_billing_sede` NO es un neto (F4 de QA): es lo que queda en la
+    sede que factura DE LO FACTURADO A WILLARD. En un abono a bateria planta ya
+    cobro $1.500/kg al trasladar, y esa maquila no esta aqui — restarla a mano
+    daria el economico; presentar esto como "neto" lo inflaria 20 veces."""
+
+    delivery_type: str
+    documents: int
+    lead_kg: Decimal
+    maquila_amount: Decimal
+    freight_amount: Decimal
+    plant_credit_amount: Decimal
+    crucible_amount: Decimal
+    kept_by_billing_sede: Decimal
+
+
+class WillardDeliverySummaryResponse(BaseModel):
+    date_from: Optional[DateOnly] = None
+    date_to: Optional[DateOnly] = None
+    rows: list[WillardDeliverySummaryRow]

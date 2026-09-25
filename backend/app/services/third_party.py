@@ -52,6 +52,74 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
     }
 
     @staticmethod
+    def _guard_system_categories(
+        db: Session,
+        third_party_id: UUID,
+        category_ids: list[UUID],
+        organization_id: UUID,
+    ) -> None:
+        """Las categorias de sistema no se asignan ni se quitan a mano (CC-013 D4d).
+
+        #58 le puso cuatro guards a la unidad de negocio de sistema; esta
+        categoria necesita los suyos, porque hoy CUALQUIER usuario asigna
+        categorias desde el formulario de terceros (#37, multi-select). Sin
+        guard, ponerle a un proveedor normal la categoria de impuestos manda su
+        saldo a favor a la seccion de impuestos Y lo saca del panel de cobro,
+        las dos cosas en silencio.
+
+        🔴 SIMETRICO, y lo decide un detalle de implementacion: el sync BORRA
+        todas las asignaciones y las recrea. Entonces hay dos formas de romper
+        la clasificacion y las dos pasan por la misma linea — AGREGAR la
+        categoria a un tercero normal (su saldo a favor migra a impuestos) y
+        QUITARSELA a una entidad de impuestos (sus retenciones vuelven a caer
+        en Gastos Prepagados y el balance le miente al contador). Se rechazan
+        las dos: arreglar en silencio deja al usuario creyendo que guardo algo
+        que no guardo.
+
+        🟢 El flujo legitimo no pasa por acá: `tax_entities.resolve_tax_entity`
+        crea la asignacion directo. Mismo reparto que #58 — la entidad de
+        sistema se siembra desde el codigo y los guards viven en los puntos de
+        entrada del usuario.
+
+        🟢 Y no estorba la edicion normal: el formulario inicializa
+        `categoryIds` con TODAS las categorias del tercero, incluidas las
+        ocultas, y las devuelve enteras al guardar — o sea que editarle el
+        telefono a una entidad de impuestos manda la categoria de vuelta sin
+        quitarla, el delta queda vacio y pasa.
+        """
+        system_cats = {
+            c.id: c for c in db.execute(
+                select(ThirdPartyCategory).where(
+                    ThirdPartyCategory.organization_id == organization_id,
+                    ThirdPartyCategory.system_code.isnot(None),
+                )
+            ).scalars().all()
+        }
+        if not system_cats:
+            return  # la organizacion no tiene ninguna: cero efecto
+
+        current = {
+            a.category_id for a in db.execute(
+                select(ThirdPartyCategoryAssignment).where(
+                    ThirdPartyCategoryAssignment.third_party_id == third_party_id,
+                )
+            ).scalars().all()
+        }
+        requested = set(category_ids or [])
+        for cat_id, cat in system_cats.items():
+            added = cat_id in requested and cat_id not in current
+            removed = cat_id in current and cat_id not in requested
+            if added or removed:
+                verbo = "asignar" if added else "quitar"
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"La categoria '{cat.name}' es del sistema: no se puede "
+                        f"{verbo} a mano. La administra el modulo que la usa."
+                    ),
+                )
+
+    @staticmethod
     def _sync_category_assignments(
         db: Session,
         third_party_id: UUID,
@@ -76,6 +144,10 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"Categorias no encontradas: {[str(m) for m in missing]}",
                 )
+
+        CRUDThirdParty._guard_system_categories(
+            db, third_party_id, category_ids, organization_id
+        )
 
         # Eliminar asignaciones actuales
         db.execute(

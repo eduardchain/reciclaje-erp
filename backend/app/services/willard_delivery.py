@@ -14,10 +14,12 @@ que salda dos deudas encadenadas (planta -> Circunvalar -> Willard). El de
 material no toca `intersede` porque los drosses llegan derecho a planta y
 Circunvalar nunca estuvo en esa cadena.
 
-Plata (Hugo 00:29/00:31): sobre TODA entrega se factura maquila + flete a
-Willard y nace la CxC. De la maquila, una porcion se le abona a planta — no es
-plata que se mueva de cuenta, es como se reparte el ingreso entre sedes, y por
-eso viaja en el par `internal_maquila_*` de #84.
+Plata: sobre cada ABONO se factura maquila + flete a Willard y nace la CxC
+(la venta no factura maquila ni flete: corta antes, CC-009).
+El reparto entre sedes (`internal_maquila_*` de #84) es OTRA cosa y NO va en
+toda entrega — ver `_emit_split_pair`. CC-009 (demo 28-ago + Johana 3-sep):
+la maquila interna se causa AL TRASLADAR, una sola vez, asi que repetirla en
+la entrega la cobraria dos veces.
 """
 import logging
 from datetime import datetime
@@ -29,15 +31,21 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
+from app.utils.advisory_locks import lock_sequences, next_number, sequence_lock_key
 from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
 from app.models.material import Material
+from app.models.material_kg_profile import MaterialKgProfile
 from app.models.money_movement import MoneyMovement
 from app.models.sale import Sale
 from app.models.service_tariff import ServiceTariff
 from app.models.third_party import ThirdParty
 from app.models.warehouse import Warehouse
-from app.models.willard_delivery import WillardDelivery, WillardDeliveryLine
+from app.models.willard_delivery import (
+    WillardDelivery,
+    WillardDeliveryLine,
+    series_of,
+)
 from app.schemas.inventory_adjustment import DecreaseCreate
 from app.schemas.sale import SaleCreate, SaleLineCreate
 from app.schemas.willard_delivery import (
@@ -47,6 +55,12 @@ from app.schemas.willard_delivery import (
 )
 from app.utils.dates import business_today_noon
 from app.utils.org_settings import get_org_setting
+from app.services.kg_ledger import (
+    INTERSEDE_STAGES,
+    STAGE_LABELS,
+    add_kg_movement,
+    kg_ledger_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +68,22 @@ KG_SOURCE_TYPE = "willard_delivery"
 MAQUILA_TARIFF_CODE = "maquila_willard"
 FREIGHT_TARIFF_CODE = "flete_willard_planta_planta"
 PLANT_CREDIT_TARIFF_CODE = "abono_planta_por_kg"
+# #109 — que tarifa reparte a planta cada TIPO de salida. La venta no esta: no
+# factura maquila, asi que no hay nada que repartir (CC-009, corta arriba).
+#   abono_material  $1.248/kg  los drosses llegaron derecho a planta: nunca hubo
+#                              traslado, o sea que aqui se causa TODA su parte.
+#   abono_bateria   $566/kg    FIJOS, ADEMAS de los $1.500 que planta ya cobro al
+#                              trasladar (Johana 16-sep L493: "es un plus que que
+#                              se reconoce por la factura"; 18-sep L183: "Sí, fijo
+#                              por kilo", respondiendo a Daniel).
+# Un tipo nuevo de abono sin fila aqui NO reparte y avisa: fail-closed.
+PLANT_CREDIT_TARIFF_BY_TYPE = {
+    "abono_material": PLANT_CREDIT_TARIFF_CODE,
+    "abono_bateria": "abono_planta_bateria_por_kg",
+}
+# #107 D4: diferencial de refinacion, causado al VENDER plomo puro (Hugo 28-ago)
+CRUCIBLE_TARIFF_CODE = "maquila_crisol"
+CRUCIBLE_CATEGORY_NAME = "Crisol Refinación"
 
 # Que cuentas kg descarga cada tipo. `intersede` es el contador interno (lo que
 # planta le debe a Circunvalar); los otros dos son las deudas con Willard.
@@ -69,7 +99,7 @@ def _err(detail: str, code: int = status.HTTP_400_BAD_REQUEST) -> HTTPException:
 
 
 class WillardDeliveryService:
-    """Salidas de plomo a Willard — 3 pasos: registrar, revisar, liquidar."""
+    """Salidas de Plomo desde planta — 2 pasos: registrar, liquidar."""
 
     # ================================================================== #
     # Escritura                                                           #
@@ -81,15 +111,35 @@ class WillardDeliveryService:
         data: WillardDeliveryCreate,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
-    ) -> WillardDelivery:
+    ) -> tuple[WillardDelivery, list[str]]:
         warehouse = self._validate_warehouse(db, data.warehouse_id, organization_id)
         self._validate_plant_origin(db, organization_id, warehouse)
         self._validate_third_party(db, data.third_party_id, organization_id)
+        self._validate_willard_holder(
+            db, data.third_party_id, data.delivery_type, organization_id
+        )
+        # Venta: el tercero tiene que ser CLIENTE ya al capturar. El check vivia
+        # solo en liquidate, o sea que una venta a un proveedor se aceptaba y
+        # reventaba dias despues (#103 D3). Daniel lo vio en pantalla: el
+        # selector ofrecia a todos. No hace falta en update: tipo y tercero son
+        # solo-lectura al editar (schema extra=forbid, #103 D9). El check de
+        # liquidate se queda para el unico camino que le queda: que al tercero
+        # le quiten la categoria de cliente DESPUES de capturar.
+        if data.delivery_type == "venta":
+            self._require_customer_id(db, data.third_party_id)
         self._validate_not_future(data.date)
+        warnings = self._validate_lead_products(
+            db,
+            [ln.material_id for ln in data.lines],
+            data.delivery_type,
+            organization_id,
+        )
 
+        series = series_of(data.delivery_type)
         delivery = WillardDelivery(
             organization_id=organization_id,
-            delivery_number=self._next_number(db, organization_id),
+            delivery_number=self._next_number(db, organization_id, series),
+            series=series,
             delivery_type=data.delivery_type,
             warehouse_id=data.warehouse_id,
             third_party_id=data.third_party_id,
@@ -108,7 +158,7 @@ class WillardDeliveryService:
         self._replace_lines(db, delivery, data.lines, organization_id)
         db.commit()
         db.refresh(delivery)
-        return delivery
+        return delivery, warnings
 
     def update(
         self,
@@ -117,7 +167,7 @@ class WillardDeliveryService:
         data: WillardDeliveryUpdate,
         organization_id: UUID,
         user_id: Optional[UUID] = None,
-    ) -> WillardDelivery:
+    ) -> tuple[WillardDelivery, list[str]]:
         delivery = self._get_or_404(db, delivery_id, organization_id)
         if delivery.status in ("liquidated", "annulled"):
             raise _err(
@@ -133,12 +183,35 @@ class WillardDeliveryService:
         if "date" in fields and fields["date"]:
             self._validate_not_future(fields["date"])
 
+        new_type = fields.get("delivery_type") or delivery.delivery_type
+        if fields.get("third_party_id"):
+            self._validate_third_party(db, fields["third_party_id"], organization_id)
+            self._validate_willard_holder(
+                db, fields["third_party_id"], new_type, organization_id
+            )
+
+        # ANTES de mutar nada. Si las lineas cambian se validan las nuevas; si no,
+        # se revalidan las vigentes, porque cambiar el TIPO tambien puede volver
+        # invalido lo que ya estaba (una salida de puro que pasa a ser un abono).
+        warnings = self._validate_lead_products(
+            db,
+            (
+                [ln["material_id"] for ln in lines]
+                if lines is not None
+                else [ln.material_id for ln in delivery.lines]
+            ),
+            new_type,
+            organization_id,
+        )
+
         for key, value in fields.items():
             setattr(delivery, key, value)
 
         if lines is not None:
-            # D17 de #95: editar las LINEAS devuelve la salida a `draft` — la
-            # revision certifica pesos y cantidades, o sea lineas. La cabecera no.
+            # Editar las LINEAS devuelve la salida a `draft`. Venia de D17 (#95):
+            # la revision certificaba lineas. Sin paso de revision (Hugo, 28-ago)
+            # solo tiene efecto sobre las filas `reviewed` que quedaron de la
+            # version anterior; una registrada ya esta en `draft`.
             from app.schemas.willard_delivery import WillardDeliveryLineCreate
 
             self._replace_lines(
@@ -154,31 +227,7 @@ class WillardDeliveryService:
 
         db.commit()
         db.refresh(delivery)
-        return delivery
-
-    def review(
-        self,
-        db: Session,
-        delivery_id: UUID,
-        organization_id: UUID,
-        user_id: Optional[UUID] = None,
-    ) -> WillardDelivery:
-        """Certifica los pesos. Sin peso no se puede revisar (#95 Q-13)."""
-        delivery = self._get_or_404(db, delivery_id, organization_id)
-        if delivery.status != "draft":
-            raise _err(
-                f"Solo se puede revisar una salida registrada "
-                f"(esta es {self._status_label(delivery.status)})."
-            )
-
-        self._require_scale_weights(db, delivery)
-
-        delivery.status = "reviewed"
-        delivery.reviewed_by = user_id
-        delivery.reviewed_at = datetime.now(tz=None).astimezone()
-        db.commit()
-        db.refresh(delivery)
-        return delivery
+        return delivery, warnings
 
     def liquidate(
         self,
@@ -195,13 +244,21 @@ class WillardDeliveryService:
         fecha la venta derivada, los ajustes, los kg y los movimientos de dinero.
         """
         delivery = self._get_or_404(db, delivery_id, organization_id)
-        if delivery.status != "reviewed":
+        # Hugo, demo 28-ago: en salidas no hay revisor — "esto funciona muy
+        # diferente porque inmediatamente queda la deuda: registrado y liquidar".
+        # `reviewed` se sigue aceptando por las filas que quedaron de la version
+        # anterior; ninguna nueva puede llegar a ese estado.
+        if delivery.status not in ("draft", "reviewed"):
             raise _err(
-                "Solo se puede liquidar una salida revisada "
+                "Solo se puede liquidar una salida registrada "
                 f"(esta es {self._status_label(delivery.status)})."
             )
         if not delivery.lines:
             raise _err("La salida no tiene lineas.")
+        # El peso de bascula se certificaba al revisar (#95 Q-13). Al desaparecer
+        # ese paso, la liquidacion es la unica puerta antes de que se muevan kg y
+        # pesos — la certificacion se mueve aqui, no se pierde.
+        self._require_scale_weights(db, delivery)
 
         # Fail-fast ANTES de cualquier efecto: sin esto el 422 sale desde adentro
         # de la venta derivada ("El tercero no es cliente"), que es cierto pero no
@@ -210,11 +267,26 @@ class WillardDeliveryService:
         if delivery.delivery_type == "venta":
             self._require_customer(db, delivery)
 
-        warnings: list[str] = []
+        warnings: list[str] = self._validate_lead_products(
+            db,
+            [ln.material_id for ln in delivery.lines],
+            delivery.delivery_type,
+            organization_id,
+        )
         liq_dt = business_today_noon()
 
+        # Declaracion anticipada de locks (plan advisory-locks D4): la venta
+        # numera una Sale (y sus movimientos al liquidar); el abono numera el
+        # ajuste de descarga (D12) y DESPUES la factura y el par — orden inverso
+        # al canonico. Se toman aqui en orden canonico para los tres tipos.
+        lock_sequences(
+            db, organization_id, "sale_number", "movement_number", "adjustment_number"
+        )
+
         # 1. kg de plomo por linea, desde la formula VIGENTE (snapshot al liquidar)
-        total_kg = self._compute_lead_kg(db, delivery, organization_id, warnings)
+        total_kg, kg_by_stage = self._compute_lead_kg(
+            db, delivery, organization_id, warnings
+        )
 
         # 2. Salida fisica del inventario
         if delivery.delivery_type == "venta":
@@ -227,7 +299,9 @@ class WillardDeliveryService:
             )
 
         # 3. Descarga de las cuentas en kg
-        self._discharge_kg(db, delivery, total_kg, organization_id, user_id, liq_dt)
+        self._discharge_kg(
+            db, delivery, total_kg, kg_by_stage, organization_id, user_id, liq_dt, warnings
+        )
 
         # 4. Facturacion a Willard + reparto entre sedes.
         #    D4d: si falta una tarifa esto avisa, pero los kg de arriba YA se
@@ -236,7 +310,24 @@ class WillardDeliveryService:
         self._bill_and_split(
             db, delivery, total_kg, organization_id, user_id, liq_dt, warnings
         )
+        # 4b. Diferencial del crisol (#107 D4): solo venta, solo kg de PURO.
+        self._emit_crucible_differential(
+            db,
+            delivery,
+            kg_by_stage.get("crisol", Decimal("0")),
+            organization_id,
+            user_id,
+            liq_dt,
+            warnings,
+        )
+        # 5. IVA y retenciones de la factura (CC-013, data-gated D2).
+        #    D10: la Salida es la DUENA aunque derive una venta — hay dos
+        #    documentos para UNA factura y este es el que el usuario liquida.
+        self._apply_document_taxes(db, delivery, data, organization_id)
 
+        # Q-30 (#107 D5): la sede que factura se estampa al liquidar (snapshot
+        # del setting); el P&L por sede le atribuye la venta derivada.
+        delivery.billing_warehouse_id = self._billing_warehouse_id(db, organization_id)
         delivery.status = "liquidated"
         delivery.liquidated_by = user_id
         delivery.liquidated_at = liq_dt
@@ -280,19 +371,31 @@ class WillardDeliveryService:
         delivery: WillardDelivery,
         organization_id: UUID,
         warnings: list[str],
-    ) -> Decimal:
+    ) -> tuple[Decimal, dict[str, Decimal]]:
+        """kg de plomo por linea y, ademas, por ETAPA de intersede (#107 D4):
+        crudo -> horno, puro -> crisol. El perfil ya lo valido
+        `_validate_lead_products`; aqui solo se lee."""
         from app.services.material_conversion_formula import material_conversion_formula
 
         formulas = {
             f.material_id: f
             for f in material_conversion_formula.get_current(db, organization_id)
         }
+        leads = self._lead_products(
+            db, [ln.material_id for ln in delivery.lines], organization_id
+        )
+        by_stage: dict[str, Decimal] = {s: Decimal("0") for s in INTERSEDE_STAGES}
         total = Decimal("0")
         for line in delivery.lines:
             material = db.get(Material, line.material_id)
             formula = formulas.get(line.material_id)
             if formula is None:
-                # Sin formula el material YA es plomo: la cantidad es el kg.
+                # Sin formula la conversion es 1:1: la cantidad YA esta en kg de
+                # plomo. Esto CALCULA, no clasifica — que el material sea plomo
+                # entregable lo decide `lead_product` en `_validate_lead_products`,
+                # que ya corrio. Usar esta ausencia como clasificador es el defecto
+                # que ese guard cierra: el aluminio y el plastico tampoco tienen
+                # formula, y saldaban la deuda 1:1.
                 kg = line.quantity
                 line.conversion_formula_snapshot = None
             else:
@@ -305,9 +408,10 @@ class WillardDeliveryService:
             line.kg_lead_equivalent = kg
             line.unit = material.default_unit if material else None
             total += kg
+            by_stage[self._stage_of(leads.get(line.material_id))] += kg
         if total <= 0:
             raise _err("La salida no equivale a ningun kg de plomo.")
-        return total
+        return total, by_stage
 
     @staticmethod
     def _kg_from_formula(formula, qty: Decimal) -> Decimal:
@@ -321,6 +425,50 @@ class WillardDeliveryService:
                 f"Tipo de formula '{formula.formula_type}' no soportado en salidas"
             )
         return (qty * factor).quantize(Decimal("0.0001"))
+
+    def _tax_context(
+        self, db: Session, delivery: WillardDelivery
+    ) -> tuple[Optional[ThirdParty], Decimal]:
+        """Sobre QUE y a QUIEN se le facturan los impuestos, por tipo de salida.
+
+        Son dos facturas distintas y por eso son dos bases distintas: en la
+        venta se factura el plomo (FE 2127) y en el abono se factura la maquila
+        mas el flete (FE 2118). Tomar una base por la otra daria un IVA que
+        cuadra con la pantalla y no con la factura.
+        """
+        if delivery.delivery_type == "venta":
+            sale = db.get(Sale, delivery.sale_id) if delivery.sale_id else None
+            if sale is None:
+                return None, Decimal("0")
+            return db.get(ThirdParty, sale.customer_id), sale.total_amount
+        billed = (delivery.maquila_amount or Decimal("0")) + (
+            delivery.freight_amount or Decimal("0")
+        )
+        return db.get(ThirdParty, delivery.third_party_id), billed
+
+    def _apply_document_taxes(
+        self,
+        db: Session,
+        delivery: WillardDelivery,
+        data: WillardDeliveryLiquidate,
+        organization_id: UUID,
+    ) -> None:
+        """Aplica los impuestos capturados. Payload ausente = cero efecto."""
+        if not data.taxes:
+            return
+        from app.services.document_tax import apply_taxes
+
+        customer, subtotal = self._tax_context(db, delivery)
+        if customer is None or subtotal <= 0:
+            raise _err(
+                "Esta salida no factura nada, asi que no hay sobre que aplicar "
+                "impuestos. Revise los precios o las tarifas.",
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        apply_taxes(
+            db, organization_id, data.taxes, customer,
+            subtotal=subtotal, willard_delivery_id=delivery.id,
+        )
 
     def _create_derived_sale(
         self,
@@ -370,11 +518,14 @@ class WillardDeliveryService:
                 warehouse_id=delivery.warehouse_id,
                 date=liq_dt,
                 invoice_number=delivery.invoice_number,
-                notes=f"Salida a Willard #{delivery.delivery_number}",
+                notes=f"Salida de Plomo — {delivery.label}",
                 lines=sale_lines,
             ),
             organization_id,
             user_id=user_id,
+            # La venta derivada es la UNICA venta legitima de plomo entregable:
+            # sin esto, el guard de Ventas la rechazaria a ella tambien.
+            from_willard_delivery=True,
         )
         warnings.extend(getattr(sale, "_warnings", []) or [])
 
@@ -422,7 +573,7 @@ class WillardDeliveryService:
                     warehouse_id=delivery.warehouse_id,
                     quantity=line.quantity,
                     date=liq_dt,
-                    reason=f"{label} Willard — Salida #{delivery.delivery_number}",
+                    reason=f"{label} Willard — Salida de Plomo — {delivery.label}",
                 ),
                 organization_id,
                 user_id=user_id,
@@ -437,30 +588,71 @@ class WillardDeliveryService:
         db: Session,
         delivery: WillardDelivery,
         total_kg: Decimal,
+        kg_by_stage: dict[str, Decimal],
         organization_id: UUID,
         user_id: Optional[UUID],
         liq_dt: datetime,
+        warnings: list[str],
     ) -> None:
         """Los kg bajan en NEGATIVO. Los dos contadores del abono de bateria
-        bajan la MISMA cantidad: es un pago que salda dos deudas encadenadas."""
+        bajan la MISMA cantidad: es un pago que salda dos deudas encadenadas.
+
+        #107 D4: la cuenta intersede se descarga POR ETAPA segun el plomo de
+        cada linea (crudo -> horno, puro -> crisol); las cuentas Willard bajan
+        el total sin etapa. Una etapa que quede en negativo AVISA, no bloquea
+        (#17/#76): lo tipico es haber vendido puro sin registrar el traslado a
+        crisoles, y el aviso dice donde registrarlo.
+        """
+        desc = (
+            f"Salida de Plomo — {delivery.label} — "
+            f"{self._type_label(delivery.delivery_type)}"
+        )
         for account_type in DISCHARGE_MAP[delivery.delivery_type]:
             account = self._resolve_kg_account(db, organization_id, account_type)
-            db.add(
-                KgLedgerMovement(
+            if account_type != "intersede":
+                add_kg_movement(
+                    db,
                     organization_id=organization_id,
-                    account_id=account.id,
+                    account=account,
                     delta_kg=-total_kg,
                     transaction_date=liq_dt,
-                    description=(
-                        f"Salida a Willard #{delivery.delivery_number} — "
-                        f"{self._type_label(delivery.delivery_type)}"
-                    ),
+                    description=desc,
                     source_type=KG_SOURCE_TYPE,
                     source_id=delivery.id,
                     created_by=user_id,
-                    status="confirmed",
                 )
-            )
+                continue
+            balances = kg_ledger_service.intersede_stage_balances(db, organization_id)
+            for stage in INTERSEDE_STAGES:
+                kg = kg_by_stage.get(stage, Decimal("0"))
+                if kg <= 0:
+                    continue
+                after = balances[stage] - kg
+                if after < 0 and stage == "crisol":
+                    # Solo la etapa crisol avisa (D4): vender puro sin haber
+                    # registrado el traslado a crisoles es un olvido de
+                    # captura con remedio. El horno en negativo NO avisa
+                    # aqui: es el mismo "planta entrega lo que Circunvalar
+                    # aun no le mando" de antes de este ciclo, y una venta
+                    # con todo configurado sigue siendo una salida perfecta
+                    # (test_la_venta_no_pide_anular_una_salida_perfecta).
+                    warnings.append(
+                        f"La etapa {STAGE_LABELS[stage]} de intersede queda en "
+                        f"{float(after):g} kg tras esta salida. Registre el "
+                        "Traslado a crisoles (Salidas de Plomo → Crisol)."
+                    )
+                add_kg_movement(
+                    db,
+                    organization_id=organization_id,
+                    account=account,
+                    delta_kg=-kg,
+                    transaction_date=liq_dt,
+                    description=desc,
+                    source_type=KG_SOURCE_TYPE,
+                    source_id=delivery.id,
+                    stage=stage,
+                    created_by=user_id,
+                )
 
     def _bill_and_split(
         self,
@@ -474,6 +666,20 @@ class WillardDeliveryService:
     ) -> None:
         from app.services.money_movement import money_movement
 
+        # CC-009: en una VENTA, Willard paga el precio del plomo y nada mas
+        # (Hugo 4-sep: "de venta normal, solamente el precio de venta. La
+        # maquila solamente aplica para el plomo a devolucion... y el flete
+        # afecta solamente cuando facturamos maquila. En venta no").
+        # El corte va ARRIBA DE TODO a proposito: mas abajo hay un warning de
+        # tarifa faltante que le pediria al usuario anular una salida que esta
+        # perfecta (familia de #100 D10, el mensaje que mandaba al modulo
+        # equivocado). Nada de lo que sigue tiene efectos: son lecturas puras.
+        if delivery.delivery_type == "venta":
+            delivery.maquila_amount = Decimal("0")
+            delivery.freight_amount = Decimal("0")
+            delivery.plant_credit_amount = Decimal("0")
+            return
+
         billing_wh = self._billing_warehouse_id(db, organization_id)
         willard = db.get(ThirdParty, delivery.third_party_id)
 
@@ -485,7 +691,10 @@ class WillardDeliveryService:
 
         maquila_tariff, maquila = _amount(MAQUILA_TARIFF_CODE)
         freight_tariff, freight = _amount(FREIGHT_TARIFF_CODE)
-        credit_tariff, plant_credit = _amount(PLANT_CREDIT_TARIFF_CODE)
+        credit_code = PLANT_CREDIT_TARIFF_BY_TYPE.get(delivery.delivery_type)
+        credit_tariff, plant_credit = (
+            _amount(credit_code) if credit_code else (None, Decimal("0"))
+        )
 
         for tariff, code in (
             (maquila_tariff, MAQUILA_TARIFF_CODE),
@@ -498,6 +707,7 @@ class WillardDeliveryService:
                 )
 
         # (a) Factura a Willard — CxC. NO entra al flujo de caja: es causado.
+        #     Solo llega aca un abono: la venta ya corto arriba.
         for concept, amount, tariff in (
             ("Maquila", maquila, maquila_tariff),
             ("Flete", freight, freight_tariff),
@@ -512,8 +722,8 @@ class WillardDeliveryService:
                 account_id=None,
                 date=liq_dt,
                 description=(
-                    f"{concept} Salida a Willard #{delivery.delivery_number} — "
-                    f"{float(total_kg):g} kg plomo"
+                    f"{concept} Salida de Plomo — {delivery.label} "
+                    f"({float(total_kg):g} kg plomo)"
                 ),
                 third_party_id=delivery.third_party_id,
                 user_id=user_id,
@@ -528,15 +738,153 @@ class WillardDeliveryService:
         delivery.maquila_amount = maquila
         delivery.freight_amount = freight
 
-        # (b) Reparto entre sedes — sin el setting no hay a quien abonarle.
-        if billing_wh is None or plant_credit <= 0:
+        # (b) Reparto entre sedes — en los DOS abonos, cada uno con SU tarifa
+        #     (`PLANT_CREDIT_TARIFF_BY_TYPE`, #109).
+        #
+        #     🔴 SUPERSEDE a CC-009 fila 4 (Hugo 28-ago: en el abono de baterias
+        #     "no se le afecta maquila porque ya la tengo causada"). Johana lo
+        #     corrigio el 16-sep con Hugo presente, y quedo confirmado el 18-sep:
+        #     ademas de los $1.500 del traslado, al FACTURAR el abono Circunvalar
+        #     le reconoce a planta $566/kg fijos y se queda con el resto y con el
+        #     flete entero. El gate sigue siendo por TIPO y sigue ignorando
+        #     `internal_maquila_enabled` (F4a de #107: dos regimenes, no se unen).
+        if credit_code is None or billing_wh is None:
             delivery.plant_credit_amount = Decimal("0")
             return
+        if credit_tariff is None:
+            # D4d: facturar y repartir son independientes de descargar kg. Sin
+            # tarifa los kg ya bajaron; lo que no puede pasar es que el reparto
+            # falte EN SILENCIO — antes de #109 este camino no decia nada.
+            warnings.append(
+                f"Sin tarifa vigente '{credit_code}': no se le repartio a planta "
+                "su parte de esta salida. Configurela en Config → Tarifas y "
+                "anule/rehaga la salida."
+            )
+            delivery.plant_credit_amount = Decimal("0")
+            return
+        if plant_credit <= 0:
+            delivery.plant_credit_amount = Decimal("0")
+            return
+
+        # Q-27 volvio al abono una TAJADA de la maquila (hoy $1.248 de los
+        # $2.097 en materiales y $566 en baterias, #109), asi que existe un
+        # invariante: el abono no puede superar lo facturado. En el codigo son
+        # dos tarifas sin relacion, y si divergen en Config la sede que factura
+        # queda en perdida en silencio — la forma exacta del defecto de #100
+        # D13, por la otra puerta. Avisa, no bloquea (#17/#76).
+        if plant_credit > maquila:
+            # `_fmt_money` y no un f-string: `f"${x:,.0f}"` imprime $75,000 —
+            # separador ingles. En formato colombiano eso se lee 75 pesos con
+            # decimales. Es "el formateador que miente" (#102) y lo atrapo el
+            # test al exigir el NUMERO, no solo que el aviso existiera.
+            from app.services.obligation_interest import _fmt_money
+
+            warnings.append(
+                f"El abono a planta ({_fmt_money(plant_credit)}) supera la "
+                f"maquila facturada a Willard ({_fmt_money(maquila)}): la sede "
+                "que factura queda en perdida en esta salida. Revise "
+                f"'{credit_code}' y 'maquila_willard' en Config → Tarifas."
+            )
         self._emit_split_pair(
             db, delivery, plant_credit, credit_tariff, billing_wh,
             organization_id, user_id, liq_dt,
         )
         delivery.plant_credit_amount = plant_credit
+
+    def _emit_crucible_differential(
+        self,
+        db: Session,
+        delivery: WillardDelivery,
+        kg_puro: Decimal,
+        organization_id: UUID,
+        user_id: Optional[UUID],
+        liq_dt: datetime,
+        warnings: list[str],
+    ) -> None:
+        """
+        #107 D4 — el diferencial del crisol ($300/kg, `maquila_crisol`) se causa
+        al VENDER plomo puro (Hugo 28-ago :425 "cuando resta ese plomo puro, le
+        abonas un diferencial a la maquila de planta que es de 300"), de planta
+        a Circunvalar: `internal_maquila_income` (sede de la salida) /
+        `internal_maquila_expense` (sede que factura), categoria sistema
+        "Crisol Refinacion" (spec §5). Sin tarifa o sin sede de facturacion los
+        kg ya salieron y se avisa (D4d de #100).
+
+        ⚠️ F4a de QA — en este modulo conviven DOS regimenes de gate y NO se
+        unifican: el par de `abono_material` (`_emit_split_pair`, reparto del
+        ingreso de Willard) es por TIPO e IGNORA `internal_maquila_enabled`;
+        este par y el del retorno de dross (crucible_charge) son por FLAG.
+        Contraste a tres bandas en los tests: T5b + T7b (flag OFF, sin par) +
+        test_par_emite_en_abono_material (flag OFF, par emitido).
+        """
+        delivery.crucible_amount = Decimal("0")
+        if delivery.delivery_type != "venta" or kg_puro <= 0:
+            return
+        if not get_org_setting(db, organization_id, "internal_maquila_enabled"):
+            return
+        billing_wh = self._billing_warehouse_id(db, organization_id)
+        if billing_wh is None:
+            warnings.append(
+                "Sin sede de facturacion configurada: el plomo puro salio sin "
+                "causar el diferencial del crisol. Definala en la configuracion "
+                "de la organizacion."
+            )
+            return
+        tariff = self._current_tariff(db, organization_id, CRUCIBLE_TARIFF_CODE)
+        if tariff is None:
+            warnings.append(
+                f"Sin tarifa vigente '{CRUCIBLE_TARIFF_CODE}': el plomo puro salio "
+                "sin causar el diferencial del crisol. Configurela en Config → Tarifas."
+            )
+            return
+        amount = (kg_puro * tariff.unit_price_cop).quantize(Decimal("0.01"))
+        if amount <= 0:
+            return
+        from app.services.money_movement import money_movement
+        from app.services.transfer import TransferService
+
+        category = TransferService()._get_or_create_maquila_category(
+            db,
+            organization_id,
+            name=CRUCIBLE_CATEGORY_NAME,
+            description="Diferencial de refinacion en crisol al vender plomo puro (SAC, #107)",
+        )
+        desc = (
+            f"Diferencial crisol — Salida de Plomo — {delivery.label} "
+            f"({float(kg_puro):g} kg puro)"
+        )
+        mm_exp = money_movement._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="internal_maquila_expense",
+            amount=amount,
+            account_id=None,
+            date=liq_dt,
+            description=desc,
+            user_id=user_id,
+            expense_category_id=category.id,
+            source_type=KG_SOURCE_TYPE,
+            source_id=delivery.id,
+            tariff_id=tariff.id,
+            warehouse_id=billing_wh,
+        )
+        mm_inc = money_movement._create_movement(
+            db=db,
+            organization_id=organization_id,
+            movement_type="internal_maquila_income",
+            amount=amount,
+            account_id=None,
+            date=liq_dt,
+            description=desc,
+            user_id=user_id,
+            source_type=KG_SOURCE_TYPE,
+            source_id=delivery.id,
+            tariff_id=tariff.id,
+            warehouse_id=delivery.warehouse_id,
+        )
+        mm_exp.transfer_pair_id = mm_inc.id
+        mm_inc.transfer_pair_id = mm_exp.id
+        delivery.crucible_amount = amount
 
     def _emit_split_pair(
         self,
@@ -550,16 +898,48 @@ class WillardDeliveryService:
         liq_dt: datetime,
     ) -> None:
         """
-        La porcion de la maquila que Circunvalar le abona a planta. Cuenta y
-        tercero NULL: no es plata que se mueva, es como se reparte el ingreso
-        entre sedes (#84).
+        La porcion que Circunvalar le abona a planta al facturar un abono
+        (#109: los DOS abonos, cada uno con su tarifa — ver
+        `PLANT_CREDIT_TARIFF_BY_TYPE`; el texto de CC-009 de abajo se conserva
+        como historia y queda superseded en lo que toca al abono de baterias).
+        Cuenta y tercero NULL: no es plata que se mueva, es como
+        se reparte el ingreso entre sedes (#84).
 
-        D11 — este par NO se gatea con `internal_maquila_enabled`. Ese flag
-        gobierna el cobro del TRASLADO, que segun Hugo (24-ago) cobra en el
-        momento equivocado: la maquila se gana cuando el plomo vuelve a Willard.
-        SAC lo apaga, y si compartieramos el gate apagarlo mataria tambien este
-        reparto — el modo de falla de #94/#99 donde "el guard funciona" y "lo
-        apague para todos" se ven identicos.
+        🔴 CC-009 (2026-09-03) SUPERSEDE a D11. D11 decia que este par se emite
+        en TODA entrega y que por eso no comparte gate con
+        `internal_maquila_enabled`. La demo del 28-ago lo desmintio: en venta y
+        en abono de baterias el material paso por Circunvalar, asi que la
+        maquila interna YA se causo al trasladar (Hugo: "no se le afecta maquila
+        porque ya yo la maquila la tengo causada"). Repetirla aqui la cobraria
+        dos veces. Los drosses son la excepcion porque llegan derecho a planta
+        y nunca hubo traslado.
+
+        El gate por TIPO se conserva separado del flag a proposito: son dos
+        preguntas distintas (que tipo de salida reparte / si el traslado cobra),
+        y compartirlo reproduciria el modo de falla de #94/#99.
+
+        Q-27 CERRADA (Hugo, 4-sep): esta rama existe y el numero es $1.500/kg
+        — segun Hugo, al facturarle la maquila a Willard una parte se le abona
+        a planta y la otra le queda a Circunvalar. Parafrasis a proposito: cita
+        sin fuente en el repo; si Daniel aporta el WhatsApp se restaura textual
+        con fecha.
+        No contradice a Johana (3-sep): ella dice que Circunvalar no le debe una
+        MAQUILA a planta, y es cierto — no hubo traslado; esto es repartir el
+        ingreso de Willard, que es otra cosa.
+
+        ⚠️ Abierto, y a proposito: `abono_planta_por_kg` vale hoy lo mismo que
+        `maquila_intersede_cv_jm` ($1.500) y son DOS filas. Nadie ha dicho que
+        sean el mismo numero — es una coincidencia sin verificar, la tercera de
+        este ciclo con ese valor. Si Hugo confirma que se mueven juntas, se
+        unifican; mientras tanto, quien edite una en Config debe mirar la otra.
+
+        🔴 #109 SUPERSEDE los parrafos «Q-27 CERRADA» y «Abierto» de arriba
+        (Q-27 resuelta el 18-sep a favor de Johana, que dicto las cifras el 16
+        y el 18): el reparto de materiales es $1.248/kg y el de baterias
+        $566/kg, cada uno con su tarifa (`PLANT_CREDIT_TARIFF_BY_TYPE`). Ya no
+        coincide con la maquila intersede ($1.500), asi que el aviso de "mirar
+        la otra" perdio su objeto (Q-29 superada). Se conservan como historia,
+        igual que en el seeder.
         """
         from app.services.money_movement import money_movement
         from app.services.transfer import TransferService
@@ -568,7 +948,7 @@ class WillardDeliveryService:
             db, organization_id
         )
         desc = (
-            f"Abono a planta — Salida a Willard #{delivery.delivery_number}"
+            f"Abono a planta — Salida de Plomo — {delivery.label}"
         )
         mm_exp = money_movement._create_movement(
             db=db,
@@ -629,7 +1009,7 @@ class WillardDeliveryService:
             inventory_adjustment.annul(
                 db,
                 adj.id,
-                f"Anulacion de Salida a Willard #{delivery.delivery_number}",
+                f"Anulacion de Salida de Plomo — {delivery.label}",
                 organization_id,
                 user_id=user_id,
                 commit=False,
@@ -666,12 +1046,22 @@ class WillardDeliveryService:
             mv.annulled_at = now
             mv.annulled_by = user_id
             mv.annulled_reason = (
-                f"Anulacion de Salida a Willard #{delivery.delivery_number}"
+                f"Anulacion de Salida de Plomo — {delivery.label}"
             )
+
+        # 5. IVA y retenciones (CC-013 D11 — el segundo de los dos unicos
+        #    puntos que revierten). Las filas son del DELIVERY, asi que el
+        #    cancel de la venta derivada no las toca: no hay doble reversion.
+        from app.services.document_tax import revert_taxes
+
+        tax_customer, _ = self._tax_context(db, delivery)
+        revert_taxes(db, tax_customer, willard_delivery_id=delivery.id)
 
         delivery.maquila_amount = Decimal("0")
         delivery.freight_amount = Decimal("0")
         delivery.plant_credit_amount = Decimal("0")
+        delivery.crucible_amount = Decimal("0")
+        delivery.billing_warehouse_id = None
 
     # ================================================================== #
     # Validaciones y helpers                                              #
@@ -723,7 +1113,7 @@ class WillardDeliveryService:
                 faltantes.append(material.code if material else str(line.material_id))
         if faltantes:
             raise _err(
-                "Sin peso de báscula no se puede revisar. Falta el peso de: "
+                "Sin peso de báscula no se puede liquidar. Falta el peso de: "
                 + ", ".join(faltantes)
             )
 
@@ -764,15 +1154,149 @@ class WillardDeliveryService:
             )
 
     def _require_customer(self, db: Session, delivery: WillardDelivery) -> None:
+        self._require_customer_id(db, delivery.third_party_id)
+
+    def _require_customer_id(self, db: Session, third_party_id: UUID) -> None:
         from app.services.third_party import third_party as tp_service
 
-        tp = db.get(ThirdParty, delivery.third_party_id)
+        tp = db.get(ThirdParty, third_party_id)
+        # QA F4 (#104): un cliente puede DESACTIVARSE entre la captura y la
+        # liquidacion (se permite con saldo 0); sin este check el 400 salia desde
+        # adentro de la venta derivada, sin decir donde arreglarlo.
+        if tp is not None and not tp.is_active:
+            raise _err(
+                f"'{tp.name}' está inactivo, así que no se le puede facturar una "
+                "venta. Reactívelo en Terceros y vuelva a intentarlo."
+            )
         if tp is not None and tp_service.has_behavior_type(db, tp.id, ["customer"]):
             return
+        # El mismo texto sirve al capturar y al liquidar: dice DONDE arreglarlo
+        # y no presume en que paso estamos ("vuelva a liquidar" mentia al capturar).
         raise _err(
             f"'{tp.name if tp else 'El tercero'}' no está marcado como cliente, "
-            "así que no se le puede facturar la venta. Agréguele la categoría de "
-            "cliente en Terceros y vuelva a liquidar."
+            "así que no se le puede facturar una venta. Agréguele la categoría de "
+            "cliente en Terceros y vuelva a intentarlo."
+        )
+
+    def _lead_products(
+        self, db: Session, material_ids: list[UUID], organization_id: UUID
+    ) -> dict[UUID, str]:
+        """`lead_product` por material (#103 D1). Sin fila de perfil no hay
+        entrada en el dict: el consumidor lee 'none' (fail-closed)."""
+        if not material_ids:
+            return {}
+        rows = db.execute(
+            select(MaterialKgProfile.material_id, MaterialKgProfile.lead_product).where(
+                MaterialKgProfile.organization_id == organization_id,
+                MaterialKgProfile.material_id.in_(material_ids),
+            )
+        ).all()
+        return {r[0]: (r[1] or "none") for r in rows}
+
+    @staticmethod
+    def _stage_of(lead: Optional[str]) -> str:
+        """Etapa de intersede que descarga cada plomo (#107 D4): puro -> crisol,
+        crudo -> horno. 'none' no llega aqui: el validador lo rechazo antes."""
+        return "crisol" if lead == "puro" else "horno"
+
+    def _validate_lead_products(
+        self,
+        db: Session,
+        material_ids: list[UUID],
+        delivery_type: str,
+        organization_id: UUID,
+    ) -> list[str]:
+        """
+        Solo el plomo entregable sale hacia Willard.
+
+        UN validador para los TRES puntos de entrada (`create`, `update`,
+        `liquidate`), calco de `_validate_willard_capture` (#81). Eran cuatro
+        hasta que `review` desaparecio (Hugo, demo 28-ago). Si viviera solo en la
+        liquidacion, el material equivocado se aceptaria en el patio y el error
+        saldria dias despues, con el camion ido.
+
+        `annul` queda fuera A PROPOSITO (#99): anular no valida — una salida vieja
+        tiene que poder anularse aunque su material hoy no pasara el guard.
+
+        ⚠️ La clasificacion sale de `lead_product` y de NADA MAS. NO reutilizar
+        "sin formula" (el aluminio y el plastico tampoco tienen) ni la categoria
+        (la categoria "Plomo" de SAC contiene cajas plasticas): ese atajo ES el
+        defecto que este guard cierra.
+        """
+        if not material_ids:
+            return []
+
+        leads = self._lead_products(db, material_ids, organization_id)
+        warnings: list[str] = []
+        for material_id in material_ids:
+            # Sin fila de perfil = sin marcar = bloqueado (fail-closed): el modo
+            # de falla correcto es no dejar pasar, con un mensaje que dice donde
+            # marcarlo, en vez de seguir calculando mal en silencio.
+            lead = leads.get(material_id, "none")
+            material = db.get(Material, material_id)
+            label = (
+                f"'{material.code} {material.name}'" if material else "El material"
+            )
+            if lead == "none":
+                raise _err(
+                    f"{label} no esta marcado como plomo entregable a Willard. "
+                    "Solo el plomo crudo o puro salda la deuda. Marquelo en "
+                    "Config -> Materiales (kg) si corresponde."
+                )
+            if lead == "puro" and delivery_type in ("abono_bateria", "abono_material"):
+                # Avisa, no bloquea: entregar puro NO fabrica un servicio (la
+                # fundicion ocurrio, la maquila facturada es trabajo real); lo
+                # raro es regalar el margen de refinacion. Hugo describe el puro
+                # como lo que se vende, no como algo prohibido en un abono.
+                warnings.append(
+                    f"Esta abonando con PLOMO PURO ({label}). El puro normalmente "
+                    "se vende; el abono se hace con crudo."
+                )
+        return warnings
+
+    def _validate_willard_holder(
+        self,
+        db: Session,
+        third_party_id: UUID,
+        delivery_type: str,
+        organization_id: UUID,
+    ) -> None:
+        """
+        En un ABONO el tercero tiene que ser el titular de la cuenta kg que se
+        descarga. Las cuentas se resuelven por `account_type`, NO por el tercero
+        del documento: sin esto una salida contra otro tercero descarga la deuda
+        de Willard y le factura la maquila y el flete a ese otro.
+
+        La VENTA queda fuera y no es un olvido: descarga `intersede`, que por
+        CHECK no puede tener titular, y ya tiene su propia regla
+        (`_require_customer`) — venderle plomo a otro cliente es legitimo.
+
+        Si la cuenta todavia no existe NO se bloquea la captura: sin cuenta la
+        salida no se puede liquidar, o sea que no hay efecto financiero que
+        proteger, y reclamar la configuracion faltante es tarea de la liquidacion.
+        """
+        if delivery_type not in ("abono_bateria", "abono_material"):
+            return
+        account_type = next(
+            (a for a in DISCHARGE_MAP[delivery_type] if a.startswith("willard_")),
+            None,
+        )
+        if account_type is None:
+            return
+        try:
+            account = self._resolve_kg_account(db, organization_id, account_type)
+        except HTTPException:
+            return
+        if account.third_party_id is None or str(account.third_party_id) == str(
+            third_party_id
+        ):
+            return
+        holder = db.get(ThirdParty, account.third_party_id)
+        raise _err(
+            "El abono salda la deuda en kg de "
+            f"{holder.name if holder else 'el titular de la cuenta'}, "
+            "asi que la salida tiene que ir a ese mismo tercero.",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
 
     def _validate_third_party(
@@ -853,16 +1377,16 @@ class WillardDeliveryService:
             .limit(1)
         ).scalar_one_or_none()
 
-    def _next_number(self, db: Session, organization_id: UUID) -> int:
-        lock_id = hash(str(organization_id)) % (2**63)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-        current = db.execute(
-            select(func.max(WillardDelivery.delivery_number)).where(
-                WillardDelivery.organization_id == organization_id
-            )
-        ).scalar_one_or_none()
-        return (current or 0) + 1
-
+    @staticmethod
+    def _lock_key(organization_id: UUID, series: str) -> int:
+        """Llave ESTABLE del advisory lock (#105 D3, F2 de QA) — hoy delega en el
+        helper unico; la cadena (`org:willard_delivery:serie`) es la misma que
+        #105 estreno, asi que el test que la compara contra crc32 sigue valiendo.
+        """
+        return sequence_lock_key(organization_id, "willard_delivery", series)
+    def _next_number(self, db: Session, organization_id: UUID, series: str) -> int:
+        """Siguiente numero de la SERIE (#105 D2): venta y abono cuentan aparte."""
+        return next_number(db, organization_id, "willard_delivery", series)
     def _get_or_404(
         self, db: Session, delivery_id: UUID, organization_id: UUID
     ) -> WillardDelivery:

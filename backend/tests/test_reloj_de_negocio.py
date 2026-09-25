@@ -139,6 +139,17 @@ RELOJES_PERMITIDOS_TESTS: dict[str, tuple[int, str]] = {}
 class TestInventarioDeRelojes:
     """🔴 La guarda de fondo: nadie deriva un dia del reloj sin declararlo."""
 
+    # ⚠️ EL PATRON LEE EL TEXTO CRUDO, COMENTARIOS INCLUIDOS (2026-09-21, CC-014).
+    # Escribir la forma prohibida DENTRO de un comentario —"nunca uses X"— tambien
+    # revienta la guarda. Paso: un comentario de `schemas/lead_market_price.py` que
+    # nombraba las dos formas malas, con el codigo usando `business_today()` bien.
+    # NO se arregla haciendo que la guarda ignore comentarios: eso agrega maquinaria
+    # (tokenizar) a un escaner que hoy no tiene ninguna, y su modo de falla nuevo
+    # seria SILENCIOSO (stripping mal hecho = codigo real que deja de mirarse),
+    # mientras que el actual es RUIDOSO. Se prefiere el falso positivo ruidoso.
+    # La regla para quien documente: describe la regla sin escribir el token.
+    # `app/utils/dates.py` los nombra y por eso esta excluido: es la implementacion.
+    #
     # ⚠️ El `(?:[^()]|\([^()]*\))*` NO es adorno: con un `[^)]*` ingenuo,
     # `datetime.now(ZoneInfo("America/Bogota")).date()` SE ESCAPA — el `[^)]*`
     # no cruza el parentesis interno. Ese agujero escondio 6 sitios (5 en

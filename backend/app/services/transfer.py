@@ -24,10 +24,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, joinedload
 
+from app.utils.advisory_locks import next_number, lock_sequences
 from app.models.exception_task import DiscrepancyTask
 from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.inventory_movement import InventoryMovement
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
+from app.services.kg_ledger import add_kg_movement
 from app.models.material import Material
 from app.models.money_movement import (
     INTERNAL_MAQUILA_MOVEMENT_TYPES,
@@ -316,6 +318,14 @@ class TransferService:
             str(get_org_setting(db, organization_id, "transfer_tolerance_pct"))
         )
 
+        # Declaracion anticipada de locks (plan advisory-locks D4): la recepcion
+        # numera ajustes (merma) y movimientos (par de maquila) — por linea, en
+        # ese orden, que es el INVERSO del canonico. Tomandolos aqui en orden
+        # canonico, las adquisiciones de abajo son re-entrantes y ningun otro
+        # flujo (p. ej. una Entrada liquidando con pago inmediato) puede
+        # esperarnos en cruz.
+        lock_sequences(db, organization_id, "movement_number", "adjustment_number")
+
         warnings: list[str] = []
         for rl in data.lines:
             line = lines_by_id[rl.transfer_line_id]
@@ -516,22 +526,23 @@ class TransferService:
         line.kg_lead_equivalent = kg_equiv
 
         # (b) intersede_send — kg POR LINEA (D5/E2), fecha canonica receipt (E11)
-        db.add(
-            KgLedgerMovement(
-                organization_id=organization_id,
-                account_id=kg_account.id,
-                delta_kg=kg_equiv,
-                transaction_date=receipt_date,
-                description=(
-                    f"Traslado #{transfer.transfer_number} — {material.code} x "
-                    f"{float(effective_qty):g} {material.default_unit or 'kg'}"
-                ),
-                source_type=KG_SOURCE_TYPE,
-                source_id=transfer.id,
-                conversion_formula_snapshot=line.conversion_formula_snapshot,
-                created_by=user_id,
-                status="confirmed",
-            )
+        # #107 D1: el crudo que llega a planta entra a la etapa HORNO de la
+        # cuenta intersede. Escritor unico del libro (F1 de QA).
+        add_kg_movement(
+            db,
+            organization_id=organization_id,
+            account=kg_account,
+            delta_kg=kg_equiv,
+            transaction_date=receipt_date,
+            description=(
+                f"Traslado #{transfer.transfer_number} — {material.code} x "
+                f"{float(effective_qty):g} {material.default_unit or 'kg'}"
+            ),
+            source_type=KG_SOURCE_TYPE,
+            source_id=transfer.id,
+            stage="horno",
+            conversion_formula_snapshot=line.conversion_formula_snapshot,
+            created_by=user_id,
         )
 
         # (c) par de maquila — inline gate (E10), embudo _create_movement (#83)
@@ -633,6 +644,11 @@ class TransferService:
         warnings: list[str] = []
         now = datetime.now(timezone.utc)
         receipt_date = transfer.received_date or self._today_noon()
+
+        # Declaracion anticipada de locks (plan advisory-locks D4): resolver
+        # numera merma (decrease) y excedente (increase) ANTES del par de
+        # maquila de la linea liberada — mismo orden inverso que receive.
+        lock_sequences(db, organization_id, "movement_number", "adjustment_number")
 
         for rl in data.lines:
             line = lines_by_id.get(rl.transfer_line_id)
@@ -1077,12 +1093,19 @@ class TransferService:
             )
         return tariff
 
-    def _get_or_create_maquila_category(self, db: Session, organization_id: UUID):
-        """Categoria sistema (patron #78/#83) — INDIRECTA, reclasificable."""
+    def _get_or_create_maquila_category(
+        self,
+        db: Session,
+        organization_id: UUID,
+        name: str = MAQUILA_CATEGORY_NAME,
+        description: str = "Maquila intersede causada al recibir traslados dos pasos (SAC)",
+    ):
+        """Categoria sistema (patron #78/#83) — INDIRECTA, reclasificable.
+        Parametrizada en #107 para la hermana "Crisol Refinacion" (spec §5)."""
         from app.models.expense_category import ExpenseCategory
         from app.services.retention_entities import normalize_entity_name
 
-        target = normalize_entity_name(MAQUILA_CATEGORY_NAME)
+        target = normalize_entity_name(name)
         candidates = db.execute(
             select(ExpenseCategory).where(
                 ExpenseCategory.organization_id == organization_id,
@@ -1096,8 +1119,8 @@ class TransferService:
 
         cat = ExpenseCategory(
             organization_id=organization_id,
-            name=MAQUILA_CATEGORY_NAME,
-            description="Maquila intersede causada al recibir traslados dos pasos (SAC)",
+            name=name,
+            description=description,
             is_direct_expense=False,
             is_system_entity=True,
         )
@@ -1222,16 +1245,8 @@ class TransferService:
             )
 
     def _generate_transfer_number(self, db: Session, organization_id: UUID) -> int:
-        # Advisory lock por org (patron inbound_order._generate_order_number)
-        lock_id = hash(str(organization_id)) % (2**63)
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
-        max_number = db.scalar(
-            select(func.coalesce(func.max(Transfer.transfer_number), 0)).where(
-                Transfer.organization_id == organization_id
-            )
-        )
-        return int(max_number or 0) + 1
-
+        """Siguiente `transfer_number` de la org: lock estable + MAX+1 en el helper unico (`app/utils/advisory_locks.py`)."""
+        return next_number(db, organization_id, "transfer_number")
     def _get_or_404(
         self,
         db: Session,
