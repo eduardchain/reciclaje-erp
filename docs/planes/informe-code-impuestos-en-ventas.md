@@ -253,7 +253,7 @@ EXIT` declarado antes de la primera descarga.
 | Parity check | **DIFF CERO** — 67 tablas, 300 indices, 367 constraints | `parity_cc013.log` |
 | Migracion | up/down/up limpia en dev; esquema re-creado identico | `migracion_cc013.log` |
 | Smoke POST real | 200, los 4 impuestos EN LA RESPUESTA, delta del cliente exacto. ⚠️ **El PRIMERO devolvio `impuestos devueltos: 0`** porque corrio contra un backend arrancado 5 min ANTES del fix; ese log queda como `smoke_post_real.log` y es el que origino C3 | `smoke_c3.log` (bueno), `smoke_post_real.log` (el vacuo) |
-| Suite completa | **1902 passed, EXIT=0** (0:48:05), 0 FAILED / 0 ERROR / 0 Traceback en todo el recorrido; arbol congelado desde el inicio (0 archivos, control positivo 659) | `suite_cc013_r6.log` |
+| Suite completa | **1908 passed, EXIT=0** (0:55:47), 0 FAILED / 0 ERROR / 0 Traceback en todo el recorrido; 1908 colectados == 1908 pasados; arbol congelado desde el inicio (0 archivos, control positivo 659); el paso 2 del log estampa el sha256 del arbol medido | `suite_cc013_r9.log`, `r9_mtime.log` |
 | ruff | All checks passed | |
 | tsc | limpio | |
 | eslint | 37 = el techo exacto | `frontend_c2.log` |
@@ -410,7 +410,516 @@ cuatro de los cinco motivos son mios:
 | r3 | **CAYO con 2 fallas**, las dos en `TestClaveAditivaCC014`. Cambiar `ALLOWED_ADDED` rompe la guarda que vigila esa lista, que es exactamente para lo que existe. Hallazgo legitimo del gate. |
 | r4 | Verde, pero **C2 toco `app/` y dos `.tsx` despues**, asi que dejo de medir el arbol actual. |
 | r5 | **La mate yo.** A mitad de corrida encontre que el camino de FALLO de `golden_run.sh` estaba roto (`set -e` mata una cadena `a && b && c` cuando el ultimo falla, asi que nunca se llegaba al `EXIT=$?` justo cuando el golden encontraba diffs). Arreglarlo toca `scripts/`, uno de los cinco directorios vigilados. Conservada como `suite_cc013_r5_INVALIDA_arregle_golden_run.log`. |
-| r6 | **La que vale.** 1902 passed, EXIT=0, 0:48:05. Predije el conteo antes de verlo —1896 de la r4 mas los 6 tests de C2— y salio exacto. |
+| r6 | **La que valia hasta la ronda 2.** 1902 passed, EXIT=0, 0:48:05. Predije el conteo antes de verlo —1896 de la r4 mas los 6 tests de C2— y salio exacto. |
+| r7 | Despues de C1–C7 y de la ronda 2 de la pantalla. **1908 passed, EXIT=0**, 1:00:54, arbol congelado. Aca la prediccion **fallo**: ver 9.7. |
+| r8 | Despues de la ronda de QA sobre el addendum (C11/C12/C13/C14/O1/O2). **1908 passed, EXIT=0**, 0:54:44, 19:17:01→20:11:52; 0 FAILED / 0 ERROR / 0 Traceback; 1908 colectados == 1908 pasados; arbol congelado (0 archivos en los cinco directorios, control positivo 659). La prediccion **acerto**, y esta vez la base salio de `git diff 9f2ac23 -- backend/tests/` (6 agregados / 0 eliminados, la misma base de la r7) en vez de la memoria: C11/C12/C13 extienden `t10c`, `t10d` y `t10e` y agregan el helper `_adelantar_reversion`, o sea cero tests nuevos. Durante la corrida solo se tocaron `CLAUDE.md` y este informe, los dos fuera de los cinco directorios y fuera del `rglob` de `test_reloj_de_negocio.py`. Artefactos: `suite_cc013_r8.log`, `r8_mtime.log`. |
+| r9 | **La vigente**, despues de la condicion C15. **1908 passed, EXIT=0**, 0:55:47, 20:21:57→21:17:52; 0 FAILED / 0 ERROR / 0 Traceback; 1908 colectados == 1908 pasados; arbol congelado (0 archivos, control positivo 659). La prediccion **acerto** y salio de DOS mediciones: el `git diff` contra `9f2ac23` (6 agregados / 0 eliminados) **y** el sha256 de los tests, identico al de la r8 con 0 archivos de `tests/` con mtime posterior — o sea que un docstring no podia mover el numero. El log deja escrito que 5433 estaba libre y **estampa el sha256 del arbol que mide**, que al terminar coincide con el arbol. Artefactos: `suite_cc013_r9.log`, `r9_mtime.log`. |
 
 Ningun log invalido se borro: un artefacto invalido borrado es indistinguible
 de uno que nunca existio (#97/#99).
+
+---
+
+## 8. Addendum de la pantalla (2026-09-23) — la base de una tarifa se podia elegir y no corregir
+
+Daniel liquido una venta de $500.000 con IVA y las tres retenciones, y la
+reteIVA precalculo **`2 % de $500.000 = $10.000`**. El calculo era correcto
+**dado lo que decia la tarifa**: el seeder siembra las tres configs **sin
+`base_kind`** (`RETENTION_CONFIGS` solo lleva tipo y `rate_pct`), asi que la
+reteIVA nace sobre el `subtotal` por el `server_default`. Lo que estaba mal era
+que **no habia forma de corregirla**: el dialogo *Editar Tarifa* mandaba
+unicamente el `rate`; el `base_kind` vivia solo en el formulario de CREAR. O
+sea, **el paso 6 del runbook del plan —"las tres tarifas sembradas se ajustan
+desde la pantalla"— era inejecutable para la base.**
+
+El backend lo aceptaba desde el dia uno (`RetentionConfigUpdate.base_kind`, y
+el endpoint lo aplica) y **ese camino no tenia ni un test**: medido con grep,
+`base_kind` aparecia en 3 archivos de `tests/` y ninguno hacia PATCH.
+
+**Arreglo**: el Select de base tambien en el dialogo de editar, **precargado**
+con lo que la tarifa tenga (sin la precarga, guardar el % pisaria la base con
+`subtotal` — peor que el defecto original, porque el usuario cree que
+corrigio algo). Mas **4 tests del PATCH**, con tres defectos plantados:
+
+| Plantado | Que se rompe | Prediccion | Resultado | Artefacto |
+|---|---|---|---|---|
+| P1 | el endpoint ignora `base_kind` | cae solo el test 1 | 1 failed / 2 passed | `plantado_base_editable.log` |
+| P2 | `list_retention_rows` deja de emitir la clave | **al menos** el assert del GET (via compartida) | 1 failed / 22 passed en el archivo entero | `plantado_p2_get_sin_base.log` |
+| P3 | el PATCH trata el ausente como "poner el default" | caen los DOS de PATCH parcial | 2 failed / 2 passed | `plantado_p3_patch_parcial.log` |
+
+Los tres cierran por sha256 y `backend/app/` queda sin diff contra HEAD.
+
+⚠️ **Los dos PATCH parciales son casos DISTINTOS y los dos tienen test**, porque
+`RetentionConfigUpdate` tiene todos los campos `Optional` y eso es contrato del
+API: `{is_active}` a secas es lo que manda el boton Desactivar/Reactivar
+(`toggleActive`), y `{rate_pct}` a secas hoy no lo manda ninguna pantalla pero
+cualquier consumidor puede. P3 tumba los dos, que es la prueba de que ninguno
+sobra.
+
+⚠️ **Lo que NO prueba P2.** Que ningun otro test del repo leyera `base_kind` de
+una **respuesta HTTP** antes de este ciclo sale de un **grep sobre `tests/`**
+—3 archivos lo mencionaban y los tres solo para CREAR—, no de P2, que corrio un
+solo archivo de 23 tests. Dos evidencias distintas y conviene no confundirlas.
+
+⚠️ **Lo que los tests SI prueban y lo que NO** (C2 de QA). Prueban que el PATCH
+cambia la base, que **los dos** PATCH parciales (`{is_active}` y `{rate_pct}`)
+no la pisan, y que una base invalida da 422.
+**No prueban el precalculo de la pantalla de ventas, y no pueden**: en ventas el
+servidor nunca mira la tarifa — `base_kind` llega en el payload
+(`DocumentTaxCreate`) y el frontend lo toma de la fila del GET. Ese eslabon lo
+cierra la pantalla, no la suite.
+
+🔴 **C3 — lo que este arreglo abre en OTRO modulo, y hay que decidirlo antes de
+prod.** Antes, la unica forma de tener una tarifa sobre el IVA era **crearla**,
+y una tarifa nueva nunca habia estado en compras. Ahora una tarifa **existente**
+—que las Entradas puedan estar usando— puede cambiarse de base, y al pasar a
+`iva` **desaparece de las dos pantallas de compras sin ningun mensaje** (filtro
+`base_kind !== "iva"`) y da 422 si alguien la manda por API. El plan ya
+argumento que eso es correcto (una compra de chatarra no lleva IVA), pero ese
+argumento descansa en que la tarifa diga **"sin uso aun"**, y eso se leyo en
+**dev**: prod no se puede consultar desde aca.
+
+**Runbook del paso 6, para Daniel:** antes de corregir la reteIVA en prod,
+mirar en *Tesoreria → Retenciones* de SAC si dice **"sin uso aun"**.
+- Si dice "sin uso aun": corregirla a **15 % sobre el IVA** y listo.
+- Si ya tiene uso: **no tocarla**. Crear una **segunda** reteIVA con concepto
+  (p. ej. "Ventas") y base IVA — la clave unica incluye el concepto (#79 D14),
+  asi que conviven —, y dejar la de compras como esta. La decision es suya.
+
+  🟠 **Consecuencia de esa rama, tambien decision de Daniel**: la tarjeta
+  de impuestos de ventas va a ofrecer **las dos** reteIVA. Se distinguen en la
+  etiqueta (lleva el concepto y el "sobre IVA"), pero si el usuario elige la de
+  compras reproduce los $10.000 del hallazgo. Si se quiere que ventas no ofrezca
+  una reteIVA sobre el subtotal, eso es un filtro nuevo y es decision de
+  producto, no un defecto. ⚠️ **El predicado es la CONJUNCION de las dos
+  cosas** — ocultar `retention_type == "reteiva" AND base_kind == "subtotal"` —
+  y no una sola: solo por tipo esconderia tambien la reteIVA "Ventas" que SI
+  corresponde, dejando a ventas sin ninguna; solo por base esconderia la
+  retefuente y el ICA, que en ventas van sobre el subtotal y son correctas.
+
+  ⚠️ Y un dato que afina la señal del runbook: **"sin uso aun" mide uso en
+  COMPRAS**, porque se calcula contra las entidades `[Retenciones]%`
+  (`retention_entities.py`). Las ventas crean entidades `[Impuestos]%`, asi que
+  **una venta no apaga ese cartel**. Para lo que el paso 6 necesita saber —si la
+  tarifa ya se uso en una compra— es exactamente la señal correcta.
+
+El dialogo avisa en ambar al elegir "El IVA de la factura", en crear y en
+editar con el mismo texto, porque la consecuencia cae en una pantalla distinta
+de donde se toma la decision.
+
+**Numero de referencia para la pantalla**: venta de $500.000, IVA 19 % =
+$95.000, reteIVA al **15 % sobre el IVA** = **$14.250**. Ni $10.000 (2 % del
+subtotal, lo sembrado) ni $1.900 (2 % del IVA). Al liquidar, la fila de
+`document_taxes` queda con `base_amount = 95.000` y `rate = 15`.
+
+⚠️ **Y tres errores mios de la misma familia en esta sesion**, que es la razon
+por la que el addendum existe: le predije a Daniel `$1.900` sin verificar con
+que base estaba configurada la tarifa; le dije que "la pantalla deja elegir la
+base" porque un `grep base_kind` la encontro en el archivo, **sin distinguir
+crear de editar**; y escribi los 3 tests leyendo el ORM, que es el **hueco (c)
+de este mismo ciclo** —lo que esta guardado no es lo que el usuario recibe— y
+lo corrigio QA pidiendo los asserts por HTTP y sobre la fila del GET, que es de
+donde la pantalla precarga. Las tres son *medir una parte y declarar el todo*.
+
+---
+
+## 9. Addendum de la pantalla, ronda 2 (2026-09-23) — el orden del estado de cuenta, y el defecto que estaba en las dos mitades del modulo
+
+Daniel liquido la Salida de Plomo #3 y sus cuatro impuestos aparecieron
+**arriba** de la venta que los genera. El bloque 4b se emite despues del de
+ventas justamente para que eso no pase (#112), asi que el sintoma decia que la
+llave de orden (#96) los estaba subiendo.
+
+### 9.1 Eran DOS campos, no uno, y lo mostro el arreglo a medias
+
+Una Salida tipo venta produce **dos documentos con dos numeraciones propias**:
+la Salida (serie Venta, #3) y la venta derivada (#5). El evento de impuesto
+salia posicionado con los datos de la SALIDA y la venta con los suyos, o sea que
+la llave **comparaba dos secuencias distintas como si fueran la misma escala**.
+
+Mi primer arreglo cambio el numero y **el sintoma no se movio**. La razon esta
+en el orden de la llave: el **instante va ANTES que el numero**, y el impuesto
+traia `delivery.created_at` (el borrador, 07:29) contra `sale.created_at` (la
+liquidacion, 14:52). Un arreglo a medias deja el defecto vivo **con cara de
+arreglado**; lo destapo re-consultar el backend vivo, no releer el codigo.
+
+**La regla que queda: un evento satelite hereda la posicion COMPLETA de su
+documento visible, no una parte de ella.**
+
+### 9.2 El relato de por que vivio escondido era falso. Lo dijo QA y lo medi.
+
+Yo habia escrito —en un comentario del codigo y en el docstring del test— que
+el defecto se escondia porque las dos series venian parejas (#1 → #1) y solo se
+manifestaba al divergir. **Falso, y medido** (`c8_relato_refutado.log`): con el
+codigo original y los numeros en 1 y 1, los impuestos salen primero igual,
+porque **el instante solo ya alcanza** (la captura y la liquidacion son dos
+requests distintos, asi que `delivery.created_at < sale.created_at` **siempre**).
+
+Vivio escondido por otra cosa: **ningun test leia el orden del statement de una
+Salida**. La unica asercion de orden del modulo era `tipos[0]` en T10, que es
+una venta directa.
+
+🔴 **Un comentario que explica mal un defecto guia mal el proximo test** (#97).
+Corregido en los dos lugares, con el artefacto citado en el texto.
+
+### 9.3 El orden colgaba del orden de ejecucion interno. Defecto de CLASE.
+
+Al escribir el test del par de cancelacion aparecio que dentro de la clase 2
+el desempate era `tax.reverted_at` contra `sale.cancelled_at` — o sea **el
+orden en que el servicio ejecuta sus pasos**. Medido: adelantar el paso 5 de
+`_reverse_liquidation` sobre el paso 1 invierte el statement (P4d). Y **el
+mismo acoplamiento estaba en la venta directa** (`sale.cancelled_at` linea 584
+vs `revert_taxes` linea 659), o sea que no era de la Salida: era de clase.
+
+Un orden observable no puede colgar de un detalle que cualquiera reordena en un
+refactor. El par ahora hereda el instante del dueno, con fallback a
+`reverted_at` para un impuesto revertido con su dueno vivo.
+
+### 9.4 El ABONO tenia el mismo sintoma por una causa distinta: la clase
+
+Un abono no deriva venta (#100 D2): su factura son los dos
+`service_income_accrual` de maquila y flete, que son eventos de **tesoreria
+(clase 1)**, y el impuesto salia en la clase **comercial (0)**. La clase se
+compara **antes** que el instante, asi que los impuestos aterrizaban arriba de
+su factura sin que el instante llegara a opinar. Medido antes del arreglo:
+
+```
+['document_tax', 'document_tax', 'service_income_accrual', 'service_income_accrual']
+```
+
+⚠️ **Ningun test mandaba impuestos en un abono.** Esa mitad del modulo no tenia
+ni una asercion encima, y es justo la de la **FE 2118**, la factura de abono
+real de Johana.
+
+El impuesto de un abono hereda ahora la clase, el instante y el numero del
+**ultimo** de sus dos movimientos — del ultimo y no del primero, porque si no
+queda en medio de su propia factura.
+
+### 9.5 Plantado
+
+Matriz de esta ronda. Las predicciones se escribieron en el log **antes** de
+correr, y cada linea deja el **motivo** de la caida (`--tb=line`), no solo el
+hecho.
+
+| # | Defecto plantado | Prediccion | Resultado | Artefacto |
+|---|---|---|---|---|
+| P4a | codigo original: instante y numero propios | CAE | `assert 0 > 2` | `plantado_p4c.log` |
+| P4b | solo el numero heredado | CAE (el instante va antes) | `assert 0 > 2` | idem |
+| P4c | solo el instante heredado | CAE (aca decide el numero) | `assert 0 > 2` | idem |
+| control | P4c **sin** la venta suelta (#1 y #1) | **NO cae** | 1 passed | idem |
+| P4d | reordenar los pasos del servicio | **ya no cae** (ese es el arreglo) | 1 passed | `plantado_p4d.log` |
+| P4e | el par vuelve a su instante propio | CAE | `assert 3 > 5` | idem |
+| P4f | clase 0 en el abono | CAE | `assert 0 > 5` | `plantado_p4f.log` |
+| P4g | clase 1 pero instante propio | CAE | `assert 0 > 5` | idem |
+
+**El control es la mitad que importa**: P4c sin la venta suelta **pasa**, y eso
+es lo que demuestra que la venta suelta no es decoracion del escenario sino la
+premisa que hace que el numero llegue a decidir algo. Por eso el guard de
+premisa del test es `entrega.delivery_number < venta.sale_number` y no `!=`: el
+numero viejo desordena **solo en esa direccion**, y con la contraria el test
+pasaria sin discriminar.
+
+⚠️ **El primer intento del control no midio nada**: neutralice la venta suelta
+con una regex que partio el archivo y pytest murio con `SyntaxError`. Se vio
+solo porque pytest imprime lo que recolecto. Re-hecho sin regex, sobre una
+copia del archivo. Es la familia de siempre — *un gate que no corrio se ve
+igual que uno que paso* (#97/#99) — y esta vez se cayo del lado ruidoso.
+
+### 9.6 Alcance
+
+`money_movements.py` es camino **compartido**, asi que la suite completa es
+gate. **El golden no observa esta superficie**: el cambio solo corre cuando hay
+filas en `document_taxes`, y las 6 orgs que no son SAC tienen **cero**. La
+corrida de gates de la seccion 5 sigue siendo la vigente para el golden.
+
+---
+
+### 9.7 La suite r7, y una prediccion que fallo por la BASE
+
+**Resultado: 1908 passed, EXIT=0**, 17:46:44 → 18:47:45 (1:00:54), a archivo en
+`suite_cc013_r7.log` con el `EXIT=$?` capturado DENTRO del bloque. Arbol
+congelado durante la corrida: **0 archivos** con mtime posterior al inicio sobre
+los cinco directorios vigilados, con control positivo de **659** (el mismo
+`find` con `-newermt "2020-01-01"`, que tiene que dar cientos) y el conteo por
+ruta impreso por separado. `DIRS` como arreglo de zsh, no como cadena.
+
+**La prediccion, escrita en el log ANTES de lanzar, decia 1903. Salieron 1908.**
+
+El error no estuvo en el resultado sino en la **base**. Yo sume "1902 de la r6
+mas 1 test nuevo". La aritmetica real es 1902 + **6**, y los seis salen
+nombrados de un comando, no de la memoria:
+
+```
+git diff 9f2ac23 -- backend/tests/ | grep -E "^\+ *(async )?def test_"
+```
+
+| Test | Archivo | De donde salio |
+|---|---|---|
+| `test_el_patch_cambia_la_base_y_el_porcentaje` | `test_purchase_retentions.py` | C1–C7 |
+| `test_desactivar_y_reactivar_NO_pisa_la_base` | `test_purchase_retentions.py` | C1–C7 |
+| `test_patch_solo_del_porcentaje_NO_pisa_la_base` | `test_purchase_retentions.py` | C1–C7 |
+| `test_una_base_invalida_se_rechaza` | `test_purchase_retentions.py` | C1–C7 |
+| `test_t10d_el_impuesto_de_una_SALIDA_va_despues_de_su_venta_derivada` | `test_sac_impuestos_ventas.py` | ronda 2 |
+| `test_t10e_los_impuestos_de_un_ABONO_van_despues_de_su_factura` | `test_sac_impuestos_ventas.py` | ronda 2 |
+
+Dos equivocaciones, las dos por recordar en vez de medir: di por incluidos en la
+r6 los **4 tests de C1–C7** (la r6 corrio antes de ese addendum) y describi
+`t10d` como una *extension* de un test existente cuando el diff lo muestra como
+un `+def test_` entero.
+
+Dos controles cierran que no falte ni sobre nada:
+
+- **0 tests eliminados** en el mismo diff, o sea que ninguno de los 6 es el
+  rename de otro que desaparecio.
+- **`pytest --collect-only -q` da 1908**, medicion independiente del diff, e
+  igual a los 1908 que pasaron: cero saltados escondidos detras del numero.
+
+**La regla que deja: la base de una prediccion sale de un comando** —
+`git diff <commit-del-numero-anterior> -- tests/` — **y no de la memoria de que
+se agrego.** Predecir contra una base recordada convierte el ejercicio en un
+sorteo: acierta cuando la memoria acierta, y su fallo no dice nada del codigo.
+
+Aun asi la disciplina hizo su trabajo. El numero estaba escrito antes de correr,
+asi que la diferencia **obligo a medir de donde salian los 5 antes de tocar
+git**, en vez de mirar un 1908 verde, darlo por bueno y descubrir despues que
+sobraban tests que nadie sabia de donde venian.
+
+---
+
+## 10. Ronda de QA sobre el addendum (2026-09-23) — cuatro condiciones, y ninguna la vio el plan
+
+QA leyo el addendum de la §9 y devolvio cuatro condiciones. Tres de ellas
+—C11, C12, C13— son la misma familia: **un test que dice medir algo y no lo
+mide**. La cuarta, C14, es una cita mia sin artefacto.
+
+### 10.1 C13 — P4e no medía la herencia, y mi propio log lo decia
+
+La §9.3 cerro el acoplamiento haciendo que el par de cancelacion herede el
+instante de su dueno en vez de usar `tax.reverted_at`. El comentario del test
+afirmaba que **P4e** (quitar la herencia) era la plantada que medía ese bloque.
+
+No lo es. Con el orden natural de los pasos, `tax.reverted_at` se estampa
+DESPUES de `sale.cancelled_at`, asi que los dos criterios —heredar, o usar el
+propio— producen el MISMO statement: el par queda debajo de la cancelacion en
+los dos casos y el bloque pasa en verde con la herencia quitada.
+
+Lo mas incomodo es que **el artefacto ya lo decia**: `plantado_p4d.log` muestra
+a P4d dejando de caer al poner la herencia, y quitarla no lo devuelve. Tenia el
+dato y no saque la conclusion.
+
+**Un test de orden sobre eventos que empatan no mide el desempate.** Para
+medirlo hay que separarlos a mano y en la direccion peligrosa. El helper nuevo
+`_adelantar_reversion` pone por ORM el `reverted_at` **un segundo antes** del
+`cancelled_at` de la venta: es exactamente el estado que dejaria un refactor
+que invierta los dos pasos, y es el unico en que los criterios difieren.
+
+Escrito en **t10c** (venta directa, donde el acoplamiento era el mismo por
+CLASE: `sale.cancelled_at` en la linea 584 contra `revert_taxes` en la 659) y
+en **t10d** (Salida con venta derivada). Medido:
+
+| plantada | prediccion escrita antes | resultado |
+|---|---|---|
+| P4j — quitar la herencia (`_evt(liq_at, tax.reverted_at, 2, …)`) | caen t10c y t10d | **caen los dos** |
+| control — arbol restaurado | pasan | **3 passed** |
+
+La traza de t10c con P4j puesto muestra el defecto sin ambiguedad: los cuatro
+`document_tax_cancellation` quedan ANTES del `sale_cancellation` de su propia
+venta.
+
+### 10.2 C11 y C12 — el camino de vuelta del abono no lo ejecutaba ningun test
+
+`t10e` liquidaba un abono, miraba el orden y terminaba. Nunca anulaba. O sea
+que `_reverse_liquidation` y `revert_taxes` **en la rama del abono** no tenian
+una sola asercion encima, que es la misma forma del hueco que la §9.4 ya habia
+encontrado en el camino de ida.
+
+El tramo nuevo captura el saldo de Willard ANTES de que exista un impuesto,
+liquida, verifica los cuatro saldos de entidad contra su monto (con
+`assert monto != 0` por delante, para que la comparacion no pueda ser vacua),
+anula, y exige tres cosas: que el par de cancelacion salga, que el orden se
+conserve DESPUES de anulada, y que el saldo vuelva al punto de partida. Los
+cuatro statements de entidad cierran en cero contra su saldo vivo.
+
+Dos plantadas lo miden, y las dos caen:
+
+| plantada | prediccion escrita antes | resultado |
+|---|---|---|
+| P4h — filtrar el lookup de la factura por `status` confirmado | cae el orden POST-anulacion | **cae**: `assert 0 > 5`, los 4 impuestos sobre las 2 facturas |
+| P4i — no pasarle el cliente a `revert_taxes` | cae el invariante de #55, con corrido 0 contra vivo **3.234.502,74** | **cae con ese numero exacto** |
+
+El numero de P4i se derivo antes de correr, no se recordo: anulado el abono,
+maquila y flete SI se revierten en el paso 4, asi que lo que queda pegado al
+cliente es `IVA − ReteFuente − ReteIVA − ICA` de la FE 2118 =
+`5.638.124,04 − 1.186.973,48 − 845.718,61 − 370.929,21` = **3.234.502,74**. El
+assert lo imprime igual.
+
+P4h ademas explica por que el lookup de la factura del abono **no filtra por
+status**, que a primera vista parece un olvido: anulada la Salida sus dos
+accruals quedan `annulled` pero siguen en el statement, **cada uno como UN
+evento anulado de clase 1**. El bloque 1 emite un evento por movimiento con su
+propio `status` y no emite par de cancelacion, a diferencia de los bloques
+comerciales; la lista post-anulacion del propio artefacto de P4h lo muestra
+—dos `service_income_accrual` y ningun par de ellos—. O sea que la factura
+sigue visible y el impuesto tiene que seguir debajo de ella. Con el filtro puesto el lookup devuelve None, el impuesto cae al fallback
+de clase 0 y se sube por encima de su propia factura anulada. La razon quedo
+escrita en el codigo, citando el test que la fija.
+
+### 10.3 C14 — una cita medida de memoria
+
+El docstring de `t10e` afirmaba una lista de eventos "medida antes del
+arreglo": dos impuestos sobre dos facturas. Esa lista no salia de ningun log.
+El unico artefacto era P4f, que es otra cosa.
+
+Re-medida contra `9f2ac23` con el mismo test (`c14a_codigo_previo.log`), lo que
+el codigo previo produce son los **cuatro** impuestos sobre las **dos**
+facturas, con `assert 0 > 5`. Corregido, citando el log.
+
+**Corregir una cita es escribir una, y se verifica igual.** Es la misma leccion
+de la §9.2 —donde el relato de por que el defecto vivio escondido resulto
+falso— aplicada al arreglo de ese mismo relato.
+
+⚠️ Y el script que produjo esa medicion **tenia roto su camino de
+restauracion**: un `cd backend` dentro del bloque dejaba sin efecto el `cp`
+relativo del cierre mientras el script imprimia "restaurado". El codigo previo
+quedo pegado en el arbol cerca de un minuto. Es, otra vez, la familia de
+`golden_run.sh`: **el camino de fallo de una guarda solo se ejercita cuando
+falla, asi que hay que ejercitarlo a proposito**. Desde esta ronda el cierre de
+una ventana de plantadas compara contra un sha256 **escrito antes de plantar**,
+y la palabra "restaurado" es el RESULTADO de esa comparacion, no una frase que
+el script imprime al terminar.
+
+### 10.4 La ventana de plantadas
+
+Las tres plantadas de esta ronda corrieron en **una sola ventana** con `:8001`
+detenido: ese proceso sirve la pantalla de Daniel con `--reload` sobre el arbol
+de trabajo, o sea que una plantada viva es codigo ejecutandose en su pantalla.
+
+- Ventana: **19:14:30 → 19:16:08**, un minuto y treinta y ocho segundos.
+- Hash del arbol `backend/app` escrito ANTES de plantar:
+  `115d5568…9584f93c`. Al cerrar, medido: **identico**, mas `cmp` por archivo y
+  `git status` sin rastro.
+- Control con el arbol restaurado: **3 passed**.
+- `:8001` relanzado con procedencia en el log: PID 15892, arrancado 19:16:08,
+  posterior al ultimo cambio en `app/` (19:15:36), `HTTP 200` en health.
+
+Artefacto: `plantado/plantado_c13.log`.
+
+### 10.5 La suite r8, y una prediccion que esta vez salio de un comando
+
+**Resultado: 1908 passed, EXIT=0**, 19:17:01 → 20:11:52 (0:54:44), a archivo en
+`suite_cc013_r8.log` con el `EXIT=$?` capturado DENTRO del bloque. En todo el
+recorrido, no solo en el resumen: **0 FAILED, 0 ERROR, 0 Traceback**. Y
+**1908 colectados == 1908 pasados**, o sea cero saltados escondidos detras del
+numero.
+
+Arbol congelado, medido con el arreglo de zsh y su control positivo
+(`r8_mtime.log`): 0 archivos tocados despues de las 19:17:01 en `backend/app`,
+`backend/tests`, `backend/alembic`, `backend/scripts` y `frontend/src`
+—excluyendo `__pycache__`—, contra un control positivo de **659** archivos con
+`-newermt 2020-01-01`. Durante la corrida solo se tocaron `CLAUDE.md` y este
+informe: los dos estan fuera de los cinco directorios **y** fuera del `rglob`
+de `test_reloj_de_negocio.py`, que es el unico test de la suite que mira
+`frontend/src` desde afuera.
+
+**La prediccion, escrita en el log ANTES de lanzar, decia 1908. Salieron 1908.**
+
+Lo que vale no es el acierto sino de donde salio la base. La r7 fallo por
+sumar contra un numero recordado; esta vez la base salio de un comando:
+
+```
+git diff 9f2ac23 -- backend/tests/  ->  6 def test_ agregados, 0 eliminados
+```
+
+Esos 6 son los mismos que ya contaba la r7, o sea la **misma base**. C11, C12 y
+C13 extienden `t10c`, `t10d` y `t10e` y agregan el helper
+`_adelantar_reversion`, que no es un test: cero tests nuevos, luego 1908.
+
+El contraste entre las dos rondas es el punto y por eso las dos quedan escritas:
+**mismo numero, y con base medida acierta donde con base recordada habia
+fallado**. Un acierto sobre una base recordada no habria probado nada; habria
+sido el mismo sorteo, ganado.
+
+### 10.6 C15 — un comentario correcto en su conclusion y falso en su mecanismo
+
+QA leyo el docstring de `_abono_invoice_pos` y encontro que describe un
+mecanismo que no existe. Decia:
+
+> al anular la Salida sus dos accruals quedan `annulled` pero SIGUEN en el
+> statement **como par de cancelacion**
+
+Es falso. El **bloque 1** del statement (`money_movements.py:925-946`) emite
+**UN** evento por movimiento, con su propio `status`:
+
+```python
+for m in db.scalars(mm_query).all():
+    _evt(m.date, m.created_at, 1, ..., status=m.status, ...)
+```
+
+Los pares con `status` anulado salen de los bloques comerciales —2, 2b, 2c, 3,
+4, 4b, 5 y 6— y **nunca de un movimiento de tesoreria**. Un accrual anulado
+aparece una sola vez, como un evento anulado de clase 1.
+
+**Lo delato mi propio artefacto**, no una relectura: la lista que imprime la
+plantada P4h al caer es
+
+```
+['document_tax' x4, 'service_income_accrual' x2, 'document_tax_cancellation' x4]
+```
+
+Dos `service_income_accrual` y **ningun par de ellos**; los cuatro
+`document_tax_cancellation` son del bloque 4b.
+
+**La conclusion del comentario si era correcta** —la factura anulada sigue
+visible, luego el impuesto tiene que seguir debajo— y por eso el codigo estaba
+bien y ningun test cayo. Lo falso era el **mecanismo**. Eso no es cosmetico en
+este ciclo: todo el arreglo de C13 trata del orden **dentro de la clase 2**, y
+un comentario que afirma que la factura del abono tiene un par en esa clase
+invita al proximo lector a razonar contra un evento que no existe. Es la
+familia de #97 por segunda vez en la misma ronda.
+
+**Un comentario correcto en su conclusion puede ser falso en su mecanismo, y el
+mecanismo es lo que el proximo lector usa.**
+
+Corregido en los tres sitios: `app/`, `CLAUDE.md` y este informe. La version
+nueva nombra el bloque 1 y **cita la lista de P4h**, para que la afirmacion
+lleve el artefacto pegado en vez de ser otra descripcion plausible.
+
+**El cambio esta probado como SOLO docstring, y anclado al arbol de la r8** en
+vez de a HEAD (artefacto `c15_artefacto.log`):
+
+| Chequeo | Resultado |
+|---|---|
+| sha256 del archivo de la r8, reconstruido con el reemplazo inverso | `1607ecd1…accac3e2` — **identico** al medido en la r8 y cotejado por QA |
+| `ast` sin docstrings, antes vs ahora | identico |
+| literales STRING | 516 vs 516, **1** distinto = el docstring editado |
+| control positivo: cambio de codigo real inyectado | el mismo comparador da **False** |
+| ruff sobre `backend/app` | All checks passed |
+
+⚠️ Dos tropiezos propios en el camino, los dos de la misma clase —medir contra
+la referencia equivocada—: el primer intento del artefacto comparo contra
+**HEAD**, que trae el ciclo entero y no dice nada sobre C15; y escribi
+"archivos de tests tocados por C15: 2" cuando ese 2 tambien era contra HEAD. Lo
+correcto son **0** archivos de `backend/tests` con mtime posterior al inicio de
+la r8 y `sha256(test_sac_impuestos_ventas.py) = 95fec676…`, el mismo que QA
+cotejo. **El ancla de un "no cambio nada" es el arbol que corrio la suite, no
+el ultimo commit.**
+
+**La r9 cierra C15: 1908 passed, EXIT=0**, 20:21:57 → 21:17:52 (0:55:47), 0
+FAILED / 0 ERROR / 0 Traceback en todo el recorrido, 1908 colectados == 1908
+pasados, arbol congelado (0 archivos en los cinco directorios, control positivo
+659). La prediccion se escribio antes de lanzar y salio de **dos** mediciones
+independientes —el `git diff` contra `9f2ac23` y el sha256 de los tests,
+intacto desde la r8— que apuntan al mismo sitio: un docstring no puede mover el
+numero, y no lo movio.
+
+Y esta corrida estrena dos cosas en el runbook del log, las dos por lo que
+aprendio este ciclo:
+
+- **Deja escrito que 5433 estaba libre** antes de arrancar (`pgrep` con el
+  truco del corchete y `pg_stat_activity` en 0), porque la r1 se invalido por
+  una colision que yo mismo cause.
+- **Estampa el sha256 del arbol que va a medir** en un paso propio. Eso cierra
+  la cadena hacia el commit sin depender de la memoria de nadie: al terminar,
+  los sha del paso 2 son exactamente los del arbol, y son los mismos contra los
+  que QA verifica el commit. Es la version de log de la leccion de C15: **el
+  ancla de un "no cambio nada" es el arbol que corrio la suite.**

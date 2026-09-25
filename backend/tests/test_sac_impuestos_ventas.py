@@ -19,6 +19,7 @@ Lo que se vigila de verdad:
 - **El control positivo del permiso** (#111): un rol que LEE en 200 antes de
   que se le niegue la escritura. Sin ese 200, el 403 puede venir de la bandera.
 """
+from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -27,6 +28,7 @@ from sqlalchemy import func, select
 
 from app.core.security import create_access_token
 from app.models.document_tax import DocumentTax
+from app.models.sale import Sale
 from app.models.third_party import ThirdParty
 from app.models.third_party_category import ThirdPartyCategory
 from tests.conftest import create_third_party_with_category
@@ -151,6 +153,43 @@ def _tax_entities(db, org_id) -> dict[str, ThirdParty]:
         )
     ).scalars().all()
     return {tp.name: tp for tp in rows}
+
+
+def _adelantar_reversion(db, *, sale_id=None, delivery_id=None) -> int:
+    """Pone el `reverted_at` de los impuestos UN SEGUNDO ANTES del
+    `cancelled_at` de su venta, y devuelve cuantas filas movio.
+
+    Es el estado que produciria un refactor que reordene los pasos internos de
+    la reversion, y es lo UNICO que distingue "el par hereda el instante de su
+    dueno" de "el par usa su propio `reverted_at` y hoy coincide porque los
+    pasos corren en ese orden". Con el orden natural los dos criterios dan el
+    mismo statement, asi que un test que solo anule y mire el orden pasa igual
+    con la herencia quitada — medido, es justo lo que mostro `plantado_p4d.log`
+    (P4d dejo de caer al poner la herencia, y quitarla no lo devuelve).
+    """
+    if delivery_id is not None:
+        sale = db.execute(
+            select(Sale).where(Sale.willard_delivery_id == delivery_id)
+        ).scalar_one()
+        cond = DocumentTax.willard_delivery_id == delivery_id
+    else:
+        sale = db.get(Sale, sale_id)
+        cond = DocumentTax.sale_id == sale_id
+    assert sale is not None and sale.cancelled_at is not None, (
+        "el ancla exige la venta CANCELADA: sin `cancelled_at` no hay instante "
+        "de dueno contra el cual adelantar"
+    )
+    filas = db.execute(select(DocumentTax).where(cond)).scalars().all()
+    assert filas, "no hay impuestos que adelantar"
+    antes = sale.cancelled_at - timedelta(seconds=1)
+    for tax in filas:
+        assert tax.reverted_at is not None, (
+            "el impuesto no esta revertido: adelantarlo no probaria nada"
+        )
+        tax.reverted_at = antes
+    db.commit()
+    db.expire_all()
+    return len(filas)
 
 
 # ------------------------------------------------------------ T1 / T3 / T9 ---
@@ -571,6 +610,39 @@ def plomo_crudo(db_session, test_organization, client, org_headers, planta):
     return mat
 
 
+@pytest.fixture
+def abono_setup(db_session, test_organization, test_user, willard_tp,
+                client, org_headers, planta, plomo_crudo):
+    """Lo que un ABONO necesita y una venta no: la cuenta de drosses que se
+    descarga y las dos tarifas que arman su factura."""
+    from app.models.kg_ledger import KgLedgerAccount
+    from app.models.service_tariff import ServiceTariff
+
+    db_session.add(KgLedgerAccount(
+        organization_id=test_organization.id, code="WILL-DROSS",
+        display_name="Willard Drosses", account_type="willard_drosses",
+        third_party_id=willard_tp.id, is_active=True,
+    ))
+    for code, price in (("maquila_willard", 2097),
+                        ("flete_willard_planta_planta", 37)):
+        db_session.add(ServiceTariff(
+            organization_id=test_organization.id, tariff_code=code,
+            unit_price_cop=Decimal(str(price)), unit="per_kg_lead",
+            created_by=test_user.id,
+        ))
+    db_session.commit()
+    # stock para los 13.905,5 kg de la FE 2118
+    r = client.post(
+        f"{ADJUST_URL}/increase", headers=org_headers,
+        json={
+            "material_id": str(plomo_crudo.id), "warehouse_id": str(planta.id),
+            "quantity": "14000", "unit_cost": "2000",
+            "date": SEED_DATE, "reason": "Seed abono",
+        },
+    )
+    assert r.status_code == 201, r.text
+
+
 def _delivery(client, headers, planta, willard_tp, plomo_crudo, taxes=None):
     """Registra y liquida una salida tipo VENTA con impuestos."""
     r = client.post(WILLARD_URL, headers=headers, json={
@@ -750,6 +822,279 @@ class TestEstadoDeCuenta:
         data = _statement(client, org_headers, rete.id)
         assert self._ultimo_saldo(data) == FE_RETEFUENTE
 
+    def test_t10d_el_impuesto_de_una_SALIDA_va_despues_de_su_venta_derivada(
+        self, client, org_headers, db_session,
+        flags_willard, planta, willard_tp, plomo_crudo, acc_intersede,
+        customer, warehouse, material,
+    ):
+        """🔴 Defecto de la pantalla de Daniel, 2026-09-23.
+
+        Una Salida de Plomo tipo venta produce DOS documentos con DOS
+        numeraciones propias: la Salida (serie Venta, #N) y la venta derivada
+        (#M). El evento de impuesto salia posicionado con los datos de la
+        SALIDA y la venta con los suyos, asi que la llave de orden (#96)
+        comparaba **dos secuencias distintas como si fueran la misma escala**
+        y los cuatro impuestos aterrizaban ANTES de su propia venta — justo lo
+        que el bloque 4b evita emitiendo despues del de ventas (#112).
+
+        **Eran DOS campos, no uno.** El `created_at` va ANTES que el numero en
+        la llave, asi que arreglar solo el numero deja el defecto vivo con cara
+        de arreglado (medido: `plantado_p4_orden_statement.log`, P4b). El
+        evento hereda la posicion COMPLETA de su venta.
+
+        ⚠️ **Por que vivio escondido, MEDIDO y no supuesto** (`c8_relato_refutado.log`):
+        NO fue porque las series vinieran parejas. Con el codigo original y los
+        numeros en 1 y 1 los impuestos salen primero IGUAL, porque el instante
+        solo ya alcanza: la captura y la liquidacion son dos requests distintos,
+        asi que `delivery.created_at` < `sale.created_at` siempre. Vivio
+        escondido porque **ningun test leia el orden del statement de una
+        Salida** — la unica asercion de orden era `tipos[0]` en T10, que es una
+        venta directa.
+
+        La venta suelta de abajo sigue haciendo falta, pero para OTRA cosa: es
+        lo unico que hace que el numero llegue a decidir algo, y por eso es la
+        premisa que mide la mitad del numero (P4c).
+        """
+        # 1) una venta suelta que consume numero de la secuencia de ventas
+        suelta = _sale(client, org_headers, customer, warehouse, material)
+        _liquidate(client, org_headers, suelta["id"])
+
+        # 2) la salida, cuya venta derivada nace con numero MAS ALTO
+        d = _delivery(client, org_headers, planta, willard_tp, plomo_crudo, [
+            {"tax_type": "iva", "rate": "19", "base_kind": "subtotal", "amount": "57000"},
+            {"tax_type": "retefuente", "rate": "2.5", "base_kind": "subtotal", "amount": "7500"},
+        ])
+        db_session.expire_all()
+
+        from app.models.sale import Sale
+        from app.models.willard_delivery import WillardDelivery
+        entrega = db_session.get(WillardDelivery, d["id"])
+        venta = db_session.get(Sale, entrega.sale_id)
+        # 🟢 El control del ESCENARIO: sin divergencia el test no prueba nada,
+        # asi que la divergencia se AFIRMA en vez de suponerse.
+        assert entrega.delivery_number < venta.sale_number, (
+            f"escenario invalido: la salida #{entrega.delivery_number} tiene que "
+            f"quedar POR DEBAJO de la venta #{venta.sale_number}. El numero viejo "
+            "desordena solo en esa direccion; con la contraria el defecto no se "
+            "manifiesta y este test pasaria sin discriminar"
+        )
+
+        data = _statement(client, org_headers, willard_tp.id)
+        tipos = [i["event_type"] for i in data["items"]]
+        i_venta = tipos.index("sale_liquidation")
+        primeros_impuestos = [k for k, t in enumerate(tipos) if t == "document_tax"]
+        assert primeros_impuestos, tipos
+        assert min(primeros_impuestos) > i_venta, (
+            f"los impuestos van antes de su venta: {tipos}"
+        )
+        # y el invariante de #55 sigue cerrando
+        assert self._ultimo_saldo(data) == Decimal(str(data["current_balance"]))
+
+        # ------------------------------------------------------------------
+        # C10 — el mismo criterio en el lado de la REVERSION: anulada la
+        # Salida, el par de cancelacion del impuesto va DESPUES de la
+        # cancelacion de su venta, igual que el vivo va despues de su venta.
+        # Dentro de la clase 2 desempata el instante, y ANTES ese instante
+        # salia del ORDEN DE LOS PASOS de `_reverse_liquidation` (paso 1
+        # cancela la venta, paso 5 revierte los impuestos): reordenarlos
+        # invertia el statement sin que nada gritara (medido, P4d) — y el
+        # mismo acoplamiento estaba en la venta directa (`sale.cancelled_at`
+        # linea 584 vs `revert_taxes` linea 659), o sea defecto de CLASE.
+        # Hoy el par hereda el instante del dueno, asi que P4d ya NO cae: el
+        # orden observable dejo de colgar de un detalle de implementacion.
+        #
+        # ⚠️ Lo que sigue NO mide la herencia y decirlo es la mitad del punto:
+        # con el orden natural de los pasos, `tax.reverted_at` cae DESPUES de
+        # `sale.cancelled_at` sola, asi que quitar la herencia deja este bloque
+        # en verde (medido: `plantado_p4d.log` muestra a P4d dejando de caer
+        # con la herencia puesta, y quitarla no lo devuelve). Este bloque mide
+        # que el par va despues de su venta en el caso NORMAL, que es su valor.
+        # La herencia la mide el bloque de abajo, con el instante adelantado.
+        # ------------------------------------------------------------------
+        r = client.post(
+            f"{WILLARD_URL}/{d['id']}/annul", headers=org_headers,
+            json={"reason": "prueba de orden del par"},
+        )
+        assert r.status_code == 200, r.text
+        db_session.expire_all()
+
+        data = _statement(client, org_headers, willard_tp.id)
+        tipos = [i["event_type"] for i in data["items"]]
+        i_cancel_venta = tipos.index("sale_cancellation")
+        pares = [k for k, t in enumerate(tipos) if t == "document_tax_cancellation"]
+        assert len(pares) == 2, tipos
+        assert min(pares) > i_cancel_venta, (
+            f"el par del impuesto va antes de la cancelacion de su venta: {tipos}"
+        )
+        assert self._ultimo_saldo(data) == Decimal(str(data["current_balance"]))
+
+        # ------------------------------------------------------------------
+        # C13 — la herencia del instante, medida. Se adelanta el `reverted_at`
+        # un segundo: es exactamente el estado que dejaria un refactor que
+        # mueva el paso 5 de `_reverse_liquidation` por encima del paso 1.
+        # Con la herencia el par sigue usando `sale.cancelled_at`, empata con
+        # la cancelacion de la venta y el orden de emision lo deja debajo; sin
+        # la herencia usa su propio instante, un segundo antes, y se sube por
+        # encima de la cancelacion de su propia venta.
+        # ------------------------------------------------------------------
+        movidas = _adelantar_reversion(db_session, delivery_id=d["id"])
+        assert movidas == 2, movidas
+
+        data = _statement(client, org_headers, willard_tp.id)
+        tipos = [i["event_type"] for i in data["items"]]
+        i_cancel_venta = tipos.index("sale_cancellation")
+        pares = [k for k, t in enumerate(tipos) if t == "document_tax_cancellation"]
+        assert len(pares) == 2, tipos
+        assert min(pares) > i_cancel_venta, (
+            f"con el instante del impuesto adelantado, el par se subio por "
+            f"encima de la cancelacion de su venta: el orden observable esta "
+            f"colgando de `tax.reverted_at` y no del dueno: {tipos}"
+        )
+
+    def test_t10e_los_impuestos_de_un_ABONO_van_despues_de_su_factura(
+        self, client, org_headers, db_session, test_organization,
+        flags_willard, planta, willard_tp, plomo_crudo, acc_intersede, abono_setup,
+    ):
+        """🔴 El mismo defecto por CLASE, en el otro tipo de Salida — y con los
+        numeros de la FE 2118, que es la factura de abono real de Johana.
+
+        Un abono no deriva venta (#100 D2): su factura son los dos
+        `service_income_accrual` de maquila y flete, que son eventos de
+        TESORERIA (clase 1), y el impuesto salia en la clase COMERCIAL (0).
+        La clase se compara ANTES que el instante (#96), asi que los impuestos
+        aterrizaban arriba de su propia factura sin que el instante llegara a
+        opinar — el mismo sintoma que la venta derivada, por una causa
+        distinta.
+
+        Medido contra el codigo de 9f2ac23 con ESTE mismo test
+        (`c14a_codigo_previo.log`), o sea los CUATRO impuestos arriba de las
+        DOS facturas:
+            ['document_tax', 'document_tax', 'document_tax', 'document_tax',
+             'service_income_accrual', 'service_income_accrual']
+            assert 0 > 5
+        ⚠️ La version anterior de este comentario citaba "2 impuestos + 2
+        facturas" y esa lista no salia de ninguna medicion: la escribi de
+        memoria. Una afirmacion sin artefacto es una afirmacion inventada
+        aunque quede parecida (#112).
+
+        ⚠️ Ningun test mandaba impuestos en un abono, asi que esta mitad del
+        modulo no tenia ni una asercion encima.
+        """
+        MAQUILA = Decimal("29159833.50")   # 13.905,5 kg x $2.097
+        FLETE = Decimal("514503.50")       # 13.905,5 kg x $37
+        IVA = Decimal("5638124.04")
+        RETEFUENTE = Decimal("1186973.48")  # 4% de 29.674.337,00
+        RETEIVA = Decimal("845718.61")      # 15% del IVA
+        ICA = Decimal("370929.21")          # 12,5 por mil del subtotal
+        TOTAL = Decimal("32908839.74")      # el "Total a Pagar" impreso
+        assert MAQUILA + FLETE + IVA - RETEFUENTE - RETEIVA - ICA == TOTAL
+
+        r = client.post(WILLARD_URL, headers=org_headers, json={
+            "delivery_type": "abono_material",
+            "warehouse_id": str(planta.id),
+            "third_party_id": str(willard_tp.id),
+            "date": f"{SALE_DATE}T12:00:00",
+            "remission_number": "FE-2118",
+            "lines": [{"material_id": str(plomo_crudo.id), "quantity": "13905.5"}],
+        })
+        assert r.status_code == 201, r.text
+        d = r.json()
+        # Saldo PREVIO, capturado antes de que exista un solo impuesto: es el
+        # punto al que tiene que volver el round-trip del final.
+        previo_willard = _balance(db_session, willard_tp.id)
+
+        liq = client.post(f"{WILLARD_URL}/{d['id']}/liquidate", headers=org_headers, json={
+            "line_prices": [],
+            "taxes": [
+                {"tax_type": "iva", "rate": "19", "base_kind": "subtotal",
+                 "amount": str(IVA)},
+                {"tax_type": "retefuente", "rate": "4", "base_kind": "subtotal",
+                 "amount": str(RETEFUENTE)},
+                {"tax_type": "reteiva", "rate": "15", "base_kind": "iva",
+                 "amount": str(RETEIVA)},
+                {"tax_type": "ica", "rate": "1.25", "base_kind": "subtotal",
+                 "municipality": "Barranquilla", "amount": str(ICA)},
+            ],
+        })
+        assert liq.status_code == 200, liq.text
+        db_session.expire_all()
+
+        # la factura que arma el servidor es la base de los impuestos
+        assert Decimal(str(liq.json()["maquila_amount"])) == MAQUILA
+        assert Decimal(str(liq.json()["freight_amount"])) == FLETE
+
+        data = _statement(client, org_headers, willard_tp.id)
+        tipos = [i["event_type"] for i in data["items"]]
+        factura = [k for k, t in enumerate(tipos) if t == "service_income_accrual"]
+        impuestos = [k for k, t in enumerate(tipos) if t == "document_tax"]
+        assert len(factura) == 2 and len(impuestos) == 4, tipos
+        assert min(impuestos) > max(factura), (
+            f"los impuestos van antes de su factura: {tipos}"
+        )
+        # y el total impreso en la FE 2118 es el saldo que queda
+        assert self._ultimo_saldo(data) == TOTAL
+        assert self._ultimo_saldo(data) == Decimal(str(data["current_balance"]))
+
+        # ------------------------------------------------------------------
+        # C12 — ROUND-TRIP AL ANULAR.
+        #
+        # Sin este tramo quedan DOS lineas del servicio que no ejecuta ningun
+        # test: (a) `delivery.annulled_at` como instante del par de
+        # cancelacion del abono, y (b) que el lookup de la factura NO filtre
+        # por `status`. La (b) es la que muerde: con el filtro puesto, despues
+        # de anular el lookup devuelve None, el impuesto cae al fallback de
+        # clase 0 y vuelve a subirse por ENCIMA de su propia factura anulada
+        # — el defecto original, reaparecido en la reversion (plantada P4h).
+        # ------------------------------------------------------------------
+        ents = _tax_entities(db_session, test_organization.id)
+        ESPERADO = {
+            "[Impuestos] IVA por Pagar": -IVA,
+            "[Impuestos] ReteFuente a Favor": RETEFUENTE,
+            "[Impuestos] ReteIVA a Favor": RETEIVA,
+            "[Impuestos] ICA a Favor Barranquilla": ICA,
+        }
+        assert set(ESPERADO) <= set(ents), sorted(ents)
+        # 🔴 Antes de exigir que vuelvan, se afirma que SE MOVIERON. Las cuatro
+        # entidades nacen al liquidar, o sea que su previo es 0 por
+        # construccion: sin este bloque, "vuelve a su previo" seria un 0 == 0
+        # que pasaria igual con una reversion que no revierte nada (#98).
+        for nombre, monto in ESPERADO.items():
+            assert monto != 0
+            assert _balance(db_session, ents[nombre].id) == monto, nombre
+        assert _balance(db_session, willard_tp.id) == TOTAL != previo_willard
+
+        r = client.post(
+            f"{WILLARD_URL}/{d['id']}/annul", headers=org_headers,
+            json={"reason": "round-trip C12"},
+        )
+        assert r.status_code == 200, r.text
+        db_session.expire_all()
+
+        data = _statement(client, org_headers, willard_tp.id)
+        tipos = [i["event_type"] for i in data["items"]]
+        assert tipos.count("document_tax_cancellation") == 4, tipos
+        # El impuesto CANCELADO sigue debajo de su factura anulada: la factura
+        # no desaparece del statement al anularse, asi que su orden relativo
+        # tiene que seguir siendo el mismo.
+        factura = [k for k, t in enumerate(tipos) if t == "service_income_accrual"]
+        impuestos = [k for k, t in enumerate(tipos) if t == "document_tax"]
+        assert len(factura) == 2 and len(impuestos) == 4, tipos
+        assert min(impuestos) > max(factura), (
+            f"anulada la Salida, los impuestos volvieron a subirse por encima "
+            f"de su factura: {tipos}"
+        )
+        # y todo vuelve EXACTO al punto de partida, en las DOS superficies
+        db_session.refresh(willard_tp)
+        assert self._ultimo_saldo(data) == Decimal(str(willard_tp.current_balance))
+        assert self._ultimo_saldo(data) == previo_willard
+
+        for nombre in ESPERADO:
+            ent = ents[nombre]
+            db_session.refresh(ent)
+            data_e = _statement(client, org_headers, ent.id)
+            assert self._ultimo_saldo(data_e) == Decimal(str(ent.current_balance)), nombre
+            assert self._ultimo_saldo(data_e) == 0, nombre
+
     def test_t10c_la_reversion_emite_su_par_y_el_saldo_vuelve_a_cero(
         self, client, org_headers, db_session, test_organization,
         flag_on, customer, warehouse, material,
@@ -780,6 +1125,27 @@ class TestEstadoDeCuenta:
         db_session.refresh(iva)
         assert self._ultimo_saldo(data) == Decimal(str(iva.current_balance))
         assert self._ultimo_saldo(data) == 0
+
+        # ------------------------------------------------------------------
+        # C13 — la herencia del instante, en la VENTA DIRECTA. El acoplamiento
+        # era de CLASE, no de la Salida: en `sale.py` el `cancelled_at` se
+        # estampa en la linea 584 y `revert_taxes` corre en la 659, o sea que
+        # aca el orden observable colgaba del mismo detalle. Adelantar el
+        # `reverted_at` un segundo es el estado que dejaria invertir esos dos
+        # pasos; con la herencia el par sigue debajo de la cancelacion.
+        # ------------------------------------------------------------------
+        movidas = _adelantar_reversion(db_session, sale_id=sale["id"])
+        assert movidas == 4, movidas
+
+        data = _statement(client, org_headers, customer.id)
+        tipos = [i["event_type"] for i in data["items"]]
+        i_cancel_venta = tipos.index("sale_cancellation")
+        pares = [k for k, t in enumerate(tipos) if t == "document_tax_cancellation"]
+        assert len(pares) == 4, tipos
+        assert min(pares) > i_cancel_venta, (
+            f"con el instante del impuesto adelantado, el par se subio por "
+            f"encima de la cancelacion de su venta: {tipos}"
+        )
 
 
 # ---------------------------------------------------------------------- T12 ---

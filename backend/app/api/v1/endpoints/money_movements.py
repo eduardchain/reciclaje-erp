@@ -1263,9 +1263,54 @@ def get_by_third_party(
     from app.models.document_tax import TAX_SIGN_ON_CUSTOMER, DocumentTax
     from app.models.willard_delivery import WillardDelivery
     from app.services.tax_entities import tax_label
+    from app.services.willard_delivery import KG_SOURCE_TYPE
+
+    _abono_invoice_cache: dict = {}
+
+    def _abono_invoice_pos(delivery):
+        """Posicion de la factura de un ABONO: su maquila y su flete.
+
+        Un abono no deriva venta (#100 D2), asi que lo que el usuario lee como
+        la factura son los `service_income_accrual` de maquila y flete — y esos
+        son eventos de TESORERIA, clase 1. Se toma el ULTIMO de los dos: el
+        impuesto va despues de la factura entera, no en medio de ella.
+
+        🔴 NO se filtra por `status`, y es deliberado: al anular la Salida
+        sus dos accruals quedan `annulled` pero SIGUEN en el statement, cada
+        uno como UN evento anulado de clase 1. El bloque 1 emite un evento por
+        movimiento con su propio `status` y NO emite par de cancelacion, a
+        diferencia de los bloques comerciales; o sea que la factura sigue ahi y
+        el impuesto tiene que seguir cayendo debajo de ella. Con el filtro
+        puesto, despues de anular esta funcion devuelve None, el impuesto cae
+        al fallback de clase 0 y vuelve a subirse por encima de su propia
+        factura anulada. Lo fija `test_t10e` en su tramo de anulacion
+        (plantada P4h), y la lista que imprime esa plantada es la evidencia de
+        que no hay par: dos `service_income_accrual` y ninguno de ellos.
+        """
+        if delivery.id not in _abono_invoice_cache:
+            _abono_invoice_cache[delivery.id] = db.execute(
+                sa_select(MoneyMovement.created_at, MoneyMovement.movement_number)
+                .where(MoneyMovement.source_type == KG_SOURCE_TYPE,
+                       MoneyMovement.source_id == delivery.id,
+                       MoneyMovement.movement_type == "service_income_accrual")
+                .order_by(MoneyMovement.created_at.desc(),
+                          MoneyMovement.movement_number.desc())
+                .limit(1)
+            ).first()
+        return _abono_invoice_cache[delivery.id]
 
     def _tax_owner(tax) -> tuple:
-        """(fecha de negocio, instante, etiqueta del documento, numero) del dueno.
+        """Posicion COMPLETA del documento dueno, viva y muerta.
+
+        Devuelve (fecha de negocio, instante, fecha doc, etiqueta, numero,
+        murio, instante en que murio, CLASE del evento vivo).
+
+        La clase es parte de la posicion, no un detalle aparte: en una venta la
+        factura es un evento comercial (0) y en un abono son movimientos de
+        tesoreria (1). La clase se compara ANTES que el instante (#96), asi que
+        emitir el impuesto en la clase equivocada lo sube por encima de su
+        factura sin que el instante llegue a opinar — que es exactamente el
+        defecto que tenia el abono.
 
         El dueno es la venta O la Salida de Plomo (D3: CHECK de exactamente
         uno). En una Salida tipo venta hay dos documentos para UNA factura y el
@@ -1278,13 +1323,66 @@ def get_by_third_party(
                 return None
             return (sale.liquidated_at, sale.created_at, sale.date,
                     f"Venta #{sale.sale_number}", sale.sale_number,
-                    sale.status == "cancelled")
+                    sale.status == "cancelled", sale.cancelled_at, 0)
         delivery = db.get(WillardDelivery, tax.willard_delivery_id)
         if delivery is None or delivery.liquidated_at is None:
             return None
+        # 🔴 El numero que ORDENA y la etiqueta que se MUESTRA son dos cosas
+        # distintas, y tratarlas como una produjo el defecto que encontro la
+        # pantalla el 2026-09-23: el evento salia con `delivery_number` y la
+        # venta derivada con `sale_number`, o sea que la llave de orden (#96)
+        # comparaba DOS SECUENCIAS distintas como si fueran la misma escala.
+        # Con Salida #3 -> Venta #5, el 3 < 5 ponia los impuestos ANTES de su
+        # propia venta, anulando la razon por la que el bloque 4b se emite
+        # despues del de ventas (#112).
+        #
+        # ⚠️ Vivio escondido porque **ningun test leia el orden del statement
+        # de una Salida** (la unica asercion de orden era sobre una venta
+        # directa), NO porque hiciera falta una coincidencia de numeros: con el
+        # codigo viejo el instante solo ya alcanzaba, incluso con numeros 1 y 1
+        # — la captura y la liquidacion son dos requests, asi que
+        # `delivery.created_at` < `sale.created_at` siempre. Medido en
+        # `c8_relato_refutado.log`; la primera version de este comentario
+        # afirmaba lo contrario y era falsa.
+        sale = db.get(Sale, delivery.sale_id) if delivery.sale_id else None
+        if sale is not None:
+            # El evento hereda la POSICION COMPLETA de la venta que se muestra
+            # al lado, no solo su numero: `created_at` **y** `sale_number`.
+            #
+            # 🔴 Eran DOS campos, no uno. Mi primer arreglo cambio solo el
+            # numero y el sintoma no se movio, porque el INSTANTE va ANTES en
+            # la llave: el impuesto traia `delivery.created_at` (el borrador,
+            # 07:29) y la venta `sale.created_at` (la liquidacion, 14:52), asi
+            # que 07:29 < 14:52 lo ponia primero igual. La regla es que la
+            # posicion se hereda entera del documento visible; heredar una
+            # parte deja el defecto vivo y parece arreglado.
+            return (delivery.liquidated_at, sale.created_at, delivery.date,
+                    f"Venta #{sale.sale_number} · Salida de Plomo #{delivery.delivery_number}",
+                    sale.sale_number,
+                    delivery.status == "annulled", sale.cancelled_at, 0)
+        # Un abono no deriva venta: hereda la posicion de su maquila y su
+        # flete, que son los que el usuario lee como la factura.
+        inv = _abono_invoice_pos(delivery)
+        if inv is not None:
+            # ⚠️ `inv[1]` es el `movement_number` del flete, o sea un numero de
+            # TESORERIA: sirve para ORDENAR dentro de la clase 1 y no es una
+            # etiqueta. Hoy `source_number` no se pinta en ninguna superficie
+            # para este evento (el PDF y el Excel solo lo usan en line items,
+            # y `resolveSourceLink` cae a null), pero si alguna vez se muestra,
+            # mostrarlo como "documento #N" diria una cosa falsa. El numero que
+            # ordena y la etiqueta que se muestra son dos cosas distintas.
+            return (delivery.liquidated_at, inv[0], delivery.date,
+                    f"Salida de Plomo — {delivery.label}", inv[1],
+                    delivery.status == "annulled", delivery.annulled_at, 1)
+        # Fallback DEFENSIVO, hoy inalcanzable: un abono sin factura no puede
+        # tener impuestos. `_apply_document_taxes` da 422 con subtotal <= 0
+        # (willard_delivery.py:462) y `_bill_and_split` corre ANTES y fija
+        # maquila y flete, asi que si hay una fila de impuesto hay factura.
+        # Queda por si un tipo nuevo de Salida factura por otro camino: sin
+        # esta rama seria un None silencioso en vez de un evento fuera de sitio.
         return (delivery.liquidated_at, delivery.created_at, delivery.date,
                 f"Salida de Plomo — {delivery.label}", delivery.delivery_number,
-                delivery.status == "annulled")
+                delivery.status == "annulled", delivery.annulled_at, 0)
 
     # `side` decide el signo: el cliente recibe TAX_SIGN_ON_CUSTOMER y la
     # entidad SIEMPRE el contrario. Un solo mapa para las dos superficies.
@@ -1311,7 +1409,8 @@ def get_by_third_party(
             owner = _tax_owner(tax)
             if owner is None:
                 continue
-            liq_at, created_at, doc_date, doc_label, doc_number, doc_dead = owner
+            (liq_at, created_at, doc_date, doc_label, doc_number,
+             doc_dead, dead_at, cls) = owner
             key = f"{side}-{tax.id}"
             if key in seen_tax_events:
                 continue  # una entidad que ademas fuera el cliente
@@ -1323,7 +1422,7 @@ def get_by_third_party(
             # del documento — es la regla que QA bloqueo en #93: un documento
             # puede quedar vivo con filas viejas revertidas.
             alive = tax.reverted_at is None
-            _evt(liq_at, created_at, 0,
+            _evt(liq_at, created_at, cls,
                  id=f"doctax-{side}-{tax.id}", date=liq_at.isoformat(),
                  document_date=doc_date.isoformat(),
                  event_type="document_tax",
@@ -1336,7 +1435,17 @@ def get_by_third_party(
                  **_null_ops)
             if not alive:
                 verbo = "cancelada (reversa)" if doc_dead else "revertida"
-                _evt(liq_at, tax.reverted_at, 2,
+                # 🔴 El par hereda el instante del dueno igual que el evento
+                # vivo hereda el suyo: si no, el orden dentro de la clase 2 lo
+                # decide `tax.reverted_at` contra `sale.cancelled_at`, o sea
+                # **el orden en que el servicio ejecuta sus pasos internos**.
+                # Medido (P4d): adelantar el paso 5 de `_reverse_liquidation`
+                # sobre el paso 1 invierte el statement. Un orden observable no
+                # puede colgar de un detalle de implementacion que cualquiera
+                # puede reordenar en un refactor. Empatado el instante, manda el
+                # orden de emision y el bloque 4b va despues del de ventas.
+                # El fallback cubre un impuesto revertido con su dueno vivo.
+                _evt(liq_at, dead_at or tax.reverted_at, 2,
                      id=f"doctax-cancel-{side}-{tax.id}", date=liq_at.isoformat(),
                      document_date=doc_date.isoformat(),
                      event_type="document_tax_cancellation",

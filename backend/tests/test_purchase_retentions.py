@@ -525,3 +525,172 @@ class TestTarifaSobreIvaNoCabeEnCompra:
     # esta su andamiaje y donde se ejercita por HTTP. Llamar `_apply_retentions`
     # a mano desde aca probaria que el guard funciona con esos datos, no que la
     # Entrada llegue hasta el — que es justo lo que hay que probar.
+
+
+class TestBaseEditableDesdeLaPantalla:
+    """La base de una tarifa se puede CORREGIR, no solo elegir al crearla.
+
+    Detonante: pruebas de pantalla 2026-09-23. Las tres tarifas de sistema se
+    siembran sin `base_kind`, o sea que la reteIVA nace sobre el `subtotal` por
+    el server_default, y el paso 6 del runbook del plan dice que "se ajustan
+    desde la pantalla". El dialogo de editar mandaba SOLO el `rate`, asi que
+    ese paso era **inejecutable para la base**: la reteIVA quedaba calculando
+    un porcentaje del subtotal para siempre, que es el numero plausible y
+    falso que D5 existe para impedir.
+
+    El endpoint ya aceptaba `base_kind` desde el dia uno y **ningun test lo
+    tocaba** (medido con grep sobre `tests/`: `base_kind` aparecia en 3
+    archivos y ninguno hacia PATCH). Un camino que el runbook necesita y que
+    nadie probaba.
+    """
+
+    @pytest.fixture
+    def config_subtotal(self, db_session, test_organization):
+        """Una reteIVA como la que siembra el seeder: sobre el subtotal."""
+        from app.models.retention_config import RetentionConfig
+
+        cfg = RetentionConfig(
+            organization_id=test_organization.id,
+            retention_type="reteiva",
+            rate_pct=Decimal("2"),
+            base_kind="subtotal",
+            is_active=True,
+        )
+        db_session.add(cfg)
+        db_session.commit()
+        db_session.refresh(cfg)
+        return cfg
+
+    def test_el_patch_cambia_la_base_y_el_porcentaje(
+        self, client, org_headers, db_session, config_subtotal,
+    ):
+        """El caso del runbook: corregir la reteIVA sembrada a 15 % del IVA."""
+        assert config_subtotal.base_kind == "subtotal"  # de donde parte
+
+        r = client.patch(
+            f"/api/v1/third-parties/retention-configs/{config_subtotal.id}",
+            json={"rate_pct": 15, "base_kind": "iva"},
+            headers=org_headers,
+        )
+        assert r.status_code == 200, r.text
+
+        # (a) el efecto en la BD
+        db_session.expire_all()
+        from app.models.retention_config import RetentionConfig
+        cfg = db_session.get(RetentionConfig, config_subtotal.id)
+        assert cfg.base_kind == "iva"
+        assert cfg.rate_pct == Decimal("15")
+
+        # (b) y lo que RECIBE quien llama, que es otra pregunta (hueco (c) de
+        # CC-013). Los dos response se arman campo por campo (#95), asi que
+        # que el dato este guardado no dice que llegue.
+        assert r.json()["base_kind"] == "iva", r.text
+
+        # (c) y la fila del GET, que es de donde la pantalla PRECARGA el
+        # selector. Si esta perdiera la clave, editar solo el % de una tarifa
+        # sobre el IVA la devolveria a subtotal en silencio — y (a) y (b)
+        # seguirian en verde.
+        rows = client.get("/api/v1/third-parties/retention-entities", headers=org_headers)
+        assert rows.status_code == 200, rows.text
+        fila = next(f for f in rows.json() if f["config_id"] == str(config_subtotal.id))
+        assert fila["base_kind"] == "iva", fila
+
+    def test_desactivar_y_reactivar_NO_pisa_la_base(
+        self, client, org_headers, db_session, test_organization,
+    ):
+        """🟢 Control negativo del PATCH PARCIAL, y su llamador es concreto.
+
+        No es el dialogo de editar —ese manda siempre los dos campos— sino el
+        boton **Desactivar/Reactivar** (`RetentionsPage.tsx`, `toggleActive`),
+        que manda unicamente `{is_active}`. Lo que este test protege es que
+        desactivar y reactivar una tarifa sobre el IVA **no le reinicie la
+        base**; un test no debe prometer mas de lo que cubre (#101).
+        """
+        from app.models.retention_config import RetentionConfig
+
+        cfg = RetentionConfig(
+            organization_id=test_organization.id,
+            retention_type="reteiva",
+            concept="ya estaba sobre el iva",
+            rate_pct=Decimal("15"),
+            base_kind="iva",
+            is_active=True,
+        )
+        db_session.add(cfg)
+        db_session.commit()
+        db_session.refresh(cfg)
+
+        # el payload exacto de `toggleActive`: solo is_active
+        r = client.patch(
+            f"/api/v1/third-parties/retention-configs/{cfg.id}",
+            json={"is_active": False},
+            headers=org_headers,
+        )
+        assert r.status_code == 200, r.text
+        # 🟢 control positivo: sin esto, un PATCH que no hiciera NADA dejaria la
+        # base en "iva" y el test pasaria sin haber ejercitado el camino (#110).
+        assert r.json()["is_active"] is False, r.text
+
+        # y el de vuelta, que es cuando el usuario la reactiva
+        r = client.patch(
+            f"/api/v1/third-parties/retention-configs/{cfg.id}",
+            json={"is_active": True},
+            headers=org_headers,
+        )
+        assert r.status_code == 200, r.text
+
+        db_session.expire_all()
+        vivo = db_session.get(RetentionConfig, cfg.id)
+        assert vivo.is_active is True
+        assert vivo.base_kind == "iva", "desactivar/reactivar no debe pisar la base"
+        assert vivo.rate_pct == Decimal("15"), "ni el %"
+
+    def test_patch_solo_del_porcentaje_NO_pisa_la_base(
+        self, client, org_headers, db_session, test_organization,
+    ):
+        """El otro PATCH parcial: `{rate_pct}` a secas.
+
+        Hoy ninguna pantalla lo manda —el dialogo manda los dos campos y
+        `toggleActive` manda solo `is_active`— pero es **contrato del API**:
+        todos los campos de `RetentionConfigUpdate` son Optional, asi que el
+        caso existe para cualquier consumidor. Sin este test, el dia que
+        alguien reescriba el endpoint con un `model_dump()` completo, cambiar
+        el % devolveria la base a su default sin que nada lo note.
+        """
+        from app.models.retention_config import RetentionConfig
+
+        cfg = RetentionConfig(
+            organization_id=test_organization.id,
+            retention_type="reteiva",
+            concept="solo porcentaje",
+            rate_pct=Decimal("15"),
+            base_kind="iva",
+            is_active=True,
+        )
+        db_session.add(cfg)
+        db_session.commit()
+        db_session.refresh(cfg)
+
+        r = client.patch(
+            f"/api/v1/third-parties/retention-configs/{cfg.id}",
+            json={"rate_pct": 16},
+            headers=org_headers,
+        )
+        assert r.status_code == 200, r.text
+        assert float(r.json()["rate_pct"]) == 16.0, r.text  # control positivo
+
+        db_session.expire_all()
+        vivo = db_session.get(RetentionConfig, cfg.id)
+        assert vivo.rate_pct == Decimal("16")
+        assert vivo.base_kind == "iva", "cambiar el % no debe pisar la base"
+
+    def test_una_base_invalida_se_rechaza(
+        self, client, org_headers, config_subtotal,
+    ):
+        """El literal del schema es el guard: 'total' no es una base."""
+        r = client.patch(
+            f"/api/v1/third-parties/retention-configs/{config_subtotal.id}",
+            json={"base_kind": "total"},
+            headers=org_headers,
+        )
+        assert r.status_code == 422, r.text
