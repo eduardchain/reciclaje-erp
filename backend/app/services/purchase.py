@@ -1469,6 +1469,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         search: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_dir: str = "desc",
+        warehouse_id: Optional[UUID] = None,
     ) -> tuple[List[Purchase], int, int, Decimal]:
         """
         Get multiple purchases with filtering, sorting, and pagination.
@@ -1503,6 +1504,29 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
 
         if date_to:
             query = query.filter(Purchase.date < date_to)
+
+        if warehouse_id:
+            # Compras con AL MENOS una linea en esa bodega. La bodega vive en la
+            # LINEA: en Costa la cabecera esta en NULL en todas las compras, y en
+            # SAC la cabecera fuerza la de las lineas (#75 D11) — filtrar por la
+            # cabecera vaciaria Costa entera.
+            #
+            # 🔴 EXISTS, nunca un join a `lines`: con 2+ lineas en la MISMA bodega
+            # (900 compras de Costa) el join repite la compra, y como la lista
+            # usa joinedload de coleccion, que unifica entidades, la lista puede
+            # verse bien mientras total / active_total / amount_sum salen
+            # inflados (#89/#93 R2). Y la correlacion `purchase_id == Purchase.id`
+            # es la que hace que la subconsulta mire las lineas de ESTA compra:
+            # sin ella es verdadera para todas en cuanto exista una linea en la
+            # bodega.
+            query = query.filter(
+                select(PurchaseLine.id)
+                .where(
+                    PurchaseLine.purchase_id == Purchase.id,
+                    PurchaseLine.warehouse_id == warehouse_id,
+                )
+                .exists()
+            )
 
         if search:
             # Search in: purchase_number (as text), supplier name, notes,

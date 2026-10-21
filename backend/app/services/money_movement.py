@@ -888,9 +888,13 @@ class CRUDMoneyMovement:
         Un tercero paga directamente a otro. NO toca cuentas bancarias.
         Crea par vinculado: tp_transfer_out + tp_transfer_in.
 
-        Efectos:
-        - source.current_balance += amount (se le abona, reduce deuda)
-        - destination.current_balance -= amount (se le cobra, aumenta deuda)
+        Efectos (los mismos que dicen los Field del schema y el codigo de abajo;
+        la version anterior de este docstring los tenia invertidos):
+        - source.current_balance -= amount (el origen paga: su saldo baja)
+        - destination.current_balance += amount (el destino recibe: su saldo sube)
+
+        Cada pierna lleva su descripcion: el origen `description`, el destino
+        `destination_description` o, si no vino, la del origen.
         """
         if data.source_third_party_id == data.destination_third_party_id:
             raise HTTPException(
@@ -935,7 +939,7 @@ class CRUDMoneyMovement:
             amount=data.amount,
             account_id=None,
             date=data.date,
-            description=data.description,
+            description=data.destination_description or data.description,
             third_party_id=data.destination_third_party_id,
             reference_number=data.reference_number,
             notes=data.notes,

@@ -291,6 +291,7 @@ async def list_purchases(
     search: Optional[str] = Query(None, description="Search in purchase number, supplier name, notes"),
     sort_by: Optional[str] = Query(None, description="Columna a ordenar (allowlist en service, fallback silencioso a 'date')"),
     sort_dir: str = Query("desc", regex="^(asc|desc)$", description="Direccion: asc | desc"),
+    warehouse_id: Optional[UUID] = Query(None, description="Compras con al menos una linea en esta bodega"),
     db: Session = Depends(get_db),
     org_context: dict = Depends(require_permission("purchases.view")),
 ) -> PaginatedPurchaseResponse:
@@ -322,6 +323,7 @@ async def list_purchases(
             search=search,
             sort_by=sort_by,
             sort_dir=sort_dir,
+            warehouse_id=warehouse_id,
         )
         
         # Enrich each purchase with joined data (+ origen inbound B1, por pagina)

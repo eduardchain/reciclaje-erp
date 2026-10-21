@@ -21,7 +21,7 @@ from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from app.utils.dates import BusinessDate
 
@@ -249,12 +249,27 @@ class GenericCollectionCreate(BaseModel):
 
 
 class ThirdPartyTransferCreate(BaseModel):
-    """Transferencia entre terceros — NO cuenta, source.balance(-), dest.balance(+)."""
+    """Transferencia entre terceros — NO cuenta, source.balance(-), dest.balance(+).
+
+    Cada pierna lleva SU descripcion (pedido de Costa, 2026-10-21): `description`
+    es la del ORIGEN y `destination_description` la del DESTINO. Si el destino no
+    viene, la pierna destino lleva la del origen — byte a byte lo de antes.
+
+    `extra="forbid"`: sin el, una clave mal escrita se descartaba en silencio y
+    el destino recibia la descripcion del origen, que se ve IDENTICO a que el
+    campo funcione. Con forbid es un 422.
+    """
+    model_config = ConfigDict(extra="forbid")
+
     source_third_party_id: UUID = Field(..., description="Tercero que paga (balance baja)")
     destination_third_party_id: UUID = Field(..., description="Tercero que recibe (balance sube)")
     amount: Decimal = Field(..., gt=0, description="Monto de la transferencia")
     date: BusinessDate = Field(..., description="Fecha de la transferencia")
-    description: str = Field(..., min_length=1, max_length=500, description="Descripcion")
+    description: str = Field(..., min_length=1, max_length=500, description="Descripcion en el estado de cuenta del ORIGEN")
+    destination_description: Optional[str] = Field(
+        None, min_length=1, max_length=500,
+        description="Descripcion en el estado de cuenta del DESTINO. Ausente = la misma del origen",
+    )
     reference_number: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
 

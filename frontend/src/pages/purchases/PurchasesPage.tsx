@@ -18,6 +18,7 @@ import { DataTable } from "@/components/shared/DataTable";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
+import { WarehouseFilterSelect, cachedWarehouseName } from "@/components/shared/WarehouseFilterSelect";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -39,6 +40,7 @@ import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 const PAGE_SIZE = 20;
 
@@ -271,6 +273,10 @@ export default function PurchasesPage() {
   const status = searchParams.get("tab") || "all";
   const page = parseInt(searchParams.get("page") || "0", 10);
   const search = searchParams.get("search") || "";
+  // Bodega: en la URL (deep-linkable, patron `?dp=` #45). Filtra las compras con
+  // AL MENOS una linea en esa bodega; una compra mixta sale completa (plan D3).
+  const warehouseId = searchParams.get("warehouse") || "";
+  const queryClient = useQueryClient();
   const sortField = searchParams.get("sort") || "";
   const sortDesc = searchParams.get("dir") !== "asc";
   const sorting: SortingState = sortField ? [{ id: sortField, desc: sortDesc }] : [];
@@ -300,6 +306,7 @@ export default function PurchasesPage() {
     search: search || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
+    warehouse_id: warehouseId || undefined,
     sort_by: sortField || undefined,
     sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
   });
@@ -334,6 +341,9 @@ export default function PurchasesPage() {
         search: search || undefined,
         date_from: dateFrom || undefined,
         date_to: dateTo || undefined,
+        // El export arma sus parametros a mano: sin esta linea la pantalla
+        // mostraria una bodega y el Excel descargaria todas (#51).
+        warehouse_id: warehouseId || undefined,
       }),
     );
 
@@ -417,7 +427,12 @@ export default function PurchasesPage() {
         exportFilename="ecobalance_compras"
         onExportAll={handleExportAll}
         currencyColumns={["total_amount"]}
-        exportOverride={(rows) => exportPurchasesDetailExcel(rows, { canViewPrices })}
+        exportOverride={(rows) =>
+          exportPurchasesDetailExcel(rows, {
+            canViewPrices,
+            fileTag: warehouseId ? (cachedWarehouseName(queryClient, warehouseId) ?? "bodega-filtrada") : undefined,
+          })
+        }
         renderMobileCard={(p) => (
           <OperationListCard
             operationNumber={p.purchase_number}
@@ -446,6 +461,7 @@ export default function PurchasesPage() {
         toolbar={
           <ResponsiveFilterBar>
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar por #, proveedor, placa o factura..." />
+            <WarehouseFilterSelect value={warehouseId} onChange={(id) => setParam({ warehouse: id, page: null })} />
             <DateRangePicker
               dateFrom={dateFrom}
               dateTo={dateTo}
