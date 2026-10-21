@@ -257,7 +257,13 @@ export interface ThirdPartyTransferCreate {
   destination_third_party_id: string;
   amount: number;
   date: string;
+  /** Descripcion en el estado de cuenta del ORIGEN */
   description: string;
+  /**
+   * Descripcion en el estado de cuenta del DESTINO. Ausente = la misma del
+   * origen. Nunca se manda vacia ni con solo espacios: en ese caso se omite.
+   */
+  destination_description?: string;
   reference_number?: string | null;
   notes?: string | null;
 }

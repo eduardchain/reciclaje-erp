@@ -15,6 +15,7 @@ import { usePayableSuppliers, useCustomers, useInvestors, useMoneyAccounts, useE
 import { usePermissions } from "@/hooks/usePermissions";
 import { formatCurrency, toLocalDateInput } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
+import type { ThirdPartyTransferCreate } from "@/types/money-movement";
 
 type MovementType = "payment_to_supplier" | "collection_from_client" | "expense" | "service_income" | "transfer" | "capital_injection" | "capital_return" | "commission_payment" | "provision_deposit" | "provision_expense" | "advance_payment" | "advance_collection" | "asset_payment" | "expense_accrual" | "liability_payment" | "payment_to_generic" | "collection_from_generic" | "tp_transfer" | "tp_adjustment";
 
@@ -97,6 +98,9 @@ export default function MovementCreatePage() {
   const [expCategoryId, setExpCategoryId] = useState("");
   const [destAccountId, setDestAccountId] = useState("");
   const [description, setDescription] = useState("");
+  // Cruce entre terceros: descripcion del lado DESTINO (pedido de Costa). Vacia
+  // = la misma del origen, como siempre.
+  const [destDescription, setDestDescription] = useState("");
   const [date, setDate] = useState(toLocalDateInput());
   const [referenceNumber, setReferenceNumber] = useState("");
   const [notes, setNotes] = useState("");
@@ -117,6 +121,7 @@ export default function MovementCreatePage() {
     setExpCategoryId("");
     setDestAccountId("");
     setDescription("");
+    setDestDescription("");
     setReferenceNumber("");
     setNotes("");
     setEvidenceFile(null);
@@ -251,12 +256,23 @@ export default function MovementCreatePage() {
       return;
     }
     if (type === "tp_transfer") {
-      const tpPayload = {
+      // "Vacia" = trim() === "": un espacio que viajara pasaria el min_length del
+      // backend y dejaria al destino con la descripcion en blanco. Vacia va como
+      // `undefined`, que JSON.stringify omite: la clave no viaja.
+      //
+      // El payload va TIPADO y la clave es una propiedad DIRECTA, a proposito:
+      // TypeScript NO revisa propiedades de mas dentro de un spread
+      // (`...(c ? { clave_mal_escrita: x } : {})` compila), asi que con un spread
+      // el tipo no protegeria nada. Medido: con la clave mal escrita en un
+      // spread, tsc salio limpio.
+      const destDesc = destDescription.trim();
+      const tpPayload: ThirdPartyTransferCreate = {
         source_third_party_id: thirdPartyId,
         destination_third_party_id: destThirdPartyId,
         amount,
         date,
         description,
+        destination_description: destDesc || undefined,
         reference_number: referenceNumber || undefined,
         notes: notes || undefined,
       };
@@ -536,7 +552,25 @@ export default function MovementCreatePage() {
               </>
             )}
 
-            {needsDescription && (
+            {isTpTransfer && (
+              <>
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Descripción para {thirdParties.find((t) => t.id === thirdPartyId)?.name ?? "el origen"} *
+                  </Label>
+                  <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ej: Consignación bancaria" />
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Descripción para {thirdParties.find((t) => t.id === destThirdPartyId)?.name ?? "el destino"}
+                  </Label>
+                  <Input value={destDescription} onChange={(e) => setDestDescription(e.target.value)} placeholder="Ej: Dinero para impuesto X" />
+                  <p className="text-xs text-slate-500 mt-1">Si la dejas vacía, se usa la misma del origen.</p>
+                </div>
+              </>
+            )}
+
+            {needsDescription && !isTpTransfer && (
               <div className="md:col-span-2">
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Descripcion *</Label>
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descripcion del movimiento" />

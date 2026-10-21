@@ -17,6 +17,8 @@ interface SaleFilters {
   date_field?: "date" | "liquidated_at";
   sort_by?: string;
   sort_dir?: "asc" | "desc";
+  /** Compras: con al menos una linea en esta bodega. Ventas: de esta bodega. */
+  warehouse_id?: string;
 }
 
 export function useSales(filters: SaleFilters = {}) {

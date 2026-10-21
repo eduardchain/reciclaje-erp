@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Captura golden ×3 orgs prod (Costa, Biogreen, MetaRecycling) contra un backend.
+"""Captura golden de las orgs cliente (Costa, MetaRecycling) contra un backend.
 
 Uso: python capture_golden.py --base-url http://localhost:8001 --out before/
 Credenciales superuser: env SEED_SU_EMAIL / SEED_SU_PASSWORD.
@@ -26,9 +26,24 @@ API = "/api/v1"
 # es lo que le permite a golden_diff distinguir "no corrio" de "paso".
 MANIFEST = "_manifest.json"
 
+# Las organizaciones CLIENTE: las que pagan licencia y operan a diario.
+# Costa se llama "RECICLAJES NACIONALES S.A.S" desde 2026-10-01; es la misma
+# org (mismo id) y aca se sigue llamando costa, igual que en el canon.
+#
+# Biogreen (02b110cc-…) salio de la lista ese mismo dia: siempre fue DEMO (nunca
+# compro la licencia) y quedo desactivada. Con ella adentro la captura falla,
+# porque el contexto de superusuario filtra `is_active`, y sin `_manifest.json`
+# `golden_diff` aborta. SAC no entra a proposito: es flag-gated y su superficie
+# la prueban sus propios tests.
+#
+# ⚠️ Esta lista es de las orgs que OPERAN, no de las que existen. Si una demo
+# pasa a cliente (o una org de baja se reactiva), vuelve ACA: si no, queda fuera
+# del gate sin que nadie lo note. Y al reves, esto NO acota los argumentos de
+# no-regresion por datos ("cero filas fuera de SAC"): esos se siguen midiendo
+# sobre TODAS las orgs de la BD, activas o no. Sacar a Biogreen del golden no la
+# saca de la base.
 ORGS = {
     "costa": "7888fbe3-d317-400b-a122-dfdd422654dc",
-    "biogreen": "02b110cc-4d96-41ca-9b5e-6e31090fa037",
     "metarecycling": "8e49c64a-8a13-4c5f-80c8-7c3123c9d246",
 }
 

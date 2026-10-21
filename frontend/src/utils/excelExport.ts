@@ -942,9 +942,23 @@ function applyNumberFormat(ws: XLSX.WorkSheet, cols: number[], fmt: string) {
 const materialsText = (lines: { material_code: string; quantity: number; material_unit?: string }[]) =>
   lines.map((l) => `${l.material_code} (${formatWeight(num(l.quantity), l.material_unit || "kg")})`).join(", ");
 
+/**
+ * Sufijo del nombre de archivo para un export filtrado (por ejemplo la bodega):
+ * "San Alberto" → "_San-Alberto". Sin tag, el nombre queda como siempre.
+ */
+function fileTagSuffix(tag?: string): string {
+  if (!tag) return "";
+  const slug = tag
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug ? `_${slug}` : "";
+}
+
 export function exportPurchasesDetailExcel(
   purchases: PurchaseResponse[],
-  opts: { canViewPrices: boolean },
+  opts: { canViewPrices: boolean; fileTag?: string },
 ) {
   const { canViewPrices } = opts;
   const wb = XLSX.utils.book_new();
@@ -1012,12 +1026,12 @@ export function exportPurchasesDetailExcel(
   if (canViewPrices) applyCurrencyFormat(wsDetalle, [8, 9]);
   XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle");
 
-  XLSX.writeFile(wb, "ecobalance_compras.xlsx");
+  XLSX.writeFile(wb, `ecobalance_compras${fileTagSuffix(opts.fileTag)}.xlsx`);
 }
 
 export function exportSalesDetailExcel(
   sales: SaleResponse[],
-  opts: { canViewPrices: boolean; canViewProfit: boolean },
+  opts: { canViewPrices: boolean; canViewProfit: boolean; fileTag?: string },
 ) {
   const { canViewPrices, canViewProfit } = opts;
   const wb = XLSX.utils.book_new();
@@ -1108,7 +1122,7 @@ export function exportSalesDetailExcel(
   }
   XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle");
 
-  XLSX.writeFile(wb, "ecobalance_ventas.xlsx");
+  XLSX.writeFile(wb, `ecobalance_ventas${fileTagSuffix(opts.fileTag)}.xlsx`);
 }
 
 export function exportDoubleEntriesDetailExcel(

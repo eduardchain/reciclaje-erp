@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
@@ -18,6 +19,7 @@ import { DataTable } from "@/components/shared/DataTable";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
+import { WarehouseFilterSelect, cachedWarehouseName } from "@/components/shared/WarehouseFilterSelect";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -306,6 +308,12 @@ export default function SalesPage() {
   const status = searchParams.get("tab") || "all";
   const page = parseInt(searchParams.get("page") || "0", 10);
   const search = searchParams.get("search") || "";
+  // Bodega FISICA de la venta (`Sale.warehouse_id`, la que saco el inventario),
+  // no la sede que factura: en SAC una venta de plomo sale de Juan Mina y la
+  // factura Circunvalar (Q-30, #107 D5). Por eso este filtro NO se conecta al
+  // drill-down del P&L por sede, que usa la sede que factura.
+  const warehouseId = searchParams.get("warehouse") || "";
+  const queryClient = useQueryClient();
   const dpFilter = (searchParams.get("dp") as "all" | "exclude" | "only" | null) || "all";
   const dateField = (searchParams.get("date_field") as "date" | "liquidated_at" | null) || "date";
   const sortField = searchParams.get("sort") || "";
@@ -350,6 +358,7 @@ export default function SalesPage() {
     date_to: effectiveDateTo || undefined,
     dp_filter: dpFilter === "all" ? undefined : dpFilter,
     date_field: dateField === "date" ? undefined : dateField,
+    warehouse_id: warehouseId || undefined,
     sort_by: sortField || undefined,
     sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
   });
@@ -399,6 +408,9 @@ export default function SalesPage() {
         date_to: effectiveDateTo || undefined,
         dp_filter: dpFilter === "all" ? undefined : dpFilter,
         date_field: dateField === "date" ? undefined : dateField,
+        // El export arma sus parametros a mano: sin esta linea la pantalla
+        // mostraria una bodega y el Excel descargaria todas (#51).
+        warehouse_id: warehouseId || undefined,
       }),
     );
 
@@ -536,7 +548,13 @@ export default function SalesPage() {
         exportFilename="ecobalance_ventas"
         onExportAll={handleExportAll}
         currencyColumns={["total_amount", "total_profit"]}
-        exportOverride={(rows) => exportSalesDetailExcel(rows, { canViewPrices, canViewProfit })}
+        exportOverride={(rows) =>
+          exportSalesDetailExcel(rows, {
+            canViewPrices,
+            canViewProfit,
+            fileTag: warehouseId ? (cachedWarehouseName(queryClient, warehouseId) ?? "bodega-filtrada") : undefined,
+          })
+        }
         renderMobileCard={(s) => (
           <OperationListCard
             operationNumber={s.sale_number}
@@ -569,6 +587,7 @@ export default function SalesPage() {
         toolbar={
           <ResponsiveFilterBar>
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar por #, cliente, placa o factura..." />
+            <WarehouseFilterSelect value={warehouseId} onChange={(id) => setParam({ warehouse: id, page: null })} />
             <DateRangePicker dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} onDateFromChange={handleDateFromChange} onDateToChange={handleDateToChange} />
           </ResponsiveFilterBar>
         }

@@ -15,6 +15,8 @@ interface PurchaseFilters {
   search?: string;
   sort_by?: string;
   sort_dir?: "asc" | "desc";
+  /** Compras: con al menos una linea en esta bodega. Ventas: de esta bodega. */
+  warehouse_id?: string;
 }
 
 export function usePurchases(filters: PurchaseFilters = {}) {
