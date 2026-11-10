@@ -1079,7 +1079,7 @@ class SacSeeder:
 
     # ---------------- RUN ----------------
 
-    def run(self, reset: bool) -> None:
+    def run(self, reset: bool, org_vacia: bool = False) -> None:
         t0 = time.monotonic()
         mode = "DRY-RUN" if self.api.dry_run else "APPLY"
         logging.info("=" * 70)
@@ -1087,6 +1087,15 @@ class SacSeeder:
         logging.info("=" * 70)
 
         try:
+            if org_vacia:
+                self._run_org_vacia(reset)
+                logging.info("=" * 70)
+                logging.info(
+                    f"LISTO en {time.monotonic() - t0:.1f}s  ({mode}) — ORG VACIA: solo org, "
+                    "usuarios y roles. Siguiente: load_sac_opening.py --fase saldos y "
+                    "despues este seeder SIN --reset (provision)."
+                )
+                return
             self._run_stages(reset)
             logging.info("=" * 70)
             logging.info(f"LISTO en {time.monotonic() - t0:.1f}s  ({mode})")
@@ -1106,6 +1115,22 @@ class SacSeeder:
             # imprime la corrida, y si una etapa posterior a las tarifas aborta
             # (un 500, un corte de red) el aviso no se pierde.
             self._report_respected_tariffs()
+
+    def _run_org_vacia(self, reset: bool) -> None:
+        """Org recien creada con sus usuarios y roles, y NADA mas.
+
+        Existe para la carga inicial (plan-sac-carga-inicial-ronda1.md, G1): el
+        saldo de apertura de un tercero o una cuenta solo se puede poner AL
+        CREARLO, y este seeder siembra Willard S.A y Caja Circunvalar en 0. Con
+        la org vacia, el cargador los crea primero con su saldo y la provision
+        posterior los reutiliza por nombre (create_third_parties,
+        create_accounts y create_kg_accounts buscan por nombre).
+
+        Solo junto con --reset, o sea solo en local (guard en main()).
+        """
+        self.create_or_reset_org(reset)
+        self.create_users_and_roles()
+        self._force_known_passwords()   # dev-only (ver docstring del metodo)
 
     def _run_stages(self, reset: bool) -> None:
         self.create_or_reset_org(reset)
@@ -1159,8 +1184,20 @@ def main() -> None:
         "--users-password", default="12345678",
         help="Password para usuarios SAC recreados (los existentes conservan la suya)",
     )
+    parser.add_argument(
+        "--org-vacia", action="store_true",
+        help=(
+            "SOLO con --reset: crea la org con usuarios y roles y se detiene, para "
+            "que la carga inicial cree los saldos ANTES que los maestros"
+        ),
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
+    if args.org_vacia and not args.reset:
+        raise SystemExit(
+            "--org-vacia solo existe junto con --reset (o sea solo en local): sobre "
+            "una org que ya existe no hay nada que dejar vacio."
+        )
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -1189,7 +1226,7 @@ def main() -> None:
 
     api.login(args.superuser_email, args.superuser_password)
     seeder = SacSeeder(api, args.users_password)
-    seeder.run(reset=args.reset)
+    seeder.run(reset=args.reset, org_vacia=args.org_vacia)
     if seeder.respected_tariffs:
         # Exit propio y distinto de 1 (fallo) para que quien encadene la
         # provision con `&&` se detenga: hay una decision que no es del operador.
