@@ -36,6 +36,7 @@ Todas las escrituras van con el `X-Organization-ID` de la org que se llama exact
 - (a) OK explícito de Daniel para escribir en producción.
 - (b) La credencial del superusuario de producción va en un archivo de Daniel fuera del repo, por ejemplo `~/.config/sac-prod.env` con `chmod 600`, `SEED_SU_EMAIL=` y `SEED_SU_PASSWORD=`. Se carga con `set -a; . ~/.config/sac-prod.env; set +a`. Nunca en la línea de comandos, en el chat ni en un log.
 - (c) Exportar el Sheet a `.xlsx` justo antes y anotar su sha256: Johana puede haberlo editado.
+- (d) Confirmar que `david@sac.com` ya no tiene la clave `12345678` con la que lo creó la provisión de producción (memoria del go-live). Si no la cambió, resetearla desde Sistema → Usuarios (#85) antes del paso 2. David tiene `third_parties.view`, y `GET /third-parties` devuelve `current_balance` a quien tenga ese permiso: con la clave por defecto, cualquiera puede leer por la API los saldos de nómina que trae la muestra. Lo decide Daniel (N4 de QA).
 
 ```bash
 cd backend
@@ -72,7 +73,7 @@ Nada de eso se borra: queda en la archivada. Pero la nueva nace sin ello. **Si a
   ```bash
   ./venv/bin/python scripts/archivar_org_sac.py --modo restaurar --org-id <id de la archivada> --apply --api-url $API
   ```
-- *Hay una «SAC» nueva a medio cargar* (falló en el paso 2 después de crearla, o del 3 en adelante). Se archiva también (`--modo archivar --apply`) y se vuelve a correr el paso 2; al final se dan de baja las dos.
+- *Hay una «SAC» nueva a medio cargar* (falló en el paso 2 después de crearla, o del 3 en adelante). Se archiva también (`--modo archivar --apply`) y se vuelve a correr `ronda_remota.sh` entero; al final se dan de baja las dos.
 
 Los dos caminos se ejercieron contra el alias (§4).
 
@@ -114,6 +115,8 @@ Artefactos en el scratchpad de la sesión, en `ensayo/` (localhost), `ensayo2/` 
   - Se vuelve a dejar la nueva y se da de baja la vieja con 0 desactivados.
   - Repetir la baja se niega con «ya está dada de baja», un mensaje que antes era inalcanzable con el backend real.
 - **Las otras empresas:** 0 filas no-SAC en 50 tablas, control positivo 374, 6 orgs no-SAC activas y sin cambios, ningún usuario modificado (`otras_orgs_alias3.txt`).
+- **Qué árbol midió cada log (N1 de QA).** `ensayo_alias3.log` estampa `archivar_org_sac.py` **00315bcc**, el árbol de antes de `include_inactive`; la única diferencia con el final es `_orgs`. `archivar`, `baja` y `restaurar` con el sha final (**e4ae895e**) corrieron en `reversa_alias3_r2.log`. `revisar` con el sha final lo cubren solo los tests. Pasa por el mismo `org_activa` que `archivar`.
+- **Dos archivadas con el mismo nombre (N2 de QA).** En la reversa, dos orgs quedaron como «SAC (archivada 2026-11-10 1908)» porque se archivaron en el mismo minuto. No rompe nada, porque todo va por id, pero confunde en Sistema → Organizaciones. Agregar segundos al nombre queda pendiente: es un cambio de código y no vale reabrir QA por esto.
 
 **Plantado.**
 - **r5:** depreciación 3/3 y la primera versión de `revisar` 3/3.
