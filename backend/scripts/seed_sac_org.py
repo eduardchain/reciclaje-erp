@@ -12,7 +12,8 @@ Que crea:
   - 4 UNs, 4 cuentas de dinero ($0), 8 categorias de gasto, 6 categorias de material.
   - Los 37 materiales del listado de Daniel (2026-07-23) + perfil kg + formula
     de conversion (battery_to_lead / drosses_to_lead) donde aplica.
-  - 5 terceros (Willard S.A = proveedor Y cliente, Green Loop, 3 PRUEBA-*).
+  - 2 terceros (Willard S.A = proveedor Y cliente, Green Loop) y, SOLO en local,
+    6 PRUEBA-* para probar el reparto multi-proveedor.
   - 3 cuentas kg (WILLARD-BAT-CV, WILL-DROSS, INTERSEDE); WILL-BAT-JM se desactiva (#105).
   - 2 tarifas (comision_green_loop $100 per_kg_material,
     maquila_intersede_cv_jm $1.500 per_kg_lead).
@@ -141,6 +142,11 @@ WAREHOUSES: list[tuple[str, bool, bool, Optional[str], Optional[str]]] = [
     ("Circunvalar - Molino", False, False, None, "Circunvalar"),
     ("Juan Mina - Transito", False, True, "Juan Mina", None),
     ("Circunvalar - Transito", False, True, "Circunvalar", None),
+    # Exportaciones despachadas y sin liquidar (Q-47, Daniel 10-nov): ya
+    # salieron de planta, asi que no van en el inventario de Juan Mina, donde
+    # se podrian vender dos veces. No receptora (la Entrada no la ofrece) y de
+    # la sede Juan Mina, de donde salio el material.
+    ("Exportaciones por liquidar", False, False, None, "Juan Mina"),
 ]
 
 ACCOUNTS = [
@@ -247,17 +253,21 @@ MATERIALS: list[tuple[str, str, str, str, str, bool, Optional[str], Optional[flo
 # Salida (W1) no puede derivar su venta: el guard de #32/#33 lo rechaza.
 THIRD_PARTIES = [
     ("Willard S.A", ["Proveedor Material", "Cliente"]),
-    ("PRUEBA - Proveedor de Chatarra", ["Proveedor Material"]),
     ("Green Loop", ["Proveedor Servicios"]),
-    ("PRUEBA - Transportes del Caribe", ["Proveedor Servicios"]),
-    ("PRUEBA - Cliente Nacional", ["Cliente"]),
 ]
 
-# SOLO en modo local con --reset (nunca contra produccion). El reparto de una
-# Entrada es multi-proveedor por naturaleza — con un unico proveedor de material
-# no se puede probar. Ojo: Willard S.A NO sirve para esto, es titular de las
-# cuentas kg y el guard de #80 lo rechaza como proveedor de compra.
+# SOLO en local (nunca contra un servidor remoto). El reparto de una Entrada es
+# multi-proveedor por naturaleza — con un unico proveedor de material no se
+# puede probar. Ojo: Willard S.A NO sirve para esto, es titular de las cuentas
+# kg y el guard de #80 lo rechaza como proveedor de compra.
+# Los tres primeros se sembraban tambien en produccion (desde #84): Daniel
+# decidio el 10-nov que la carga de muestra no los traiga, porque aparecian
+# junto a los terceros reales. Ningun codigo los usa por nombre; solo las guias
+# de prueba local.
 THIRD_PARTIES_LOCAL = [
+    ("PRUEBA - Proveedor de Chatarra", ["Proveedor Material"]),
+    ("PRUEBA - Transportes del Caribe", ["Proveedor Servicios"]),
+    ("PRUEBA - Cliente Nacional", ["Cliente"]),
     ("PRUEBA - Chatarreria Bogota", ["Proveedor Material"]),
     ("PRUEBA - Reciclados del Norte", ["Proveedor Material"]),
     ("PRUEBA - Metales del Atlantico", ["Proveedor Material"]),
@@ -397,6 +407,34 @@ WILLARD_DISTRIBUTION_CENTERS = ["baq", "bog", "monteria", "santa_marta", "motoco
 # API CLIENT (patron de seed_demo_org.py)
 # ============================================================================
 
+def settings_de_la_org(warehouses: dict[str, str]) -> dict:
+    """Los settings que el seeder deja en la org (REPLACE completo del JSONB, D3).
+
+    Funcion de modulo para que archivar_org_sac.py --modo revisar compare la org
+    vieja contra ESTA fuente y no contra una copia. `warehouses` = nombre -> id.
+    """
+    return {
+        "kg_ledger_enabled": True,
+        "two_step_transfers_enabled": True,
+        # W1 (Hugo, 24-ago): es UN solo cobro y ocurre en la ENTREGA a
+        # CC-009 (2026-09-03): vuelve a ON. Se habia apagado por D11 de
+        # #100, que asumia que la maquila se cobraba en la ENTREGA; la demo
+        # del 28-ago lo desmintio — se causa AL TRASLADAR, una sola vez, que
+        # es lo que ya decia la decision escrita del 2-jul. El reparto de la
+        # Salida gatea por TIPO de salida, no por este flag.
+        "internal_maquila_enabled": True,
+        "transfer_tolerance_pct": 0.05,
+        "intersede_stale_days": 30,
+        "aging_buckets": [30, 60, 90],
+        "willard_distribution_centers": WILLARD_DISTRIBUTION_CENTERS,
+        "willard_sede_drosses": warehouses["Juan Mina"],
+        "willard_sede_postconsumo_default": warehouses["Circunvalar"],
+        # W1 (D4c): Circunvalar factura a Willard y le abona a planta. Sin
+        # esta clave el reparto no se emite y la factura nace sin bodega.
+        "willard_sede_facturacion": warehouses["Circunvalar"],
+    }
+
+
 class APIClient:
     def __init__(self, dry_run: bool = True, base_url: str = BASE_URL):
         self.base_url = base_url.rstrip("/")
@@ -485,9 +523,44 @@ class APIClient:
         """
         if self.dry_run:
             return {}
-        data = self.get(path, {"limit": 500})
-        items = data["items"] if isinstance(data, dict) and "items" in data else data
-        return {it[key]: it for it in items if it.get(key) is not None}
+        return {it[key]: it for it in self.list_all(path) if it.get(key) is not None}
+
+    def list_all(self, path: str, page: int = 500) -> list[dict]:
+        """Todos los items de un listado, pagina por pagina.
+
+        Antes se pedia UNA pagina de 500 sin mirar el `total`: con mas filas
+        el mapa quedaba incompleto en silencio, y la provision creaba un
+        segundo «Willard S.A» (N1 de QA, carga inicial). Ahora se pagina con
+        `skip` hasta el `total`, y si no se llega a el, se detiene.
+        """
+        items: list[dict] = []
+        while True:
+            data = self.get(path, {"limit": page, "skip": len(items)})
+            if not (isinstance(data, dict) and "items" in data):
+                # Lista plana: no trae total. Una pagina llena puede estar cortada.
+                if len(data) >= page:
+                    raise SystemExit(
+                        f"{path} devolvio {len(data)} filas sin total: puede estar "
+                        "cortado y el seeder crearia duplicados. No se sigue."
+                    )
+                return list(data)
+            pagina = data["items"]
+            items.extend(pagina)
+            total = data.get("total")
+            if total is None:
+                if len(pagina) >= page:
+                    raise SystemExit(
+                        f"{path} devolvio una pagina llena sin total: no se puede saber "
+                        "si falta algo. No se sigue."
+                    )
+                return items
+            if len(items) >= total or not pagina:
+                break
+        # `!=` y no `<` (O1 de QA): un endpoint que ignorara `skip` repetiria la
+        # pagina, pasaria del total y saldria del bucle con duplicados.
+        if len(items) != total:
+            raise SystemExit(f"{path}: se leyeron {len(items)} de {total}. No se sigue.")
+        return items
 
     def delete(self, path: str) -> None:
         if self.dry_run:
@@ -546,6 +619,13 @@ class SacSeeder:
             )
             return
 
+        # Contra un remoto los usuarios tienen que existir ANTES de crear la org:
+        # si faltara el cuarto, la org quedaria creada a medias (ver
+        # _pre_register_user).
+        if not self.api.is_local and not self.api.dry_run:
+            faltan = self._usuarios_que_faltan()
+            if faltan:
+                raise SystemExit(self._mensaje_faltan(faltan))
         owner = USERS[0]
         self._pre_register_user(owner)
         r = self.api.post(
@@ -621,9 +701,39 @@ class SacSeeder:
             db.commit()
         logging.info(f"  Clave unificada para {n} usuarios (dev)")
 
+    def verificar_usuarios(self) -> None:
+        """Solo lectura: se detiene si --org-vacia se detendria por un usuario
+        faltante (C1 de QA, 10-nov). Va en el paso 0 de ronda_remota.sh, ANTES
+        de archivar: si fallara recien en el paso 2, la vieja ya estaria
+        archivada y la nueva sin crear, sin ninguna «SAC» activa."""
+        if self.api.is_local:
+            logging.info("  Local: el seeder crea los usuarios que falten. Nada que verificar.")
+            return
+        faltan = self._usuarios_que_faltan()
+        if faltan:
+            raise SystemExit(self._mensaje_faltan(faltan))
+        logging.info(f"  Los {len(USERS)} usuarios del seeder existen en {self.api.base_url}.")
+
+    def _usuarios_que_faltan(self) -> list[str]:
+        existentes = {x["email"].lower() for x in self.api.get("/system/users")}
+        return [u["email"] for u in USERS if u["email"].lower() not in existentes]
+
+    def _mensaje_faltan(self, faltan: list[str]) -> str:
+        return (
+            f"Usuario(s) que no existen en {self.api.base_url}: {', '.join(faltan)}. Contra un "
+            "servidor remoto el seeder NO crea usuarios: nacerian con --users-password, una "
+            "clave constante (la familia del reseteo-a-constante, #85). Créelos desde Sistema "
+            "→ Usuarios con una clave propia y vuelva a correr."
+        )
+
     def _pre_register_user(self, u: dict) -> None:
         if self.api.dry_run:
             logging.info(f"  [DRY] pre-register {u['email']}")
+            return
+        if not self.api.is_local:
+            if u["email"] in self._usuarios_que_faltan():
+                raise SystemExit(self._mensaje_faltan([u["email"]]))
+            logging.info(f"  Usuario {u['email']} ya existe (conserva su password)")
             return
         r = self.api.session.post(
             f"{self.api.base_url}{API_PREFIX}/auth/register",
@@ -766,26 +876,7 @@ class SacSeeder:
     def patch_settings(self) -> None:
         """REPLACE completo del JSONB (D3) — SIEMPRE todas las claves."""
         logging.info("[5] Settings de la org (flags SAC ON + sedes Willard)")
-        settings = {
-            "kg_ledger_enabled": True,
-            "two_step_transfers_enabled": True,
-            # W1 (Hugo, 24-ago): es UN solo cobro y ocurre en la ENTREGA a
-            # CC-009 (2026-09-03): vuelve a ON. Se habia apagado por D11 de
-            # #100, que asumia que la maquila se cobraba en la ENTREGA; la demo
-            # del 28-ago lo desmintio — se causa AL TRASLADAR, una sola vez, que
-            # es lo que ya decia la decision escrita del 2-jul. El reparto de la
-            # Salida gatea por TIPO de salida, no por este flag.
-            "internal_maquila_enabled": True,
-            "transfer_tolerance_pct": 0.05,
-            "intersede_stale_days": 30,
-            "aging_buckets": [30, 60, 90],
-            "willard_distribution_centers": WILLARD_DISTRIBUTION_CENTERS,
-            "willard_sede_drosses": self.warehouses["Juan Mina"],
-            "willard_sede_postconsumo_default": self.warehouses["Circunvalar"],
-            # W1 (D4c): Circunvalar factura a Willard y le abona a planta. Sin
-            # esta clave el reparto no se emite y la factura nace sin bodega.
-            "willard_sede_facturacion": self.warehouses["Circunvalar"],
-        }
+        settings = settings_de_la_org(self.warehouses)
         self.api.patch(
             f"/system/organizations/{self.api.org_id}", {"settings": settings},
             label="settings",
@@ -1126,8 +1217,18 @@ class SacSeeder:
         posterior los reutiliza por nombre (create_third_parties,
         create_accounts y create_kg_accounts buscan por nombre).
 
-        Solo junto con --reset, o sea solo en local (guard en main()).
+        Con --reset (solo local) borra la org previa y la recrea. Sin --reset
+        (el unico modo contra produccion) exige que NO haya una org activa con
+        ese nombre: la anterior se archiva antes con archivar_org_sac.py, que
+        la renombra sin dar de baja a sus usuarios. Si existiera, la provision
+        la completaria en vez de dejarla vacia, y el cargador no podria poner
+        los saldos.
         """
+        if not reset and not self.api.dry_run and self._find_existing_org():
+            raise SystemExit(
+                f"Ya hay una org activa «{ORG_NAME}»: --org-vacia no la vacia. Archivela "
+                "primero (scripts/archivar_org_sac.py --modo archivar) o, en local, use --reset."
+            )
         self.create_or_reset_org(reset)
         self.create_users_and_roles()
         self._force_known_passwords()   # dev-only (ver docstring del metodo)
@@ -1182,22 +1283,26 @@ def main() -> None:
     parser.add_argument("--superuser-password", default=os.environ.get("SEED_SU_PASSWORD"))
     parser.add_argument(
         "--users-password", default="12345678",
-        help="Password para usuarios SAC recreados (los existentes conservan la suya)",
+        help=("Password para usuarios SAC creados EN LOCAL (los existentes conservan la "
+              "suya). Contra un remoto no se crean usuarios: si falta uno, se detiene"),
     )
     parser.add_argument(
         "--org-vacia", action="store_true",
         help=(
-            "SOLO con --reset: crea la org con usuarios y roles y se detiene, para "
-            "que la carga inicial cree los saldos ANTES que los maestros"
+            "Crea la org con usuarios y roles y se detiene, para que la carga inicial "
+            "cree los saldos ANTES que los maestros. Sin --reset exige que no haya una "
+            "org activa con el nombre (archivarla antes con archivar_org_sac.py)"
+        ),
+    )
+    parser.add_argument(
+        "--verificar-usuarios", action="store_true",
+        help=(
+            "Solo lectura: contra un remoto, se detiene si falta alguno de los usuarios "
+            "del seeder (no escribe nada, con o sin --apply)"
         ),
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
-    if args.org_vacia and not args.reset:
-        raise SystemExit(
-            "--org-vacia solo existe junto con --reset (o sea solo en local): sobre "
-            "una org que ya existe no hay nada que dejar vacio."
-        )
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -1226,6 +1331,9 @@ def main() -> None:
 
     api.login(args.superuser_email, args.superuser_password)
     seeder = SacSeeder(api, args.users_password)
+    if args.verificar_usuarios:
+        seeder.verificar_usuarios()
+        return
     seeder.run(reset=args.reset, org_vacia=args.org_vacia)
     if seeder.respected_tariffs:
         # Exit propio y distinto de 1 (fallo) para que quien encadene la
