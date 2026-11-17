@@ -19,6 +19,8 @@ Hoy el sistema conoce **una** deuda de planta con Circunvalar (`intersede`), un 
 | 5 | Q-30: la venta derivada de una Salida | Nace en Juan Mina → el P&L de JM se lleva ingreso y COGS de un material que no es suyo | Ingreso y COGS se atribuyen a la **sede que factura** (Circunvalar) en el P&L por sede; el inventario sigue saliendo de planta |
 | 6 | Pantalla | Cards Horno/Crisol ocultas (#103 D8) | Vuelven, como sub-líneas de Intersede; tab **Crisol** en Salidas de Plomo |
 
+*Errata 17-nov:* la frase entre comillas de la fila 4 no es literal de Johana. El registro primario es control-cambios fila 10 (3-sep 08:52, sin comillas), y "un mismo kg puede causar maquila más de una vez" es inferencia nuestra (grado c): allí dice "Implica que…".
+
 Lo que **no** se construye (sección 8): recetas/colada del horno grande (`FurnaceCharge`, Fase 2), FIFO de intersede, exportación, valoración del plomo en el balance (Q-B), margen propio vs Willard (Q-34), `willard_drosses` por sede.
 
 ---
