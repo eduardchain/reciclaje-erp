@@ -72,6 +72,27 @@ class OrgSettingsPayload(BaseModel):
         None, ge=0, le=1,
         description="Tolerancia del descuadre de entrada (0.05 = 5%); dentro avisa, fuera resalta, jamas bloquea",
     )
+    # Planta como proveedor (plan-sac-planta-como-proveedor D1): con un id, las
+    # maquilas entre sedes se causan como deuda con ESE tercero en vez del par
+    # interno. None = el par de siempre. STR por la regla JSON-nativa de este
+    # payload; el formato UUID se valida aca (N4 de QA) y la pertenencia a la
+    # org, el estado y la categoria al USARLO (D3), que es donde hay org.
+    plant_third_party_id: str | None = Field(
+        None,
+        description="Third party ID (str) de la planta cuando funciona como proveedor de maquila; None = par interno entre sedes",
+    )
+
+    @field_validator("plant_third_party_id")
+    @classmethod
+    def _plant_third_party_is_uuid(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        try:
+            return str(UUID(v))
+        except ValueError:
+            raise ValueError(
+                f"plant_third_party_id debe ser el id (UUID) de un tercero; llego {v!r}"
+            )
 
 
 class WillardDistributionCentersUpdate(BaseModel):

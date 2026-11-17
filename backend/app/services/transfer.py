@@ -31,10 +31,7 @@ from app.models.inventory_movement import InventoryMovement
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
 from app.services.kg_ledger import add_kg_movement
 from app.models.material import Material
-from app.models.money_movement import (
-    INTERNAL_MAQUILA_MOVEMENT_TYPES,
-    MoneyMovement,
-)
+from app.models.money_movement import MoneyMovement
 from app.models.service_tariff import ServiceTariff
 from app.models.transfer import Transfer, TransferLine
 from app.models.user import User
@@ -564,7 +561,7 @@ class TransferService:
         organization_id: UUID,
         user_id: Optional[UUID],
     ) -> None:
-        from app.services.money_movement import money_movement
+        from app.services.plant_maquila import emit_plant_maquila
 
         amount = (kg_equiv * tariff.unit_price_cop).quantize(Decimal("0.01"))
         if amount <= 0:
@@ -577,12 +574,12 @@ class TransferService:
             f"{material.code} ({float(kg_equiv):g} kg eq)"
         )
 
-        mm_exp = money_movement._create_movement(
-            db=db,
+        # plan-sac-planta-como-proveedor D2: par interno o causado a planta,
+        # segun el setting. El gate (maquila_on y tarifa) ya decidio arriba.
+        emit_plant_maquila(
+            db,
             organization_id=organization_id,
-            movement_type="internal_maquila_expense",
             amount=amount,
-            account_id=None,
             date=receipt_date,
             description=desc,
             user_id=user_id,
@@ -591,25 +588,9 @@ class TransferService:
             source_type="transfer",
             source_id=transfer.id,
             tariff_id=tariff.id,
-            warehouse_id=transfer.from_warehouse_id,
+            expense_warehouse_id=transfer.from_warehouse_id,
+            income_warehouse_id=transfer.to_warehouse_id,
         )
-        mm_inc = money_movement._create_movement(
-            db=db,
-            organization_id=organization_id,
-            movement_type="internal_maquila_income",
-            amount=amount,
-            account_id=None,
-            date=receipt_date,
-            description=desc,
-            user_id=user_id,
-            business_unit_id=material.business_unit_id,
-            source_type="transfer",
-            source_id=transfer.id,
-            tariff_id=tariff.id,
-            warehouse_id=transfer.to_warehouse_id,
-        )
-        mm_exp.transfer_pair_id = mm_inc.id
-        mm_inc.transfer_pair_id = mm_exp.id
 
     # ================================================================== #
     # Resolucion de discrepancias                                         #
@@ -855,8 +836,12 @@ class TransferService:
             mov.annulled_at = now
             mov.annulled_by = user_id
 
-        # 3. Anular el par de maquila SIN pasar por annul() (E9 — su guard
-        # INTERNAL_MAQUILA_MOVEMENT_TYPES lo 422-earia; deadlock ciclo C)
+        # 3. Anular la maquila SIN pasar por annul() (E9 — su guard la
+        # 422-earia; deadlock ciclo C). Es el par interno o, con el setting
+        # plant_third_party_id, el causado a planta (plan-sac-planta-como-
+        # proveedor D4): se filtra por DOCUMENTO, no por tipo, y la reversa
+        # lee movement.third_party_id — nunca el setting —, asi que un
+        # traslado viejo se anula bien aunque el setting haya cambiado (C3).
         from app.services.money_movement import money_movement
 
         pair_movs = db.execute(
@@ -864,12 +849,12 @@ class TransferService:
                 MoneyMovement.organization_id == organization_id,
                 MoneyMovement.source_type == "transfer",
                 MoneyMovement.source_id == transfer.id,
-                MoneyMovement.movement_type.in_(INTERNAL_MAQUILA_MOVEMENT_TYPES),
                 MoneyMovement.status == "confirmed",
             )
         ).scalars().all()
         for mm in pair_movs:
-            money_movement._reverse_effects(db, mm)  # rama pass explicita (inerte)
+            # par: rama pass explicita (inerte); causado: tercero +=
+            money_movement._reverse_effects(db, mm)
             mm.status = "annulled"
             mm.annulled_reason = reason
             mm.annulled_at = now

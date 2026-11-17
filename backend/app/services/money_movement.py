@@ -1096,6 +1096,21 @@ class CRUDMoneyMovement:
                 "Plomo desde Tesorería. Anule la salida desde su módulo.",
             )
 
+        # plan-sac-planta-como-proveedor D5: con el setting plant_third_party_id
+        # la maquila de un traslado o de un documento de crisol nace como
+        # expense_accrual a planta, que no es de los tipos de arriba. Anularlo
+        # aqui borraria la deuda con el documento vivo. Guard por CAMPO y con
+        # LISTA CERRADA (C2 de QA): un expense_accrual manual sin source_type,
+        # o el de collector_commission (#83: anular = condonar), siguen
+        # anulables desde Tesoreria.
+        if movement.source_type in _OWNER_MODULE:
+            doc, module = _OWNER_MODULE[movement.source_type]
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"No se puede anular desde Tesorería un movimiento generado por "
+                f"{doc}. Anule {doc} desde el módulo de {module}.",
+            )
+
         now = datetime.now(timezone.utc)
 
         # Revertir efectos del movimiento

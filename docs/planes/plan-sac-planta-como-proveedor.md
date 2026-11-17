@@ -1,11 +1,12 @@
 # Plan — Planta Juan Mina como proveedor de maquila (SAC)
 
-**Versión**: v1.1 (2026-11-17) · **Cliente**: SAC · **Pedido de**: Daniel, a partir de lo que Johana pide ver en su balance
+**Versión**: v1.2 (2026-11-17) · **Cliente**: SAC · **Pedido de**: Daniel, a partir de lo que Johana pide ver en su balance
 
 **Estado**:
 - La v1.0 (sha256 `9b3be6f9…`) recibió **NO-GO de QA** (sesión `d724e9a0…`, «QA Ecobalance»). QA dijo que el diseño es correcto, pero puso siete condiciones (C1–C7) y seis observaciones (O1–O6).
 - Esta v1.1 las incorpora. Las marcas **[C#]** y **[O#]** indican de dónde sale cada cambio.
-- **No se implementa sin el GO de QA y la autorización de Daniel.**
+- La v1.1 (sha256 `f752d9fc…`, commit 07ccd7a) recibió el **GO de QA** con tres notas (N1, N2, N4), y Daniel autorizó construirla.
+- Esta v1.2 incorpora esas notas **[N#]** y el estado de producción del 17-nov a las 15:06Z en G7. La matriz de tests y de plantado (§4) **no se reescribe**: lo que la medición contradiga va declarado en el informe.
 
 ## 0. El pedido
 
@@ -35,7 +36,7 @@ Lo que **no** cambia es el inventario. El de ella sí incluye planta y crisol: J
 | G4 | Mientras el setting esté puesto, el resultado por sede (#84) deja de mostrar la maquila: un gasto causado da $0 por sede. | Declarado en D8 y fijado por T11. |
 | G5 | Volver al modelo de sedes (fase 2) no convierte lo ya causado. | Declarado en D9. La anulación de un documento viejo sigue funcionando después del cambio (D4, T13). |
 | G6 | **Supuesto [O2]:** los gastos propios de planta (nómina, gas, energía de Juan Mina) no se registran en esta organización. | Si se registraran, el consolidado contaría dos veces el costo de planta: una por la maquila y otra por sus gastos. Hay que decírselo a Johana con el runbook. |
-| G7 | **Johana ya está registrando en producción.** El 17-nov, entre 09:16 y 09:32, registró dos entradas Willard (confirmadas) y una entrada de compra (revisada), todas del 3-nov. Todavía no hay traslados, Salidas ni documentos de crisol. | Una maquila que nazca **antes** de poner el setting queda como par interno y el setting no la convierte. Hasta el deploy conviene que no registre traslados a planta, Salidas ni crisol. Si alguno se registra, se corrige uno a uno anulándolo y registrándolo de nuevo después del deploy. |
+| G7 | **Johana ya está registrando en producción.** El 17-nov, entre 09:16 y 09:32, registró dos entradas Willard (confirmadas) y una entrada de compra (revisada), todas del 3-nov. Todavía no hay traslados, Salidas ni documentos de crisol. **Relectura solo GET del 17-nov a las 15:06Z:** sumó la entrada de compra #7 (revisada, creada a las 09:56); siguen en cero los traslados, Salidas, crisol, compras, ventas y transformaciones, y no hay **ningún** movimiento de maquila. | Una maquila que nazca **antes** de poner el setting queda como par interno y el setting no la convierte. Hasta el deploy conviene que no registre traslados a planta, Salidas ni crisol. Si alguno se registra, se corrige uno a uno anulándolo y registrándolo de nuevo después del deploy. |
 
 ## 2. Decisiones
 
@@ -51,7 +52,7 @@ Lo que **no** cambia es el inventario. El de ella sí incluye planta y crisol: J
   - categoría del lado del gasto, que se conserva ("Maquila Intersede" o "Crisol Refinación");
   - bodega del lado del gasto, que es la sede que factura;
   - la misma firma `source_type`/`source_id`/`tariff_id` que hoy.
-- 🔴 **[O1] `_create_movement` no aplica efectos.** El helper hace `planta.current_balance -= amount`, igual que la comisión del recolector (#83, `purchase.py:570`). La reversa ya existe: es la rama `expense_accrual` (`+=`) de `_reverse_effects` (`money_movement.py:1816`). P7 cubre el signo.
+- 🔴 **[O1] `_create_movement` no aplica efectos.** El helper hace `planta.current_balance -= amount`, igual que la comisión del recolector (#83, `purchase.py:1837` y `inbound_order.py:1066`) **[N1]**. La reversa ya existe: es la rama `expense_accrual` (`+=`) de `_reverse_effects` (`money_movement.py:1816`). P7 cubre el signo.
 - Los cuatro sitios que hoy emiten pasan a llamar al helper:
   - `transfer._emit_maquila_pair`, que cubre `receive` y `resolve`;
   - los dos de `willard_delivery`: el diferencial del crisol, y el reparto de materiales y baterías;
@@ -63,7 +64,7 @@ Lo que **no** cambia es el inventario. El de ella sí incluye planta y crisol: J
 - Números y locks no cambian. QA lo verificó: `_create_movement` ya numera, y los cuatro flujos ya declaran `movement_number` (transfer:327/651, willard:282, crucible:169).
 
 **D3. Validación fail-closed, antes de cualquier commit [C5].** Con el setting puesto, el tercero tiene que cumplir todo esto:
-- el valor es un UUID **bien formado**: el payload es `str` strict y acepta cualquier texto, así que un valor malformado tiene que dar 422, no 500;
+- el valor es un UUID **bien formado**: el payload es `str` strict y acepta cualquier texto, así que un valor malformado tiene que dar 422, no 500. Además el payload valida el formato UUID **[N4]**, así que por el PATCH de sistema un valor malformado ni siquiera entra; la validación del helper queda para lo que ya esté guardado;
 - existe en la organización, está activo y no es entidad de sistema;
 - tiene categoría `liability` o `service_provider`. #83 usa `service_provider`, y PLANTA JUAN MINA se cargó como Pasivo.
 
@@ -115,7 +116,8 @@ Con el cambio, `patch_settings` lee primero los settings vivos y arma el diccion
 Aplica **la medición, no la corrida**, y QA la reprodujo:
 - `golden_capture.py` tiene 0 ocurrencias de `annul`;
 - en dev, los únicos movimientos con esos `source_type` son de la organización SAC;
-- los cambios en código compartido son el guard de `money_movement.annul` (D5), que no ve ninguna fila fuera de SAC, y los scripts de SAC.
+- los cambios en código compartido son el guard de `money_movement.annul` (D5), que no ve ninguna fila fuera de SAC, y los scripts de SAC;
+- **[N2]** también es código compartido `OrgSettingsPayload` y `SETTING_DEFAULTS`: una clave nueva, opcional y con default `None`, que ninguna de las otras orgs tiene. `test_org_settings.py` tiene que pasar **sin cambios**.
 
 ## 4. Tests (`tests/test_sac_planta_proveedor.py` + `tests/test_seed_sac_settings.py`)
 

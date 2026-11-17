@@ -415,7 +415,17 @@ def revisar(api) -> list[str]:
             esperados = None
         if esperados is not None:
             for clave in sorted(set(vivos) | set(esperados)):
-                if vivos.get(clave) != esperados.get(clave):
+                if clave not in esperados:
+                    # Clave AJENA al seeder (p.ej. plant_third_party_id, D11 de
+                    # plan-sac-planta-como-proveedor): no es una diferencia de
+                    # la org vieja, es algo que alguien puso a mano y que la
+                    # nueva NO trae. Se informa a sabiendas, con el remedio.
+                    avisos.append(
+                        f"Setting {clave} = {legible(vivos.get(clave))}: lo puso alguien fuera del "
+                        "seeder; la org nueva no lo trae y hay que re-aplicarlo a mano despues de "
+                        "cargarla (si apunta a un tercero o una bodega, con el id NUEVO)"
+                    )
+                elif vivos.get(clave) != esperados.get(clave):
                     avisos.append(f"Setting {clave} = {legible(vivos.get(clave))}; la nueva nace con "
                                   f"{legible(esperados.get(clave))}")
     finally:

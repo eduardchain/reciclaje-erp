@@ -282,6 +282,8 @@ class CrucibleChargeService:
             mv.annulled_reason = note
             mv.annulled_at = now
             mv.annulled_by = user_id
+        from app.services.money_movement import money_movement
+
         for mm in db.execute(
             select(MoneyMovement).where(
                 MoneyMovement.source_type == KG_SOURCE_TYPE,
@@ -289,6 +291,10 @@ class CrucibleChargeService:
                 MoneyMovement.status == "confirmed",
             )
         ).scalars().all():
+            # plan-sac-planta-como-proveedor D4: el par interno no tenia
+            # efectos que revertir (rama pass); el causado a planta si
+            # (tercero +=). Lee el tercero del movimiento, no el setting (C3).
+            money_movement._reverse_effects(db, mm)
             mm.status = "annulled"
             mm.annulled_at = now
             mm.annulled_by = user_id
@@ -412,7 +418,7 @@ class CrucibleChargeService:
         amount = (charge.lead_kg * tariff.unit_price_cop).quantize(Decimal("0.01"))
         if amount <= 0:
             return
-        from app.services.money_movement import money_movement
+        from app.services.plant_maquila import emit_plant_maquila
         from app.services.transfer import TransferService
 
         category = TransferService()._get_or_create_maquila_category(db, organization_id)
@@ -420,12 +426,11 @@ class CrucibleChargeService:
             f"Maquila reproceso dross — {charge.label} — "
             + self._qty_text(material, charge.quantity_kg, charge.lead_kg, "dross_return")
         )
-        mm_exp = money_movement._create_movement(
-            db=db,
+        # plan-sac-planta-como-proveedor D2: par interno o causado a planta.
+        emit_plant_maquila(
+            db,
             organization_id=organization_id,
-            movement_type="internal_maquila_expense",
             amount=amount,
-            account_id=None,
             date=charge.date,
             description=desc,
             user_id=user_id,
@@ -434,25 +439,9 @@ class CrucibleChargeService:
             source_type=KG_SOURCE_TYPE,
             source_id=charge.id,
             tariff_id=tariff.id,
-            warehouse_id=billing_wh,
+            expense_warehouse_id=billing_wh,
+            income_warehouse_id=charge.warehouse_id,
         )
-        mm_inc = money_movement._create_movement(
-            db=db,
-            organization_id=organization_id,
-            movement_type="internal_maquila_income",
-            amount=amount,
-            account_id=None,
-            date=charge.date,
-            description=desc,
-            user_id=user_id,
-            business_unit_id=material.business_unit_id,
-            source_type=KG_SOURCE_TYPE,
-            source_id=charge.id,
-            tariff_id=tariff.id,
-            warehouse_id=charge.warehouse_id,
-        )
-        mm_exp.transfer_pair_id = mm_inc.id
-        mm_inc.transfer_pair_id = mm_exp.id
         charge.maquila_amount = amount
 
     def _move_inventory(

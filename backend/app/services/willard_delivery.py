@@ -840,7 +840,7 @@ class WillardDeliveryService:
         amount = (kg_puro * tariff.unit_price_cop).quantize(Decimal("0.01"))
         if amount <= 0:
             return
-        from app.services.money_movement import money_movement
+        from app.services.plant_maquila import emit_plant_maquila
         from app.services.transfer import TransferService
 
         category = TransferService()._get_or_create_maquila_category(
@@ -853,12 +853,11 @@ class WillardDeliveryService:
             f"Diferencial crisol — Salida de Plomo — {delivery.label} "
             f"({float(kg_puro):g} kg puro)"
         )
-        mm_exp = money_movement._create_movement(
-            db=db,
+        # plan-sac-planta-como-proveedor D2: par interno o causado a planta.
+        emit_plant_maquila(
+            db,
             organization_id=organization_id,
-            movement_type="internal_maquila_expense",
             amount=amount,
-            account_id=None,
             date=liq_dt,
             description=desc,
             user_id=user_id,
@@ -866,24 +865,9 @@ class WillardDeliveryService:
             source_type=KG_SOURCE_TYPE,
             source_id=delivery.id,
             tariff_id=tariff.id,
-            warehouse_id=billing_wh,
+            expense_warehouse_id=billing_wh,
+            income_warehouse_id=delivery.warehouse_id,
         )
-        mm_inc = money_movement._create_movement(
-            db=db,
-            organization_id=organization_id,
-            movement_type="internal_maquila_income",
-            amount=amount,
-            account_id=None,
-            date=liq_dt,
-            description=desc,
-            user_id=user_id,
-            source_type=KG_SOURCE_TYPE,
-            source_id=delivery.id,
-            tariff_id=tariff.id,
-            warehouse_id=delivery.warehouse_id,
-        )
-        mm_exp.transfer_pair_id = mm_inc.id
-        mm_inc.transfer_pair_id = mm_exp.id
         delivery.crucible_amount = amount
 
     def _emit_split_pair(
@@ -941,7 +925,7 @@ class WillardDeliveryService:
         la otra" perdio su objeto (Q-29 superada). Se conservan como historia,
         igual que en el seeder.
         """
-        from app.services.money_movement import money_movement
+        from app.services.plant_maquila import emit_plant_maquila
         from app.services.transfer import TransferService
 
         category = TransferService()._get_or_create_maquila_category(
@@ -950,12 +934,11 @@ class WillardDeliveryService:
         desc = (
             f"Abono a planta — Salida de Plomo — {delivery.label}"
         )
-        mm_exp = money_movement._create_movement(
-            db=db,
+        # plan-sac-planta-como-proveedor D2: par interno o causado a planta.
+        emit_plant_maquila(
+            db,
             organization_id=organization_id,
-            movement_type="internal_maquila_expense",
             amount=amount,
-            account_id=None,
             date=liq_dt,
             description=desc,
             user_id=user_id,
@@ -963,24 +946,9 @@ class WillardDeliveryService:
             source_type=KG_SOURCE_TYPE,
             source_id=delivery.id,
             tariff_id=tariff.id if tariff else None,
-            warehouse_id=billing_wh,
+            expense_warehouse_id=billing_wh,
+            income_warehouse_id=delivery.warehouse_id,
         )
-        mm_inc = money_movement._create_movement(
-            db=db,
-            organization_id=organization_id,
-            movement_type="internal_maquila_income",
-            amount=amount,
-            account_id=None,
-            date=liq_dt,
-            description=desc,
-            user_id=user_id,
-            source_type=KG_SOURCE_TYPE,
-            source_id=delivery.id,
-            tariff_id=tariff.id if tariff else None,
-            warehouse_id=delivery.warehouse_id,
-        )
-        mm_exp.transfer_pair_id = mm_inc.id
-        mm_inc.transfer_pair_id = mm_exp.id
 
     def _reverse_liquidation(
         self,
@@ -1037,11 +1005,16 @@ class WillardDeliveryService:
             )
         ).scalars().all()
         now = datetime.now(tz=None).astimezone()
+        from app.services.money_movement import money_movement
+
         for mv in movements:
-            if mv.movement_type == "service_income_accrual" and mv.third_party_id:
-                tp = db.get(ThirdParty, mv.third_party_id)
-                if tp:
-                    tp.current_balance -= mv.amount
+            # plan-sac-planta-como-proveedor D4: UNA reversa para todos los
+            # tipos del documento — la factura (service_income_accrual), el
+            # par interno (rama pass) y el causado a planta (tercero +=). La
+            # copia manual de antes cubria solo la factura; tener dos copias de
+            # la terna de signos es lo que #67 enseno a no hacer. Lee el
+            # tercero del MOVIMIENTO, nunca el setting (C3).
+            money_movement._reverse_effects(db, mv)
             mv.status = "annulled"
             mv.annulled_at = now
             mv.annulled_by = user_id

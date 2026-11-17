@@ -435,6 +435,47 @@ def settings_de_la_org(warehouses: dict[str, str]) -> dict:
     }
 
 
+def merge_settings(vivos: Optional[dict], deseados: dict) -> tuple[dict, list[str]]:
+    """Que mandar en el PATCH de settings sin pisar lo que no es del seeder (D11).
+
+    El endpoint es REPLACE del JSONB completo (#74), asi que el dict que sale de
+    aca se manda ENTERO. Reglas (plan-sac-planta-como-proveedor D11, C1 de QA):
+
+    - clave AJENA al seeder (no esta en `deseados`, p.ej. plant_third_party_id):
+      se conserva tal cual. Antes el REPLACE la borraba en silencio y las
+      maquilas volvian al par interno, que es lo que D3 de ese plan prohibe.
+    - clave del seeder AUSENTE: se escribe. Una org recien creada las recibe
+      todas.
+    - clave del seeder PRESENTE con otro valor, None incluido: NO se pisa. Se
+      devuelve en la lista de respetadas y la corrida termina en DECISION
+      PENDIENTE con exit 3 (mismo gate que las tarifas, #109). Un setting no
+      tiene autor, asi que el seeder no puede saber si el valor vivo es un
+      cambio legitimo (los centros Willard que Johana edita desde la pantalla)
+      o uno viejo suyo: decide Daniel.
+
+    Por que un None PRESENTE no es "falta" (H1 de QA): el PATCH de sistema
+    guarda con `exclude_unset` y `settings_de_la_org` nunca escribe None, asi
+    que una clave del seeder en None solo existe si alguien la mando a
+    proposito. Y None significa algo: `willard_sede_facturacion` en None es
+    "sin reparto ni bodega de factura" (#100 D4c); tratarlo como faltante lo
+    volveria a prender en silencio en la siguiente provision.
+    """
+    vivos = dict(vivos or {})
+    a_mandar = dict(vivos)
+    respetadas: list[str] = []
+    for clave, valor in deseados.items():
+        if clave not in vivos:
+            a_mandar[clave] = valor
+            continue
+        actual = vivos[clave]
+        if actual != valor:
+            respetadas.append(
+                f"setting {clave}: la org tiene {actual!r} y el seed dice {valor!r} "
+                "— se respeto el de la org"
+            )
+    return a_mandar, respetadas
+
+
 class APIClient:
     def __init__(self, dry_run: bool = True, base_url: str = BASE_URL):
         self.base_url = base_url.rstrip("/")
@@ -595,6 +636,9 @@ class SacSeeder:
         # Motivos presentes (O1 de QA): el remedio que se imprime depende de
         # ellos — a una tarifa AJENA no la arregla agregar su valor a la tabla.
         self.respected_motives: set[str] = set()
+        # Settings propios del seeder con otro valor en la org (D11 de
+        # plan-sac-planta-como-proveedor): se respetan y entran al mismo gate.
+        self.respected_settings: list[str] = []
 
     # ---------------- ORG + USUARIOS ----------------
 
@@ -874,9 +918,26 @@ class SacSeeder:
                 logging.info(f"  Bodega '{name}' actualizada (flags transito/receptora)")
 
     def patch_settings(self) -> None:
-        """REPLACE completo del JSONB (D3) — SIEMPRE todas las claves."""
+        """REPLACE del JSONB completo (#74) armado con `merge_settings` (D11).
+
+        Lee los settings vivos de la org y solo escribe las claves del seeder
+        que faltan; las ajenas se conservan y las propias con otro valor se
+        respetan y se listan en DECISION PENDIENTE. Una org recien creada (no
+        `provisioning`) no tiene settings: se le escriben todos.
+        """
         logging.info("[5] Settings de la org (flags SAC ON + sedes Willard)")
-        settings = settings_de_la_org(self.warehouses)
+        deseados = settings_de_la_org(self.warehouses)
+        vivos: dict = {}
+        if self.provisioning:
+            vivos = (self.api.get(f"/organizations/{self.api.org_id}") or {}).get("settings") or {}
+        settings, respetadas = merge_settings(vivos, deseados)
+        ajenas = sorted(set(vivos) - set(deseados))
+        if ajenas:
+            logging.info(f"  Settings ajenos al seeder, conservados: {', '.join(ajenas)}")
+        self.respected_settings.extend(respetadas)
+        if settings == vivos:
+            logging.info("  Settings al dia (nada que escribir)")
+            return
         self.api.patch(
             f"/system/organizations/{self.api.org_id}", {"settings": settings},
             label="settings",
@@ -1266,6 +1327,20 @@ class SacSeeder:
             for motive in sorted(self.respected_motives):
                 logging.warning(f"    Remedio [{motive}]: {RESPECTED_REMEDY[motive]}")
             logging.warning("=" * 70)
+        if self.respected_settings:
+            logging.warning("=" * 70)
+            logging.warning(
+                f"⚠️  DECISION PENDIENTE — {len(self.respected_settings)} setting(s) "
+                "RESPETADO(S), NO coinciden con el seed:"
+            )
+            for line in self.respected_settings:
+                logging.warning(f"    {line}")
+            logging.warning(
+                "    Remedio: decide Daniel. Si el de la org es un cambio real (p.ej. los "
+                "centros Willard editados desde la pantalla), no hacer nada. Si el seed es "
+                "el correcto, se aplica con un PATCH de sistema con el dict COMPLETO (REPLACE)."
+            )
+            logging.warning("=" * 70)
 
 
 def main() -> None:
@@ -1335,7 +1410,7 @@ def main() -> None:
         seeder.verificar_usuarios()
         return
     seeder.run(reset=args.reset, org_vacia=args.org_vacia)
-    if seeder.respected_tariffs:
+    if seeder.respected_tariffs or seeder.respected_settings:
         # Exit propio y distinto de 1 (fallo) para que quien encadene la
         # provision con `&&` se detenga: hay una decision que no es del operador.
         raise SystemExit(3)
