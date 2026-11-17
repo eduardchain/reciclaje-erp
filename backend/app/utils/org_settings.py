@@ -57,6 +57,9 @@ SETTING_DEFAULTS: dict = {
     # El monto se digita y es editable (D1: el sistema REGISTRA lo que Siigo
     # emitio), asi que este numero solo ayuda a llenar el campo.
     "iva_rate_pct": 19.0,
+    # Planta como proveedor (plan-sac-planta-como-proveedor D1): tercero al que
+    # se le causan las maquilas entre sedes. None = par interno (hoy, 7 orgs).
+    "plant_third_party_id": None,
 }
 
 

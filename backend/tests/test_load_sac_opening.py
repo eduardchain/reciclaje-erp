@@ -347,9 +347,12 @@ class TestProvisional:
         api = L.seed.APIClient(dry_run=True, base_url="https://api.ecobalance.cc")
         with pytest.raises(SystemExit, match="solo corre contra un backend local"):
             L.validar_destino(api, ensayo=True)
-        with pytest.raises(SystemExit, match="remoto no está habilitada"):
-            L.validar_destino(api, ensayo=False)
         L.validar_destino(L.seed.APIClient(dry_run=True, base_url="http://localhost:8000"), ensayo=True)
+
+    def test_sin_ensayo_el_remoto_esta_habilitado(self):
+        # B1 de QA (10-nov): el procedimiento de prod moria aqui en el paso 0, y
+        # el ensayo contra localhost no podia verlo.
+        L.validar_destino(L.seed.APIClient(dry_run=True, base_url="https://api.ecobalance.cc"), ensayo=False)
 
 
 # ---------------------------------------------------------------------------
@@ -568,6 +571,33 @@ class TestConciliacion:
     def test_corte_distinto_de_hoy_es_una_falla(self):
         _, fallas = self._informe(100, corte_distinto=True)
         assert fallas == 1
+
+    def test_redondeo_tolerado_se_muestra_con_centavos(self):
+        """O2 de QA: la tabla redondea a pesos y un resto de centavos sale como
+        «1» o «-1» al lado de «0 fallas». Debajo van los centavos."""
+        texto, fallas = self._informe("100.52")
+        assert fallas == 0
+        assert "Con centavos: Cuentas por cobrar 0,52." in texto
+
+    def test_sin_redondeo_no_hay_nota(self):
+        texto, _ = self._informe(100)
+        assert "Con centavos" not in texto
+
+    def test_lo_que_pasa_del_peso_es_falla_y_no_redondeo(self):
+        texto, fallas = self._informe("101.50")
+        assert fallas == 1
+        assert "Con centavos" not in texto
+
+
+class TestSinTopeDeTerceros:
+    def test_un_plan_de_mas_de_500_terceros_no_se_frena(self):
+        """El tope de 500 existia porque el seeder leia una sola pagina (N1).
+        Con list_all ya no hace falta, y dejarlo frenaria una carga final
+        legitima con un mensaje falso («el seeder solo lee 500»)."""
+        plan = _plan(Terceros=[_tercero(f"Tercero {i}", "Por cobrar", 1, "Cliente", fila=i + 2)
+                               for i in range(600)])
+        assert len(_pasos(plan, "third_party")) == 600
+        assert not [e for e in plan.errores if "seeder" in e or "500" in e], plan.errores
 
     def test_ver_hoja_kilos_no_explica_una_diferencia(self):
         """La deuda en plomo el sistema la muestra DENTRO de Inventario: listarla
@@ -913,3 +943,114 @@ class TestContratoConElBackend:
             sobran = set(b) - set(schema.model_fields)
             assert not sobran, f"{ruta}: {sorted(sobran)} no existen en {schema.__name__} (se pierden sin error)"
             schema.model_validate(b)
+
+
+# ---------------------------------------------------------------------------
+# Carga de muestra en produccion (Daniel, 10-nov): supuestos que el Sheet trae
+# ---------------------------------------------------------------------------
+
+class TestCargaDeMuestra:
+    def test_pasivo_entra_con_su_categoria_y_signo(self):
+        # La provision de IVA, la de retefuente y la nomina por pagar entran como
+        # pasivo con su nombre. Sin --ensayo: en produccion no hay provisionales.
+        plan = _plan(ensayo=False, Terceros=[
+            _tercero("PROVISION IVA", "Por pagar", -1000, "Pasivo", fila=139)])
+        assert not plan.errores
+        (p,) = _pasos(plan, "third_party")
+        assert p.payload["categorias"] == ["Pasivo"]
+        assert p.esperado == Decimal("-1000")
+        assert p.payload["initial_balance"] == "-1000"
+        assert p.rubro == "Cuentas por pagar"
+
+    def test_exportaciones_tienen_bodega_propia_no_receptora(self):
+        # Q-47: ya salieron de planta. Si quedaran en Juan Mina se podrian vender
+        # dos veces; y una bodega receptora la ofreceria la Entrada.
+        fila = {w[0]: w for w in L.seed.WAREHOUSES}["Exportaciones por liquidar"]
+        _, receptora, transito, _destino, sede = fila
+        assert (receptora, transito, sede) == (False, False, "Juan Mina")
+        # La sede tiene que ser una bodega que es su propia sede (un solo nivel, #94).
+        assert {w[0]: w for w in L.seed.WAREHOUSES}[sede][4] is None
+        assert "Exportaciones por liquidar" in L._seeder_bodegas().values()
+
+
+class TestDepreciacionRepartida:
+    """Supuesto 6 de la muestra: la depreciacion que Johana lleva en UNA linea se
+    reparte dentro de los activos. Asi el sistema ya los muestra netos y esa
+    linea esta en el sistema, en el mismo rubro: si se la sigue contando como
+    explicacion, el rubro cuadra y aun asi sale «sin explicar» (ensayo del 10-nov:
+    280 M sin explicar con diferencia 0)."""
+
+    def _plan(self, deps, linea=-280):
+        activos = [_activo(fecha=date(2019, 5, 1), vida=60, valor=1000) | {"_fila": 2 + i, "nombre": f"A{i}",
+                                                                           "depreciacion": d}
+                   for i, d in enumerate(deps)]
+        activos.append({"_fila": 41, "nombre": "DEPRECIACION ACUMULADA", "valor": linea, "fecha": None,
+                        "vida": None, "residual": None, "depreciacion": None, "entra": "No"})
+        return _plan(ensayo=False, **{"Activos fijos": activos})
+
+    def _cruce(self, plan):
+        return [c for c in plan.cruces if c[0].startswith("Depreciación acumulada")]
+
+    def test_reparto_completo_no_explica_nada_y_cuadra(self):
+        plan = self._plan([100, 180])
+        assert not plan.errores
+        (e,) = [e for e in plan.exclusiones if e.pestana == "Activos fijos"]
+        assert e.en_el_sistema == "Activos fijos"
+        assert L.explicar_rubros(plan)["Activos fijos"] == []
+        ((_, linea, repartida),) = self._cruce(plan)
+        assert (linea, repartida) == (Decimal("280"), Decimal("280"))
+        # Lo cargado ya es neto: 2.000 de compra menos 280.
+        assert sum(p.esperado for p in _pasos(plan, "fixed_asset")) == Decimal("1720")
+
+    def test_reparto_que_no_suma_la_linea_es_un_cruce_que_no_cuadra(self):
+        plan = self._plan([100, 170])
+        ((_, linea, repartida),) = self._cruce(plan)
+        assert abs(linea - repartida) > L.UNO
+
+    def test_sin_reparto_la_linea_explica_la_diferencia_como_en_la_ronda_1(self):
+        plan = self._plan([None, None])
+        (e,) = [e for e in plan.exclusiones if e.pestana == "Activos fijos"]
+        assert e.en_el_sistema is None
+        assert [m for _, m in L.explicar_rubros(plan)["Activos fijos"]] == [Decimal("-280")]
+        assert self._cruce(plan) == []
+
+    def test_en_el_informe_el_rubro_cuadra_y_un_reparto_a_medias_falla(self):
+        def informe(deps, sistema):
+            plan = self._plan(deps)
+            plan.johana = {r: Decimal("0") for r in L.RUBROS}
+            plan.johana["Activos fijos"] = Decimal("1720")
+            s = _sistema_que_cuadra(plan)
+            for p in _pasos(plan, "fixed_asset"):
+                s["activos"][L.clave(p.nombre)] = p.esperado
+                s["activos_nombres"][L.clave(p.nombre)] = (p.nombre, p.esperado)
+            s["balance"] = s["balance_corte"] = {"assets": {"fixed_assets": sistema}, "total_assets": sistema,
+                                                 "total_liabilities": 0, "equity": sistema}
+            s["utilidad"] = Decimal("0")
+            return L.informe(plan, s, "libro de prueba")
+        texto, fallas = informe([100, 180], 1720)
+        assert fallas == 0, texto
+        # Repartido 270: el rubro queda 10 corrido y el cruce no cuadra. Dos
+        # fallas, ninguna tapada.
+        _, fallas = informe([100, 170], 1730)
+        assert fallas == 2
+
+
+class TestMarcaDeMuestra:
+    """C4 de QA (10-nov): los activos de la muestra llevan valores de ejemplo y la
+    nota de la fila vive solo en el Sheet. Sin marca en el SISTEMA, Johana y Hugo
+    los verian como reales."""
+
+    def _activo(self, muestra):
+        plan = L.armar_plan(_libro(**{"Activos fijos": [_activo(fecha=date(2019, 5, 1), vida=60)]}),
+                            CORTE, ensayo=False, muestra=muestra)
+        (a,) = _pasos(plan, "fixed_asset")
+        return a
+
+    def test_con_muestra_el_nombre_y_las_notas_lo_dicen(self):
+        a = self._activo(True)
+        assert a.nombre == "CAMION" + L.SUFIJO_MUESTRA == a.payload["name"]
+        assert "MUESTRA: valores de ejemplo" in a.payload["notes"]
+
+    def test_sin_muestra_nada_cambia(self):
+        a = self._activo(False)
+        assert a.nombre == "CAMION" and "MUESTRA" not in a.payload["notes"]

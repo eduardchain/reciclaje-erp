@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -97,6 +97,14 @@ export function EntradaTypeBadge({ order }: { order: InboundOrderResponse }) {
   );
 }
 
+/** El unico orden que va al servidor es el de Remision (plan columna Remision
+ * D2/D3); cualquier otra columna devuelve null y queda en manos de la tabla. */
+function serverSortOf(sorting: SortingState): "remission_asc" | "remission_desc" | null {
+  const s = sorting[0];
+  if (s?.id !== "remission_number") return null;
+  return s.desc ? "remission_desc" : "remission_asc";
+}
+
 /** Dias desde la captura — semaforo de antiguedad para la bandeja (patron #68) */
 function daysPending(createdAt: string): number {
   return Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000);
@@ -167,6 +175,18 @@ export default function InboundOrdersPage() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  // Plan columna Remision D3: la Remision la ordena el SERVIDOR sobre toda la
+  // lista; las demas columnas siguen ordenando la pagina. Un solo orden a la
+  // vez [C1]: Shift+clic agregaria un segundo orden y la tabla reordenaria la
+  // pagina por el, rompiendo el orden que mando el servidor.
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const remissionSort = serverSortOf(sorting);
+  const handleSortingChange = (next: SortingState) => {
+    const single = next.slice(-1);
+    // [C2] Volver a la pagina 1 SOLO si cambia lo que va al servidor
+    if (serverSortOf(single) !== remissionSort) setPage(0);
+    setSorting(single);
+  };
 
   const isBandeja = tab === "registered" || tab === "reviewed";
 
@@ -189,8 +209,9 @@ export default function InboundOrdersPage() {
     search: search.trim() || undefined,
     warehouse_id: warehouseFilter === "all" ? undefined : warehouseFilter,
     third_party_id: tpFilter === "all" ? undefined : tpFilter,
-    // Bandeja FIFO: la registrada mas vieja primero (Johana procesa en orden)
-    sort: isBandeja ? "oldest" : "newest",
+    // Bandeja FIFO: la registrada mas vieja primero (Johana procesa en orden).
+    // El orden por Remision, si esta activo, gana sobre los dos.
+    sort: remissionSort ?? (isBandeja ? "oldest" : "newest"),
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
@@ -240,6 +261,24 @@ export default function InboundOrdersPage() {
         accessorKey: "date",
         header: "Fecha",
         cell: ({ row }) => formatDate(row.original.date),
+      },
+      {
+        accessorKey: "remission_number",
+        header: "Remisión",
+        // La ordena el servidor (D3): la tabla no la reordena. Con 0 TanStack
+        // desempata por el indice de la fila = el orden en que llegaron.
+        sortingFn: () => 0,
+        sortUndefined: false,
+        // [N1] El primer clic es ascendente aunque la primera fila no tenga remision
+        sortDescFirst: false,
+        // Es un identificador: en el Excel va como texto exacto ("0012" no es 12)
+        meta: { exportAsText: true },
+        cell: ({ row }) =>
+          row.original.remission_number ? (
+            <span className="tabular-nums">{row.original.remission_number}</span>
+          ) : (
+            <span className="text-slate-400">—</span>
+          ),
       },
       {
         accessorKey: "inbound_type",
@@ -437,6 +476,9 @@ export default function InboundOrdersPage() {
         pageIndex={page}
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
+        sorting={sorting}
+        onSortingChange={handleSortingChange}
+        manualSorting={false}
         totalItems={data?.total}
         onRowClick={goToDetail}
         emptyTitle={isBandeja ? "Nada por liquidar" : "Sin entradas"}
@@ -461,7 +503,7 @@ export default function InboundOrdersPage() {
               WILLARD_INBOUND_TYPES.includes(o.inbound_type)
                 ? `Willard${o.willard_world ? ` · ${WORLD_LABELS[o.willard_world] ?? o.willard_world}` : ""}`
                 : INBOUND_TYPE_LABELS[o.inbound_type] ?? o.inbound_type
-            }${o.warehouse_name ? ` · ${o.warehouse_name}` : ""}${o.vehicle_plate ? ` · ${o.vehicle_plate.toUpperCase()}` : ""}`}
+            }${o.remission_number ? ` · Rem. ${o.remission_number}` : ""}${o.warehouse_name ? ` · ${o.warehouse_name}` : ""}${o.vehicle_plate ? ` · ${o.vehicle_plate.toUpperCase()}` : ""}`}
             extras={
               <span className="flex items-center gap-2">
                 {WILLARD_INBOUND_TYPES.includes(o.inbound_type) ? (
@@ -521,7 +563,7 @@ export default function InboundOrdersPage() {
             <SearchInput
               value={search}
               onChange={(v) => { setSearch(v); setPage(0); }}
-              placeholder="Buscar #, placa, conductor, material..."
+              placeholder="Buscar #, remisión, placa, conductor, material..."
             />
             <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0); }}>
               <SelectTrigger className="w-full sm:w-48">

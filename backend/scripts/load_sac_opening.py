@@ -90,6 +90,11 @@ TIPO_CATEGORIAS = {
     "proveedor de servicios": ["Proveedor Servicios"],
     "socio": ["Socios"],
     "empleado": ["Empleados"],
+    # Supuesto de la carga de muestra (Daniel, 10-nov): provision de IVA,
+    # provision de retefuente y nomina por pagar entran como pasivo con su
+    # nombre. En la carga final el IVA y la retefuente van a las entidades de
+    # impuestos y retenciones del sistema (Q-56), que no se crean por la API.
+    "pasivo": ["Pasivo"],
 }
 TIPO_WILLARD = "willard (se suman en un tercero)"
 WILLARD = "Willard S.A"
@@ -145,11 +150,12 @@ INICIO_RUBROS = {
 #: Vida util provisional del ensayo (G4). Solo existe con --ensayo.
 VIDA_UTIL_PROVISIONAL = 120
 SUFIJO_PROVISIONAL = " (vida útil provisional)"
-
-#: El seeder lee los terceros existentes con limit=500 (`existing_by`). Con mas,
-#: Willard S.A —que ordena casi al final— quedaria fuera de la lectura y el
-#: seeder crearia un SEGUNDO Willard en 0 y le colgaria las cuentas kg (#108).
-TOPE_TERCEROS_SEEDER = 500
+#: --muestra (carga de muestra en produccion, Daniel 10-nov): los activos llevan
+#: valores de EJEMPLO. Sin esta marca en el SISTEMA, Johana y Hugo los verian como
+#: reales: la nota de la fila vive solo en el Sheet (C4 de QA).
+SUFIJO_MUESTRA = " (MUESTRA)"
+NOTA_MUESTRA = (" MUESTRA: valores de ejemplo (fecha de compra, vida útil, residual y "
+                "depreciación supuestos). No es la carga final.")
 
 UNO = Decimal("1")
 CENTAVO = Decimal("0.01")
@@ -385,6 +391,7 @@ class Plan:
     corte: date
     ensayo: bool
     pasos: list[Paso] = field(default_factory=list)
+    muestra: bool = False
     exclusiones: list[Exclusion] = field(default_factory=list)
     errores: list[str] = field(default_factory=list)
     avisos: list[str] = field(default_factory=list)
@@ -808,6 +815,7 @@ def _plan_kilos(plan: Plan, filas: list[dict]) -> None:
 
 def _plan_activos(plan: Plan, filas: list[dict]) -> None:
     inicio_dep = (plan.corte.replace(day=1) + timedelta(days=32)).replace(day=1)
+    repartida = Decimal("0")
     for f in filas:
         nombre, fila = texto(f["nombre"]), f["_fila"]
         if not nombre:
@@ -843,6 +851,9 @@ def _plan_activos(plan: Plan, filas: list[dict]) -> None:
             vida = vida if vida > 0 else VIDA_UTIL_PROVISIONAL
             nombre_sistema = nombre + SUFIJO_PROVISIONAL
             notas += " ENSAYO: vida útil y fecha provisionales, no aplicar depreciación."
+        if plan.muestra:
+            nombre_sistema += SUFIJO_MUESTRA
+            notas += NOTA_MUESTRA
         if dep > valor - residual:
             plan.errores.append(
                 f"Activos fijos fila {fila} ({nombre}): depreciación {dep} mayor que la base {valor - residual}"
@@ -862,6 +873,31 @@ def _plan_activos(plan: Plan, filas: list[dict]) -> None:
              "accumulated_depreciation": str(dep), "historical_load": True, "notes": notas},
             "Activos fijos", esperado, {"Activos fijos": esperado}, f"Activos fijos fila {fila}",
         ))
+        repartida += dep
+    _cruzar_depreciacion(plan, repartida)
+
+
+def _cruzar_depreciacion(plan: Plan, repartida: Decimal) -> None:
+    """La depreciacion del balance en UNA linea (valor negativo, marcada «No»)
+    contra la que se repartio dentro de los activos cargados.
+
+    Sin reparto, esa linea explica la diferencia del rubro: el sistema muestra
+    los activos a valor de compra y Johana los muestra netos. Con reparto, el
+    sistema YA los muestra netos, asi que la linea esta en el sistema y en el
+    mismo rubro: no explica nada (`en_el_sistema`). Contarla como explicacion
+    deja la diferencia «sin explicar» aunque el rubro cuadre (carga de muestra
+    del 10-nov). El cruce exige que la linea y lo repartido sean el mismo
+    numero; un reparto a medias no se tapa, falla.
+    """
+    lineas = [e for e in plan.exclusiones if e.pestana == "Activos fijos" and e.monto < 0]
+    if repartida <= 0 or not lineas:
+        return
+    for e in lineas:
+        e.en_el_sistema = "Activos fijos"
+    plan.cruces.append((
+        "Depreciación acumulada: línea única del balance vs repartida en los activos",
+        -sum((e.monto for e in lineas), Decimal("0")), repartida,
+    ))
 
 
 def _plan_entradas(plan: Plan, filas: list[dict]) -> set[str]:
@@ -956,8 +992,8 @@ def _cruzar_compras_por_liquidar(plan: Plan) -> None:
             plan.cruces.append((f"Compra sin liquidar {etiqueta}: Inventario vs Entradas", descuenta, abre))
 
 
-def armar_plan(libro: dict[str, list[dict]], corte: date, ensayo: bool) -> Plan:
-    plan = Plan(corte=corte, ensayo=ensayo)
+def armar_plan(libro: dict[str, list[dict]], corte: date, ensayo: bool, muestra: bool = False) -> Plan:
+    plan = Plan(corte=corte, ensayo=ensayo, muestra=muestra)
     _plan_inicio(plan, libro["Inicio"])
     _plan_terceros(plan, libro["Terceros"])
     _plan_creditos(plan, libro["Créditos"])
@@ -1000,12 +1036,9 @@ def armar_plan(libro: dict[str, list[dict]], corte: date, ensayo: bool) -> Plan:
             if k in vistos:
                 plan.errores.append(f"Nombre repetido ({tipo}): «{p.nombre}» ({vistos[k]} y {p.origen})")
             vistos[k] = p.origen
-    n_terceros = sum(1 for p in plan.pasos if p.tipo == "third_party") + len(seed.THIRD_PARTIES)
-    if n_terceros >= TOPE_TERCEROS_SEEDER:
-        plan.errores.append(
-            f"Quedarían {n_terceros} terceros y el seeder solo lee {TOPE_TERCEROS_SEEDER}: "
-            "crearía un segundo Willard S.A"
-        )
+    # Aca habia un tope de 500 terceros: el seeder leia una sola pagina y con
+    # mas crearia un segundo Willard S.A (N1). Ya no hace falta: existing_by
+    # pagina hasta el total y se detiene si no llega (list_all).
     return plan
 
 
@@ -1062,7 +1095,8 @@ def _precondiciones(api, fase: str) -> None:
         bodegas = _todos(api, "/warehouses", 10)
         if terceros or cuentas or bodegas:
             raise SystemExit(
-                "La fase «saldos» necesita una org VACÍA (seed_sac_org.py --reset --org-vacia): "
+                "La fase «saldos» necesita una org VACÍA (seed_sac_org.py --org-vacia; en local "
+                "con --reset, contra un servidor remoto archivando antes la org anterior): "
                 f"hay {len(terceros)} terceros, {len(cuentas)} cuentas y {len(bodegas)} bodegas. "
                 "Si el seeder ya corrió, el saldo de Willard S.A y de Caja Circunvalar no se puede poner."
             )
@@ -1184,14 +1218,6 @@ def aplicar(plan: Plan, fase: str, api) -> None:
             raise SystemExit(f"Paso de tipo desconocido: {p.tipo}")
         hechos += 1
     logging.info(f"  fase «{fase}»: {hechos} escrituras")
-
-    if fase == "saldos":
-        total = api.get("/third-parties", {"limit": 1}).get("total", 0)
-        if total + len(seed.THIRD_PARTIES) >= TOPE_TERCEROS_SEEDER:
-            raise SystemExit(
-                f"Hay {total} terceros y el seeder solo lee {TOPE_TERCEROS_SEEDER}: NO corra la "
-                "provisión, crearía un segundo Willard S.A"
-            )
 
 
 # ============================================================================
@@ -1362,6 +1388,10 @@ def leer_sistema(api, plan: Plan) -> dict:
     return s
 
 
+def _centavos(x: Decimal) -> str:
+    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def _plata(x: Optional[Decimal]) -> str:
     if x is None:
         return "—"
@@ -1406,6 +1436,7 @@ def informe(plan: Plan, s: dict, fuente: str) -> tuple[str, int]:
     l.append("Signo del sistema: activos en positivo, cuentas por pagar en negativo.\n")
     l.append("| Rubro | Johana | Sistema | Diferencia | Explicado | Sin explicar |\n|---|---:|---:|---:|---:|---:|")
     rubros_malos = 0
+    redondeos: list[tuple[str, Decimal]] = []
     for r in RUBROS:
         j = plan.johana.get(r)
         sis = rubros[r]
@@ -1414,7 +1445,15 @@ def informe(plan: Plan, s: dict, fuente: str) -> tuple[str, int]:
         resto = None if dif is None else dif - explicado
         if resto is None or abs(resto) > UNO:
             rubros_malos += 1  # sin total de Johana tampoco se puede dar por bueno
+        elif resto != 0:
+            redondeos.append((r, resto))
         l.append(f"| {r} | {_plata(j)} | {_plata(sis)} | {_plata(dif)} | {_plata(explicado)} | {_plata(resto)} |")
+    if redondeos:
+        # O2 de QA: «Sin explicar -1» al lado de «0 fallas» hace preguntar. La
+        # tabla redondea a pesos; aca van los centavos.
+        detalle = "; ".join(f"{r} {_centavos(x)}" for r, x in redondeos)
+        l.append(f"\nHasta $1 por rubro se tolera como redondeo y no cuenta como falla. "
+                 f"Con centavos: {detalle}.")
     l.append(f"\nActivos del balance que no cayeron en ningún rubro: {_plata(sin_rubro)} (tiene que ser 0).\n")
     for r in RUBROS:
         if exp[r]:
@@ -1477,12 +1516,12 @@ def _resumen_plan(plan: Plan, fase: Optional[str]) -> None:
 
 
 def validar_destino(api, ensayo: bool) -> None:
-    """--ensayo acepta valores provisionales: nunca contra un backend remoto. Y
-    la carga remota (produccion) no existe en la ronda 1: es otro plan."""
+    """--ensayo acepta valores provisionales: nunca contra un backend remoto.
+    Sin --ensayo, el remoto (produccion) se habilita desde la carga de muestra
+    del 10-nov (procedimiento-carga-muestra-sac-prod.md): la org vacia la deja
+    archivar_org_sac.py, no --reset."""
     if ensayo and not api.is_local:
         raise SystemExit(f"--ensayo solo corre contra un backend local, no contra {api.base_url}")
-    if not api.is_local:
-        raise SystemExit("La carga contra un backend remoto no está habilitada en este plan (ronda 1)")
 
 
 def main() -> None:
@@ -1494,6 +1533,9 @@ def main() -> None:
     grupo.add_argument("--conciliar", action="store_true")
     parser.add_argument("--apply", action="store_true", help="Escribir (default: solo imprime el plan)")
     parser.add_argument("--ensayo", action="store_true", help="Ensayo local: acepta valores provisionales")
+    parser.add_argument("--muestra", action="store_true",
+                        help="Carga de muestra: marca los activos fijos como valores de ejemplo (nombre y notas). "
+                             "Va en las tres corridas (saldos, resto y conciliar): el nombre es la llave del cruce")
     parser.add_argument("--salida", help="Archivo del informe de conciliación")
     parser.add_argument("--api-url", default=seed.BASE_URL)
     # Por variable de entorno, como el seeder: en la linea de comandos la clave
@@ -1512,7 +1554,7 @@ def main() -> None:
         libro = leer_libro(args.file)
     except ErrorDeLibro as e:
         raise SystemExit(f"El archivo no tiene la forma esperada: {e}")
-    plan = armar_plan(libro, corte, ensayo=args.ensayo)
+    plan = armar_plan(libro, corte, ensayo=args.ensayo, muestra=args.muestra)
     logging.info(f"Archivo {args.file} sha256={sha}")
     _resumen_plan(plan, args.fase)
     if plan.errores:

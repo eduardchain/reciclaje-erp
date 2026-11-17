@@ -30,7 +30,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import String as SAString, and_, cast, func, or_, select, text
+from sqlalchemy import Numeric, String as SAString, and_, case, cast, func, or_, select, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.utils.advisory_locks import next_number, lock_sequences
@@ -1881,11 +1881,12 @@ class InboundOrderService:
 
         total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
         # Ciclo C (C-3): oldest = FIFO para la bandeja de Johana
-        order_clause = (
-            InboundOrder.created_at.asc()
-            if sort == "oldest"
-            else InboundOrder.order_number.desc()
-        )
+        if sort == "oldest":
+            order_clauses = [InboundOrder.created_at.asc()]
+        elif sort in ("remission_asc", "remission_desc"):
+            order_clauses = self._remission_order(desc=sort == "remission_desc")
+        else:
+            order_clauses = [InboundOrder.order_number.desc()]
         orders = db.execute(
             q.options(
                 joinedload(InboundOrder.lines).joinedload(InboundOrderLine.material),
@@ -1899,11 +1900,56 @@ class InboundOrderService:
                 joinedload(InboundOrder.vehicle),
                 joinedload(InboundOrder.purchase),
             )
-            .order_by(order_clause)
+            .order_by(*order_clauses)
             .offset(skip)
             .limit(limit)
         ).unique().scalars().all()
         return list(orders), total
+
+    @staticmethod
+    def _remission_order(desc: bool) -> list:
+        """Orden natural de la remision (plan columna Remision, D2) sobre TODA
+        la lista. Johana la llena a mano: es texto libre de hasta 50, sin strip.
+
+        Con r = NULLIF(TRIM(remission_number), ''):
+        1. Vacia (NULL, '' o solo espacios) al FINAL en los dos sentidos: quien
+           ordena por remision quiere ver primero las que la tienen.
+        2. Valor numerico, SOLO si r es solo digitos: el CASE es lo que impide
+           castear texto (sin el, la primera remision de texto da DataError).
+           «0012» vale 12. Para el texto es NULL, y su posicion va EXPLICITA:
+           numericas antes que texto en asc, texto antes en desc. Los NULLS
+           coinciden con el default de PG (quitarlos no cambia nada medible,
+           P9); se escriben para el lector.
+        3. Texto: lower(r) COLLATE "C" — orden independiente de la collation
+           del server (dev/test en Alpine ordena por bytes y prod no se puede
+           medir desde aca; lower() como en #108). OJO: lower(r) y DESPUES el
+           COLLATE; `lower(r COLLATE "C")` solo pasaria a minuscula el ASCII.
+        4. Desempate order_number DESC (unico por org): orden TOTAL, asi la
+           paginacion con skip no repite ni salta filas aunque la remision se
+           repita.
+        """
+        # UNA sola definicion de "vacia" para las cuatro llaves: NULL, '' y
+        # solo espacios dan NULL. Con TRIM solo, «  » quedaba '' en la llave de
+        # texto y NULL en la otra vacia: en desc PG pone los NULL primero, asi
+        # que la llave 3 desempataba las vacias ANTES que order_number (lo
+        # encontro T3 en la construccion; T2 pasaba por coincidencia).
+        r = func.nullif(func.trim(InboundOrder.remission_number), "")
+        vacia = r.is_(None)
+        numerica = case((r.op("~")("^[0-9]+$"), cast(r, Numeric)), else_=None)
+        texto = func.lower(r).collate("C")
+        if desc:
+            return [
+                vacia.asc(),
+                numerica.desc().nulls_first(),
+                texto.desc(),
+                InboundOrder.order_number.desc(),
+            ]
+        return [
+            vacia.asc(),
+            numerica.asc().nulls_last(),
+            texto.asc(),
+            InboundOrder.order_number.desc(),
+        ]
 
     @staticmethod
     def display_status_of(order: InboundOrder) -> str:

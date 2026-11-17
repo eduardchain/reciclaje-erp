@@ -128,6 +128,20 @@ export default function InboundDetailPage() {
   const estimatedTotalKg = showsEstimatedKg
     ? order.lines.reduce((acc, l) => acc + (estimateKgLead(formulas, l.material_id, l.quantity) ?? 0), 0)
     : null;
+  // Entrada liquidada: los materiales siempre en orden alfabético por nombre
+  // (pedido de Johana). `numeric` para que "GRUPO 2" quede antes de "GRUPO 10"
+  // y `sensitivity: base` para ignorar tildes y mayúsculas. Se copia el arreglo:
+  // `order.lines` es del cache de React Query y no se debe mutar. Antes de
+  // liquidar se conserva el orden de captura, que es el que el pesador ve.
+  const displayLines = isLiquidated
+    ? [...order.lines].sort((x, y) =>
+        (x.material_name ?? x.material_code ?? "").localeCompare(
+          y.material_name ?? y.material_code ?? "",
+          "es",
+          { numeric: true, sensitivity: "base" },
+        ),
+      )
+    : order.lines;
   const purchaseTotal = isPurchaseType
     ? order.lines.reduce((acc, l) => acc + l.quantity * (l.unit_price ?? 0), 0)
     : 0;
@@ -580,7 +594,7 @@ export default function InboundDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {order.lines.map((line) => {
+                {displayLines.map((line) => {
                   const hasAllocs = line.allocations.length > 0;
                   // 🔴 El backend serializa Decimal como STRING ("0.0000")
                   // aunque el tipo TS diga number: `disc === 0` daba false y el
