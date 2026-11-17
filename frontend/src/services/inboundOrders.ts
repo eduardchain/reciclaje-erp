@@ -18,8 +18,9 @@ export interface InboundOrderFilters {
   display_status?: "registered" | "reviewed" | "liquidated" | "annulled";
   /** Ciclo C: busca por #, placa, conductor, tercero o material */
   search?: string;
-  /** Ciclo C: oldest = FIFO para la bandeja */
-  sort?: "newest" | "oldest";
+  /** Ciclo C: oldest = FIFO para la bandeja. remission_*: orden natural de la
+   * remision sobre TODA la lista (plan columna Remision) */
+  sort?: "newest" | "oldest" | "remission_asc" | "remission_desc";
   /** Ciclo C: filtra entradas willard por mundo */
   willard_world?: "postconsumo" | "drosses";
   warehouse_id?: string;

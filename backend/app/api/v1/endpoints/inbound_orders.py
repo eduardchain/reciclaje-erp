@@ -302,7 +302,11 @@ def list_inbound_orders(
         description="#93 D4: estado unico columna-driven",
     ),
     search: Optional[str] = Query(None, max_length=100),
-    sort: str = Query("newest", pattern="^(newest|oldest)$"),
+    sort: str = Query(
+        "newest",
+        pattern="^(newest|oldest|remission_asc|remission_desc)$",
+        description="remission_*: orden natural de la remision sobre TODA la lista (plan columna Remision)",
+    ),
     willard_world: Optional[str] = Query(None, pattern="^(postconsumo|drosses)$"),
     warehouse_id: Optional[UUID] = Query(None),
     third_party_id: Optional[UUID] = Query(None),

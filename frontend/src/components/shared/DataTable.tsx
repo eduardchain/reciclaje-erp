@@ -61,6 +61,13 @@ interface DataTableProps<TData, TValue> {
    * internamente con useState. */
   sorting?: SortingState;
   onSortingChange?: (sorting: SortingState) => void;
+  /** Quien ordena las filas visibles. Por defecto lo decide `onSortingChange`:
+   * con handler controlado ordena el servidor (manual), sin el ordena la tabla.
+   * `false` explicito = estado controlado por el padre y orden client-side de
+   * la pagina: el padre manda al servidor solo las columnas que el servidor
+   * sabe ordenar, y esas columnas declaran `sortingFn: () => 0` para que la
+   * tabla conserve el orden en que llegaron las filas. */
+  manualSorting?: boolean;
   /** Si se pasa, en mobile (<md) renderiza una lista de cards en vez de la tabla.
    * Desktop sigue mostrando la tabla normal. Backwards-compatible: si se omite,
    * mobile usa scroll horizontal en la tabla. */
@@ -82,14 +89,16 @@ function exportToExcel<TData>(
   const colKeys = exportableCols.map(
     (col) => (col as { accessorKey?: string }).accessorKey || col.id || "",
   );
+  const asText = exportableCols.map((col) => col.meta?.exportAsText === true);
 
   const rows = data.map((row) =>
-    colKeys.map((key) => {
+    colKeys.map((key, idx) => {
       const value = (row as Record<string, unknown>)[key];
       if (value == null) return "";
       // Backend serializa Decimal como string ("100000.00"). Convertir a número
-      // si parsea limpio, para que Excel los reconozca como numéricos.
-      if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value)) {
+      // si parsea limpio, para que Excel los reconozca como numéricos — salvo
+      // en las columnas que declaran meta.exportAsText (identificadores).
+      if (!asText[idx] && typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value)) {
         return Number(value);
       }
       return value;
@@ -131,6 +140,7 @@ export function DataTable<TData, TValue>({
   toolbar,
   sorting: externalSorting,
   onSortingChange: externalOnSortingChange,
+  manualSorting,
   renderMobileCard,
 }: DataTableProps<TData, TValue>) {
   const [internalSorting, setInternalSorting] = useState<SortingState>([]);
@@ -157,7 +167,7 @@ export function DataTable<TData, TValue>({
 
   // Server-side sort cuando el padre pasa onSortingChange controlado. Sin esto,
   // DataTable ordena solo la pagina visible (client-side, comportamiento previo).
-  const useManualSorting = externalOnSortingChange != null;
+  const useManualSorting = manualSorting ?? externalOnSortingChange != null;
   const table = useReactTable({
     data,
     columns,
