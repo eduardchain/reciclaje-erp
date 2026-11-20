@@ -1508,6 +1508,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         sort_by: Optional[str] = None,
         sort_dir: str = "desc",
         warehouse_id: Optional[UUID] = None,
+        collector_id: Optional[UUID] = None,
     ) -> tuple[List[Purchase], int, int, Decimal]:
         """
         Get multiple purchases with filtering, sorting, and pagination.
@@ -1562,6 +1563,20 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 .where(
                     PurchaseLine.purchase_id == Purchase.id,
                     PurchaseLine.warehouse_id == warehouse_id,
+                )
+                .exists()
+            )
+
+        if collector_id is not None:
+            # Alcance de recolector (SAC, fila 16, D-b = a): la compra es del
+            # usuario si su PROVEEDOR lleva la marca. EXISTS y no join: el
+            # buscador de abajo ya hace `join(Purchase.supplier)`. Va ANTES del
+            # conteo, asi que total y amount_sum cuentan lo filtrado (§5.4).
+            query = query.filter(
+                select(ThirdParty.id)
+                .where(
+                    ThirdParty.id == Purchase.supplier_id,
+                    ThirdParty.collector_id == collector_id,
                 )
                 .exists()
             )

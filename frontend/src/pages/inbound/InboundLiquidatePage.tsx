@@ -18,6 +18,7 @@ import {
   useMaterials,
   usePayableProviders,
   useRetentionRows,
+  useScopeSupplierIds,
   useSuppliers,
 } from "@/hooks/useMasterData";
 import { retentionRowLabel } from "@/pages/treasury/RetentionsPage";
@@ -142,6 +143,13 @@ const BASE_PRICE_HINT = "se usa en las compras sin lista ni precio propio";
 
 /** Q-66 sin respuesta: la casilla «Con IVA» nace apagada (Daniel: «IVA opcional»). */
 const IVA_RATE_PCT = 19;
+
+/** Reglas 9e/9f del alcance (plan Ingrid v1.6/v1.7): el mismo texto que el
+ * 422 del servidor (`RELIQUIDATE_FOREIGN_SUPPLIER` / `RELIQUIDATE_TAXES`). */
+const RELIQ_FOREIGN =
+  "Esta Entrada tiene una compra de un proveedor fuera de tu alcance: la vuelve a liquidar SAC";
+const RELIQ_TAXES =
+  "Esta Entrada tuvo retenciones o IVA en su liquidación anterior: la vuelve a liquidar SAC";
 
 let keyCounter = 0;
 const nextKey = () => ++keyCounter;
@@ -463,8 +471,14 @@ export default function InboundLiquidatePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get("returnTo");
-  const { hasPermission } = usePermissions();
+  const { hasPermission, collectorScope, unscoped } = usePermissions();
   const canViewPrices = hasPermission("purchases.view_prices");
+  // Alcance de recolector (SAC, plan §8 y fila 9): sin cuentas kg, sin
+  // retenciones ni IVA (S5) y con la comision fija (D-a: la calcula el
+  // servidor). Sin alcance, la pantalla es la de siempre.
+  const scoped = collectorScope !== null;
+  // Regla 9e (plan v1.6): sus proveedores, activos o no. Solo con alcance.
+  const scopeSupplierIds = useScopeSupplierIds(scoped);
 
   const { data: order, isLoading } = useInboundOrder(id!);
   const liquidateOrder = useLiquidateInboundOrder();
@@ -475,7 +489,7 @@ export default function InboundLiquidatePage() {
   const { data: materialsData } = useMaterials();
   const { data: profilesData } = useKgProfiles();
   const { data: tariffsData } = useCurrentTariffs();
-  const { data: kgAccountsData } = useKgAccounts();
+  const { data: kgAccountsData } = useKgAccounts(undefined, unscoped);
   const { data: accountsData } = useMoneyAccounts();
 
   // 🔴 TODOS los hooks van ARRIBA de los `return` condicionales de abajo: un
@@ -559,7 +573,7 @@ export default function InboundLiquidatePage() {
   const [bulkSupplier, setBulkSupplier] = useState("");
 
   // Catálogo de retenciones (v2 #79) — la ruta ya está gated por el flag (FP)
-  const { data: retentionRows } = useRetentionRows(true);
+  const { data: retentionRows } = useRetentionRows(unscoped);
   const retentionConfigs = useMemo(
     () => (retentionRows ?? []).filter((r) => r.config_id && r.is_active),
     [retentionRows],
@@ -571,7 +585,8 @@ export default function InboundLiquidatePage() {
 
   useEffect(() => {
     // Espera al catálogo: la precarga mapea cada retención guardada a su tarifa
-    if (!order || initialized || !retentionRows) return;
+    // Con alcance no hay catalogo de retenciones que esperar (S5).
+    if (!order || initialized || (!retentionRows && !scoped)) return;
     const initial = initLines(order);
     setLines(initial);
     setCollectorEnabled(!!order.collector_id);
@@ -657,7 +672,10 @@ export default function InboundLiquidatePage() {
       }
     }
     setInitialized(true);
-  }, [order, initialized, retentionRows, retentionConfigs, configById, draftKey, draftSig]);
+    // `scoped` es dependencia REAL: si la Entrada carga antes que los permisos,
+    // el init corta (sin retenciones y aun sin saber del alcance) y tiene que
+    // volver a correr cuando se sabe que el usuario tiene alcance.
+  }, [order, initialized, retentionRows, retentionConfigs, configById, draftKey, draftSig, scoped]);
 
   // Guardar el borrador en cada cambio; si lo digitado vuelve a lo del
   // servidor, se borra (así no aparece «recuperado» sin haber nada)
@@ -1071,6 +1089,18 @@ export default function InboundLiquidatePage() {
         return `Falta el precio en la compra ${slot}`;
       }
     }
+    // 9g (plan Ingrid v1.10), solo con alcance: todo lo pesado se reparte.
+    // Mismo orden que el servidor: antes de «sin asignar» y del precio base.
+    if (scoped && lineDisc(l) !== 0) {
+      const qty = formatWeight(Math.abs(lineDisc(l)), l.material_unit);
+      const what =
+        activeCells(l).length === 0
+          ? `sin repartir (${formatWeight(l.weighed, l.material_unit)} pesados)`
+          : lineDisc(l) > 0
+            ? `faltan ${qty} por repartir`
+            : `se repartieron ${qty} de más`;
+      return `${what} — con tu alcance hay que repartir todo lo pesado; si no se puede, esta Entrada la liquida SAC`;
+    }
     if (activeCells(l).length === 0 && l.isExtra) {
       return "Reparta este material o quítelo";
     }
@@ -1114,7 +1144,27 @@ export default function InboundLiquidatePage() {
     if (col.paymentAccount === "") problems.push(`${tag}: pago de contado sin cuenta`);
   }
 
-  const collectorValid = !collectorEnabled || (!!collectorTpId && effCollectorAmount > 0);
+  // Reglas 9e/9f (plan Ingrid v1.6/v1.7), SOLO con alcance: una Entrada que
+  // SAC liquidó y des-liquidó con una compra viva de un proveedor ajeno, o
+  // con retenciones o IVA en su última liquidación, la vuelve a liquidar SAC.
+  // Se avisa al abrir, no al enviar; el 422 del servidor sigue siendo la red.
+  // `taxes`/`retentions` ya son el lote de la ÚLTIMA liquidación (la misma
+  // función del servidor, `last_liquidation_batch`).
+  const livePurchases = order.purchases.filter((p) => p.status !== "cancelled");
+  const reliqBlocks: string[] = !scoped
+    ? []
+    : [
+        ...(scopeSupplierIds && livePurchases.some((p) => !scopeSupplierIds.has(p.supplier_id))
+          ? [RELIQ_FOREIGN]
+          : []),
+        ...(livePurchases.some((p) => (p.retentions?.length ?? 0) > 0 || (p.taxes?.length ?? 0) > 0)
+          ? [RELIQ_TAXES]
+          : []),
+      ];
+  problems.push(...reliqBlocks);
+
+  // Con alcance la comision no la arma la pantalla (fila 9): no bloquea.
+  const collectorValid = scoped || !collectorEnabled || (!!collectorTpId && effCollectorAmount > 0);
   const canSubmit = problems.length === 0 && collectorValid && !liquidateOrder.isPending;
 
   const handleSubmit = () => {
@@ -1193,8 +1243,10 @@ export default function InboundLiquidatePage() {
         id: order.id,
         data: {
           lines: payloadLines,
-          collector_commission:
-            collectorEnabled && collectorTpId && effCollectorAmount > 0
+          // Con alcance la comision la fija el servidor (fila 9, D-a): no se manda.
+          collector_commission: scoped
+            ? null
+            : collectorEnabled && collectorTpId && effCollectorAmount > 0
               ? { third_party_id: collectorTpId, amount: effCollectorAmount }
               : null,
           // Ausentes (no []) sin bloques — data-gate D9
@@ -1251,7 +1303,9 @@ export default function InboundLiquidatePage() {
             <span className="font-normal"> ({(pct * 100).toFixed(1)}%{state === "out" ? ", fuera de tolerancia" : ""})</span>
           )}
         </div>
-        {activeCells(l).length === 0 && !l.isExtra && (
+        {/* 9g: con alcance, «sin proveedor» en un material pesado solo
+            termina en 422; con pesado 0 no deja descuadre y se ofrece. */}
+        {activeCells(l).length === 0 && !l.isExtra && !(scoped && l.weighed !== 0) && (
           <label className="flex items-center gap-1.5 text-slate-600 cursor-pointer font-normal">
             <Checkbox
               checked={l.unallocated}
@@ -1500,7 +1554,9 @@ export default function InboundLiquidatePage() {
           )}
         </div>
 
-        {/* IVA (§4): a la entidad [Impuestos] IVA; el proveedor queda con +IVA */}
+        {/* IVA (§4): a la entidad [Impuestos] IVA; el proveedor queda con +IVA.
+            Con alcance no hay IVA ni retenciones (S5): la liquida SAC. */}
+        {!scoped && (<>
         <div className="space-y-1 border-t border-slate-100 pt-1.5">
           <label className="flex items-center gap-1.5 text-slate-600 cursor-pointer">
             <Checkbox
@@ -1591,6 +1647,7 @@ export default function InboundLiquidatePage() {
             </div>
           ))}
         </div>
+        </>)}
 
         {/* Pago de contado OPCIONAL (#20 vía canal único). Sin marcar = crédito */}
         <div className="space-y-1 border-t border-slate-100 pt-1.5">
@@ -1650,6 +1707,14 @@ export default function InboundLiquidatePage() {
           Volver
         </Button>
       </PageHeader>
+
+      {reliqBlocks.length > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 space-y-0.5">
+          {reliqBlocks.map((t) => (
+            <p key={t}>{t}.</p>
+          ))}
+        </div>
+      )}
 
       {recoveredAt !== null && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -1847,7 +1912,9 @@ export default function InboundLiquidatePage() {
         </Button>
       </div>
 
-      {/* D16: material reportado por proveedores que la báscula no vio */}
+      {/* D16: material reportado por proveedores que la báscula no vio.
+          Con alcance no se ofrece: repartirlo deja descuadre (9g). */}
+      {!scoped && (
       <Card className="shadow-sm border-dashed">
         <CardContent className="pt-4">
           <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
@@ -1872,6 +1939,7 @@ export default function InboundLiquidatePage() {
           </p>
         </CardContent>
       </Card>
+      )}
 
       {/* D11: comisión del recolector — UNA por entrada, sobre lo pesado */}
       <Card className="shadow-sm">
@@ -1882,6 +1950,21 @@ export default function InboundLiquidatePage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          {scoped ? (
+            // Fila 9 (D-a): con alcance la comision la fija el servidor —
+            // tarifa x lo pesado, a su recolector. Aca solo se informa.
+            <p className="text-sm text-slate-600">
+              {suggestedCommission > 0 ? (
+                <>
+                  Se causa a <strong>{collectorScope?.name}</strong>:{" "}
+                  {canViewPrices && <strong>{formatCurrency(suggestedCommission)}</strong>}
+                  {" "}— tarifa × {formatWeight(commissionBase.base)} pesados. La calcula el sistema.
+                </>
+              ) : (
+                "Sin comisión: no hay tarifa de recolección vigente."
+              )}
+            </p>
+          ) : (<>
           <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
             <Checkbox
               checked={collectorEnabled}
@@ -1937,6 +2020,7 @@ export default function InboundLiquidatePage() {
               </div>
             </div>
           )}
+          </>)}
         </CardContent>
       </Card>
 

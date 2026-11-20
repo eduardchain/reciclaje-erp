@@ -1295,6 +1295,7 @@ class CRUDMoneyMovement:
         search: Optional[str] = None,
         allowed_account_ids: Optional[List[UUID]] = None,
         created_by_filter: Optional[UUID] = None,
+        collector_scope_id: Optional[UUID] = None,
         adjustment_class: Optional[str] = None,
         commission_source: Optional[str] = None,
         pnl_section: Optional[str] = None,
@@ -1325,7 +1326,25 @@ class CRUDMoneyMovement:
             MoneyMovement.organization_id == organization_id
         )
 
-        if allowed_account_ids is not None:
+        if collector_scope_id is not None:
+            # Usuario con alcance de recolector (#124, fila 24 del plan):
+            # `cta(account)` o (`account IS NULL` y `alc(tp)`). Lista de cuentas
+            # vacia = NINGUNA (fail-closed); una causacion sin cuenta solo se ve
+            # si su tercero lleva la marca del recolector.
+            scoped_tps = select(ThirdParty.id).where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.collector_id == collector_scope_id,
+            )
+            query = query.where(
+                or_(
+                    MoneyMovement.account_id.in_(list(allowed_account_ids or [])),
+                    and_(
+                        MoneyMovement.account_id.is_(None),
+                        MoneyMovement.third_party_id.in_(scoped_tps),
+                    ),
+                )
+            )
+        elif allowed_account_ids is not None:
             query = query.where(
                 (MoneyMovement.account_id.in_(allowed_account_ids))
                 | (MoneyMovement.account_id.is_(None))

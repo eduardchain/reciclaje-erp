@@ -302,6 +302,17 @@ const orgNavItems: NavItem[] = [
   },
 ];
 
+// Alcance de recolector (SAC, plan recolector-alcance §8): con alcance, el menu
+// muestra SOLO estas rutas — las demas le darian 403 «Fuera de tu alcance» en el
+// backend (lista blanca §5.2). Sin alcance este set no se consulta.
+const SCOPE_PATHS = new Set<string>([
+  ROUTES.INBOUND,
+  ROUTES.TREASURY,
+  ROUTES.TREASURY_ACCOUNT_STATEMENT,
+  ROUTES.TREASURY_ACCOUNT_MOVEMENTS,
+  ROUTES.THIRD_PARTIES,
+]);
+
 interface SidebarProps {
   mode?: "desktop" | "mobile";
   onNavigate?: () => void;
@@ -311,7 +322,8 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
   const location = useLocation();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [collapsedDesktop, setCollapsedDesktop] = useState(false);
-  const { hasPermission, hasAnyPermission, isLoading } = usePermissions();
+  const { hasPermission, hasAnyPermission, isLoading, collectorScope } = usePermissions();
+  const scoped = collectorScope !== null;
   const { flagEnabled } = useOrgSettings();
   const user = useAuthStore((s) => s.user);
   const organizationId = useAuthStore((s) => s.organizationId);
@@ -342,17 +354,19 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
     const checkFlag = (flag?: string) => !flag || flagEnabled(flag);
     // W1: ocultar-si-flag — solo la consulta la entrada que lo declara
     const checkHide = (flag?: string) => !flag || !flagEnabled(flag);
+    // Alcance: solo se consulta con alcance; sin el, todo pasa como hoy.
+    const checkScope = (path: string) => !scoped || SCOPE_PATHS.has(path);
 
     const filtered = orgNavItems
       .map((item) => {
         if (item.children) {
           const filteredChildren = item.children.filter(
-            (child) => checkPerm(child.permission) && checkFlag(child.orgFlag) && checkHide(child.hideWhenOrgFlag)
+            (child) => checkPerm(child.permission) && checkFlag(child.orgFlag) && checkHide(child.hideWhenOrgFlag) && checkScope(child.path)
           );
           if (filteredChildren.length === 0) return null;
           return { ...item, children: filteredChildren };
         }
-        if (!checkPerm(item.permission) || !checkFlag(item.orgFlag) || !checkHide(item.hideWhenOrgFlag)) return null;
+        if (!checkPerm(item.permission) || !checkFlag(item.orgFlag) || !checkHide(item.hideWhenOrgFlag) || !checkScope(item.path)) return null;
         return item;
       })
       .filter(Boolean) as NavItem[];
@@ -370,7 +384,7 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
       lastSection = item.section;
       return item;
     });
-  }, [isLoading, hasPermission, hasAnyPermission, isSystemMode, isSuperuser, flagEnabled]);
+  }, [isLoading, hasPermission, hasAnyPermission, isSystemMode, isSuperuser, flagEnabled, scoped]);
 
   const toggleExpand = (name: string) => {
     setExpanded((prev) => ({ ...prev, [name]: !prev[name] }));

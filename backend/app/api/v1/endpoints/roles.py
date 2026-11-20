@@ -69,6 +69,13 @@ def get_my_permissions(
 
     acc_ids = get_user_account_assignments(db, ctx["user_id"], ctx["organization_id"])
 
+    collector_scope = None
+    scope_id = ctx.get("collector_scope_id")
+    if scope_id is not None:
+        from app.models.third_party import ThirdParty
+        collector = db.get(ThirdParty, scope_id)
+        collector_scope = {"id": scope_id, "name": collector.name if collector else ""}
+
     return MyPermissionsResponse(
         role_id=ctx["user_role_id"],
         role_name=ctx["user_role"],
@@ -76,6 +83,7 @@ def get_my_permissions(
         is_admin=ctx["is_admin"],
         permissions=sorted(perms),
         assigned_account_ids=[str(a) for a in acc_ids],
+        collector_scope=collector_scope,
     )
 
 

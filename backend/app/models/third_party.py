@@ -63,7 +63,22 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
     )
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    
+
+    # Marca de recolector (SAC, plan recolector-alcance §3 y §10): «este tercero
+    # es de ESTE recolector» (Green Loop). NULL en las otras orgs.
+    # ⚠️ FK autorreferente SIN `ondelete` = NO ACTION, a proposito (n1 de QA 2):
+    # RESTRICT se chequea fila por fila y un DELETE de varias filas podria fallar
+    # segun el orden; NO ACTION se chequea al final de la sentencia. Las dos
+    # impiden borrar solo al recolector.
+    # ⚠️ SIN `relationship` inversa: con la cascada por defecto, la sesion pondria
+    # NULL en los marcados antes del DELETE y la base dejaria de proteger (T20).
+    collector_id: Mapped[UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("third_parties.id"),
+        nullable=True,
+        index=True,
+    )
+
     # Relationships
     purchases: Mapped[list["Purchase"]] = relationship(
         "Purchase",
@@ -106,5 +121,20 @@ class ThirdParty(Base, TimestampMixin, OrganizationMixin):
         back_populates="customer",
     )
     
+    # Muchos-a-uno hacia el recolector, SOLO para leer su nombre. No hay
+    # coleccion inversa (ver la nota de `collector_id`). Carga perezosa: en un
+    # listado todos apuntan al mismo recolector, y despues de la primera carga
+    # el resto sale del identity map sin SQL.
+    collector: Mapped["ThirdParty | None"] = relationship(
+        "ThirdParty",
+        remote_side=[id],
+        foreign_keys=[collector_id],
+        viewonly=True,
+    )
+
+    @property
+    def collector_name(self) -> str | None:
+        return self.collector.name if self.collector_id and self.collector else None
+
     def __repr__(self) -> str:
         return f"<ThirdParty(id={self.id}, name='{self.name}')>"

@@ -120,3 +120,39 @@ class UserAccountAssignment(Base):
     )
 
     __table_args__ = (UniqueConstraint("user_id", "account_id"),)
+
+
+class UserCollectorScope(Base):
+    """
+    Alcance de recolector de un usuario en una org (SAC, plan recolector-alcance §4).
+
+    Con una fila, el usuario solo opera lo de ESE recolector (Ingrid / Green Loop):
+    la lista blanca de `app/services/collector_scope.py` se impone en
+    `get_required_org_context`. El alcance lo decide la FILA, no el flag ni el
+    rol (fail-closed, T16b/T16c).
+
+    🔴 Las tres FKs son RESTRICT (N1), NO el CASCADE de `UserAccountAssignment`:
+    con CASCADE, borrar al recolector borraria esta fila y el usuario veria TODO
+    (fail-open). Sin `relationship` inversa por la misma razon.
+    """
+
+    __tablename__ = "user_collector_scopes"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False, index=True,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+    )
+    collector_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("third_parties.id", ondelete="RESTRICT"), nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_user_collector_scopes_org_user"),
+    )

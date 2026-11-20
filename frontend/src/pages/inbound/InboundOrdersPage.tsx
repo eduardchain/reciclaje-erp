@@ -144,13 +144,16 @@ export function entradaPartyLabel(order: InboundOrderResponse): string {
 export default function InboundOrdersPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { hasPermission } = usePermissions();
+  const { hasPermission, collectorScope, unscoped } = usePermissions();
+  // Alcance de recolector (SAC, plan §8): sin filtro de sede — /warehouses esta
+  // fuera de su lista blanca. Sin alcance, todo como hoy.
+  const scoped = collectorScope !== null;
   const canCreate = hasPermission("purchases.create");
   const canLiquidate = hasPermission("purchases.liquidate");
   const canReview = hasPermission("purchases.review");
   const canViewPrices = hasPermission("purchases.view_prices");
 
-  const { data: warehousesData } = useWarehouses();
+  const { data: warehousesData } = useWarehouses(unscoped);
   const { data: suppliersData } = useSuppliers();
   const warehouses = warehousesData?.items ?? [];
   const suppliers = suppliersData?.items ?? [];
@@ -577,6 +580,7 @@ export default function InboundOrdersPage() {
                 <SelectItem value="willard_drosses">Willard · Drosses</SelectItem>
               </SelectContent>
             </Select>
+            {!scoped && (
             <Select value={warehouseFilter} onValueChange={(v) => { setWarehouseFilter(v); setPage(0); }}>
               <SelectTrigger className="w-full sm:w-44">
                 <SelectValue placeholder="Todas las sedes" />
@@ -588,6 +592,7 @@ export default function InboundOrdersPage() {
                 ))}
               </SelectContent>
             </Select>
+            )}
             {/* Combobox con escritura (patron EntitySelect de los formularios —
                 asi manejan terceros en toda la app); re-seleccionar limpia */}
             <div className="w-full sm:w-56">

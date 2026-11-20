@@ -4,7 +4,7 @@ SQLAlchemy models for EcoBalance ERP system.
 
 from .base import Base, TimestampMixin, OrganizationMixin
 from .organization import Organization
-from .user import User, OrganizationMember
+from .user import User, OrganizationMember, UserAccountAssignment, UserCollectorScope
 from .third_party import ThirdParty
 from .material import Material, MaterialCategory
 from .warehouse import Warehouse
@@ -56,6 +56,8 @@ __all__ = [
     "Organization",
     "User",
     "OrganizationMember",
+    "UserAccountAssignment",
+    "UserCollectorScope",
     "ThirdParty",
     "Material",
     "MaterialCategory",

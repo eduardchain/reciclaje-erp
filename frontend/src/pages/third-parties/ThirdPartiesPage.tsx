@@ -7,13 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { useThirdParties } from "@/hooks/useMasterData";
+import { usePayableProviders, useThirdParties } from "@/hooks/useMasterData";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { useDeactivateThirdParty, useReactivateThirdParty } from "@/hooks/useCrudData";
 import { SELECT_LIMIT, thirdPartyService } from "@/services/thirdParties";
 import { toast } from "sonner";
@@ -54,6 +56,7 @@ function getColumns(
   onDeactivate: (tp: ThirdPartyResponse) => void,
   onReactivate: (tp: ThirdPartyResponse) => void,
   currentUrl: string,
+  showCollector: boolean,
 ): ColumnDef<ThirdPartyResponse, unknown>[] {
   const cols: ColumnDef<ThirdPartyResponse, unknown>[] = [
     {
@@ -71,6 +74,12 @@ function getColumns(
     { accessorKey: "categories", header: "Categorias", meta: { hideOnMobile: true }, cell: ({ row }) => <div className={!row.original.is_active ? "opacity-50" : ""}><CategoryBadges tp={row.original} /></div> },
     { accessorKey: "phone", header: "Telefono", meta: { hideOnMobile: true }, cell: ({ row }) => <span className={!row.original.is_active ? "opacity-50" : ""}>{row.original.phone ?? "-"}</span> },
   ];
+  if (showCollector) {
+    // SAC (plan §7): «el estado de las cuentas… por aparte» de cada recolector.
+    cols.push(
+      { id: "collector", header: "Recolector", enableSorting: false, meta: { hideOnMobile: true }, cell: ({ row }) => <span className={!row.original.is_active ? "opacity-50" : ""}>{row.original.collector_name ?? "-"}</span> },
+    );
+  }
   if (canViewBalance) {
     cols.push(
       { accessorKey: "current_balance", header: "Saldo", enableSorting: true, cell: ({ row }) => <span className={!row.original.is_active ? "opacity-50" : ""}><MoneyDisplay amount={row.original.current_balance} /></span> },
@@ -123,7 +132,14 @@ export default function ThirdPartiesPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { hasPermission } = usePermissions();
+  const { hasPermission, unscoped } = usePermissions();
+  // Columna y filtro «Recolector» (SAC, plan §7): solo con el flag y SIN alcance
+  // (con alcance el servidor ya filtra a su recolector). `unscoped` es false
+  // mientras cargan los permisos: no se pide payable-providers antes de saber.
+  const { flagEnabled } = useOrgSettings();
+  const showCollector = flagEnabled("kg_ledger_enabled") && unscoped;
+  const { data: collectorsData } = usePayableProviders(undefined, showCollector);
+  const collectorFilter = showCollector ? searchParams.get("collector") || "" : "";
 
   const roleFilter = searchParams.get("tab") || "all";
   const page = parseInt(searchParams.get("page") || "0", 10);
@@ -162,8 +178,8 @@ export default function ThirdPartiesPage() {
 
   const currentUrl = location.pathname + location.search;
   const columns = useMemo(
-    () => getColumns(navigate, canViewBalance, canDelete, setDeactivateTarget, setReactivateTarget, currentUrl),
-    [navigate, canViewBalance, canDelete, currentUrl],
+    () => getColumns(navigate, canViewBalance, canDelete, setDeactivateTarget, setReactivateTarget, currentUrl, showCollector),
+    [navigate, canViewBalance, canDelete, currentUrl, showCollector],
   );
 
   const { data, isLoading } = useThirdParties({
@@ -174,6 +190,7 @@ export default function ThirdPartiesPage() {
     is_active: showInactive ? undefined : true,
     sort_by: sortField || undefined,
     sort_dir: sortField ? (sortDesc ? "desc" : "asc") : undefined,
+    collector_id: collectorFilter || undefined,
   });
   useScrollRestoration(!isLoading);
 
@@ -188,6 +205,7 @@ export default function ThirdPartiesPage() {
       search: search || undefined,
       role: roleFilter === "all" ? undefined : roleFilter,
       is_active: showInactive ? undefined : true,
+      collector_id: collectorFilter || undefined,
     });
     if (all.total > all.items.length) {
       toast.warning(`Excel limitado a ${all.items.length} filas. Hay ${all.total} en total — refina filtros para descargar todo.`);
@@ -240,6 +258,20 @@ export default function ThirdPartiesPage() {
         toolbar={
           <ResponsiveFilterBar>
             <SearchInput value={search} onChange={(v) => setParam({ search: v, page: null })} placeholder="Buscar tercero..." />
+            {showCollector && (
+              <Select
+                value={collectorFilter || "__all__"}
+                onValueChange={(v) => setParam({ collector: v === "__all__" ? null : v, page: null })}
+              >
+                <SelectTrigger className="w-full sm:w-52"><SelectValue placeholder="Recolector" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Todos los recolectores</SelectItem>
+                  {(collectorsData?.items ?? []).map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <div className="flex items-center gap-2">
               <Checkbox
                 id="show-inactive"

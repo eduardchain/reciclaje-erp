@@ -93,6 +93,8 @@ interface ThirdPartyFilters {
   is_active?: boolean;
   sort_by?: string;
   sort_dir?: "asc" | "desc";
+  /** SAC: solo los terceros de este recolector. */
+  collector_id?: string;
 }
 
 export const thirdPartyService = {

@@ -41,6 +41,16 @@ const typeLabels: Record<MovementType, string> = {
   tp_adjustment: "Ajuste de Saldo",
 };
 
+// Alcance de recolector (SAC, plan S7 / filas 26-27b): los UNICOS tipos que el
+// backend le acepta, y el behavior_type que exige cada guard de tipo existente
+// (money_movement.py `require_behavior`) — la pantalla ofrece exactamente eso.
+const SCOPED_TYPES: MovementType[] = ["payment_to_supplier", "advance_payment", "payment_to_generic"];
+const SCOPED_TYPE_BEHAVIORS: Partial<Record<MovementType, string[]>> = {
+  payment_to_supplier: ["material_supplier", "service_provider", "liability"],
+  advance_payment: ["material_supplier", "service_provider", "liability"],
+  payment_to_generic: ["generic"],
+};
+
 // Tipos frontend-only que mapean a un tipo backend diferente
 const backendTypeMap: Partial<Record<MovementType, string>> = {
   liability_payment: "payment_to_supplier",
@@ -59,25 +69,28 @@ export default function MovementCreatePage() {
   const createTpTransfer = useCreateTpTransfer();
   const createTpAdjustment = useCreateTpAdjustment();
   const uploadEvidence = useUploadEvidence();
-  const { hasPermission } = usePermissions();
+  const { hasPermission, collectorScope, unscoped } = usePermissions();
+  // Con alcance, los selectores salen de GET /third-parties (fila 10, filtrado
+  // por el servidor) y no se pide nada fuera de su lista blanca (plan §8).
+  const scoped = collectorScope !== null;
   // Mostrar saldo del tercero al lado del nombre en selectores solo si el rol
   // tiene `third_parties.view_balance`. Config solicitada por el cliente —
   // mismo permiso que oculta saldos en ThirdPartiesPage.
   const canViewTpBalance = hasPermission("third_parties.view_balance");
 
-  const { data: payableSuppliersData } = usePayableSuppliers();
-  const { data: customersData } = useCustomers();
+  const { data: payableSuppliersData } = usePayableSuppliers(undefined, unscoped);
+  const { data: customersData } = useCustomers(undefined, unscoped);
   const { data: investorsData } = useInvestors();
   const { data: thirdPartiesData } = useThirdParties();
   const { data: accountsData } = useMoneyAccounts();
-  const { data: expCategoriesData } = useExpenseCategoriesFlat();
-  const { data: provisionsData } = useProvisions();
-  const { data: liabilitiesData } = useLiabilities();
+  const { data: expCategoriesData } = useExpenseCategoriesFlat(unscoped);
+  const { data: provisionsData } = useProvisions(undefined, undefined, unscoped);
+  const { data: liabilitiesData } = useLiabilities(undefined, undefined, undefined, unscoped);
   // W5 (SAC D9): el PAGO de pasivo lista también las entidades sistema
   // "[Retenciones] X" (backend ya lo soporta; sin esto no se pueden pagar
   // desde la UI). Causar gasto (expense_accrual) sigue SIN system entities.
-  const { data: payableLiabilitiesData } = useLiabilities(undefined, undefined, true);
-  const { data: genericData } = useGenericThirdParties();
+  const { data: payableLiabilitiesData } = useLiabilities(undefined, undefined, true, unscoped);
+  const { data: genericData } = useGenericThirdParties(undefined, unscoped);
 
   const payableSuppliers = payableSuppliersData?.items ?? [];
   const customers = customersData?.items ?? [];
@@ -303,6 +316,14 @@ export default function MovementCreatePage() {
   });
 
   const getThirdPartyOptions = () => {
+    if (scoped) {
+      // Solo lo que el guard de tipo del servidor acepta: un conductor generic
+      // en un pago a proveedor daria 400 (QA 2, p1).
+      const behaviors = SCOPED_TYPE_BEHAVIORS[type] ?? [];
+      return thirdParties
+        .filter((t) => t.is_active && (t.categories ?? []).some((c) => behaviors.includes(c.behavior_type)))
+        .map(tpOption);
+    }
     switch (type) {
       case "payment_to_supplier":
       case "advance_payment": return payableSuppliers.map(tpOption);
@@ -369,7 +390,9 @@ export default function MovementCreatePage() {
               <EntitySelect
                 value={type}
                 onChange={handleTypeChange}
-                options={Object.entries(typeLabels).map(([key, label]) => ({ id: key, label }))}
+                options={Object.entries(typeLabels)
+                  .filter(([key]) => !scoped || SCOPED_TYPES.includes(key as MovementType))
+                  .map(([key, label]) => ({ id: key, label }))}
                 placeholder="Buscar tipo de movimiento..."
               />
             </div>
