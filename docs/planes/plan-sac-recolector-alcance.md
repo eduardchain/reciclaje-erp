@@ -1,4 +1,13 @@
-# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.12)
+# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.14)
+
+**v1.14 (20-nov, revisión de QA 2 sobre v1.13, `qa-2-ingrid/runbook_d1cb311/revision.md`):** tres correcciones del runbook (§16), solo de docs:
+- **Paso 6, paginación:** cada lectura de lista va con el límite máximo del endpoint, exige `len(items) == total` (si no, pagina con `skip`) y compara **conjuntos de ids**, no conteos. Sin eso, en producción (148 Entradas y 123 proveedores marcados, más que el límite de 100 por defecto) la lectura de Johana se trunca y la de Ingrid mira 100 de 123.
+- **Paso 5b, la segunda puerta:** la clave de Ingrid NUNCA se resetea desde Usuarios, que la fija en '123456'; solo con #85.
+- **Lo ensayado:** en la demo de `:8001` la comparación de Entradas fue `0 == 0`. Se re-corrió con el método nuevo y con las 2 Entradas de demo; el volumen real (más de 100 Entradas, 25 de Green Loop) solo existe en producción.
+
+**v1.13 (20-nov, después de integrar):** la demo en `:8001` (`~/sac-evidencia/2026-11-20/coder-2-recolector-alcance/demo_ingrid_8001.log`) encontró dos defectos del runbook (§16). Los dos son solo de docs:
+- **Paso 6:** `GET /inbound-orders` no tiene el parámetro `collector_id` y lo ignora en silencio: con `?collector_id=` devolvió las 34 Entradas. Ahora la lectura de comparación filtra del lado del cliente por el campo `collector_id` de cada Entrada.
+- **Orden de los pasos 3 a 5:** entre el alta en la org y el alcance, Ingrid es «Recolector» sin alcance, y sus 13 permisos le dejan ver todo lo que alcanzan. Ahora la clave final (#85) se fija DESPUÉS del alcance (paso 5b). Hasta ahí nadie conoce la clave, así que nadie puede entrar en esa ventana.
 
 **v1.12 (20-nov):** el plantado P1–P59 corrió contra la matriz de `41940cf`: 56 defectos cayeron en la diagonal (`plantado/plantado.log`, predicción `predicciones.tsv` `28bf0b36…58ae`). Dejó dos huecos de tests, que entran antes de cerrar:
 - **P24 cayó del lado peligroso:** la fila 28 no cae.
@@ -756,17 +765,24 @@ Revisión de producto del Coordinador. Todo lo hace el Coordinador con el OK de 
    - **Dry-run:** `scripts/marcar_recolector.py --api-url <prod> --org-id <id> --collector-id <id> --esperado <N>`. Se revisan los marcados y los excluidos con su motivo, y se verifica que «ADALBERTO AVILA (GREENLOOP)» está en «a marcar» (n4, v1.4). Exit ≠ 0 detiene todo y decide Daniel.
    - **Corrida real:** la misma línea con `--apply`, con el OK de Daniel.
    - **Re-corrida:** tiene que dar 0 a marcar y exit 0.
-3. **El usuario de Ingrid:**
-   - se crea por la vía de superusuario;
-   - **su clave se fija solo con el reseteo de #85** (`POST /system/users/{id}/reset-password`), con la clave que defina Daniel, **NUNCA con la clave fija** que dejan las altas de miembros (la deuda de #85);
-   - su rol es «Recolector», con los 13 permisos de §5.1 (v1.4); `payment-to-generic` (H5 = a) usa el mismo `treasury.create_movements`. Ningún permiso es nuevo.
+3. **El usuario de Ingrid** (v1.13: su clave final va en el paso 5b, después del alcance):
+   - **Registro:** con `POST /auth/register` y una clave TEMPORAL aleatoria que no se guarda, así que nadie la conoce. No hay alta de usuario por `/system`; así se hizo en la demo de `:8001`.
+   - **Membresía:** se da por la vía de superusuario, con `POST /system/users/{id}/add-to-org` y el rol. **NUNCA** con el alta de miembros de la org, que deja la clave fija (la deuda de #85).
+   - **Rol:** «Recolector», con los 13 permisos de §5.1 (v1.4). `payment-to-generic` (H5 = a) usa el mismo `treasury.create_movements`. Ningún permiso es nuevo.
 4. **Su caja:** `PUT /organizations/{org}/members/{ingrid}/account-assignments` con la cuenta real de la caja de Green Loop (K1 de producción). **Antes** de poner el alcance, para que en ningún momento vea cuentas que no son suyas. Igual, con alcance y sin asignaciones vería cero (fila 21).
 5. **Su alcance:** `PUT /organizations/{org}/members/{ingrid}/collector-scope` con el id del tercero «Green Loop».
    - **Antes (v1.5), una lectura:** que exista la categoría de terceros «Empleados», activa y generic, en la SAC activa. Si no existe, Ingrid solo puede crear proveedores (falla cerrado), y Daniel decide si se crea.
+
+   5b. **Su clave, al final** (v1.13). Se fija solo con el reseteo de #85 (`POST /system/users/{id}/reset-password`), con la clave que defina Daniel.
+   - **Por qué al final:** entre el alta en la org (paso 3) y el alcance (paso 5), Ingrid es «Recolector» sin alcance y vería todo lo que alcanzan sus 13 permisos. Como hasta acá nadie conoce su clave, nadie puede entrar en esa ventana.
+   - **Nunca desde Usuarios (v1.14):** la clave de Ingrid NO se resetea con el botón de Usuarios (`POST /organizations/{org}/members/{user}/reset-password`), ni durante el runbook ni después. Ese reseteo la fija en '123456' (`services/user.py`, la deuda de #85) y lo puede usar cualquier admin de SAC: durante la ventana dejaría a una «Recolector» sin alcance con una clave conocida. Solo con #85.
 6. **Verificación**, con lecturas en producción y su usuario:
+   - **Toda lectura de lista (v1.14):** con el límite máximo del endpoint (`/inbound-orders` 1000, `/third-parties/suppliers` 5000, `/money-accounts` 500), exigiendo `len(items) == total` (si no, se pagina con `skip` hasta cerrar) y comparando **conjuntos de ids**, no conteos. Es la regla de `list_all` (#115) y la lección de #108. Un ejemplo que la aplica: `~/sac-evidencia/2026-11-20/coder-2-recolector-alcance/scripts/paso6_paginado_8001.py`;
    - `my-permissions` trae `collector_scope`;
-   - `GET /inbound-orders` da solo Entradas con recolector Green Loop: el 20-nov eran 25 (18 revisadas y 7 liquidadas, v1.6). Se compara contra una lectura de Johana con el filtro `collector_id`, hecha en el mismo momento;
-   - `GET /third-parties/suppliers` da solo los marcados;
+   - `GET /inbound-orders` da solo Entradas con recolector Green Loop: el 20-nov eran 25 (18 revisadas y 7 liquidadas, v1.6).
+     - **Cómo se compara:** contra una lectura de Johana hecha en el mismo momento, que trae TODAS las Entradas y se **filtra del lado del cliente** por el campo `collector_id` de cada una. El conjunto de ids de Ingrid tiene que ser igual a ese subconjunto.
+     - **Por qué así (v1.13):** el endpoint no tiene ese parámetro y lo ignora en silencio. En la demo, con `?collector_id=` devolvió las 34;
+   - `GET /third-parties/suppliers` da solo los marcados: su conjunto de ids es igual al de los proveedores de Johana con `collector_id` = Green Loop (123 el 20-nov);
    - `GET /money-accounts` da solo su caja;
    - `GET /third-party-categories/flat` da solo las de proveedor de material y «Empleados» (v1.5);
    - `GET /organizations/{org}/members` da 403.
