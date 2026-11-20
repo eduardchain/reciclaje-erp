@@ -66,10 +66,11 @@ import type {
  * quitar una del medio queda el hueco. Si se renumerara, al reliquidar el
  * slot 3 se compararía contra la compra del slot 2 y se perderían números.
  *
- * Precio: uno por fila (sirve para todas las compras y es también la
- * referencia del descuadre). Una celda puede tener precio propio — unitario,
- * valor total (Q-15) o por kg (#101) — o tomar el de la lista del proveedor
- * (#98) cuando difiere del de la fila. Cambiar de modo NO convierte la cifra:
+ * Precio (plan-sac-precio-por-compra-visible v1.1): cada celda muestra su
+ * precio al lado de la cantidad, prellenado con el de la lista del proveedor
+ * (#98) o, si no hay, con el PRECIO BASE de la fila (que es también la
+ * referencia del descuadre). Escribirlo lo vuelve precio propio — unitario,
+ * valor total (Q-15) o por kg (#101). Cambiar de modo NO convierte la cifra:
  * el campo nuevo queda vacío con el valor anterior como texto («antes: …»),
  * así ningún número digitado se transforma solo (hallazgo de #101: la
  * rotación por kg perdía $114,60 sobre $3.138.450).
@@ -134,6 +135,9 @@ interface PurchaseCol {
 
 type OwnMode = "unit" | "total" | "kg";
 type CellMode = "row" | "list" | OwnMode;
+
+/** Plan v1.1 D1b (S-1 del Coordinador): el de la fila queda de respaldo. */
+const BASE_PRICE_HINT = "se usa en las compras sin lista ni precio propio";
 
 /** Q-66 sin respuesta: la casilla «Con IVA» nace apagada (Daniel: «IVA opcional»). */
 const IVA_RATE_PCT = 19;
@@ -255,6 +259,37 @@ const MODE_LABEL: Record<OwnMode, string> = {
   total: "Valor total",
   kg: "Por kg",
 };
+
+const MODE_SHORT: Record<OwnMode, string> = {
+  unit: "c/u",
+  total: "total",
+  kg: "kg",
+};
+
+/** Lo que muestra el campo de precio de la celda (plan v1.1 D2), a centavos:
+ *  es contra esto que se compara el blur (C1). Sin cantidad ni precio propio,
+ *  0 (el sugerido va como placeholder: una celda vacía no aparenta precio). */
+const priceFieldValue = (
+  c: CellState | undefined,
+  col: PurchaseCol | undefined,
+  l: LineState
+): number => {
+  if (!c) return 0;
+  switch (ownMode(c)) {
+    case "kg":
+      return toCents(c.price_per_kg ?? 0);
+    case "total":
+      return toCents(c.total_price ?? 0);
+    case "unit":
+      return toCents(c.unit_price ?? 0);
+    default:
+      return c.quantity > 0 ? toCents(cellUnit(c, col, l)) : 0;
+  }
+};
+
+/** El precio que una celda usaría sin precio propio: lista del proveedor, o base. */
+const suggestedUnit = (col: PurchaseCol | undefined, l: LineState): number =>
+  listPriceOf(col, l) ?? l.rowPrice;
 
 const MODE_COLOR: Record<CellMode, string> = {
   row: "text-slate-400",
@@ -498,7 +533,6 @@ export default function InboundLiquidatePage() {
     if (el) el.scrollTo({ left: el.scrollWidth, behavior: "smooth" });
   }, [sortedCols.length]);
   const [initialized, setInitialized] = useState(false);
-  const [editing, setEditing] = useState<{ lineKey: number; slot: number } | null>(null);
   const [createFor, setCreateFor] = useState<number | null>(null);
   // D11: UNA comisión por entrada, sobre lo pesado
   const [collectorEnabled, setCollectorEnabled] = useState(false);
@@ -740,25 +774,51 @@ export default function InboundLiquidatePage() {
     );
   };
 
-  /** El modo NO rota con la cifra (§5): el campo nuevo arranca vacío y el
-   *  precio anterior queda como texto «antes: …». */
+  /** El modo NO rota con la cifra (§5): a total o kg el campo arranca vacío y
+   *  el precio anterior queda como texto «antes: …». A c/u (plan v1.1 D3) se
+   *  quita el precio propio y el campo vuelve prellenado con lista/base. */
   const switchMode = (l: LineState, col: PurchaseCol, mode: OwnMode) => {
     const c = l.cells[col.slot] ?? emptyCell();
-    if (ownMode(c) === mode) return;
+    const own = ownMode(c);
+    if (mode === "unit") {
+      // C3: en lista, base o propio unitario el campo YA es un unitario: no-op
+      if (own !== "total" && own !== "kg") return;
+      setCell(l._key, col.slot, {
+        unit_price: null,
+        total_price: null,
+        price_per_kg: null,
+        before: describePrice(c, col, l) ?? c.before,
+      });
+      return;
+    }
+    if (own === mode) return;
     setCell(l._key, col.slot, {
-      unit_price: mode === "unit" ? 0 : null,
+      unit_price: null,
       total_price: mode === "total" ? 0 : null,
       price_per_kg: mode === "kg" ? 0 : null,
       before: describePrice(c, col, l) ?? c.before,
     });
   };
 
+  /** ↺: vuelve al precio de la lista del proveedor o al base. */
   const clearOwnPrice = (l: LineState, slot: number) =>
-    setCell(l._key, slot, { unit_price: null, total_price: null, price_per_kg: null });
+    setCell(l._key, slot, { unit_price: null, total_price: null, price_per_kg: null, before: null });
 
-  const closeEditor = () => {
-    if (editing) setCell(editing.lineKey, editing.slot, { before: null });
-    setEditing(null);
+  /** Plan v1.1 D2. `MoneyInput` llama `onChange` en CADA blur (2 decimales). */
+  const onPriceInput = (l: LineState, col: PurchaseCol, v: number) => {
+    const c = l.cells[col.slot] ?? emptyCell();
+    // 🔴 C1: un blur que no cambia la cifra no escribe nada, en ningún modo —
+    // ni crea una celda vacía, ni redondea un unitario de 8 decimales, ni borra «antes»
+    if (toCents(v) === priceFieldValue(l.cells[col.slot], col, l)) return;
+    const own = ownMode(c);
+    if (own === "kg") return setCell(l._key, col.slot, { price_per_kg: v, before: null });
+    if (own === "total") return setCell(l._key, col.slot, { total_price: v, before: null });
+    // Vista unitaria (vacía, base, lista o propio). El 0 vuelve al sugerido (S2).
+    if (v === 0) {
+      if (own === "unit") clearOwnPrice(l, col.slot);
+      return;
+    }
+    setCell(l._key, col.slot, { unit_price: v, total_price: null, price_per_kg: null, before: null });
   };
 
   /** D8 (#98): la lista del proveedor, por material. Se aplica solo si el
@@ -837,7 +897,6 @@ export default function InboundLiquidatePage() {
         return { ...l, cells };
       })
     );
-    if (editing?.slot === slot) setEditing(null);
   };
 
   /**
@@ -880,7 +939,6 @@ export default function InboundLiquidatePage() {
         };
       })
     );
-    setEditing(null);
     void loadListPrices(keep, bulkSupplier);
   };
 
@@ -888,7 +946,6 @@ export default function InboundLiquidatePage() {
    *  asignaciones, y marcarlo «sin proveedor» no aplica: no se pesó). */
   const removeLine = (key: number) => {
     setLines((prev) => prev.filter((l) => l._key !== key));
-    if (editing?.lineKey === key) setEditing(null);
   };
 
   const addExtraLine = () => {
@@ -989,6 +1046,7 @@ export default function InboundLiquidatePage() {
   };
   const statsBySlot = new Map(cols.map((c) => [c.slot, colStats(c)]));
   const activeCols = sortedCols.filter((c) => (statsBySlot.get(c.slot)?.rows.length ?? 0) > 0);
+  const emptyColCount = sortedCols.length - activeCols.length;
 
   // ---------- validación ----------
 
@@ -1007,8 +1065,8 @@ export default function InboundLiquidatePage() {
     if (lineDisc(l) !== 0 && l.rowPrice <= 0) {
       const qty = formatWeight(Math.abs(lineDisc(l)), l.material_unit);
       return l.unallocated
-        ? `Falta el precio: con él se valoran los ${qty} que entran como ganancia`
-        : `Falta el precio: con él se valora el descuadre de ${qty}`;
+        ? `Falta el precio base: con él se valoran los ${qty} que entran como ganancia`
+        : `Falta el precio base: con él se valora el descuadre de ${qty}`;
     }
     return null;
   };
@@ -1232,7 +1290,7 @@ export default function InboundLiquidatePage() {
         // con Tab marcaba la fila como tocada sin haber cambiado nada
         onChange={(v) => v !== l.rowPrice && updateLine(l._key, { rowPrice: v, rowTouched: true })}
         decimals={2}
-        placeholder="Precio"
+        placeholder="Precio base"
         className={cn("h-8 text-sm", needed && l.rowPrice <= 0 && "border-red-300")}
       />
     );
@@ -1241,112 +1299,118 @@ export default function InboundLiquidatePage() {
   const renderCell = (l: LineState, col: PurchaseCol) => {
     const c = l.cells[col.slot];
     const qty = c?.quantity ?? 0;
-    const isEditing = editing?.lineKey === l._key && editing.slot === col.slot;
     const mode = c ? cellMode(c, col, l) : "row";
     const own = c ? ownMode(c) : null;
     const priced = c ? cellPriced(c, col, l) : false;
+    // En lista, base o propio unitario el campo es un unitario: se ve activo c/u (C3)
+    const activeMode: OwnMode = own === "total" || own === "kg" ? own : "unit";
+    const suggested = suggestedUnit(col, l);
+    const fieldValue = priceFieldValue(c, col, l);
+    const origin = own
+      ? "propio"
+      : mode === "list" || listPriceOf(col, l) != null
+        ? "lista"
+        : "base";
     return (
       <div className="space-y-1">
-        <MoneyInput
-          value={qty}
-          // C5: un blur sin cambio no crea una celda en 0 (borrador fantasma)
-          onChange={(v) => v !== qty && setCell(l._key, col.slot, { quantity: v })}
-          // 3 decimales: la escala con la que se guarda (ALLOC_Q)
-          decimals={3}
-          placeholder="—"
-          className="h-8 text-sm"
-        />
-        {c && qty > 0 && (
-          <button
-            type="button"
-            onClick={() => (isEditing ? closeEditor() : setEditing({ lineKey: l._key, slot: col.slot }))}
+        {/* Plan v1.1 D1: cantidad y precio lado a lado, siempre visibles. El
+            campo de precio existe también con cantidad 0, para que el Tab vaya
+            cantidad → precio → celda siguiente. */}
+        <div className="grid grid-cols-2 gap-1">
+          <MoneyInput
+            value={qty}
+            // C5: un blur sin cambio no crea una celda en 0 (borrador fantasma)
+            onChange={(v) => v !== qty && setCell(l._key, col.slot, { quantity: v })}
+            // 3 decimales: la escala con la que se guarda (ALLOC_Q)
+            decimals={3}
+            placeholder="—"
+            className="h-8 text-sm px-2"
+          />
+          <MoneyInput
+            value={fieldValue}
+            onChange={(v) => onPriceInput(l, col, v)}
+            decimals={2}
+            placeholder={
+              activeMode !== "unit"
+                ? MODE_LABEL[activeMode]
+                : suggested > 0
+                  ? fmtMoney(suggested).replace(/^\$\s?/, "")
+                  : "Precio"
+            }
             className={cn(
-              "block w-full text-left text-[11px] leading-tight tabular-nums hover:underline",
-              priced ? MODE_COLOR[mode] : "text-rose-600"
+              "h-8 text-sm px-2",
+              qty > 0 && !priced && "border-red-300",
+              own && "text-indigo-700 font-medium"
             )}
-          >
-            {!priced
-              ? "falta precio"
-              : mode === "kg"
-                ? `${formatWeight(cellWeight(c, l), "kg")} × ${fmtMoney(c.price_per_kg ?? 0)} = ${fmtMoney(cellTotal(c, col, l))}`
-                : mode === "total"
-                  ? `${fmtMoney(c.total_price ?? 0)} → ${fmtMoney(cellUnit(c, col, l))} c/u`
-                  : `${fmtMoney(cellUnit(c, col, l))} c/u${mode === "list" ? " · lista" : mode === "unit" ? " · propio" : ""}`}
-          </button>
-        )}
-        {isEditing && c && (
-          <div className="rounded-md border border-indigo-200 bg-indigo-50/60 p-2 space-y-1.5">
-            <div className="flex flex-wrap gap-1">
-              {(["unit", "total", "kg"] as OwnMode[])
-                .filter((m) => m !== "kg" || canKg(l))
-                .map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => switchMode(l, col, m)}
-                    className={cn(
-                      "px-1.5 py-0.5 rounded border text-[11px]",
-                      own === m
-                        ? "bg-indigo-600 border-indigo-600 text-white"
-                        : "bg-white border-slate-200 text-slate-600"
-                    )}
-                  >
-                    {MODE_LABEL[m]}
-                  </button>
-                ))}
+          />
+        </div>
+        {c && qty > 0 && (
+          <>
+            <div className="flex items-center justify-between gap-1 text-[11px] leading-tight">
+              <div className="flex gap-0.5">
+                {(["unit", "total", "kg"] as OwnMode[])
+                  .filter((m) => m !== "kg" || canKg(l))
+                  .map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      // C2: fuera del recorrido con Tab
+                      tabIndex={-1}
+                      title={MODE_LABEL[m]}
+                      onClick={() => switchMode(l, col, m)}
+                      className={cn(
+                        "px-1.5 py-0.5 rounded border",
+                        activeMode === m
+                          ? "bg-indigo-600 border-indigo-600 text-white"
+                          : "bg-white border-slate-200 text-slate-500 hover:border-indigo-300"
+                      )}
+                    >
+                      {MODE_SHORT[m]}
+                    </button>
+                  ))}
+              </div>
+              {own ? (
+                <button
+                  type="button"
+                  // C2: fuera del recorrido con Tab
+                  tabIndex={-1}
+                  onClick={() => clearOwnPrice(l, col.slot)}
+                  className="text-indigo-600 hover:underline whitespace-nowrap"
+                  title={
+                    suggested > 0
+                      ? `Volver al precio ${listPriceOf(col, l) != null ? "de la lista" : "base"} (${fmtMoney(suggested)})`
+                      : "Quitar el precio propio"
+                  }
+                >
+                  propio ↺
+                </button>
+              ) : (
+                <span className={cn("whitespace-nowrap", MODE_COLOR[origin === "lista" ? "list" : "row"])}>
+                  {origin}
+                </span>
+              )}
             </div>
-            {own && (
-              <MoneyInput
-                value={
-                  own === "kg" ? c.price_per_kg ?? 0 : own === "total" ? c.total_price ?? 0 : c.unit_price ?? 0
-                }
-                onChange={(v) => {
-                  const cur = own === "kg" ? c.price_per_kg : own === "total" ? c.total_price : c.unit_price;
-                  if (v === (cur ?? 0)) return; // C5
-                  setCell(
-                    l._key,
-                    col.slot,
-                    own === "kg" ? { price_per_kg: v } : own === "total" ? { total_price: v } : { unit_price: v }
-                  );
-                }}
-                decimals={2}
-                placeholder={MODE_LABEL[own]}
-                className="h-8 text-sm bg-white"
-              />
-            )}
-            {!own && (
-              <p className="text-[11px] text-slate-500">
-                Usa el precio {mode === "list" ? "de la lista del proveedor" : "de la fila"}. Elija un
-                modo para ponerle uno propio.
-              </p>
-            )}
+            <div
+              className={cn(
+                "text-[11px] leading-tight tabular-nums",
+                priced ? "text-slate-500" : "text-rose-600"
+              )}
+            >
+              {!priced
+                ? "falta precio"
+                : mode === "kg"
+                  ? `${formatWeight(cellWeight(c, l), "kg")} × ${fmtMoney(c.price_per_kg ?? 0)} = ${fmtMoney(cellTotal(c, col, l))}`
+                  : mode === "total"
+                    ? `→ ${fmtMoney(cellUnit(c, col, l))} c/u`
+                    : `= ${fmtMoney(cellTotal(c, col, l))}`}
+            </div>
             {c.before && <p className="text-[11px] text-slate-500">antes: {c.before}</p>}
             {own === "total" && priced && Math.abs(cellTotal(c, col, l) - (c.total_price ?? 0)) >= 0.005 && (
               <p className="text-[11px] text-amber-600">
                 La compra suma {fmtMoney(cellTotal(c, col, l))}
               </p>
             )}
-            <div className="flex items-center justify-between gap-2">
-              {own ? (
-                <button
-                  type="button"
-                  className="text-[11px] text-indigo-600 hover:underline"
-                  onClick={() => clearOwnPrice(l, col.slot)}
-                >
-                  Quitar precio propio
-                </button>
-              ) : (
-                <span />
-              )}
-              <button
-                type="button"
-                className="text-[11px] font-medium text-slate-600 hover:underline"
-                onClick={closeEditor}
-              >
-                Listo
-              </button>
-            </div>
-          </div>
+          </>
         )}
       </div>
     );
@@ -1395,6 +1459,10 @@ export default function InboundLiquidatePage() {
           className="h-8 text-sm"
           placeholder="N° factura (opcional)"
         />
+        <div className="grid grid-cols-2 gap-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          <span>Cantidad</span>
+          <span>Precio</span>
+        </div>
       </div>
     );
   };
@@ -1575,7 +1643,6 @@ export default function InboundLiquidatePage() {
             onClick={() => {
               if (draftKey) removeDraft(draftKey);
               setRecoveredAt(null);
-              setEditing(null);
               setInitialized(false);
             }}
           >
@@ -1622,7 +1689,15 @@ export default function InboundLiquidatePage() {
               cortado en el borde derecho apenas había dos compras. */}
           <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2">
             <span className="text-xs text-slate-500">
-              {sortedCols.length === 1 ? "1 compra" : `${sortedCols.length} compras`} — una columna por compra
+              {/* Plan v1.1 D4: cuenta lo mismo que el pie (activeCols); las
+                  columnas vacías van aparte — no nace compra de ellas */}
+              {activeCols.length === 0
+                ? `${sortedCols.length === 1 ? "1 columna" : `${sortedCols.length} columnas`}, ninguna con materiales todavía`
+                : `${activeCols.length === 1 ? "1 compra" : `${activeCols.length} compras`}${
+                    emptyColCount > 0
+                      ? ` · ${emptyColCount === 1 ? "1 columna" : `${emptyColCount} columnas`} sin materiales (no nace compra)`
+                      : " — una columna por compra"
+                  }`}
             </span>
             <Button
               variant="outline"
@@ -1648,13 +1723,16 @@ export default function InboundLiquidatePage() {
                     Pesado
                   </th>
                   <th className="border-b border-slate-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 min-w-[8rem]">
-                    Precio
+                    Precio base
+                    <div className="mt-0.5 text-[10px] font-normal normal-case tracking-normal text-slate-400 leading-tight">
+                      {BASE_PRICE_HINT}
+                    </div>
                   </th>
                   <th className="border-b border-r border-slate-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 min-w-[9rem]">
                     Descuadre
                   </th>
                   {sortedCols.map((col) => (
-                    <th key={col.slot} className="border-b border-slate-200 bg-slate-50/60 px-3 py-2 min-w-[13rem] max-w-[15rem]">
+                    <th key={col.slot} className="border-b border-slate-200 bg-slate-50/60 px-3 py-2 min-w-[15rem] max-w-[17rem]">
                       {renderColHeader(col)}
                     </th>
                   ))}
@@ -1715,9 +1793,10 @@ export default function InboundLiquidatePage() {
                 <div className="grid grid-cols-1 gap-2">
                   <div>
                     <Label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Precio de la fila
+                      Precio base
                     </Label>
                     {renderRowPrice(l)}
+                    <p className="text-[10px] text-slate-400 mt-0.5">{BASE_PRICE_HINT}</p>
                   </div>
                   {renderDisc(l)}
                 </div>
