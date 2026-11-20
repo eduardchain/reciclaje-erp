@@ -35,3 +35,23 @@ Nivel: **lógica**. QA 1 lo subió porque `Sidebar.tsx` y `ConfigLayout.tsx` los
 - **Dirigidas:** el comando `grep -rln "Sidebar\|ConfigLayout" backend/tests` y su resultado van en `dirigidas.log`. Si sale vacío, no aplican más allá de las tres guardas.
 - **Golden:** no aplica. El cambio no toca backend, y el golden captura respuestas HTTP.
 - **Plantado:** resultados en §4 (se llena después de plantar, sin tocar §2).
+
+## 4. Resultado del plantado (`plantado.log`, sha256 `28481093…`, 14:01–14:05)
+
+**C0, sin defecto:** las 6 capturas salieron idénticas a `despues_*`. El instrumento es determinista.
+
+| P | Cambió | Idéntica | ¿Diagonal? |
+|---|---|---|---|
+| P1 | sac_config-1440, sac_sidebar-390 | costa ×3, sac_pestanas-390 | sí, exacta |
+| P2 | sac_pestanas-390, sac_config-1440, sac_sidebar-390 | costa ×3 | sí; sac_sidebar-390 estaba declarada como «puede cambiar de más» |
+| P3 | costa_config-1440, costa_sidebar-390, sac_config-1440, sac_sidebar-390 | costa_pestanas-390, sac_pestanas-390 | sí; las dos de SAC estaban declaradas como «de más» |
+
+- **Dirección peligrosa:** ninguna. Toda captura de «Debe cambiar» cambió.
+- **P3 prueba que la comparación de Costa discrimina:** el texto del sidebar pasa de «… Cat. Gastos · Listas Precios · Cat. Terceros» a «… Cat. Gastos · Cat. Terceros».
+- **Cierre:** cada fila se restauró y su sha256 se verificó. `git status --short` y `git diff --stat 335f561 -- frontend` salieron vacíos.
+
+## 5. Decisión de Daniel (vía el Coordinador, 20-nov)
+
+Sobre la observación de QA 1, Daniel dijo «Ocultarla igual». En SAC no se sugiere precio de venta, y eso queda aceptado.
+
+Medido en producción (`~/sac-evidencia/2026-11-20/gate-prod/listas_ventas_sac_prod.log`, sha256 `341002161eb103ce…`, 13:58): SAC tiene 0 filas en la lista general y 0 ventas.
