@@ -1,4 +1,5 @@
 import type { BaseEntity, PaginatedResponse } from "./common";
+import type { DocumentTax } from "./document-tax";
 
 export type PurchaseStatus = "registered" | "liquidated" | "cancelled";
 
@@ -135,6 +136,12 @@ export interface PurchaseResponse extends BaseEntity {
   collector_name?: string | null;
   /** Solo en GET de detalle: comisión de recolección causada (gasto); null si no hay o fue anulada */
   collector_commission_total?: number | null;
+  /** Reparto por compra §4: IVA de la compra (solo en GET de detalle; el
+   *  listado lo trae vacío, decisión de #112). Decimal llega como string. */
+  taxes?: DocumentTax[];
+  /** Subtotal + IVA vivo (las retenciones NO se descuentan acá: viven en
+   *  `retentions`). null si la compra no tiene impuestos vivos. */
+  total_with_taxes?: number | null;
   warnings?: string[];
 }
 

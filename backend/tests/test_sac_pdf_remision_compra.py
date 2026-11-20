@@ -16,6 +16,7 @@ from tests.integration_helpers import (
     create_warehouse,
 )
 from app.utils.dates import business_today
+from tests.reparto_slots import con_slots
 
 INBOUND_URL = "/api/v1/inbound-orders"
 PURCHASES_URL = "/api/v1/purchases"
@@ -72,11 +73,11 @@ def _entrada_liquidada(client, headers, wh, mat, sup, remision):
     assert client.post(f"{INBOUND_URL}/{oid}/review", headers=headers).status_code == 200
     resp = client.post(
         f"{INBOUND_URL}/{oid}/liquidate", headers=headers,
-        json={"lines": [{
+        json=con_slots({"lines": [{
             "material_id": str(mat.id),
             "allocations": [{"third_party_id": str(sup.id), "quantity": "100",
                              "unit_price": "900"}],
-        }]},
+        }]}),
     )
     assert resp.status_code == 200, resp.text
     compras = resp.json()["purchases"]

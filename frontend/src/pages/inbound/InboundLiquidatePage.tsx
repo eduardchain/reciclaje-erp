@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Plus, Scale, Trash2, Truck } from "lucide-react";
+import { ArrowLeft, Plus, Scale, Trash2, Truck, UserPlus, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
+import { CreateSupplierDialog } from "@/components/inbound/CreateSupplierDialog";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useInboundOrder, useLiquidateInboundOrder } from "@/hooks/useInboundOrders";
 import {
@@ -23,10 +25,12 @@ import { formOrderMap, sortByFormOrder } from "@/utils/formOrder";
 import { useKgAccounts } from "@/hooks/useKgLedger";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { useAuthStore } from "@/stores/authStore";
 import { useSupplierPriceLookup } from "@/hooks/usePriceSuggestions";
 import {
   formatCurrency,
   formatCurrencyDecimals,
+  formatDateTime,
   formatWeight,
 } from "@/utils/formatters";
 import { buildRoute, ROUTES } from "@/utils/constants";
@@ -41,33 +45,49 @@ import {
 import type {
   InboundLiquidateLine,
   InboundOrderResponse,
+  InboundPurchaseTaxes,
+  InboundSupplierPayment,
   InboundSupplierRetentions,
 } from "@/types/inbound-order";
 
 /**
- * #93 — Reparto de proveedores (liquidación de la Entrada).
+ * #93 — Liquidación de la Entrada. Reparto por COMPRA (plan-sac-reparto-por-compra §5).
  *
  * Lo PESADO es la verdad física (inventario); lo REPARTIDO es la verdad
- * comercial (compras por proveedor). La diferencia por material es el
- * DESCUADRE, valorado al precio de referencia (D6) — visible en vivo, con
- * la tolerancia de la org como semáforo (D8: avisa, jamás bloquea por monto).
+ * comercial (las compras). La diferencia por material es el DESCUADRE,
+ * valorado al precio de la fila (D6) con la tolerancia de la org como
+ * semáforo (D8: avisa, jamás bloquea por monto).
+ *
+ * La pantalla es la hoja de Johana: filas = materiales (en el orden del
+ * formato en papel, #121), columnas = COMPRAS, celda = cantidad. Una columna
+ * es una compra, no un proveedor: el mismo proveedor puede estar en dos
+ * («son dos recolecciones», Q-65). Cada columna lleva su `purchase_slot`, que
+ * es IDENTIDAD — nunca se renumera (R6): una columna nueva toma max + 1 y al
+ * quitar una del medio queda el hueco. Si se renumerara, al reliquidar el
+ * slot 3 se compararía contra la compra del slot 2 y se perderían números.
+ *
+ * Precio: uno por fila (sirve para todas las compras y es también la
+ * referencia del descuadre). Una celda puede tener precio propio — unitario,
+ * valor total (Q-15) o por kg (#101) — o tomar el de la lista del proveedor
+ * (#98) cuando difiere del de la fila. Cambiar de modo NO convierte la cifra:
+ * el campo nuevo queda vacío con el valor anterior como texto («antes: …»),
+ * así ningún número digitado se transforma solo (hallazgo de #101: la
+ * rotación por kg perdía $114,60 sobre $3.138.450).
  */
 
-let allocKeyCounter = 0;
+/* ------------------------------------------------------------------ */
+/* Estado                                                              */
+/* ------------------------------------------------------------------ */
 
-interface AllocRow {
-  _key: number;
-  third_party_id: string;
+/** Precio propio de una celda: si los tres son null, la celda usa el de la
+ *  lista del proveedor (si difiere) o el de la fila. Solo uno lleno a la vez. */
+interface CellState {
   quantity: number;
-  unit_price: number;
-  /** Q-15: si NO es null, Johana digitó el valor total y el unitario es una
-   *  fórmula (total / cantidad). null = digitó el unitario, como siempre. */
+  unit_price: number | null;
   total_price: number | null;
-  /** Modo por kg: si NO es null, digitó $/kg y el sistema multiplica por el
-   *  peso PRORRATEADO de la asignación (kg/unidad de la línea × cantidad).
-   *  Es lo que pidió Hugo: "no le va a pagar 100 unidades, le va a pagar por
-   *  peso". Los tres modos son excluyentes. */
   price_per_kg: number | null;
+  /** «antes: $X total» — se muestra al cambiar de modo y se borra al cerrar */
+  before: string | null;
 }
 
 interface LineState {
@@ -76,117 +96,20 @@ interface LineState {
   material_code: string;
   material_name: string;
   material_unit: string;
-  /** cantidad pesada (0 = material de reparto que la báscula no vio, D16) */
+  /** cantidad pesada (0 = material que la báscula no vio, D16) */
   weighed: number;
-  /** Q-13: peso de báscula certificado en la revisión. Es literalmente la
-   *  pregunta de Hugo en vivo — "¿dónde sale aquí el peso de lo que acabamos
-   *  de traer?" —: se capturaba y esta pantalla nunca lo mostraba. NO entra a
-   *  Desde el modo por kg SÍ entra al cálculo — es el insumo del prorrateo. */
+  /** Q-13: peso de báscula certificado. Insumo del modo por kg (#101). */
   weightKg: number | null;
   isExtra: boolean;
-  refPrice: number;
-  refTouched: boolean;
+  /** Precio de la fila: el de todas las celdas sin precio propio y la
+   *  referencia con la que se valora el descuadre (D6). */
+  rowPrice: number;
+  rowTouched: boolean;
   unallocated: boolean;
-  allocations: AllocRow[];
+  /** slot → celda */
+  cells: Record<number, CellState>;
 }
 
-function newAlloc(price = 0): AllocRow {
-  return {
-    _key: ++allocKeyCounter,
-    third_party_id: "",
-    quantity: 0,
-    unit_price: price,
-    total_price: null,
-    price_per_kg: null,
-  };
-}
-
-/** Q-15/D8: el efecto REAL del valor total digitado. El backend deriva el
- *  unitario como total/cantidad a 8 decimales y después re-multiplica, así que
- *  la compra vuelve al total digitado al centavo. Con 2 decimales (hasta el
- *  19-nov) el error se multiplicaba por la cantidad: $3.138.450 para 1.503
- *  unidades nacían $3.138.444,36 (plan-redondeo-precio-compras). Se calcula
- *  igual acá, y el aviso ámbar de abajo queda para el caso que llegue a
- *  diferir, que con 8 decimales no se espera.
- *
- *  ⚠️ La vista previa puede diferir en 1 centavo del valor persistido en un
- *  empate exacto: acá es `Math.round` sobre float (half up) y allá
- *  `Decimal.quantize` (HALF_EVEN). Igualar el modo de redondeo NO lo cierra —
- *  float y Decimal difieren en la representación, no solo en el redondeo — y
- *  pintar el número del servidor exigiría un round-trip que antes de guardar
- *  no existe. Con montos en pesos el empate al medio centavo no ocurre.
- *  `cantidad × 1e8` cabe sin pérdida en un `number` para las cantidades
- *  reales (la mayor línea medida es 45.660). */
-const PRICE_SCALE = 1e8;
-const roundPrice = (v: number): number => Math.round(v * PRICE_SCALE) / PRICE_SCALE;
-/** Peso prorrateado de una asignación: el estimador es kg/unidad de la LÍNEA
- *  (no una proporción del total repartido), así que el peso de cada proveedor
- *  depende solo de su propia cantidad. Con el denominador puesto en la suma de
- *  las asignaciones, agregar un segundo proveedor cambiaría el peso —y el
- *  pago— del primero. Espeja `_total_desde_kg` del backend. */
-export const allocWeight = (a: AllocRow, l: LineState): number =>
-  l.weightKg && l.weighed > 0
-    ? Math.round((l.weightKg / l.weighed) * a.quantity * 1000) / 1000
-    : 0;
-
-const effUnitPrice = (a: AllocRow, l?: LineState): number => {
-  if (a.price_per_kg != null && l && a.quantity > 0) {
-    const peso = allocWeight(a, l);
-    return roundPrice((peso * a.price_per_kg) / a.quantity);
-  }
-  if (a.total_price != null && a.quantity > 0) {
-    return roundPrice(a.total_price / a.quantity);
-  }
-  return a.unit_price;
-};
-
-/** Lo que la compra va a sumar por esta asignación: cantidad × unitario,
- *  redondeado a centavos como la columna `total_price` de la línea. */
-const effAllocTotal = (a: AllocRow, l?: LineState): number =>
-  Math.round(a.quantity * effUnitPrice(a, l) * 100) / 100;
-
-/** C1 de QA (plan-redondeo-precio-compras): el unitario de 8 decimales es
- *  para CALCULAR, no para editar. Todo valor que sale de `effUnitPrice` hacia
- *  un estado que se pinta en un `MoneyInput` de 2 decimales (referencia,
- *  unitario al rotar el modo, "Repartir todo") se redondea a centavos ACÁ:
- *  si no, el `MoneyInput` lo redondea solo en el blur y la compra vuelve a
- *  nacer con el total viejo, en silencio, por un cambio de foco. Quien quiere
- *  el total exacto usa el modo total, que no pasa por el unitario. */
-const toCents = (v: number): number => Math.round(v * 100) / 100;
-
-/** El peso colombiano se pinta sin decimales en toda la app (`formatCurrency`),
- *  y en el reparto eso BORRABA justo el dato que D8 promete mostrar: el aviso
- *  ámbar decía "$ 66.667 c/u → $ 200.000" — el mismo número dos veces, en un
- *  color de alerta, sin rastro del centavo que sí se iba a guardar (defecto
- *  encontrado abriendo la pantalla, no por los tests). Los decimales aparecen
- *  SOLO cuando existen, para no ensuciar los montos redondos, que son la norma. */
-const fmtMoney = (v: number): string =>
-  Math.abs(v - Math.round(v)) < 0.005 ? formatCurrency(v) : formatCurrencyDecimals(v);
-
-/** Una asignación está completa si tiene proveedor, cantidad y ALGUNO de los
- *  dos precios — no siempre el unitario (Q-15). */
-const allocPriced = (a: AllocRow): boolean =>
-  a.price_per_kg != null
-    ? a.price_per_kg > 0
-    : a.total_price != null
-      ? a.total_price > 0
-      : a.unit_price > 0;
-
-/** El modo vigente de una asignación. Se deriva de cuál campo está lleno en
- *  vez de guardarse aparte: así no puede quedar un modo que no corresponda al
- *  precio digitado. */
-type AllocMode = "unit" | "total" | "kg";
-const allocMode = (a: AllocRow): AllocMode =>
-  a.price_per_kg != null ? "kg" : a.total_price != null ? "total" : "unit";
-
-const MODE_LABEL: Record<AllocMode, string> = {
-  unit: "Precio unit.",
-  total: "Valor total",
-  kg: "Precio por kg",
-};
-
-/** Fila de retención por proveedor (patrón RetentionFormData de
- *  PurchaseLiquidatePage: monto vigente solo cuando touched) */
 interface RetRow {
   _key: number;
   config_id: string;
@@ -194,51 +117,295 @@ interface RetRow {
   touched: boolean;
 }
 
-let retRowCounter = 0;
-
-function newRetRow(): RetRow {
-  return { _key: ++retRowCounter, config_id: "", amount: 0, touched: false };
+interface PurchaseCol {
+  slot: number;
+  third_party_id: string;
+  invoice: string;
+  /** Lista #98 del proveedor por material. Se carga SOLO al elegirlo: en la
+   *  precarga de un reparto guardado pisaría el precio que se guardó. */
+  listPrices: Record<string, number>;
+  withIva: boolean;
+  ivaAmount: number;
+  ivaTouched: boolean;
+  retentions: RetRow[];
+  /** null = a crédito (el camino normal); "" = marcó contado sin cuenta */
+  paymentAccount: string | null;
 }
 
-/** El backend serializa Decimal como STRING en JSON ("530.0000") aunque el
- *  tipo TS diga number — sin coerción, `acc + a.quantity` concatena texto y el
- *  repartido/descuadre sale NaN al precargar un reparto (bug encontrado en
- *  pruebas: solo aparece tras des-liquidar, porque en la primera captura los
- *  valores los digita el usuario y sí son números). */
+type OwnMode = "unit" | "total" | "kg";
+type CellMode = "row" | "list" | OwnMode;
+
+/** Q-66 sin respuesta: la casilla «Con IVA» nace apagada (Daniel: «IVA opcional»). */
+const IVA_RATE_PCT = 19;
+
+let keyCounter = 0;
+const nextKey = () => ++keyCounter;
+
+const emptyCell = (): CellState => ({
+  quantity: 0,
+  unit_price: null,
+  total_price: null,
+  price_per_kg: null,
+  before: null,
+});
+
+const newCol = (slot: number, third_party_id = ""): PurchaseCol => ({
+  slot,
+  third_party_id,
+  invoice: "",
+  listPrices: {},
+  withIva: false,
+  ivaAmount: 0,
+  ivaTouched: false,
+  retentions: [],
+  paymentAccount: null,
+});
+
+/* ------------------------------------------------------------------ */
+/* Aritmética del precio                                               */
+/* ------------------------------------------------------------------ */
+
+/** Q-15/D8 (#120): el backend deriva el unitario a 8 decimales y re-multiplica,
+ *  así que el valor total digitado vuelve exacto. La vista previa calcula
+ *  igual. ⚠️ Puede diferir en 1 centavo del persistido en un empate exacto
+ *  (Math.round half-up sobre float vs Decimal HALF_EVEN); con pesos no ocurre. */
+const PRICE_SCALE = 1e8;
+const roundPrice = (v: number): number => Math.round(v * PRICE_SCALE) / PRICE_SCALE;
+
+/** C1 del redondeo (#120): todo valor calculado que va a un `MoneyInput`
+ *  editable de 2 decimales pasa por acá; si no, el blur lo redondea solo y
+ *  el total cambia por un cambio de foco. */
+const toCents = (v: number): number => Math.round(v * 100) / 100;
+
+/** El peso se pinta sin decimales en toda la app; acá los decimales aparecen
+ *  SOLO cuando existen (D8: el centavo tiene que verse). */
+const fmtMoney = (v: number): string =>
+  Math.abs(v - Math.round(v)) < 0.005 ? formatCurrency(v) : formatCurrencyDecimals(v);
+
+/** Decimal llega como string en el JSON (#93 b): coerción en la frontera. */
 const num = (v: unknown, fallback = 0): number => {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 };
 
+/** Peso prorrateado de una celda: kg/unidad de la LÍNEA × cantidad. Depende
+ *  solo de su propia cantidad (#101 D2). Espeja `_total_desde_kg` del backend. */
+const cellWeight = (c: CellState, l: LineState): number =>
+  l.weightKg && l.weighed > 0
+    ? Math.round((l.weightKg / l.weighed) * c.quantity * 1000) / 1000
+    : 0;
+
+/** El modo por kg necesita con qué prorratear (#101 D4b). */
+const canKg = (l: LineState) => Boolean(l.weightKg) && l.weighed > 0;
+
+const ownMode = (c: CellState): OwnMode | null =>
+  c.price_per_kg != null ? "kg" : c.total_price != null ? "total" : c.unit_price != null ? "unit" : null;
+
+const listPriceOf = (col: PurchaseCol | undefined, l: LineState): number | null =>
+  col?.listPrices[l.material_id] ?? null;
+
+const cellMode = (c: CellState, col: PurchaseCol | undefined, l: LineState): CellMode => {
+  const own = ownMode(c);
+  if (own) return own;
+  const lp = listPriceOf(col, l);
+  return lp != null && lp !== l.rowPrice ? "list" : "row";
+};
+
+const cellUnit = (c: CellState, col: PurchaseCol | undefined, l: LineState): number => {
+  switch (cellMode(c, col, l)) {
+    case "kg":
+      return c.quantity > 0 ? roundPrice((cellWeight(c, l) * (c.price_per_kg ?? 0)) / c.quantity) : 0;
+    case "total":
+      return c.quantity > 0 ? roundPrice((c.total_price ?? 0) / c.quantity) : 0;
+    case "unit":
+      return c.unit_price ?? 0;
+    case "list":
+      return listPriceOf(col, l) ?? 0;
+    default:
+      return l.rowPrice;
+  }
+};
+
+/** Lo que la compra suma por esta celda, a centavos como `total_price` de la línea. */
+const cellTotal = (c: CellState, col: PurchaseCol | undefined, l: LineState): number =>
+  Math.round(c.quantity * cellUnit(c, col, l) * 100) / 100;
+
+const cellPriced = (c: CellState, col: PurchaseCol | undefined, l: LineState): boolean => {
+  const m = cellMode(c, col, l);
+  if (m === "kg") return (c.price_per_kg ?? 0) > 0 && cellWeight(c, l) > 0;
+  if (m === "total") return (c.total_price ?? 0) > 0;
+  return cellUnit(c, col, l) > 0;
+};
+
+/** Texto del precio vigente, para «antes: …» al cambiar de modo. */
+const describePrice = (c: CellState, col: PurchaseCol | undefined, l: LineState): string | null => {
+  if (!cellPriced(c, col, l)) return null;
+  switch (cellMode(c, col, l)) {
+    case "total":
+      return `${fmtMoney(c.total_price ?? 0)} total`;
+    case "kg":
+      return `${fmtMoney(c.price_per_kg ?? 0)}/kg`;
+    default:
+      return `${fmtMoney(cellUnit(c, col, l))} c/u`;
+  }
+};
+
+const MODE_LABEL: Record<OwnMode, string> = {
+  unit: "Unitario",
+  total: "Valor total",
+  kg: "Por kg",
+};
+
+const MODE_COLOR: Record<CellMode, string> = {
+  row: "text-slate-400",
+  list: "text-sky-600",
+  unit: "text-indigo-600",
+  total: "text-indigo-600",
+  kg: "text-indigo-600",
+};
+
+/* ------------------------------------------------------------------ */
+/* Borrador (plan §9, Daniel 19-nov)                                   */
+/* ------------------------------------------------------------------ */
+
+/** El reparto solo se guarda al liquidar; con 10 compras un error de red
+ *  perdería lo digitado. Se guarda un borrador en `localStorage` por org,
+ *  usuario y Entrada. Cada lectura y escritura va con try/catch: en una
+ *  ventana privada o sin espacio la pantalla funciona igual, sin borrador. */
+interface Draft {
+  v: 1;
+  /** Firma de lo pesado: si la Entrada se editó, el borrador ya no aplica */
+  sig: string;
+  /** Instante del guardado (ms desde epoch, `Date.now()`), no un día de negocio */
+  savedAt: number;
+  lines: LineState[];
+  cols: PurchaseCol[];
+  collector: { enabled: boolean; tpId: string; amount: number; touched: boolean };
+}
+
+const readDraft = (key: string): Draft | null => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as Draft;
+    return d && d.v === 1 && Array.isArray(d.lines) && Array.isArray(d.cols) ? d : null;
+  } catch {
+    return null;
+  }
+};
+const writeDraft = (key: string, d: Draft) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(d));
+  } catch {
+    /* sin espacio o sin permiso: se sigue sin borrador */
+  }
+};
+const removeDraft = (key: string) => {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* idem */
+  }
+};
+
+/** QA C6: la firma cubre TODO lo que el borrador da por supuesto — lo
+ *  pesado, el peso de báscula (la vista por kg), la referencia, el reparto
+ *  guardado y el estado de las compras. Si alguien desliquidó y repartió
+ *  distinto desde otro equipo, el borrador viejo ya no tapa lo nuevo. */
+const orderSignature = (order: InboundOrderResponse): string =>
+  [
+    ...order.lines.map((l) =>
+      [
+        l.material_id,
+        num(l.quantity),
+        l.scale_weight_kg != null ? num(l.scale_weight_kg) : "-",
+        l.reference_unit_price != null ? num(l.reference_unit_price) : "-",
+        l.allocations
+          .map((a) => `${a.id}/${a.purchase_slot}/${num(a.quantity)}`)
+          .sort()
+          .join(","),
+      ].join(":")
+    ),
+    order.purchases.map((p) => `${p.purchase_id}/${p.status}`).sort().join(","),
+  ].join("|");
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+const isNumOrNull = (v: unknown) => v === null || typeof v === "number";
+
+/** QA C3: un borrador viene de `localStorage` y puede estar malformado (otra
+ *  versión, a mano, cortado). Se valida la FORMA entera antes de aplicarlo;
+ *  si algo no cuadra, lanza y el llamador lo borra y sigue con el servidor. */
+function assertDraftShape(d: Draft): void {
+  // Anotado `never` para que TS estreche el tipo después de cada `bad()`
+  const bad: () => never = () => {
+    throw new Error("borrador malformado");
+  };
+  // QA: un borrador viejo con `savedAt` string se descarta por forma
+  if (typeof d.savedAt !== "number" || !Number.isFinite(d.savedAt)) bad();
+  const c: unknown = d.collector;
+  if (!isObj(c)) bad();
+  if (typeof c.enabled !== "boolean" || typeof c.tpId !== "string" ||
+      typeof c.amount !== "number" || typeof c.touched !== "boolean") bad();
+  for (const l of d.lines as unknown[]) {
+    if (!isObj(l) || typeof l._key !== "number" || typeof l.material_id !== "string" ||
+        typeof l.weighed !== "number" || typeof l.rowPrice !== "number" ||
+        typeof l.rowTouched !== "boolean" || typeof l.unallocated !== "boolean" ||
+        typeof l.isExtra !== "boolean" || !isNumOrNull(l.weightKg) || !isObj(l.cells)) bad();
+    for (const cell of Object.values(l.cells)) {
+      if (!isObj(cell) || typeof cell.quantity !== "number" || !isNumOrNull(cell.unit_price) ||
+          !isNumOrNull(cell.total_price) || !isNumOrNull(cell.price_per_kg)) bad();
+    }
+  }
+  for (const col of d.cols as unknown[]) {
+    if (!isObj(col) || typeof col.slot !== "number" || typeof col.third_party_id !== "string" ||
+        typeof col.invoice !== "string" || !isObj(col.listPrices) ||
+        typeof col.withIva !== "boolean" || typeof col.ivaAmount !== "number" ||
+        typeof col.ivaTouched !== "boolean" || !Array.isArray(col.retentions) ||
+        !(col.paymentAccount === null || typeof col.paymentAccount === "string")) bad();
+    for (const r of col.retentions as unknown[]) {
+      if (!isObj(r) || typeof r._key !== "number" || typeof r.config_id !== "string" ||
+          typeof r.amount !== "number" || typeof r.touched !== "boolean") bad();
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Precarga                                                            */
+/* ------------------------------------------------------------------ */
+
 function initLines(order: InboundOrderResponse): LineState[] {
-  return order.lines.map((l, idx) => ({
-    _key: idx + 1,
-    material_id: l.material_id,
-    material_code: l.material_code ?? "",
-    material_name: l.material_name ?? "",
-    material_unit: l.material_unit || "kg",
-    weighed: num(l.quantity),
-    weightKg: l.scale_weight_kg != null ? num(l.scale_weight_kg) : null,
-    isExtra: false,
-    refPrice: num(l.reference_unit_price ?? l.unit_price ?? 0),
-    refTouched: l.reference_unit_price != null,
-    unallocated: l.unallocated_intentional,
-    // Re-liquidación (D20): el reparto anterior se conserva — precargar
-    allocations: l.allocations.map((a) => ({
-      _key: ++allocKeyCounter,
-      third_party_id: a.third_party_id,
-      quantity: num(a.quantity),
-      unit_price: num(a.unit_price),
-      // El MODO es parte del reparto: si se guardó por total, se re-abre por
-      // total. Sin esto Johana vería un unitario derivado en vez de lo suyo.
-      total_price: a.total_price != null ? num(a.total_price) : null,
-      // Ídem el modo por kg. El PESO no se precarga: en el editor tiene que
-      // derivarse en vivo de la línea, porque Johana está cambiando las
-      // cantidades justo ahí. Lo persistido es la verdad de lo GUARDADO —
-      // se muestra en el detalle, que sí lo lee.
-      price_per_kg: a.price_per_kg != null ? num(a.price_per_kg) : null,
-    })),
-  }));
+  return order.lines.map((l) => {
+    const rowPrice = num(l.reference_unit_price ?? l.unit_price ?? 0);
+    const cells: Record<number, CellState> = {};
+    // Re-liquidación (D20): el reparto anterior se conserva, por SLOT
+    for (const a of l.allocations) {
+      const unit = num(a.unit_price);
+      cells[a.purchase_slot] = {
+        quantity: num(a.quantity),
+        // El MODO es parte del reparto: se re-abre como se guardó
+        total_price: a.total_price != null ? num(a.total_price) : null,
+        price_per_kg: a.price_per_kg != null ? num(a.price_per_kg) : null,
+        unit_price:
+          a.total_price == null && a.price_per_kg == null && unit !== rowPrice ? unit : null,
+        before: null,
+      };
+    }
+    return {
+      _key: nextKey(),
+      material_id: l.material_id,
+      material_code: l.material_code ?? "",
+      material_name: l.material_name ?? "",
+      material_unit: l.material_unit || "kg",
+      weighed: num(l.quantity),
+      weightKg: l.scale_weight_kg != null ? num(l.scale_weight_kg) : null,
+      isExtra: false,
+      rowPrice,
+      rowTouched: l.reference_unit_price != null,
+      unallocated: l.unallocated_intentional,
+      cells,
+    };
+  });
 }
 
 export default function InboundLiquidatePage() {
@@ -261,20 +428,17 @@ export default function InboundLiquidatePage() {
   const { data: kgAccountsData } = useKgAccounts();
   const { data: accountsData } = useMoneyAccounts();
 
-  // 🔴 ARRIBA de cualquier `return` condicional (hay tres guards mas abajo):
-  // llamar un hook despues de un early return rompe el orden de hooks y deja
-  // la pantalla en blanco — el bloqueante (a) de #93, en esta misma pagina.
-  // Precio por proveedor (D8): al elegir el proveedor de una asignacion, se
-  // llena el precio con SU lista. Imperativo porque cada asignacion puede
-  // tener un proveedor distinto.
+  // 🔴 TODOS los hooks van ARRIBA de los `return` condicionales de abajo: un
+  // hook después de un early return rompe el orden y deja la pantalla en
+  // blanco — el bloqueante (a) de #93, en esta misma página.
   const lookupSupplierPrice = useSupplierPriceLookup();
 
   const collectors = collectorsData?.items ?? [];
   const materials = materialsData?.items ?? [];
   const accounts = (accountsData?.items ?? []).filter((a) => a.is_active);
 
-  // El titular de una cuenta kg NO es proveedor de compra (#80: "lo Willard
-  // nunca es compra"). El backend lo defiende con 422; esto evita ofrecerlo.
+  // El titular de una cuenta kg NO es proveedor de compra (#80). El backend
+  // lo defiende con 422; esto evita ofrecerlo.
   const suppliers = useMemo(() => {
     const holders = new Set(
       (kgAccountsData ?? [])
@@ -284,37 +448,56 @@ export default function InboundLiquidatePage() {
     return (suppliersData?.items ?? []).filter((s) => !holders.has(s.id));
   }, [suppliersData, kgAccountsData]);
 
-  // D8: tolerancia de descuadre de la org (fracción, ej. 0.05 = 5%)
+  // Proveedores recién creados desde la ventana: se pintan antes de que
+  // vuelva la lista invalidada
+  const [createdNames, setCreatedNames] = useState<Record<string, string>>({});
+  const supplierOptions = useMemo(() => {
+    const opts = suppliers.map((s) => ({ id: s.id, label: s.name }));
+    const known = new Set(opts.map((o) => o.id));
+    for (const [sid, name] of Object.entries(createdNames)) {
+      if (!known.has(sid)) opts.push({ id: sid, label: name });
+    }
+    return opts;
+  }, [suppliers, createdNames]);
+  const supplierName = (sid: string) =>
+    supplierOptions.find((o) => o.id === sid)?.label ?? "—";
+
   const tolerance = Number(getSetting("inbound_discrepancy_tolerance_pct") ?? 0.05);
 
+  const userId = useAuthStore((st) => st.user?.id);
+  const orgId = useAuthStore((st) => st.organizationId);
+  const draftKey = order && userId
+    ? `inbound-liquidate-draft:v1:${orgId ?? ""}:${userId}:${order.id}`
+    : null;
+  const draftSig = useMemo(() => (order ? orderSignature(order) : ""), [order]);
+  /** Estado tal como vino del servidor: si lo digitado vuelve a él, no hay borrador */
+  const baselineRef = useRef<string | null>(null);
+  const [recoveredAt, setRecoveredAt] = useState<number | null>(null);
+
   const [lines, setLines] = useState<LineState[]>([]);
-  // Orden del formato en papel (plan-sac-orden-formato-materiales §3): solo
-  // de PRESENTACION — el estado se actualiza por `_key`, asi que pintar en
-  // otro orden no cambia nada de lo que se manda.
+  const [cols, setCols] = useState<PurchaseCol[]>([]);
+  // QA C9: la consulta de la lista es asíncrona; al volver se mira la
+  // columna VIGENTE, no la del momento del clic
+  const colsRef = useRef<PurchaseCol[]>(cols);
+  colsRef.current = cols;
+  // Orden del formato en papel (#121): solo de PRESENTACIÓN — el estado se
+  // actualiza por `_key`, pintar en otro orden no cambia lo que se manda
   const formOrder = useMemo(() => formOrderMap(profilesData?.items), [profilesData]);
   const orderedLines = useMemo(() => sortByFormOrder(lines, formOrder), [lines, formOrder]);
+  const sortedCols = useMemo(() => [...cols].sort((a, b) => a.slot - b.slot), [cols]);
   const [initialized, setInitialized] = useState(false);
+  const [editing, setEditing] = useState<{ lineKey: number; slot: number } | null>(null);
+  const [createFor, setCreateFor] = useState<number | null>(null);
   // D11: UNA comisión por entrada, sobre lo pesado
   const [collectorEnabled, setCollectorEnabled] = useState(false);
   const [collectorTpId, setCollectorTpId] = useState("");
   const [collectorAmount, setCollectorAmount] = useState(0);
   const [collectorTouched, setCollectorTouched] = useState(false);
-  // D5/D12: factura POR PROVEEDOR (se estampa en sus asignaciones)
-  const [invoiceBySupplier, setInvoiceBySupplier] = useState<Record<string, string>>({});
-  // Addendum retenciones #93: bloques OPCIONALES por proveedor ("sí les
-  // descuenta, pero no a todas"). touched=false → sugerido % × subtotal vivo
-  const [retentionsBySupplier, setRetentionsBySupplier] = useState<
-    Record<string, RetRow[]>
-  >({});
-  // Pago de contado por proveedor (opcional, como las retenciones): tpId ->
-  // cuenta. Ausente = se le queda debiendo, que es el camino normal.
-  const [paymentBySupplier, setPaymentBySupplier] = useState<Record<string, string>>({});
   const [extraMaterialId, setExtraMaterialId] = useState("");
   // Ítem 2 (Hugo): el caso más común es que todo el camión sea de un proveedor
   const [bulkSupplier, setBulkSupplier] = useState("");
 
-  // Catálogo de retenciones (v2 #79) — la ruta ya está gated por el flag (FP),
-  // enabled=true no fuga requests a orgs sin SAC
+  // Catálogo de retenciones (v2 #79) — la ruta ya está gated por el flag (FP)
   const { data: retentionRows } = useRetentionRows(true);
   const retentionConfigs = useMemo(
     () => (retentionRows ?? []).filter((r) => r.config_id && r.is_active),
@@ -326,41 +509,115 @@ export default function InboundLiquidatePage() {
   );
 
   useEffect(() => {
-    // Espera al catálogo: la precarga necesita mapear cada retención guardada
-    // a su tarifa (por tipo + municipio), y sin catálogo no hay a qué mapear
-    if (order && !initialized && retentionRows) {
-      setLines(initLines(order));
-      setCollectorEnabled(!!order.collector_id);
-      setCollectorTpId(order.collector_id ?? "");
-      // Precarga del último lote de retenciones por proveedor (pruebas
-      // Daniel: si el reparto se conserva al des-liquidar, la retención
-      // también — es lo que más se corrige). El monto va como `touched` para
-      // que NO se recalcule al vuelo: si Johana lo había editado a mano,
-      // reaparece tal cual lo dejó.
-      const preload: Record<string, RetRow[]> = {};
-      for (const p of order.purchases) {
-        const rows = (p.retentions ?? [])
-          .map((r) => {
-            const cfg = retentionConfigs.find(
-              (c) =>
-                c.retention_type === r.retention_type &&
-                (c.municipality ?? null) === (r.municipality ?? null),
-            );
-            if (!cfg?.config_id) return null;   // tarifa borrada: se re-elige
-            return {
-              _key: ++retRowCounter,
-              config_id: cfg.config_id,
-              amount: num(r.amount),
-              touched: true,
-            } as RetRow;
-          })
-          .filter(Boolean) as RetRow[];
-        if (rows.length) preload[p.supplier_id] = rows;
+    // Espera al catálogo: la precarga mapea cada retención guardada a su tarifa
+    if (!order || initialized || !retentionRows) return;
+    const initial = initLines(order);
+    setLines(initial);
+    setCollectorEnabled(!!order.collector_id);
+    setCollectorTpId(order.collector_id ?? "");
+
+    // Columnas = los slots del reparto guardado, con su proveedor y factura
+    const bySlot = new Map<number, PurchaseCol>();
+    for (const l of order.lines) {
+      for (const a of l.allocations) {
+        const col = bySlot.get(a.purchase_slot) ?? newCol(a.purchase_slot, a.third_party_id);
+        if (!col.invoice && a.invoice_number) col.invoice = a.invoice_number;
+        bySlot.set(a.purchase_slot, col);
       }
-      if (Object.keys(preload).length) setRetentionsBySupplier(preload);
-      setInitialized(true);
     }
-  }, [order, initialized, retentionRows, retentionConfigs]);
+    // Retenciones e IVA del último lote de la compra de ESE slot (la viva, o
+    // la más reciente si se des-liquidó). Con dos compras del mismo proveedor
+    // la precarga por proveedor se pisaba; por slot no.
+    for (const col of bySlot.values()) {
+      const same = order.purchases.filter((p) => p.purchase_slot === col.slot);
+      const p = same.find((x) => x.status !== "cancelled") ?? same[same.length - 1];
+      if (!p) continue;
+      col.retentions = (p.retentions ?? [])
+        .map((r) => {
+          const cfg = retentionConfigs.find(
+            (c) =>
+              c.retention_type === r.retention_type &&
+              (c.municipality ?? null) === (r.municipality ?? null),
+          );
+          if (!cfg?.config_id) return null; // tarifa borrada: se re-elige
+          // `touched`: si Johana lo había editado, reaparece tal cual
+          return { _key: nextKey(), config_id: cfg.config_id, amount: num(r.amount), touched: true };
+        })
+        .filter(Boolean) as RetRow[];
+      const iva = (p.taxes ?? []).find((t) => t.tax_type === "iva");
+      if (iva) {
+        col.withIva = true;
+        col.ivaAmount = num(iva.amount);
+        // Si era el 19 % de su base, sigue siendo sugerido y se recalcula al
+        // cambiar cantidades; si Johana lo había editado, reaparece tal cual
+        col.ivaTouched =
+          num(iva.amount) !== Math.round(num(iva.base_amount) * IVA_RATE_PCT) / 100;
+      }
+    }
+    const initialCols = [...bySlot.values()];
+    const startCols = initialCols.length > 0 ? initialCols : [newCol(1)];
+    setCols(startCols);
+    baselineRef.current = JSON.stringify({
+      lines: initial,
+      cols: startCols,
+      collector: { enabled: !!order.collector_id, tpId: order.collector_id ?? "", amount: 0, touched: false },
+    });
+
+    // Borrador de una visita anterior, si sigue correspondiendo a lo pesado
+    if (draftKey) {
+      const d = readDraft(draftKey);
+      if (d && d.sig === draftSig) {
+        try {
+          assertDraftShape(d);
+          // QA C4: una tarifa que ya no está activa no se restaura (el clic en
+          // Liquidar no tendría con qué armar el bloque)
+          const draftCols = d.cols.map((c) => ({
+            ...c,
+            retentions: c.retentions.filter((r) => !r.config_id || configById.has(r.config_id)),
+          }));
+          keyCounter = Math.max(
+            keyCounter,
+            ...d.lines.map((l) => l._key),
+            ...draftCols.flatMap((c) => c.retentions.map((r) => r._key)),
+          );
+          setLines(d.lines);
+          setCols(draftCols);
+          setCollectorEnabled(d.collector.enabled);
+          setCollectorTpId(d.collector.tpId);
+          setCollectorAmount(d.collector.amount);
+          setCollectorTouched(d.collector.touched);
+          setRecoveredAt(d.savedAt);
+        } catch {
+          // Malformado: se borra y se sigue con lo del servidor (ya puesto arriba)
+          removeDraft(draftKey);
+        }
+      } else if (d) {
+        removeDraft(draftKey);
+      }
+    }
+    setInitialized(true);
+  }, [order, initialized, retentionRows, retentionConfigs, configById, draftKey, draftSig]);
+
+  // Guardar el borrador en cada cambio; si lo digitado vuelve a lo del
+  // servidor, se borra (así no aparece «recuperado» sin haber nada)
+  useEffect(() => {
+    if (!initialized || !draftKey) return;
+    const collector = {
+      enabled: collectorEnabled,
+      tpId: collectorTpId,
+      amount: collectorAmount,
+      touched: collectorTouched,
+    };
+    const snap = JSON.stringify({ lines, cols, collector });
+    if (snap === baselineRef.current) {
+      removeDraft(draftKey);
+    } else {
+      writeDraft(draftKey, { v: 1, sig: draftSig, savedAt: Date.now(), lines, cols, collector });
+    }
+  }, [
+    initialized, draftKey, draftSig, lines, cols,
+    collectorEnabled, collectorTpId, collectorAmount, collectorTouched,
+  ]);
 
   // Materiales elegibles para reparto extra (D16): compra regular, no presentes
   const compraByMaterial = useMemo(() => {
@@ -375,7 +632,7 @@ export default function InboundLiquidatePage() {
     );
   }, [materials, lines, compraByMaterial]);
 
-  // Tarifa vigente comision_green_loop (precio + regla de los 14 kg/unidad)
+  // Tarifa vigente comision_green_loop (precio + regla de los kg/unidad)
   const greenLoopTariff = (tariffsData?.items ?? []).find(
     (t) => t.tariff_code === "comision_green_loop"
   );
@@ -400,61 +657,6 @@ export default function InboundLiquidatePage() {
     ? Math.round(commissionBase.base * tariffPrice * 100) / 100
     : 0;
   const effCollectorAmount = collectorTouched ? collectorAmount : suggestedCommission;
-
-  // Resumen por proveedor (las N compras que van a nacer). Regla de Hooks:
-  // TODOS los hooks van antes de los `return` condicionales de abajo — si un
-  // useMemo queda después de un guard, el conteo de hooks difiere entre el
-  // render "Cargando..." (guard activo) y el render con datos (guard pasado)
-  // y React revienta con "Rendered more hooks than during the previous
-  // render" (bug real encontrado en pruebas manuales — pantalla en blanco en
-  // TODA liquidación, no solo con retenciones; tsc/build no lo detectan).
-  const supplierSummary = useMemo(() => {
-    // Cantidad POR UNIDAD (#54): un proveedor puede traer 530 kg de scrap y 60
-    // baterías por unidad — sumarlos en un solo número y llamarlo "kg" es un
-    // dato falso (bug encontrado en pruebas: "590 kg repartidos")
-    const map = new Map<
-      string,
-      {
-        name: string;
-        total: number;
-        qtyByUnit: Record<string, number>;
-        // Detalle por material (pruebas de usuario): la card decía solo el
-        // total, y Johana no podía verificar QUÉ le está comprando a cada uno
-        materials: { code: string; qty: number; unit: string; price: number }[];
-      }
-    >();
-    for (const l of orderedLines) {
-      for (const a of l.allocations) {
-        if (!a.third_party_id || a.quantity <= 0) continue;
-        const name = suppliers.find((s) => s.id === a.third_party_id)?.name ?? "—";
-        const entry =
-          map.get(a.third_party_id) ??
-          { name, total: 0, qtyByUnit: {}, materials: [] };
-        // Q-15/D8: el resumen muestra el efecto REAL (unitario derivado y
-        // re-multiplicado), no el total digitado — es donde el centavo se ve
-        entry.total += effAllocTotal(a, l);
-        entry.qtyByUnit[l.material_unit] =
-          (entry.qtyByUnit[l.material_unit] ?? 0) + a.quantity;
-        entry.materials.push({
-          code: l.material_code || l.material_name || "—",
-          qty: a.quantity,
-          unit: l.material_unit,
-          price: effUnitPrice(a, l),
-        });
-        map.set(a.third_party_id, entry);
-      }
-    }
-    return [...map.entries()].map(([tpId, v]) => ({
-      tpId,
-      name: v.name,
-      total: v.total,
-      materials: v.materials,
-      // "530 kg + 60 unidad" cuando hay mezcla; "530 kg" cuando no
-      qtyLabel: Object.entries(v.qtyByUnit)
-        .map(([unit, qty]) => formatWeight(qty, unit))
-        .join(" + "),
-    }));
-  }, [orderedLines, suppliers]);
 
   if (isLoading || !initialized) {
     return <div className="p-8 text-center text-slate-500">Cargando...</div>;
@@ -493,208 +695,188 @@ export default function InboundLiquidatePage() {
     );
   }
 
+  const colBySlot = new Map(cols.map((c) => [c.slot, c]));
+
   // ---------- mutadores ----------
 
   const updateLine = (key: number, patch: Partial<LineState>) => {
     setLines((prev) => prev.map((l) => (l._key === key ? { ...l, ...patch } : l)));
   };
 
-  /**
-   * D8 — al elegir el proveedor de una asignacion, se le llena el precio con
-   * SU lista. Solo si el campo esta vacio: un precio ya digitado no se pisa
-   * (misma regla del sugerido de #10).
-   *
-   * Sin lista, o con el material en cero en ella, no hace nada — el sistema no
-   * adivina (D3). Es asincrono, asi que se aplica en un segundo `setLines`;
-   * mientras tanto la fila queda como estaba.
-   */
-  const autofillAllocPrice = async (lineKey: number, allocKey: number, supplierId: string) => {
-    // `lines` del render actual: la funcion se recrea en cada uno, asi que en
-    // el momento del evento es el estado vigente.
-    const line = lines.find((l) => l._key === lineKey);
-    if (!line || !supplierId) return;
-    const alloc = line.allocations.find((a) => a._key === allocKey);
-    if (!alloc || allocPriced(alloc)) return;   // ya tiene precio: no se toca
-
-    const price = await lookupSupplierPrice(supplierId, line.material_id);
-    if (price == null) return;
-
-    setLines((prev) =>
-      prev.map((l) =>
-        l._key !== lineKey
-          ? l
-          : {
-              ...l,
-              allocations: l.allocations.map((a) =>
-                // Se re-verifica al aplicar: el usuario pudo digitar un precio
-                // mientras la consulta viajaba.
-                a._key === allocKey && !allocPriced(a)
-                  ? { ...a, unit_price: price, total_price: null }
-                  : a
-              ),
-            }
-      )
-    );
+  const updateCol = (slot: number, patch: Partial<PurchaseCol>) => {
+    setCols((prev) => prev.map((c) => (c.slot === slot ? { ...c, ...patch } : c)));
   };
 
-  const updateAlloc = (
-    lineKey: number,
-    allocKey: number,
-    patch: Partial<Omit<AllocRow, "_key">>
-  ) => {
-    if (patch.third_party_id) {
-      void autofillAllocPrice(lineKey, allocKey, patch.third_party_id);
-    }
+  const setCell = (lineKey: number, slot: number, patch: Partial<CellState>) => {
     setLines((prev) =>
       prev.map((l) => {
         if (l._key !== lineKey) return l;
-        const allocations = l.allocations.map((a) =>
-          a._key === allocKey ? { ...a, ...patch } : a
-        );
-        // "Reutilizar el primer precio digitado" (respuesta Daniel): si la
-        // referencia sigue virgen, el primer precio del reparto la llena.
-        // Q-15: si se digitó el TOTAL, la llena el unitario derivado — es el
-        // mismo precio expresado distinto, así que se lee del efectivo y no
-        // del campo, que puede venir vacío en modo total.
-        let refPrice = l.refPrice;
-        if (!l.refTouched && refPrice <= 0) {
-          const touched = allocations.find((a) => a._key === allocKey);
-          const eff = touched ? toCents(effUnitPrice(touched, l)) : 0;
-          if (eff > 0) refPrice = eff;
+        const cell = { ...(l.cells[slot] ?? emptyCell()), ...patch };
+        let rowPrice = l.rowPrice;
+        // «Reutilizar el primer precio digitado» (Daniel): una fila virgen
+        // toma el primer precio propio de una celda — a centavos (C1, A3)
+        if (!l.rowTouched && rowPrice <= 0 && ownMode(cell) && cellPriced(cell, undefined, l)) {
+          rowPrice = toCents(cellUnit(cell, undefined, l));
         }
-        return { ...l, allocations, refPrice };
-      })
-    );
-  };
-
-  /** Q-15: rotar el modo NO pierde el número — se convierte con la cantidad y
-   *  el peso vigentes. Sin cantidad no hay conversión posible y el campo
-   *  arranca en 0 (la validación lo marca incompleto, que es honesto).
-   *
-   *  El ciclo es unitario → total → por kg → unitario. El modo por kg se
-   *  SALTEA cuando la línea no tiene con qué prorratear (sin peso certificado
-   *  o sin cantidad pesada — los materiales agregados en la liquidación,
-   *  #93 D5): ofrecerlo ahí sería ofrecer un 422. */
-  const toggleAllocMode = (lineKey: number, allocKey: number) => {
-    setLines((prev) =>
-      prev.map((l) => {
-        if (l._key !== lineKey) return l;
-        const puedeKg = Boolean(l.weightKg) && l.weighed > 0;
         return {
           ...l,
-          allocations: l.allocations.map((a) => {
-            if (a._key !== allocKey) return a;
-            const unitario = effUnitPrice(a, l);
-            const unitarioEditable = toCents(unitario);
-            switch (allocMode(a)) {
-              case "unit":
-                return {
-                  ...a,
-                  total_price:
-                    a.quantity > 0 ? Math.round(unitario * a.quantity * 100) / 100 : 0,
-                  price_per_kg: null,
-                };
-              case "total": {
-                if (!puedeKg) {
-                  return { ...a, unit_price: unitarioEditable, total_price: null, price_per_kg: null };
-                }
-                const peso = allocWeight(a, l);
-                return {
-                  ...a,
-                  total_price: null,
-                  price_per_kg:
-                    peso > 0
-                      ? Math.round(((unitario * a.quantity) / peso) * 100) / 100
-                      : 0,
-                };
-              }
-              default:
-                return { ...a, unit_price: unitarioEditable, total_price: null, price_per_kg: null };
-            }
-          }),
+          rowPrice,
+          unallocated: cell.quantity > 0 ? false : l.unallocated,
+          cells: { ...l.cells, [slot]: cell },
         };
       })
     );
   };
 
-  const addAlloc = (lineKey: number) => {
+  /** El modo NO rota con la cifra (§5): el campo nuevo arranca vacío y el
+   *  precio anterior queda como texto «antes: …». */
+  const switchMode = (l: LineState, col: PurchaseCol, mode: OwnMode) => {
+    const c = l.cells[col.slot] ?? emptyCell();
+    if (ownMode(c) === mode) return;
+    setCell(l._key, col.slot, {
+      unit_price: mode === "unit" ? 0 : null,
+      total_price: mode === "total" ? 0 : null,
+      price_per_kg: mode === "kg" ? 0 : null,
+      before: describePrice(c, col, l) ?? c.before,
+    });
+  };
+
+  const clearOwnPrice = (l: LineState, slot: number) =>
+    setCell(l._key, slot, { unit_price: null, total_price: null, price_per_kg: null });
+
+  const closeEditor = () => {
+    if (editing) setCell(editing.lineKey, editing.slot, { before: null });
+    setEditing(null);
+  };
+
+  /** D8 (#98): la lista del proveedor, por material. Se aplica solo si el
+   *  proveedor de la columna sigue siendo el mismo cuando vuelve la consulta.
+   *  Una fila virgen (sin precio) arranca del precio de la lista. */
+  const loadListPrices = async (slot: number, supplierId: string) => {
+    const mats = [...new Set(lines.map((l) => l.material_id))];
+    const found: Record<string, number> = {};
+    await Promise.all(
+      mats.map(async (m) => {
+        const p = await lookupSupplierPrice(supplierId, m);
+        if (p != null) found[m] = p;
+      })
+    );
+    // Si mientras viajaba la consulta la columna cambió de proveedor (o se
+    // quitó), no se aplica nada — ni la lista ni el precio de la fila
+    if (colsRef.current.find((c) => c.slot === slot)?.third_party_id !== supplierId) return;
+    setCols((prev) =>
+      prev.map((c) =>
+        c.slot === slot && c.third_party_id === supplierId ? { ...c, listPrices: found } : c
+      )
+    );
     setLines((prev) =>
       prev.map((l) =>
-        l._key === lineKey
-          ? { ...l, unallocated: false, allocations: [...l.allocations, newAlloc(l.refPrice)] }
+        !l.rowTouched && l.rowPrice <= 0 && found[l.material_id] != null
+          ? { ...l, rowPrice: found[l.material_id] }
           : l
       )
     );
   };
 
-  const removeAlloc = (lineKey: number, allocKey: number) => {
+  /** QA C9: retenciones, contado, factura e IVA son DEL proveedor de la
+   *  columna. Al cambiarlo se vacían (una ICA de otro municipio o un pago de
+   *  contado no pueden pasar al nuevo sin que nadie lo vea); el IVA vuelve a
+   *  la casilla apagada (Q-66). Se avisa si había algo. */
+  const setColSupplier = (slot: number, supplierId: string) => {
+    const prev = cols.find((c) => c.slot === slot);
+    if (prev && prev.third_party_id === supplierId) return;
+    const had =
+      prev &&
+      (prev.retentions.length > 0 || prev.paymentAccount !== null || prev.invoice.trim() || prev.withIva);
+    updateCol(slot, {
+      third_party_id: supplierId,
+      listPrices: {},
+      retentions: [],
+      paymentAccount: null,
+      invoice: "",
+      withIva: false,
+      ivaAmount: 0,
+      ivaTouched: false,
+    });
+    if (had && prev?.third_party_id) {
+      toast.info(`Compra ${slot}: se quitaron la factura, el IVA, las retenciones y el contado del proveedor anterior`);
+    }
+    if (supplierId) void loadListPrices(slot, supplierId);
+  };
+
+  /** R6: max + 1 sobre las columnas Y los slots que ya existen en el puente
+   *  (incluidas compras canceladas): un slot quitado queda como hueco. */
+  const addCol = () => {
+    const used = [
+      ...cols.map((c) => c.slot),
+      ...order.purchases.map((p) => p.purchase_slot ?? 0),
+    ];
+    const slot = Math.max(0, ...used) + 1;
+    setCols((prev) => [...prev, newCol(slot)]);
+  };
+
+  const removeCol = (slot: number) => {
+    setCols((prev) => prev.filter((c) => c.slot !== slot));
     setLines((prev) =>
-      prev.map((l) =>
-        l._key === lineKey
-          ? { ...l, allocations: l.allocations.filter((a) => a._key !== allocKey) }
-          : l
-      )
+      prev.map((l) => {
+        if (!(slot in l.cells)) return l;
+        const cells = { ...l.cells };
+        delete cells[slot];
+        return { ...l, cells };
+      })
     );
+    if (editing?.slot === slot) setEditing(null);
   };
 
   /**
-   * Ítem 2 — Hugo: *"no le carga las cantidades al llamar el proveedor de lo
-   * que tenga pendiente"*. Pide más de lo que suena: no es fijar el tercero,
-   * es pre-llenar el reparto con lo pesado.
-   *
-   * Las líneas con pesado 0 NO reciben asignación (una asignación en 0 es
-   * inválida y quedarían bloqueando la pantalla): las capturadas en 0 se
-   * marcan "sin proveedor" —con descuadre 0 eso es inerte, ni ajuste ni P&L—
-   * y los extras del D16 se dejan quietos, que se agregaron a mano para
-   * asignarlos a mano.
+   * Ítem 2 — «Repartir todo a este proveedor»: UNA compra con todo lo pesado.
+   * Reemplaza el reparto. Conserva el slot (la columna del mismo proveedor, o
+   * la primera) para no renumerar (R6). Prioridad de precio como antes: lo ya
+   * digitado > la lista del proveedor > el de la fila.
    */
-  const applySingleSupplier = async () => {
+  const applySingleSupplier = () => {
     if (!bulkSupplier) return;
-
-    // D8 — los precios de la lista de ESE proveedor, por material. Es
-    // exactamente el dolor que motivó las listas: hasta ahora el botón dejaba
-    // el precio en 0 y la pantalla marcaba "Hay asignaciones incompletas" en
-    // rojo. Un solo request (el resolutor devuelve el mapa completo).
-    const precios = new Map<string, number>();
-    await Promise.all(
-      [...new Set(lines.filter((l) => l.weighed > 0).map((l) => l.material_id))].map(
-        async (matId) => {
-          const p = await lookupSupplierPrice(bulkSupplier, matId);
-          if (p != null) precios.set(matId, p);
-        }
-      )
-    );
-
+    const keep =
+      cols.find((c) => c.third_party_id === bulkSupplier)?.slot ??
+      (cols.length > 0 ? Math.min(...cols.map((c) => c.slot)) : 1);
+    setCols([newCol(keep, bulkSupplier)]);
     setLines((prev) =>
       prev.map((l) => {
-        if (l.weighed <= 0) {
-          return l.isExtra ? l : { ...l, unallocated: true };
+        if (l.isExtra) {
+          // QA C2: el material extra (D16) se agregó a mano para repartirlo a
+          // mano. Como en HEAD, no se pierde: lo repartido pasa a la compra
+          // que queda, con el primer precio propio que tuviera.
+          const act = Object.entries(l.cells).filter(([, c]) => c.quantity > 0);
+          if (act.length === 0) return l;
+          const qty = Math.round(act.reduce((acc, [, c]) => acc + c.quantity, 0) * 1000) / 1000;
+          const own = act.find(([, c]) => ownMode(c));
+          const carried = own ? toCents(cellUnit(own[1], colBySlot.get(Number(own[0])), l)) : null;
+          return { ...l, cells: { [keep]: { ...emptyCell(), quantity: qty, unit_price: carried } } };
         }
-        // Prioridad: lo ya digitado > la lista del proveedor > la referencia.
-        // Lo digitado nunca se pisa (#10); la lista es más específica que la
-        // referencia de la entrada, y si el proveedor no tiene precio para ese
-        // material, se cae a la referencia — que es el comportamiento previo,
-        // NO la lista general (D3: nada se hereda de otra lista).
-        const priced = l.allocations.find((a) => allocPriced(a));
-        const precio = priced
-          ? toCents(effUnitPrice(priced, l))
-          : precios.get(l.material_id) ?? l.refPrice;
+        if (l.weighed <= 0) {
+          // en 0 no se asigna (sería inválida): «sin proveedor», inerte con descuadre 0
+          return { ...l, cells: {}, unallocated: true };
+        }
+        const typed = Object.entries(l.cells).find(([, c]) => c.quantity > 0 && ownMode(c));
+        const carried = typed
+          ? toCents(cellUnit(typed[1], colBySlot.get(Number(typed[0])), l))
+          : null;
         return {
           ...l,
           unallocated: false,
-          allocations: [
-            {
-              _key: ++allocKeyCounter,
-              third_party_id: bulkSupplier,
-              quantity: l.weighed,
-              unit_price: precio,
-              total_price: null,
-              price_per_kg: null,
-            },
-          ],
+          cells: { [keep]: { ...emptyCell(), quantity: l.weighed, unit_price: carried } },
         };
       })
     );
+    setEditing(null);
+    void loadListPrices(keep, bulkSupplier);
+  };
+
+  /** QA C2: el material extra se puede quitar (el backend rechaza uno sin
+   *  asignaciones, y marcarlo «sin proveedor» no aplica: no se pesó). */
+  const removeLine = (key: number) => {
+    setLines((prev) => prev.filter((l) => l._key !== key));
+    if (editing?.lineKey === key) setEditing(null);
   };
 
   const addExtraLine = () => {
@@ -703,7 +885,7 @@ export default function InboundLiquidatePage() {
     setLines((prev) => [
       ...prev,
       {
-        _key: prev.length + 1000,
+        _key: nextKey(),
         material_id: mat.id,
         material_code: mat.code,
         material_name: mat.name,
@@ -711,164 +893,216 @@ export default function InboundLiquidatePage() {
         weighed: 0,
         weightKg: null, // material que la báscula no vio (D16)
         isExtra: true,
-        refPrice: 0,
-        refTouched: false,
+        rowPrice: 0,
+        rowTouched: false,
         unallocated: false,
-        allocations: [newAlloc()],
+        cells: {},
       },
     ]);
     setExtraMaterialId("");
   };
 
-  // ---------- derivados ----------
+  // ---------- retenciones / IVA por compra ----------
 
-  const lineAllocated = (l: LineState) =>
-    l.allocations.reduce((acc, a) => acc + (a.quantity > 0 ? a.quantity : 0), 0);
-
-  const lineDisc = (l: LineState) => l.weighed - lineAllocated(l);
-
-  const activeAllocs = (l: LineState) =>
-    l.allocations.filter((a) => a.third_party_id && a.quantity > 0);
-
-  // ---------- retenciones por proveedor (addendum #93) ----------
-
-  const suggestedRet = (configId: string, supplierTotal: number) => {
+  const suggestedRet = (configId: string, base: number) => {
     const cfg = configById.get(configId);
     if (!cfg || cfg.rate_pct == null) return 0;
-    return Math.round(supplierTotal * cfg.rate_pct) / 100; // % × subtotal a 2 dec
+    return Math.round(base * cfg.rate_pct) / 100; // % × subtotal a 2 dec
   };
-  const effRetAmount = (r: RetRow, supplierTotal: number) =>
-    r.touched ? r.amount : suggestedRet(r.config_id, supplierTotal);
-  const supplierRetTotal = (tpId: string, supplierTotal: number) =>
-    (retentionsBySupplier[tpId] ?? []).reduce(
-      (acc, r) => acc + effRetAmount(r, supplierTotal), 0);
+  const effRetAmount = (r: RetRow, base: number) =>
+    r.touched ? r.amount : suggestedRet(r.config_id, base);
 
-  const updateRet = (tpId: string, key: number, patch: Partial<RetRow>) =>
-    setRetentionsBySupplier((prev) => ({
-      ...prev,
-      [tpId]: (prev[tpId] ?? []).map((r) => (r._key === key ? { ...r, ...patch } : r)),
-    }));
-  const removeRet = (tpId: string, key: number) =>
-    setRetentionsBySupplier((prev) => ({
-      ...prev,
-      [tpId]: (prev[tpId] ?? []).filter((r) => r._key !== key),
-    }));
+  const updateRet = (slot: number, key: number, patch: Partial<RetRow>) =>
+    setCols((prev) =>
+      prev.map((c) =>
+        c.slot === slot
+          ? { ...c, retentions: c.retentions.map((r) => (r._key === key ? { ...r, ...patch } : r)) }
+          : c
+      )
+    );
+  const removeRet = (slot: number, key: number) =>
+    setCols((prev) =>
+      prev.map((c) =>
+        c.slot === slot ? { ...c, retentions: c.retentions.filter((r) => r._key !== key) } : c
+      )
+    );
+  const addRet = (slot: number) =>
+    setCols((prev) =>
+      prev.map((c) =>
+        c.slot === slot
+          ? { ...c, retentions: [...c.retentions, { _key: nextKey(), config_id: "", amount: 0, touched: false }] }
+          : c
+      )
+    );
 
-  // Solo cuentan proveedores QUE SIGUEN en el reparto — editar asignaciones
-  // puede sacar a uno y sus filas quedan huérfanas (no viajan ni validan)
-  const retentionProblems: string[] = [];
-  for (const s of supplierSummary) {
-    const rows = retentionsBySupplier[s.tpId] ?? [];
-    if (rows.length === 0) continue;
-    // Tres causas distintas, tres mensajes distintos. "Falta tarifa o monto"
-    // mandaba a revisar el selector incluso con la tarifa bien puesta: el monto
-    // sale $0 porque el % se calcula sobre un subtotal de $0, y el usuario no
-    // tenía cómo saberlo (pruebas Daniel).
-    if (rows.some((r) => !r.config_id)) {
-      retentionProblems.push(`Retenciones de ${s.name}: falta elegir la tarifa`);
-    } else if (s.total <= 0) {
-      retentionProblems.push(
-        `Retenciones de ${s.name}: su subtotal es $0, no hay base sobre la cual ` +
-        `retener — ponga los precios del reparto o quite la retención`
-      );
-    } else if (rows.some((r) => effRetAmount(r, s.total) <= 0)) {
-      retentionProblems.push(`Retenciones de ${s.name}: el monto quedó en $0`);
-    } else if (supplierRetTotal(s.tpId, s.total) >= s.total) {
-      retentionProblems.push(
-        `Retenciones de ${s.name} deben ser menores a su total (${fmtMoney(s.total)})`
-      );
+  // ---------- derivados ----------
+
+  const activeCells = (l: LineState) =>
+    Object.entries(l.cells)
+      .map(([s, c]) => ({ slot: Number(s), cell: c }))
+      .filter(({ slot, cell }) => cell.quantity > 0 && colBySlot.has(slot));
+
+  /** QA C7: cuantizado a ALLOC_Q (0,001), igual que el servidor. Sin esto
+   *  100,1 + 200,2 contra 300,3 da 5,7e-14 y la pantalla bloquea un
+   *  descuadre que el backend ve en 0. */
+  const q3 = (v: number) => Math.round(v * 1000) / 1000;
+  const lineAllocated = (l: LineState) =>
+    q3(activeCells(l).reduce((acc, { cell }) => acc + cell.quantity, 0));
+  const lineDisc = (l: LineState) => q3(l.weighed - lineAllocated(l));
+
+  const colStats = (col: PurchaseCol) => {
+    const rows = orderedLines
+      .map((l) => ({ l, c: l.cells[col.slot] }))
+      .filter(({ c }) => c && c.quantity > 0) as { l: LineState; c: CellState }[];
+    const subtotal = rows.reduce((acc, { l, c }) => acc + cellTotal(c, col, l), 0);
+    const iva = col.withIva
+      ? col.ivaTouched
+        ? col.ivaAmount
+        : Math.round(subtotal * IVA_RATE_PCT) / 100
+      : 0;
+    const ret = col.retentions.reduce((acc, r) => acc + effRetAmount(r, subtotal), 0);
+    const qtyByUnit: Record<string, number> = {};
+    for (const { l, c } of rows) {
+      qtyByUnit[l.material_unit] = q3((qtyByUnit[l.material_unit] ?? 0) + c.quantity);
     }
-  }
-  const totalRetAll = supplierSummary.reduce(
-    (acc, s) => acc + supplierRetTotal(s.tpId, s.total), 0);
-
-  // Marcar "pagar de contado" sin cuenta es un error silencioso: el bloque no
-  // viajaría y la compra nacería a crédito sin avisar
-  for (const s of supplierSummary) {
-    if (paymentBySupplier[s.tpId] !== undefined && !paymentBySupplier[s.tpId]) {
-      retentionProblems.push(`Pago de contado de ${s.name}: falta la cuenta`);
-    }
-  }
+    return {
+      rows,
+      subtotal,
+      iva,
+      ret,
+      neto: subtotal + iva - ret,
+      // Cantidad POR UNIDAD (#54): kg y unidades no se suman
+      qtyLabel: Object.entries(qtyByUnit).map(([u, q]) => formatWeight(q, u)).join(" + "),
+    };
+  };
+  const statsBySlot = new Map(cols.map((c) => [c.slot, colStats(c)]));
+  const activeCols = sortedCols.filter((c) => (statsBySlot.get(c.slot)?.rows.length ?? 0) > 0);
 
   // ---------- validación ----------
 
-  const lineProblems = (l: LineState): string | null => {
-    const active = activeAllocs(l);
-    // Q-15: "precio" es el unitario O el total, según el modo de la fila
-    const halfFilled = l.allocations.some(
-      (a) => (a.third_party_id || a.quantity > 0) && !(a.third_party_id && a.quantity > 0 && allocPriced(a))
-    );
-    if (halfFilled) return "Hay asignaciones incompletas (proveedor, cantidad y precio)";
-    const ids = active.map((a) => a.third_party_id);
-    if (new Set(ids).size !== ids.length) return "El mismo proveedor aparece dos veces";
-    if (active.length === 0 && !l.unallocated) {
-      return "Sin asignaciones — reparta o marque \"sin proveedor (intencional)\"";
+  const lineProblem = (l: LineState): string | null => {
+    for (const { slot, cell } of activeCells(l)) {
+      if (!cellPriced(cell, colBySlot.get(slot), l)) {
+        return `Falta el precio en la compra ${slot}`;
+      }
     }
-    if (lineDisc(l) !== 0 && l.refPrice <= 0) {
-      // El mensaje explica POR QUÉ hace falta (pruebas de usuario: marcar
-      // "sin proveedor" y seguir bloqueado sin saber la razón desconcierta)
-      const disc = lineDisc(l);
-      const qty = `${formatWeight(Math.abs(disc), l.material_unit)}`;
+    if (activeCells(l).length === 0 && l.isExtra) {
+      return "Reparta este material o quítelo";
+    }
+    if (activeCells(l).length === 0 && !l.unallocated) {
+      return "Sin asignar — reparta o marque \"sin proveedor (intencional)\"";
+    }
+    if (lineDisc(l) !== 0 && l.rowPrice <= 0) {
+      const qty = formatWeight(Math.abs(lineDisc(l)), l.material_unit);
       return l.unallocated
-        ? `Falta el precio de referencia: con él se valoran los ${qty} que entran como ganancia`
-        : `Falta el precio de referencia: con él se valora el descuadre de ${qty}`;
+        ? `Falta el precio: con él se valoran los ${qty} que entran como ganancia`
+        : `Falta el precio: con él se valora el descuadre de ${qty}`;
     }
     return null;
   };
 
-  const problems = lines.map((l) => lineProblems(l)).filter(Boolean) as string[];
+  const problems: string[] = [];
+  for (const l of orderedLines) {
+    const p = lineProblem(l);
+    if (p) problems.push(`${l.material_code || l.material_name}: ${p}`);
+  }
+  for (const col of activeCols) {
+    const st = statsBySlot.get(col.slot)!;
+    const who = col.third_party_id ? supplierName(col.third_party_id) : "";
+    const tag = `Compra ${col.slot}${who ? ` (${who})` : ""}`;
+    if (!col.third_party_id) problems.push(`${tag}: falta el proveedor`);
+    // Tres causas, tres mensajes: «falta tarifa o monto» mandaba a revisar
+    // el selector con la tarifa bien puesta (pruebas Daniel)
+    if (col.retentions.some((r) => !r.config_id)) {
+      problems.push(`${tag}: falta elegir la tarifa de una retención`);
+    } else if (col.retentions.some((r) => !configById.has(r.config_id))) {
+      problems.push(`${tag}: una retención usa una tarifa que ya no está activa — elíjala de nuevo`);
+    } else if (col.retentions.length > 0 && st.subtotal <= 0) {
+      problems.push(`${tag}: su subtotal es $0, no hay base sobre la cual retener`);
+    } else if (col.retentions.some((r) => effRetAmount(r, st.subtotal) <= 0)) {
+      problems.push(`${tag}: una retención quedó en $0`);
+    } else if (st.ret > 0 && st.ret >= st.subtotal + st.iva) {
+      problems.push(`${tag}: las retenciones deben ser menores al total (${fmtMoney(st.subtotal + st.iva)})`);
+    }
+    if (col.withIva && st.iva <= 0) problems.push(`${tag}: el IVA quedó en $0`);
+    // Contado sin cuenta es un error silencioso: nacería a crédito sin avisar
+    if (col.paymentAccount === "") problems.push(`${tag}: pago de contado sin cuenta`);
+  }
+
   const collectorValid = !collectorEnabled || (!!collectorTpId && effCollectorAmount > 0);
-  const canSubmit =
-    problems.length === 0 && retentionProblems.length === 0 &&
-    collectorValid && !liquidateOrder.isPending;
+  const canSubmit = problems.length === 0 && collectorValid && !liquidateOrder.isPending;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
-    const payloadLines: InboundLiquidateLine[] = lines.map((l) => ({
-      material_id: l.material_id,
-      reference_unit_price: l.refPrice > 0 ? l.refPrice : null,
-      unallocated_intentional: activeAllocs(l).length === 0 && l.unallocated,
-      allocations: activeAllocs(l).map((a) => ({
-        third_party_id: a.third_party_id,
-        quantity: a.quantity,
-        // Viaja UNO de los tres — mandar más de uno es 422 del backend
-        ...(a.price_per_kg != null
-          ? { price_per_kg: a.price_per_kg }
-          : a.total_price != null
-            ? { total_price: a.total_price }
-            : { unit_price: a.unit_price }),
-        invoice_number: invoiceBySupplier[a.third_party_id]?.trim() || null,
-      })),
-    }));
-    // Bloques por proveedor — solo los que siguen en el reparto y tienen filas
-    const supplierRetentionBlocks = supplierSummary
-      .map((s) => {
-        const rows = (retentionsBySupplier[s.tpId] ?? []).filter((r) => r.config_id);
-        if (rows.length === 0) return null;
-        return {
-          third_party_id: s.tpId,
-          retentions: rows.map((r) => {
-            const cfg = configById.get(r.config_id)!;
+    const payloadLines: InboundLiquidateLine[] = lines.map((l) => {
+      const act = activeCells(l);
+      return {
+        material_id: l.material_id,
+        reference_unit_price: l.rowPrice > 0 ? l.rowPrice : null,
+        unallocated_intentional: act.length === 0 && l.unallocated,
+        allocations: act.map(({ slot, cell }) => {
+          const col = colBySlot.get(slot)!;
+          const mode = cellMode(cell, col, l);
+          // Viaja UNO de los tres precios — mandar más de uno es 422
+          const price =
+            mode === "kg"
+              ? { price_per_kg: cell.price_per_kg }
+              : mode === "total"
+                ? { total_price: cell.total_price }
+                : { unit_price: cellUnit(cell, col, l) };
+          return {
+            third_party_id: col.third_party_id,
+            purchase_slot: slot,
+            quantity: cell.quantity,
+            ...price,
+            invoice_number: col.invoice.trim() || null,
+          };
+        }),
+      };
+    });
+    const retentionBlocks: InboundSupplierRetentions[] = [];
+    const paymentBlocks: InboundSupplierPayment[] = [];
+    const taxBlocks: InboundPurchaseTaxes[] = [];
+    for (const col of activeCols) {
+      const st = statsBySlot.get(col.slot)!;
+      const rows = col.retentions.flatMap((r) => {
+        const cfg = configById.get(r.config_id);
+        return cfg ? [{ r, cfg }] : [];
+      });
+      if (rows.length > 0) {
+        retentionBlocks.push({
+          purchase_slot: col.slot,
+          third_party_id: col.third_party_id,
+          retentions: rows.map(({ r, cfg }) => {
             return {
               retention_type: cfg.retention_type,
-              // CC-013 C2: la tarifa usada, para que el servidor pueda rechazar
-              // una `base_kind='iva'`. Sin esto solo puede juzgar lo que ve.
+              // CC-013 C2: la tarifa usada, para que el servidor rechace una
+              // `base_kind='iva'`
               config_id: cfg.config_id,
-              ...(cfg.retention_type === "ica" && cfg.municipality
-                ? { municipality: cfg.municipality }
-                : {}),
-              amount: effRetAmount(r, s.total),
-              // Auditoría del precálculo ofrecido (F1: el backend los persiste)
-              ...(cfg.rate_pct != null ? { rate: cfg.rate_pct, base: s.total } : {}),
+              municipality: cfg.retention_type === "ica" ? cfg.municipality ?? null : undefined,
+              amount: effRetAmount(r, st.subtotal),
+              // Auditoría del precálculo (F1: el backend los persiste)
+              rate: cfg.rate_pct ?? undefined,
+              base: cfg.rate_pct != null ? st.subtotal : undefined,
             };
           }),
-        };
-      })
-      .filter(Boolean) as InboundSupplierRetentions[];
-    // Pago de contado: igual que arriba, solo proveedores vigentes con cuenta
-    const supplierPaymentBlocks = supplierSummary
-      .filter((s) => paymentBySupplier[s.tpId])
-      .map((s) => ({ third_party_id: s.tpId, account_id: paymentBySupplier[s.tpId] }));
+        });
+      }
+      if (col.paymentAccount) {
+        paymentBlocks.push({
+          purchase_slot: col.slot,
+          third_party_id: col.third_party_id,
+          account_id: col.paymentAccount,
+        });
+      }
+      if (col.withIva && st.iva > 0) {
+        taxBlocks.push({
+          purchase_slot: col.slot,
+          third_party_id: col.third_party_id,
+          taxes: [{ tax_type: "iva", rate: IVA_RATE_PCT, base_kind: "subtotal", amount: st.iva }],
+        });
+      }
+    }
     liquidateOrder.mutate(
       {
         id: order.id,
@@ -878,32 +1112,465 @@ export default function InboundLiquidatePage() {
             collectorEnabled && collectorTpId && effCollectorAmount > 0
               ? { third_party_id: collectorTpId, amount: effCollectorAmount }
               : null,
-          // Ausente (no []) sin bloques — data-gate D9
-          ...(supplierRetentionBlocks.length > 0
-            ? { supplier_retentions: supplierRetentionBlocks }
-            : {}),
-          ...(supplierPaymentBlocks.length > 0
-            ? { supplier_payments: supplierPaymentBlocks }
-            : {}),
+          // Ausentes (no []) sin bloques — data-gate D9
+          supplier_retentions: retentionBlocks.length > 0 ? retentionBlocks : undefined,
+          supplier_payments: paymentBlocks.length > 0 ? paymentBlocks : undefined,
+          purchase_taxes: taxBlocks.length > 0 ? taxBlocks : undefined,
         },
       },
       {
-        onSuccess: () => navigate(buildRoute(ROUTES.INBOUND_DETAIL, { id: order.id })),
+        onSuccess: () => {
+          if (draftKey) removeDraft(draftKey);
+          navigate(buildRoute(ROUTES.INBOUND_DETAIL, { id: order.id }));
+        },
       }
     );
   };
+
+  // ---------- piezas de render (funciones, no componentes: no remontan) ----------
+
+  const discInfo = (l: LineState) => {
+    const disc = lineDisc(l);
+    const pct = l.weighed > 0 ? Math.abs(disc) / l.weighed : null;
+    const state = disc === 0 ? "ok" : pct != null && pct <= tolerance ? "within" : "out";
+    return { disc, pct, state };
+  };
+
+  const renderDisc = (l: LineState) => {
+    const { disc, pct, state } = discInfo(l);
+    return (
+      <div className="text-xs tabular-nums space-y-0.5">
+        <div className="text-slate-500">
+          Repartido{" "}
+          <span className="font-semibold text-slate-700">
+            {formatWeight(lineAllocated(l), l.material_unit)}
+          </span>
+        </div>
+        <div
+          className={cn(
+            "font-semibold",
+            state === "ok" && "text-emerald-700",
+            state === "within" && "text-amber-700",
+            state === "out" && "text-rose-700"
+          )}
+          title={
+            disc === 0
+              ? "Cuadre exacto — sin ajuste de inventario"
+              : disc > 0
+                ? "Sobrante: entra al inventario como ganancia al precio de la fila"
+                : "Faltante: sale del inventario como pérdida al precio de la fila"
+          }
+        >
+          {disc === 0 ? "Cuadra" : `${disc > 0 ? "+" : ""}${formatWeight(disc, l.material_unit)}`}
+          {pct != null && disc !== 0 && (
+            <span className="font-normal"> ({(pct * 100).toFixed(1)}%{state === "out" ? ", fuera de tolerancia" : ""})</span>
+          )}
+        </div>
+        {activeCells(l).length === 0 && !l.isExtra && (
+          <label className="flex items-center gap-1.5 text-slate-600 cursor-pointer font-normal">
+            <Checkbox
+              checked={l.unallocated}
+              onCheckedChange={(v) => updateLine(l._key, { unallocated: v === true })}
+            />
+            Sin proveedor (intencional)
+          </label>
+        )}
+      </div>
+    );
+  };
+
+  const renderMaterial = (l: LineState) => {
+    const problem = lineProblem(l);
+    return (
+      <div className="space-y-0.5">
+        <div className="font-semibold text-slate-800">{l.material_code}</div>
+        <div className="text-xs text-slate-500 leading-tight">{l.material_name}</div>
+        {l.isExtra && (
+          <div className="text-[11px] text-amber-600">
+            no pesado (entra como faltante) ·{" "}
+            <button type="button" className="underline hover:text-red-600" onClick={() => removeLine(l._key)}>
+              Quitar
+            </button>
+          </div>
+        )}
+        {problem && <div className="text-[11px] text-rose-600 leading-tight">{problem}</div>}
+      </div>
+    );
+  };
+
+  const renderWeighed = (l: LineState) => (
+    <div className="text-xs tabular-nums">
+      <div className="flex items-center gap-1 font-semibold text-slate-700 whitespace-nowrap">
+        <Scale className="h-3.5 w-3.5 text-slate-400" />
+        {formatWeight(l.weighed, l.material_unit)}
+      </div>
+      {/* Q-13: el peso certificado, solo cuando dice algo que la cantidad no dice */}
+      {l.weightKg != null && (l.material_unit !== "kg" || l.weightKg !== l.weighed) && (
+        <div className="text-indigo-700 whitespace-nowrap">Báscula {formatWeight(l.weightKg, "kg")}</div>
+      )}
+    </div>
+  );
+
+  const renderRowPrice = (l: LineState) => {
+    const needed = lineDisc(l) !== 0 || activeCells(l).length > 0;
+    return (
+      <MoneyInput
+        value={l.rowPrice}
+        // QA C5: MoneyInput llama onChange en CADA blur; sin el guard, pasar
+        // con Tab marcaba la fila como tocada sin haber cambiado nada
+        onChange={(v) => v !== l.rowPrice && updateLine(l._key, { rowPrice: v, rowTouched: true })}
+        decimals={2}
+        placeholder="Precio"
+        className={cn("h-8 text-sm", needed && l.rowPrice <= 0 && "border-red-300")}
+      />
+    );
+  };
+
+  const renderCell = (l: LineState, col: PurchaseCol) => {
+    const c = l.cells[col.slot];
+    const qty = c?.quantity ?? 0;
+    const isEditing = editing?.lineKey === l._key && editing.slot === col.slot;
+    const mode = c ? cellMode(c, col, l) : "row";
+    const own = c ? ownMode(c) : null;
+    const priced = c ? cellPriced(c, col, l) : false;
+    return (
+      <div className="space-y-1">
+        <MoneyInput
+          value={qty}
+          // C5: un blur sin cambio no crea una celda en 0 (borrador fantasma)
+          onChange={(v) => v !== qty && setCell(l._key, col.slot, { quantity: v })}
+          // 3 decimales: la escala con la que se guarda (ALLOC_Q)
+          decimals={3}
+          placeholder="—"
+          className="h-8 text-sm"
+        />
+        {c && qty > 0 && (
+          <button
+            type="button"
+            onClick={() => (isEditing ? closeEditor() : setEditing({ lineKey: l._key, slot: col.slot }))}
+            className={cn(
+              "block w-full text-left text-[11px] leading-tight tabular-nums hover:underline",
+              priced ? MODE_COLOR[mode] : "text-rose-600"
+            )}
+          >
+            {!priced
+              ? "falta precio"
+              : mode === "kg"
+                ? `${formatWeight(cellWeight(c, l), "kg")} × ${fmtMoney(c.price_per_kg ?? 0)} = ${fmtMoney(cellTotal(c, col, l))}`
+                : mode === "total"
+                  ? `${fmtMoney(c.total_price ?? 0)} → ${fmtMoney(cellUnit(c, col, l))} c/u`
+                  : `${fmtMoney(cellUnit(c, col, l))} c/u${mode === "list" ? " · lista" : mode === "unit" ? " · propio" : ""}`}
+          </button>
+        )}
+        {isEditing && c && (
+          <div className="rounded-md border border-indigo-200 bg-indigo-50/60 p-2 space-y-1.5">
+            <div className="flex flex-wrap gap-1">
+              {(["unit", "total", "kg"] as OwnMode[])
+                .filter((m) => m !== "kg" || canKg(l))
+                .map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => switchMode(l, col, m)}
+                    className={cn(
+                      "px-1.5 py-0.5 rounded border text-[11px]",
+                      own === m
+                        ? "bg-indigo-600 border-indigo-600 text-white"
+                        : "bg-white border-slate-200 text-slate-600"
+                    )}
+                  >
+                    {MODE_LABEL[m]}
+                  </button>
+                ))}
+            </div>
+            {own && (
+              <MoneyInput
+                value={
+                  own === "kg" ? c.price_per_kg ?? 0 : own === "total" ? c.total_price ?? 0 : c.unit_price ?? 0
+                }
+                onChange={(v) => {
+                  const cur = own === "kg" ? c.price_per_kg : own === "total" ? c.total_price : c.unit_price;
+                  if (v === (cur ?? 0)) return; // C5
+                  setCell(
+                    l._key,
+                    col.slot,
+                    own === "kg" ? { price_per_kg: v } : own === "total" ? { total_price: v } : { unit_price: v }
+                  );
+                }}
+                decimals={2}
+                placeholder={MODE_LABEL[own]}
+                className="h-8 text-sm bg-white"
+              />
+            )}
+            {!own && (
+              <p className="text-[11px] text-slate-500">
+                Usa el precio {mode === "list" ? "de la lista del proveedor" : "de la fila"}. Elija un
+                modo para ponerle uno propio.
+              </p>
+            )}
+            {c.before && <p className="text-[11px] text-slate-500">antes: {c.before}</p>}
+            {own === "total" && priced && Math.abs(cellTotal(c, col, l) - (c.total_price ?? 0)) >= 0.005 && (
+              <p className="text-[11px] text-amber-600">
+                La compra suma {fmtMoney(cellTotal(c, col, l))}
+              </p>
+            )}
+            <div className="flex items-center justify-between gap-2">
+              {own ? (
+                <button
+                  type="button"
+                  className="text-[11px] text-indigo-600 hover:underline"
+                  onClick={() => clearOwnPrice(l, col.slot)}
+                >
+                  Quitar precio propio
+                </button>
+              ) : (
+                <span />
+              )}
+              <button
+                type="button"
+                className="text-[11px] font-medium text-slate-600 hover:underline"
+                onClick={closeEditor}
+              >
+                Listo
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderColHeader = (col: PurchaseCol) => {
+    const twin = cols.find(
+      (o) => o.slot !== col.slot && o.third_party_id && o.third_party_id === col.third_party_id
+    );
+    return (
+      <div className="space-y-1.5 text-left font-normal normal-case tracking-normal">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Compra {col.slot}
+          </span>
+          <button
+            type="button"
+            onClick={() => removeCol(col.slot)}
+            className="text-slate-400 hover:text-red-500"
+            title={`Quitar la compra ${col.slot}`}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <EntitySelect
+          value={col.third_party_id}
+          onChange={(v) => setColSupplier(col.slot, v)}
+          options={supplierOptions}
+          placeholder="Proveedor..."
+        />
+        <button
+          type="button"
+          onClick={() => setCreateFor(col.slot)}
+          className="flex items-center gap-1 text-[11px] text-indigo-600 hover:underline"
+        >
+          <UserPlus className="h-3 w-3" />
+          Crear proveedor
+        </button>
+        {twin && (
+          <p className="text-[11px] text-slate-500">También en la compra {twin.slot} (otra recolección)</p>
+        )}
+        <Input
+          value={col.invoice}
+          onChange={(e) => updateCol(col.slot, { invoice: e.target.value })}
+          maxLength={50}
+          className="h-8 text-sm"
+          placeholder="N° factura (opcional)"
+        />
+      </div>
+    );
+  };
+
+  const renderFooter = (col: PurchaseCol) => {
+    const st = statsBySlot.get(col.slot)!;
+    if (st.rows.length === 0) {
+      return <p className="text-xs text-slate-400">Sin materiales — no nace compra.</p>;
+    }
+    const suggestedIva = Math.round(st.subtotal * IVA_RATE_PCT) / 100;
+    return (
+      <div className="space-y-2 text-xs">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-slate-500">{st.qtyLabel}</span>
+          {canViewPrices && (
+            <span className="font-semibold tabular-nums text-slate-800">{fmtMoney(st.subtotal)}</span>
+          )}
+        </div>
+
+        {/* IVA (§4): a la entidad [Impuestos] IVA; el proveedor queda con +IVA */}
+        <div className="space-y-1 border-t border-slate-100 pt-1.5">
+          <label className="flex items-center gap-1.5 text-slate-600 cursor-pointer">
+            <Checkbox
+              checked={col.withIva}
+              onCheckedChange={(v) => updateCol(col.slot, { withIva: v === true, ivaTouched: false, ivaAmount: 0 })}
+            />
+            Con IVA ({IVA_RATE_PCT}%)
+          </label>
+          {col.withIva && (
+            <>
+              <MoneyInput
+                value={st.iva}
+                // C5: solo un valor DISTINTO congela el IVA; un Tab no
+                onChange={(v) => v !== st.iva && updateCol(col.slot, { ivaAmount: v, ivaTouched: true })}
+                decimals={2}
+                className={cn("h-8 text-sm", st.iva <= 0 && "border-red-300")}
+              />
+              {col.ivaTouched && st.iva !== suggestedIva && (
+                <button
+                  type="button"
+                  className="text-[11px] text-indigo-600 hover:underline"
+                  onClick={() => updateCol(col.slot, { ivaTouched: false, ivaAmount: 0 })}
+                >
+                  Sugerido: {fmtMoney(suggestedIva)}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Retenciones OPCIONALES de la compra (addendum #93) */}
+        <div className="space-y-1 border-t border-slate-100 pt-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500">Retenciones</span>
+            <button type="button" className="text-indigo-600 hover:underline" onClick={() => addRet(col.slot)}>
+              + Retención
+            </button>
+          </div>
+          {col.retentions.map((r) => (
+            <div key={r._key} className="space-y-1">
+              <div className="flex items-center gap-1">
+                <Select
+                  value={r.config_id || undefined}
+                  onValueChange={(v) => updateRet(col.slot, r._key, { config_id: v, touched: false })}
+                >
+                  <SelectTrigger className={cn("h-8 text-xs flex-1", !r.config_id && "border-red-300")}>
+                    <SelectValue placeholder="Tarifa..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* 🔴 CC-013 C2: una tarifa «sobre el IVA» no se precalcula
+                        acá (% × subtotal); el servidor la rechaza. Q-68 abierta. */}
+                    {retentionConfigs
+                      .filter((cfg) => cfg.base_kind !== "iva" || cfg.config_id === r.config_id)
+                      .map((cfg) => (
+                        <SelectItem key={cfg.config_id} value={cfg.config_id as string}>
+                          {retentionRowLabel(cfg)} ({cfg.rate_pct}%)
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <button
+                  type="button"
+                  onClick={() => removeRet(col.slot, r._key)}
+                  className="text-slate-400 hover:text-red-500"
+                  title="Quitar retención"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <MoneyInput
+                value={effRetAmount(r, st.subtotal)}
+                onChange={(v) =>
+                  v !== effRetAmount(r, st.subtotal) && updateRet(col.slot, r._key, { amount: v, touched: true })
+                }
+                decimals={2}
+                className={cn("h-8 text-sm", st.subtotal > 0 && effRetAmount(r, st.subtotal) <= 0 && "border-red-300")}
+              />
+              {r.config_id && r.touched && effRetAmount(r, st.subtotal) !== suggestedRet(r.config_id, st.subtotal) && (
+                <button
+                  type="button"
+                  className="text-[11px] text-indigo-600 hover:underline"
+                  onClick={() => updateRet(col.slot, r._key, { touched: false, amount: 0 })}
+                >
+                  Sugerido: {formatCurrency(suggestedRet(r.config_id, st.subtotal))} (
+                  {configById.get(r.config_id)?.rate_pct}%)
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Pago de contado OPCIONAL (#20 vía canal único). Sin marcar = crédito */}
+        <div className="space-y-1 border-t border-slate-100 pt-1.5">
+          <label className="flex items-center gap-1.5 text-slate-600 cursor-pointer">
+            <Checkbox
+              checked={col.paymentAccount !== null}
+              onCheckedChange={(v) =>
+                updateCol(col.slot, { paymentAccount: v === true ? accounts[0]?.id ?? "" : null })
+              }
+            />
+            Pagar de contado
+          </label>
+          {col.paymentAccount !== null && (
+            <Select
+              value={col.paymentAccount || undefined}
+              onValueChange={(v) => updateCol(col.slot, { paymentAccount: v })}
+            >
+              <SelectTrigger className={cn("h-8 text-xs", !col.paymentAccount && "border-red-300")}>
+                <SelectValue placeholder="Cuenta..." />
+              </SelectTrigger>
+              <SelectContent>
+                {accounts.map((acc) => (
+                  <SelectItem key={acc.id} value={acc.id}>
+                    {acc.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {canViewPrices && (st.iva > 0 || st.ret > 0) && (
+          <div className="flex items-baseline justify-between gap-2 border-t border-slate-100 pt-1.5">
+            <span className="text-slate-500">
+              {col.paymentAccount !== null ? "Sale de la cuenta" : "A pagar"}
+            </span>
+            <span className="font-semibold tabular-nums text-slate-800">{fmtMoney(st.neto)}</span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const anyAllocated = lines.some((l) => activeCells(l).length > 0);
+  const totalAll = activeCols.reduce((acc, c) => acc + (statsBySlot.get(c.slot)?.subtotal ?? 0), 0);
+  const ivaAll = activeCols.reduce((acc, c) => acc + (statsBySlot.get(c.slot)?.iva ?? 0), 0);
+  const retAll = activeCols.reduce((acc, c) => acc + (statsBySlot.get(c.slot)?.ret ?? 0), 0);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={`Liquidar Entrada #${order.order_number}`}
-        description="Reparta cada material entre sus proveedores — lo pesado es la verdad física, el reparto es la comercial"
+        description="Cada columna es una compra: elija el proveedor y ponga cuánto se le compró de cada material"
       >
         <Button variant="outline" onClick={() => navigate(backTo)}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Volver
         </Button>
       </PageHeader>
+
+      {recoveredAt !== null && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <span>Se recuperó el reparto sin liquidar ({formatDateTime(new Date(recoveredAt).toISOString())}).</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="bg-white w-full sm:w-auto"
+            onClick={() => {
+              if (draftKey) removeDraft(draftKey);
+              setRecoveredAt(null);
+              setEditing(null);
+              setInitialized(false);
+            }}
+          >
+            Descartar borrador
+          </Button>
+        </div>
+      )}
 
       {/* Ítem 2: el atajo del caso común — todo el camión de un proveedor */}
       <Card className="shadow-sm border-indigo-100 bg-indigo-50/40">
@@ -916,7 +1583,7 @@ export default function InboundLiquidatePage() {
               <EntitySelect
                 value={bulkSupplier}
                 onChange={setBulkSupplier}
-                options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+                options={supplierOptions}
                 placeholder="Proveedor..."
               />
             </div>
@@ -930,245 +1597,137 @@ export default function InboundLiquidatePage() {
             </Button>
           </div>
           <p className="text-xs text-slate-500 mt-1.5">
-            Carga cada material con lo pesado; después puede ajustar línea por línea.
-            {lines.some((l) => activeAllocs(l).length > 0) && (
-              <span className="text-amber-600"> Reemplaza el reparto actual.</span>
-            )}
+            Una sola compra con todo lo pesado; después puede ajustar celda por celda.
+            {anyAllocated && <span className="text-amber-600"> Reemplaza el reparto actual.</span>}
           </p>
         </CardContent>
       </Card>
 
-      {/* Lineas con reparto */}
-      {orderedLines.map((l) => {
-        const allocated = lineAllocated(l);
-        const disc = lineDisc(l);
-        const pct = l.weighed > 0 ? Math.abs(disc) / l.weighed : null;
-        const discState =
-          disc === 0 ? "ok" : pct != null && pct <= tolerance ? "within" : "out";
-        const problem = lineProblems(l);
-        return (
-          <Card key={l._key} className="shadow-sm">
-            <CardHeader className="pb-2">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <CardTitle className="text-base">
-                  <span className="font-semibold">{l.material_code}</span>
-                  <span className="text-slate-500 font-normal"> — {l.material_name}</span>
-                  {l.isExtra && (
-                    <span className="ml-2 text-xs font-normal text-amber-600">
-                      no pesado en la entrada (entra con faltante completo)
-                    </span>
-                  )}
-                </CardTitle>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Scale className="h-4 w-4 text-slate-400" />
-                    <span className="text-slate-500">Pesado:</span>
-                    <span className="font-semibold tabular-nums">
-                      {formatWeight(l.weighed, l.material_unit)}
-                    </span>
+      {/* Escritorio: la hoja de Johana (Opción B: overflow + columna sticky) */}
+      <Card className="shadow-sm hidden md:block">
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm border-separate border-spacing-0">
+              <thead>
+                <tr className="align-top">
+                  <th className="sticky left-0 z-20 bg-white border-b border-r border-slate-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 min-w-[11rem]">
+                    Material
+                  </th>
+                  <th className="border-b border-slate-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 min-w-[7rem]">
+                    Pesado
+                  </th>
+                  <th className="border-b border-slate-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 min-w-[8rem]">
+                    Precio
+                  </th>
+                  <th className="border-b border-r border-slate-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 min-w-[9rem]">
+                    Descuadre
+                  </th>
+                  {sortedCols.map((col) => (
+                    <th key={col.slot} className="border-b border-slate-200 bg-slate-50/60 px-3 py-2 min-w-[13rem] max-w-[15rem]">
+                      {renderColHeader(col)}
+                    </th>
+                  ))}
+                  <th className="border-b border-slate-200 px-3 py-2 align-top">
+                    <Button variant="outline" size="sm" onClick={addCol} className="whitespace-nowrap">
+                      <Plus className="h-4 w-4 mr-1" />
+                      Compra
+                    </Button>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {orderedLines.map((l) => (
+                  <tr key={l._key} className="align-top">
+                    <td className="sticky left-0 z-10 bg-white border-b border-r border-slate-100 px-3 py-2">
+                      {renderMaterial(l)}
+                    </td>
+                    <td className="border-b border-slate-100 px-3 py-2">{renderWeighed(l)}</td>
+                    <td className="border-b border-slate-100 px-3 py-2">{renderRowPrice(l)}</td>
+                    <td className="border-b border-r border-slate-100 px-3 py-2">{renderDisc(l)}</td>
+                    {sortedCols.map((col) => (
+                      <td key={col.slot} className="border-b border-slate-100 bg-slate-50/30 px-3 py-2">
+                        {renderCell(l, col)}
+                      </td>
+                    ))}
+                    <td className="border-b border-slate-100" />
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="align-top">
+                  {/* QA C8: pegajosa SOLO la celda del ancho de Material, como en
+                      el cuerpo; las otras tres columnas van en una celda normal */}
+                  <td className="sticky left-0 z-10 bg-white border-r border-slate-100 px-3 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Cierre de cada compra
+                  </td>
+                  <td colSpan={3} className="border-r border-slate-100" />
+                  {sortedCols.map((col) => (
+                    <td key={col.slot} className="bg-slate-50/60 px-3 py-3">
+                      {renderFooter(col)}
+                    </td>
+                  ))}
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Celular: la matriz no cabe en 390 px — materiales y una tarjeta por compra */}
+      <div className="md:hidden space-y-4">
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+              Materiales
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {orderedLines.map((l) => (
+              <div key={l._key} className="rounded-lg border border-slate-200 p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  {renderMaterial(l)}
+                  {renderWeighed(l)}
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  <div>
+                    <Label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Precio de la fila
+                    </Label>
+                    {renderRowPrice(l)}
                   </div>
-                  {/* Q-13: el peso de báscula que certificó el revisor. Se
-                      capturaba desde E2 y esta pantalla nunca lo mostró — es
-                      exactamente lo que Hugo preguntó en la reunión. Solo
-                      aparece cuando dice algo que la cantidad no dice ya. */}
-                  {l.weightKg != null &&
-                    (l.material_unit !== "kg" || l.weightKg !== l.weighed) && (
-                      <div className="flex items-center gap-2 sm:border-l sm:pl-3">
-                        <span className="text-slate-500">Báscula:</span>
-                        <span className="font-semibold tabular-nums text-indigo-700">
-                          {formatWeight(l.weightKg, "kg")}
-                        </span>
-                      </div>
-                    )}
+                  {renderDisc(l)}
                 </div>
               </div>
-            </CardHeader>
+            ))}
+          </CardContent>
+        </Card>
+
+        {sortedCols.map((col) => (
+          <Card key={col.slot} className="shadow-sm">
+            <CardHeader className="pb-2">{renderColHeader(col)}</CardHeader>
             <CardContent className="space-y-3">
-              {/* Asignaciones */}
-              {l.allocations.map((a) => (
-                <div key={a._key} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
-                  <div className="md:col-span-4">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Proveedor</Label>
-                    <EntitySelect
-                      value={a.third_party_id}
-                      onChange={(v) => updateAlloc(l._key, a._key, { third_party_id: v })}
-                      options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
-                      placeholder="Proveedor..."
-                    />
+              {orderedLines.map((l) => (
+                <div key={l._key} className="space-y-1">
+                  <div className="text-xs text-slate-600">
+                    <span className="font-semibold">{l.material_code}</span>
+                    <span className="text-slate-400"> · {formatWeight(l.weighed, l.material_unit)} pesado</span>
                   </div>
-                  <div className="md:col-span-3">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                      Cantidad ({l.material_unit})
-                    </Label>
-                    <MoneyInput
-                      value={a.quantity}
-                      onChange={(v) => updateAlloc(l._key, a._key, { quantity: v })}
-                      /* 3 decimales: es la escala real con la que se guarda
-                         (ALLOC_Q) y con la que entra al inventario — un 4º
-                         decimal se perdía en silencio */
-                      decimals={3}
-                      placeholder="0"
-                    />
-                  </div>
-                  {/* Tres modos por asignación (cada proveedor negocia su
-                      precio): unitario, valor total, o precio por kg. El
-                      unitario siempre es el que llega al inventario — los
-                      otros dos son formas de llegar a él. */}
-                  <div className="md:col-span-4">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                        {MODE_LABEL[allocMode(a)]}
-                      </Label>
-                      <button
-                        type="button"
-                        className="text-[11px] text-indigo-600 hover:underline"
-                        onClick={() => toggleAllocMode(l._key, a._key)}
-                      >
-                        cambiar
-                      </button>
-                    </div>
-                    <MoneyInput
-                      value={
-                        a.price_per_kg != null
-                          ? a.price_per_kg
-                          : a.total_price != null
-                            ? a.total_price
-                            : a.unit_price
-                      }
-                      onChange={(v) =>
-                        updateAlloc(
-                          l._key,
-                          a._key,
-                          a.price_per_kg != null
-                            ? { price_per_kg: v }
-                            : a.total_price != null
-                              ? { total_price: v }
-                              : { unit_price: v }
-                        )
-                      }
-                      decimals={2}
-                      placeholder="0"
-                    />
-                    {a.quantity > 0 && allocPriced(a) && (
-                      <p
-                        className={cn(
-                          "text-xs mt-0.5 tabular-nums",
-                          a.total_price != null &&
-                            Math.abs(effAllocTotal(a, l) - a.total_price) >= 0.005
-                            ? "text-amber-600"
-                            : "text-slate-400"
-                        )}
-                      >
-                        {a.price_per_kg != null
-                          ? // La trazabilidad que pidió Hugo, a la vista antes
-                            // de guardar: cuántos kg se le pagan a ESTE
-                            // proveedor y en qué costo unitario aterrizan
-                            `${formatWeight(allocWeight(a, l), "kg")} × ${fmtMoney(
-                              a.price_per_kg
-                            )} = ${fmtMoney(effAllocTotal(a, l))} · ${fmtMoney(
-                              effUnitPrice(a, l)
-                            )} c/u`
-                          : a.total_price != null
-                            ? // D8: el total que realmente queda. Con el unitario a
-                              // 8 decimales vuelve al digitado; si alguna vez
-                              // difiere, el ámbar de arriba lo pinta
-                              `${fmtMoney(effUnitPrice(a, l))} c/u → ${fmtMoney(effAllocTotal(a, l))}`
-                            : `Total ${fmtMoney(effAllocTotal(a, l))}`}
-                      </p>
-                    )}
-                  </div>
-                  <div className="md:col-span-1 flex justify-end">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-slate-400 hover:text-red-500"
-                      onClick={() => removeAlloc(l._key, a._key)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  {renderCell(l, col)}
                 </div>
               ))}
-
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => addAlloc(l._key)}>
-                  <Plus className="h-4 w-4 mr-1" />
-                  Agregar proveedor
-                </Button>
-                {activeAllocs(l).length === 0 && (
-                  <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-                    <Checkbox
-                      checked={l.unallocated}
-                      onCheckedChange={(v) => updateLine(l._key, { unallocated: v === true })}
-                    />
-                    Sin proveedor (intencional) — entra completo como {disc >= 0 ? "ganancia" : "pérdida"}
-                  </label>
-                )}
-              </div>
-
-              {/* Descuadre en vivo + precio de referencia */}
-              <div
-                className={cn(
-                  "rounded-lg border p-3 flex flex-col sm:flex-row sm:items-center gap-3",
-                  discState === "ok" && "border-emerald-200 bg-emerald-50",
-                  discState === "within" && "border-amber-200 bg-amber-50",
-                  discState === "out" && "border-rose-200 bg-rose-50"
-                )}
-              >
-                <div className="flex-1 text-sm">
-                  <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    <span>
-                      Repartido:{" "}
-                      <span className="font-semibold tabular-nums">
-                        {formatWeight(allocated, l.material_unit)}
-                      </span>
-                    </span>
-                    <span>
-                      Descuadre:{" "}
-                      <span
-                        className={cn(
-                          "font-semibold tabular-nums",
-                          disc === 0 ? "text-emerald-700" : disc > 0 ? "text-emerald-700" : "text-rose-700"
-                        )}
-                      >
-                        {disc > 0 ? "+" : ""}
-                        {formatWeight(disc, l.material_unit)}
-                        {pct != null && disc !== 0 && (
-                          <span className="font-normal"> ({(pct * 100).toFixed(1)}%)</span>
-                        )}
-                      </span>
-                    </span>
-                  </div>
-                  <p className="text-xs mt-0.5 text-slate-500">
-                    {disc === 0
-                      ? "Cuadre exacto — sin ajuste de inventario."
-                      : disc > 0
-                        ? `Sobrante: entra al inventario como ganancia a $referencia${discState === "out" ? " — FUERA de tolerancia" : " (dentro de tolerancia)"}.`
-                        : `Faltante: sale del inventario como pérdida a $referencia${discState === "out" ? " — FUERA de tolerancia" : " (dentro de tolerancia)"}.`}
-                  </p>
-                </div>
-                {(disc !== 0 || l.refPrice > 0) && (
-                  <div className="w-full sm:w-44">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                      Precio de referencia {disc !== 0 ? "*" : ""}
-                    </Label>
-                    <MoneyInput
-                      value={l.refPrice}
-                      onChange={(v) => updateLine(l._key, { refPrice: v, refTouched: true })}
-                      decimals={2}
-                      placeholder="0"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {problem && <p className="text-xs text-rose-600">{problem}</p>}
+              <div className="border-t border-slate-200 pt-2">{renderFooter(col)}</div>
             </CardContent>
           </Card>
-        );
-      })}
+        ))}
 
-      {/* D16: material reportado por proveedores que la bascula no vio */}
+        <Button variant="outline" onClick={addCol} className="w-full">
+          <Plus className="h-4 w-4 mr-1" />
+          Agregar compra
+        </Button>
+      </div>
+
+      {/* D16: material reportado por proveedores que la báscula no vio */}
       <Card className="shadow-sm border-dashed">
         <CardContent className="pt-4">
           <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
@@ -1189,7 +1748,7 @@ export default function InboundLiquidatePage() {
             </Button>
           </div>
           <p className="text-xs text-slate-400 mt-1.5">
-            La línea nace con pesado 0 — todo lo repartido queda como faltante valorado al precio de referencia.
+            La fila nace con pesado 0 — todo lo repartido queda como faltante valorado al precio de la fila.
           </p>
         </CardContent>
       </Card>
@@ -1226,6 +1785,7 @@ export default function InboundLiquidatePage() {
                 <MoneyInput
                   value={effCollectorAmount}
                   onChange={(v) => {
+                    if (v === effCollectorAmount) return; // C5
                     setCollectorAmount(v);
                     setCollectorTouched(true);
                   }}
@@ -1260,239 +1820,32 @@ export default function InboundLiquidatePage() {
         </CardContent>
       </Card>
 
-      {/* Resumen por proveedor */}
-      {supplierSummary.length > 0 && (
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
-              Compras que van a nacer ({supplierSummary.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {supplierSummary.map((s) => (
-                <div key={s.tpId} className="rounded-lg border border-slate-200 p-3 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 text-sm">
-                    <span className="font-medium truncate">{s.name}</span>
-                    {canViewPrices && (
-                      <span className="font-semibold tabular-nums">{fmtMoney(s.total)}</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-slate-500 tabular-nums">{s.qtyLabel} repartidos</div>
-
-                  {/* Detalle por material — verificar QUÉ se le compra a cada
-                      uno sin volver a leer el reparto arriba */}
-                  <ul className="space-y-0.5 border-t border-slate-100 pt-1.5">
-                    {s.materials.map((m, i) => (
-                      <li
-                        key={`${m.code}-${i}`}
-                        className="flex items-baseline justify-between gap-2 text-xs"
-                      >
-                        <span className="truncate text-slate-600">{m.code}</span>
-                        <span className="tabular-nums text-slate-500 shrink-0">
-                          {formatWeight(m.qty, m.unit)}
-                          {canViewPrices && ` × ${fmtMoney(m.price)}`}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-
-                  <div>
-                    <Label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      N° Factura proveedor
-                    </Label>
-                    <Input
-                      value={invoiceBySupplier[s.tpId] ?? ""}
-                      onChange={(e) =>
-                        setInvoiceBySupplier((prev) => ({ ...prev, [s.tpId]: e.target.value }))
-                      }
-                      maxLength={50}
-                      className="h-8 text-sm"
-                      placeholder="Opcional"
-                    />
-                  </div>
-
-                  {/* Retenciones OPCIONALES del proveedor (addendum #93) */}
-                  <div className="space-y-1.5 pt-1 border-t border-slate-100">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        Retenciones
-                      </Label>
-                      <button
-                        type="button"
-                        className="text-xs text-indigo-600 hover:underline"
-                        onClick={() =>
-                          setRetentionsBySupplier((prev) => ({
-                            ...prev,
-                            [s.tpId]: [...(prev[s.tpId] ?? []), newRetRow()],
-                          }))
-                        }
-                      >
-                        + Retención
-                      </button>
-                    </div>
-                    {(retentionsBySupplier[s.tpId] ?? []).map((r) => (
-                      <div key={r._key} className="space-y-1">
-                        <div className="flex items-center gap-1.5">
-                          <Select
-                            value={r.config_id || undefined}
-                            onValueChange={(v) =>
-                              updateRet(s.tpId, r._key, { config_id: v, touched: false })
-                            }
-                          >
-                            <SelectTrigger
-                              className={cn("h-8 text-xs flex-1", !r.config_id && "border-red-300")}
-                            >
-                              <SelectValue placeholder="Tarifa..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                          // 🔴 CC-013 C2: una tarifa "sobre el IVA" no cabe en una
-                          // COMPRA — el documento no lleva IVA capturado. Esta
-                          // pantalla precalcula `% x subtotal` sin mirar `base_kind`,
-                          // asi que ofrecerla daria un numero plausible y falso, y el
-                          // monto que se manda es la verdad (#79 F1). El servidor la
-                          // rechaza con 422; esto evita que el usuario llegue hasta
-                          // alla. La YA elegida se sigue ofreciendo (#104).
-                              {retentionConfigs
-                                .filter((cfg) => cfg.base_kind !== "iva" || cfg.config_id === r.config_id)
-                                .map((cfg) => (
-                                  <SelectItem key={cfg.config_id} value={cfg.config_id as string}>
-                                    {retentionRowLabel(cfg)} ({cfg.rate_pct}%)
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                          <button
-                            type="button"
-                            onClick={() => removeRet(s.tpId, r._key)}
-                            className="text-slate-400 hover:text-red-500"
-                            title="Quitar retención"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                        <MoneyInput
-                          value={effRetAmount(r, s.total)}
-                          onChange={(v) => updateRet(s.tpId, r._key, { amount: v, touched: true })}
-                          decimals={2}
-                          placeholder="0"
-                          // Con subtotal $0 el monto SIEMPRE sale 0: marcar el
-                          // input en rojo culpa al campo de algo que no es suyo
-                          className={cn(
-                            "h-8 text-sm",
-                            s.total > 0 && effRetAmount(r, s.total) <= 0 && "border-red-300"
-                          )}
-                        />
-                        {r.config_id && r.touched &&
-                          effRetAmount(r, s.total) !== suggestedRet(r.config_id, s.total) && (
-                          <button
-                            type="button"
-                            className="text-[11px] text-indigo-600 hover:underline"
-                            onClick={() => updateRet(s.tpId, r._key, { touched: false, amount: 0 })}
-                          >
-                            Sugerido: {formatCurrency(suggestedRet(r.config_id, s.total))} (
-                            {configById.get(r.config_id)?.rate_pct}%)
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {supplierRetTotal(s.tpId, s.total) > 0 && canViewPrices && (
-                      <p className="text-xs text-slate-500">
-                        Neto al proveedor:{" "}
-                        <span className="font-semibold text-slate-700">
-                          {fmtMoney(s.total - supplierRetTotal(s.tpId, s.total))}
-                        </span>
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Pago de contado OPCIONAL por proveedor (#20 via canal
-                      unico). Sin marcar = se le queda debiendo, el camino normal */}
-                  <div className="space-y-1.5 pt-1 border-t border-slate-100">
-                    <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
-                      <Checkbox
-                        checked={paymentBySupplier[s.tpId] !== undefined}
-                        onCheckedChange={(v) =>
-                          setPaymentBySupplier((prev) => {
-                            const next = { ...prev };
-                            if (v === true) next[s.tpId] = accounts[0]?.id ?? "";
-                            else delete next[s.tpId];
-                            return next;
-                          })
-                        }
-                      />
-                      Pagar de contado
-                    </label>
-                    {paymentBySupplier[s.tpId] !== undefined && (
-                      <>
-                        <Select
-                          value={paymentBySupplier[s.tpId] || undefined}
-                          onValueChange={(v) =>
-                            setPaymentBySupplier((prev) => ({ ...prev, [s.tpId]: v }))
-                          }
-                        >
-                          <SelectTrigger
-                            className={cn(
-                              "h-8 text-xs",
-                              !paymentBySupplier[s.tpId] && "border-red-300",
-                            )}
-                          >
-                            <SelectValue placeholder="Cuenta..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {accounts.map((acc) => (
-                              <SelectItem key={acc.id} value={acc.id}>
-                                {acc.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {canViewPrices && (
-                          <p className="text-[11px] text-slate-500">
-                            Sale de la cuenta:{" "}
-                            <span className="font-semibold text-slate-700">
-                              {fmtMoney(s.total - supplierRetTotal(s.tpId, s.total))}
-                            </span>{" "}
-                            (el neto)
-                          </p>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {retentionProblems.length > 0 && (
-              <div className="mt-3 rounded-md bg-red-50 border border-red-100 px-3 py-2 text-xs text-red-600 space-y-0.5">
-                {retentionProblems.map((p) => (
-                  <p key={p}>{p}</p>
-                ))}
-              </div>
-            )}
-            {totalRetAll > 0 && (
-              <p className="mt-3 text-xs text-slate-500">
-                Cada retención acredita al proveedor por el <strong>neto</strong> y deja la
-                deuda en su entidad [Retenciones] para el pago mensual de impuestos. Las
-                tarifas se administran en Tesorería → Retenciones.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+      {problems.length > 0 && (
+        <div className="rounded-md bg-red-50 border border-red-100 px-3 py-2 text-xs text-red-600 space-y-0.5">
+          {problems.map((p) => (
+            <p key={p}>{p}</p>
+          ))}
+        </div>
+      )}
+      {retAll > 0 && (
+        <p className="text-xs text-slate-500">
+          Cada retención acredita al proveedor por el <strong>neto</strong> y deja la deuda en su entidad
+          [Retenciones]. Las tarifas se administran en Tesorería → Retenciones.
+        </p>
       )}
 
       {/* Submit */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-slate-100 py-4 -mx-3 px-3 md:-mx-6 md:px-6 mt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div className="text-sm text-slate-500">
-            {supplierSummary.length > 0 && (
+            {activeCols.length > 0 && (
               <>
-                {supplierSummary.length} compra{supplierSummary.length === 1 ? "" : "s"}
-                {canViewPrices &&
-                  ` · ${fmtMoney(supplierSummary.reduce((acc, s) => acc + s.total, 0))}`}
-                {totalRetAll > 0 && canViewPrices &&
-                  ` · retenciones ${formatCurrency(totalRetAll)}`}
-                {collectorEnabled && effCollectorAmount > 0 &&
-                  canViewPrices && ` · comisión ${formatCurrency(effCollectorAmount)}`}
+                {activeCols.length} compra{activeCols.length === 1 ? "" : "s"}
+                {canViewPrices && ` · ${fmtMoney(totalAll)}`}
+                {ivaAll > 0 && canViewPrices && ` · IVA ${formatCurrency(ivaAll)}`}
+                {retAll > 0 && canViewPrices && ` · retenciones ${formatCurrency(retAll)}`}
+                {collectorEnabled && effCollectorAmount > 0 && canViewPrices &&
+                  ` · comisión ${formatCurrency(effCollectorAmount)}`}
               </>
             )}
           </div>
@@ -1510,6 +1863,15 @@ export default function InboundLiquidatePage() {
           </div>
         </div>
       </div>
+
+      <CreateSupplierDialog
+        open={createFor !== null}
+        onOpenChange={(o) => !o && setCreateFor(null)}
+        onCreated={(sid, name) => {
+          setCreatedNames((prev) => ({ ...prev, [sid]: name }));
+          if (createFor !== null) setColSupplier(createFor, sid);
+        }}
+      />
     </div>
   );
 }

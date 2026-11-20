@@ -168,6 +168,72 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
 
         db.flush()
 
+    def find_similar(
+        self,
+        db: Session,
+        organization_id: UUID,
+        name: Optional[str] = None,
+        identification: Optional[str] = None,
+    ) -> list[dict]:
+        """Reparto por compra §3.3: terceros ACTIVOS de la org que ya podrian
+        ser el que se va a crear — nombre igual sin tildes ni mayusculas
+        (`normalize_entity_name`, #78) o identificacion igual sin puntos,
+        guiones ni espacios. La tabla no tiene unicidad: este es el unico freno
+        a un duplicado. No incluye entidades de sistema (no son proveedores).
+
+        Devuelve id, nombre, identificacion, si es proveedor de material y sus
+        categorias (la pantalla las necesita para AGREGAR la de proveedor sin
+        quitarle las otras: `_sync_category_assignments` borra y recrea).
+        """
+        from app.services.retention_entities import normalize_entity_name
+
+        def clean_id(v: Optional[str]) -> str:
+            return "".join(ch for ch in (v or "") if ch not in ".- \t").upper()
+
+        want_name = normalize_entity_name(name) if name and name.strip() else None
+        want_id = clean_id(identification) or None
+        if not want_name and not want_id:
+            return []
+
+        candidates = db.execute(
+            select(ThirdParty).where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.is_active.is_(True),
+                ThirdParty.is_system_entity.isnot(True),
+            )
+        ).scalars().all()
+        matches = [
+            tp for tp in candidates
+            if (want_name and normalize_entity_name(tp.name or "") == want_name)
+            or (want_id and clean_id(tp.identification_number) == want_id)
+        ]
+        if not matches:
+            return []
+        ids = [tp.id for tp in matches]
+        cats: dict = {}
+        for tp_id, cat_id, behavior in db.execute(
+            select(
+                ThirdPartyCategoryAssignment.third_party_id,
+                ThirdPartyCategory.id,
+                ThirdPartyCategory.behavior_type,
+            )
+            .join(ThirdPartyCategory, ThirdPartyCategoryAssignment.category_id == ThirdPartyCategory.id)
+            .where(ThirdPartyCategoryAssignment.third_party_id.in_(ids))
+        ).all():
+            cats.setdefault(tp_id, []).append((cat_id, behavior))
+        return [
+            {
+                "id": tp.id,
+                "name": tp.name,
+                "identification_number": tp.identification_number,
+                "is_material_supplier": any(
+                    b == "material_supplier" for _c, b in cats.get(tp.id, [])
+                ),
+                "category_ids": [c for c, _b in cats.get(tp.id, [])],
+            }
+            for tp in sorted(matches, key=lambda t: (normalize_entity_name(t.name or ""), str(t.id)))
+        ]
+
     @staticmethod
     def has_behavior_type(
         db: Session,

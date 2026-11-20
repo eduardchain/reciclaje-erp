@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
+from app.schemas.document_tax import DocumentTaxResponse  # noqa: F401 (forward ref en PurchaseResponse)
 from app.utils.dates import BusinessDate
 
 
@@ -221,6 +222,14 @@ class PurchaseResponse(PurchaseBase):
     # None si no hay o fue anulada (condonada)
     collector_commission_total: Optional[float] = Field(
         None, description="Comision de recoleccion causada (gasto) — solo detalle"
+    )
+
+    # Reparto por compra §4 (R9) — SOLO en el detalle (en el listado seria un
+    # N+1; ahi va [] y None, decision de #112). Sin esto la pantalla y el PDF
+    # mostrarian el subtotal como si fuera el total a pagar.
+    taxes: List["DocumentTaxResponse"] = Field(default_factory=list, description="IVA de la compra (detalle)")
+    total_with_taxes: Optional[float] = Field(
+        None, description="Total a pagar con IVA vivo. None si la compra no tiene IVA vivo (detalle)"
     )
 
     # Pago inmediato enlazado vivo (solo en detalle) — para el diálogo de cancelación (decisión #63)

@@ -42,6 +42,7 @@ import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 const PAGE_SIZE = 20;
 
@@ -105,7 +106,22 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => exportPurchasePDF(orderForPdf(purchase), pdfTitle)}>
+          <DropdownMenuItem
+            onClick={async () => {
+              // A4: el listado trae `taxes` vacío (#112), así que una compra de
+              // Entrada se exporta desde su DETALLE — si no, el PDF del listado
+              // mostraría el subtotal como total. La compra directa sigue con la
+              // fila del listado, byte a byte.
+              try {
+                const full = purchase.inbound_order_id
+                  ? await purchaseService.getById(purchase.id)
+                  : purchase;
+                exportPurchasePDF(orderForPdf(full), pdfTitle);
+              } catch {
+                toast.error("No se pudo cargar la compra para el PDF");
+              }
+            }}
+          >
             <FileText className="h-4 w-4 mr-2" />
             Exportar PDF
           </DropdownMenuItem>

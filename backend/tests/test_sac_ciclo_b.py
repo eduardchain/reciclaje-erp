@@ -20,6 +20,7 @@ from app.utils.org_settings import SETTING_DEFAULTS, get_org_setting
 from tests.integration_helpers import create_material, create_material_category, create_warehouse
 from tests.conftest import create_third_party_with_category
 from app.utils.dates import business_today
+from tests.reparto_slots import con_slots
 
 INBOUND_URL = "/api/v1/inbound-orders"
 PURCHASES_URL = "/api/v1/purchases"
@@ -180,13 +181,13 @@ def _review_and_liquidate(client, headers, order, material_id, supplier_id,
     assert resp.status_code == 200, resp.text
     resp = client.post(
         f"{INBOUND_URL}/{order['id']}/liquidate", headers=headers,
-        json={"lines": [{
+        json=con_slots({"lines": [{
             "material_id": str(material_id),
             "allocations": [{
                 "third_party_id": str(supplier_id),
                 "quantity": str(qty), "unit_price": str(price),
             }],
-        }]},
+        }]}),
     )
     assert resp.status_code == 200, resp.text
     return resp.json()

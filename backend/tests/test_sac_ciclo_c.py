@@ -20,6 +20,7 @@ from decimal import Decimal
 
 from tests.integration_helpers import create_material, create_material_category, create_warehouse
 from tests.conftest import create_third_party_with_category
+from tests.reparto_slots import con_slots
 
 INBOUND_URL = "/api/v1/inbound-orders"
 PURCHASES_URL = "/api/v1/purchases"
@@ -213,13 +214,13 @@ def _liquidate_order(client, headers, order, mat, tp, qty="100", price="900"):
     """#93: reviewed -> liquidated con reparto de UN proveedor."""
     resp = client.post(
         f"{INBOUND_URL}/{order['id']}/liquidate", headers=headers,
-        json={"lines": [{
+        json=con_slots({"lines": [{
             "material_id": str(mat.id),
             "allocations": [{
                 "third_party_id": str(tp.id),
                 "quantity": str(qty), "unit_price": str(price),
             }],
-        }]},
+        }]}),
     )
     assert resp.status_code == 200, resp.text
     return resp.json()

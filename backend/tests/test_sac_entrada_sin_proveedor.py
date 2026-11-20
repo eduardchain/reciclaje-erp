@@ -40,6 +40,7 @@ from tests.integration_helpers import (
     create_material_category,
     create_warehouse,
 )
+from tests.reparto_slots import con_slots
 
 INBOUND_URL = "/api/v1/inbound-orders"
 PURCHASES_URL = "/api/v1/purchases"
@@ -238,7 +239,7 @@ def _liq_line(mat, allocations, ref_price=None, unallocated=False):
 def _liquidate(client, headers, order_id, lines, expect=200, **extra):
     resp = client.post(
         f"{INBOUND_URL}/{order_id}/liquidate", headers=headers,
-        json={"lines": lines, **extra},
+        json=con_slots({"lines": lines, **extra}),
     )
     assert resp.status_code == expect, resp.text
     return resp.json()
@@ -382,7 +383,7 @@ class TestRevision:
         body = _capture(client, org_headers, wh, [_line(mat_moto, "10")])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [_liq_line(mat_moto, [_alloc(sup1, "10", "900")])]},
+            json=con_slots({"lines": [_liq_line(mat_moto, [_alloc(sup1, "10", "900")])]}),
         )
         assert resp.status_code == 400
         assert "revis" in resp.json()["detail"].lower()
@@ -601,10 +602,10 @@ class TestLiquidacion:
         )
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [
+            json=con_slots({"lines": [
                 _liq_line(mat_moto, [_alloc(sup1, "100", "900")]),
                 _liq_line(mat_balancin, []),  # sin asignaciones, sin intencion
-            ]},
+            ]}),
         )
         assert resp.status_code == 422
         assert "BALANCIN-93" in resp.json()["detail"]
@@ -702,7 +703,7 @@ class TestLiquidacion:
         )
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "900")])]},
+            json=con_slots({"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "900")])]}),
         )
         assert resp.status_code == 422
         assert "BALANCIN-93" in resp.json()["detail"]
@@ -715,7 +716,7 @@ class TestLiquidacion:
         body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "100")])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [_liq_line(mat_moto, [_alloc(sup1, "95", "900")])]},
+            json=con_slots({"lines": [_liq_line(mat_moto, [_alloc(sup1, "95", "900")])]}),
         )
         assert resp.status_code == 422
         assert "referencia" in resp.json()["detail"]
@@ -1175,7 +1176,7 @@ class TestAtomicidadYComision:
         body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "100")])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={
+            json=con_slots({
                 "lines": [_liq_line(
                     mat_moto,
                     [_alloc(sup1, "60", "900"), _alloc(sup2, "40", "900")],
@@ -1183,7 +1184,7 @@ class TestAtomicidadYComision:
                 "collector_commission": {
                     "third_party_id": str(not_provider.id), "amount": "1000",
                 },
-            },
+            }),
         )
         assert resp.status_code == 422
 
@@ -1839,7 +1840,7 @@ class TestPagoContadoYWillard:
         body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "100")])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "1000")])]},
+            json=con_slots({"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "1000")])]}),
         )
         assert resp.status_code == 422, resp.text
         detail = resp.json()["detail"]
@@ -1930,8 +1931,8 @@ class TestPagoContadoYWillard:
 
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "1000")])],
-                  "supplier_payments": pay},
+            json=con_slots({"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "1000")])],
+                  "supplier_payments": pay}),
         )
         assert resp.status_code == 422, resp.text
         assert "ya tiene un pago vivo" in resp.json()["detail"]
@@ -1957,7 +1958,7 @@ class TestPagoContadoYWillard:
         def liq(payments):
             return client.post(
                 f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-                json={"lines": line, "supplier_payments": payments},
+                json=con_slots({"lines": line, "supplier_payments": payments}),
             )
 
         r = liq([{"third_party_id": str(sup2.id), "account_id": str(account.id)}])
@@ -2309,9 +2310,9 @@ class TestLiquidarPorValorTotal:
         r = client.post(
             f"/api/v1/inbound-orders/{order['id']}/liquidate",
             headers=org_headers,
-            json={"lines": [_liq_line(
+            json=con_slots({"lines": [_liq_line(
                 mat_balancin, [_alloc(sup1, "0.0004", total="50000")], ref_price=500,
-            )]},
+            )]}),
         )
         assert r.status_code == 422, r.text
         assert "demasiado pequena" in r.json()["detail"]
@@ -2485,11 +2486,11 @@ class TestPrecioPorKg:
         )
         r = client.post(
             f"{INBOUND_URL}/{order['id']}/liquidate", headers=org_headers,
-            json={"lines": [
+            json=con_slots({"lines": [
                 _liq_line(mat_balancin, [_alloc(sup1, "10", per_kg="1000")]),
                 _liq_line(mat_grupo4, [_alloc(sup1, "5", per_kg="1000")],
                           ref_price="100"),
-            ]},
+            ]}),
         )
         assert r.status_code == 422, r.text
         assert "GRUPO4-93" in r.text
@@ -2520,9 +2521,9 @@ class TestPrecioPorKg:
 
         r = client.post(
             f"{INBOUND_URL}/{order['id']}/liquidate", headers=org_headers,
-            json={"lines": [
+            json=con_slots({"lines": [
                 _liq_line(mat_balancin, [_alloc(sup1, "10", per_kg="1000")])
-            ]},
+            ]}),
         )
         assert r.status_code == 422, r.text
         assert "peso de bascula" in r.text
@@ -2539,7 +2540,7 @@ class TestPrecioPorKg:
         ):
             r = client.post(
                 f"{INBOUND_URL}/{order['id']}/liquidate", headers=org_headers,
-                json={"lines": [_liq_line(mat_balancin, [alloc])]},
+                json=con_slots({"lines": [_liq_line(mat_balancin, [alloc])]}),
             )
             assert r.status_code == 422, r.text
 
@@ -2669,7 +2670,7 @@ class TestTarifaSobreIvaEnLaEntrada:
         body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "1000")])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={
+            json=con_slots({
                 "lines": [_liq_line(mat_moto, [_alloc(sup1, "1000", "1000")])],
                 "supplier_retentions": [{
                     "third_party_id": str(sup1.id),
@@ -2677,7 +2678,7 @@ class TestTarifaSobreIvaEnLaEntrada:
                                     "config_id": str(cfg_iva.id),
                                     "amount": "15000"}],
                 }],
-            },
+            }),
         )
         assert resp.status_code == 422, resp.text
         assert "sobre el IVA" in resp.text and "subtotal" in resp.text, resp.text
@@ -2692,7 +2693,7 @@ class TestTarifaSobreIvaEnLaEntrada:
         body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "1000")])
         client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={
+            json=con_slots({
                 "lines": [_liq_line(mat_moto, [_alloc(sup1, "1000", "1000")])],
                 "supplier_retentions": [{
                     "third_party_id": str(sup1.id),
@@ -2700,7 +2701,7 @@ class TestTarifaSobreIvaEnLaEntrada:
                                     "config_id": str(cfg_iva.id),
                                     "amount": "15000"}],
                 }],
-            },
+            }),
         )
         db_session.expire_all()
         assert db_session.get(ThirdParty, sup1.id).current_balance == Decimal("0")

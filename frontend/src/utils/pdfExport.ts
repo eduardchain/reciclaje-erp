@@ -5,6 +5,7 @@ import type { DoubleEntryResponse } from "@/types/double-entry";
 import type { BalanceSheetResponse, BalanceDetailedResponse } from "@/types/reports";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 import { CHARGE_TYPE_LABELS } from "@/utils/constants";
+import { TAX_TYPE_LABELS, numTax } from "@/types/document-tax";
 
 export interface AccountStatementExportData {
   thirdPartyName: string;
@@ -230,9 +231,34 @@ export function exportPurchasePDF(purchase: PurchaseResponse, title?: string) {
   y += 4;
   doc.setDrawColor(200);
   doc.line(colX.price - 10, y - 3, pageWidth - 14, y - 3);
-  doc.setFontSize(12);
-  doc.setFont("helvetica", "bold");
-  doc.text(`Total: ${formatCurrency(purchase.total_amount)}`, pageWidth - 14, y + 2, { align: "right" });
+  // Reparto por compra §4 (A4): el bloque de IVA se pinta SOLO si la compra
+  // trae impuestos VIVOS. Sin ellos (Costa, Meta, toda compra sin IVA) el
+  // camino es el de siempre, byte a byte.
+  const liveTaxes = (purchase.taxes ?? []).filter((t) => !t.reverted_at);
+  if (liveTaxes.length === 0) {
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Total: ${formatCurrency(purchase.total_amount)}`, pageWidth - 14, y + 2, { align: "right" });
+  } else {
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Subtotal: ${formatCurrency(purchase.total_amount)}`, pageWidth - 14, y + 2, { align: "right" });
+    for (const t of liveTaxes) {
+      y += 6;
+      doc.text(
+        `${TAX_TYPE_LABELS[t.tax_type] ?? t.tax_type}: ${formatCurrency(numTax(t.amount))}`,
+        pageWidth - 14, y + 2, { align: "right" },
+      );
+    }
+    y += 7;
+    const withTaxes =
+      purchase.total_with_taxes != null
+        ? numTax(purchase.total_with_taxes)
+        : numTax(purchase.total_amount) + liveTaxes.reduce((acc, t) => acc + numTax(t.amount), 0);
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Total con IVA: ${formatCurrency(withTaxes)}`, pageWidth - 14, y + 2, { align: "right" });
+  }
 
   // Descargar
   doc.save(docTitle.file);

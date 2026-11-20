@@ -1260,7 +1260,7 @@ def get_by_third_party(
     # que todavia no aparecia, con un saldo corrido que arrancaba en el IVA.
     from sqlalchemy import func as sa_func
 
-    from app.models.document_tax import TAX_SIGN_ON_CUSTOMER, DocumentTax
+    from app.models.document_tax import TAX_SIGN_ON_PARTY, DocumentTax, owner_kind
     from app.models.willard_delivery import WillardDelivery
     from app.services.tax_entities import tax_label
     from app.services.willard_delivery import KG_SOURCE_TYPE
@@ -1317,6 +1317,22 @@ def get_by_third_party(
         impuesto cuelga de la Salida — por eso se pregunta por el dueno y no se
         asume la venta.
         """
+        if tax.purchase_id:
+            # Reparto por compra §4 (R1): IVA de una compra. Hereda la
+            # posicion COMPLETA de la compra — clase 0, instante y numero — y
+            # en el par de reversa el instante de la cancelacion. Sin esta
+            # rama la fila le llegaba al lado ENTIDAD y se saltaba en silencio
+            # (`db.get(WillardDelivery, None)`), y el corrido de `[Impuestos]
+            # IVA` dejaba de cerrar contra su saldo vivo (#55).
+            # Una compra DESLIQUIDADA vuelve a liquidated_at NULL: sus
+            # impuestos (ya revertidos) desaparecen con ella, igual que sus
+            # retenciones (bloque 2c) — el saldo neto de esas filas es cero.
+            purchase = db.get(Purchase, tax.purchase_id)
+            if purchase is None or purchase.liquidated_at is None:
+                return None
+            return (purchase.liquidated_at, purchase.created_at, purchase.date,
+                    f"Compra #{purchase.purchase_number}", purchase.purchase_number,
+                    purchase.status == "cancelled", purchase.cancelled_at, 0)
         if tax.sale_id:
             sale = db.get(Sale, tax.sale_id)
             if sale is None or sale.liquidated_at is None:
@@ -1384,9 +1400,15 @@ def get_by_third_party(
                 f"Salida de Plomo — {delivery.label}", delivery.delivery_number,
                 delivery.status == "annulled", delivery.annulled_at, 0)
 
-    # `side` decide el signo: el cliente recibe TAX_SIGN_ON_CUSTOMER y la
-    # entidad SIEMPRE el contrario. Un solo mapa para las dos superficies.
+    # `side` decide el lado: el tercero del documento recibe el signo de
+    # TAX_SIGN_ON_PARTY[clase de dueno] y la entidad SIEMPRE el contrario. Un
+    # solo mapa para las dos superficies y las tres clases de dueno.
     tax_queries = [
+        # Lado PROVEEDOR: por las compras cuyo proveedor es este (§4, R1)
+        (1, sa_select(DocumentTax)
+            .join(Purchase, DocumentTax.purchase_id == Purchase.id)
+            .where(DocumentTax.organization_id == org_id,
+                   Purchase.supplier_id == third_party_id)),
         # Lado CLIENTE: por las ventas y salidas cuyo tercero es este
         (1, sa_select(DocumentTax)
             .join(Sale, DocumentTax.sale_id == Sale.id)
@@ -1416,7 +1438,7 @@ def get_by_third_party(
                 continue  # una entidad que ademas fuera el cliente
             seen_tax_events.add(key)
 
-            direction = side * TAX_SIGN_ON_CUSTOMER[tax.tax_type]
+            direction = side * TAX_SIGN_ON_PARTY[owner_kind(tax)][tax.tax_type]
             label = tax_label(tax.tax_type, tax.municipality)
             # El estado del evento sigue a la FILA (`reverted_at`), no al status
             # del documento — es la regla que QA bloqueo en #93: un documento

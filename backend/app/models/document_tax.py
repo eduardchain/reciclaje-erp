@@ -43,6 +43,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, GUID, OrganizationMixin, TimestampMixin
 
 if TYPE_CHECKING:
+    from app.models.purchase import Purchase
     from app.models.sale import Sale
     from app.models.willard_delivery import WillardDelivery
 
@@ -62,9 +63,39 @@ TAX_SIGN_ON_CUSTOMER = {
     "ica": -1,
 }
 
+#: Signo sobre el TERCERO del documento, por CLASE de dueno (reparto por
+#: compra §4). En una venta (o Salida de Plomo) el tercero es el cliente; en
+#: una compra es el proveedor y el IVA va al reves: le debemos subtotal + IVA
+#: (proveedor −IVA) y la entidad `[Impuestos] IVA` recibe +IVA, o sea que
+#: descuenta del IVA por pagar (decision de Daniel, 19-nov).
+#: Un tipo que no esta en el mapa de su clase no se admite (422): hoy una
+#: compra solo lleva IVA — sus retenciones viven en `purchase_retentions`.
+#: ⚠️ Todo consumidor lee de aca, nunca de `side x TAX_SIGN_ON_CUSTOMER`.
+TAX_SIGN_ON_PARTY = {
+    "sale": TAX_SIGN_ON_CUSTOMER,
+    "willard_delivery": TAX_SIGN_ON_CUSTOMER,
+    "purchase": {"iva": -1},
+}
+
+#: Signo del SUBTOTAL sobre el tercero, por clase de dueno: la venta le carga
+#: el subtotal al cliente (+) y la compra se lo acredita al proveedor (−). Un
+#: impuesto "suma a la factura" si su signo coincide con este, y "se retiene"
+#: si es el contrario — asi el guard de retenciones >= total no depende de que
+#: el documento sea una venta.
+SUBTOTAL_SIGN_ON_PARTY = {"sale": 1, "willard_delivery": 1, "purchase": -1}
+
+
+def owner_kind(tax: "DocumentTax") -> str:
+    """Clase de dueno de una fila: sale | willard_delivery | purchase."""
+    if tax.purchase_id is not None:
+        return "purchase"
+    if tax.willard_delivery_id is not None:
+        return "willard_delivery"
+    return "sale"
+
 
 class DocumentTax(Base, OrganizationMixin, TimestampMixin):
-    """Un impuesto registrado sobre una venta o una Salida de Plomo."""
+    """Un impuesto registrado sobre una venta, una Salida de Plomo o una compra."""
 
     __tablename__ = "document_taxes"
 
@@ -80,6 +111,13 @@ class DocumentTax(Base, OrganizationMixin, TimestampMixin):
     willard_delivery_id: Mapped[Optional[UUID]] = mapped_column(
         GUID(),
         ForeignKey("willard_deliveries.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    # Reparto por compra §4: IVA de una compra (descontable)
+    purchase_id: Mapped[Optional[UUID]] = mapped_column(
+        GUID(),
+        ForeignKey("purchases.id", ondelete="CASCADE"),
         nullable=True,
     )
 
@@ -138,7 +176,8 @@ class DocumentTax(Base, OrganizationMixin, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "(sale_id IS NOT NULL)::int + (willard_delivery_id IS NOT NULL)::int = 1",
+            "(sale_id IS NOT NULL)::int + (willard_delivery_id IS NOT NULL)::int"
+            " + (purchase_id IS NOT NULL)::int = 1",
             name="ck_document_taxes_single_owner",
         ),
         CheckConstraint("amount > 0", name="ck_document_taxes_amount_positive"),
@@ -152,6 +191,7 @@ class DocumentTax(Base, OrganizationMixin, TimestampMixin):
         ),
         Index("ix_document_taxes_sale", "sale_id"),
         Index("ix_document_taxes_delivery", "willard_delivery_id"),
+        Index("ix_document_taxes_purchase", "purchase_id"),
     )
 
     # --- Relationships ---
@@ -159,6 +199,7 @@ class DocumentTax(Base, OrganizationMixin, TimestampMixin):
     willard_delivery: Mapped[Optional["WillardDelivery"]] = relationship(
         "WillardDelivery", back_populates="taxes"
     )
+    purchase: Mapped[Optional["Purchase"]] = relationship("Purchase", back_populates="taxes")
 
     def __repr__(self) -> str:
         return f"<DocumentTax {self.tax_type} ${self.amount}>"

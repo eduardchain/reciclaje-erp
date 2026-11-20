@@ -58,12 +58,19 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         date: datetime,  # noqa: F811
         organization_id: UUID,
         total_quantity: Optional[Decimal] = None,
+        exclude_purchase_ids: Optional[set] = None,
     ) -> int:
         """
         Verifica si existen compras del mismo proveedor en la misma fecha (RN-COMP-02).
 
         Si se proporciona total_quantity, solo cuenta como duplicado si la cantidad
         total esta dentro de ±20% de tolerancia.
+
+        exclude_purchase_ids (reparto por compra, R8): compras que NO cuentan —
+        las de la misma Entrada. Dos compras del mismo proveedor dentro de una
+        Entrada son dos recolecciones legitimas (Q-65), y el aviso le mentiria a
+        Johana. Solo esas: otra Entrada del mismo dia con el mismo proveedor SI
+        avisa, por eso no es una bandera que lo apague para todo `from_inbound`.
         """
         same_day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
         same_day_end = date.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -75,6 +82,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             Purchase.date <= same_day_end,
             Purchase.status != "cancelled",
         )
+        if exclude_purchase_ids:
+            base_query = base_query.filter(Purchase.id.notin_(list(exclude_purchase_ids)))
 
         if total_quantity is not None and total_quantity > 0:
             # Filtrar por cantidad total dentro de ±20%
@@ -131,6 +140,8 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         organization_id: UUID,
         user_id: Optional[UUID] = None,
         commit: bool = True,
+        *,
+        exclude_from_duplicates: Optional[set] = None,
     ) -> Purchase:
         """
         Create purchase with lines, inventory movements, and balance updates.
@@ -200,7 +211,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # Step 2b: Deteccion de duplicados (RN-COMP-02) - warning, no bloquea
         warnings = []
         total_quantity = sum(Decimal(str(l.quantity)) for l in obj_in.lines)
-        existing_count = self.check_duplicate(db, obj_in.supplier_id, obj_in.date, organization_id, total_quantity)
+        existing_count = self.check_duplicate(
+            db, obj_in.supplier_id, obj_in.date, organization_id, total_quantity,
+            exclude_purchase_ids=exclude_from_duplicates,
+        )
         if existing_count > 0:
             warnings.append(
                 f"Ya existen {existing_count} compra(s) del mismo proveedor en esta fecha"
@@ -373,6 +387,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         retentions_data: Optional[List] = None,
         collector_commission_data: Optional[object] = None,
         commit: bool = True,
+        taxes_data: Optional[List] = None,
     ) -> Purchase:
         """
         Liquidar compra registrada (cambiar status a 'liquidated').
@@ -580,6 +595,20 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 db, purchase, retentions_data, supplier, organization_id
             )
 
+        # Step 8c-bis (reparto por compra §4, R3): IVA de la compra. ANTES del
+        # Step 10 a proposito: el contado paga el NETO, que con IVA es
+        # total + IVA − retenciones; aplicado despues (desde la Entrada) el
+        # contado pagaria sin IVA. Ausente/vacio = camino de siempre byte a
+        # byte. El IVA descontable NO entra al costo del material (el pool ya
+        # se calculo arriba con el subtotal).
+        taxes_net = Decimal("0")
+        if taxes_data:
+            from app.services.document_tax import apply_taxes
+            taxes_net = apply_taxes(
+                db, organization_id, taxes_data, supplier,
+                Decimal(str(purchase.total_amount)), purchase_id=purchase.id,
+            )
+
         # Step 8d (SAC Ciclo D): comision de recolector como GASTO causado.
         # NO entra al prorrateo #30 (Step 4c solo ve purchase.commissions —
         # params disjuntos, W-D2). Fecha con el PARAMETRO (W-D5 trampa #61:
@@ -601,7 +630,9 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if immediate_payment and payment_account_id:
             # SAC E2 D9: con retenciones se paga el NETO (total − Σret).
             # Sin retenciones, net == total — camino actual byte a byte.
-            net_payment = purchase.total_amount - total_retentions
+            # Con IVA (§4) el neto suma el IVA: `taxes_net` es el delta sobre
+            # el proveedor (−IVA), asi que restarlo lo suma. Sin IVA es 0.
+            net_payment = purchase.total_amount - total_retentions - taxes_net
             account = db.execute(
                 select(MoneyAccount).where(
                     MoneyAccount.id == payment_account_id,
@@ -991,6 +1022,13 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 entity.current_balance += ret.amount
             ret.reverted_at = datetime.now(timezone.utc)
             print(f"  ↩️  Retencion revertida: ${ret.amount} ({ret.retention_type})")
+
+        # Reparto por compra §4 (R4): IVA de la compra. Aca y no solo en el
+        # camino de la Entrada: una compra derivada LIQUIDADA se puede cancelar
+        # directo desde Compras (#82 c), y este helper es el de cancel Y
+        # unliquidate (#93 D20c). Sin filas vivas es no-op.
+        from app.services.document_tax import revert_taxes
+        revert_taxes(db, supplier, purchase_id=purchase.id)
 
         # SAC Ciclo D: auto-anular la comision de recolector causada al
         # liquidar (patron commission_accrual #23 — sin eleccion #63: no hay

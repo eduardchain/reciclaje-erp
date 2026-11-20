@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from app.models.material import Material
     from app.models.warehouse import Warehouse
     from app.models.purchase_retention import PurchaseRetention
+    from app.models.document_tax import DocumentTax
 
 
 class Purchase(Base, OrganizationMixin, TimestampMixin):
@@ -228,6 +229,15 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         back_populates="purchase",
         cascade="all, delete-orphan",
         order_by="PurchaseRetention.created_at",
+    )
+
+    # Reparto por compra §4: IVA de la compra (descontable). Vacio en toda
+    # compra sin IVA y en las organizaciones que no son SAC (data-gated).
+    taxes: Mapped[List["DocumentTax"]] = relationship(
+        "DocumentTax",
+        back_populates="purchase",
+        cascade="all, delete-orphan",
+        order_by="DocumentTax.created_at",
     )
 
     double_entry: Mapped[Optional["DoubleEntry"]] = relationship(

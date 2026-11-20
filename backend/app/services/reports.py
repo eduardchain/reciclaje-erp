@@ -2703,7 +2703,7 @@ class ReportService:
         #
         # Los dos lados salen de la MISMA tabla y con el mismo mapa de signos,
         # asi que no pueden desincronizarse.
-        from app.models.document_tax import TAX_SIGN_ON_CUSTOMER, DocumentTax
+        from app.models.document_tax import TAX_SIGN_ON_PARTY, DocumentTax
         from app.models.willard_delivery import WillardDelivery
 
         # (a) Impuestos de una venta directa: el dueno es la Sale.
@@ -2748,12 +2748,37 @@ class ReportService:
             )
         ).all()
 
-        for tax_type, customer_id, entity_id, total in tax_sale_rows + tax_delivery_rows:
-            sign = TAX_SIGN_ON_CUSTOMER[tax_type]
-            amount = Decimal(str(total))
-            if customer_id is not None:
-                balances[customer_id] += sign * amount
-            balances[entity_id] -= sign * amount
+        # (c) IVA de una compra (reparto por compra §4, R2): el dueno es la
+        #     Purchase y el tercero es su proveedor. Sin esta rama el IVA de
+        #     compra faltaria en el corte de los DOS terceros, el proveedor y
+        #     la entidad — no solo en uno.
+        tax_purchase_rows = db.execute(
+            select(
+                DocumentTax.tax_type,
+                Purchase.supplier_id,
+                DocumentTax.third_party_id,
+                func.sum(DocumentTax.amount),
+            ).join(Purchase, DocumentTax.purchase_id == Purchase.id)
+            .where(
+                Purchase.organization_id == organization_id,
+                Purchase.liquidated_at < cutoff_dt,
+                DocumentTax.reverted_at.is_(None),
+                self._active_at_cutoff(Purchase.status),
+            ).group_by(DocumentTax.tax_type, Purchase.supplier_id, DocumentTax.third_party_id)
+        ).all()
+
+        # El signo sale del mapa por CLASE de dueno, nunca de un `if`.
+        for kind, rows in (
+            ("sale", tax_sale_rows),
+            ("willard_delivery", tax_delivery_rows),
+            ("purchase", tax_purchase_rows),
+        ):
+            for tax_type, party_id, entity_id, total in rows:
+                sign = TAX_SIGN_ON_PARTY[kind][tax_type]
+                amount = Decimal(str(total))
+                if party_id is not None:
+                    balances[party_id] += sign * amount
+                balances[entity_id] -= sign * amount
 
         return {k: v for k, v in balances.items() if v != 0}
 

@@ -21,6 +21,7 @@ from app.models.material_cost_history import MaterialCostHistory
 from tests.integration_helpers import create_material, create_material_category, create_warehouse
 from tests.conftest import create_third_party_with_category
 from app.utils.dates import business_today
+from tests.reparto_slots import con_slots
 
 INBOUND_URL = "/api/v1/inbound-orders"
 KG_URL = "/api/v1/kg-ledger"
@@ -504,13 +505,13 @@ class TestPurchaseDerivation:
                    qty="500", price="1200"):
         resp = client.post(
             f"{INBOUND_URL}/{order_id}/liquidate", headers=org_headers,
-            json={"lines": [{
+            json=con_slots({"lines": [{
                 "material_id": str(material.id),
                 "allocations": [{
                     "third_party_id": str(supplier.id),
                     "quantity": qty, "unit_price": price,
                 }],
-            }]},
+            }]}),
         )
         assert resp.status_code == 200, resp.text
         return resp.json()
@@ -659,13 +660,13 @@ class TestPurchaseDerivation:
         self._review(client, org_headers, body["id"])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [{
+            json=con_slots({"lines": [{
                 "material_id": str(mat_regular.id),
                 "allocations": [{
                     "third_party_id": str(generic_tp.id),
                     "quantity": "10", "unit_price": "900",
                 }],
-            }]},
+            }]}),
         )
         assert resp.status_code == 400
         assert "proveedor de material" in resp.json()["detail"]
@@ -1008,13 +1009,13 @@ class TestEditD18:
         client.post(f"{INBOUND_URL}/{body['id']}/review", headers=org_headers)
         liq = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [{
+            json=con_slots({"lines": [{
                 "material_id": str(mat_regular.id),
                 "allocations": [{
                     "third_party_id": str(willard_tp.id),
                     "quantity": "90", "unit_price": "900",
                 }],
-            }]},
+            }]}),
         )
         assert liq.status_code == 200, liq.text
         resp = client.patch(

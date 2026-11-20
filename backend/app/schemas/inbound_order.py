@@ -17,6 +17,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.schemas.document_tax import DocumentTaxCreate, DocumentTaxResponse
 from app.schemas.purchase import PurchaseRetentionCreate
 from app.utils.dates import BusinessDate, business_today
 
@@ -125,6 +126,10 @@ class InboundAllocationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     third_party_id: UUID
+    # Reparto por compra §3.1: la COMPRA de la Entrada (1, 2, 3…). Obligatorio:
+    # el unico cliente es la pantalla, que cambia en el mismo ciclo. Dos slots
+    # pueden tener el mismo proveedor (Q-65: «son dos recolecciones»).
+    purchase_slot: int = Field(..., ge=1, le=999)
     quantity: Decimal = Field(..., gt=0)
     # gt=0 en el API (purchase.liquidate exige precios > 0 — V-LIQ-01);
     # el CHECK de BD queda >= 0 per D1
@@ -194,6 +199,9 @@ class InboundSupplierRetentions(BaseModel):
     compra del proveedor -> hereda flag-guard, tope < total y matching H4."""
     model_config = ConfigDict(extra="forbid")
 
+    # Reparto por compra §3.1: se identifica por la COMPRA; el proveedor viaja
+    # como dato de control (si no coincide con el del slot, 422).
+    purchase_slot: int = Field(..., ge=1, le=999)
     third_party_id: UUID
     retentions: list[PurchaseRetentionCreate] = Field(..., min_length=1)
 
@@ -209,8 +217,20 @@ class InboundSupplierPayment(BaseModel):
     #75), asi que no puede desalinearse del saldo."""
     model_config = ConfigDict(extra="forbid")
 
+    purchase_slot: int = Field(..., ge=1, le=999)
     third_party_id: UUID
     account_id: UUID
+
+
+class InboundPurchaseTaxes(BaseModel):
+    """Reparto por compra §4: IVA de UNA compra de la Entrada. Opcional; el
+    monto digitado es la verdad (#79 F1), la pantalla lo precalcula como
+    19 % del subtotal. Hoy solo admite `iva` (el servicio da 422 con otro)."""
+    model_config = ConfigDict(extra="forbid")
+
+    purchase_slot: int = Field(..., ge=1, le=999)
+    third_party_id: UUID
+    taxes: list[DocumentTaxCreate] = Field(..., min_length=1)
 
 
 class InboundLiquidateRequest(BaseModel):
@@ -222,6 +242,8 @@ class InboundLiquidateRequest(BaseModel):
     # queda byte a byte
     supplier_retentions: Optional[list[InboundSupplierRetentions]] = None
     supplier_payments: Optional[list[InboundSupplierPayment]] = None
+    # Ausente/vacio = sin IVA, camino de siempre
+    purchase_taxes: Optional[list[InboundPurchaseTaxes]] = None
 
 
 class InboundAllocationResponse(BaseModel):
@@ -230,6 +252,7 @@ class InboundAllocationResponse(BaseModel):
     id: UUID
     third_party_id: UUID
     third_party_name: Optional[str] = None
+    purchase_slot: int
     quantity: Decimal
     unit_price: Decimal
     # Q-15: presente solo si se digito el total. La pantalla lo usa para
@@ -260,6 +283,9 @@ class InboundPurchaseSummary(BaseModel):
     """Cara financiera por proveedor — via puente, lookup por pagina (R2)."""
     purchase_id: UUID
     purchase_number: int
+    # Slot de la compra en la Entrada (None solo si una fila legacy quedo sin
+    # backfill, que la migracion no deja)
+    purchase_slot: Optional[int] = None
     supplier_id: UUID
     supplier_name: Optional[str] = None
     status: str
@@ -269,6 +295,9 @@ class InboundPurchaseSummary(BaseModel):
     # quedo acreditado neto (total - retenciones)
     retentions_total: Optional[float] = None
     retentions: list[InboundRetentionDetail] = []
+    # §4: IVA del ultimo lote (vivo, o el ultimo revertido para la precarga al
+    # reliquidar — mismo criterio que `_last_retention_batch`)
+    taxes: list[DocumentTaxResponse] = []
 
 
 class InboundDiscrepancyAdjustment(BaseModel):

@@ -110,6 +110,11 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None, inbound_ma
         ],
         # SAC E2 D9 — vacio para compras sin retenciones (clientes actuales)
         "retentions": list(purchase.retentions or []),
+        # Reparto por compra §4: detail-only. Explicito y vacio aca para que un
+        # `taxes` cargado en la sesion no se cuele por el `__dict__` (los dos
+        # GET de detalle lo llenan con `_add_purchase_taxes`).
+        "taxes": [],
+        "total_with_taxes": None,
         "created_by_name": None,
         "liquidated_by_name": None,
         "cancelled_by_name": None,
@@ -444,7 +449,27 @@ async def get_purchase_by_number(
         db, purchase.id, org_context["organization_id"]
     )
     response_data["collector_commission_total"] = float(cc_total) if cc_total > 0 else None
+    _add_purchase_taxes(db, purchase, response_data)
     return PurchaseResponse(**response_data)
+
+
+def _add_purchase_taxes(db: Session, purchase, response_data: dict) -> None:
+    """Reparto por compra §4 (R9): IVA de la compra en el DETALLE, armado campo
+    por campo (trampa #95). `total_with_taxes` = subtotal + IVA vivo con el
+    signo del mapa por clase de dueno; None si no hay IVA vivo, asi el detalle
+    y el PDF de una compra sin IVA quedan como siempre."""
+    from app.api.v1.endpoints.sales import _tax_rows
+    from app.models.document_tax import TAX_SIGN_ON_PARTY
+
+    rows = _tax_rows(db, purchase_id=purchase.id)
+    response_data["taxes"] = rows
+    live = [r for r in rows if r["reverted_at"] is None]
+    if live:
+        # El signo es sobre el PROVEEDOR (−IVA = le debemos mas): restarlo suma
+        delta = sum(TAX_SIGN_ON_PARTY["purchase"][r["tax_type"]] * r["amount"] for r in live)
+        response_data["total_with_taxes"] = float(purchase.total_amount - delta)
+    else:
+        response_data["total_with_taxes"] = None
 
 
 @router.get(
@@ -531,6 +556,7 @@ async def get_purchase(
         db, purchase.id, org_context["organization_id"]
     )
     response_data["collector_commission_total"] = float(cc_total) if cc_total > 0 else None
+    _add_purchase_taxes(db, purchase, response_data)
     return PurchaseResponse(**response_data)
 
 
