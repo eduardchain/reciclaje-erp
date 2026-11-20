@@ -1,11 +1,19 @@
 import pytest
 from uuid import uuid4
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_required_org_context, get_optional_org_context
 from app.models.user import User
 from app.models.organization import Organization
+
+
+def _request() -> Request:
+    """Request mínimo para llamar la dependency directo (FastAPI lo inyecta
+    solo). Desde #129 (alcance de recolector) la firma lo exige, pero solo lo
+    LEE si el usuario tiene fila en `user_collector_scopes` —`scope["endpoint"]`
+    para la lista blanca—; los usuarios de estos tests no la tienen."""
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""})
 
 
 class TestRequiredOrgContext:
@@ -20,6 +28,7 @@ class TestRequiredOrgContext:
         """Test rejects invalid UUID format."""
         with pytest.raises(HTTPException) as exc_info:
             await get_required_org_context(
+                request=_request(),
                 x_organization_id="not-a-valid-uuid",
                 current_user=test_user,
                 db=db_session,
@@ -41,6 +50,7 @@ class TestRequiredOrgContext:
         
         with pytest.raises(HTTPException) as exc_info:
             await get_required_org_context(
+                request=_request(),
                 x_organization_id=random_org_id,
                 current_user=test_user,
                 db=db_session,
@@ -58,6 +68,7 @@ class TestRequiredOrgContext:
     ):
         """Test returns user's correct role in organization."""
         context = await get_required_org_context(
+            request=_request(),
             x_organization_id=str(test_organization.id),
             current_user=test_user,
             db=db_session,
@@ -80,6 +91,7 @@ class TestRequiredOrgContext:
     ):
         """Test returns correct role when user has different role in different org."""
         context = await get_required_org_context(
+            request=_request(),
             x_organization_id=str(test_organization2.id),
             current_user=test_user,
             db=db_session,
