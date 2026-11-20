@@ -1,7 +1,8 @@
-# Plan: Detalle de Entrada, las compras en tabla y el total con IVA (v1.0)
+# Plan: Detalle de Entrada, las compras en tabla y el total con IVA (v1.1)
 
 Autor: Eco Coder 1 · 20-nov-2026 · rama `coder-1/compras-entrada-tabla` (base develop `1aacc2f`)
 Base: escrito sobre `31ba117` y rebasado a `1aacc2f`. El delta `31ba117..1aacc2f` (MoneyInput y Ocultar Listas) no toca `frontend/src/pages/inbound`, `types/inbound.ts` ni `backend`, y `InboundDetailPage` no usa `MoneyInput`. Artefacto: `delta_develop_superficie.log`.
+v1.1 (20-nov): C1 y C2 del GO de QA 1 sobre la v1.0 (`830ecb7`), las dos del instrumento. C1: el setup suma una compra con IVA **y** retención, y E8 se mide sobre ella. C2: la predicción de P2 se escribe después de medir en el `GET` del setup qué compras vigentes traen IVA revertido. Develop ya está en `80afd45`; la construcción arranca con un merge de develop, y la entrega sale con merge-base == develop.
 Pedido: el Coordinador, 20-nov, desde la revisión en pantalla de #122 con Daniel. Con 10 compras, las tarjetas de `InboundDetailPage` no se leen. En la Entrada #12, «Total Liquidado» dice $200.000 y no dice en ningún lado que el IVA es $36.480.
 
 **Nivel: lógica. Solo frontend, cero backend.** La subo a lógica aunque no toca el servidor porque agrega dos cálculos de plata que Johana usa para pagar: la fila de totales y el total con IVA. Además cada uno tiene una regla de exclusión: qué compras no suman y qué IVA no cuenta. La definición de nivel chico del protocolo («sin reglas ni cálculos») no alcanza a cubrirlo.
@@ -117,7 +118,7 @@ Medido con `git diff 31ba117 coder-2/recolector-alcance -- frontend/src/pages/in
 **Datos (`setup`, en mi BD `reciclaje_coder_1`, org SAC, idempotente):**
 - **Entrada A** (tipo compra), 3 materiales, liquidada con 4 compras:
   - dos del **mismo** proveedor (Q-65);
-  - una con IVA y otra con retención;
+  - una solo con IVA, una solo con retención y **una con IVA y retención a la vez** (C1 de QA: E8, P3 y P9 se miden sobre esta, que es la única en la que olvidar restar la retención cambia un total que también lleva IVA);
   - después **desliquidada y reliquidada intercambiando dos proveedores entre compras** (R6), para que queden 2 compras canceladas que comparten slot con vigentes.
 - **Entrada B**, liquidada con IVA y después desliquidada: queda Revisada, con sus compras `registered`.
 - **Entrada C**, liquidada sin IVA.
@@ -132,7 +133,7 @@ Medido con `git diff 31ba117 coder-2/recolector-alcance -- frontend/src/pages/in
 | E5 | A 390 px no hay tabla, hay tarjetas y no hay scroll horizontal | `#main-scroll` `scrollWidth <= clientWidth`; a 1440 lo inverso |
 | E6 | Materiales de cada fila = las asignaciones de su slot; cancelada → «—» | Entrada A, cruzado contra `lines[].allocations` |
 | E7 | Desliquidada: filas «Registrada», IVA 0, totales = Σ subtotales = «Total Liquidado» | Entrada B |
-| E8 | La tarjeta móvil (390) dice el mismo «Total al proveedor» que la fila de la tabla (1440) | Entrada A, compra con IVA y retención |
+| E8 | La tarjeta móvil (390) dice el mismo «Total al proveedor» que la fila de la tabla (1440), y los dos = sub + iva − ret de la API | Entrada A, **la compra con IVA y retención** (C1), buscada por número desde el setup, no «la primera con IVA» |
 | E9 | *(solo si Coder 2 integró antes, ver D6)* Con alcance, una compra fuera del alcance sale sin link en la tabla | usuario con alcance de Coder 2 |
 
 **Matriz del plantado** (se commitea antes de plantar; cada fila se restaura por ruta y se verifica por sha):
@@ -140,7 +141,7 @@ Medido con `git diff 31ba117 coder-2/recolector-alcance -- frontend/src/pages/in
 | P | Defecto | Caen |
 |---|---|---|
 | P1 | las canceladas suman en la fila de totales | E2 |
-| P2 | el IVA cuenta también las filas con `reverted_at` | E1, E7 (al menos) |
+| P2 | el IVA cuenta también las filas con `reverted_at` | **E7 siempre**; E1 solo si la medición de C2 lo dice (ver abajo) |
 | P3 | `total = sub + iva` (se olvida restar las retenciones) | E1, E8 (al menos) |
 | P4 | las columnas de plata sin el gate `canViewPrices` | E4 |
 | P5 | los materiales sin filtrar por slot (todos los del reparto) | E6 |
@@ -150,6 +151,12 @@ Medido con `git diff 31ba117 coder-2/recolector-alcance -- frontend/src/pages/in
 | P9 | la tarjeta vuelve a su cálculo propio, sin restar las retenciones (deja de usar `purchaseMoney`) | E8 |
 
 En las filas sobre vías compartidas (`purchaseMoney` la usan la tabla, la tarjeta y el pie), la predicción se escribe «al menos estos» (#105).
+
+**C2 de QA: la predicción de P2 depende de lo que traiga la API.**
+- E7 cae siempre: la Entrada B desliquidada tiene todo su IVA revertido, así que con P2 el IVA deja de ser 0.
+- E1 cae solo si alguna compra **vigente** trae filas de IVA revertidas. Por ejemplo, una compra reusada al reliquidar: la fila vieja queda revertida y la nueva viva. El criterio del lote que devuelve `taxes` lo decide el servidor: hoy «vivas, o si no el último lote revertido», y con Coder 2, `last_liquidation_batch`. Así que esas filas pueden no llegar, y entonces P2 no tumba E1 por motivos del servidor, no del código.
+- Por eso, antes de escribir la predicción de P2, el `setup` imprime por compra vigente de las Entradas A, B y C cuántas filas de IVA vivas y cuántas revertidas trae el `GET /inbound-orders/{id}`. Esa medición queda en `setup.log`.
+- La predicción de P2 se escribe en el informe (addendum, commiteado antes de plantar) a partir de esa medición: «E1» solo si hay al menos una compra vigente con IVA revertido.
 
 **Capturas a 1440 y 390** de las Entradas A, B y C. Costa no lleva captura: la ruta está detrás de `FP flag="kg_ledger_enabled"` (`App.tsx:174`), así que una org sin flag no llega a la página, y este cambio no toca ese guard.
 
