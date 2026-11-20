@@ -30,6 +30,7 @@ import {
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { formatLinesTotalQuantity } from "@/utils/operationLines";
+import { countsAsLiquidated } from "@/utils/inboundPurchases";
 import { buildRoute, ROUTES } from "@/utils/constants";
 import { cn } from "@/utils";
 import {
@@ -123,11 +124,12 @@ function AgingBadge({ createdAt }: { createdAt: string }) {
   );
 }
 
-/** Total $ de una entrada tipo compra: liquidada = Σ compras del reparto;
- *  pendiente = referencia capturada (puede ser 0 — #93 captura sin precios) */
+/** Total $ de una entrada tipo compra: liquidada = Σ compras LIQUIDADAS del
+ *  reparto; pendiente = referencia capturada (puede ser 0 — #93 captura sin
+ *  precios). Una desliquidada vuelve a ser pendiente (O1, `countsAsLiquidated`). */
 function purchaseTotal(order: InboundOrderResponse): number {
-  const live = order.purchases.filter((p) => p.status !== "cancelled");
-  if (live.length > 0) return live.reduce((acc, p) => acc + p.total_amount, 0);
+  const liquidated = order.purchases.filter(countsAsLiquidated);
+  if (liquidated.length > 0) return liquidated.reduce((acc, p) => acc + p.total_amount, 0);
   return order.lines.reduce((acc, l) => acc + l.quantity * (l.unit_price ?? 0), 0);
 }
 
