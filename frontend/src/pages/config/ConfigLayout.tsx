@@ -7,13 +7,15 @@ import { useOrgSettings } from "@/hooks/useOrgSettings";
 
 // orgFlag (SAC E1, D12): el tab solo aparece con el flag encendido. Los tabs
 // SIN orgFlag jamas dependen del query de settings (no-regresion §5.1).
+// hideWhenOrgFlag: el inverso — el tab se OCULTA con el flag encendido (en
+// loading/error flagEnabled=false → visible, status quo de las orgs sin flag).
 // ⚠️ Lista duplicada con Sidebar.tsx (children de Configuracion) — mantener AMBAS.
-const tabs = [
+const tabs: { value: string; label: string; permission: string; orgFlag?: string; hideWhenOrgFlag?: string }[] = [
   { value: ROUTES.CONFIG_WAREHOUSES, label: "Bodegas", permission: "warehouses.view" },
   { value: ROUTES.CONFIG_ACCOUNTS, label: "Cuentas", permission: "treasury.manage_accounts" },
   { value: ROUTES.CONFIG_BUSINESS_UNITS, label: "Unidades Negocio", permission: "config.view_business_units" },
   { value: ROUTES.CONFIG_EXPENSE_CATEGORIES, label: "Cat. Gastos", permission: "treasury.manage_expenses" },
-  { value: ROUTES.CONFIG_PRICE_LISTS, label: "Precios", permission: "materials.view_prices" },
+  { value: ROUTES.CONFIG_PRICE_LISTS, label: "Precios", permission: "materials.view_prices", hideWhenOrgFlag: "kg_ledger_enabled" },
   { value: ROUTES.CONFIG_THIRD_PARTY_CATEGORIES, label: "Cat. Terceros", permission: "third_parties.create" },
   { value: ROUTES.CONFIG_TARIFFS, label: "Tarifas", permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
   { value: ROUTES.CONFIG_LEAD_PRICE, label: "Precio del Plomo", permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
@@ -30,7 +32,10 @@ export default function ConfigLayout({ children }: { children: React.ReactNode }
   const { flagEnabled } = useOrgSettings();
 
   const visibleTabs = tabs.filter(
-    (t) => hasPermission(t.permission) && (!t.orgFlag || flagEnabled(t.orgFlag))
+    (t) =>
+      hasPermission(t.permission) &&
+      (!t.orgFlag || flagEnabled(t.orgFlag)) &&
+      (!t.hideWhenOrgFlag || !flagEnabled(t.hideWhenOrgFlag))
   );
 
   return (

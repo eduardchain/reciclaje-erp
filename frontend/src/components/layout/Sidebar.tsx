@@ -91,6 +91,9 @@ interface NavChild {
   // esta encendido. Las entradas SIN orgFlag JAMAS dependen del query de
   // settings (regla de no-regresion §5.1 del plan E1).
   orgFlag?: string;
+  // Inverso, como en NavItem: se OCULTA si el flag esta encendido. "Listas Precios"
+  // (general, #35) en SAC, cuya compra usa solo Listas por Proveedor (#98 D3).
+  hideWhenOrgFlag?: string;
 }
 
 interface NavItem {
@@ -277,7 +280,7 @@ const orgNavItems: NavItem[] = [
       { name: "Cuentas", path: ROUTES.CONFIG_ACCOUNTS, icon: <CreditCard className="w-4 h-4" />, permission: "treasury.manage_accounts" },
       { name: "Unidades Negocio", path: ROUTES.CONFIG_BUSINESS_UNITS, icon: <Building className="w-4 h-4" />, permission: "config.view_business_units" },
       { name: "Cat. Gastos", path: ROUTES.CONFIG_EXPENSE_CATEGORIES, icon: <Tag className="w-4 h-4" />, permission: "treasury.manage_expenses" },
-      { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" />, permission: "materials.view_prices" },
+      { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" />, permission: "materials.view_prices", hideWhenOrgFlag: "kg_ledger_enabled" },
       { name: "Cat. Terceros", path: ROUTES.CONFIG_THIRD_PARTY_CATEGORIES, icon: <Users className="w-4 h-4" />, permission: "third_parties.create" },
       { name: "Tarifas", path: ROUTES.CONFIG_TARIFFS, icon: <Receipt className="w-4 h-4" />, permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
       { name: "Precio del Plomo", path: ROUTES.CONFIG_LEAD_PRICE, icon: <Receipt className="w-4 h-4" />, permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
@@ -344,7 +347,7 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
       .map((item) => {
         if (item.children) {
           const filteredChildren = item.children.filter(
-            (child) => checkPerm(child.permission) && checkFlag(child.orgFlag)
+            (child) => checkPerm(child.permission) && checkFlag(child.orgFlag) && checkHide(child.hideWhenOrgFlag)
           );
           if (filteredChildren.length === 0) return null;
           return { ...item, children: filteredChildren };
