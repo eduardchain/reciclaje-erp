@@ -325,3 +325,34 @@ class TestListadoImpuestos:
         assert inactiva["is_active"] is False
         assert inactiva["current_balance"] == pytest.approx(float(ICA))
         assert by[("iva", None)]["is_active"] is True
+
+    def test_t10_nombre_que_no_parsea_sale_con_su_nombre_y_al_final(
+        self, client, org_headers, db_session, test_organization, flag_on,
+    ):
+        """T10 (C2 de la pasada 1): la PERTENENCIA la da la categoría, no el
+        nombre. Una entidad de la categoría `taxes` con un nombre fuera del
+        formato aparece igual: sin tipo, rotulada con su nombre y al final."""
+        from app.models.third_party_category import ThirdPartyCategoryAssignment
+        from app.services.tax_entities import get_or_create_tax_category
+
+        iva = resolve_tax_entity(db_session, test_organization.id, "iva")
+        iva.current_balance = Decimal("-500")
+        rara = ThirdParty(
+            name="Impuesto heredado", organization_id=test_organization.id,
+            is_system_entity=True, is_active=True, current_balance=Decimal("-70"),
+        )
+        db_session.add(rara)
+        db_session.flush()
+        cat = get_or_create_tax_category(db_session, test_organization.id)
+        db_session.add(ThirdPartyCategoryAssignment(third_party_id=rara.id, category_id=cat.id))
+        db_session.commit()
+
+        rows = _rows(client, org_headers)
+        assert [r["name"] for r in rows] == ["[Impuestos] IVA por Pagar", "Impuesto heredado"]
+        ultima = rows[-1]
+        assert ultima["tax_type"] is None
+        assert ultima["municipality"] is None
+        assert ultima["label"] == "Impuesto heredado"
+        assert ultima["current_balance"] == pytest.approx(-70)
+        # Control positivo: la entidad canónica sí parsea.
+        assert rows[0]["tax_type"] == "iva" and rows[0]["label"] == "IVA"

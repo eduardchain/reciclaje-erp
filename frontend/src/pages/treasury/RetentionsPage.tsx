@@ -191,12 +191,6 @@ export default function RetentionsPage() {
 
       <div className="flex flex-col sm:flex-row sm:gap-3 sm:items-center gap-2">
         <SearchInput value={search} onChange={setSearch} placeholder="Buscar impuesto o retención..." />
-        <div className="flex items-center gap-2">
-          <Checkbox id="show-inactive-ret" checked={showInactive} onCheckedChange={(c) => setShowInactive(c === true)} />
-          <label htmlFor="show-inactive-ret" className="text-sm text-slate-600 cursor-pointer whitespace-nowrap">
-            Mostrar tarifas inactivas
-          </label>
-        </div>
       </div>
 
       {/* Sección 1 — Impuestos (IVA y retenciones que nos practican) */}
@@ -276,9 +270,18 @@ export default function RetentionsPage() {
       </section>
 
       {/* Sección 2 — Retenciones que practicamos (la tabla de siempre) */}
-      <div>
-        <h2 className="text-base font-semibold text-slate-800">Retenciones que practicamos</h2>
-        <p className="text-xs text-slate-500">Las que aplicamos al liquidar compras: se le deben a la DIAN.</p>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold text-slate-800">Retenciones que practicamos</h2>
+          <p className="text-xs text-slate-500">Las que aplicamos al liquidar compras: se le deben a la DIAN.</p>
+        </div>
+        {/* Solo afecta a las tarifas de esta sección: la de impuestos nunca esconde inactivas (C3). */}
+        <div className="flex items-center gap-2">
+          <Checkbox id="show-inactive-ret" checked={showInactive} onCheckedChange={(c) => setShowInactive(c === true)} />
+          <label htmlFor="show-inactive-ret" className="text-sm text-slate-600 cursor-pointer whitespace-nowrap">
+            Mostrar tarifas inactivas
+          </label>
+        </div>
       </div>
       <Card className="shadow-sm">
         <CardContent className="p-0">
