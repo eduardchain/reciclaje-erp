@@ -1,4 +1,11 @@
-# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.7)
+# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.8)
+
+**v1.8 (20-nov): Daniel eligió D-E2(b)** («Sí, aviso al liquidar», por ventanita, 20-nov ~14:25, vía el Coordinador). Con eso cambia la decisión 3 de la mañana, que había sido (a) (§15). La v1.7 (`9b09307`) ya estaba con QA 2, así que esto va encima como v1.8, sin reescribirla.
+- **El aviso** (§5.6). Cuando alguien liquida una Entrada con recolector y reparte a un proveedor que no tiene esa marca, la **respuesta de liquidar** trae un aviso en `warnings[]`, y la pantalla lo muestra en el toast que ya existe. Avisa, no bloquea (#17/#76).
+- **Solo si alguien lo pierde:** avisa únicamente cuando el recolector tiene al menos un usuario con alcance en la org. Sin ese usuario nadie deja de ver nada, y el aviso sería ruido en cada Entrada (decisión mía, va a QA 2).
+- **El texto dice qué hacer:** «El proveedor X no tiene la marca de Green Loop: Ingrid verá esta compra en la Entrada, pero no podrá abrirla. Si es de Green Loop, márcalo en Terceros → Recolector.» El nombre del usuario sale de su alcance, no está escrito a mano.
+- **T25e:** el aviso se lee de la **respuesta HTTP**, no del servicio (lección de #100 D4d), y va con su PAR, de modo que el control positivo es que con la marca no hay aviso. **Matriz:** P51 y P52.
+- La nota del detalle de Ingrid (§8) se queda: el aviso no bloquea, así que el caso puede pasar igual.
 
 **v1.7 (20-nov):** responde a la revisión de Eco QA 2 sobre la v1.6 (`919157a`, `~/sac-evidencia/2026-11-20/qa-2-ingrid/revision_plan_v1.6.md`, sha256 `29d8139a…3273`). QA 2 dio GO a la 9e y a T25 tal como estaban. La 9f quedó condicionada a c1, y c2 era de redacción.
 - **c1, la 9f mira el lote de la ÚLTIMA liquidación.** Los dos helpers de hoy (`_last_retention_batch` y `_last_tax_batch`, en el endpoint) devuelven «las vivas, o si no, el lote revertido más reciente que exista». Una liquidación sin retenciones no deja filas, así que esta secuencia rompía la regla:
@@ -69,7 +76,7 @@
 
 **Autor:** Eco Coder 2 · **Revisa:** Eco QA 2 · **Nivel:** lógica · **Rama:** `coder-2/recolector-alcance` (base `de32530`)
 **Evidencia:** `~/sac-evidencia/2026-11-20/coder-2-recolector-alcance/` (inventarios, mediciones y los scripts que los producen).
-**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. La v1.6 (`919157a`) tiene GO de Eco QA 2 a la 9e y a T25; la v1.7 vuelve a QA 2 con su sha.
+**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. La v1.6 (`919157a`) tiene GO de Eco QA 2 a la 9e y a T25. La v1.7 (`9b09307`) y la v1.8 vuelven a QA 2 con su sha.
 
 ---
 
@@ -293,7 +300,11 @@ Green Loop es otra empresa: que una ruta esté permitida no quiere decir que tod
 
 - **D-E2, una Entrada suya con un proveedor ajeno adentro.** Si Johana (sin alcance, S1) liquida E_GL con el proveedor B, Ingrid ve en el detalle de E_GL el nombre de B y el resumen de su compra, porque la Entrada es de ella (S8). La compra de B, en cambio, le da 404. Para cerrarlo hay dos opciones: (a) declararlo como está (recomendado: es la Entrada de Green Loop y lo puso alguien de SAC a propósito); (b) en una Entrada con recolector GL, que Johana reciba un **aviso** (no un bloqueo) al repartir a un proveedor sin la marca. Lo decide Daniel junto con Q-70 (decisión 3). **Decidido: (a)** (§15, decisión 3).
   - **v1.6, el link de esa compra.** Con (a), el criterio es marcar, no esconder: el detalle de Ingrid pinta esa compra **sin link** y con la nota «Proveedor sin la marca de Green Loop: pídele a SAC que lo marque en Terceros» (§8). Así no hay un link que dé 404, y ella sabe qué pedir. La marca la pone Johana, o quien tenga `third_parties.edit`, desde Terceros → «Recolector».
-  - **v1.6, propuesta que reabre D-E2 y decide Daniel:** que la **respuesta de liquidar** traiga un aviso cuando quien liquida una Entrada con recolector reparte a un proveedor que no tiene esa marca. Sería la opción (b) con el mecanismo que ya existe (`warnings` de la respuesta, que la pantalla muestra en un toast). Avisa el día que se crea el caso, no cuando Ingrid lo encuentra. **No se construye sin el OK de Daniel.**
+  - ~~**v1.6, propuesta que reabre D-E2 y decide Daniel:** que la respuesta de liquidar traiga un aviso cuando quien liquida una Entrada con recolector reparte a un proveedor que no tiene esa marca. No se construye sin el OK de Daniel.~~ **Decidido (v1.8): (b)**, Daniel, 20-nov ~14:25.
+  - **El aviso (v1.8).** Lo arma `inbound_order_service.liquidate` y viaja en `warnings[]` de la respuesta; `useLiquidateInboundOrder` ya lo muestra en un toast. Avisa, no bloquea (#17/#76).
+    - **Cuándo:** la Entrada tiene recolector, un proveedor del reparto no tiene esa marca (sin marca, o con la de otro recolector), y ese recolector tiene al menos un usuario con alcance en la org. Sin ese usuario nadie pierde nada y no se avisa.
+    - **Uno por proveedor**, ordenados por nombre. El texto es «El proveedor {X} no tiene la marca de {recolector}: {usuario} verá esta compra en la Entrada, pero no podrá abrirla. Si es de {recolector}, márcalo en Terceros → Recolector.» `{usuario}` es el nombre de quien tiene el alcance; con más de uno, se nombran todos y el verbo va en plural.
+    - Un usuario con alcance nunca lo recibe: la fila 9 le exige que todo el reparto sea suyo.
 - **Su caja muestra todo lo que pasa por su caja.** Si Johana paga a B desde K1, Ingrid ve ese movimiento con el nombre de B, porque la cuenta es suya (fila 24). Es correcto por definición de «su caja».
 - **D-E1:** en el estado de cuenta de un proveedor suyo puede aparecer el nombre de una cuenta de SAC (§5.2).
 
@@ -544,6 +555,11 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
   - **Controles de c1 (v1.7), uno con retención y otro con IVA:** L1 con retención (o IVA) → des-liquidar → Johana re-liquida **sin** retención (L2) → des-liquidar → Ingrid re-liquida → **200**. Contra la vacuidad, antes del último paso se afirma que el lote de L1 sigue en la base, revertido. Si no estuviera, el control no mediría nada.
 - **T25d, la precarga usa la misma función** (v1.7). Mismo escenario L1/L2 → el detalle de la Entrada (`GET /inbound-orders/{id}`, leído como Johana) trae `retentions == []` y `taxes == []` en esa compra. Y una liquidación con **dos** retenciones (ReteFuente e ICA), des-liquidada → el detalle trae las **dos**. Este segundo caso mide la sospecha de `reverted_at` por fila: se corre una vez contra el código viejo, con el resultado a archivo, antes de afirmar en el informe si el defecto existía.
 - **T25c, regla 9e** (v1.6). Johana liquida una Entrada GL con A en la compra 1 y B en la compra 2, y la des-liquida. Ingrid manda la compra 2 con A: el reparto es todo suyo, así que solo 9e la puede rechazar → 422 con el mensaje de 9e, y la compra de B sigue `registered`. Control: Johana manda el mismo cuerpo → 200, y la compra de B queda cancelada (R6). El control prueba que el escenario sí cancela la compra ajena, o sea que el 422 es lo que la protege. Segundo control: Johana des-liquida otra vez; ahora la compra de B está **cancelada** en el puente y todas las vivas son de A → Ingrid re-liquida → 200. Sin él, una regla que contara las canceladas bloquearía para siempre una Entrada que SAC ya corrigió (P48).
+- **T25e, el aviso de D-E2(b)** (v1.8). Se lee de la **respuesta HTTP** del `POST …/liquidate`, no del retorno del servicio (#100 D4d). Johana liquida:
+  - E_GL con A y B → `warnings` trae **un** aviso, que nombra a B, a Green Loop y a Ingrid y dice «Terceros → Recolector»;
+  - **control positivo**, otra Entrada GL toda de A → `warnings` no trae ningún aviso de marca;
+  - E_X (recolector X, sin usuario con alcance) con B → sin aviso. Es la condición «solo si alguien lo pierde».
+  - Contra la vacuidad, en el caso 1 se exige que la compra de B exista y que Ingrid reciba 404 al abrirla: el aviso dice la verdad.
 - **T18, no-regresión de la otra org:** una org sin flag y sin alcances; un usuario restringido por cuentas sigue viendo lo que ve hoy en las 4 lecturas, salvo lo que decida Daniel en §6.
 
 **Dirigidas.** Son la única red de develop hasta el checkpoint. El comando queda fijo aquí, se re-corre igual en la entrega y se escribe en el log. Eco QA 2 corre esa misma lista.
@@ -621,6 +637,8 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
 | P48 | la regla 9e cuenta también las compras canceladas del puente | T25c, el segundo control: con la compra de B ya cancelada, Ingrid recibe 422 en vez de 200 |
 | P49 | la 9f usa «el último lote que exista» (el criterio de los helpers viejos) en vez del de la última liquidación (v1.7) | T25b, los dos controles de c1 (retención e IVA): Ingrid recibe 422 en vez de 200 |
 | P50 | la precarga vuelve a su helper propio y la regla sigue con `last_liquidation_batch` (plantado **solo** en la precarga) | T25d, el escenario L1/L2. **No deben caer** T25b ni sus controles: si caen, la regla y la precarga no están separadas en el plantado y P50 no se distingue de P49 |
+| P51 | sin el aviso de D-E2(b) (v1.8) | T25e, caso 1 |
+| P52 | el aviso no mira si el recolector tiene un usuario con alcance | T25e, caso E_X. **No debe caer** el caso 1 |
 
 **Dirección peligrosa a buscar celda por celda antes de plantar:** un test que debía caer y no cae. El candidato más probable es P7 si los cuatro listados comparten helper. Por eso el test se parametriza por ruta y el defecto se planta en una sola.
 
@@ -647,7 +665,7 @@ Las pide el Coordinador; me las pasa él. Se anotan con su fuente: un mensaje de
 
 3. **Supuestos S1–S8 y las cuatro decisiones abiertas: Daniel aceptó todas las recomendadas** (20-nov, vía el Coordinador):
    - S1–S8 tal como están; los gastos desde la caja de Ingrid quedan fuera (S7);
-   - **D-E2** (§5.6): (a), se declara la fuga;
+   - **D-E2** (§5.6): ~~(a), se declara la fuga~~ — **queda sin efecto**. **(b), aviso al liquidar** (Daniel, 20-nov ~14:25, por ventanita, vía el Coordinador; v1.8);
    - **H5**: (a), `payment-to-generic` entra al alcance con las reglas de la fila 27b;
    - **D-a**: (a), el servidor fija el monto de la comisión;
    - **D-b**: (a), las compras son de Ingrid por la marca del proveedor.
