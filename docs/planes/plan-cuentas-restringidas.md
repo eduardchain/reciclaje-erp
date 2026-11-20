@@ -1,4 +1,10 @@
-# Plan — Cuentas restringidas por usuario: que la asignación de cuentas también limite lo que se ESCRIBE (v1.1)
+# Plan — Cuentas restringidas por usuario: que la asignación de cuentas también limite lo que se ESCRIBE (v1.2)
+
+**v1.2 (20-nov, ronda 2 de QA 2, `revision_plan_v1.0.md` sha `4c474e91…3e65`):** se fijan los permisos de cada usuario de prueba (R1–R3).
+- **R1:** T5 usaba al liquidador, que no tiene `treasury.view_statements`. Daba 403 antes y después: «fallaba en la base» por la razón equivocada y nunca pasaba. Ahora usa al analista y afirma el 200 antes que el saldo.
+- **R2:** el usuario de control del golden tiene los permisos del analista, y cada señal predice también su status.
+- **R3:** la fixture escribe los permisos de cada usuario. En T1, T2 y T14 cada ruta corre con un rol que tiene el permiso que pide la ruta. Todo 403 del listener tiene que nombrar la cuenta, porque un 403 de RBAC no la nombra.
+- **De paso:** T7 fija su usuario (el liquidador) y que K1 ordene tercera por nombre. Sin eso, la página 1 la traería igual y el defecto no se vería.
 
 **v1.1 (20-nov, revisión de QA 2 sobre v1.0, `~/sac-evidencia/2026-11-20/qa-2-cuentas/revision_plan_v1.0.md`, sha `725dc58e…8757`):**
 - **C1:** P4 no tumbaba T2, porque las reversas de activos cambian la cuenta Y el movimiento en el mismo flush. Se agrega T14, en la que cambia SOLO la cuenta (`PATCH`/`DELETE /money-accounts/{K3}`).
@@ -182,23 +188,32 @@ Además, para cualquier restringido con `treasury.manage_accounts`, `POST /money
 
 ## 4. Tests (archivo nuevo `tests/test_cuentas_restringidas.py`)
 
-Fixture: una org con 3 cuentas (K1, K2, K3) y 4 usuarios:
-- un liquidador con K1 asignada;
-- un usuario custom con los 16 permisos del analista de SAC y K1, K2;
-- un admin con K1 asignada;
-- un usuario sin asignaciones.
+Fixture: una org con 3 cuentas (K1, K2, K3). Los permisos de cada usuario se escriben en el test como constantes, sin depender del sembrado (R3):
 
-Los roles son custom con sus permisos: el admin bypassa y no prueba nada (#29). En cada test de permiso va un **control positivo** con la cuenta propia en 2xx (lección de #111).
+| Usuario | Rol | Permisos | Cuentas asignadas |
+|---|---|---|---|
+| liquidador | custom | los 32 del liquidador de Costa (`cuentas_permisos_liquidador_costa.txt`): **sin** `view_statements` ni `view_dashboard` | K1 |
+| analista | custom | los 16 del rol analista de SAC en producción (`gate-prod/rol_analista_sac_prod.log`, lista en `cuentas_permisos_analista_sac_prod.txt`): con `view_statements`, `view_dashboard`, `view_movements` y `create_movements` | K1, K2 |
+| cuentas | custom | `treasury.manage_accounts` + `treasury.view_accounts` | K1 |
+| por ruta (T1, T2) | custom, uno por permiso | exactamente el permiso que pide la ruta (columna «permiso» del inventario v2: cada escritura pide uno solo) | K1 |
+| admin | admin de sistema | todos | K1 |
+| sin asignaciones | custom | los 16 del analista | ninguna |
+
+- **Reglas para todos los tests:**
+  - los roles con permisos van custom: el admin bypassa y no prueba nada (#29);
+  - en cada test de permiso va un **control positivo**, con la cuenta propia y el mismo usuario, en 2xx (#111);
+  - **todo 403 que se atribuye al listener afirma que el detalle nombra la cuenta** (R3). Un 403 de RBAC dice que falta el permiso y no nombra ninguna cuenta, así que solo así se distinguen.
+- **La fila de `inbound-orders/liquidate`** corre en una org con `kg_ledger_enabled`, porque la ruta está detrás de ese flag.
 
 | # | Qué afirma |
 |---|---|
-| **T1** | **Barrido de escrituras**, parametrizado sobre una lista explícita, con un comentario de por qué está completa (#108): las 34 con cuenta en el cuerpo del inventario v2 (`batch-expenses` incluido) más las 3 de `/money-accounts` (C2). Con K3: **403**, el detalle nombra la cuenta, y **nada queda escrito** (N2): el saldo de K3, el del tercero, el conteo de `money_movements`, el conteo y el estado del documento de la ruta (compra, venta, activo, obligación, cruce, Entrada, Salida, gasto programado) y el estado de la entidad tocada, antes y después. Con K1: 2xx. |
-| **T2** | **Las 6 indirectas.** Cancelar una compra y una venta con `annul_linked_payments=True` cuyo pago es de K3; anular un movimiento de obligación de K3; cancelar un activo, anular su venta y anular una revalorización pagadas desde K3. Todo da **403** y no cambia nada, con el mismo recuento de T1 (N2). Con K1: 2xx. |
-| **T3** | **Admin con asignación (D1):** escribe en K3 → 2xx. Control: el liquidador, con la misma petición, da 403. **Orden fijo dentro del mismo test: el request del admin va ANTES que el del liquidador** (N3: un caché a nivel de módulo devolvería al liquidador el `None` del admin, y solo ese orden lo atrapa). |
+| **T1** | **Barrido de escrituras**, parametrizado sobre una lista explícita, con un comentario de por qué está completa (#108): las 34 con cuenta en el cuerpo del inventario v2 (`batch-expenses` incluido) más las 3 de `/money-accounts` (C2). Cada ruta corre con el usuario «por ruta» de su permiso (R3). Con K3: **403**, el detalle nombra la cuenta, y **nada queda escrito** (N2): el saldo de K3, el del tercero, el conteo de `money_movements`, el conteo y el estado del documento de la ruta (compra, venta, activo, obligación, cruce, Entrada, Salida, gasto programado) y el estado de la entidad tocada, antes y después. Con K1: 2xx. |
+| **T2** | **Las 6 indirectas.** Cancelar una compra y una venta con `annul_linked_payments=True` cuyo pago es de K3; anular un movimiento de obligación de K3; cancelar un activo, anular su venta y anular una revalorización pagadas desde K3. Cada una corre con el usuario «por ruta» de su permiso (`purchases.cancel`, `sales.cancel`, `treasury.manage_obligations`, `treasury.manage_fixed_assets`). Todo da **403** nombrando K3, y no cambia nada, con el mismo recuento de T1 (N2). Con K1: 2xx. |
+| **T3** | **Admin con asignación (D1):** `POST /money-movements/expense` desde K3 → 2xx. Control: el liquidador (tiene `treasury.create_movements`), con la misma petición, da 403 **nombrando K3** (R3: P5 y P13 dependen de que ese 403 sea del listener y no de RBAC). **Orden fijo dentro del mismo test: el request del admin va ANTES que el del liquidador** (N3: un caché a nivel de módulo devolvería al liquidador el `None` del admin, y solo ese orden lo atrapa). |
 | **T4** | **Sin asignaciones** escribe en K3 → 2xx (no-regresión). |
-| **T5** | **Estado de cuenta (D4):** un tercero con una compra liquidada, un pago desde K3 y otro desde K1. Para el liquidador con K1:<br>• el último `balance_after` == `current_balance`, y el pago de K3 aparece. **Se escribe primero y se corre contra la base:** tiene que FALLAR ahí (hoy esconde el pago);<br>• **el enlace (C3):** el evento de K3 sale con `source == "money_movement_restricted"` y el de K1 con `"money_movement"`;<br>• **control:** para el admin, los dos salen con `"money_movement"`. |
+| **T5** | **Estado de cuenta (D4):** un tercero con una compra liquidada, un pago desde K3 y otro desde K1. Con el **analista** (K1, K2; tiene `treasury.view_statements`; el liquidador no lo tiene y daría 403, R1):<br>• **primero el status:** 200;<br>• el último `balance_after` == `current_balance`, y el pago de K3 aparece. **Se escribe primero y se corre contra la base:** tiene que FALLAR ahí, con 200 y el saldo descuadrado (hoy esconde el pago), no con 403;<br>• **el enlace (C3):** el evento de K3 sale con `source == "money_movement_restricted"` y el de K1 con `"money_movement"`;<br>• **control:** para el admin, 200 y los dos con `"money_movement"`. |
 | **T6** | **Dashboard:** el analista con K1 y K2 ve solo K1 y K2, con sus totales, y los recientes solo de K1, K2 o NULL. Control: el admin ve las 3. |
-| **T7** | **`GET /money-accounts` con 3 cuentas, `limit=1` y una sola cuenta asignada en la posición 3:** `total == 1` y la página la trae. Hoy da `total` 0 y una página vacía: pagina primero y filtra después (`money_accounts.py:45-62`). |
+| **T7** | **`GET /money-accounts` con 3 cuentas, `limit=1` y una sola cuenta asignada en la posición 3:** el liquidador (tiene `treasury.view_accounts`), con K1 nombrada para que ordene tercera por nombre. Si ordenara primera, la página 1 la traería igual y el defecto no se vería. `total == 1` y la página la trae. Hoy da `total` 0 y una página vacía: pagina primero y filtra después (`money_accounts.py:45-62`). |
 | **T8** | **C1:** GET por id y por número, evidencia (GET, POST, DELETE), `annul` y `classification` sobre un movimiento de K3 → 404. El POST de evidencia no deja archivo en disco (directorio de uploads de la org, antes y después). Control con K1. |
 | **T9** | **Traslado entre cuentas (D2):** K1→K3 y K3→K1 dan 403; K1→K2 con el analista da 201. |
 | **T10** | **Movimientos con cuenta NULL** (`expense-accrual`, `tp-transfer`, `tp-adjustment-*`): el liquidador los crea y los anula (D3). |
@@ -282,12 +297,13 @@ Se commitea ANTES de plantar, con la predicción por fila. Un defecto en una ví
      - `CAPTURES` corre como superusuario, así que por construcción da 0/0 en `/money-accounts`, `/money-movements` y los dos estados de cuenta.
      - Una sola BD alcanza: no hay cambio de esquema.
      - **Prueba de vida y control positivo FUERA de `CAPTURES`** (#110, N5):
-       - el usuario restringido (un liquidador con una cuenta) se siembra en la copia ANTES de la captura BEFORE. Con una sola BD, una escritura en un lado cambiaría el otro;
+       - el usuario de control se siembra en la copia ANTES de la captura BEFORE. Con una sola BD, una escritura en un lado cambiaría el otro;
+       - **sus permisos son los 16 del rol analista de SAC, con una cuenta asignada** (R2). Con los del liquidador, el estado de cuenta (`view_statements`) y el dashboard (`view_dashboard`, `reports.py:313`) darían 403 en los dos lados, y solo diferiría el GET por id;
        - el script de control es **solo de lectura**, el mismo en los dos lados, con ese usuario;
-       - tres señales, con las predicciones escritas antes:
-         - el estado de cuenta de un tercero con un pago desde otra cuenta: en BEFORE no cierra contra el saldo vivo; en AFTER cierra y el pago sale con `money_movement_restricted`;
-         - el dashboard: en BEFORE muestra todas las cuentas; en AFTER, solo la suya;
-         - `GET /money-movements/{id}` de un movimiento de otra cuenta: 200 en BEFORE y 404 en AFTER.
+       - tres señales, con las predicciones escritas antes, **status incluido**:
+         - el estado de cuenta de un tercero con un pago desde otra cuenta: **200 en los dos lados**; en BEFORE no cierra contra el saldo vivo, y en AFTER cierra y el pago sale con `money_movement_restricted`;
+         - el dashboard: **200 en los dos lados**; en BEFORE muestra todas las cuentas, y en AFTER solo la suya;
+         - `GET /money-movements/{id}` de un movimiento de otra cuenta: **200 en BEFORE y 404 en AFTER**.
        - Si no difieren, los dos lados son el mismo código y el golden no probó nada.
      - Guardas de procedencia de `golden_run.sh`, con lockf y puertos 8091 y 8092.
    - **Suite completa:** diferida al checkpoint.
