@@ -1,4 +1,16 @@
-# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.9)
+# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.10)
+
+**v1.10 (20-nov):** QA 2 dio la pasada 1 OK sobre `9d8cc33` y GO a la v1.9 (`71c3fde`; revisión `pasada1_9d8cc33.md`, `89cb33e8…4ffc`, en `~/sac-evidencia/2026-11-20/qa-2-ingrid/`). Entran tres cosas:
+- **9g — con alcance no se liquida con descuadre.** Lo decidió Daniel sobre la O1 de QA 2 («Que no deje descuadre», por ventanita, 20-nov ~15:05, vía el Coordinador). Con alcance, una Entrada se liquida solo si **todo lo pesado** queda repartido. Si algún material queda con descuadre (falta o sobra, sin importar la tolerancia), o se marca «sin proveedor» en un material pesado, sale un 422 que lista lo que falta y dice que, si no se puede repartir todo, esta Entrada la liquida SAC.
+  - **Por qué:** el descuadre se valora al precio de referencia y aterriza en los libros de SAC (ajuste de inventario a resultados, #93 D6/D7). Con alcance, ese precio lo fijaría Ingrid. Sin descuadre no hay ajuste, así que el `reference_unit_price` que mande no tiene efecto contable. Se sigue guardando en la línea como hoy: si SAC re-liquida, es una precarga que puede editar.
+  - **Mecanismo:** un kwarg `require_full_allocation` de `inbound_order_service.liquidate()`, que por defecto es False (sin él, todo queda byte a byte igual) y que el endpoint enciende solo con alcance. La regla corre en el mismo lazo que ya calcula `disc = pesado − repartido`, con la misma cuantización, así que el descuadre tiene **una sola definición**.
+    - Va **antes** de D8 y D16, para que Ingrid no reciba el mensaje del precio de referencia, que no le corresponde.
+    - Junta **todos** los materiales con problema y da **un** 422.
+  - **Material que la báscula no pesó (#93 D16):** repartirlo deja descuadre (sobra), así que cae en la regla. Una línea con pesado 0 marcada «sin proveedor» no tiene descuadre y pasa, porque «todo lo pesado repartido» se cumple. La marca «sin proveedor» solo da 422 cuando el material tiene algo pesado. Es más angosto que la letra del pedido («si se marca sin proveedor, 422»), y se declara aquí.
+  - **Pantalla:** con alcance, el aviso sale en la lista de problemas **antes** de mandar y Liquidar queda deshabilitado. Se esconden la casilla «Sin proveedor (intencional)» y el bloque «¿Un proveedor reporta un material que la báscula no pesó?», que con alcance solo pueden terminar en 422.
+  - **Tests:** T26. **Matriz:** P55–P57.
+- **n11:** se declara en §4. No se deja pasar el `null` sin flag, por dos razones: la pantalla de Usuarios esconde el alcance cuando el flag está apagado, así que solo serviría por API; y una fila solo puede nacer con el flag encendido.
+- **n12:** T25e gana el caso «los usuarios con alcance GL están inactivos → sin aviso». **Matriz:** P54.
 
 **v1.9 (20-nov):** responde a QA 2. Dio GO a la v1.7 (`9b09307`) y a la v1.8 (`de0d714`); las revisiones son `revision_plan_v1.7.md` (`edac1352…a8f5`) y `revision_plan_v1.8.md` (`87f93baa…6acc`), en `~/sac-evidencia/2026-11-20/qa-2-ingrid/`.
 - **c3, una celda vacía en T25e.** §5.6 dice «sin marca, o con la de otro recolector», pero ningún caso ponía un proveedor con la marca de **otro** recolector, así que un aviso escrito `collector_id IS NULL` pasaba T25e entero. Se agregan el caso «E_GL con C (marca X) → un aviso que nombra a C» y **P53**.
@@ -169,6 +181,12 @@ Se escribe por `PATCH /third-parties/{id}` (permiso `third_parties.edit`, ya exi
   - si el recolector no cumple las reglas de §3.
 - **Contexto:** `get_required_org_context` lee el alcance con una consulta por índice único y lo deja en `ctx["collector_scope_id"]`. El superusuario sintetizado no tiene alcance.
 - **🔴 El alcance lo decide la FILA, no el flag** (patrón #109: «el predicado es el dato»). Si alguien apaga `kg_ledger_enabled`, el alcance sigue restringiendo. **Tampoco lo salta el admin**: si una fila de alcance existe sobre un usuario admin (escrita por ORM o por un cambio de rol posterior), igual restringe. Es fail-closed (test T16c).
+- **n11 (v1.10):** con el flag apagado, el PUT tampoco **quita** el alcance (`collector_id: null` → 422), y la fila sigue restringiendo (T16b). Se declara y no se cambia, por tres razones:
+  - una fila solo puede nacer con el flag encendido;
+  - en SAC el flag es el módulo entero;
+  - la pantalla de Usuarios esconde el alcance cuando el flag está apagado, así que dejar pasar el `null` solo serviría por API.
+  
+  Si alguna vez se apagara el flag con un alcance vivo, se quita volviendo a encenderlo.
 - `GET /roles/my-permissions` gana `collector_scope: {id, name} | null`, para que la pantalla lo sepa.
 
 ## 5. Dónde se impone: lista blanca en el backend (deny-by-default)
@@ -228,7 +246,7 @@ Notación: `alc(tp)` = `tp.collector_id == scope`; `cta(k)` = `k ∈ cuentas asi
 | 6 | `GET /price-lists/current` | `third_party_id` **obligatorio** y `alc`: sin él → 422, ajeno → 404. Solo `purchase_price`, sin `sale_price` (§5.7) |
 | 7 | `GET /inbound-orders` | se **fuerza** `collector_id = scope`; un `collector_id` del query se ignora |
 | 8 | `GET /inbound-orders/{id}` | 404 si `order.collector_id != scope` |
-| 9 | `POST /inbound-orders/{id}/liquidate` | Todo se valida **antes de escribir** (D14 de #93): un rechazo no deja nada. Las reglas:<br>• 404 como en la fila 8.<br>• Todo proveedor del reparto tiene que ser `alc`. Si no, 422 **genérico**, «Hay un proveedor fuera de tu alcance»: no nombra a lo ajeno (M1), porque su selector solo ofrece lo suyo y el nombre solo le llegaría a quien arma UUIDs a mano.<br>• Toda cuenta de `supplier_payments` tiene que ser `cta` (si no, 403).<br>• Comisión (S6/D-a): el tercero es su recolector, y el monto lo calcula el servidor. Si viene otro tercero u otro `amount` → 422.<br>• Si vienen `supplier_retentions` o impuestos → 422 (S5).<br>• **9e (v1.6):** si alguna compra **viva** (no cancelada) del puente de la Entrada es de un proveedor que no es `alc` → 422 «Esta Entrada tiene una compra de un proveedor fuera de tu alcance: la vuelve a liquidar SAC». Sin ella, cambiar ese proveedor por uno suyo en la misma compra pasaba la regla del reparto y el servicio cancelaba la compra ajena (R6 de #122).<br>• **9f (v1.6, definición de la v1.7):** si el lote de la **última liquidación** de alguna compra viva del puente trae retenciones o IVA → 422 «Esta Entrada tuvo retenciones o IVA en su liquidación anterior: la vuelve a liquidar SAC». Sin ella, se perdían en silencio. El lote lo da `last_liquidation_batch`, la misma función de la precarga (v1.7); una liquidación posterior sin retenciones ni IVA lo deja vacío.<br>Las dos solo existen en una Entrada que SAC ya liquidó y des-liquidó; en la primera liquidación el puente está vacío. Los mensajes no nombran a nadie (M1) y son distintos entre sí, para que cada test sepa qué regla disparó. |
+| 9 | `POST /inbound-orders/{id}/liquidate` | Todo se valida **antes de escribir** (D14 de #93): un rechazo no deja nada. Las reglas:<br>• 404 como en la fila 8.<br>• Todo proveedor del reparto tiene que ser `alc`. Si no, 422 **genérico**, «Hay un proveedor fuera de tu alcance»: no nombra a lo ajeno (M1), porque su selector solo ofrece lo suyo y el nombre solo le llegaría a quien arma UUIDs a mano.<br>• Toda cuenta de `supplier_payments` tiene que ser `cta` (si no, 403).<br>• Comisión (S6/D-a): el tercero es su recolector, y el monto lo calcula el servidor. Si viene otro tercero u otro `amount` → 422.<br>• Si vienen `supplier_retentions` o impuestos → 422 (S5).<br>• **9e (v1.6):** si alguna compra **viva** (no cancelada) del puente de la Entrada es de un proveedor que no es `alc` → 422 «Esta Entrada tiene una compra de un proveedor fuera de tu alcance: la vuelve a liquidar SAC». Sin ella, cambiar ese proveedor por uno suyo en la misma compra pasaba la regla del reparto y el servicio cancelaba la compra ajena (R6 de #122).<br>• **9f (v1.6, definición de la v1.7):** si el lote de la **última liquidación** de alguna compra viva del puente trae retenciones o IVA → 422 «Esta Entrada tuvo retenciones o IVA en su liquidación anterior: la vuelve a liquidar SAC». Sin ella, se perdían en silencio. El lote lo da `last_liquidation_batch`, la misma función de la precarga (v1.7); una liquidación posterior sin retenciones ni IVA lo deja vacío.<br>Las dos solo existen en una Entrada que SAC ya liquidó y des-liquidó; en la primera liquidación el puente está vacío. Los mensajes no nombran a nadie (M1) y son distintos entre sí, para que cada test sepa qué regla disparó.<br>• **9g (v1.10, Daniel):** todo lo pesado queda repartido. Si en algún material el descuadre es distinto de cero (falta o sobra, sin importar la tolerancia) → 422 «Con tu alcance hay que repartir todo lo pesado — <material: qué falta>; …. Si no se puede repartir todo, esta Entrada la liquida SAC».<br>&nbsp;&nbsp;– El mensaje nombra **materiales**, no terceros: son de la Entrada que ella ve.<br>&nbsp;&nbsp;– Corre en el servicio (`require_full_allocation`), en el mismo lazo del descuadre y antes de D8/D16.<br>&nbsp;&nbsp;– Razón: el descuadre se valora al precio de referencia y aterriza en los libros de SAC; sin descuadre, el precio que ella mande no tiene efecto. |
 | 10 | `GET /third-parties` | se fuerza `alc` |
 | 11 | `GET /third-parties/suppliers` | se fuerza `alc` |
 | 12 | `GET /third-parties/similar` | se fuerza `alc` (no revela nombres de proveedores de SAC) |
@@ -360,6 +378,7 @@ Va con capturas a 1440 y 390; la de Daniel es condición de deploy.
 - **v1.6, Entradas que SAC ya tocó (solo con alcance):**
   - **Liquidar una Entrada des-liquidada.** La página ya trae, por compra del puente, el último lote de retenciones e IVA, y ya carga los proveedores de su alcance (fila 11). Si una compra viva trae retenciones o IVA, o es de un proveedor que no está en esa lista, la página muestra un aviso con el mismo texto de la regla 9e o 9f y **deshabilita Liquidar**. Ella se entera al abrir, no al enviar. El 422 del servidor sigue siendo la red.
   - **Detalle de la Entrada.** Una compra cuyo proveedor no está en su alcance se pinta **sin link**, con la nota de §5.6. Se mide con el sondeo de red: 0 respuestas ≥ 400.
+- **v1.10, 9g (solo con alcance):** en la liquidación, cada material con descuadre suma un problema en la lista que ya existe: «<material>: faltan N por repartir — con tu alcance hay que repartir todo lo pesado; si no se puede, esta Entrada la liquida SAC». Liquidar queda deshabilitado. Se esconden la casilla «Sin proveedor (intencional)» y el bloque del material que la báscula no pesó. Sin alcance, la pantalla queda igual.
 
 **v1.5, lo que medí y cómo se cierra.** Sondeo de red como usuario con alcance (`sondeo_red_r1.log`). Toda respuesta ≥ 400, por pantalla:
 
@@ -571,6 +590,14 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
   - **control positivo**, otra Entrada GL toda de A → `warnings` no trae ningún aviso de marca;
   - E_X (recolector X, sin usuario con alcance) con B → sin aviso. Es la condición «solo si alguien lo pierde».
   - Contra la vacuidad, en el caso 1 se exige que la compra de B exista y que Ingrid reciba 404 al abrirla: el aviso dice la verdad.
+  - **n12 (v1.10):** con los dos usuarios de alcance GL (ingrid e ingrid_todo) puestos **inactivos**, Johana liquida E_GL con B → sin aviso. El control positivo es el caso 1, con los mismos usuarios activos.
+- **T26, regla 9g** (v1.10). Todo por HTTP, sobre una E_GL revisada con un material pesado (100):
+  - Ingrid reparte 60 a A, con precio de referencia → 422 con el mensaje de 9g, que nombra el material y dice «esta Entrada la liquida SAC». Las 7 tablas quedan sin cambios.
+  - Lo mismo **sin** precio de referencia → 422 de 9g, no el de D16. Esto mide el orden de las reglas.
+  - Ingrid reparte 110 → 422 de 9g («de más»).
+  - Ingrid marca el material «sin proveedor», sin asignaciones → 422 de 9g («sin proveedor»).
+  - **Control positivo:** Ingrid reparte 100 → 200, con **cero** ajustes de descuadre de la Entrada.
+  - **Par sin alcance:** Johana manda el mismo cuerpo de 60 → 200 y nace el ajuste de descuadre, como hoy.
 - **T18, no-regresión de la otra org:** una org sin flag y sin alcances; un usuario restringido por cuentas sigue viendo lo que ve hoy en las 4 lecturas, salvo lo que decida Daniel en §6.
 
 **Dirigidas.** Son la única red de develop hasta el checkpoint. El comando queda fijo aquí, se re-corre igual en la entrega y se escribe en el log. Eco QA 2 corre esa misma lista.
@@ -651,6 +678,10 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
 | P51 | sin el aviso de D-E2(b) (v1.8) | T25e, caso 1 |
 | P52 | el aviso no mira si el recolector tiene un usuario con alcance | T25e, caso E_X. **No debe caer** el caso 1 |
 | P53 | el aviso solo mira `collector_id IS NULL`: no avisa por un proveedor con la marca de otro recolector (v1.9, c3) | T25e, el caso de C. **No debe caer** el caso 1 |
+| P54 | el aviso no filtra `User.is_active` (n12) | T25e, el caso de los inactivos. **No debe caer** el caso 1 |
+| P55 | sin la regla 9g (el endpoint no enciende `require_full_allocation`) | T26: los cuatro casos de 422. **No debe caer** el par de Johana |
+| P56 | 9g encendida para todos (`require_full_allocation` por defecto True) — vía | T26, el par de Johana, y al menos los tests de descuadre de `test_sac_entrada_sin_proveedor.py` |
+| P57 | 9g evaluada **después** de D16 | T26, el caso sin precio de referencia (sale el mensaje de D16). **No deben caer** los otros casos de 422 |
 
 **Dirección peligrosa a buscar celda por celda antes de plantar:** un test que debía caer y no cae. El candidato más probable es P7 si los cuatro listados comparten helper. Por eso el test se parametriza por ruta y el defecto se planta en una sola.
 
@@ -683,6 +714,8 @@ Las pide el Coordinador; me las pasa él. Se anotan con su fuente: un mensaje de
    - **D-b**: (a), las compras son de Ingrid por la marca del proveedor.
 
    El cuerpo del plan ya se leía con estas opciones desde la v1.1, así que ninguna fila cambia. Las marcas «pendiente de Daniel» y «solo si Daniel elige (a)» de S2, S6, S7, §5.1, la fila 27b y el cuadrante se limpiaron en la v1.3.
+
+5. **9g — sin descuadre con alcance** (Daniel, O1 de QA 2, «Que no deje descuadre», por ventanita, 20-nov ~15:05, vía el Coordinador; v1.10). Con alcance, una Entrada se liquida solo si todo lo pesado queda repartido. Si no, la liquida SAC (fila 9, 9g).
 
 ## 16. Runbook de deploy
 
