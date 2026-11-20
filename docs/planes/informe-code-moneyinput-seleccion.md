@@ -15,7 +15,7 @@ Es código compartido: un archivo, que usan 40 pantallas de las 7 orgs. Código 
 ## Pendientes y decisiones para Daniel
 
 1. **N2 de QA (declarado, no se corrige):** un `pointerdown` que no termina en foco deja el ref encendido, y el próximo foco por Tab no selecciona, una sola vez. Apagarlo en `pointerup` rompería el toque en iOS, donde el foco llega después.
-2. **D5 diferido:** el parche local `selectOnFocus` de Liquidar Entrada (de #precio-por-compra) sobra con este arreglo, pero (a)+(b) no estaba en develop al construir. El retiro queda para después de integrar los dos, con la fila de plantado M6 del plan.
+2. 🔴 **D5 no se aplica, y la premisa del plan era falsa.** El plan decía que el parche local `selectOnFocus` de Liquidar Entrada «hace lo mismo» y sobra. **No es así: el parche selecciona también con CLIC**, y el E2E aprobado de (a)+(b) lo exige (E14b: «clic + escribir 4200» reemplaza). `MoneyInput`, por D1, a propósito no selecciona con clic. Retirar el parche cambiaría el clic en la matriz de Johana, y eso es aplanar una divergencia deliberada (lección de #102). **Decide Daniel:** ¿en la matriz el clic selecciona todo (se queda el parche, hoy) o deja el cursor (se retira, y E14b se re-semantiza)? M6 queda sin correr hasta esa respuesta. Los dos conviven sin conflicto: el E2E de (a)+(b) da 22/22 con el `MoneyInput` nuevo.
 3. **Ya existían y no se tocan:**
    - en Nueva Compra, el Tab desde el precio cae en el hint «Lista: $ X»;
    - a 390 px ese hint se monta sobre el rótulo «TOTAL» (se ve en `costa_nueva_compra-390.png`);
@@ -40,6 +40,11 @@ Es código compartido: un archivo, que usan 40 pantallas de las 7 orgs. Código 
 | M5 | sin redondeo | M-E6 (crudo «1.23456») |
 
 - Capturas de Costa: `costa_nueva_compra-1440.png` y `-390.png`, tomadas después de Tab y escribir 1250 sobre 3.600.
+- **Merge de develop** (`31ba117`, que trae (a)+(b)) en `3017bd5`: sin conflictos y con `--remerge-diff` vacío. `git diff develop` = `207de853…`, el mismo delta que antes del merge. Sobre el árbol combinado:
+  - lint 37/0, `tsc` 0, `build` 0 (`*_merge.log`);
+  - E2E de MoneyInput 9/9 (`e2e_merge.log`; M-E8 ahora mide la página nueva con el parche);
+  - E2E de (a)+(b) 22/22 (`e2e_precio_por_compra_con_moneyinput.log`);
+  - guardas (`guardas_merge.log`).
 - Golden: no aplica (solo frontend).
 
 ## Borrador de la decisión (la numera el Coordinador)
