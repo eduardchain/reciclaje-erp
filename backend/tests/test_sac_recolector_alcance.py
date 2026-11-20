@@ -446,6 +446,20 @@ class TestListaBlanca:
         r = client.get(f"{INBOUND}/{w.E_GL}", headers=w.johana)
         assert r.json()["collector_id"] == str(w.GL.id)
 
+    def test_t1_ruta_nueva_de_develop_tax_entities(self, w, client):
+        """Merge de develop 87c799f (#128): `GET /third-parties/tax-entities`
+        es una ruta nueva con `third_parties.view` + el flag. Ingrid tiene ese
+        permiso, y la ruta NO va a la lista blanca (S5: sin retenciones ni
+        IVA). T1 ya la recorre (itera todas las rutas montadas y su cota es
+        `>= 200`, no un conteo exacto); aca queda nombrada, con su control."""
+        url = f"{TP}/tax-entities"
+        assert ("GET", url) in {(m, r.path) for m, r in _pares()}
+        r = client.get(url, headers=w.ingrid)
+        assert _scope_denied(r), (r.status_code, r.text)
+        # Control positivo: el mismo rol sin alcance la usa (el 403 de arriba
+        # no sale ni del permiso ni del flag).
+        assert client.get(url, headers=w.ingrid_libre).status_code == 200
+
     def test_t1c_rutas_de_miembros(self, w, client):
         org = w.org.id
         uid = uuid4()
