@@ -1,4 +1,10 @@
-# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.5)
+# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.6)
+
+**v1.6 (20-nov):** las Entradas que ya existen en producción. El Coordinador midió R1 en producción (API, solo lectura, `~/sac-evidencia/2026-11-20/gate-prod/gl_entradas_prod.log`): de 149 Entradas de SAC, **25 tienen recolector y las 25 son Green Loop**, 18 revisadas y 7 liquidadas. Ingrid las encuentra el día del deploy sin que nadie las haya creado con el código nuevo. Revisé cada regla contra ese hecho y encontré dos supuestos que solo valían para Entradas nacidas con el código nuevo. Hoy ninguno tiene casos (mediciones (a) y (b) del Coordinador), pero los dos pueden aparecer el día que Johana des-liquide o reparta una Entrada de Green Loop, así que las defensas van igual (Coordinador).
+- **(1) Una Entrada des-liquidada por SAC que Ingrid vuelve a liquidar.** Des-liquidar conserva el reparto (#93 D20), y las compras vuelven a registradas con su último lote de retenciones e IVA. Con alcance, la pantalla no carga el catálogo de retenciones, así que **las retenciones de Johana se perdían en silencio** al re-liquidar; el IVA precargado viajaba escondido y daba el 422 de S5 sin explicación. Y si el reparto tenía un proveedor fuera de su alcance, Ingrid podía cambiarlo por uno suyo en la misma compra: la regla de la fila 9 pasaba (todo el payload es suyo) y **el servicio cancelaba la compra del proveedor ajeno**, un documento que ella ni siquiera puede abrir (R6 de #122). Se cierra con **dos reglas nuevas en la fila 9** (9e y 9f) y su espejo en la pantalla (§8). Medición (a): 0 de las 18 revisadas tienen reparto o compras en el puente, y 0 retenciones en el último lote; el IVA de compra todavía no existe en producción (llega con #122).
+- **(2) Una Entrada liquidada por SAC con un proveedor sin la marca.** Ingrid ve la compra en el detalle de su Entrada (es la fuga D-E2, declarada, §5.6), pero el link le da 404. Criterio: **marcar, no esconder**. Lo marca Johana, o quien tenga `third_parties.edit`, desde Terceros → «Recolector»; los que ya existen los marca el script al deploy (§16 paso 2); y después, la pantalla de Ingrid le dice qué compra no puede abrir y que se la pida a SAC (§8). Medición (b): 0 proveedores sin marca en las 7 liquidadas (5 proveedores, todos con «(GREENLOOP)»).
+  - **Aviso a Johana al liquidar: NO va en este ciclo sin Daniel.** Es exactamente la opción (b) de D-E2 (§5.6), y Daniel eligió la (a) el 20-nov (§15, decisión 3). Lo dejo como propuesta en §5.6; si Daniel la quiere, es un delta propio con su test.
+- **Tests:** T25 (las Entradas preexistentes en sus dos estados), T25b (regla 9e) y T25c (regla 9f). **Matriz:** P45 a P48. El cuerpo aprobado no cambia fuera de esto.
 
 **v1.5 (20-nov):** un hueco de la v1.4 que encontré midiendo la pantalla, y la regla de la categoría de conductor. El resto del cuerpo aprobado no cambia.
 - **El hueco.** Fila 15 exige `category_ids`, y Ingrid no tenía forma de conocerlos: `GET /third-party-categories/flat` no estaba en la lista blanca. `CreateSupplierDialog` quedaba sin categorías («No hay una categoría de proveedor de material»), así que con la v1.4 no podía crear un proveedor desde la liquidación.
@@ -48,7 +54,7 @@
 
 **Autor:** Eco Coder 2 · **Revisa:** Eco QA 2 · **Nivel:** lógica · **Rama:** `coder-2/recolector-alcance` (base `de32530`)
 **Evidencia:** `~/sac-evidencia/2026-11-20/coder-2-recolector-alcance/` (inventarios, mediciones y los scripts que los producen).
-**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. La v1.4 (`f6c4623`) tiene GO de Eco QA 2; la v1.5 vuelve a QA 2 con su sha.
+**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. La v1.5 (`c8922d8`) tiene GO de Eco QA 2; la v1.6 vuelve a QA 2 con su sha.
 
 ---
 
@@ -192,7 +198,7 @@ Notación: `alc(tp)` = `tp.collector_id == scope`; `cta(k)` = `k ∈ cuentas asi
 | 6 | `GET /price-lists/current` | `third_party_id` **obligatorio** y `alc`: sin él → 422, ajeno → 404. Solo `purchase_price`, sin `sale_price` (§5.7) |
 | 7 | `GET /inbound-orders` | se **fuerza** `collector_id = scope`; un `collector_id` del query se ignora |
 | 8 | `GET /inbound-orders/{id}` | 404 si `order.collector_id != scope` |
-| 9 | `POST /inbound-orders/{id}/liquidate` | Todo se valida **antes de escribir** (D14 de #93): un rechazo no deja nada. Las reglas:<br>• 404 como en la fila 8.<br>• Todo proveedor del reparto tiene que ser `alc`. Si no, 422 **genérico**, «Hay un proveedor fuera de tu alcance»: no nombra a lo ajeno (M1), porque su selector solo ofrece lo suyo y el nombre solo le llegaría a quien arma UUIDs a mano.<br>• Toda cuenta de `supplier_payments` tiene que ser `cta` (si no, 403).<br>• Comisión (S6/D-a): el tercero es su recolector, y el monto lo calcula el servidor. Si viene otro tercero u otro `amount` → 422.<br>• Si vienen `supplier_retentions` o impuestos → 422 (S5). |
+| 9 | `POST /inbound-orders/{id}/liquidate` | Todo se valida **antes de escribir** (D14 de #93): un rechazo no deja nada. Las reglas:<br>• 404 como en la fila 8.<br>• Todo proveedor del reparto tiene que ser `alc`. Si no, 422 **genérico**, «Hay un proveedor fuera de tu alcance»: no nombra a lo ajeno (M1), porque su selector solo ofrece lo suyo y el nombre solo le llegaría a quien arma UUIDs a mano.<br>• Toda cuenta de `supplier_payments` tiene que ser `cta` (si no, 403).<br>• Comisión (S6/D-a): el tercero es su recolector, y el monto lo calcula el servidor. Si viene otro tercero u otro `amount` → 422.<br>• Si vienen `supplier_retentions` o impuestos → 422 (S5).<br>• **9e (v1.6):** si alguna compra **viva** (no cancelada) del puente de la Entrada es de un proveedor que no es `alc` → 422 «Esta Entrada tiene una compra de un proveedor fuera de tu alcance: la vuelve a liquidar SAC». Sin ella, cambiar ese proveedor por uno suyo en la misma compra pasaba la regla del reparto y el servicio cancelaba la compra ajena (R6 de #122).<br>• **9f (v1.6):** si el último lote de alguna compra viva del puente trae retenciones o IVA (`_last_retention_batch` y `_last_tax_batch`, el mismo criterio de la precarga) → 422 «Esta Entrada tuvo retenciones o IVA en su liquidación anterior: la vuelve a liquidar SAC». Sin ella, se perdían en silencio.<br>Las dos solo existen en una Entrada que SAC ya liquidó y des-liquidó; en la primera liquidación el puente está vacío. Los mensajes no nombran a nadie (M1) y son distintos entre sí, para que cada test sepa qué regla disparó. |
 | 10 | `GET /third-parties` | se fuerza `alc` |
 | 11 | `GET /third-parties/suppliers` | se fuerza `alc` |
 | 12 | `GET /third-parties/similar` | se fuerza `alc` (no revela nombres de proveedores de SAC) |
@@ -270,7 +276,9 @@ Green Loop es otra empresa: que una ruta esté permitida no quiere decir que tod
 
 ### 5.6 Fugas laterales que quedan, declaradas
 
-- **D-E2, una Entrada suya con un proveedor ajeno adentro.** Si Johana (sin alcance, S1) liquida E_GL con el proveedor B, Ingrid ve en el detalle de E_GL el nombre de B y el resumen de su compra, porque la Entrada es de ella (S8). La compra de B, en cambio, le da 404. Para cerrarlo hay dos opciones: (a) declararlo como está (recomendado: es la Entrada de Green Loop y lo puso alguien de SAC a propósito); (b) en una Entrada con recolector GL, que Johana reciba un **aviso** (no un bloqueo) al repartir a un proveedor sin la marca. Lo decide Daniel junto con Q-70 (decisión 3).
+- **D-E2, una Entrada suya con un proveedor ajeno adentro.** Si Johana (sin alcance, S1) liquida E_GL con el proveedor B, Ingrid ve en el detalle de E_GL el nombre de B y el resumen de su compra, porque la Entrada es de ella (S8). La compra de B, en cambio, le da 404. Para cerrarlo hay dos opciones: (a) declararlo como está (recomendado: es la Entrada de Green Loop y lo puso alguien de SAC a propósito); (b) en una Entrada con recolector GL, que Johana reciba un **aviso** (no un bloqueo) al repartir a un proveedor sin la marca. Lo decide Daniel junto con Q-70 (decisión 3). **Decidido: (a)** (§15, decisión 3).
+  - **v1.6, el link de esa compra.** Con (a), el criterio es marcar, no esconder: el detalle de Ingrid pinta esa compra **sin link** y con la nota «Proveedor sin la marca de Green Loop: pídele a SAC que lo marque en Terceros» (§8). Así no hay un link que dé 404, y ella sabe qué pedir. La marca la pone Johana, o quien tenga `third_parties.edit`, desde Terceros → «Recolector».
+  - **v1.6, propuesta que reabre D-E2 y decide Daniel:** que la **respuesta de liquidar** traiga un aviso cuando quien liquida una Entrada con recolector reparte a un proveedor que no tiene esa marca. Sería la opción (b) con el mecanismo que ya existe (`warnings` de la respuesta, que la pantalla muestra en un toast). Avisa el día que se crea el caso, no cuando Ingrid lo encuentra. **No se construye sin el OK de Daniel.**
 - **Su caja muestra todo lo que pasa por su caja.** Si Johana paga a B desde K1, Ingrid ve ese movimiento con el nombre de B, porque la cuenta es suya (fila 24). Es correcto por definición de «su caja».
 - **D-E1:** en el estado de cuenta de un proveedor suyo puede aparecer el nombre de una cuenta de SAC (§5.2).
 
@@ -313,6 +321,9 @@ Va con capturas a 1440 y 390; la de Daniel es condición de deploy.
   Todo es `enabled: !scope` en los hooks, para que no salgan 403 en la consola.
 - **Barra superior:** chip «Green Loop» para que Ingrid sepa por qué ve menos.
 - **Sin alcance**, ninguna pantalla compartida cambia: el selector de Johana sigue igual (S1).
+- **v1.6, Entradas que SAC ya tocó (solo con alcance):**
+  - **Liquidar una Entrada des-liquidada.** La página ya trae, por compra del puente, el último lote de retenciones e IVA, y ya carga los proveedores de su alcance (fila 11). Si una compra viva trae retenciones o IVA, o es de un proveedor que no está en esa lista, la página muestra un aviso con el mismo texto de la regla 9e o 9f y **deshabilita Liquidar**. Ella se entera al abrir, no al enviar. El 422 del servidor sigue siendo la red.
+  - **Detalle de la Entrada.** Una compra cuyo proveedor no está en su alcance se pinta **sin link**, con la nota de §5.6. Se mide con el sondeo de red: 0 respuestas ≥ 400.
 
 **v1.5, lo que medí y cómo se cierra.** Sondeo de red como usuario con alcance (`sondeo_red_r1.log`). Toda respuesta ≥ 400, por pantalla:
 
@@ -419,7 +430,7 @@ Archivo nuevo `tests/test_sac_recolector_alcance.py`.
 |---|---|---|---|
 | 7 Entradas lista | ve E_GL | no ve E_none ni E_X; con `?collector_id=X` sigue viendo solo E_GL | ve las 3 |
 | 8 Entrada detalle | 200 | 404 (E_none, E_X) | 200 |
-| 9 liquidar | 200 con A; la comisión queda en tarifa × base aunque no se mande `amount` (D-a = a) | 422 con B, 422 con C (los dos **sin el nombre**, M1), 403 con K2, 422 comisión a X, 422 `amount` distinto del calculado (D-a = a), 422 con retención/IVA; **las 7 tablas sin cambios** | 200 con B; la comisión toma el `amount` digitado |
+| 9 liquidar | 200 con A; la comisión queda en tarifa × base aunque no se mande `amount` (D-a = a) | 422 con B, 422 con C (los dos **sin el nombre**, M1), 403 con K2, 422 comisión a X, 422 `amount` distinto del calculado (D-a = a), 422 con retención/IVA; **las 7 tablas sin cambios**. Cada caso afirma también el **mensaje**, no solo el código: un 422 de validación del schema pasaría por el status (v1.6). Des-liquidada por SAC: 9e y 9f (T25b, T25c) | 200 con B; la comisión toma el `amount` digitado |
 | 10–13 listados de terceros | solo GL (+ D en 10) | sin B ni C | ven B y C |
 | 14 tercero detalle | 200 A | 404 B | 200 B |
 | 15 crear tercero | nace con GL aunque el payload diga X; con categoría material_supplier → 201; con «Empleados» → 201 (v1.5) | `initial_balance` ≠ 0 → 422; categoría investor, customer o liability → 422; generic «Genérico» → 422 (v1.5); sin categoría → 422. **Ninguna fila escrita** | nace sin marca, con su `initial_balance` y cualquier categoría (comportamiento de hoy) |
@@ -510,6 +521,12 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
   - **con sorpresa y `--apply` no se escribe nada:** el cliente HTTP es un doble que cuenta las llamadas, y se afirma 0 `PATCH`.
   - **Ensayo a archivo contra mi backend de dev** (`:8012`, la SAC activa de mi copia): dry-run → 124 a marcar y exit 0; `--apply --esperado 124` → 124 `PATCH`; re-correr → 0 a marcar, 124 «ya marcado» y exit 0; un tercero re-marcado por ORM con el recolector X → exit 3 y 0 escrituras. Las 4 corridas van con su comando y su `EXIT` en el log (`ensayo_marcar_recolector.log`). (v1.5: suma una quinta, `--apply --esperado 123` → exit 3 y 0 escrituras.)
 - **T17, el balance:** en el detallado vivo y as-of, A y A2 van en el grupo «Recolector: GL» dentro de CxP y de anticipos, con totales iguales a los de antes de marcar. Contra la vacuidad: se exige `total != 0` y `grupos ≥ 2` **antes** de comparar (#110). Y en una org sin marcas, el response es igual campo por campo al de sin código, con cero claves nuevas.
+- **T25, las Entradas preexistentes** (v1.6, R1 medido en producción). Nacen igual que allá: por la API de siempre y con Johana, que no tiene alcance.
+  - E_GL revisada y una Entrada GL liquidada por Johana con A y B (B sin la marca) y la comisión editada a mano (777): Ingrid ve **las dos** en el listado, con su estado, y el detalle de las dos da 200.
+  - La compra de A está en su listado y abre; la de B no está y da 404. Control: Johana abre la de B.
+  - Re-liquidar la liquidada → rechazo por estado, y la comisión sigue en 777, sin recalcular.
+- **T25b, regla 9f** (v1.6). Johana liquida una Entrada GL con A y con retención, y la des-liquida. Ingrid re-liquida con el mismo reparto → 422 con el mensaje de 9f, y **las 7 tablas sin cambios**. Lo mismo con IVA de compra en vez de retención: es un caso propio, porque cada mitad de la regla tiene su plantado. Control positivo: una Entrada des-liquidada sin retenciones ni IVA, toda de A → Ingrid 200. Sin ese control, una regla que bloqueara toda des-liquidada pasaría el test. Segundo control: Johana re-liquida la de la retención → 200.
+- **T25c, regla 9e** (v1.6). Johana liquida una Entrada GL con A en la compra 1 y B en la compra 2, y la des-liquida. Ingrid manda la compra 2 con A: el reparto es todo suyo, así que solo 9e la puede rechazar → 422 con el mensaje de 9e, y la compra de B sigue `registered`. Control: Johana manda el mismo cuerpo → 200, y la compra de B queda cancelada (R6). El control prueba que el escenario sí cancela la compra ajena, o sea que el 422 es lo que la protege. Segundo control: Johana des-liquida otra vez; ahora la compra de B está **cancelada** en el puente y todas las vivas son de A → Ingrid re-liquida → 200. Sin él, una regla que contara las canceladas bloquearía para siempre una Entrada que SAC ya corrigió (P48).
 - **T18, no-regresión de la otra org:** una org sin flag y sin alcances; un usuario restringido por cuentas sigue viendo lo que ve hoy en las 4 lecturas, salvo lo que decida Daniel en §6.
 
 **Dirigidas.** Son la única red de develop hasta el checkpoint. El comando queda fijo aquí, se re-corre igual en la entrega y se escribe en el log. Eco QA 2 corre esa misma lista.
@@ -581,12 +598,16 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
 | P42 | `scoped_create_categories` reconoce al conductor por `behavior_type = generic`, sin mirar el nombre | T24 («Empleados SAC» renombrada sigue apareciendo) y T23 («Genérico» aparece) — vía |
 | P43 | la fila 15 valida con su propia lista de behaviors (`material_supplier`, `generic`) en vez de llamar a la función (plantado **solo** en la validación) | T23 y T24: crear con «Genérico» da 201. **No debe caer** la parte del flat de T23: si cae, la validación y el flat no están separados y P43 no se distingue de P42 |
 | P44 | el nombre se compara con `==` sin `normalize_entity_name` | T24: «EMPLEADOS» desaparece |
+| P45 | sin la regla 9f (v1.6) | T25b, los dos casos (retención e IVA) |
+| P46 | la regla 9f mira solo las retenciones, no el IVA (plantado **solo** en el IVA) | T25b, el caso del IVA. **No debe caer** el de la retención |
+| P47 | sin la regla 9e (v1.6) | T25c: la compra de B queda cancelada |
+| P48 | la regla 9e cuenta también las compras canceladas del puente | T25c, el segundo control: con la compra de B ya cancelada, Ingrid recibe 422 en vez de 200 |
 
 **Dirección peligrosa a buscar celda por celda antes de plantar:** un test que debía caer y no cae. El candidato más probable es P7 si los cuatro listados comparten helper. Por eso el test se parametriza por ruta y el defecto se planta en una sola.
 
 ## 14. Riesgos y fuera de alcance
 
-- **R1 — CONDICIÓN DE USO, no solo riesgo** (Coordinador, revisión de producto): sin recolector en la Entrada, Ingrid no ve nada. Cuántas de producción lo tienen hoy lo mide el Coordinador; el «0 de 34» de la v1.1 era de Entradas de prueba (§2.7). **Báscula tiene que poner el recolector en cada Entrada de Green Loop**, y **Daniel se lo comunica a Johana** antes de que Ingrid entre. Johana lo puede corregir mientras la Entrada no esté liquidada (#83/#93). El aviso «¿Recolector?» en la captura queda fuera de este ciclo y es el **primer candidato a v2**.
+- **R1 — CONDICIÓN DE USO, no solo riesgo** (Coordinador, revisión de producto): sin recolector en la Entrada, Ingrid no ve nada. **Medido en producción (v1.6):** 25 de 149 Entradas de SAC tienen recolector, las 25 Green Loop (18 revisadas, 7 liquidadas); el «0 de 34» de la v1.1 era de Entradas de prueba (§2.7). Las reglas que tocan Entradas ya existentes están en la fila 9 (9e, 9f) y en T25. **Báscula tiene que poner el recolector en cada Entrada de Green Loop**, y **Daniel se lo comunica a Johana** antes de que Ingrid entre. Johana lo puede corregir mientras la Entrada no esté liquidada (#83/#93). El aviso «¿Recolector?» en la captura queda fuera de este ciclo y es el **primer candidato a v2**.
 - **R2 — una consulta más por request** para todo miembro de las 7 orgs (índice único `(org, user)`). Se mide en la construcción con `EXPLAIN ANALYZE` sobre la copia.
 - **R3 — el selector de Johana no cambia (S1).** Si en la pantalla Daniel quiere que también a ella, en una Entrada con recolector GL, se le ofrezcan primero los de GL, es un orden visual y va como sugerencia.
 - **Fuera de alcance:**
@@ -634,7 +655,7 @@ Revisión de producto del Coordinador. Todo lo hace el Coordinador con el OK de 
    - **Antes (v1.5), una lectura:** que exista la categoría de terceros «Empleados», activa y generic, en la SAC activa. Si no existe, Ingrid solo puede crear proveedores (falla cerrado), y Daniel decide si se crea.
 6. **Verificación**, con lecturas en producción y su usuario:
    - `my-permissions` trae `collector_scope`;
-   - `GET /inbound-orders` da solo Entradas con recolector Green Loop (al principio puede ser 0, por R1);
+   - `GET /inbound-orders` da solo Entradas con recolector Green Loop: el 20-nov eran 25 (18 revisadas y 7 liquidadas, v1.6). Se compara contra una lectura de Johana con el filtro `collector_id`, hecha en el mismo momento;
    - `GET /third-parties/suppliers` da solo los marcados;
    - `GET /money-accounts` da solo su caja;
    - `GET /third-party-categories/flat` da solo las de proveedor de material y «Empleados» (v1.5);
