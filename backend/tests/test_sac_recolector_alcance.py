@@ -1271,6 +1271,43 @@ class TestTesoreria:
         assert client.get(f"{MM}/{en_K2['id']}/evidence", headers=w.ingrid).status_code == 404
         assert client.get(f"{MM}/{en_K2['id']}/evidence", headers=w.ingrid_libre).status_code == 200
 
+    @pytest.mark.parametrize("accion", ["anular", "evidencia"])
+    def test_filas_28_30_pago_propio_con_par_forzado(self, w, client, db_session, accion):
+        """P24 (QA 2): ningun tipo de OWN_MOVEMENT_TYPES nace con
+        `transfer_pair_id` (lo asignan financial_obligation, plant_maquila y
+        money_movement en dos sitios, y ninguno crea esos tipos), asi que la
+        condicion `transfer_pair_id IS NULL` de `movement_owned` no tiene caso
+        por HTTP: se FUERZA por ORM (precedente #109 C3). El pago es propio en
+        todo lo demas (su caja K1, proveedor A en alcance) y solo el par lo
+        hace ajeno. Va por accion: un defecto plantado solo en annul tumba
+        [anular] y no [evidencia]; uno en el predicado compartido (H2), los dos."""
+        _fondeo(client, w.johana, w)
+        in_K1 = _mm(db_session, account_id=w.K1.id, movement_type="transfer_in")
+        if accion == "anular":
+            def hacer(mid):
+                return client.post(f"{MM}/{mid}/annul", headers=w.ingrid, json={"reason": "prueba"})
+        else:
+            def hacer(mid):
+                return _evidencia(client, w.ingrid, mid)
+        con_par = _ok(_pago(client, w.ingrid, "supplier-payment", w.K1, w.A), 201)
+        sin_par = _ok(_pago(client, w.ingrid, "supplier-payment", w.K1, w.A), 201)
+        mov = db_session.get(MoneyMovement, UUID(con_par["id"]))
+        mov.transfer_pair_id = in_K1.id
+        db_session.commit()
+        # Contra la vacuidad: propio en todo menos en el par
+        assert mov.movement_type in cs.OWN_MOVEMENT_TYPES
+        assert mov.account_id == w.K1.id and mov.third_party_id == w.A.id
+
+        r = hacer(con_par["id"])
+        assert r.status_code == 404, r.text
+        db_session.expire_all()
+        mov = db_session.get(MoneyMovement, UUID(con_par["id"]))
+        assert mov.status == "confirmed" and mov.evidence_url is None
+        par = db_session.get(MoneyMovement, in_K1.id)
+        assert par.status == "confirmed"
+        # Control positivo: el mismo pago, sin par, pasa
+        assert hacer(sin_par["id"]).status_code == 200
+
 
 # ===========================================================================
 # T19 (§5.7): lista blanca de CAMPOS
@@ -1573,3 +1610,34 @@ class TestRestrict:
         assert db_session.get(ThirdParty, w.A.id).collector_id == w.GL.id
         assert db_session.execute(select(UserCollectorScope).where(
             UserCollectorScope.collector_id == w.GL.id)).first() is not None
+
+    def test_t20_la_fk_del_alcance_restringe_sola(self, w, db_session):
+        """P33 del plantado: a GL tambien lo referencian los terceros marcados y
+        la Entrada, asi que borrarlo falla aunque la FK del alcance fuera
+        CASCADE, y el test de arriba no la aisla. Aca el recolector SOLO tiene
+        la fila de alcance: con CASCADE el borrado pasaria y el usuario quedaria
+        sin alcance, viendo TODO (fail-open, N1)."""
+        x2 = ThirdParty(organization_id=w.org.id, name="Recolector solo con alcance")
+        db_session.add(x2)
+        db_session.flush()
+        user, _ = _member(db_session, w.org.id, "solo_alcance", w.role_recolector.id, scope=x2.id)
+        db_session.commit()
+        x2_id, user_id = x2.id, user.id
+
+        db_session.delete(db_session.get(ThirdParty, x2_id))
+        with pytest.raises(IntegrityError):
+            db_session.commit()
+        db_session.rollback()
+        db_session.expire_all()
+        assert db_session.get(ThirdParty, x2_id) is not None
+        fila = db_session.execute(select(UserCollectorScope).where(
+            UserCollectorScope.user_id == user_id)).scalar_one()
+        assert fila.collector_id == x2_id
+        # Control positivo: sin la fila de alcance nada mas lo retiene, o sea
+        # que lo que detuvo el borrado de arriba fue esa FK y no otra.
+        db_session.delete(fila)
+        db_session.commit()
+        db_session.delete(db_session.get(ThirdParty, x2_id))
+        db_session.commit()
+        db_session.expire_all()
+        assert db_session.get(ThirdParty, x2_id) is None

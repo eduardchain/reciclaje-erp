@@ -1,4 +1,18 @@
-# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.11)
+# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.12)
+
+**v1.12 (20-nov):** el plantado P1–P59 corrió contra la matriz de `41940cf`: 56 defectos cayeron en la diagonal (`plantado/plantado.log`, predicción `predicciones.tsv` `28bf0b36…58ae`). Dejó dos huecos de tests, que entran antes de cerrar:
+- **P24 cayó del lado peligroso:** la fila 28 no cae.
+  - Ningún tipo de `OWN_MOVEMENT_TYPES` nace con `transfer_pair_id`, así que esa condición de `movement_owned` no tiene un caso alcanzable por HTTP. El campo se asigna en cuatro sitios, `financial_obligation.py:628`, `plant_maquila.py:164` y `money_movement.py:404` y `:950` (grep de QA 2), y ninguno crea esos tipos.
+  - Entra un test forzado por ORM (fila «28–30b» de §12).
+  - La parte de P24 que dice «no debe caer la fila 30» suponía dos predicados. Es uno solo, `movement_owned` (H2). Por eso se suma **P24b**, el defecto plantado en el predicado compartido.
+- **P33 cayó del lado peligroso:** T20 no aislaba la FK del alcance, porque a GL también lo retienen los terceros marcados y la Entrada. Entra **T20b**.
+- Re-corrida r2 (`plantado/plantado_r2.log`, predicción `predicciones_r2.tsv` `23dd8b0d…8e47`):
+  - P24 tumba `[anular]` y no `[evidencia]`;
+  - P24b tumba los dos;
+  - P33 tumba T20b y no T20;
+  - P43, re-corrido con su import corregido, tumba T23 en el alta y no en el flat.
+- Las filas originales de §13 no se reescriben: la r1 las midió así y queda en el log. P31 y P43 eran errores del instrumento (cómo se tradujo la fila a tests), no de la matriz, y van en el informe.
+- **Formato:** la línea en blanco después de P40 cortaba la tabla de §13.
 
 **v1.11 (20-nov):** QA 2 dio GO a la v1.10 (`e6ac14e`; revisión `revision_plan_v1.10.md`, `8f77c2b1…c637`). Entran su condición y sus dos notas, junto con la construcción y antes de plantar:
 - **c4:** P58, «9g solo mira `disc > 0`». Tumba el caso de 110 y no tumba el de 60, el de «sin proveedor» ni el control. Sin ella, una 9g de un solo sentido pasaba P55–P57.
@@ -504,6 +518,7 @@ Archivo nuevo `tests/test_sac_recolector_alcance.py`.
 | 27b pago a generic (H5 = a) | K1→D 201 | K2 403; →E (generic sin marca) 404 | K2→E 201 |
 | 28 anular | su pago K1→A | transferencia K1↔K2 de Johana: **404, y el par en K2 sigue `confirmed`**; pago de Johana K1→B 404; causación de A (cuenta NULL) 404; movimiento de K2 404 | anula todo lo que hoy anula |
 | 29–30 evidencia | ver y subir en su pago K1→A | subir en el pago de Johana K1→B 404 (su evidencia no cambia); ver la de un movimiento de K2 404 | 200 |
+| 28–30b par forzado (v1.12, P24) | el mismo pago sin par: anular y subir evidencia 200 (control positivo) | su pago K1→A con `transfer_pair_id` forzado por ORM: anular 404 y subir evidencia 404; parametrizado por acción; el pago y el par siguen `confirmed`, sin evidencia | — |
 | §5.0 miembros | `GET /organizations/{id}` 200 (con `settings`) | `GET …/members` 403 y las otras 8 de miembros 403 | `GET …/members` 200 |
 | §5.7 campos | ver T19 | ver T19 | ver T19 |
 
@@ -563,6 +578,9 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
   - desactivada, desaparece.
   - Contra la vacuidad: antes de renombrar se exige que aparezca.
 - **T20** (N1): borrar físicamente por ORM al recolector cuando tiene un alcance o terceros marcados → `IntegrityError`. La fila de alcance y la marca siguen ahí.
+- **T20b** (v1.12, P33): T20 no aísla la FK del alcance, porque GL también lo retienen los terceros marcados y la Entrada.
+  - Un recolector creado por ORM sin ninguna otra referencia, con un usuario con alcance: borrarlo da `IntegrityError` y la fila sigue apuntándolo.
+  - **Control positivo:** sin la fila de alcance, el mismo borrado pasa. Con eso se prueba que lo que lo detuvo fue esa FK y no otra.
 - **T21, el script de la marca** (v1.3, §9). Archivo propio `tests/test_marcar_recolector.py`. Las funciones son puras (normalizar, verificar la org, armar el plan) y reciben los JSON con la forma real de las respuestas: los campos se copian de `OrganizationResponse` y `ThirdPartyResponse`, nunca más permisivos que el backend (memoria *fake-más-permisivo*). Casos:
   - **normalización**, con los nombres reales:
     - «ABRAHAM CABARCAS (GREENLOOP)» → cumple;
@@ -670,7 +688,6 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
 | P38 | la org se valida sin mirar `kg_ledger_enabled` | T21: org sin flag |
 | P39 | con sorpresa, `--apply` escribe lo que no es sorpresa | T21: 0 `PATCH` con sorpresa |
 | P40 | con alcance, el listado de movimientos sigue filtrando por `created_by` aunque el rol tenga `view_all_movements` (v1.4) | T22: el fondeo de Johana no aparece |
-
 | P41 | la fila 15b sin el filtro forzado: el flat con alcance devuelve todas las categorías (v1.5) | T23 |
 | P42 | `scoped_create_categories` reconoce al conductor por `behavior_type = generic`, sin mirar el nombre | T24 («Empleados SAC» renombrada sigue apareciendo) y T23 («Genérico» aparece) — vía |
 | P43 | la fila 15 valida con su propia lista de behaviors (`material_supplier`, `generic`) en vez de llamar a la función (plantado **solo** en la validación) | T23 y T24: crear con «Genérico» da 201. **No debe caer** la parte del flat de T23: si cae, la validación y el flat no están separados y P43 no se distingue de P42 |
@@ -690,6 +707,8 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
 | P57 | 9g evaluada **después** de D16 | T26, el caso sin precio de referencia (sale el mensaje de D16). **No deben caer** los otros casos de 422 |
 | P58 | 9g solo mira `disc > 0` (c4, v1.11) | T26 `[110]` y el de dos materiales (COBRE-AL sobra). **No deben caer** `[60_con_precio]`, `[60_sin_precio]`, `[sin_proveedor]` ni el control |
 | P59 | 9g levanta en el **primer** material, sin juntar (n14, v1.11) | T26, el caso de dos materiales. **No deben caer** los cuatro `[…]` de un material |
+| P24b | `transfer_pair_id IS NULL` quitado **dentro** de `movement_owned`, el predicado compartido de las filas 28 y 30 (v1.12) | fila 28–30b, `[anular]` y `[evidencia]`. **No caen** las filas 28 y 30 originales (no tienen un caso con par) |
+| — | **v1.12, re-corrida r2:** P24 se mide contra la fila 28–30b: tumba `[anular]` y no `[evidencia]`; se planta **solo** en el call site de `annul_movement`, sin tocar `movement_owned`. P33 se mide contra T20b, que cae; T20 no. | |
 | — | **v1.11:** los cuatro rechazos de T26 son un test parametrizado (`test_t26_9g_rechazo_no_escribe_nada[…]`), uno por caso, para que P55–P58 digan cuál cae. Releídas así: P55 tumba los cuatro y el de dos materiales; P57 tumba solo `[60_sin_precio]` | |
 
 **Dirección peligrosa a buscar celda por celda antes de plantar:** un test que debía caer y no cae. El candidato más probable es P7 si los cuatro listados comparten helper. Por eso el test se parametriza por ruta y el defecto se planta en una sola.
