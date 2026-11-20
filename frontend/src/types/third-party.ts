@@ -45,6 +45,9 @@ export interface SimilarThirdParty {
   /** Todas sus categorías: para AGREGAR la de proveedor sin quitar ninguna
    *  (el PATCH reemplaza la lista entera). */
   category_ids: string[];
+  /** exact: el mismo tercero (la ventana bloquea); similar: se parece por
+   *  contenido (avisa y deja crear igual). Plan similar-por-contenido D2. */
+  match: "exact" | "similar";
 }
 
 export interface ThirdPartyUpdate {
