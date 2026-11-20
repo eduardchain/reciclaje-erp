@@ -511,7 +511,7 @@ export default function InboundDetailPage() {
                     <div className="text-xs text-slate-500">
                       {iva > 0 && <>IVA: {fmtMoney(iva)} · </>}
                       {ret > 0 && <>Retenciones: {fmtMoney(ret)} · </>}
-                      Neto:{" "}
+                      Total al proveedor:{" "}
                       <span className="font-medium text-slate-700">
                         {fmtMoney(num(p.total_amount) + iva - ret)}
                       </span>

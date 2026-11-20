@@ -485,6 +485,18 @@ export default function InboundLiquidatePage() {
   const formOrder = useMemo(() => formOrderMap(profilesData?.items), [profilesData]);
   const orderedLines = useMemo(() => sortByFormOrder(lines, formOrder), [lines, formOrder]);
   const sortedCols = useMemo(() => [...cols].sort((a, b) => a.slot - b.slot), [cols]);
+
+  // Escritorio: la compra nueva nace a la derecha, dentro del scroll de la
+  // tabla; con 3+ compras quedaba fuera de la vista. Solo el botón de
+  // escritorio pide el scroll (recuperar un borrador no mueve la tabla).
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const scrollToNewColRef = useRef(false);
+  useEffect(() => {
+    if (!scrollToNewColRef.current) return;
+    scrollToNewColRef.current = false;
+    const el = tableScrollRef.current;
+    if (el) el.scrollTo({ left: el.scrollWidth, behavior: "smooth" });
+  }, [sortedCols.length]);
   const [initialized, setInitialized] = useState(false);
   const [editing, setEditing] = useState<{ lineKey: number; slot: number } | null>(null);
   const [createFor, setCreateFor] = useState<number | null>(null);
@@ -1606,7 +1618,26 @@ export default function InboundLiquidatePage() {
       {/* Escritorio: la hoja de Johana (Opción B: overflow + columna sticky) */}
       <Card className="shadow-sm hidden md:block">
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          {/* «Agregar compra» fuera de la tabla: como última columna quedaba
+              cortado en el borde derecho apenas había dos compras. */}
+          <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2">
+            <span className="text-xs text-slate-500">
+              {sortedCols.length === 1 ? "1 compra" : `${sortedCols.length} compras`} — una columna por compra
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                scrollToNewColRef.current = true;
+                addCol();
+              }}
+              className="whitespace-nowrap"
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Agregar compra
+            </Button>
+          </div>
+          <div ref={tableScrollRef} className="overflow-x-auto">
             <table className="min-w-full text-sm border-separate border-spacing-0">
               <thead>
                 <tr className="align-top">
@@ -1627,12 +1658,6 @@ export default function InboundLiquidatePage() {
                       {renderColHeader(col)}
                     </th>
                   ))}
-                  <th className="border-b border-slate-200 px-3 py-2 align-top">
-                    <Button variant="outline" size="sm" onClick={addCol} className="whitespace-nowrap">
-                      <Plus className="h-4 w-4 mr-1" />
-                      Compra
-                    </Button>
-                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1649,7 +1674,6 @@ export default function InboundLiquidatePage() {
                         {renderCell(l, col)}
                       </td>
                     ))}
-                    <td className="border-b border-slate-100" />
                   </tr>
                 ))}
               </tbody>
@@ -1666,7 +1690,6 @@ export default function InboundLiquidatePage() {
                       {renderFooter(col)}
                     </td>
                   ))}
-                  <td />
                 </tr>
               </tfoot>
             </table>
