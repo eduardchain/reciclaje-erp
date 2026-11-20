@@ -104,6 +104,11 @@ La barra cuenta lo mismo que el pie: `activeCols.length` compras, y aparte las c
   sigue. Se escribió el precio en esa compra, así que es de esa compra; un clic en ↺ la devuelve
   a la base. Con la celda visible esto se va a notar más: lo mira Daniel en la pantalla.
 - Costa y Meta: la ruta está detrás del flag SAC; nada compartido se toca.
+- **O1 de QA (conocido, se deja)**: en una celda VACÍA (cantidad 0), escribir exactamente el
+  precio sugerido (el del placeholder) la vuelve «propio» con esa misma cifra: el campo de una
+  celda vacía muestra 0, así que C1 no lo ve como «sin cambio». Si después cambia la lista o la
+  base, esa celda no la sigue; un clic en ↺ la devuelve. No se corrige: distinguir «escribí el
+  sugerido» de «escribí un precio que coincide» no tiene criterio que no sea adivinar.
 
 ## 4. Verificación (no hay infra de test de frontend)
 
@@ -155,6 +160,26 @@ La barra cuenta lo mismo que el pie: `activeCols.length` compras, y aparte las c
 - Capturas a 1440 y 390 con 3 compras y precios distintos (lista A, lista B, base, propio), al
   Coordinador antes de la revisión completa de QA.
 - Golden: **no aplica** (solo frontend de una ruta SAC; el golden compara respuestas HTTP).
+
+### 4b. Delta del instrumento entre la ronda 1 y la ronda 2 del plantado (la matriz de arriba NO se reescribe)
+Evidencia en `~/sac-evidencia/2026-11-20/coder-1-precio-por-compra/` (`plantado.log` = ronda 1).
+- **Tests agregados antes de plantar la ronda 1**: E11c (celda vacía con precio propio, Tab por
+  ella → borrador igual) y E11d (celda en total con «antes» que vuelve a cantidad 0 → borrador
+  igual), porque con un solo guard para todos los modos P6 no tenía un test que lo viera.
+- **E14 era vacuo en dos sub-mediciones** (lo destapó P9b, que no tumbó nada): la cantidad (10) y
+  el precio base (700) no tienen separador de miles, así que el texto formateado es igual al crudo,
+  el reformateo de `MoneyInput` no cambia el valor y la selección del Tab sobrevive con o sin
+  `selectOnFocus`. `sonda_p9b.log`: con P9b plantado, 700 → selección [0,3] y «710» (no se ve);
+  4.000 → selección [4,4] y «40.004.050» (vivo). E14 pasa a medir sobre 10,5 y 4.000, e imprime
+  la selección.
+- **`submit()` moría** cuando el botón «Liquidar Entrada» estaba deshabilitado (P3: la celda queda
+  sin precio → 30 s de espera → crash, `plantado_P3_salida_completa.log`); ahora registra
+  «botón deshabilitado» y el check del payload cae con su detalle.
+- **El driver descartaba la salida** salvo FAIL/RESUMEN: el crash de P2 en la ronda 1 no se puede
+  diagnosticar (re-corrido aparte completo: 20/22, cae E5 y E1-payload,
+  `plantado_P2_salida_completa.log`). La ronda 2 guarda la salida completa por fila.
+- sha256 del instrumento de la ronda 2: `e2e.mjs` eaca82f15334ba9d041eb5481c5c77ff5bbb45bfdb8da1a3984ee6b16c0f2dcb · `plantar.py` 4b45eca89dc6872918d21d0b41564c09381d7c3f85e33d289f3be72c05f8dfb8 ·
+  `plantado.sh` 20397d4f3df70768d1d723dc2b868dbd6e7efd080bf1460d433889bb0fffb6ef · `sonda_p9b.mjs` 91c9948c9a186ab6b32689308e09c5fce51a66ca69c2463969bd3b4396323684.
 
 ## 5. Supuestos
 - S1: «el precio unitario de esa compra se ve y se edita directamente» se cumple con el campo de
