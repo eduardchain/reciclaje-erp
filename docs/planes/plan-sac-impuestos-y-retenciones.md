@@ -1,7 +1,8 @@
-# Plan — Tesorería: «Impuestos y retenciones» en una sola página (v1.1)
+# Plan — Tesorería: «Impuestos y retenciones» en una sola página (v1.2)
 
 Autor: Eco Coder 1 · 20-nov-2026 · rama `coder-1/impuestos-retenciones` (base develop `31ba117`)
 v1.1 (20-nov): C1–C4 y O1–O3 de QA 1 sobre la v1.0 (`75d0b39`).
+v1.2 (20-nov): C3 invertida después del GO de la v1.1 (`e6b5086`): la lista NO filtra inactivas. Cambian D1, T9, P8 y E7.
 Nivel: **lógica**. Lleva un endpoint nuevo y la naturaleza de cada saldo sale de su signo.
 Pedido: el Coordinador, 20-nov: que Tesorería → Retenciones muestre también «[Impuestos] IVA por Pagar» y las demás entidades de impuestos, cada una con su saldo y su estado de cuenta.
 
@@ -20,10 +21,13 @@ Pedido: el Coordinador, 20-nov: que Tesorería → Retenciones muestre también 
 ### D1 — Endpoint `GET /third-parties/tax-entities`
 - Usa el mismo patrón que `retention-entities`: `require_org_flag("kg_ledger_enabled")` (403 sin flag, también para admin), permiso `third_parties.view` y ruta estática declarada **antes** de `/{third_party_id}`.
 - **Reconoce las entidades por CÓDIGO, nunca por texto** (#112 D4b): las que tienen asignada la categoría con `system_code='taxes'` (`TAX_CATEGORY_CODE`). Un tercero que se llame «[Impuestos] lo que sea» sin esa categoría no aparece. Tampoco aparecen las `[Retenciones] X`, que van en su sección de siempre.
-- Cada fila trae `entity_id`, `name`, `label`, `tax_type` (iva/retefuente/reteiva/ica, o `null` si el nombre no sigue el formato), `municipality` y `current_balance`.
+- Cada fila trae `entity_id`, `name`, `label`, `tax_type` (iva/retefuente/reteiva/ica, o `null` si el nombre no sigue el formato), `municipality`, `current_balance` e `is_active`.
   - `label` = `tax_label(tax_type, municipality)` («IVA», «ICA Bogotá»), o el nombre si no parsea (O2).
   - El tipo se lee del nombre con un parser nuevo en `tax_entities.py` (el módulo dueño del formato), hermano de `_parse_entity` de retenciones. **El tipo es solo para el rótulo; la pertenencia la decide el código.**
-- **Solo entidades ACTIVAS (C3).** Desactivar un tercero exige saldo 0 (`third_party.py:442`), así que filtrar inactivas no esconde ninguna deuda. Por eso el response no lleva `is_active`. Lo sostiene T9.
+- **TODAS las entidades, activas e inactivas (C3, invertida en v1.2).**
+  - La v1.1 decía «solo activas», con la premisa de que desactivar exige saldo 0 (`third_party.py:442`). Para estas entidades manda el guard ANTERIOR, `third_party.py:431`: una entidad de sistema no se puede desactivar por la API, con saldo o sin él (corrección de QA 1).
+  - O sea, una entidad de impuestos solo queda inactiva por fuera de la API, y en ese caso nada garantiza que su saldo sea 0. Con el filtro, ese saldo desaparecería de la página en silencio.
+  - Entre esconder una deuda y mostrar una fila de más, gana mostrar (fail-open). La fila inactiva lleva la marca «Inactiva». Lo sostienen T9 y P8.
 - Orden: IVA, ReteFuente, ReteIVA, ICA por municipio, y al final los que no parsean.
 - Servicio `list_tax_entity_rows(db, org_id)` en `tax_entities.py`. Sin migración y sin cambios en ninguna tabla.
 
@@ -72,7 +76,7 @@ Pedido: el Coordinador, 20-nov: que Tesorería → Retenciones muestre también 
 | T6 | org sin `kg_ledger_enabled` | 403, también para admin |
 | T7 | rol con `third_parties.view` / rol sin él | 200 / 403 (control positivo, regla de los tests de permiso) |
 | T8 | dos orgs con IVA | cada una ve solo el suyo |
-| T9 | una entidad de impuestos con saldo 0 desactivada | no aparece; la activa sí (C3) |
+| T9 | una entidad de impuestos dejada inactiva **por ORM** (el DELETE de la API da 400, línea 431) con saldo ≠ 0, junto a otra activa | las dos aparecen. La inactiva trae `is_active=false` y su saldo exacto, y la activa `is_active=true` (control positivo: el campo distingue y no viene fijo). Además, el DELETE por la API sobre la entidad da 400 (fija la premisa) |
 
 **Dirigidas (C4):** el router `/third-parties` es COMPARTIDO y el orden de rutas importa: una ruta estática declarada después de `/{third_party_id}` da 422 en silencio. Comando, escrito en el log con su resultado (hoy trae 11 archivos):
 
@@ -92,6 +96,7 @@ Se corren esos archivos más las tres guardas (`test_reloj_de_negocio.py`, `test
 | E4 | Estado de Cuenta de la fila IVA | abre con la entidad en el selector (#125) |
 | E5 | Costa | sin entrada en el sidebar; `/treasury/retentions` responde como hoy (FP) |
 | E6 | una retención practicada (sección 2) con saldo > 0, puesta por un movimiento en mi BD | etiqueta «A favor» y conserva Pagar (C1) |
+| E7 | una entidad de impuestos inactiva por SQL en mi BD de dev, con saldo ≠ 0; al terminar se restaura | la fila aparece con la marca «Inactiva» y su saldo |
 
 **Plantado** (la matriz va commiteada con el plan, antes de plantar; copia por ruta y cierre por sha256):
 
@@ -104,7 +109,7 @@ Se corren esos archivos más las tres guardas (`test_reloj_de_negocio.py`, `test
 | P5 | sin filtro de org | T8 | — |
 | P6 | `taxBalanceNature` con el signo invertido | E1, E2 | E3 |
 | P7 | Pagar en toda fila con entidad, sin mirar el signo | E3 | — |
-| P8 | sin filtro `is_active` | T9 | — |
+| P8 | CON filtro `is_active == True` (el comportamiento de la v1.1) | T9 | E7 |
 | P9 | el Pagar de la sección 2 gobernado por el signo | E6 | — |
 
 **Capturas** de SAC a 1440 y 390.
