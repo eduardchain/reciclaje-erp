@@ -1559,6 +1559,15 @@ class InboundOrderService:
                         f"no configurado — validos: {', '.join(valid_centers)}"
                     )
 
+        # Sede (pedido de Johana 2026-11-19): corregible mientras la Entrada no
+        # tenga efectos. Va ANTES de cualquier asignacion en memoria (O3 de QA)
+        # y antes de los bloques de lineas, que validan con order.warehouse_id.
+        # Reenviar la MISMA sede es un no-op y no dispara los guards: un form
+        # que la mande siempre no puede romper la edicion de notas de una
+        # liquidada (C3 de QA).
+        if "warehouse_id" in fields_set and str(obj_in.warehouse_id) != str(order.warehouse_id):
+            self._change_warehouse(db, order, obj_in, organization_id, is_willard)
+
         if obj_in.driver_id is not None:
             self._validate_org(db, Driver, obj_in.driver_id, organization_id, "Conductor")
         if obj_in.vehicle_id is not None:
@@ -1720,6 +1729,65 @@ class InboundOrderService:
         db.commit()
         db.refresh(order)
         return order, warnings
+
+    def _change_warehouse(
+        self,
+        db: Session,
+        order: InboundOrder,
+        obj_in: InboundOrderUpdate,
+        organization_id: UUID,
+        is_willard: bool,
+    ) -> None:
+        """Cambia la sede de una Entrada sin efectos (registrada o revisada).
+
+        Con efectos (liquidada, Willard confirmada) cambiar la sede seria mover
+        inventario, kilos y plata ya registrados: se anula y se registra de
+        nuevo. No decertifica una revisada (D2 de Daniel): la revision
+        certifica pesos y cantidades, y la sede es cabecera (criterio D17)."""
+        if obj_in.warehouse_id is None:
+            raise _err("La sede es obligatoria — elija una bodega")
+        if order.status not in ("draft", "reviewed"):
+            estado = "confirmada" if is_willard else "liquidada"
+            raise _err(
+                f"La entrada esta {estado} — la sede ya no se puede cambiar. "
+                "Anulela y registrela de nuevo en la sede correcta"
+            )
+        if not is_willard:
+            # D1 de Daniel: una desliquidada vuelve a 'revisada' con sus compras
+            # VIVAS (registered), con las lineas en la sede vieja. Re-liquidar
+            # reusa esas compras cuando la firma del reparto coincide, y
+            # purchase_signature NO incluye la bodega: quedarian en la sede
+            # vieja mientras el descuadre y la comision nacen en la nueva. El
+            # puente cubre tambien el legacy 1:1 (backfill de #93).
+            vivas = [
+                p for p in self._linked_purchases(db, organization_id, order.id)
+                if p.status != "cancelled"
+            ]
+            if vivas:
+                numeros = ", ".join(f"#{p.purchase_number}" for p in vivas)
+                raise _err(
+                    f"La entrada ya tuvo compras ({numeros}) — la sede no se puede "
+                    "cambiar. Anulela y registrela de nuevo en la sede correcta"
+                )
+        self._validate_warehouse(db, obj_in.warehouse_id, organization_id)
+        order.warehouse_id = obj_in.warehouse_id
+        if is_willard and obj_in.lines is None:
+            # Con lines en el payload, el bloque de lineas ya valida contra la
+            # sede nueva; sin ellas se revalidan las persistidas (drosses solo
+            # en planta, postconsumo con cuenta de baterias del titular).
+            self._validate_willard_capture(
+                db, organization_id, order.warehouse_id, order.third_party_id,
+                [
+                    SimpleNamespace(
+                        material_id=l.material_id,
+                        quantity=l.quantity,
+                        unit_price=l.unit_price,
+                        scale_weight_kg=l.scale_weight_kg,
+                        quality_notes=l.quality_notes,
+                    )
+                    for l in order.lines
+                ],
+            )
 
     # ------------------------------------------------------------------ #
     # Lectura                                                             #

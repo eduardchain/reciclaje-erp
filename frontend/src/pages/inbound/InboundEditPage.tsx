@@ -26,7 +26,7 @@ import { MoneyInput } from "@/components/shared/MoneyInput";
 import { PurchaseLink } from "@/components/shared/EntityLink";
 import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { useInboundOrder, useUpdateInboundOrder } from "@/hooks/useInboundOrders";
-import { useMaterials, usePayableProviders } from "@/hooks/useMasterData";
+import { useMaterials, usePayableProviders, useWarehouses } from "@/hooks/useMasterData";
 import {
   useCreateDriver,
   useCreateVehicle,
@@ -79,6 +79,7 @@ export default function InboundEditPage() {
   const { data: collectorsData } = usePayableProviders();
   const { data: vehiclesData } = useVehicles();
   const { data: profilesData } = useKgProfiles();
+  const { data: warehousesData } = useWarehouses();
 
   const materials = materialsData?.items ?? [];
   const drivers = driversData?.items ?? [];
@@ -87,6 +88,7 @@ export default function InboundEditPage() {
 
   const [initialized, setInitialized] = useState(false);
   const [date, setDate] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
   const [driverId, setDriverId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   // Quick-create de flota: el Ciclo B lo agrego SOLO en la pagina de crear;
@@ -154,6 +156,7 @@ export default function InboundEditPage() {
   useEffect(() => {
     if (order && !initialized) {
       setDate(utcToLocalDateInput(order.date));
+      setWarehouseId(order.warehouse_id);
       setDriverId(order.driver_id ?? "");
       setVehicleId(order.vehicle_id ?? "");
       setCollectorId(order.collector_id ?? "");
@@ -204,6 +207,17 @@ export default function InboundEditPage() {
       ? order.purchase_status != null && order.purchase_status !== "registered"
       : order.status === "liquidated"
   );
+  // Sede corregible (pedido de Johana 2026-11-19) solo en tipo compra sin
+  // efectos: registrada o revisada, y sin compras vivas — una desliquidada las
+  // conserva con las lineas en la sede vieja (D1 de Daniel: anular y recrear).
+  // Willard queda fija: en SAC cada mundo tiene una sola sede valida.
+  const hasLivePurchases = (order.purchases ?? []).some((p) => p.status !== "cancelled");
+  const sedeEditable =
+    !isWillard && !isLegacy && !hasLivePurchases &&
+    (order.status === "draft" || order.status === "reviewed");
+  const receivingWarehouses = ((warehousesData?.items ?? []) as {
+    id: string; name: string; is_receiving?: boolean;
+  }[]).filter((w) => w.is_receiving !== false);
   const todayStr = toLocalDateInput();
   const isFutureDate = date ? date > todayStr : false;
 
@@ -228,6 +242,9 @@ export default function InboundEditPage() {
 
   const buildPayload = (): InboundOrderUpdate => {
     const payload: InboundOrderUpdate = {};
+    if (sedeEditable && warehouseId && warehouseId !== order.warehouse_id) {
+      payload.warehouse_id = warehouseId;
+    }
     if (linesEditable) {
       if (date && date !== originalDate) payload.date = date;
       if (linesDirty) payload.lines = toApiLines(lines, !isWillard);
@@ -295,7 +312,20 @@ export default function InboundEditPage() {
             </div>
             <div>
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Sede</span>
-              <span>{order.warehouse_name ?? "—"}</span>
+              {sedeEditable ? (
+                <div className="w-full">
+                  <EntitySelect
+                    value={warehouseId}
+                    // EntitySelect deselecciona al re-clickear la opcion elegida
+                    // (onChange("")): la sede es obligatoria, se conserva la actual
+                    onChange={(v) => v && setWarehouseId(v)}
+                    options={receivingWarehouses.map((w) => ({ id: w.id, label: w.name }))}
+                    placeholder="Bodega..."
+                  />
+                </div>
+              ) : (
+                <span>{order.warehouse_name ?? "—"}</span>
+              )}
             </div>
             <div>
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Tercero</span>
@@ -303,7 +333,11 @@ export default function InboundEditPage() {
             </div>
           </div>
           <p className="text-xs text-slate-400 mt-2">
-            Tipo y sede son inmutables — para cambiarlos, anule la orden y cree otra.
+            {sedeEditable
+              ? "El tipo no se cambia. La sede se corrige mientras la entrada no esté liquidada."
+              : isWillard
+                ? "Tipo y sede son fijos en una recepción Willard — para cambiarlos, anule la orden y cree otra."
+                : "La sede ya no se puede cambiar: la entrada tiene compras. Para corregirla, anúlela y regístrela de nuevo."}
           </p>
         </CardContent>
       </Card>

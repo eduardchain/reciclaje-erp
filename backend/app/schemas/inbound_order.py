@@ -81,8 +81,12 @@ class InboundOrderCreate(BaseModel):
 
 class InboundOrderUpdate(BaseModel):
     """Edicion D18 — Willard: revert-and-reapply de lineas; purchase: solo
-    cabecera sin efectos. warehouse/tipo/tercero inmutables (anular y recrear)."""
+    cabecera sin efectos. Tipo y tercero inmutables (anular y recrear).
+    La sede (warehouse_id) se corrige solo en registrada/revisada sin compras
+    vivas (pedido de Johana 2026-11-19, plan-sac-entrada-editar-sede.md)."""
     model_config = ConfigDict(extra="forbid")
+
+    warehouse_id: Optional[UUID] = None
 
     date: Optional[BusinessDate] = None
     driver_id: Optional[UUID] = None

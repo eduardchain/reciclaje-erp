@@ -57,6 +57,8 @@ export interface InboundOrderCreate {
  */
 export interface InboundOrderUpdate {
   date?: string;
+  /** Sede: solo registrada/revisada sin compras vivas (pedido Johana 2026-11-19) */
+  warehouse_id?: string;
   /** null explícito = quitar (alineado a fields_set en el backend) */
   driver_id?: string | null;
   vehicle_id?: string | null;
