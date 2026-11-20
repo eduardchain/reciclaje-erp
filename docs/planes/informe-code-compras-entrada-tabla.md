@@ -102,3 +102,14 @@ Suite completa del frontend: diferida al checkpoint.
 | P | Defecto | Cae (predicción) |
 |---|---|---|
 | P13 | la tabla ignora `outOfScope` (las celdas con link siempre) | **E9a, y solo E9a.** E9b queda verde (las tarjetas son de Ingrid) y E9c también (sin alcance no cambia nada) |
+
+**Resultados del delta.** Logs en la misma carpeta de evidencia.
+
+| Gate | Log | Resultado |
+|---|---|---|
+| Migración de Ingrid en la BD dev propia | `merge_alembic.log` | `d6e8f0a2b4c7 → e7f9a1b3c5d8`. El backend `:8011` corría sin `--reload` desde las 15:50, así que se reinició con el código del merge (`back_8011_merge.log`) |
+| E9 sin defectos | `e9_r1.log` | 3/3, EXIT=0 |
+| Plantado P13 | `plantado_p13.log` | **cae E9a y solo E9a, como estaba predicho**. Al restaurar, el sha256 es igual y `git status` queda limpio. ⚠️ El grep «Vite sirve la versión plantada» dio 0 también plantado, porque esbuild pliega `false && …` al transformar, así que ese instrumento no vio el defecto. La prueba de que se sirvió es la caída de E9a en la misma corrida (2/3, contra el 3/3 sin el defecto) |
+| Lint / tsc / build sobre el árbol del merge | `merge_lint.log`, `merge_tsc.log`, `merge_build.log` | 37 avisos y 0 errores (igual al techo); tsc y build con EXIT=0 |
+| Guardas | `merge_guardas.log` | **52 passed, EXIT=0**, igual a la predicción escrita antes. `git diff 87c799f..HEAD` sobre los 3 archivos de guardas da vacío |
+| Check E1–E11 + E9 y capturas | `merge_check_final.log`, `capturas_final/` | sobre el SHA final, con el SHA en el encabezado |
