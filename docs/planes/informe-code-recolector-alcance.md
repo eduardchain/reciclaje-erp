@@ -178,6 +178,7 @@ Referencia, el ensayo en la copia de dev (`EV/ensayo_marcar_recolector.log`):
   - los pasos 4–6: rol de 13 permisos, caja K1 antes que el alcance, collector-scope y `my-permissions` con `collector_scope`;
   - la verificación: suppliers con 123, todos marcados; una sola cuenta; categorías «Empleados» y «Proveedor Material»; `members` en 403, con Johana en 200 como control.
 - **Por qué hubo un desvío:** la membresía se dio por admin de org, porque en esa BD no había un superusuario con clave conocida.
+- **Lo que NO es el comportamiento final:** en ese ensayo `tax-entities` dio 422, porque `c00a133` todavía no tenía la ruta y la petición caía en `/{third_party_id}`. Sobre `c0ef770` da 403 con el prefijo de alcance, como muestran el test nuevo y `QA/red/ingrid_sondeo_c0ef770.log` (sha `bf850683…aaba`).
 - **No los ensayó nadie:**
   - el alta del usuario en la org por `/system`;
   - el reseteo de clave de #85.
