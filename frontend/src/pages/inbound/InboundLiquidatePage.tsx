@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { FocusEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Plus, Scale, Trash2, Truck, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
@@ -284,6 +285,20 @@ const priceFieldValue = (
       return toCents(c.unit_price ?? 0);
     default:
       return c.quantity > 0 ? toCents(cellUnit(c, col, l)) : 0;
+  }
+};
+
+/** `MoneyInput` reemplaza el texto al recibir el foco («1.300» → «1300») y eso
+ *  borra la selección que deja el Tab: lo que se escribía se PEGABA al final
+ *  (1250 sobre 1.300 daba 13.001.250). Con el precio prellenado ese es el flujo
+ *  normal, así que en la celda se selecciona todo después de ese render.
+ *  (MoneyInput es compartido: no se toca acá.) */
+const selectOnFocus = (e: FocusEvent<HTMLElement>) => {
+  const t = e.target;
+  if (t instanceof HTMLInputElement) {
+    requestAnimationFrame(() => {
+      if (document.activeElement === t) t.select();
+    });
   }
 };
 
@@ -1284,15 +1299,18 @@ export default function InboundLiquidatePage() {
   const renderRowPrice = (l: LineState) => {
     const needed = lineDisc(l) !== 0 || activeCells(l).length > 0;
     return (
-      <MoneyInput
-        value={l.rowPrice}
-        // QA C5: MoneyInput llama onChange en CADA blur; sin el guard, pasar
-        // con Tab marcaba la fila como tocada sin haber cambiado nada
-        onChange={(v) => v !== l.rowPrice && updateLine(l._key, { rowPrice: v, rowTouched: true })}
-        decimals={2}
-        placeholder="Precio base"
-        className={cn("h-8 text-sm", needed && l.rowPrice <= 0 && "border-red-300")}
-      />
+      // Mismo pegado de cifras que en la celda: con Tab, 710 sobre 700 daba 700710
+      <div onFocus={selectOnFocus}>
+        <MoneyInput
+          value={l.rowPrice}
+          // QA C5: MoneyInput llama onChange en CADA blur; sin el guard, pasar
+          // con Tab marcaba la fila como tocada sin haber cambiado nada
+          onChange={(v) => v !== l.rowPrice && updateLine(l._key, { rowPrice: v, rowTouched: true })}
+          decimals={2}
+          placeholder="Precio base"
+          className={cn("h-8 text-sm", needed && l.rowPrice <= 0 && "border-red-300")}
+        />
+      </div>
     );
   };
 
@@ -1316,7 +1334,7 @@ export default function InboundLiquidatePage() {
         {/* Plan v1.1 D1: cantidad y precio lado a lado, siempre visibles. El
             campo de precio existe también con cantidad 0, para que el Tab vaya
             cantidad → precio → celda siguiente. */}
-        <div className="grid grid-cols-2 gap-1">
+        <div className="grid grid-cols-2 gap-1" onFocus={selectOnFocus}>
           <MoneyInput
             value={qty}
             // C5: un blur sin cambio no crea una celda en 0 (borrador fantasma)
