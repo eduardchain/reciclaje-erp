@@ -819,6 +819,128 @@ class TestEntradasPreexistentes:
         assert r.status_code == 200, r.text
         assert self._avisos(r) == []
 
+    def test_t25e_n12_usuarios_con_alcance_inactivos_sin_aviso(self, w, client, db_session):
+        # n12 de QA 2: n8 («solo usuarios activos») con su test. Los dos
+        # usuarios con alcance GL quedan inactivos, asi que nadie pierde nada.
+        # El control positivo es el caso 1, con los mismos usuarios activos.
+        users = db_session.execute(
+            select(User).join(UserCollectorScope, UserCollectorScope.user_id == User.id)
+            .where(UserCollectorScope.collector_id == w.GL.id)).scalars().all()
+        # Contra la vacuidad: son ingrid e ingrid_todo, y estaban activos
+        assert sorted(u.email.split("@")[0] for u in users) == ["ingrid", "ingrid_todo"]
+        assert all(u.is_active for u in users)
+        for u in users:
+            u.is_active = False
+        db_session.commit()
+        r = client.post(f"{INBOUND}/{w.E_GL}/liquidate", headers=w.johana,
+                        json=_liq_body(w.m1, _alloc(w.A, 1, 40), _alloc(w.B, 2, 60)))
+        assert r.status_code == 200, r.text
+        assert self._avisos(r) == []
+
+
+# ===========================================================================
+# T26 — regla 9g (v1.10, Daniel: «Que no deje descuadre»). Con alcance, todo
+# lo pesado se reparte: el descuadre se valora al precio de referencia y
+# aterriza en los libros de SAC. Todo por HTTP, con el PAR sin alcance.
+# ===========================================================================
+
+def _ajustes(db, entrada=None) -> int:
+    """Ajustes de inventario (el descuadre de #93 D6/D7 nace como uno)."""
+    from sqlalchemy import func
+    from app.models.inventory_adjustment import InventoryAdjustment
+    db.expire_all()
+    q = select(func.count()).select_from(InventoryAdjustment)
+    if entrada is not None:
+        q = q.where(InventoryAdjustment.inbound_order_id == UUID(entrada))
+    return db.scalar(q)
+
+
+def _linea(mat, *allocs, **extra):
+    return {"material_id": str(mat.id), "allocations": list(allocs), **extra}
+
+
+class TestSinDescuadre:
+
+    @staticmethod
+    def _liq(client, headers, oid, *lineas):
+        return client.post(f"{INBOUND}/{oid}/liquidate", headers=headers,
+                           json={"lines": list(lineas)})
+
+    @staticmethod
+    def _es_9g(r, *que) -> None:
+        from app.services.collector_scope import FULL_ALLOCATION, FULL_ALLOCATION_TAIL
+        assert r.status_code == 422, r.text
+        d = _detail(r)
+        assert d.startswith(FULL_ALLOCATION) and d.endswith(FULL_ALLOCATION_TAIL), d
+        # No es el mensaje de D16 (P57): ese habla del precio de referencia
+        assert "precio de referencia" not in d, d
+        for q in que:
+            assert q in d, (q, d)
+
+    # Un caso por test, para que la matriz (P55-P58) diga CUAL cae.
+    @pytest.mark.parametrize("caso", ["60_con_precio", "60_sin_precio", "110", "sin_proveedor"])
+    def test_t26_9g_rechazo_no_escribe_nada(self, w, client, db_session, caso):
+        lineas = {
+            # 60 de 100, con precio de referencia
+            "60_con_precio": (_linea(w.m1, _alloc(w.A, 1, 60), reference_unit_price="1000"),
+                              "HIERRO-AL: faltan 40 kg por repartir"),
+            # Lo mismo SIN precio: sale 9g, no D16 (P57)
+            "60_sin_precio": (_linea(w.m1, _alloc(w.A, 1, 60)),
+                              "HIERRO-AL: faltan 40 kg por repartir"),
+            # 110 de 100: sobra (P58, el sentido que una 9g `disc > 0` no ve)
+            "110": (_linea(w.m1, _alloc(w.A, 1, 110), reference_unit_price="1000"),
+                    "HIERRO-AL: se repartieron 10 kg de más"),
+            # Marcado sin proveedor, con algo pesado
+            "sin_proveedor": (_linea(w.m1, unallocated_intentional=True, reference_unit_price="1000"),
+                              "HIERRO-AL: marcado sin proveedor (100 kg pesados)"),
+        }
+        linea, que = lineas[caso]
+        antes, aj = _conteos(db_session), _ajustes(db_session)
+        self._es_9g(self._liq(client, w.ingrid, w.E_GL, linea), que)
+        assert _conteos(db_session) == antes
+        assert _ajustes(db_session) == aj
+        assert client.get(f"{INBOUND}/{w.E_GL}", headers=w.johana).json()["status"] == "reviewed"
+
+    def test_t26_n14_junta_los_materiales_en_un_422(self, w, client, db_session):
+        # n14 de QA 2: la promesa de «junta todos los materiales» con su test.
+        m2 = create_material(db_session, w.org.id, "COBRE-AL", "Cobre AL",
+                             w.m1.category_id, bu_id=w.m1.business_unit_id)
+        m2.default_unit = "kg"
+        db_session.commit()
+        _ok(client.put(f"{API}/material-kg-profiles/{m2.id}", headers=w.johana,
+                       json={"compra_regular": True, "willard_world": "none", "lead_product": "none"}))
+        e = _ok(client.post(INBOUND, headers=w.johana, json={
+            "inbound_type": "purchase", "warehouse_id": str(w.wh.id), "date": _past(),
+            "collector_id": str(w.GL.id),
+            "lines": [{"material_id": str(w.m1.id), "quantity": "100", "scale_weight_kg": "100"},
+                      {"material_id": str(m2.id), "quantity": "50", "scale_weight_kg": "50"}]}), 201)["id"]
+        _ok(client.post(f"{INBOUND}/{e}/review", headers=w.johana))
+        antes = _conteos(db_session)
+        r = self._liq(client, w.ingrid, e,
+                      _linea(w.m1, _alloc(w.A, 1, 60), reference_unit_price="1000"),
+                      _linea(m2, _alloc(w.A, 1, 70), reference_unit_price="1000"))
+        # Los DOS materiales en el MISMO 422
+        self._es_9g(r, "HIERRO-AL: faltan 40 kg por repartir", "COBRE-AL: se repartieron 20 kg de más")
+        assert _conteos(db_session) == antes
+
+    def test_t26_control_reparto_exacto(self, w, client, db_session):
+        # Control positivo: todo lo pesado repartido -> 200 y CERO ajustes de
+        # descuadre; el precio de referencia que mande no tiene efecto.
+        r = self._liq(client, w.ingrid, w.E_GL, _linea(
+            w.m1, _alloc(w.A, 1, 60), _alloc(w.A2, 2, 40), reference_unit_price="1000"))
+        assert r.status_code == 200, r.text
+        assert _ajustes(db_session, w.E_GL) == 0
+
+    def test_t26_par_sin_alcance_el_descuadre_pasa(self, w, client, db_session):
+        # El PAR: sin alcance (Johana), el mismo cuerpo de 60 -> 200 y nace el
+        # ajuste de descuadre, como hoy. Sin esto, una 9g encendida para todos
+        # pasaria los casos de arriba (P56).
+        e = _entrada(client, w.johana, w.wh, w.m1, 100, collector=w.GL)
+        r = self._liq(client, w.johana, e, _linea(
+            w.m1, _alloc(w.A, 1, 60), reference_unit_price="1000"))
+        assert r.status_code == 200, r.text
+        assert _ajustes(db_session, e) == 1
+
 
 # ===========================================================================
 # Filas 10-15: terceros

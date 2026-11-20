@@ -329,6 +329,8 @@ def _scoped_liquidation_payload(
     - Sin retenciones ni IVA (422, S5).
     - Comision (S6/D-a): el tercero es su recolector y el monto lo fija el
       servidor; si no viene, la causa igual. Otro tercero u otro monto -> 422.
+    - Sin descuadre (9g, v1.10): lo valida el servicio con
+      `require_full_allocation`, sobre el mismo calculo del descuadre.
     """
     from decimal import Decimal
     from app.models.third_party import ThirdParty
@@ -565,7 +567,8 @@ def liquidate_inbound_order(
     descuadre se ajusta al precio de referencia (D6/D7) y la comision del
     recolector se causa una vez por entrada (D11). Todo el evento en el dia
     de la liquidacion (D21)."""
-    if scope_of(org_context) is not None:
+    scoped = scope_of(org_context) is not None
+    if scoped:
         payload = _scoped_liquidation_payload(db, order_id, payload, org_context)
     order, warnings = inbound_order_service.liquidate(
         db,
@@ -573,6 +576,8 @@ def liquidate_inbound_order(
         payload=payload,
         organization_id=org_context["organization_id"],
         user_id=org_context["user_id"],
+        # 9g (plan Ingrid v1.10): con alcance, sin descuadre.
+        require_full_allocation=scoped,
     )
     order = inbound_order_service.get(db, order.id, org_context["organization_id"])
     return _enrich_one(db, order, org_context["organization_id"], warnings)

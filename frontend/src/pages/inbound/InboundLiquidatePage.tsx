@@ -1089,6 +1089,18 @@ export default function InboundLiquidatePage() {
         return `Falta el precio en la compra ${slot}`;
       }
     }
+    // 9g (plan Ingrid v1.10), solo con alcance: todo lo pesado se reparte.
+    // Mismo orden que el servidor: antes de «sin asignar» y del precio base.
+    if (scoped && lineDisc(l) !== 0) {
+      const qty = formatWeight(Math.abs(lineDisc(l)), l.material_unit);
+      const what =
+        activeCells(l).length === 0
+          ? `sin repartir (${formatWeight(l.weighed, l.material_unit)} pesados)`
+          : lineDisc(l) > 0
+            ? `faltan ${qty} por repartir`
+            : `se repartieron ${qty} de más`;
+      return `${what} — con tu alcance hay que repartir todo lo pesado; si no se puede, esta Entrada la liquida SAC`;
+    }
     if (activeCells(l).length === 0 && l.isExtra) {
       return "Reparta este material o quítelo";
     }
@@ -1291,7 +1303,9 @@ export default function InboundLiquidatePage() {
             <span className="font-normal"> ({(pct * 100).toFixed(1)}%{state === "out" ? ", fuera de tolerancia" : ""})</span>
           )}
         </div>
-        {activeCells(l).length === 0 && !l.isExtra && (
+        {/* 9g: con alcance, «sin proveedor» en un material pesado solo
+            termina en 422; con pesado 0 no deja descuadre y se ofrece. */}
+        {activeCells(l).length === 0 && !l.isExtra && !(scoped && l.weighed !== 0) && (
           <label className="flex items-center gap-1.5 text-slate-600 cursor-pointer font-normal">
             <Checkbox
               checked={l.unallocated}
@@ -1898,7 +1912,9 @@ export default function InboundLiquidatePage() {
         </Button>
       </div>
 
-      {/* D16: material reportado por proveedores que la báscula no vio */}
+      {/* D16: material reportado por proveedores que la báscula no vio.
+          Con alcance no se ofrece: repartirlo deja descuadre (9g). */}
+      {!scoped && (
       <Card className="shadow-sm border-dashed">
         <CardContent className="pt-4">
           <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
@@ -1923,6 +1939,7 @@ export default function InboundLiquidatePage() {
           </p>
         </CardContent>
       </Card>
+      )}
 
       {/* D11: comisión del recolector — UNA por entrada, sobre lo pesado */}
       <Card className="shadow-sm">

@@ -378,6 +378,7 @@ class InboundOrderService:
         payload: InboundLiquidateRequest,
         organization_id: UUID,
         user_id: UUID,
+        require_full_allocation: bool = False,
     ) -> tuple[InboundOrder, list[str]]:
         """Liquidacion ATOMICA de la Entrada (D14): reparto -> N compras
         liquidadas + ajustes de descuadre + comision del recolector, en UNA
@@ -509,6 +510,9 @@ class InboundOrderService:
         payload_materials: set = set()
         new_material_lines: list = []
         plan: list[dict] = []  # [{line(payload), order_line|None, material, disc}]
+        # 9g del alcance (plan Ingrid v1.10): materiales que no quedan
+        # repartidos del todo. Solo con `require_full_allocation`.
+        gaps: list[str] = []
 
         for pl in payload.lines:
             if pl.material_id in payload_materials:
@@ -538,6 +542,28 @@ class InboundOrderService:
 
             allocated = sum((a.quantity for a in pl.allocations), Decimal("0"))
             disc = (weighed - allocated).quantize(QTY_Q)
+
+            # 9g (plan Ingrid v1.10, Daniel: «Que no deje descuadre»). Con
+            # alcance de recolector TODO lo pesado se reparte: el descuadre se
+            # valora al precio de referencia y aterriza en los libros de SAC
+            # (#93 D6/D7), y con alcance ese precio lo fijaria el recolector.
+            # Usa el MISMO `disc` de arriba (una sola definicion), va ANTES de
+            # D8/D16 (que le hablarian del precio de referencia) y junta todos
+            # los materiales en un 422 despues del lazo. Una linea con pesado 0
+            # marcada sin proveedor no tiene descuadre y pasa.
+            if require_full_allocation and disc != 0:
+                unit = material.default_unit or "kg"
+                if not pl.allocations:
+                    gaps.append(
+                        f"{material.code}: "
+                        f"{'marcado sin proveedor' if pl.unallocated_intentional else 'sin repartir'}"
+                        f" ({weighed.normalize():f} {unit} pesados)"
+                    )
+                elif disc > 0:
+                    gaps.append(f"{material.code}: faltan {disc.normalize():f} {unit} por repartir")
+                else:
+                    gaps.append(f"{material.code}: se repartieron {(-disc).normalize():f} {unit} de más")
+                continue
 
             # D8: se bloquea la AUSENCIA de intencion, no el monto
             if not pl.allocations and not pl.unallocated_intentional:
@@ -571,6 +597,10 @@ class InboundOrderService:
                 "payload": pl, "order_line": order_line,
                 "material": material, "disc": disc, "weighed": weighed,
             })
+
+        if gaps:
+            from app.services.collector_scope import FULL_ALLOCATION, FULL_ALLOCATION_TAIL
+            raise _err(f"{FULL_ALLOCATION} — {'; '.join(gaps)}. {FULL_ALLOCATION_TAIL}")
 
         # Completitud (D14 "todo de una"): toda linea de la entrada debe venir
         # en el reparto — una olvidada seria un descuadre del 100% en silencio

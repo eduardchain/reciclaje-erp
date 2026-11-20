@@ -40,18 +40,22 @@ SCOPE_DENIED_PREFIX = "Fuera de tu alcance"
 # lo ajeno — su pantalla no lo muestra, el nombre solo le llegaria a quien arma
 # UUIDs a mano.
 OUT_OF_SCOPE_PAYLOAD = "Hay un tercero fuera de tu alcance en la solicitud"
-# Regla 9e (v1.6): una Entrada que SAC liquido y des-liquido con una compra
-# viva de un proveedor ajeno. No nombra al proveedor (M1).
 # Regla 9f (v1.6/v1.7): la ultima liquidacion de SAC tuvo retenciones o IVA;
 # con alcance no se pueden rehacer (S5), y se perderian en silencio.
 RELIQUIDATE_TAXES = (
     "Esta Entrada tuvo retenciones o IVA en su liquidación anterior: "
     "la vuelve a liquidar SAC"
 )
+# Regla 9e (v1.6): una Entrada que SAC liquido y des-liquido con una compra
+# viva de un proveedor ajeno. No nombra al proveedor (M1).
 RELIQUIDATE_FOREIGN_SUPPLIER = (
     "Esta Entrada tiene una compra de un proveedor fuera de tu alcance: "
     "la vuelve a liquidar SAC"
 )
+# Regla 9g (v1.10, Daniel: «Que no deje descuadre»): con alcance, todo lo
+# pesado se reparte. Nombra MATERIALES de la Entrada que ella ve, no terceros.
+FULL_ALLOCATION = "Con tu alcance hay que repartir todo lo pesado"
+FULL_ALLOCATION_TAIL = "Si no se puede repartir todo, esta Entrada la liquida SAC"
 
 _E = "app.api.v1.endpoints."
 
