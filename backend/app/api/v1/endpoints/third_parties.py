@@ -16,6 +16,7 @@ from app.schemas.third_party import (
     RetentionConfigCreate,
     RetentionConfigUpdate,
     RetentionRowResponse,
+    TaxEntityRowResponse,
 )
 from app.services.base import PaginatedResponse
 from app.services.third_party import third_party
@@ -292,6 +293,23 @@ def list_retention_rows_endpoint(
     matcheadas por nombre canonico normalizado (D-v2-1)."""
     from app.services.retention_entities import list_retention_rows
     return list_retention_rows(db, org_context["organization_id"])
+
+
+@router.get(
+    "/tax-entities",
+    response_model=list[TaxEntityRowResponse],
+    dependencies=[Depends(require_org_flag("kg_ledger_enabled"))],
+)
+def list_tax_entity_rows_endpoint(
+    org_context: tuple = Depends(require_permission("third_parties.view")),
+    db: Session = Depends(get_db),
+):
+    """Entidades '[Impuestos] X' (IVA y retenciones que le practican a SAC) para
+    Tesorería → Impuestos y retenciones. Reconocidas por la categoría con
+    `system_code='taxes'`, nunca por el nombre (#112 D4b). Ruta ESTÁTICA,
+    declarada antes de /{third_party_id}."""
+    from app.services.tax_entities import list_tax_entity_rows
+    return list_tax_entity_rows(db, org_context["organization_id"])
 
 
 @router.post(

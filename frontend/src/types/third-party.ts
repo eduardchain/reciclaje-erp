@@ -72,6 +72,23 @@ export interface RetentionRow {
   is_active: boolean;
 }
 
+/**
+ * Fila de GET /third-parties/tax-entities — entidades «[Impuestos] X» (IVA y
+ * retenciones que le practican a la org). La naturaleza (por pagar / a favor)
+ * la decide el SIGNO de `current_balance`, nunca el nombre: `taxBalanceNature`.
+ */
+export interface TaxEntityRow {
+  entity_id: string;
+  name: string;
+  /** Rótulo para la pantalla: «IVA», «ICA Bogotá». El nombre va de subtítulo. */
+  label: string;
+  tax_type: "iva" | "retefuente" | "reteiva" | "ica" | null;
+  municipality: string | null;
+  current_balance: number;
+  /** Sin filtro en el servidor: una inactiva con saldo se muestra (plan v1.2 C3). */
+  is_active: boolean;
+}
+
 export type RetentionBaseKind = "subtotal" | "iva";
 
 export interface RetentionConfigCreate {
