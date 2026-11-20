@@ -1,4 +1,14 @@
-# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.0)
+# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.1)
+
+**v1.1 (20-nov):** responde al NO-GO de Eco QA 2 sobre la v1.0 (`409e857`, revisión `~/sac-evidencia/2026-11-20/qa-2-ingrid/revision_plan_v1.0.md`, sha256 `e918ab25…10f8`) y a la revisión de producto del Coordinador. Verifiqué los cinco hallazgos contra el código antes de aceptarlos.
+- **H1:** el alta de terceros con alcance no acepta saldo inicial y las categorías se restringen (§5.2 fila 15).
+- **H2:** anular y la evidencia solo valen para sus propios tipos de pago, y una transferencia nunca (filas 28–30).
+- **H3:** lista blanca de CAMPOS, nueva §5.7.
+- **H4:** las rutas sin contexto de org, nueva §5.0, con T1b y T1c.
+- **H5:** los conductores van por `payment-to-generic`, fila 27b.
+- **Decisiones nuevas en §15:** D-a (quién fija la comisión) y D-b (compras por marca o por Entrada).
+- **Menores:** M1 (el 422 sin nombre), M2 (P22–P29) y M3 (T2 con métodos).
+- **Coordinador:** R1 pasa a condición de uso (§14), runbook de deploy (§16) y nota sobre Adalberto (§2.7).
 
 **Autor:** Eco Coder 2 · **Revisa:** Eco QA 2 · **Nivel:** lógica · **Rama:** `coder-2/recolector-alcance` (base `de32530`)
 **Evidencia:** `~/sac-evidencia/2026-11-20/coder-2-recolector-alcance/` (inventarios, mediciones y los scripts que los producen).
@@ -8,7 +18,7 @@
 
 ## 0. En una línea
 
-Se agregan dos cosas: una **marca** por tercero (`third_parties.collector_id`, «este tercero es de Green Loop») y un **alcance** por usuario (`user_collector_scopes`, «este usuario solo opera Green Loop»). Un usuario con alcance pasa por una **lista blanca de ~30 rutas** en `get_required_org_context` (la cifra exacta la fija T2b), y cada una filtra o rechaza por la marca. Cualquier otra ruta le devuelve 403, aunque su rol tenga el permiso. El balance detallado agrupa a los terceros marcados por aparte.
+Se agregan dos cosas: una **marca** por tercero (`third_parties.collector_id`, «este tercero es de Green Loop») y un **alcance** por usuario (`user_collector_scopes`, «este usuario solo opera Green Loop»). Un usuario con alcance pasa por una **lista blanca de ~30 rutas** en `get_required_org_context` (la cifra exacta la fija T2b), y cada una filtra o rechaza por la marca y recorta los campos que son de SAC (§5.7). Cualquier otra ruta le devuelve 403, aunque su rol tenga el permiso. Lo mismo pasa con las rutas de miembros de la org, que no pasan por ese contexto (§5.0). El balance detallado agrupa a los terceros marcados por aparte.
 
 ## 1. Qué pidió el cliente
 
@@ -26,13 +36,13 @@ Las citas llevan su grado: (a) textual, (b) Daniel lo afirmó y el cliente asint
 | # | Supuesto | Por qué así |
 |---|---|---|
 | **S1 (Q-70)** | Un tercero marcado de Green Loop sigue siéndolo aunque alguna vez le venda directo a SAC. El filtro es **estricto para Ingrid** y **no cambia nada para quien no tiene alcance**: Johana sigue viendo todos los proveedores en todas las Entradas. | Con esto, la respuesta de Q-70 no cambia el modelo. Si es «sí, venden directo», Johana igual los ve; si es «no», tampoco cambia nada. |
-| S2 | La marca va en **cualquier tercero**, no solo en proveedores de material: los conductores reciben anticipos desde la caja de Green Loop (fila «Provisionales de Green Loop a conductores», 11-ago). | En la copia de dev, «DANIEL DE LA HOZ (GREENLOP)» es de la categoría *Empleados* (generic), no proveedor (medido). |
+| S2 | La marca va en **cualquier tercero**, no solo en proveedores de material: los conductores reciben anticipos desde la caja de Green Loop (fila «Provisionales de Green Loop a conductores», 11-ago). ⚠️ **Pendiente de Daniel (H5, §15):** un conductor *generic* no se le puede pagar con `supplier-payment` ni con `advance-payment`, porque exigen material_supplier/service_provider/liability (`money_movement.py:105` y `:642`). Hay dos opciones: (a) sumar `payment-to-generic` al alcance (fila 27b, recomendada); (b) sacar los pagos a conductores del alcance de su caja. | En la copia de dev, «DANIEL DE LA HOZ (GREENLOP)» es de la categoría *Empleados* (generic), no proveedor (medido). |
 | S3 | El recolector mismo (el tercero «Green Loop», service_provider) **no** entra al alcance de Ingrid: su saldo con SAC (comisiones) es asunto de Johana. | No lo pidió el cliente. |
 | S4 | Ingrid **no** crea, revisa, edita, desliquida ni anula Entradas: solo las ve y las liquida. | La captura es de báscula y la revisión de Erwin (Q-19). |
 | S5 | En la liquidación de Ingrid **no** van retenciones (#93) ni IVA de compra (#122): si vienen en el payload, da 422. Johana sí los puede poner. | Las entidades `[Retenciones]`/`[Impuestos]` son pasivos de SAC, y su selector expone esos saldos. |
-| S6 | La comisión del recolector (#83 D11) sí la puede mandar Ingrid, pero su tercero tiene que ser el recolector de su alcance. | La comisión nace en la liquidación y no se puede agregar después. |
-| S7 | Desde su caja, Ingrid solo puede hacer pagos a proveedor (`supplier-payment`) y anticipos (`advance-payment`) a terceros de su alcance, más anular los suyos. Fondear la caja es un `transfer` que hace Johana. | Es lo mínimo que describe «llevar la caja». Gastos de la caja de Green Loop: no se pidieron. |
-| S8 | Una Entrada es de Ingrid **solo si su recolector es el de su alcance**, aunque todos sus proveedores sean de Green Loop. | La regla que el cliente asintió es «Entradas con recolector Green Loop» (L226-229, b). |
+| S6 (**D-a**, §15, pendiente de Daniel) | **Propuesta recomendada:** la comisión del recolector (#83 D11) la causa la liquidación de Ingrid, pero **el monto lo fija el servidor**: tarifa vigente `comision_green_loop` × la base sugerida de #93 D11 (kg + unidades × `kg_per_unit`). El tercero es siempre su recolector. Si manda un `amount` distinto al calculado → 422. Para Johana (sin alcance) no cambia nada: el monto digitado manda (#79 F1). | Es la deuda de SAC con Green Loop, y la digitaría una empleada de Green Loop: conflicto de interés (QA 2, D-a). La comisión nace en la liquidación y no se agrega después, así que dejarla a Johana exige un camino nuevo. |
+| S7 | Desde su caja, Ingrid solo puede hacer pagos a proveedor (`supplier-payment`), anticipos (`advance-payment`) y, si Daniel elige (a) en H5, pagos a terceros generic (`payment-to-generic`, conductores), siempre a terceros de su alcance, y anular **esos mismos** movimientos. Fondear la caja es un `transfer` que hace Johana. | Es lo mínimo que describe «llevar la caja». Gastos de la caja de Green Loop: no se pidieron. |
+| S8 (**D-b**, §15) | Una Entrada es de Ingrid **solo si su recolector es el de su alcance**. En cambio, una **compra** es suya si su **proveedor** tiene la marca, así venga de una Entrada sin recolector o sea directa. | Son las dos reglas que asintió el cliente: «Entradas con recolector Green Loop» (L226-229, b) y «las liquidaciones de sus proveedores» (L213-217, b). Alinearlas es la decisión D-b. |
 
 ## 2. Lo medido (cada dato con su artefacto)
 
@@ -49,7 +59,7 @@ Las citas llevan su grado: (a) textual, (b) Daniel lo afirmó y el cliente asint
 6. **Costa tiene hoy 2 usuarios con cuentas restringidas (6 asignaciones).** Lo midió el Coordinador en dev y lo re-medí en mi copia (`medicion_asignaciones_dev.log`). Los defectos 3 a 5 ya afectan a un cliente.
 7. **Datos de Green Loop en la copia de dev** (`reciclaje_coder_2`, réplica de prod; `medicion_gl_dev.log`), org SAC activa:
    - **124 terceros** con el sufijo `(GREENLOOP)` o `(GREENLOP)` en el nombre. 123 son *Proveedor Material* y 1 es *Empleados* (generic): «DANIEL DE LA HOZ (GREENLOP)».
-   - Las dos «excepciones» que nombró Johana **ya llevan el sufijo en esta copia**: «ADALBERTO AVILA (GREENLOOP)» y «DANIEL DE LA HOZ (GREENLOP)». No interpreto si es porque las renombraron después de la reunión (Daniel le mostró cómo, L56) o porque eran las que *no* son de Green Loop. Lo resuelve la lista que mande Johana (Q-71, 📎).
+   - Las dos «excepciones» que nombró Johana **ya llevan el sufijo en esta copia**: «ADALBERTO AVILA (GREENLOOP)» y «DANIEL DE LA HOZ (GREENLOP)». Según el Coordinador, que tiene la transcripción, Johana dijo de Adalberto que «es Greenloop, pero no dice Greenloop» (L51). La cita me llega de otra sesión y no la medí yo. Si es así, alguien ya lo renombró después de la reunión (Daniel le mostró cómo, L56). No cambia nada: lo resuelve la lista que mande Johana (Q-71, 📎).
    - Hay nombres parecidos que **no** llevan el sufijo y que un patrón amplio atraparía: «BIOGREENLOOP» (−$150.000.000), «ASOCIACION BIOGREEN RECYCLING», «ECOGREEN». **La marca inicial no se hace por regex**: va una lista explícita (§9).
    - **0 de 34 Entradas tienen recolector** (`inbound_orders.collector_id`). Hoy Ingrid no vería ninguna. Ver riesgo R1.
 8. **La agrupación por categoría del balance detallado (#38) no sirve para esto.** `_load_tp_behavior_map` guarda «la primera categoría por behavior_type» de una consulta **sin ORDER BY** (`services/reports.py:222-266`), así que un proveedor con dos categorías de material cae en un grupo arbitrario.
@@ -94,13 +104,29 @@ Se escribe por `PATCH /third-parties/{id}` (permiso `third_parties.edit`, ya exi
 
 Que un admin le sume un permiso al rol de Ingrid **no abre** una ruta fuera de la lista: ampliar la lista es un cambio de código. El permiso sigue aplicando dentro de la lista, porque el alcance no da permisos (T14).
 
-Las rutas que no pasan por el contexto de org no cambian: `/auth/*`, `GET /organizations` y `GET /organizations/{id}` (que la pantalla usa para los settings), y las de `/system`. Ninguna sirve terceros, compras ni movimientos.
+### 5.0 Las 27 rutas que NO pasan por `get_required_org_context` (H4)
+
+QA 2 las midió en runtime (`~/sac-evidencia/2026-11-20/qa-2-ingrid/rutas_sin_contexto.txt`). La v1.0 decía que «ninguna sirve datos», y es falso: `GET /organizations/{id}/members` la puede pedir cualquier miembro y devuelve email, nombre, rol y cuentas asignadas de todo el personal de SAC (`organizations.py:253-290`; verificado).
+
+| Grupo | Rutas | Con alcance |
+|---|---|---|
+| `/auth/*` y `/health` | 7 (`register`, `login`, `login/json`, `change-password`, `me` y los dos `/health`) | sin cambio: no son de una org |
+| `/system/*` | 8 | sin cambio: son de superusuario, y el superusuario no tiene alcance |
+| `GET /organizations` | 1 | sin cambio: lista las orgs del propio usuario |
+| `POST /organizations` | 1 | sin cambio. ⚠️ **Preexistente:** cualquier usuario autenticado crea una org nueva. Con eso no ve nada de SAC; se reporta y queda fuera de alcance |
+| `GET /organizations/{id}` | 1 | **permitida**: la pantalla lee de ahí los settings y los flags (`useOrgSettings`). Devuelve la org con sus `settings`: flags, sedes, centros Willard, `plant_third_party_id`. Son ids de configuración, sin saldos; queda declarado |
+| las otras 9 de `/organizations/{id}/…` (miembros: listar, crear, editar, borrar, resetear clave, cuentas asignadas; `PATCH` de la org; `leave`) | 9 | **403 «Fuera de tu alcance»**. Lo hace un helper `deny_if_collector_scoped(db, org_id, user)`, llamado al entrar en cada una. Va también en las que ya exigen admin: por T16c, un admin con fila de alcance tampoco administra |
+
+Son 7 + 8 + 1 + 1 + 1 + 9 = **27**. Las tres pruebas:
+- **T1b:** el conjunto de rutas montadas **sin** `get_required_org_context` es igual a un **set literal** de esas 27, escrito en el test. Si mañana aparece una ruta que se salta el contexto, T1b la nombra en vez de dejarla fuera de T1 en silencio.
+- **T1c:** el usuario con alcance recibe 403 en las 9 rutas de miembros y 200 en `GET /organizations/{id}`.
+- **Control positivo de T1c:** el mismo rol sin alcance recibe 200 en `GET …/members`, que es el comportamiento de hoy y no se toca.
 
 ### 5.1 Inventario: a qué llega el rol propuesto
 
 Rol propuesto «Recolector» (12 permisos existentes, **cero permisos nuevos**): `purchases.view`, `purchases.view_prices`, `purchases.liquidate`, `third_parties.view`, `third_parties.create`, `treasury.view_statements`, `treasury.view_accounts`, `treasury.view_movements`, `treasury.create_movements`, `materials.view`, `materials.view_prices`, `tariffs.view`.
 
-`scripts/alcance_rol.py` sobre el inventario AST da **89 rutas** a las que llegan esos permisos (`alcance_rol_ingrid.tsv`). De esas, **27 van a la lista blanca** y **62 quedan cerradas para el usuario con alcance**. Por ejemplo, quedan cerradas:
+`scripts/alcance_rol.py` sobre el inventario AST da **89 rutas** a las que llegan esos permisos (`alcance_rol_ingrid.tsv`). Las **31 filas** de §5.2 están todas dentro de esas 89; la 27b, `payment-to-generic`, depende de H5. Lo medí con un `grep -F` de las 31 contra `alcance_rol_ingrid.tsv`: aparecen las 31, una vez cada una. Las **otras 58 quedan cerradas para el usuario con alcance**. La cifra exacta la fija T2b. Por ejemplo, quedan cerradas:
 - los 15 POST de tesorería fuera de S7;
 - `PATCH /purchases/{id}/liquidate`, la liquidación directa sin pasar por la Entrada;
 - `POST /inbound-orders/{id}/confirm`, que confirma una Willard;
@@ -120,20 +146,20 @@ Notación: `alc(tp)` = `tp.collector_id == scope`; `cta(k)` = `k ∈ cuentas asi
 | # | Ruta | Regla con alcance |
 |---|---|---|
 | 1 | `GET /roles/my-permissions` | sin filtro; devuelve `collector_scope` |
-| 2 | `GET /materials` | sin filtro (no hay terceros) |
-| 3 | `GET /materials/{id}` | sin filtro |
-| 4 | `GET /material-kg-profiles` | sin filtro (orden del formato, #121) |
-| 5 | `GET /service-tariffs/current` | sin filtro (sugerido de la comisión) |
-| 6 | `GET /price-lists/current` | con `third_party_id`, tiene que ser `alc`; si no, 404. Sin el parámetro devuelve la lista general (precios, sin terceros) |
+| 2 | `GET /materials` | todos los materiales, **sin** stock ni costo (§5.7) |
+| 3 | `GET /materials/{id}` | lo mismo |
+| 4 | `GET /material-kg-profiles` | sin filtro: orden del formato (#121) y unidad; los campos de §5.7 |
+| 5 | `GET /service-tariffs/current` | **solo** `comision_green_loop` (§5.7) |
+| 6 | `GET /price-lists/current` | `third_party_id` **obligatorio** y `alc`: sin él → 422, ajeno → 404. Solo `purchase_price`, sin `sale_price` (§5.7) |
 | 7 | `GET /inbound-orders` | se **fuerza** `collector_id = scope`; un `collector_id` del query se ignora |
 | 8 | `GET /inbound-orders/{id}` | 404 si `order.collector_id != scope` |
-| 9 | `POST /inbound-orders/{id}/liquidate` | 404 como en la fila 8; todo proveedor del reparto `alc` (si no, 422 que lo nombra); toda cuenta de `supplier_payments` `cta` (403); `collector_commission.third_party_id == scope` (422); `supplier_retentions` o impuestos presentes → 422 (S5). Todo se valida antes de escribir (D14 de #93): un rechazo no deja nada |
+| 9 | `POST /inbound-orders/{id}/liquidate` | Todo se valida **antes de escribir** (D14 de #93): un rechazo no deja nada. Las reglas:<br>• 404 como en la fila 8.<br>• Todo proveedor del reparto tiene que ser `alc`. Si no, 422 **genérico**, «Hay un proveedor fuera de tu alcance»: no nombra a lo ajeno (M1), porque su selector solo ofrece lo suyo y el nombre solo le llegaría a quien arma UUIDs a mano.<br>• Toda cuenta de `supplier_payments` tiene que ser `cta` (si no, 403).<br>• Comisión (S6/D-a): el tercero es su recolector, y el monto lo calcula el servidor. Si viene otro tercero u otro `amount` → 422.<br>• Si vienen `supplier_retentions` o impuestos → 422 (S5). |
 | 10 | `GET /third-parties` | se fuerza `alc` |
 | 11 | `GET /third-parties/suppliers` | se fuerza `alc` |
 | 12 | `GET /third-parties/similar` | se fuerza `alc` (no revela nombres de proveedores de SAC) |
 | 13 | `GET /third-parties/payable-providers` | devuelve solo el recolector de su alcance (selector de la comisión, S6) |
 | 14 | `GET /third-parties/{id}` | 404 si no `alc` |
-| 15 | `POST /third-parties` | `collector_id` = scope, **forzado por el servidor**, con lo que venga en el payload |
+| 15 | `POST /third-parties` | `collector_id` = scope, **forzado por el servidor**, con lo que venga en el payload. **H1:** `initial_balance ≠ 0` → 422, porque si no Ingrid podría inventar una CxP sin movimiento (rompe #55) y pagarla desde K1. `category_ids`: cada categoría tiene que tener `behavior_type ∈ {material_supplier, generic}` (proveedor o conductor, S2); cualquier otra (investor/«Socios», customer, liability, provision, service_provider) → 422; vacío → 422 (un tercero sin categoría no sirve en su selector). `ThirdPartyCreate` no cambia para quien no tiene alcance. |
 | 16 | `GET /purchases` | se fuerza `alc(purchase.supplier)` |
 | 17 | `GET /purchases/{id}` | 404 si no `alc(supplier)` |
 | 18 | `GET /attachments` | solo dueño compra con `alc(supplier)`; venta y transformación → 404 |
@@ -144,20 +170,40 @@ Notación: `alc(tp)` = `tp.collector_id == scope`; `cta(k)` = `k ∈ cuentas asi
 | 23 | `GET /money-movements/account/{id}` | 403 si no `cta` (actual) |
 | 24 | `GET /money-movements` | `cta(account)` **o** (`account IS NULL` **y** `alc(tp)`) |
 | 25 | `GET /money-movements/{id}` | el mismo predicado; si no, 404 |
-| 26 | `POST /money-movements/supplier-payment` | `cta(account)` (403) y `alc(tp)` (404) |
+| 26 | `POST /money-movements/supplier-payment` | `cta(account)` (si no, 403) y `alc(tp)` (si no, 404). El guard de tipo de tercero existente no se toca |
 | 27 | `POST /money-movements/advance-payment` | igual |
-| 28 | `POST /money-movements/{id}/annul` | el movimiento cumple la fila 25 **y** su cuenta es `cta` (no anula causaciones) |
-| 29 | `GET /money-movements/{id}/evidence` | el predicado de la fila 25 |
-| 30 | `POST /money-movements/{id}/evidence` | filas 25 y 28 |
+| 27b | `POST /money-movements/payment-to-generic` | **Solo si Daniel elige (a) en H5.** Mismas reglas que la fila 26: es el pago o anticipo a un conductor *generic* de su alcance (S2). Si elige (b), esta fila sale; `payment_to_generic` sale también de PROPIOS (fila 28) y `generic` sale de las categorías permitidas en la fila 15 |
+| 28 | `POST /money-movements/{id}/annul` | **H2:** cuatro condiciones, todas:<br>• `movement_type ∈ PROPIOS = {payment_to_supplier, advance_payment, payment_to_generic}`;<br>• `alc(tp)`;<br>• `cta(account)`;<br>• `transfer_pair_id IS NULL`.<br>Si falta alguna → 404. Así no anula un `transfer_in` de K1 que hizo Johana (`annul` anula también el par en K2, `money_movement.py:1126-1133`), ni un pago de Johana a B desde K1, ni una causación |
+| 29 | `GET /money-movements/{id}/evidence` | el predicado de la fila 25 (solo lectura) |
+| 30 | `POST /money-movements/{id}/evidence` | **H2:** el predicado de la fila 28. Así no reemplaza la evidencia de un movimiento de Johana |
 
-Son 30 filas. Las filas 2 y 3, y las 29 y 30, pueden reducirse si la pantalla no las usa; se cierran en la construcción y **la lista final la fija T2b** (doble entrada, §12).
+Son 31 filas (30 más la 27b, que depende de H5). Las filas 2 y 3, y las 29 y 30, pueden reducirse si la pantalla no las usa; se cierran en la construcción y **la lista final la fija T2b** (doble entrada, §12).
+
+### 5.7 Lista blanca de CAMPOS (H3)
+
+Green Loop es otra empresa: que una ruta esté permitida no quiere decir que todos sus campos lo estén. Con alcance:
+
+| Ruta | Campo de SAC | Con alcance | Por qué |
+|---|---|---|---|
+| `GET /materials`, `/materials/{id}` | `current_stock`, `current_stock_liquidated`, `current_stock_transit`, `current_average_cost` (`schemas/material.py:83-86`) | **`null`** | Son el inventario y el costo de SAC. Los cuatro campos pasan a `Optional[float]` en `MaterialResponse`. Sin alcance llegan con su número de siempre: el JSON no cambia, porque un `float` no nulo se serializa igual. `/materials` no es captura del golden (se verifica con `grep` sobre `CAPTURES`) |
+| `GET /price-lists/current` | `sale_price` | **`null`**, y `third_party_id` obligatorio y `alc` (fila 6) | Son los precios de venta de SAC. Sin `third_party_id` y con #98 D10 (org sin listas activas) devolvería la lista general entera |
+| `GET /service-tariffs/current` | las demás tarifas (maquila Willard, abono a planta, flete, crisol, maquila intersede) | **fuera**; solo `comision_green_loop` | Son los precios de SAC con Willard y con su planta |
+| `GET /material-kg-profiles` | `willard_world`, `compra_regular`, `lead_product`, `form_order` | se quedan | Es la clasificación de cada material, no tiene montos. La pantalla los usa para el orden del formato (#121). Queda declarado |
+| `GET /inbound-orders/{id}` | `discrepancy_adjustments` (valorado al precio de referencia), `liquidated_by_name` y demás nombres de usuarios | se quedan | Es su Entrada; el descuadre lo valoró ella misma al liquidar (#93) |
+| `GET /money-movements/third-party/{id}` | nombre de una cuenta de SAC en un pago viejo | se queda (D-E1) | El saldo corrido tiene que cuadrar con el vivo (#55) |
+| `GET /third-parties*` | `current_balance` de sus terceros | se queda | Es el saldo de lo suyo |
+
+**Test:** T19, «ausencia de lo de SAC», con usuario con alcance y su control sin alcance en el mismo test:
+- en `/materials`, los cuatro campos son `null` en **todas** las filas; el control ve números distintos de 0 en al menos una fila (contra la vacuidad: el fixture siembra stock por API);
+- en `/price-lists/current`, no hay ningún `sale_price` distinto de `null`; el control ve al menos uno distinto de 0;
+- en `/service-tariffs/current`, el conjunto de `tariff_code` es exactamente `{comision_green_loop}`; el control ve ≥ 2.
 
 ### 5.3 Códigos: una regla para cada uno
 
 - **404**: el objeto existe, pero está fuera de su alcance. Aplica a terceros, Entradas, compras, movimientos, adjuntos y al `third_party_id` de precios. No revela que existe.
 - **403 «Fuera de tu alcance: …»**: la ruta no está en la lista blanca.
 - **403 «No tienes acceso a esta cuenta»**: la cuenta no está asignada, en lectura o en escritura. Es el mensaje que ya existe; se conserva para no partir el código ni cambiarles el mensaje a los usuarios de Costa.
-- **422**: un payload que mezcla lo suyo con lo ajeno, por ejemplo un proveedor ajeno en el reparto o la comisión a otro recolector. Va con el nombre de lo ajeno, porque ella misma lo eligió en pantalla.
+- **422**: un payload que mezcla lo suyo con lo ajeno, por ejemplo un proveedor ajeno en el reparto, la comisión a otro recolector, saldo inicial o una categoría no permitida. El mensaje es **genérico y no nombra lo ajeno** (M1): en su pantalla lo ajeno no aparece, así que el nombre solo le llegaría a quien arma el payload a mano.
 
 ### 5.4 Por número, export, PDF, búsqueda y contadores (QA 2, punto 2)
 
@@ -202,13 +248,15 @@ Ninguna ruta que mueva o muestre dinero queda sin una de las dos, y lo prueban T
 - **C3** listado: el `account_id IS NULL` deja de pasar entero. Opción a decidir: o se ocultan las causaciones, o pasan solo las de terceros con los que el usuario tiene movimientos.
 - **C4** estado de cuenta por tercero: se deja como está (D-E1 aplica solo con alcance).
 
-**C2 cambia lo que pueden hacer hoy los 2 usuarios de Costa:** si hoy registran un pago desde una cuenta no asignada, mañana reciben 403. Por eso **lo decide Daniel** (§12, decisión 1): (a) entra en este ciclo con el golden como gate y un aviso a Costa; (b) va en un ciclo propio, recomendado, porque mezcla un pedido de SAC con un cambio de comportamiento para Costa. En cualquiera de los dos casos, este plan deja escrito el helper y los cuatro puntos.
+**C2 cambia lo que pueden hacer hoy los 2 usuarios de Costa:** si hoy registran un pago desde una cuenta no asignada, mañana recibirían 403.
+
+**Decidido por Daniel (20-nov, me lo pasó el Coordinador; decisión 1): CICLO PROPIO, justo después de este. Este ciclo no le cambia nada a Costa.** Para los usuarios sin alcance, `_get_allowed_accounts` y los cuatro caminos C1–C4 quedan como hoy; T18 lo afirma. El helper y los cuatro puntos quedan escritos aquí como insumo de ese ciclo.
 
 ## 7. El balance: Green Loop por aparte
 
 - **Balance Detallado, vivo y as-of.** En cada sección de terceros (CxP proveedores, anticipos a proveedores, CxC, etc.), los terceros con `collector_id` van en un grupo «Recolector: <nombre>», que manda sobre el grupo de categoría. Usa el esquema existente `BalanceDetailedGroup` (#38): **cero claves nuevas**.
 - **Costo:** una consulta `SELECT id, collector_id WHERE organization_id=? AND collector_id IS NOT NULL`, vacía en las otras 6 orgs, así que el agrupado queda idéntico por construcción.
-- **Balance General: no cambia** en v1. Johana habló del «informe», y el documento que ella exporta es el Detallado (#110 C1). Si Daniel quiere líneas propias en el General, son claves nuevas en `BalanceSheetAssets` y `BalanceSheetLiabilities`, aditivas en el golden (§12, decisión 2).
+- **Balance General: no cambia.** Decidido por Daniel (20-nov, vía el Coordinador; decisión 2): solo el Detallado agrupa, sin claves nuevas en el General.
 - **Terceros:** filtro y columna «Recolector» en `ThirdPartiesPage` (`GET /third-parties?collector_id=`, gated por el flag). Es el «estado de las cuentas… por aparte» de la fila del 19-nov.
 
 ## 8. Pantalla
@@ -232,7 +280,7 @@ Va con capturas a 1440 y 390; la de Daniel es condición de deploy.
 - resuelve cada nombre exacto y aborta si hay ambiguos o faltantes;
 - imprime la lista y marca vía `PATCH`.
 
-La propuesta de lista sale del sufijo `(GREENLOOP|GREENLOP)` (124 en la copia de dev) y **se la revisa Johana**, no un regex. Contra producción la corre solo el Coordinador, con el OK de Daniel (escritura en prod).
+**Decidido por Daniel (20-nov, vía el Coordinador; decisión 4):** a Johana se le proponen los **124 con sufijo** `(GREENLOOP)`/`(GREENLOP)`, y ella confirma o corrige. Mientras tanto, la marca inicial es **esa lista explícita**, con los nombres exactos escritos en un archivo, nunca un regex. La lista sale de un `SELECT` sobre la base que se vaya a marcar, y el dry-run la imprime completa. Contra producción la corre solo el Coordinador, con el OK de Daniel (escritura en prod).
 
 ## 10. Migración: una sola línea
 
@@ -262,7 +310,7 @@ Turno de migración: lo asigna el Coordinador. Si `develop` recibe otra antes, c
 
 Archivo nuevo `tests/test_sac_recolector_alcance.py`.
 
-**Fixture:** org con flag; recolectores **GL** y **X** (service_provider); terceros **A** y **A2** (GL), **B** (sin marca), **C** (de X) y **D** (conductor generic de GL); Entradas **E_GL**, **E_none** y **E_X**; cuentas **K1**, asignada a Ingrid, y **K2**.
+**Fixture:** org con flag; recolectores **GL** y **X** (service_provider); terceros **A** y **A2** (GL), **B** (sin marca), **C** (de X), **D** (conductor generic de GL) y **E** (generic sin marca); Entradas **E_GL**, **E_none** y **E_X**; cuentas **K1**, asignada a Ingrid, y **K2**.
 
 **Usuarios** (nunca admin, que bypassa, #29):
 - `ingrid`: rol Recolector, alcance GL, K1;
@@ -277,17 +325,21 @@ Archivo nuevo `tests/test_sac_recolector_alcance.py`.
 |---|---|---|---|
 | 7 Entradas lista | ve E_GL | no ve E_none ni E_X; con `?collector_id=X` sigue viendo solo E_GL | ve las 3 |
 | 8 Entrada detalle | 200 | 404 (E_none, E_X) | 200 |
-| 9 liquidar | 200 con A | 422 con B, 422 con C, 403 con K2, 422 comisión a X, 422 con retención/IVA; **las 7 tablas sin cambios** | 200 con B |
+| 9 liquidar | 200 con A; si D-a = servidor, la comisión queda en tarifa × base aunque no se mande `amount` | 422 con B, 422 con C (los dos **sin el nombre**, M1), 403 con K2, 422 comisión a X, 422 `amount` distinto del calculado (si D-a = servidor), 422 con retención/IVA; **las 7 tablas sin cambios** | 200 con B; la comisión toma el `amount` digitado |
 | 10–13 listados de terceros | solo GL (+ D en 10) | sin B ni C | ven B y C |
 | 14 tercero detalle | 200 A | 404 B | 200 B |
-| 15 crear tercero | nace con GL aunque el payload diga X | — | nace sin marca |
-| 16–17 compras | lista y detalle de A | 404 compra de B | ven la de B |
+| 15 crear tercero | nace con GL aunque el payload diga X; con categoría material_supplier → 201 | `initial_balance` ≠ 0 → 422; categoría investor, customer o liability → 422; sin categoría → 422. **Ninguna fila escrita** | nace sin marca, con su `initial_balance` y cualquier categoría (comportamiento de hoy) |
+| 16–17 compras | lista y detalle de A, **también la que nació en E_none** (S8 / D-b tal como está; si Daniel alinea por Entrada, esta celda pasa a 404) | 404 compra de B | ven la de B |
 | 18–19 adjuntos | lista y descarga de la compra de A | 404 compra de B y venta | 200 |
 | 20 estado de cuenta | A: **corrido == vivo** con un pago desde K2 adentro | 404 B | B 200 |
 | 21–23 caja | solo K1; sin asignaciones → **ninguna** | K2 403 | sin asignaciones ve K1 y K2 (comportamiento actual, regresión) |
 | 24–25 movimientos | ve K1 y la causación de A | no ve la causación de B (cuenta NULL); detalle de K2 404 | ve todo |
-| 26–27 pagar/anticipar | K1→A 201, K1→D 201 | K2 403; →B 404 | K2→B 201 |
-| 28–30 anular/evidencia | el suyo, K1 | causación de A (cuenta NULL) 404; movimiento de K2 404 | 200 |
+| 26–27 pagar/anticipar | K1→A 201 | K2 403; →B 404; **→D 400 (guard de tipo existente, intacto)** | K2→B 201 |
+| 27b pago a generic (si H5 = a) | K1→D 201 | K2 403; →E (generic sin marca) 404 | K2→E 201 |
+| 28 anular | su pago K1→A | transferencia K1↔K2 de Johana: **404, y el par en K2 sigue `confirmed`**; pago de Johana K1→B 404; causación de A (cuenta NULL) 404; movimiento de K2 404 | anula todo lo que hoy anula |
+| 29–30 evidencia | ver y subir en su pago K1→A | subir en el pago de Johana K1→B 404 (su evidencia no cambia); ver la de un movimiento de K2 404 | 200 |
+| §5.0 miembros | `GET /organizations/{id}` 200 (con `settings`) | `GET …/members` 403 y las otras 8 de miembros 403 | `GET …/members` 200 |
+| §5.7 campos | ver T19 | ver T19 | ver T19 |
 
 **El cuadrante de quién × flag × recurso** (QA 2, punto 7). Ruta de muestra: `GET /inbound-orders/{id}`; la misma tabla vale para la familia T1 cambiando «200/404» por «pasa / 403 de ruta».
 
@@ -307,7 +359,9 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
 **Además:**
 
 - **T1, familia (deny-by-default):** parametrizada sobre las **rutas montadas** (`app.routes`, no una lista a mano) que dependen de `get_required_org_context` y no están en la lista blanca. `ingrid_todo` → 403 «Fuera de tu alcance». **Conteo:** la cantidad de casos == rutas con contexto de org − largo de la lista, comparado **antes** del parametrizado (lección de #108). **Control positivo:** en las mismas rutas, `todo_libre` **no** recibe el 403 de alcance; sin eso, un 403 por cualquier otra puerta pasaría el test.
-- **T2:** cada entrada de `SCOPED_ENDPOINTS` resuelve a una ruta montada (nada muerto).
+- **T1b y T1c:** las rutas sin contexto de org (§5.0).
+- **T2** (M3): cada entrada de `SCOPED_ENDPOINTS` se identifica como `módulo.función` y resuelve a **≥ 1 ruta montada**. Se afirma el conjunto exacto de pares (método, path) de cada entrada, para que una función montada en dos paths no abra el segundo sin que se vea. Nada queda muerto.
+- **T19:** la ausencia de lo de SAC (§5.7).
 - **T2b, doble entrada:** `SCOPED_ENDPOINTS` == un set literal escrito en el test. Ampliar la lista obliga a venir a declararla donde se lee, como `TestClaveAditiva` (#112).
 - **T14, permisos con control positivo** (memoria *test-de-permiso…*). Un rol con alcance y `purchases.view` pero **sin** `purchases.liquidate` → `GET /inbound-orders/{E_GL}` 200 (control) y `POST …/liquidate` 403 «Permisos insuficientes»: el alcance no da permisos. Lo mismo con `third_parties.view` sin `treasury.view_statements` (la lista de terceros da 200 y el estado de cuenta 403). Y el barrido por `grep` de los dos permisos de escritura del rol (`purchases.liquidate`, `treasury.create_movements`) sobre la lista blanca: cada uno con su par 200/403.
 - **T15, la marca:**
@@ -373,12 +427,22 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
 | P19 | la búsqueda de Entradas se aplica en OR con el filtro de recolector (precedencia) | §5.4: `search` B → 0 |
 | P20 | se agrega `GET /money-movements/by-number/{n}` a la lista | T2b y T1 |
 | P21 | el listado de compras calcula `amount_sum` antes del filtro | §5.4: suma == filas |
+| P22 | el alta de tercero con alcance acepta `initial_balance` | fila 15 (422 y ninguna fila escrita) |
+| P23 | el alta de tercero con alcance acepta cualquier categoría | fila 15 (investor y customer) |
+| P24 | `annul` sin la condición `transfer_pair_id IS NULL` (plantado **solo** en annul) | fila 28: transferencia de Johana, con el par en K2 todavía `confirmed`. **No debe caer** la fila 30: si cae, el predicado está compartido y P25 no se distingue de P24 |
+| P25 | subir evidencia sin el filtro de PROPIOS (plantado **solo** en evidencia) | fila 30, el pago de Johana K1→B. **No debe caer** la fila 28 |
+| P26 | `/materials` con alcance devuelve stock y costo | T19, materiales |
+| P27 | `/price-lists/current` con alcance acepta la ausencia de `third_party_id`, o devuelve `sale_price` | T19, precios, y fila 6 |
+| P28 | `/service-tariffs/current` sin el filtro | T19, tarifas |
+| P29 | `GET …/members` sin el `deny_if_collector_scoped` | T1c |
+| P30 | una ruta nueva sin contexto de org (se monta una de prueba en el plantado) | T1b |
+| P31 | con alcance, se respeta el `amount` digitado de la comisión (solo si D-a = servidor) | fila 9, comisión |
 
 **Dirección peligrosa a buscar celda por celda antes de plantar:** un test que debía caer y no cae. El candidato más probable es P7 si los cuatro listados comparten helper. Por eso el test se parametriza por ruta y el defecto se planta en una sola.
 
 ## 14. Riesgos y fuera de alcance
 
-- **R1 — hoy 0 de 34 Entradas tienen recolector.** Si báscula no lo pone, Ingrid no ve la Entrada. Johana lo puede corregir mientras no esté liquidada (#83/#93), pero hay que comunicarlo. Un aviso «¿Recolector?» en la captura queda como sugerencia y se decide aparte.
+- **R1 — CONDICIÓN DE USO, no solo riesgo** (Coordinador, revisión de producto): hoy 0 de 34 Entradas tienen recolector. Sin recolector en la Entrada, Ingrid no ve nada. **Báscula tiene que poner el recolector en cada Entrada de Green Loop**, y **Daniel se lo comunica a Johana** antes de que Ingrid entre. Johana lo puede corregir mientras la Entrada no esté liquidada (#83/#93). El aviso «¿Recolector?» en la captura queda fuera de este ciclo y es el **primer candidato a v2**.
 - **R2 — una consulta más por request** para todo miembro de las 7 orgs (índice único `(org, user)`). Se mide en la construcción con `EXPLAIN ANALYZE` sobre la copia.
 - **R3 — el selector de Johana no cambia (S1).** Si en la pantalla Daniel quiere que también a ella, en una Entrada con recolector GL, se le ofrezcan primero los de GL, es un orden visual y va como sugerencia.
 - **Fuera de alcance:**
@@ -387,12 +451,47 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
   - el aviso de recolector en la captura;
   - un alcance de Ingrid sobre las Willard (Q-02: Green Loop también recolecta postconsumo; con S4 ella no confirma Willard, pero las ve en el listado si tienen su recolector, y su detalle muestra kg).
 
-## 15. Decisiones para Daniel (las pide el Coordinador)
+## 15. Decisiones de Daniel
 
-1. **El hueco de cuentas de §6 para las orgs sin alcance** (Costa: 2 usuarios). (a) Ciclo propio (recomendado); (b) entra en este.
-2. **Balance General.** (a) Solo el Detallado agrupa (recomendado); (b) además, líneas propias en el General (claves nuevas).
-3. **Supuestos S1–S8** tal como están (recomendado), o cuál cambia. En particular:
-   - S5: Ingrid sin retenciones ni IVA;
-   - S7: sin gastos desde su caja;
-   - D-E2 (§5.6): declarar la fuga, o avisarle a Johana cuando reparte una Entrada de Green Loop a un proveedor sin la marca.
-4. **La lista de proveedores de Green Loop** para la marca inicial: la manda Johana (Q-71 📎). Mientras no llegue, la propuesta son los 124 con sufijo.
+Las pide el Coordinador; me las pasa él. Se anotan con su fuente: un mensaje de QA no es una decisión de Daniel.
+
+**Decididas (20-nov, vía el Coordinador):**
+
+1. **El hueco de cuentas de §6 para las orgs sin alcance (Costa):** CICLO PROPIO, justo después. Este ciclo no le cambia nada a Costa (T18).
+2. **Balance General:** solo el Detallado agrupa a Green Loop, sin claves nuevas en el General (§7).
+4. **Lista de la marca inicial:** a Johana se le proponen los 124 con sufijo y ella confirma o corrige. Mientras tanto, la lista es esa, explícita y nunca un regex (§9).
+
+**Pendientes (las está revisando Daniel):**
+
+3. **Supuestos S1–S8**, más:
+   - **D-E2** (§5.6): declarar la fuga (recomendado), o avisarle a Johana cuando reparte una Entrada de Green Loop a un proveedor sin la marca.
+   - **H5, pagos a conductores generic:** (a) sumar `payment-to-generic` a su alcance, con las reglas de la fila 27b (recomendado); (b) sacar los pagos a conductores del alcance de su caja.
+   - **D-a, la comisión de SAC a Green Loop:** (a) con alcance, el monto lo fija el servidor como tarifa × base de #93 D11, y un `amount` distinto da 422 (recomendado); (b) Ingrid no manda comisión y la pone Johana, lo que exige un camino nuevo para causarla después de liquidar.
+   - **D-b, qué compras son de Ingrid:** (a) por la marca del proveedor, aunque la compra venga de una Entrada sin recolector o sea directa (recomendado: es «las liquidaciones de sus proveedores», L213-217, b); (b) solo las compras que nacieron de sus Entradas.
+   - Los supuestos que más pesan: S1 (Q-70: filtro estricto para Ingrid y nada cambia para Johana), S5 (sin retenciones ni IVA) y S7 (sin gastos desde su caja).
+
+Mientras la 3 esté pendiente, el plan se lee con las opciones recomendadas. Si Daniel elige otra, cambian:
+- H5 = (b): la fila 27b, PROPIOS, `generic` en la fila 15 y la fila 27b del cuadrante;
+- D-a = (b): la fila 9, P31 y la pantalla de la comisión;
+- D-b = (b): las filas 16–17, la fila 16–17 del cuadrante y P9.
+Cada cambio vuelve a QA como delta.
+
+## 16. Runbook de deploy
+
+Revisión de producto del Coordinador. Todo lo hace el Coordinador con el OK de Daniel, porque son escrituras en producción.
+
+1. **Migración** `e7f9a1b3c5d8`, vía `/deploy` (aditiva: columna NULL y tabla vacía).
+2. **Marca inicial:** primero `scripts/marcar_recolector.py --collector "Green Loop" --lista <archivo> --dry-run` contra producción; se revisa la lista impresa y se compara con la que confirmó Johana. Después, la corrida real. Antes del deploy se verifica en producción que existe el tercero «Green Loop» (service_provider) y que su nombre coincide.
+3. **El usuario de Ingrid:**
+   - se crea por la vía de superusuario;
+   - **su clave se fija solo con el reseteo de #85** (`POST /system/users/{id}/reset-password`), con la clave que defina Daniel, **NUNCA con la clave fija** que dejan las altas de miembros (la deuda de #85);
+   - su rol es «Recolector», con los 12 permisos de §5.1, más `payment-to-generic` si H5 = (a), que usa el mismo `treasury.create_movements`. Ningún permiso es nuevo.
+4. **Su caja:** `PUT /organizations/{org}/members/{ingrid}/account-assignments` con la cuenta real de la caja de Green Loop (K1 de producción). **Antes** de poner el alcance, para que en ningún momento vea cuentas que no son suyas. Igual, con alcance y sin asignaciones vería cero (fila 21).
+5. **Su alcance:** `PUT /organizations/{org}/members/{ingrid}/collector-scope` con el id del tercero «Green Loop».
+6. **Verificación**, con lecturas en producción y su usuario:
+   - `my-permissions` trae `collector_scope`;
+   - `GET /inbound-orders` da solo Entradas con recolector Green Loop (al principio puede ser 0, por R1);
+   - `GET /third-parties/suppliers` da solo los marcados;
+   - `GET /money-accounts` da solo su caja;
+   - `GET /organizations/{org}/members` da 403.
+7. **Condición de uso (R1):** Daniel le comunica a Johana que báscula tiene que poner el recolector en las Entradas de Green Loop.
