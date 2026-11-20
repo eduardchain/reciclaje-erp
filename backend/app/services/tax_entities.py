@@ -137,3 +137,81 @@ def resolve_tax_entity(
     db.add(ThirdPartyCategoryAssignment(third_party_id=tp.id, category_id=category.id))
     db.flush()
     return tp
+
+
+# --- Listado para Tesorería → Impuestos y retenciones (plan v1.2 D1) --- #
+
+_TAX_TYPE_ORDER = {"iva": 0, "retefuente": 1, "reteiva": 2, "ica": 3}
+
+
+def parse_tax_entity_name(name: str) -> Optional[tuple[str, Optional[str]]]:
+    """Nombre canónico → (tipo, municipio). None si no sigue el formato.
+
+    SOLO sirve para el rótulo: la pertenencia al listado la decide la categoría
+    por código, nunca este parser (D4b). Matching sin acentos ni casing (H4),
+    igual que `resolve_tax_entity`.
+    """
+    target = normalize_entity_name(name)
+    for tax_type, canonical in TAX_ENTITY_NAMES.items():
+        if normalize_entity_name(canonical) == target:
+            return tax_type, None
+    prefix = normalize_entity_name(ICA_PREFIX)
+    if target.startswith(prefix):
+        municipality = name.strip()[len(ICA_PREFIX.strip()):].strip()
+        return "ica", municipality or None
+    return None
+
+
+def list_tax_entity_rows(db: Session, organization_id: UUID) -> list[dict]:
+    """Entidades '[Impuestos] X' de la org, con su saldo (plan v1.2 D1).
+
+    🔴 Pertenencia por CÓDIGO: las que tienen asignada la categoría con
+    `system_code='taxes'`. Un tercero que se llame "[Impuestos] ..." sin esa
+    categoría NO aparece, y renombrar la categoría no cambia nada.
+
+    🔴 SIN filtro `is_active` (C3 invertida en v1.2): una entidad de sistema no
+    se puede desactivar por la API (`third_party.py`, guard de entidad del
+    sistema, antes del de saldo), así que una inactiva solo existe por fuera de
+    la aplicación y puede tener saldo. Filtrarla escondería esa deuda; se
+    muestra con `is_active=false`.
+
+    ⚠️ Una entidad que perdió la asignación (downgrade de #112) no sale acá
+    aunque `resolve_tax_entity` le siga moviendo saldos por nombre: esta página
+    hereda esa deuda, no la repara (O3).
+    """
+    from app.models.third_party_category import (
+        ThirdPartyCategory, ThirdPartyCategoryAssignment,
+    )
+
+    entities = db.execute(
+        select(ThirdParty)
+        .join(ThirdPartyCategoryAssignment,
+              ThirdPartyCategoryAssignment.third_party_id == ThirdParty.id)
+        .join(ThirdPartyCategory,
+              ThirdPartyCategory.id == ThirdPartyCategoryAssignment.category_id)
+        .where(
+            ThirdParty.organization_id == organization_id,
+            ThirdPartyCategory.organization_id == organization_id,
+            ThirdPartyCategory.system_code == TAX_CATEGORY_CODE,
+        )
+    ).scalars().unique().all()
+
+    rows = []
+    for tp in entities:
+        parsed = parse_tax_entity_name(tp.name)
+        tax_type, municipality = parsed if parsed else (None, None)
+        rows.append({
+            "entity_id": tp.id,
+            "name": tp.name,
+            "label": tax_label(tax_type, municipality) if tax_type else tp.name,
+            "tax_type": tax_type,
+            "municipality": municipality,
+            "current_balance": float(tp.current_balance or 0),
+            "is_active": bool(tp.is_active),
+        })
+    rows.sort(key=lambda r: (
+        _TAX_TYPE_ORDER.get(r["tax_type"], 99),
+        normalize_entity_name(r["municipality"] or ""),
+        normalize_entity_name(r["name"]),
+    ))
+    return rows

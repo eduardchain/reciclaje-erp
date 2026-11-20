@@ -15,16 +15,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PageHeader } from "@/components/shared/PageHeader";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
-import { useRetentionRows, useCreateRetentionConfig, useUpdateRetentionConfig } from "@/hooks/useMasterData";
+import { useRetentionRows, useTaxEntityRows, useCreateRetentionConfig, useUpdateRetentionConfig } from "@/hooks/useMasterData";
+import { taxBalanceNature } from "@/utils/taxBalanceNature";
 import { ROUTES } from "@/utils/constants";
 import { RETENTION_TYPE_LABELS } from "@/types/purchase";
-import type { RetentionRow, RetentionConfigType, RetentionBaseKind } from "@/types/third-party";
+import type { RetentionRow, RetentionConfigType, RetentionBaseKind, TaxEntityRow } from "@/types/third-party";
 
 export function retentionRowLabel(r: RetentionRow): string {
   let label: string = RETENTION_TYPE_LABELS[r.retention_type];
   if (r.municipality) label += ` — ${r.municipality}`;
   if (r.concept) label += ` · ${r.concept}`;
   return label;
+}
+
+/** Etiqueta «Por pagar» / «A favor» — el criterio vive en `taxBalanceNature`. */
+function NatureBadge({ balance, small = false }: { balance: number; small?: boolean }) {
+  const n = taxBalanceNature(balance);
+  return (
+    <Badge variant="outline" data-nature={n.kind} className={`${small ? "text-[10px]" : "text-xs"} ${n.className}`}>
+      {n.label}
+    </Badge>
+  );
 }
 
 export default function RetentionsPage() {
@@ -39,6 +50,13 @@ export default function RetentionsPage() {
     (r) =>
       (showInactive || r.is_active) &&
       (!search || retentionRowLabel(r).toLowerCase().includes(search.toLowerCase())),
+  );
+
+  // Sección 1 (plan v1.2 D2): entidades «[Impuestos] X». SIN filtro de
+  // inactivas — una inactiva con saldo se muestra (C3); solo la búsqueda filtra.
+  const { data: taxData, isLoading: taxLoading } = useTaxEntityRows(true);
+  const taxRows = (taxData ?? []).filter(
+    (t) => !search || `${t.label} ${t.name}`.toLowerCase().includes(search.toLowerCase()),
   );
 
   const canManage = hasPermission("third_parties.create");
@@ -115,6 +133,24 @@ export default function RetentionsPage() {
     );
   };
 
+  const statementUrl = (entityId: string) =>
+    `${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${entityId}&returnTo=/treasury/retentions`;
+
+  // Pagar en la sección 1: SOLO si el saldo es «Por pagar». Un saldo a favor se
+  // cruza en la declaración, no se paga.
+  const taxActions = (t: TaxEntityRow, mobile = false) => (
+    <>
+      {canPay && taxBalanceNature(t.current_balance).payable && (
+        <Button variant="outline" size="sm" className={mobile ? "w-full" : ""} onClick={() => navigate(`${ROUTES.TREASURY_NEW}?type=liability_payment&third_party_id=${t.entity_id}`)}>
+          Pagar
+        </Button>
+      )}
+      <Button variant="outline" size="sm" className={mobile ? "w-full" : ""} onClick={() => navigate(statementUrl(t.entity_id))}>
+        {mobile ? "Estado" : "Estado de Cuenta"}
+      </Button>
+    </>
+  );
+
   const rowActions = (r: RetentionRow, mobile = false) => (
     <>
       {canPay && r.entity_id && (
@@ -123,7 +159,7 @@ export default function RetentionsPage() {
         </Button>
       )}
       {r.entity_id && (
-        <Button variant="outline" size="sm" className={mobile ? "w-full" : ""} onClick={() => navigate(`${ROUTES.TREASURY_ACCOUNT_STATEMENT}?third_party_id=${r.entity_id}&returnTo=/treasury/retentions`)}>
+        <Button variant="outline" size="sm" className={mobile ? "w-full" : ""} onClick={() => navigate(statementUrl(r.entity_id!))}>
           {mobile ? "Estado" : "Estado de Cuenta"}
         </Button>
       )}
@@ -143,8 +179,8 @@ export default function RetentionsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Retenciones"
-        description="Tarifas configuradas y deuda acumulada por retenciones aplicadas al liquidar compras — para el pago de impuestos"
+        title="Impuestos y retenciones"
+        description="El IVA y las retenciones que nos practican, y las retenciones que practicamos al liquidar compras. Cada saldo se muestra solo: no se suman entre sí."
       >
         {canManage && (
           <Button onClick={() => openAdd()} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto">
@@ -154,15 +190,99 @@ export default function RetentionsPage() {
       </PageHeader>
 
       <div className="flex flex-col sm:flex-row sm:gap-3 sm:items-center gap-2">
-        <SearchInput value={search} onChange={setSearch} placeholder="Buscar retención..." />
+        <SearchInput value={search} onChange={setSearch} placeholder="Buscar impuesto o retención..." />
+      </div>
+
+      {/* Sección 1 — Impuestos (IVA y retenciones que nos practican) */}
+      <section className="space-y-2" data-testid="tax-section">
+        <div>
+          <h2 className="text-base font-semibold text-slate-800">Impuestos (IVA y retenciones que nos practican)</h2>
+          <p className="text-xs text-slate-500">
+            Saldo negativo: se le debe a la DIAN. Saldo positivo: queda a favor y se cruza en la declaración.
+          </p>
+        </div>
+        <Card className="shadow-sm">
+          <CardContent className="p-0">
+            {taxLoading ? (
+              <p className="text-sm text-slate-400 py-8 text-center">Cargando...</p>
+            ) : taxRows.length === 0 ? (
+              <p className="p-6 text-sm text-slate-500">
+                {search
+                  ? "Ningún impuesto coincide con la búsqueda."
+                  : "Aún no hay impuestos registrados. Aparecen al liquidar una venta, una Salida de Plomo o una compra con IVA."}
+              </p>
+            ) : (
+              <>
+                <Table className="hidden md:table">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Impuesto</TableHead>
+                      <TableHead className="text-right">Saldo Contable</TableHead>
+                      <TableHead>Naturaleza</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {taxRows.map((t) => (
+                      <TableRow key={t.entity_id} data-testid="tax-row" className={!t.is_active ? "opacity-60" : ""}>
+                        <TableCell>
+                          <div className="flex items-center gap-2 flex-wrap font-medium">
+                            {t.label}
+                            {!t.is_active && <Badge variant="secondary" className="text-xs">Inactiva</Badge>}
+                          </div>
+                          <div className="text-xs text-slate-400">{t.name}</div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <MoneyDisplay amount={t.current_balance} />
+                        </TableCell>
+                        <TableCell><NatureBadge balance={t.current_balance} /></TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">{taxActions(t)}</div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+
+                {/* Mobile: cards */}
+                <div className="md:hidden space-y-2 p-3">
+                  {taxRows.map((t) => (
+                    <div key={t.entity_id} data-testid="tax-card" className={`rounded-md border bg-white p-3 shadow-sm ${!t.is_active ? "opacity-60" : ""}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate">{t.label}</div>
+                          <div className="text-xs text-slate-400 truncate">{t.name}</div>
+                          <div className="flex gap-1 mt-1 flex-wrap">
+                            <NatureBadge balance={t.current_balance} small />
+                            {!t.is_active && <Badge variant="secondary" className="text-[10px]">Inactiva</Badge>}
+                          </div>
+                        </div>
+                        <MoneyDisplay amount={t.current_balance} className="text-sm shrink-0" />
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-1.5">{taxActions(t, true)}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Sección 2 — Retenciones que practicamos (la tabla de siempre) */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold text-slate-800">Retenciones que practicamos</h2>
+          <p className="text-xs text-slate-500">Las que aplicamos al liquidar compras: se le deben a la DIAN.</p>
+        </div>
+        {/* Solo afecta a las tarifas de esta sección: la de impuestos nunca esconde inactivas (C3). */}
         <div className="flex items-center gap-2">
           <Checkbox id="show-inactive-ret" checked={showInactive} onCheckedChange={(c) => setShowInactive(c === true)} />
           <label htmlFor="show-inactive-ret" className="text-sm text-slate-600 cursor-pointer whitespace-nowrap">
-            Mostrar inactivas
+            Mostrar tarifas inactivas
           </label>
         </div>
       </div>
-
       <Card className="shadow-sm">
         <CardContent className="p-0">
           {isLoading ? (
@@ -202,7 +322,12 @@ export default function RetentionsPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {r.entity_id ? <MoneyDisplay amount={r.current_balance} /> : <span className="text-slate-400">—</span>}
+                        {r.entity_id ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <MoneyDisplay amount={r.current_balance} />
+                            <NatureBadge balance={r.current_balance} />
+                          </div>
+                        ) : <span className="text-slate-400">—</span>}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">{rowActions(r)}</div>
@@ -226,6 +351,7 @@ export default function RetentionsPage() {
                           <Badge variant="outline" className="text-[10px] text-indigo-600 border-indigo-200">Sistema</Badge>
                           {!r.is_active && <Badge variant="secondary" className="text-[10px]">Inactiva</Badge>}
                           {!r.entity_id && <Badge variant="secondary" className="text-[10px]">Sin uso aún</Badge>}
+                          {r.entity_id && <NatureBadge balance={r.current_balance} small />}
                         </div>
                       </div>
                       {r.entity_id && <MoneyDisplay amount={r.current_balance} className="text-sm shrink-0" />}

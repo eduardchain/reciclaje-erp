@@ -152,6 +152,17 @@ export function useRetentionRows(enabled: boolean) {
   });
 }
 
+export function useTaxEntityRows(enabled: boolean) {
+  // Endpoint flag-gated (kg_ledger_enabled), igual que useRetentionRows.
+  // La llave cuelga de ["third-parties"]: invalidateAfterTreasury la refresca
+  // tras un pago.
+  return useQuery({
+    queryKey: ["third-parties", "tax-entities"],
+    queryFn: () => thirdPartyService.getTaxEntityRows(),
+    enabled,
+  });
+}
+
 export function useCreateRetentionConfig() {
   // Colision (tipo, municipio, concepto) normalizados H4 → 409 con la tarifa
   // existente en el detail (editarla, no duplicar).

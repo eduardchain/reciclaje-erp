@@ -143,6 +143,22 @@ class RetentionConfigUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class TaxEntityRowResponse(BaseModel):
+    """Fila de GET /third-parties/tax-entities (plan impuestos y retenciones v1.2 D1).
+
+    `label` es el rótulo para la pantalla («IVA», «ICA Bogotá»): el nombre de la
+    entidad dice «por Pagar» aunque el saldo esté a favor, así que la fila se
+    rotula con el tipo y la naturaleza la decide el signo de `current_balance`.
+    """
+    entity_id: UUID
+    name: str
+    label: str
+    tax_type: Optional[str] = None
+    municipality: Optional[str] = None
+    current_balance: float
+    is_active: bool
+
+
 class RetentionRowResponse(BaseModel):
     """Fila del GET unificado (plan v2 D-v2-1): config y/o entidad.
     entity_id NULL = config sin uso aún (sin Pagar/Estado);
