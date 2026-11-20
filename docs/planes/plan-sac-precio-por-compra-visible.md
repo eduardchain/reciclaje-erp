@@ -4,7 +4,8 @@ Autor: Eco Coder 1 · 20-nov-2026 · rama `coder-1/precio-por-compra` (base `de3
 Nivel: **lógica** (cálculo en pantalla). Solo frontend; el backend no cambia.
 Archivo: `frontend/src/pages/inbound/InboundLiquidatePage.tsx` (matriz de #122/#123).
 Historia: v1.0 `4070017` → GO de Eco QA 1 con C1–C3; revisión de producto del Coordinador
-(sugerencias S-1 y S-2, nota E2); Daniel autorizó construir la v1.1.
+(sugerencias S-1 y S-2, nota E2); Daniel autorizó construir la v1.1. v1.1 `02743e2` → C4 de QA
+(P1 medía nada: E13 nuevo), antes de plantar.
 
 ## 1. Qué pasa hoy
 
@@ -124,13 +125,14 @@ La barra cuenta lo mismo que el pie: `activeCols.length` compras, y aparte las c
 | E10 | 3 columnas, una vacía | barra y pie dicen «2 compras» |
 | E11 | Tab de punta a punta por una fila de celdas vacías y por una celda en total con «antes» | el borrador de `localStorage` queda **igual byte a byte** antes y después; el «antes» sigue visible |
 | E12 | clic en c/u con la celda en lista, en base y en propio | ningún cambio: borrador igual byte a byte, sin «antes» |
+| E13 | (C4 de QA) Entrada liquidada por API con `unit_price` 1234.56789, desliquidada; abrir Liquidar, Tab por esa celda sin tocarla | el log imprime el precargado antes; payload `unit_price` = 1234.56789 (no 1234.57) y borrador igual byte a byte |
 
 - **Plantado** (esta matriz va commiteada con la v1.1, antes de plantar). Cada defecto se planta
   sobre una copia por ruta, se corre el E2E entero y se restaura con cierre por sha256:
 
 | P | Defecto plantado | Debe caer | Puede caer de más (vía compartida) |
 |---|---|---|---|
-| P1 | comparar el prellenado sin `toCents` (exacto) | E4 | E11 |
+| P1 | comparar sin `toCents` (exacto) | E13 | — (E4 **no** cae: los prellenados de lista y base son de 2 decimales — `price_lists.purchase_price` y `reference_unit_price` son Numeric(15,2); el único valor de más decimales es el unitario propio precargado desde `inbound_line_allocations.unit_price` Numeric(21,8)) |
 | P2 | el 0 en un unitario propio no limpia | E5 | — |
 | P3 | de total a c/u sin prellenar (`unit_price: 0`) | E8 | — |
 | P4 | la barra con `sortedCols.length` | E10 | — |
