@@ -29,3 +29,21 @@ Se commitea ANTES de plantar. La columna «predicción» no se reescribe despué
 | P13 | Sin defensa dura: se quita el chequeo `expected != p.supplier_id` (`inbound_order.py`) | QA c (§3.2) | T18, y solo T18 | T18: 200, esperaba 409 |
 | P14 | PANTALLA — «Agregar categoría y usar» manda SOLO la categoría de proveedor (`CreateSupplierDialog.tsx`) | §5 | 0 tests (T12 emula el payload correcto) | Pantalla: el PATCH lleva 1 id y el tercero pierde la categoría de cliente |
 | P15 | PANTALLA — quitar una compra renumera los slots (`InboundLiquidatePage.tsx`, `removeCol`) | R6 | 0 tests | Pantalla: con 1, 2, 3, al quitar la 2 los encabezados quedan «Compra 1, 2» y no «1, 3» |
+
+## Addendum P2b (20-nov, antes de re-plantar)
+
+P2 dio 0 caídas, como estaba predicho: ningún test intercambiaba proveedores entre compras, así que la regla «el slot es identidad» (R6) no la sostenía nada. La corrida queda en su log tal como salió. Se agrega `test_t3b_intercambiar_proveedores_entre_compras`:
+- primera liquidación: compra 1 = sup_a, compra 2 = sup_b;
+- se desliquida y se reliquida intercambiados: compra 1 = sup_b, compra 2 = sup_a.
+
+Afirma:
+- las dos compras viejas, canceladas;
+- dos nuevas: slot 1 de sup_b y slot 2 de sup_a;
+- en el puente, exactamente una compra viva por slot y del proveedor correcto;
+- en un segundo ciclo de desliquidar y reliquidar: 200 sin 409 y los mismos números.
+
+| P | Defecto | Predicción | Primera falla esperada |
+|---|---|---|---|
+| P2b | El mismo defecto de P2, re-plantado contra el archivo con T3b | T3b, y solo T3b | T3b, en la afirmación de «canceladas»: con P2, el slot 1 (sup_b) reusa la #n2 y el slot 2 (sup_a) reusa la #n1, y no se cancela ninguna |
+
+Control: sin el defecto, el archivo pasa entero, T3b incluido.
