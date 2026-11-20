@@ -32,6 +32,13 @@ import { useCurrentFormulas, useKgProfiles } from "@/hooks/useSacConfig";
 import { useScopeSupplierIds } from "@/hooks/useMasterData";
 import { formOrderMap, sortByFormOrder } from "@/utils/formOrder";
 import {
+  countsAsLiquidated,
+  liquidatedTotals,
+  purchaseMaterials,
+  purchaseMoney,
+  type PurchaseTotals,
+} from "@/utils/inboundPurchases";
+import {
   formatCurrency,
   formatCurrencyDecimals,
   formatDate,
@@ -46,6 +53,8 @@ import {
   INBOUND_TYPE_LABELS,
   PURCHASE_INBOUND_TYPES,
   WILLARD_INBOUND_TYPES,
+  type InboundOrderLineResponse,
+  type InboundPurchaseSummary,
 } from "@/types/inbound-order";
 
 /** El backend serializa Decimal como STRING ("0.0000") aunque el tipo TS diga
@@ -79,6 +88,206 @@ function InfoRow({ label, value, long = false }: { label: string; value: React.R
     <div className={long ? "flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-3" : "flex justify-between gap-3"}>
       <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</span>
       <span className="text-sm text-slate-800 sm:text-right">{value}</span>
+    </div>
+  );
+}
+
+const MAX_MATERIALS = 3;
+
+/** Materiales de la compra (D3): hasta 3 renglones + «+N más» (patrón #82). */
+function PurchaseMaterialsCell({
+  purchase,
+  lines,
+}: {
+  purchase: InboundPurchaseSummary;
+  lines: InboundOrderLineResponse[];
+}) {
+  const mats = purchaseMaterials(purchase, lines);
+  if (mats.length === 0) return <span className="text-slate-400">—</span>;
+  return (
+    <div className="space-y-0.5 text-xs">
+      {mats.slice(0, MAX_MATERIALS).map((m, i) => (
+        <div key={i} className="whitespace-nowrap">
+          <span className="font-medium">{m.code}</span>{" "}
+          <span className="tabular-nums text-slate-500">{formatWeight(m.quantity, m.unit)}</span>
+        </div>
+      ))}
+      {mats.length > MAX_MATERIALS && (
+        <div className="text-slate-400">+{mats.length - MAX_MATERIALS} más</div>
+      )}
+    </div>
+  );
+}
+
+function totalsLabel(totals: PurchaseTotals): string {
+  const s = totals.count === 1 ? "" : "s";
+  return `Total (${totals.count} compra${s} liquidada${s})`;
+}
+
+/** Compras de la Entrada en tabla, desde md (plan compras en tabla v1.2, D1).
+ *  Suman solo las liquidadas (O1); una registrada (Entrada desliquidada) y una
+ *  cancelada se ven, pero con «no suma». */
+function PurchasesTable({
+  purchases,
+  lines,
+  totals,
+  canViewPrices,
+  outOfScope,
+  collectorName,
+}: {
+  purchases: InboundPurchaseSummary[];
+  lines: InboundOrderLineResponse[];
+  totals: PurchaseTotals;
+  canViewPrices: boolean;
+  /** Alcance de recolector (#129, plan D6): la MISMA regla de las tarjetas —
+   *  proveedor fuera del alcance → Compra y Proveedor sin link (darían 404) y
+   *  la nota ámbar debajo del proveedor. Sin alcance siempre da false. */
+  outOfScope: (supplierId: string | null | undefined) => boolean;
+  collectorName: string | null | undefined;
+}) {
+  const money = "text-right tabular-nums whitespace-nowrap";
+  return (
+    <div className="hidden md:block overflow-x-auto" data-testid="purchases-table">
+      <Table className={canViewPrices ? "min-w-[960px]" : "min-w-[640px]"}>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Compra</TableHead>
+            <TableHead>Proveedor</TableHead>
+            <TableHead>Factura</TableHead>
+            <TableHead>Materiales</TableHead>
+            {canViewPrices && (
+              <>
+                <TableHead className="text-right">Subtotal</TableHead>
+                <TableHead className="text-right">IVA</TableHead>
+                <TableHead className="text-right">Retenciones</TableHead>
+                <TableHead className="text-right">Total al proveedor</TableHead>
+              </>
+            )}
+            <TableHead>Estado</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {purchases.map((p) => {
+            const m = purchaseMoney(p);
+            const cancelled = p.status === "cancelled";
+            const counts = countsAsLiquidated(p);
+            const moneyCls = cn(money, cancelled && "line-through");
+            const out = outOfScope(p.supplier_id);
+            return (
+              <TableRow
+                key={p.purchase_id}
+                data-testid="purchase-row"
+                data-purchase-number={p.purchase_number}
+                data-counts={counts ? "1" : "0"}
+                className={cn(
+                  cancelled && "bg-slate-50/70 text-slate-400",
+                  !cancelled && !counts && "text-slate-500"
+                )}
+              >
+                <TableCell className="whitespace-nowrap" data-col="compra">
+                  {out ? (
+                    <span>Compra #{p.purchase_number}</span>
+                  ) : (
+                    <PurchaseLink id={p.purchase_id}>Compra #{p.purchase_number}</PurchaseLink>
+                  )}
+                  {p.purchase_slot != null && (
+                    <div className="text-[11px] uppercase tracking-wider text-slate-400">
+                      Compra {p.purchase_slot}
+                    </div>
+                  )}
+                </TableCell>
+                <TableCell className="max-w-[220px]" data-col="proveedor">
+                  {out ? (
+                    p.supplier_name ?? "—"
+                  ) : (
+                    <ThirdPartyLink id={p.supplier_id}>{p.supplier_name ?? "—"}</ThirdPartyLink>
+                  )}
+                  {out && (
+                    <div data-testid="out-of-scope-note" className="text-xs text-amber-700 mt-0.5 whitespace-normal">
+                      Proveedor sin la marca de {collectorName ?? "tu recolector"}: pídele a SAC
+                      que lo marque en Terceros.
+                    </div>
+                  )}
+                </TableCell>
+                <TableCell className="whitespace-nowrap">{p.invoice_number || "—"}</TableCell>
+                <TableCell>
+                  <PurchaseMaterialsCell purchase={p} lines={lines} />
+                </TableCell>
+                {canViewPrices && (
+                  <>
+                    <TableCell className={moneyCls} data-col="subtotal">{fmtMoney(m.subtotal)}</TableCell>
+                    <TableCell className={moneyCls} data-col="iva">{fmtMoney(m.iva)}</TableCell>
+                    <TableCell className={moneyCls} data-col="ret">{fmtMoney(m.ret)}</TableCell>
+                    <TableCell className={cn(moneyCls, "font-medium")} data-col="total">
+                      {fmtMoney(m.total)}
+                    </TableCell>
+                  </>
+                )}
+                <TableCell className="whitespace-nowrap">
+                  <StatusBadge status={p.status} />
+                  {!counts && (
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      {cancelled ? "no suma" : "no suma: sin liquidar"}
+                    </div>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+          {canViewPrices && (
+            <TableRow data-testid="purchase-totals" className="bg-slate-50 font-semibold">
+              {totals.count > 0 ? (
+                <>
+                  <TableCell colSpan={4}>{totalsLabel(totals)}</TableCell>
+                  <TableCell className={money} data-col="subtotal">{fmtMoney(totals.subtotal)}</TableCell>
+                  <TableCell className={money} data-col="iva">{fmtMoney(totals.iva)}</TableCell>
+                  <TableCell className={money} data-col="ret">{fmtMoney(totals.ret)}</TableCell>
+                  <TableCell className={money} data-col="total">{fmtMoney(totals.total)}</TableCell>
+                  <TableCell />
+                </>
+              ) : (
+                <TableCell colSpan={9} className="text-slate-500 font-medium">
+                  Sin compras liquidadas
+                </TableCell>
+              )}
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/** Los mismos totales de la tabla, para el celular (D5). */
+function PurchasesTotalsCard({ totals }: { totals: PurchaseTotals }) {
+  return (
+    <div
+      data-testid="purchase-totals-card"
+      className="md:hidden mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm space-y-1"
+    >
+      {totals.count === 0 ? (
+        <div className="text-slate-500 font-medium">Sin compras liquidadas</div>
+      ) : (
+        <>
+          <div className="font-semibold">{totalsLabel(totals)}</div>
+          <div className="flex justify-between gap-3">
+            <span className="text-slate-500">Subtotal</span>
+            <span className="tabular-nums" data-col="subtotal">{fmtMoney(totals.subtotal)}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span className="text-slate-500">IVA</span>
+            <span className="tabular-nums" data-col="iva">{fmtMoney(totals.iva)}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span className="text-slate-500">Retenciones</span>
+            <span className="tabular-nums" data-col="ret">{fmtMoney(totals.ret)}</span>
+          </div>
+          <div className="flex justify-between gap-3 font-semibold">
+            <span>Total al proveedor</span>
+            <span className="tabular-nums" data-col="total">{fmtMoney(totals.total)}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -148,9 +357,17 @@ export default function InboundDetailPage() {
   const purchaseTotal = isPurchaseType
     ? order.lines.reduce((acc, l) => acc + l.quantity * (l.unit_price ?? 0), 0)
     : 0;
-  const liquidatedTotal = order.purchases
-    .filter((p) => p.status !== "cancelled")
-    .reduce((acc, p) => acc + p.total_amount, 0);
+  // O1 de Daniel: solo suman las compras LIQUIDADAS (`countsAsLiquidated`);
+  // una Entrada desliquidada no muestra «Total Liquidado» hasta reliquidar.
+  // La misma suma alimenta la fila de totales de la tabla y la tarjeta móvil.
+  const totals = liquidatedTotals(order.purchases);
+  // Vigentes por slot (como antes); las canceladas al final
+  const sortedPurchases = [...order.purchases].sort(
+    (a, b) =>
+      Number(a.status === "cancelled") - Number(b.status === "cancelled") ||
+      (a.purchase_slot ?? 0) - (b.purchase_slot ?? 0) ||
+      a.purchase_number - b.purchase_number
+  );
   // Descuadre neto que llegó a resultados (solo ajustes vigentes: los
   // anulados ya no cuentan, igual que en el P&L)
   const discrepancyAdjustments = (order.discrepancy_adjustments ?? []).filter(
@@ -396,11 +613,22 @@ export default function InboundDetailPage() {
                     }
                   />
                 )}
-                {canViewPrices && order.purchases.length > 0 && (
+                {canViewPrices && totals.count > 0 && (
                   <InfoRow
                     label="Total Liquidado"
                     value={
-                      <span className="font-semibold tabular-nums">{fmtMoney(liquidatedTotal)}</span>
+                      <span className="font-semibold tabular-nums">{fmtMoney(totals.subtotal)}</span>
+                    }
+                  />
+                )}
+                {/* O3: solo si hay IVA — si no, repetiría el mismo número */}
+                {canViewPrices && totals.count > 0 && totals.iva > 0 && (
+                  <InfoRow
+                    label="Total con IVA"
+                    value={
+                      <span className="font-semibold tabular-nums">
+                        {fmtMoney(totals.subtotal + totals.iva)}
+                      </span>
                     }
                   />
                 )}
@@ -478,21 +706,25 @@ export default function InboundDetailPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {[...order.purchases]
-                .sort(
-                  (a, b) =>
-                    (a.purchase_slot ?? 0) - (b.purchase_slot ?? 0) ||
-                    a.purchase_number - b.purchase_number
-                )
+            {/* Desde md: tabla (con 10 compras las tarjetas no se leen) */}
+            <PurchasesTable
+              purchases={sortedPurchases}
+              lines={order.lines}
+              totals={totals}
+              canViewPrices={canViewPrices}
+              outOfScope={outOfScope}
+              collectorName={order.collector_name}
+            />
+            {/* Bajo md: las tarjetas de siempre + una de totales */}
+            <div className="md:hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {sortedPurchases
                 .map((p) => {
                 // IVA vivo de la compra (§4): el proveedor queda con +IVA
-                const iva = (p.taxes ?? [])
-                  .filter((t) => t.tax_type === "iva" && !t.reverted_at)
-                  .reduce((acc, t) => acc + num(t.amount), 0);
-                const ret = num(p.retentions_total);
+                const { iva, ret, total } = purchaseMoney(p);
                 return (
                 <div
+                  data-testid="purchase-card"
+                  data-purchase-number={p.purchase_number}
                   key={p.purchase_id}
                   className={`rounded-lg border p-3 space-y-1 ${
                     p.status === "cancelled" ? "border-rose-200 bg-rose-50/50 opacity-70" : "border-slate-200"
@@ -531,8 +763,8 @@ export default function InboundDetailPage() {
                       {iva > 0 && <>IVA: {fmtMoney(iva)} · </>}
                       {ret > 0 && <>Retenciones: {fmtMoney(ret)} · </>}
                       Total al proveedor:{" "}
-                      <span className="font-medium text-slate-700">
-                        {fmtMoney(num(p.total_amount) + iva - ret)}
+                      <span data-testid="card-total" className="font-medium text-slate-700">
+                        {fmtMoney(total)}
                       </span>
                     </div>
                   )}
@@ -546,6 +778,7 @@ export default function InboundDetailPage() {
                 );
               })}
             </div>
+            {canViewPrices && <PurchasesTotalsCard totals={totals} />}
           </CardContent>
         </Card>
       )}
