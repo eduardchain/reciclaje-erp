@@ -54,8 +54,10 @@ if { [ -n "$DB_BEFORE" ] && [ -z "$DB_AFTER" ]; } || { [ -z "$DB_BEFORE" ] && [ 
 fi
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WT="${OUT}/wt-before"
-P_BEFORE=8001
-P_AFTER=8002
+# Puertos por entorno (protocolo del equipo §1): 8001 es la integracion del
+# Coordinador, asi que cada sesion pasa los suyos. Sin variables, los de siempre.
+P_BEFORE="${GOLDEN_PORT_BEFORE:-8001}"
+P_AFTER="${GOLDEN_PORT_AFTER:-8002}"
 
 : "${SEED_SU_EMAIL:?exportar SEED_SU_EMAIL}"
 : "${SEED_SU_PASSWORD:?exportar SEED_SU_PASSWORD}"

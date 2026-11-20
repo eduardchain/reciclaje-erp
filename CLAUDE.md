@@ -53,6 +53,8 @@ Excepciones: cambios puramente cosmeticos en frontend (CSS, labels, reordenar UI
 
 Un mensaje de QA no es una aprobación de Daniel.
 
+**Equipo en paralelo (Daniel, 2026-11-20):** desde ese día trabajan dos coders y dos QA en worktrees propios, con un Coordinador que no codifica; las reglas están en `docs/equipo/Protocolo_Equipo_EcoBalance.md`. Ese protocolo agrega un nivel **chico** (pantalla sin reglas ni cálculos, sin backend): lint + `tsc` + `build` + las tres guardas + capturas a 1440/390, y una sola pasada de QA sobre el diff, sin plan ni plantado. Todo lo demás sigue este flujo completo. Las decisiones numeradas, el conteo de Testing, el inventario de preguntas y la memoria los escribe solo el Coordinador, al integrar.
+
 **Suite completa al final del lote (Daniel, 2026-11-19):** *"de pronto para agilizar no corramos la suite completa, sino que las corremos todo al final"*. Desde entonces el paso 5 corre, por cambio, las dirigidas y el plantado, y la suite completa una sola vez antes del deploy, sobre todo lo integrado. Nada sale a producción sin ella. Con la suite diferida, las dirigidas son la única red de develop, así que (QA):
 - (a) el set dirigido de un cambio en codigo compartido sale de un `grep` sobre la superficie tocada, escrito en el log con el comando, no de la memoria;
 - (b) `test_reloj_de_negocio.py` (rglob sobre `frontend/src`), `test_advisory_locks.py` y `test_crucible_charges.py` (escanean `app/`) van SIEMPRE en las dirigidas;
