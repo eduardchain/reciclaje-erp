@@ -30,7 +30,7 @@ Es lo que pide el §0 del plan, sin cambios de alcance:
 - **Script de la marca inicial:** `scripts/marcar_recolector.py` (§9). Dry-run por defecto, `--apply`, `--esperado N` y exit 3 ante cualquier sorpresa sin escribir nada.
 - **Migración:** `e7f9a1b3c5d8_recolector_alcance.py`. Es aditiva: columna NULL y tabla vacía en las 7 orgs.
 
-**Commits de la rama, en orden:**
+**Commits de la rama, en orden, desde la construcción.** Antes hay 10 commits del plan, de `409e857` (v1.0) a `71c3fde` (v1.9).
 
 | Commit | Qué es |
 |---|---|
@@ -60,7 +60,7 @@ En la Entrada: 9e/9f para las que ya existen, 9g (con alcance no se liquida con 
 
 El Balance Detallado agrupa los terceros marcados en «Recolector: X»; el General no cambia.
 
-**No-regresión demostrable:** sin fila de alcance el contexto no consulta nada más (la consulta usa el índice único, R2) y el front no cambia. Golden 0/0 en las dos bases.
+**No-regresión demostrable:** sin fila de alcance el contexto no consulta nada más (la consulta usa el índice único, R2) y el front no cambia. Golden 0/0 en los dos goldens (bases 31ba117 y 87c799f), cada uno con UNA sola BD: la migración es aditiva (columna NULL y tabla nueva) y el código base no las lee.
 
 **Marca inicial por regla, nunca por lista** (decisión 4 de Daniel): nombre normalizado con `greenloop`/`greenlop`, menos el recolector y «BIOGREENLOOP».
 
@@ -171,6 +171,18 @@ Referencia, el ensayo en la copia de dev (`EV/ensayo_marcar_recolector.log`):
 - **Re-corrida:** tiene que dar 0 a marcar y exit 0.
 
 ### 3. Usuario de Ingrid, su caja, su alcance y la verificación
+
+**Qué está ensayado y qué no.** QA 2 ensayó el runbook en su backend local (`:8022`, BD `reciclaje_qa_2`, árbol `c00a133`; `QA/ensayo_runbook/ensayo.log`, sha `f4f02c35…02f9`):
+- **Ensayados:**
+  - la marca, corridas 1–4;
+  - los pasos 4–6: rol de 13 permisos, caja K1 antes que el alcance, collector-scope y `my-permissions` con `collector_scope`;
+  - la verificación: suppliers con 123, todos marcados; una sola cuenta; categorías «Empleados» y «Proveedor Material»; `members` en 403, con Johana en 200 como control.
+- **Por qué hubo un desvío:** la membresía se dio por admin de org, porque en esa BD no había un superusuario con clave conocida.
+- **No los ensayó nadie:**
+  - el alta del usuario en la org por `/system`;
+  - el reseteo de clave de #85.
+
+  El Coordinador los ejecuta por primera vez en producción.
 
 Siguen igual que en §16, pasos 3 a 7:
 - **Clave:** solo con el reseteo de #85, nunca con la clave fija.
