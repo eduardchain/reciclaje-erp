@@ -59,9 +59,6 @@ Se escribe aquí y no se edita el plan: la matriz commiteada no se reescribe.
   - `git status --short` vacío;
   - `git diff --stat 3a83a20` vacío en `backend/app` y `frontend/src`.
 
-## 3. Gates
-*(se llenan después)*
-
 ### 2.4 Predicciones exactas por fila (escritas ANTES de plantar)
 
 **Instrumentos:**
@@ -94,3 +91,23 @@ Se escribe aquí y no se edita el plan: la matriz commiteada no se reescribe.
 - **P6:** `const b = -(Number(balance) || 0);` en `taxBalanceNature`.
 - **P7:** quitar `taxBalanceNature(t.current_balance).payable &&` del Pagar de la sección 1.
 - **P9:** agregar `taxBalanceNature(r.current_balance).payable &&` al Pagar de la sección 2 (`rowActions`).
+
+## 3. Gates
+
+Evidencia en `~/sac-evidencia/2026-11-20/coder-1-impuestos-retenciones/`. El código de producto no cambia desde `3a83a20`; los commits posteriores son solo del informe.
+
+| Gate | Resultado | Archivo |
+|---|---|---|
+| Dirigidas (grep sobre la superficie + las 3 guardas) | **398 passed** en 0:49:03, igual a la predicción escrita antes (de `--collect-only`). `EXIT=0` dentro del bloque, 0 FAILED/ERROR/Traceback. `ARBOL_INICIO == ARBOL_FIN` (`be558f678b1411ab`), status vacío | `dirigidas.log` |
+| Plantado backend (C0 + 11 filas) | **Todas exactas contra §2.4.** C0 10/10; P1 → T3, T10 (T4 pasa, como corrigió §2.2); P1b → T4; P2 → T6; P3 → T7; P4 → T5; P5a y P5b → ninguno; P5c → T8; P8 → T9; P10 → T10. Cierre: status y diff vacíos | `plantado_back.log`, `plantado/` |
+| Plantado frontend (C0 + 3 filas, e2e E1–E7) | **Todas exactas contra §2.4.** C0 7/7; P6 → E1, E2, E3, E6; P7 → E3; P9 → E6. Cierre limpio | `plantado_front.log` |
+| tsc / lint / ruff, sobre el árbol final | tsc `EXIT=0`; eslint 0 errores y 37 warnings (= techo); ruff limpio en los 4 archivos de backend | `tsc_final.log`, `lint_final.log`, `ruff_final.log` |
+| build | `EXIT=0` | `build.log` |
+| Capturas SAC 1440/390 (C3 de QA) | Del árbol final, contra un backend relanzado a las 15:50:12 (PID 3579, el que escucha :8011, sin `address already in use`), posterior a todo cambio de `backend/app` | `capturas_final/`, `capturas_final.log` |
+
+**Sin lockf**, por decisión del Coordinador (20-nov ~14:45): la suite con lock es una confirmación post-deploy. La primera corrida quedó esperando el lock; se conserva como `dirigidas_INVALIDA_esperando_lock.log`.
+
+**Lo que no cubren estos gates:**
+- **Golden: no aplica, y se midió** (`golden_aplica.log`). Los tres archivos de `app/` solo agregan: 0 líneas borradas. `/third-parties/tax-entities` es una ruta nueva detrás de `kg_ledger_enabled`, que da 403 sin el flag (T6), y `golden_capture.py` no la llama. `/third-parties`, sin cambios, solo se usa para elegir los terceros del statement, no se escribe.
+- La suite completa queda diferida al checkpoint.
+- **Estado de datos de la BD de dev** `reciclaje_coder_1`: el e2e dejó en SAC la venta #1, la compra #15 y varios pagos a `[Impuestos] IVA por Pagar`, que quedó en −139.958,37. Son datos de prueba de mi base, no de la principal.
