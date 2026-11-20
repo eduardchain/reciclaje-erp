@@ -1,4 +1,10 @@
-# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.3)
+# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.4)
+
+**v1.4 (20-nov):** dos hallazgos de la construcción, los dos llevados al Coordinador, y los nits n4/n5 de la revisión de la v1.3 (`ad8f5a2`, `~/sac-evidencia/2026-11-20/qa-2-ingrid/revision_plan_v1.3.md`). El cuerpo aprobado no cambia fuera de lo que sigue.
+- **(a) Celda del cuadrante quién × flag:** «con alcance, flag off» en `GET /inbound-orders/{id}` decía 200/404, y eso no puede pasar: el router de Entradas tiene `require_org_flag`, que corta con 403 a todos, incluido el admin (#75), antes de que el alcance opine. Queda 403/403, y **T16b se mide en las rutas sin flag** (`/third-parties`, `/purchases`, `/money-movements`). P15 sigue cayendo por T16b. Acordado con el Coordinador.
+- **(b) El rol «Recolector» pasa a 13 permisos** (decisión de Daniel, 20-nov, vía el Coordinador): se suma `treasury.view_all_movements`, que ya existe. Sin él, el listado general de Tesorería (`GET /money-movements`) le muestra a Ingrid solo lo que ella creó (`money_movements.py`, `can_view_all`), así que el fondeo de su caja que hace Johana no aparecía ahí, aunque sí en el estado de la cuenta. Ninguna ruta exige ese permiso como dependencia (es un `if` dentro del listado), así que las 89 rutas de §5.1 no cambian. Con el permiso, el filtro de alcance de la fila 24 es la única barrera del listado, y lo prueba **T22** en las dos direcciones; P40 es su plantado.
+- **n4:** en el dry-run de §16 paso 2 se verifica que «ADALBERTO AVILA (GREENLOOP)» está en «a marcar».
+- **n5:** en P35, «CARLOS CASTAÑO (GREENLOOP)» es un chequeo de cordura, no el control; el control que discrimina es «GRÉENLOOP SAS».
 
 **v1.3 (20-nov):** Daniel autorizó la construcción sobre el cuerpo de la v1.2 (`700c87a`, GO de Eco QA 2, revisión `~/sac-evidencia/2026-11-20/qa-2-ingrid/revision_plan_v1.2.md`, sha256 `d11d1fe1…d247`) y, antes de arrancar, **cambió la decisión 4** (vía el Coordinador). Solo cambia la **marca inicial**; el cuerpo aprobado (alcance, lista blanca, tests T1–T20, matriz P1–P33) no se toca.
 - **Decisión 4 nueva:** «todo lo que diga green loop es green loop». No se le manda lista a Johana; la marca sale de una **regla sobre el nombre normalizado**, con dos exclusiones (§9, §15.4, §16 paso 2).
@@ -24,7 +30,7 @@
 
 **Autor:** Eco Coder 2 · **Revisa:** Eco QA 2 · **Nivel:** lógica · **Rama:** `coder-2/recolector-alcance` (base `de32530`)
 **Evidencia:** `~/sac-evidencia/2026-11-20/coder-2-recolector-alcance/` (inventarios, mediciones y los scripts que los producen).
-**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. El script de la marca (§9) sigue esta v1.3, que vuelve a Eco QA 2 con su sha.
+**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. La v1.3 (`ad8f5a2`) tiene GO de Eco QA 2; la v1.4 vuelve a QA 2 con su sha.
 
 ---
 
@@ -139,9 +145,9 @@ Son 7 + 8 + 1 + 1 + 1 + 9 = **27**. Las tres pruebas:
 
 ### 5.1 Inventario: a qué llega el rol propuesto
 
-Rol propuesto «Recolector» (12 permisos existentes, **cero permisos nuevos**): `purchases.view`, `purchases.view_prices`, `purchases.liquidate`, `third_parties.view`, `third_parties.create`, `treasury.view_statements`, `treasury.view_accounts`, `treasury.view_movements`, `treasury.create_movements`, `materials.view`, `materials.view_prices`, `tariffs.view`.
+Rol propuesto «Recolector» (13 permisos existentes, **cero permisos nuevos**): `purchases.view`, `purchases.view_prices`, `purchases.liquidate`, `third_parties.view`, `third_parties.create`, `treasury.view_statements`, `treasury.view_accounts`, `treasury.view_movements`, `treasury.view_all_movements` (v1.4, decisión de Daniel), `treasury.create_movements`, `materials.view`, `materials.view_prices`, `tariffs.view`.
 
-`scripts/alcance_rol.py` sobre el inventario AST da **89 rutas** a las que llegan esos permisos (`alcance_rol_ingrid.tsv`). Las **31 filas** de §5.2 están todas dentro de esas 89 (la 27b, `payment-to-generic`, entra por H5 = a, decidida). Lo medí con un `grep -F` de las 31 contra `alcance_rol_ingrid.tsv`: aparecen las 31, una vez cada una. Las **otras 58 quedan cerradas para el usuario con alcance**. La cifra exacta la fija T2b. Por ejemplo, quedan cerradas:
+`scripts/alcance_rol.py` sobre el inventario AST da **89 rutas** a las que llegan esos permisos (v1.4: `treasury.view_all_movements` no lo exige ninguna ruta como dependencia, así que el número no cambia) (`alcance_rol_ingrid.tsv`). Las **31 filas** de §5.2 están todas dentro de esas 89 (la 27b, `payment-to-generic`, entra por H5 = a, decidida). Lo medí con un `grep -F` de las 31 contra `alcance_rol_ingrid.tsv`: aparecen las 31, una vez cada una. Las **otras 58 quedan cerradas para el usuario con alcance**. La cifra exacta la fija T2b. Por ejemplo, quedan cerradas:
 - los 15 POST de tesorería fuera de S7;
 - `PATCH /purchases/{id}/liquidate`, la liquidación directa sin pasar por la Entrada;
 - `POST /inbound-orders/{id}/confirm`, que confirma una Willard;
@@ -381,7 +387,7 @@ Archivo nuevo `tests/test_sac_recolector_alcance.py`.
 | 18–19 adjuntos | lista y descarga de la compra de A | 404 compra de B y venta | 200 |
 | 20 estado de cuenta | A: **corrido == vivo** con un pago desde K2 adentro | 404 B | B 200 |
 | 21–23 caja | solo K1; sin asignaciones → **ninguna** | K2 403 | sin asignaciones ve K1 y K2 (comportamiento actual, regresión) |
-| 24–25 movimientos | ve K1 y la causación de A | no ve la causación de B (cuenta NULL); detalle de K2 404 | ve todo |
+| 24–25 movimientos | ve K1, **incluido el fondeo K2→K1 que hizo Johana** (con `view_all_movements`, v1.4), y la causación de A | no ve la causación de B (cuenta NULL); detalle de K2 404 | ve todo |
 | 26–27 pagar/anticipar | K1→A 201 | K2 403; →B 404; **→D 400 (guard de tipo existente, intacto)** | K2→B 201 |
 | 27b pago a generic (H5 = a) | K1→D 201 | K2 403; →E (generic sin marca) 404 | K2→E 201 |
 | 28 anular | su pago K1→A | transferencia K1↔K2 de Johana: **404, y el par en K2 sigue `confirmed`**; pago de Johana K1→B 404; causación de A (cuenta NULL) 404; movimiento de K2 404 | anula todo lo que hoy anula |
@@ -394,7 +400,7 @@ Archivo nuevo `tests/test_sac_recolector_alcance.py`.
 | Usuario | Flag | Recurso propio (E_GL) | Recurso ajeno (E_none) | Test |
 |---|---|---|---|---|
 | con alcance (rol Recolector) | on | 200 | 404 | fila 8 |
-| con alcance | **off** (apagado después) | **200** | **404**: el alcance sigue | T16b |
+| con alcance | **off** (apagado después) | **403** (router flag-gated: corta antes que el alcance) | **403** | v1.4; T16b se mide en las rutas sin flag |
 | sin alcance, mismo rol | on | 200 | 200 | control de la fila 8 |
 | sin alcance, mismo rol | off | 403 (router flag-gated, comportamiento de hoy) | 403 | T18 |
 | admin sin fila de alcance | on | 200 | 200 | T16 (control) |
@@ -402,7 +408,7 @@ Archivo nuevo `tests/test_sac_recolector_alcance.py`.
 | admin **con** fila de alcance (puesta por ORM) | on | 200 | **404**: fail-closed | T16c |
 | admin con fila de alcance | off | 403 (router) | 403 | T16c, segunda mitad |
 
-En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movements`, `/money-accounts`), «off» no cambia nada para el usuario sin alcance (T18). Para el usuario con alcance aplica la fila de T16b.
+En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movements`, `/money-accounts`), «off» no cambia nada para el usuario sin alcance (T18). Para el usuario con alcance, el alcance **sigue** restringiendo ahí: eso es T16b (v1.4).
 
 **Además:**
 
@@ -425,9 +431,14 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
   - alcance sobre un usuario admin → 422;
   - org sin flag → 422;
   - `my-permissions` con alcance y con `null`;
-  - **T16b:** con el flag apagado después, el alcance **sigue** restringiendo;
+  - **T16b:** con el flag apagado después, el alcance **sigue** restringiendo en las rutas sin flag: `GET /third-parties/{B}` y `GET /purchases/{compra de B}` → 404, y `GET /third-parties/{A}` → 200 como control (v1.4: en `/inbound-orders` el router da 403 a todos y no mide el alcance);
   - **T16c:** una fila de alcance sobre un admin, puesta por ORM, **sigue** restringiendo (fail-closed).
   - **T16d** (N2): poner alcance a un superusuario → 422, y no se escribe ninguna fila.
+- **T22, el listado de Tesorería con `view_all_movements`** (v1.4, pedido del Coordinador). `ingrid` con el rol de 13 permisos; Johana hace por API una transferencia K2→K1 (el fondeo) y un ajuste de tercero (`tp_adjustment_debit`, cuenta NULL) contra B y otro contra A. En `GET /money-movements`:
+  - **aparece** el lado K1 del fondeo, que creó Johana (sin el permiso no aparecería: el `created_by` lo filtraría);
+  - **no aparece** el ajuste de B ni el lado K2 del fondeo;
+  - **aparece** el ajuste de A (cuenta NULL, tercero marcado);
+  - control: `ingrid_libre` (mismo rol, sin alcance) ve el ajuste de B, así que su ausencia en `ingrid` la produce el alcance y no el escenario. Contra la vacuidad, antes de comparar se exige que la lista de `ingrid` no esté vacía.
 - **T20** (N1): borrar físicamente por ORM al recolector cuando tiene un alcance o terceros marcados → `IntegrityError`. La fila de alcance y la marca siguen ahí.
 - **T21, el script de la marca** (v1.3, §9). Archivo propio `tests/test_marcar_recolector.py`. Las funciones son puras (normalizar, verificar la org, armar el plan) y reciben los JSON con la forma real de las respuestas: los campos se copian de `OrganizationResponse` y `ThirdPartyResponse`, nunca más permisivos que el backend (memoria *fake-más-permisivo*). Casos:
   - **normalización**, con los nombres reales:
@@ -507,11 +518,12 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
 | P32 | `PUT …/collector-scope` acepta a un superusuario | T16d |
 | P33 | `ondelete="CASCADE"` en `user_collector_scopes.collector_id` (en modelo y migración) | T20 |
 | P34 | la normalización no borra lo que no es letra (espacios, guiones, paréntesis) | T21: «Bio Green Loop- Maquila» |
-| P35 | la normalización sin NFKD | T21: «GRÉENLOOP SAS». **No debe caer** «CARLOS CASTAÑO (GREENLOOP)»: si cae, la Ñ rompe la regla y P35 mide otra cosa |
+| P35 | la normalización sin NFKD | T21: «GRÉENLOOP SAS», que es el control que discrimina. «CARLOS CASTAÑO (GREENLOOP)» es un chequeo de cordura (n5): cumple con o sin NFKD, así que no distingue nada; si cayera, la Ñ rompería la regla por otro motivo |
 | P36 | si la exclusión de «BIOGREENLOOP» no aparece, se sigue en silencio | T21: exclusión ausente → exit 3 |
 | P37 | un tercero marcado con otro recolector se pisa | T21: marcado con otro |
 | P38 | la org se valida sin mirar `kg_ledger_enabled` | T21: org sin flag |
 | P39 | con sorpresa, `--apply` escribe lo que no es sorpresa | T21: 0 `PATCH` con sorpresa |
+| P40 | con alcance, el listado de movimientos sigue filtrando por `created_by` aunque el rol tenga `view_all_movements` (v1.4) | T22: el fondeo de Johana no aparece |
 
 **Dirección peligrosa a buscar celda por celda antes de plantar:** un test que debía caer y no cae. El candidato más probable es P7 si los cuatro listados comparten helper. Por eso el test se parametriza por ruta y el defecto se planta en una sola.
 
@@ -553,13 +565,13 @@ Revisión de producto del Coordinador. Todo lo hace el Coordinador con el OK de 
 2. **Marca inicial (v1.3):**
    - **Antes:** se leen en producción el id de la org SAC activa y el del tercero «Green Loop», que tiene que ser service_provider y estar activo. Los dos ids van escritos en el log, nunca resueltos por nombre dentro del script.
    - **Predicción:** se escribe en el log cuántos se espera marcar. En la copia de dev son 124; en producción se cuentan antes con una lectura que aplique la misma regla.
-   - **Dry-run:** `scripts/marcar_recolector.py --api-url <prod> --org-id <id> --collector-id <id> --esperado <N>`. Se revisan los marcados y los excluidos con su motivo. Exit ≠ 0 detiene todo y decide Daniel.
+   - **Dry-run:** `scripts/marcar_recolector.py --api-url <prod> --org-id <id> --collector-id <id> --esperado <N>`. Se revisan los marcados y los excluidos con su motivo, y se verifica que «ADALBERTO AVILA (GREENLOOP)» está en «a marcar» (n4, v1.4). Exit ≠ 0 detiene todo y decide Daniel.
    - **Corrida real:** la misma línea con `--apply`, con el OK de Daniel.
    - **Re-corrida:** tiene que dar 0 a marcar y exit 0.
 3. **El usuario de Ingrid:**
    - se crea por la vía de superusuario;
    - **su clave se fija solo con el reseteo de #85** (`POST /system/users/{id}/reset-password`), con la clave que defina Daniel, **NUNCA con la clave fija** que dejan las altas de miembros (la deuda de #85);
-   - su rol es «Recolector», con los 12 permisos de §5.1; `payment-to-generic` (H5 = a) usa el mismo `treasury.create_movements`. Ningún permiso es nuevo.
+   - su rol es «Recolector», con los 13 permisos de §5.1 (v1.4); `payment-to-generic` (H5 = a) usa el mismo `treasury.create_movements`. Ningún permiso es nuevo.
 4. **Su caja:** `PUT /organizations/{org}/members/{ingrid}/account-assignments` con la cuenta real de la caja de Green Loop (K1 de producción). **Antes** de poner el alcance, para que en ningún momento vea cuentas que no son suyas. Igual, con alcance y sin asignaciones vería cero (fila 21).
 5. **Su alcance:** `PUT /organizations/{org}/members/{ingrid}/collector-scope` con el id del tercero «Green Loop».
 6. **Verificación**, con lecturas en producción y su usuario:
