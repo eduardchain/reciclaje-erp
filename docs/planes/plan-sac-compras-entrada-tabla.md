@@ -1,6 +1,7 @@
 # Plan: Detalle de Entrada, las compras en tabla y el total con IVA (v1.0)
 
-Autor: Eco Coder 1 · 20-nov-2026 · rama `coder-1/compras-entrada-tabla` (base develop `31ba117`)
+Autor: Eco Coder 1 · 20-nov-2026 · rama `coder-1/compras-entrada-tabla` (base develop `1aacc2f`)
+Base: escrito sobre `31ba117` y rebasado a `1aacc2f`. El delta `31ba117..1aacc2f` (MoneyInput y Ocultar Listas) no toca `frontend/src/pages/inbound`, `types/inbound.ts` ni `backend`, y `InboundDetailPage` no usa `MoneyInput`. Artefacto: `delta_develop_superficie.log`.
 Pedido: el Coordinador, 20-nov, desde la revisión en pantalla de #122 con Daniel. Con 10 compras, las tarjetas de `InboundDetailPage` no se leen. En la Entrada #12, «Total Liquidado» dice $200.000 y no dice en ningún lado que el IVA es $36.480.
 
 **Nivel: lógica. Solo frontend, cero backend.** La subo a lógica aunque no toca el servidor porque agrega dos cálculos de plata que Johana usa para pagar: la fila de totales y el total con IVA. Además cada uno tiene una regla de exclusión: qué compras no suman y qué IVA no cuenta. La definición de nivel chico del protocolo («sin reglas ni cálculos») no alcanza a cubrirlo.
