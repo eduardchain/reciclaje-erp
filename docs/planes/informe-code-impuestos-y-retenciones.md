@@ -61,3 +61,36 @@ Se escribe aquí y no se edita el plan: la matriz commiteada no se reescribe.
 
 ## 3. Gates
 *(se llenan después)*
+
+### 2.4 Predicciones exactas por fila (escritas ANTES de plantar)
+
+**Instrumentos:**
+- **Backend:** `tests/test_tax_entities_listing.py`, con 10 tests T1–T10.
+- **Frontend:** `e2e_impuestos.mjs check` (E1–E7) contra :5181, sobre el estado de datos que dejó el `setup` de `e2e_r4_setup.log`:
+  - IVA < 0, en «Por pagar»;
+  - «[Impuestos] ReteFuente a Favor» > 0, en «A favor»;
+  - «[Retenciones] ReteFuente» > 0, en «A favor».
+- Los plantados de backend NO se sirven en :8011, que no tiene `--reload`. Por eso el «de más» E7 de P8 no se mide; la matriz lo deja como «puede».
+
+| P | Caen (predicción) | Pasan |
+|---|---|---|
+| P1 | T3, T10 | los otros 8, **T4 incluido** (2.2) |
+| P1b | T4 | los otros 9 |
+| P2 | T6 | los otros 9 |
+| P3 | T7 | los otros 9 |
+| P4 | T5 | los otros 9 (T1 no tiene retenciones practicadas, así que el «de más» no aplica) |
+| P5a | ninguno | los 10 |
+| P5b | ninguno | los 10 |
+| P5c | T8 | los otros 9 |
+| P8 | T9 | los otros 9 |
+| P10 | T10 | los otros 9 |
+| P6 | E1, E2, E3, **E6** | E4, E5, E7 |
+| P7 | E3 | E1, E2, E4, E5, E6, E7 |
+| P9 | E6 | E1, E2, E3, E4, E5, E7 |
+
+**E6 bajo P6 no estaba en el addendum.** La etiqueta de la sección 2 sale del mismo `taxBalanceNature` (C1: el helper pone la etiqueta), así que con el signo invertido la retención practicada a favor se ve «Por pagar». La predicción va escrita antes de plantar; la matriz no se reescribe.
+
+**Defectos exactos de frontend:**
+- **P6:** `const b = -(Number(balance) || 0);` en `taxBalanceNature`.
+- **P7:** quitar `taxBalanceNature(t.current_balance).payable &&` del Pagar de la sección 1.
+- **P9:** agregar `taxBalanceNature(r.current_balance).payable &&` al Pagar de la sección 2 (`rowActions`).
