@@ -177,6 +177,11 @@ export interface MaterialKgProfileResponse {
   compra_regular: boolean;
   willard_world: WillardWorld;
   lead_product: LeadProduct;
+  /** Renglon del formato en papel «Materiales recolectados» (null = no esta).
+   *  Solo lectura: se escribe por `setFormOrder`, nunca por el upsert. */
+  form_order: number | null;
+  /** F3: un material del formato puede desactivarse despues. */
+  material_is_active: boolean | null;
   created_at: string;
 }
 

@@ -26,6 +26,7 @@ import { LinkedPaymentChoice, type AnnulChoice } from "@/components/shared/Linke
 import { OperationListCard } from "@/components/shared/OperationListCard";
 import { usePurchases, usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
 import { usePdfTitle } from "@/hooks/usePdfTitle";
+import { usePurchasePdfOrder } from "@/hooks/usePurchasePdfOrder";
 import { purchaseService } from "@/services/purchases";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { formatLinesTotalQuantity } from "@/utils/operationLines";
@@ -49,6 +50,7 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
   const location = useLocation();
   const [cancelOpen, setCancelOpen] = useState(false);
   const pdfTitle = usePdfTitle();
+  const orderForPdf = usePurchasePdfOrder();
   const cancelMutation = useCancelPurchase();
   const [annulChoice, setAnnulChoice] = useState<AnnulChoice>(null);
   const { hasPermission } = usePermissions();
@@ -103,7 +105,7 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => exportPurchasePDF(purchase, pdfTitle)}>
+          <DropdownMenuItem onClick={() => exportPurchasePDF(orderForPdf(purchase), pdfTitle)}>
             <FileText className="h-4 w-4 mr-2" />
             Exportar PDF
           </DropdownMenuItem>

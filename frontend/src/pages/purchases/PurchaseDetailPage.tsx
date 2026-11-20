@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { usePdfTitle } from "@/hooks/usePdfTitle";
+import { usePurchasePdfOrder } from "@/hooks/usePurchasePdfOrder";
 import { ArrowLeft, CreditCard, XCircle, Pencil, FileText, PackageOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +44,7 @@ export default function PurchaseDetailPage() {
   const { hasPermission } = usePermissions();
   const canViewPrices = hasPermission("purchases.view_prices");
   const pdfTitle = usePdfTitle();
+  const orderForPdf = usePurchasePdfOrder();
 
   const [showCancel, setShowCancel] = useState(false);
   const [annulChoice, setAnnulChoice] = useState<"annul" | "advance" | null>(null);
@@ -105,7 +107,7 @@ export default function PurchaseDetailPage() {
               Cancelar
             </Button>
           )}
-          <Button variant="outline" onClick={() => exportPurchasePDF(purchase, pdfTitle)}>
+          <Button variant="outline" onClick={() => exportPurchasePDF(orderForPdf(purchase), pdfTitle)}>
             <FileText className="h-4 w-4 mr-2" />
             PDF
           </Button>

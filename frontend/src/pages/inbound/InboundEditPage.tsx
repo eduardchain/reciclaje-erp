@@ -25,6 +25,15 @@ import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { PurchaseLink } from "@/components/shared/EntityLink";
 import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
+import {
+  FormatoMateriales,
+  buildFormatoSlots,
+  formatoLines,
+  formatoMaterialIds,
+  splitLinesForFormato,
+  type FormatoSlot,
+  type FormatoValues,
+} from "@/components/inbound/FormatoMateriales";
 import { useInboundOrder, useUpdateInboundOrder } from "@/hooks/useInboundOrders";
 import { useMaterials, usePayableProviders, useWarehouses } from "@/hooks/useMasterData";
 import {
@@ -58,7 +67,7 @@ interface LineFormData {
 
 let lineKeyCounter = 0;
 
-const toApiLines = (lines: LineFormData[], withPrice: boolean): InboundOrderLineCreate[] =>
+const toApiLines = (lines: Omit<LineFormData, "_key">[], withPrice: boolean): InboundOrderLineCreate[] =>
   lines.map((l) => ({
     material_id: l.material_id,
     quantity: l.quantity,
@@ -78,7 +87,7 @@ export default function InboundEditPage() {
   const { data: driversData } = useDrivers();
   const { data: collectorsData } = usePayableProviders();
   const { data: vehiclesData } = useVehicles();
-  const { data: profilesData } = useKgProfiles();
+  const { data: profilesData, isFetched: profilesFetched } = useKgProfiles();
   const { data: warehousesData } = useWarehouses();
 
   const materials = materialsData?.items ?? [];
@@ -137,6 +146,11 @@ export default function InboundEditPage() {
   const [remissionNumber, setRemissionNumber] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([]);
   const [linesDirty, setLinesDirty] = useState(false);
+  // Formato en papel (plan-sac-orden-formato-materiales §3). Los renglones se
+  // CONGELAN al inicializar: si los perfiles se refrescan con otro formato, una
+  // cantidad de un material que salio del formato no puede perderse al guardar.
+  const [formatoSlots, setFormatoSlots] = useState<FormatoSlot[]>([]);
+  const [formatoValues, setFormatoValues] = useState<FormatoValues>({});
 
   // Ciclo B (B2): el mundo de la orden se deriva de sus lineas (homogeneas) —
   // el picker de edicion queda filtrado a ese mundo
@@ -154,7 +168,9 @@ export default function InboundEditPage() {
   }, [order, worldById]);
 
   useEffect(() => {
-    if (order && !initialized) {
+    // Espera a los perfiles: de ellos sale que linea va al formato y cual a
+    // «Otros materiales» (sin ellos todo caeria en otros).
+    if (order && profilesFetched && !initialized) {
       setDate(utcToLocalDateInput(order.date));
       setWarehouseId(order.warehouse_id);
       setDriverId(order.driver_id ?? "");
@@ -164,19 +180,34 @@ export default function InboundEditPage() {
       setNotes(order.notes ?? "");
       setInvoiceNumber(order.invoice_number ?? "");
       setRemissionNumber(order.remission_number ?? "");
-      setLines(
-        order.lines.map((l) => ({
-          _key: ++lineKeyCounter,
-          material_id: l.material_id,
-          quantity: Number(l.quantity),
-          unit_price: l.unit_price != null ? Number(l.unit_price) : 0,
-          scale_weight_kg: l.scale_weight_kg != null ? Number(l.scale_weight_kg) : 0,
-          quality_notes: l.quality_notes ?? "",
-        }))
-      );
+      const saved: LineFormData[] = order.lines.map((l) => ({
+        _key: ++lineKeyCounter,
+        material_id: l.material_id,
+        quantity: Number(l.quantity),
+        unit_price: l.unit_price != null ? Number(l.unit_price) : 0,
+        scale_weight_kg: l.scale_weight_kg != null ? Number(l.scale_weight_kg) : 0,
+        quality_notes: l.quality_notes ?? "",
+      }));
+      // Formato: solo tipo compra nueva (#93) con lineas editables. F7: se
+      // arma aca, con los setters crudos, y NO marca linesDirty — editar solo
+      // la cabecera de una Revisada no la devuelve a Registrada (D17).
+      const slots = buildFormatoSlots(profilesData?.items);
+      const formatoAplica =
+        !WILLARD_INBOUND_TYPES.includes(order.inbound_type) &&
+        !order.purchase_id &&
+        order.status !== "liquidated" &&
+        slots.length > 0;
+      if (formatoAplica) {
+        const { values, others } = splitLinesForFormato(saved, slots);
+        setFormatoSlots(slots);
+        setFormatoValues(values);
+        setLines(others);
+      } else {
+        setLines(saved);
+      }
       setInitialized(true);
     }
-  }, [order, initialized]);
+  }, [order, initialized, profilesFetched, profilesData]);
 
   if (isLoading || !initialized) return <div className="p-8 text-center text-slate-500">Cargando...</div>;
   if (!order) return <div className="p-8 text-center text-slate-500">Entrada no encontrada</div>;
@@ -231,6 +262,16 @@ export default function InboundEditPage() {
 
   const markLinesDirty = () => setLinesDirty(true);
 
+  const conFormato = formatoSlots.length > 0;
+  const formatoIds = formatoMaterialIds(formatoSlots);
+  // Con formato, una linea libre vacia no cuenta («Otros» es opcional). Se
+  // mandan primero los renglones con cantidad, en su orden; F6: cada renglon
+  // reenvia el precio y la nota que traia la linea guardada.
+  const freeLines = conFormato ? lines.filter((l) => l.material_id || l.quantity > 0) : lines;
+  const submitLines: Omit<LineFormData, "_key">[] = conFormato
+    ? [...formatoLines(formatoSlots, formatoValues), ...freeLines]
+    : lines;
+
   const updateLine = (key: number, field: keyof Omit<LineFormData, "_key">, value: string | number) => {
     setLines((prev) => prev.map((l) => (l._key === key ? { ...l, [field]: value } : l)));
     markLinesDirty();
@@ -247,7 +288,7 @@ export default function InboundEditPage() {
     }
     if (linesEditable) {
       if (date && date !== originalDate) payload.date = date;
-      if (linesDirty) payload.lines = toApiLines(lines, !isWillard);
+      if (linesDirty) payload.lines = toApiLines(submitLines, !isWillard);
     }
     if (isWillard) {
       if (willardCenter !== "none" && willardCenter !== (order.willard_distribution_center ?? "none")) {
@@ -279,7 +320,9 @@ export default function InboundEditPage() {
   const payload = buildPayload();
   const hasChanges = Object.keys(payload).length > 0;
 
-  const linesValid = !linesEditable || (lines.length > 0 && lines.every((l) => l.material_id && l.quantity > 0));
+  const linesValid =
+    !linesEditable ||
+    (submitLines.length > 0 && freeLines.every((l) => l.material_id && l.quantity > 0));
   const canSubmit = hasChanges && linesValid && !isFutureDate && (!linesEditable || !!date);
 
   const handleSubmit = () => {
@@ -510,11 +553,33 @@ export default function InboundEditPage() {
         </CardContent>
       </Card>
 
+      {/* Formato en papel «Materiales recolectados» (tipo compra sin efectos) */}
+      {linesEditable && conFormato && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Formato</CardTitle>
+            <p className="text-xs text-slate-500">En el orden del formato en papel.</p>
+          </CardHeader>
+          <CardContent>
+            <FormatoMateriales
+              slots={formatoSlots}
+              values={formatoValues}
+              onChange={(id, v) => {
+                setFormatoValues((prev) => ({ ...prev, [id]: v }));
+                markLinesDirty();
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
+
       {/* Lineas — willard y tipo compra #93 (draft/reviewed) */}
       {linesEditable && (
         <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Líneas de Material</CardTitle>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+              {conFormato ? "Otros materiales" : "Líneas de Material"}
+            </CardTitle>
             <Button
               variant="outline"
               size="sm"
@@ -527,7 +592,7 @@ export default function InboundEditPage() {
               }}
             >
               <Plus className="h-4 w-4 mr-1" />
-              Agregar Línea
+              {conFormato ? "Agregar material" : "Agregar Línea"}
             </Button>
           </CardHeader>
           {/* D17: la revisión certifica pesos y cantidades — o sea, líneas.
@@ -541,6 +606,9 @@ export default function InboundEditPage() {
             </div>
           )}
           <CardContent className="space-y-0">
+            {conFormato && (
+              <p className="text-xs text-slate-500 pb-2">Lo que no está en el formato (opcional).</p>
+            )}
             {lines.map((line, idx) => (
               <FormLineGrid
                 key={line._key}
@@ -550,7 +618,7 @@ export default function InboundEditPage() {
                   setLines((p) => p.filter((l) => l._key !== line._key));
                   markLinesDirty();
                 }}
-                disableDelete={lines.length === 1}
+                disableDelete={!conFormato && lines.length === 1}
               >
                 <div className={isWillard ? "md:col-span-4" : "md:col-span-3"}>
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Material *</Label>
@@ -561,7 +629,10 @@ export default function InboundEditPage() {
                       .filter((m) =>
                         isWillard
                           ? !orderWorld || worldById.get(m.id) === orderWorld
-                          : true
+                          // un material del formato no se repite en «Otros»,
+                          // salvo el que ya trae esta linea (inactivo o
+                          // deshabilitado: no se pierde de la pantalla)
+                          : !formatoIds.has(m.id) || m.id === line.material_id
                       )
                       .map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
                     placeholder="Material..."

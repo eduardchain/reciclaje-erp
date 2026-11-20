@@ -28,7 +28,8 @@ import {
   useReviewInboundOrder,
   useUnliquidateInboundOrder,
 } from "@/hooks/useInboundOrders";
-import { useCurrentFormulas } from "@/hooks/useSacConfig";
+import { useCurrentFormulas, useKgProfiles } from "@/hooks/useSacConfig";
+import { formOrderMap, sortByFormOrder } from "@/utils/formOrder";
 import {
   formatCurrency,
   formatCurrencyDecimals,
@@ -106,6 +107,7 @@ export default function InboundDetailPage() {
   // B.2: kg estimados client-side para drafts (los definitivos nacen al confirmar)
   const { data: formulasData } = useCurrentFormulas();
   const formulas = formulasData?.items ?? [];
+  const { data: profilesData } = useKgProfiles();
 
   if (isLoading) return <div className="p-8 text-center text-slate-500">Cargando...</div>;
   if (!order) return <div className="p-8 text-center text-slate-500">Entrada no encontrada</div>;
@@ -128,20 +130,12 @@ export default function InboundDetailPage() {
   const estimatedTotalKg = showsEstimatedKg
     ? order.lines.reduce((acc, l) => acc + (estimateKgLead(formulas, l.material_id, l.quantity) ?? 0), 0)
     : null;
-  // Entrada liquidada: los materiales siempre en orden alfabético por nombre
-  // (pedido de Johana). `numeric` para que "GRUPO 2" quede antes de "GRUPO 10"
-  // y `sensitivity: base` para ignorar tildes y mayúsculas. Se copia el arreglo:
-  // `order.lines` es del cache de React Query y no se debe mutar. Antes de
-  // liquidar se conserva el orden de captura, que es el que el pesador ve.
-  const displayLines = isLiquidated
-    ? [...order.lines].sort((x, y) =>
-        (x.material_name ?? x.material_code ?? "").localeCompare(
-          y.material_name ?? y.material_code ?? "",
-          "es",
-          { numeric: true, sensitivity: "base" },
-        ),
-      )
-    : order.lines;
+  // Orden del formato en papel «Materiales recolectados» en TODOS los
+  // estados (plan-sac-orden-formato-materiales §3): con la captura como el
+  // papel, el orden que ve el pesador ya es ese. Lo que no esta en el formato
+  // va al final, alfabetico (la regla de 0862891 queda como desempate).
+  // `sortByFormOrder` devuelve una copia: `order.lines` es del cache.
+  const displayLines = sortByFormOrder(order.lines, formOrderMap(profilesData?.items));
   const purchaseTotal = isPurchaseType
     ? order.lines.reduce((acc, l) => acc + l.quantity * (l.unit_price ?? 0), 0)
     : 0;

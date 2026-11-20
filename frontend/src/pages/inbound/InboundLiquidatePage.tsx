@@ -19,6 +19,7 @@ import {
 } from "@/hooks/useMasterData";
 import { retentionRowLabel } from "@/pages/treasury/RetentionsPage";
 import { useCurrentTariffs, useKgProfiles } from "@/hooks/useSacConfig";
+import { formOrderMap, sortByFormOrder } from "@/utils/formOrder";
 import { useKgAccounts } from "@/hooks/useKgLedger";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
@@ -287,6 +288,11 @@ export default function InboundLiquidatePage() {
   const tolerance = Number(getSetting("inbound_discrepancy_tolerance_pct") ?? 0.05);
 
   const [lines, setLines] = useState<LineState[]>([]);
+  // Orden del formato en papel (plan-sac-orden-formato-materiales §3): solo
+  // de PRESENTACION — el estado se actualiza por `_key`, asi que pintar en
+  // otro orden no cambia nada de lo que se manda.
+  const formOrder = useMemo(() => formOrderMap(profilesData?.items), [profilesData]);
+  const orderedLines = useMemo(() => sortByFormOrder(lines, formOrder), [lines, formOrder]);
   const [initialized, setInitialized] = useState(false);
   // D11: UNA comisión por entrada, sobre lo pesado
   const [collectorEnabled, setCollectorEnabled] = useState(false);
@@ -417,7 +423,7 @@ export default function InboundLiquidatePage() {
         materials: { code: string; qty: number; unit: string; price: number }[];
       }
     >();
-    for (const l of lines) {
+    for (const l of orderedLines) {
       for (const a of l.allocations) {
         if (!a.third_party_id || a.quantity <= 0) continue;
         const name = suppliers.find((s) => s.id === a.third_party_id)?.name ?? "—";
@@ -448,7 +454,7 @@ export default function InboundLiquidatePage() {
         .map(([unit, qty]) => formatWeight(qty, unit))
         .join(" + "),
     }));
-  }, [lines, suppliers]);
+  }, [orderedLines, suppliers]);
 
   if (isLoading || !initialized) {
     return <div className="p-8 text-center text-slate-500">Cargando...</div>;
@@ -933,7 +939,7 @@ export default function InboundLiquidatePage() {
       </Card>
 
       {/* Lineas con reparto */}
-      {lines.map((l) => {
+      {orderedLines.map((l) => {
         const allocated = lineAllocated(l);
         const disc = lineDisc(l);
         const pct = l.weighed > 0 ? Math.abs(disc) / l.weighed : null;

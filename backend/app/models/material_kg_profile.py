@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, String, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, GUID, OrganizationMixin, TimestampMixin
@@ -69,6 +69,16 @@ class MaterialKgProfile(Base, OrganizationMixin, TimestampMixin):
         ),
     )
 
+    # Renglon del formato en papel «Materiales recolectados» (pedido de Johana,
+    # 19-nov). NULL = el material no esta en el formato. Se escribe SOLO por
+    # PUT /material-kg-profiles/form-order (lista completa, REPLACE): el upsert
+    # del perfil no lo conoce, asi que no lo puede borrar (#103 D4).
+    form_order: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Renglon del formato en papel «Materiales recolectados» (NULL = no esta en el formato)",
+    )
+
     created_by: Mapped[Optional[UUID]] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -88,6 +98,15 @@ class MaterialKgProfile(Base, OrganizationMixin, TimestampMixin):
             name="ck_material_kg_profiles_lead_product",
         ),
         Index("ix_material_kg_profiles_material", "material_id"),
+        # Dos materiales no comparten renglon. Declarado tambien aca (y no solo
+        # en la migracion) para que el parity check no de DIFF (F8, #98).
+        Index(
+            "uq_material_kg_profiles_org_form_order",
+            "organization_id",
+            "form_order",
+            unique=True,
+            postgresql_where=text("form_order IS NOT NULL"),
+        ),
     )
 
     # --- Relationships ---

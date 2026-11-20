@@ -39,9 +39,23 @@ class MaterialKgProfileResponse(BaseModel):
     compra_regular: bool
     willard_world: str
     lead_product: str
+    # Orden del formato en papel (solo lectura; se escribe por /form-order).
+    form_order: Optional[int] = None
+    # F3: un material del formato puede desactivarse despues y conserva su
+    # renglon. Config lo marca para que el usuario lo pueda quitar.
+    material_is_active: Optional[bool] = None
     created_at: datetime
 
 
 class MaterialKgProfileListResponse(BaseModel):
     items: list[MaterialKgProfileResponse]
     total: int
+
+
+class MaterialFormOrderUpdate(BaseModel):
+    """Lista COMPLETA del formato, en orden. `null` es un renglon vacio (el 8
+    de Batería Húmeda, Q-72): conserva la numeracion del papel. REPLACE: los
+    materiales que no esten en la lista salen del formato."""
+    model_config = ConfigDict(extra="forbid")
+
+    material_ids: list[Optional[UUID]]

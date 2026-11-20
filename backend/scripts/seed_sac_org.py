@@ -402,6 +402,20 @@ RETENTION_CONFIGS = [
 
 WILLARD_DISTRIBUTION_CENTERS = ["baq", "bog", "monteria", "santa_marta", "motocosta"]
 
+# Formato en papel «Materiales recolectados» (pedido de Johana, 19-nov; plan
+# plan-sac-orden-formato-materiales.md §1). Un codigo por renglon, en orden;
+# None = renglon vacio. El 8 es «Batería Húmeda», que no existe como material
+# (Q-72): no se inventa, el renglon queda vacio hasta que Johana lo cree y lo
+# agregue desde Configuracion.
+FORM_ORDER: list[Optional[str]] = [
+    "BAT-G07", "BAT-G08", "BAT-G1", "BAT-G2", "BAT-G3", "BAT-G4", "BAT-G5",
+    None,  # 8: Batería Húmeda (Q-72)
+    "SCR-MOTO", "SCR-SG", "SCR-SP", "SCR-LSB", "SCR-LCB",
+    "PLO-LIN", "PLO-RET", "PLO-CAS",
+    "CAJ-PLA", "CAJ-ACR", "POL-DUC", "PP-MOL", "TAP-BOR",
+    "GUA-RRU", "LOD-01", "HIE-CHA", "ALU-01",
+]
+
 
 # ============================================================================
 # API CLIENT (patron de seed_demo_org.py)
@@ -1060,6 +1074,39 @@ class SacSeeder:
             f"{n_formulas} formulas nuevas"
         )
 
+    def create_form_order(self) -> None:
+        """Siembra el formato en papel SOLO si la organizacion no tiene ninguno
+        (D4/F5 del plan). Si ya hay formato, es de Johana y gana: no se toca,
+        se informa en una linea y la corrida sigue (exit 0). Un formato
+        distinto es el estado ESPERADO, no una decision pendiente."""
+        if self.api.dry_run:
+            logging.info("  formato en papel: [DRY] se sembraria si la org no tiene uno")
+            return
+        data = self.api.get("/material-kg-profiles")
+        items = data["items"] if isinstance(data, dict) else data
+        vigente = sorted(
+            (p for p in items if p.get("form_order") is not None),
+            key=lambda p: p["form_order"],
+        )
+        deseado = {i + 1: c for i, c in enumerate(FORM_ORDER) if c is not None}
+        if vigente:
+            actual = {p["form_order"]: p.get("material_code") for p in vigente}
+            igual = "coincide con" if actual == deseado else "DISTINTO de"
+            logging.info(
+                f"  formato en papel: la org ya tiene uno ({len(vigente)} renglones, "
+                f"{igual} FORM_ORDER) — no se toca"
+            )
+            return
+        faltan = [c for c in FORM_ORDER if c is not None and c not in self.materials]
+        if faltan:
+            raise SystemExit(f"FORM_ORDER nombra materiales que no existen: {faltan}")
+        self.api.put(
+            "/material-kg-profiles/form-order",
+            {"material_ids": [self.materials[c] if c else None for c in FORM_ORDER]},
+            label="formato-en-papel",
+        )
+        logging.info(f"  formato en papel: sembrado ({len(deseado)} renglones)")
+
     def create_third_parties(self) -> None:
         logging.info("[10] Terceros")
         existing = self.api.existing_by("/third-parties", "name")
@@ -1305,6 +1352,7 @@ class SacSeeder:
         self.create_expense_categories()
         self.create_material_categories()
         self.create_materials()        # perfiles/formulas requieren flag ON (settings ya)
+        self.create_form_order()       # requiere los perfiles de create_materials
         self.create_third_parties()
         self.create_kg_accounts()      # requiere Willard S.A creado
         self.create_tariffs()
