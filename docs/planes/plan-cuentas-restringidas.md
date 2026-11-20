@@ -1,11 +1,18 @@
-# Plan — Cuentas restringidas por usuario: que la asignación de cuentas también limite lo que se ESCRIBE (v1.0)
+# Plan — Cuentas restringidas por usuario: que la asignación de cuentas también limite lo que se ESCRIBE (v1.1)
 
-**Base:** develop `dda8e38`. Del árbol de `d3c6919` solo cambian docs.
+**v1.1 (20-nov, revisión de QA 2 sobre v1.0, `~/sac-evidencia/2026-11-20/qa-2-cuentas/revision_plan_v1.0.md`, sha `725dc58e…8757`):**
+- **C1:** P4 no tumbaba T2, porque las reversas de activos cambian la cuenta Y el movimiento en el mismo flush. Se agrega T14, en la que cambia SOLO la cuenta (`PATCH`/`DELETE /money-accounts/{K3}`).
+- **C2:** las 3 escrituras de `/money-accounts` entran a §2.1, §3 y T1/T14.
+- **C3:** el estado de cuenta ya no enlaza a un movimiento que el restringido no puede abrir (§2.2, celda nueva en T5, P16).
+- **C4:** en un update de `MoneyMovement` se miran la cuenta vieja y la nueva, con cambios netos (§2.1, T15, P14, P15).
+- **N1–N9:** en el lugar de cada una.
+
+**Base:** el plan se escribió sobre develop `dda8e38`. La construcción arranca desde develop actualizado (N8: `4006fb8` a las 18:16, el frontend de Entradas y docs, sin cruce con esta superficie), y el patch de la pasada 1 va contra esa base.
 **Nivel:** lógica. Toca código compartido: el embudo de escritura de tesorería, el estado de cuenta, el listado de cuentas y el dashboard de tesorería. Lo ven las 7 orgs.
 **Pedido:** decisión 1 de Daniel en el plan de Ingrid (§6): ciclo propio, inmediatamente después de Ingrid.
 **Migraciones:** cero. **Permisos nuevos:** cero.
 
-Las decisiones que espera Daniel están en §6. El plan se puede revisar sin ellas, y cada una tiene recomendación.
+Las decisiones que espera Daniel están en §6 (D1–D6). El plan se puede revisar sin ellas, y cada una tiene recomendación.
 
 ## 1. El problema, medido
 
@@ -52,7 +59,21 @@ Hoy un usuario puede tener cuentas asignadas (`user_account_assignments`, pantal
 **Mecanismo (D-M):** un listener `before_flush` de SQLAlchemy, en un módulo nuevo `app/services/account_access.py`.
 - En la transacción de un usuario restringido, toda fila de `MoneyAccount` o de `MoneyMovement` que se inserta, modifica o borra tiene que ser de una cuenta permitida. Si no, la transacción se corta con **403 «No tienes acceso a la cuenta «X»»**.
 - Un movimiento con `account_id NULL` (causaciones, cruces entre terceros, ajustes) pasa siempre: la restricción es sobre cuentas de dinero.
-- Un `MoneyAccount` se mira solo si cambió algún atributo (historia de atributos con cambios netos), así que leerlo o asignarle el mismo valor no cuenta.
+- **Qué cuenta se mira en cada caso (C4):**
+
+  | Fila | Insert | Update | Delete |
+  |---|---|---|---|
+  | `MoneyMovement` | su `account_id` | la cuenta VIEJA (historia del atributo) y la NUEVA, las dos | su `account_id` |
+  | `MoneyAccount` | su `id` (una cuenta nueva nunca está en el conjunto) | su `id` | su `id` |
+
+- **Solo cuentan los cambios netos, en las dos clases** (historia de atributos con `has_changes()`, o `session.is_modified`). Leer una fila o asignarle el mismo valor no cuenta. Importa porque `CRUDBase.update` hace `setattr` genérico (`base.py:307`).
+  - Hoy ningún camino cambia el `account_id` de un movimiento (`grep "\.account_id = "` en `app/` da 0). La regla de la cuenta vieja y la nueva es para el camino que se escriba mañana, que es el argumento del listener.
+- **Las escrituras de `/money-accounts` también quedan cubiertas (C2):**
+  - `POST /money-accounts` da **403 siempre** a un restringido, porque la cuenta nueva no está en su conjunto;
+  - `PATCH` y `DELETE /money-accounts/{id}` de una cuenta no asignada dan 403.
+
+  Es la regla uniforme, declarada. Hoy está latente: ningún restringido tiene `treasury.manage_accounts` (ni los 16 permisos del analista de SAC ni el rol liquidador, `role.py:158-177`), y el admin queda afuera por D1. Si Daniel prefiere que un restringido con `manage_accounts` pueda crear cuentas, es una excepción explícita para el insert de `MoneyAccount` (D6).
+- **El mensaje del 403 nombra la cuenta** (N7). La elegió el usuario en una creación, y en una reversa el nombre ya es visible por D5 (el pago inmediato de una compra muestra su cuenta). Declarado.
 
 **Quién es el usuario.** `get_required_org_context` (deps.py) deja el contexto en `db.info["account_actor"]`.
 - La sesión es una por request, en producción (`get_db`) y en tests (`override_get_db`, conftest l.153), así que el contexto no se cruza entre requests.
@@ -76,7 +97,13 @@ El precedente de un listener sobre `Session` es `advisory_locks.py` (#106).
 
 **Riesgos del mecanismo, y cómo se cubren:**
 - **El 403 sale en el flush, que puede ser un autoflush dentro de una consulta.** La transacción se descarta igual (`get_db` cierra sin commit). Para que el error salga temprano y con el mensaje del recurso, las rutas por id (§2.2, C1) chequean ANTES con el mismo predicado: 404 si la cuenta del movimiento no es visible. El listener queda como red.
-- **Un `except` que se trague el 403.** En `services/` hay un solo `except Exception`, en `user.py:127`, y no toca dinero. El barrido T1 da 403 y no 500 en cada ruta.
+- **Un `except` que se trague el 403** (N1). QA 2 lo midió en todo `app/` (`qa-2-cuentas/broad_except_6898bc9.log`, `dd61cc23…9406`, con su script `scripts/broad_except.py`):
+  - hay 8 `except` amplios sin un `except HTTPException` antes: `health`, 6 listados GET de compras y ventas, y `user.py:127`;
+  - toda ruta de escritura re-lanza el HTTPException antes del `except Exception`;
+  - en SQLAlchemy 2.0.25, `_autoflush` solo atrapa `StatementError`, y `before_flush` corre antes del bloque que hace rollback (`verificacion_plan_v1.0_sqla.log`, `3b37d79b…2d3d`).
+
+  El barrido T1 da 403 y no 500 en cada ruta.
+- **Que algo se commitee antes del flush de dinero** (N2). QA 2 midió que ninguna función de los caminos de dinero hace dos commits (`multi_commit_6898bc9.log`, `fcd13d5e…ff9f`). Las únicas que los hacen son `update_collector_scope`, `create_user` y `delete_user`. `create` con `auto_liquidate` hace flush y deja el commit a `liquidate`. Esa medición no ve commits anidados entre llamadas, así que T1 y T2 cuentan también el documento de la ruta y el estado de la entidad (§4).
 - **Archivos en disco antes del flush** (evidencia). El chequeo de visibilidad de C1 corre antes de escribir el archivo, así que no queda un huérfano. Lo prueba T8.
 
 ### 2.2 Lecturas
@@ -86,6 +113,12 @@ El precedente de un listener sobre `Session` es `advisory_locks.py` (#106).
   - Con alcance no cambia nada. Sin alcance, «visible» es: `account_id` NULL, o una cuenta en `accounts_for`.
 - **C3 — Listado y resumen** (`GET /money-movements` y `/summary`): **sin cambio**. Siguen pasando las cuenta-NULL (decisión D3).
 - **C4 — Estado de cuenta por tercero:** se quita el filtro por cuenta para el usuario sin alcance (decisión D4). Con alcance sigue D-E1 de Ingrid, sin tocar.
+  - **El enlace del evento (C3 de QA 2).** Con D4, el restringido ve los eventos de K3, y la pantalla los enlaza al detalle del movimiento (`AccountStatementPage.resolveSourceLink`, l.171, `case "money_movement"`), que por C1 le da 404.
+  - **Lo que se hace:** para el usuario restringido sin alcance, el evento de un movimiento cuya cuenta no le es visible sale con `source="money_movement_restricted"`, y el resto de sus campos igual. El `switch` del frontend lo resuelve explícitamente a `null`, y `EntityLink` con `to=null` pinta texto plano.
+  - **Por qué esta opción y no un campo nuevo:**
+    - para el superusuario y para todo usuario con `accounts_for` = `None`, el evento sale byte a byte igual, así que el golden no gana una clave aditiva;
+    - el único lector de `source == "money_movement"` en el frontend es ese `switch` (grep de `"money_movement"` en `frontend/src`: 1 línea), y el Excel y los PDF del estado de cuenta leen `parent_source_id`, no `source`;
+    - se cambia `source` y no solo `source_id`: con `source_id` en null y `source` intacto, el `switch` armaría `/treasury/null`.
 - **Dashboard de tesorería** (`GET /reports/treasury-dashboard`, `reports.py:4172`): hoy lista todas las cuentas activas de la org, con su saldo, y los 10 últimos movimientos.
   - Para el usuario restringido se filtran las cuentas, sus totales, el MTD y los movimientos recientes, con el mismo predicado del listado: cuenta permitida o NULL.
   - CxC, CxP y provisiones son de terceros, no de cuentas: no cambian.
@@ -107,6 +140,8 @@ El diálogo «Configurar Usuario» rotula la sección «Cuentas Visibles», con 
 - Pasa a **«Cuentas»**, con el texto «Solo podrá ver y mover estas cuentas. Vacío: todas».
 - Si el rol elegido en el mismo diálogo es admin: un aviso en ámbar, «Con rol Administrador, las cuentas asignadas no restringen nada» (decisión D1).
 
+**Estado de cuenta:** `resolveSourceLink` gana un `case "money_movement_restricted": return null` explícito. El `default` ya devuelve `null`, pero el caso escrito deja claro que es a propósito (C3).
+
 Nivel chico dentro del ciclo: lint, `tsc`, `build` y capturas a 1440 y 390.
 
 ## 3. Lo que NO cambia (no-regresión, dos argumentos, #98)
@@ -125,7 +160,12 @@ Nivel chico dentro del ciclo: lint, `tsc`, `build` y capturas a 1440 y 390.
 - Con alcance (Ingrid), la regla de cuentas ya era fail-closed y no cambia. La sostienen los tests de Ingrid, que van en las dirigidas.
 
 **Llamadores: qué empieza a enviar o ejecutar el código compartido en una org sin la función.**
-- El listener se registra para TODA sesión, pero con `account_actor` ausente o con `None` vuelve en la primera línea. No consulta nada.
+- El listener se registra para TODA sesión. Sin `account_actor` (scripts, seeds) vuelve en la primera línea. Un flush que no toca filas de dinero tampoco consulta nada.
+- **Con contexto, en el primer flush que toca dinero, `accounts_for` corre una vez** (N4):
+  - para el admin y el superusuario corta en `is_admin` sin consultar;
+  - para un no-admin sin asignaciones hace UNA consulta para saber que da `None`.
+
+  Los datos salen byte a byte iguales, con una consulta más por request que escribe dinero, y el resultado queda en `db.info` para el resto del request.
 - `get_required_org_context` hace UNA asignación de diccionario más y ninguna consulta más.
 - El dashboard recibe `allowed_account_ids=None` de su único llamador.
 - Ninguna pantalla compartida manda un parámetro nuevo.
@@ -137,6 +177,8 @@ Nivel chico dentro del ciclo: lint, `tsc`, `build` y capturas a 1440 y 390.
 | Liquidador de Costa | 403 (medido: 0 casos hasta el 17-sep) | sin cambio para él: no tiene el permiso | no tiene el permiso | 404 |
 | Analistas de SAC | 403 (**no medido**: ver G-prod 1) | pasan a ver TODOS los eventos del tercero, y su saldo cierra | solo sus cajas | 404 |
 | Admin de Costa con 5 cuentas | sin cambio (D1) | sin cambio | sin cambio | sin cambio |
+
+Además, para cualquier restringido con `treasury.manage_accounts`, `POST /money-accounts` y el `PATCH`/`DELETE` de una cuenta no asignada pasan a dar 403 (C2). Hoy no hay ninguno.
 
 ## 4. Tests (archivo nuevo `tests/test_cuentas_restringidas.py`)
 
@@ -150,11 +192,11 @@ Los roles son custom con sus permisos: el admin bypassa y no prueba nada (#29). 
 
 | # | Qué afirma |
 |---|---|
-| **T1** | **Barrido de escrituras**, parametrizado sobre la lista del inventario v2 (las 34 con cuenta en el cuerpo, `batch-expenses` incluido). Con K3: **403**, el detalle nombra la cuenta, y nada queda escrito (saldo de K3, saldo del tercero y conteo de `money_movements`, antes y después). Con K1: 2xx. La lista es explícita y lleva un comentario de por qué está completa (#108). |
-| **T2** | **Las 6 indirectas.** Cancelar una compra y una venta con `annul_linked_payments=True` cuyo pago es de K3; anular un movimiento de obligación de K3; cancelar un activo, anular su venta y anular una revalorización pagadas desde K3. Todo da **403** y no cambia nada. Con K1: 2xx. |
-| **T3** | **Admin con asignación (D1):** escribe en K3 → 2xx. Control: el liquidador, con la misma petición, da 403. |
+| **T1** | **Barrido de escrituras**, parametrizado sobre una lista explícita, con un comentario de por qué está completa (#108): las 34 con cuenta en el cuerpo del inventario v2 (`batch-expenses` incluido) más las 3 de `/money-accounts` (C2). Con K3: **403**, el detalle nombra la cuenta, y **nada queda escrito** (N2): el saldo de K3, el del tercero, el conteo de `money_movements`, el conteo y el estado del documento de la ruta (compra, venta, activo, obligación, cruce, Entrada, Salida, gasto programado) y el estado de la entidad tocada, antes y después. Con K1: 2xx. |
+| **T2** | **Las 6 indirectas.** Cancelar una compra y una venta con `annul_linked_payments=True` cuyo pago es de K3; anular un movimiento de obligación de K3; cancelar un activo, anular su venta y anular una revalorización pagadas desde K3. Todo da **403** y no cambia nada, con el mismo recuento de T1 (N2). Con K1: 2xx. |
+| **T3** | **Admin con asignación (D1):** escribe en K3 → 2xx. Control: el liquidador, con la misma petición, da 403. **Orden fijo dentro del mismo test: el request del admin va ANTES que el del liquidador** (N3: un caché a nivel de módulo devolvería al liquidador el `None` del admin, y solo ese orden lo atrapa). |
 | **T4** | **Sin asignaciones** escribe en K3 → 2xx (no-regresión). |
-| **T5** | **Estado de cuenta (D4):** un tercero con una compra liquidada y un pago desde K3. Para el liquidador con K1, el último `balance_after` == `current_balance` y el pago aparece. **Se escribe primero y se corre contra la base:** tiene que FALLAR ahí (hoy esconde el pago). |
+| **T5** | **Estado de cuenta (D4):** un tercero con una compra liquidada, un pago desde K3 y otro desde K1. Para el liquidador con K1:<br>• el último `balance_after` == `current_balance`, y el pago de K3 aparece. **Se escribe primero y se corre contra la base:** tiene que FALLAR ahí (hoy esconde el pago);<br>• **el enlace (C3):** el evento de K3 sale con `source == "money_movement_restricted"` y el de K1 con `"money_movement"`;<br>• **control:** para el admin, los dos salen con `"money_movement"`. |
 | **T6** | **Dashboard:** el analista con K1 y K2 ve solo K1 y K2, con sus totales, y los recientes solo de K1, K2 o NULL. Control: el admin ve las 3. |
 | **T7** | **`GET /money-accounts` con 3 cuentas, `limit=1` y una sola cuenta asignada en la posición 3:** `total == 1` y la página la trae. Hoy da `total` 0 y una página vacía: pagina primero y filtra después (`money_accounts.py:45-62`). |
 | **T8** | **C1:** GET por id y por número, evidencia (GET, POST, DELETE), `annul` y `classification` sobre un movimiento de K3 → 404. El POST de evidencia no deja archivo en disco (directorio de uploads de la org, antes y después). Control con K1. |
@@ -162,7 +204,9 @@ Los roles son custom con sus permisos: el admin bypassa y no prueba nada (#29). 
 | **T10** | **Movimientos con cuenta NULL** (`expense-accrual`, `tp-transfer`, `tp-adjustment-*`): el liquidador los crea y los anula (D3). |
 | **T11** | **Sin contexto:** el servicio llamado directo con `db_session`, sin request, escribe en K3. Fija que el listener no actúa sin contexto, para que nadie lo vuelva fail-closed sin decidirlo (rompería scripts y seeds). |
 | **T12** | **Con alcance (Ingrid), el listener coincide con las reglas existentes:** una escritura en una cuenta no asignada da 403 aunque el endpoint estuviera en la lista blanca. Se monta parcheando el chequeo explícito, para ver que la red sola también corta. |
-| **T13** | **El listener está registrado y el contexto lo carga** (guarda del mecanismo): sin `account_actor` en `db.info`, T1 no corta. Se afirma leyendo `db.info` en un endpoint de prueba. |
+| **T13** | **El contexto lo carga** (guarda del mecanismo, N6). Sin rutas de prueba en `app/`: el test reemplaza `get_db` con `dependency_overrides` por un generador que guarda la sesión que entrega. Después de un request del liquidador, `db.info["account_actor"]` trae su `user_id` y su organización; después de uno del superusuario, `is_admin` es True. |
+| **T14** | **Cambia SOLO la cuenta** (C1 de QA 2). Un rol custom con `treasury.manage_accounts` y K1 asignada:<br>• `PATCH /money-accounts/{K3}` (el nombre) y `DELETE /money-accounts/{K3}` → 403, y K3 queda igual (nombre, `is_active`);<br>• `POST /money-accounts` → 403, sin cuenta nueva;<br>• **control:** el mismo `PATCH` sobre K1 → 200. |
+| **T15** | **Updates de movimientos, en el listener** (C4). No hay camino HTTP que cambie la cuenta de un movimiento, así que va con una sesión directa y `account_actor` puesto a mano (el liquidador con K1):<br>• cambiar un movimiento de K3 a K1 → 403;<br>• de K1 a K3 → 403;<br>• asignar a un movimiento de K3 el mismo `account_id` y la misma descripción → no hay 403, porque no hay cambio neto;<br>• lo mismo sobre `MoneyAccount` K3 (el mismo nombre) → no hay 403. |
 
 **Dirigidas** (regla del 19-nov):
 - el set sale de un `grep` sobre la superficie tocada, escrito en el log con el comando: `accounts_for|_get_allowed_accounts|movement_visible|treasury-dashboard|get_treasury_dashboard|money-accounts|third-party/` en `tests/`;
@@ -180,7 +224,7 @@ Se commitea ANTES de plantar, con la predicción por fila. Un defecto en una ví
 | P1 | El listener no se registra | T1, T2, T9, T12, T13 |
 | P2 | `get_required_org_context` no deja `account_actor` | T1, T2, T9, T13 |
 | P3 | El listener mira solo inserts, no updates ni deletes | T2 (las reversas son updates), T8 si cae al listener |
-| P4 | El listener mira `MoneyMovement` pero no `MoneyAccount` | T2 (`fixed_asset` escribe `current_balance` directo) |
+| P4 | El listener mira `MoneyMovement` pero no `MoneyAccount` | T14 (PATCH y DELETE de K3). **No tumba T2:** las reversas de activos cambian la cuenta Y el movimiento en el mismo flush (C1 de QA 2) |
 | P5 | El listener no corta en admin (D1) | T3 |
 | P6 | El listener deja pasar si alguna de las cuentas del flush es permitida (en vez de todas) | T9 |
 | P7 | El estado de cuenta conserva el filtro por cuenta | T5 |
@@ -189,6 +233,10 @@ Se commitea ANTES de plantar, con la predicción por fila. Un defecto en una ví
 | P10 | C1 solo con alcance (como hoy) | T8 |
 | P11 | El listener corta también las cuenta-NULL | T10 |
 | P12 | El listener actúa sin contexto (fail-closed) | T11 |
+| P13 | El conjunto permitido se cachea a nivel de módulo, no en la sesión | T3, con el orden fijado (N3) |
+| P14 | En un update de movimiento se mira solo la cuenta nueva | T15, el caso K3→K1 |
+| P15 | Se usa `session.dirty` sin cambios netos | T15, el caso del mismo valor sobre K3 |
+| P16 | El evento de una cuenta no visible sale con `source="money_movement"` | T5, la celda del enlace |
 
 **Dirección peligrosa:** un test que debía caer y no cae. Si aparece, se agrega el test que faltaba antes de seguir (como P24 y P33 en Ingrid).
 
@@ -216,9 +264,13 @@ Se commitea ANTES de plantar, con la predicción por fila. Un defecto en una ví
 **D5 — Lecturas que muestran el nombre de la cuenta del pago inmediato** (compras, ventas), el estado de una obligación y el gasto programado: ¿se tocan?
 - **Recomiendo que no** en este ciclo. Exponen el nombre de una cuenta, no su saldo ni sus movimientos.
 
+**D6 — Un restringido con `treasury.manage_accounts`: ¿puede crear cuentas?** (C2 de QA 2)
+- **Recomiendo que no, que es la regla uniforme.** Una cuenta nueva no está en su conjunto, así que el listener da 403. Hoy no hay ningún restringido con ese permiso.
+- **La otra opción:** una excepción explícita para el insert de `MoneyAccount`, más asignarle automáticamente la cuenta que crea. Es una regla nueva y no la propongo sin un caso real.
+
 ## 7. Gates
 
-1. **Plan** → GO de QA → autorización de Daniel, con D1–D5.
+1. **Plan** → GO de QA → autorización de Daniel, con D1–D6.
 2. **Construcción:** el autor corre solo el lint (ruff y ESLint) y los tests nuevos.
 3. **QA pasada 1:** el delta va como patch, con su sha256, la base y el sha256 de cada archivo. Desde ahí el árbol queda quieto.
 4. **Correcciones.**
@@ -229,7 +281,14 @@ Se commitea ANTES de plantar, con la predicción por fila. Un defecto en una ví
    - **Golden: aplica**, porque toca `money_movements.py`, `money_accounts.py`, `reports.py` y un listener sobre toda sesión.
      - `CAPTURES` corre como superusuario, así que por construcción da 0/0 en `/money-accounts`, `/money-movements` y los dos estados de cuenta.
      - Una sola BD alcanza: no hay cambio de esquema.
-     - **Prueba de vida y control positivo FUERA de `CAPTURES`** (#110): el mismo script, en los dos lados, como un usuario restringido sembrado en la copia (liquidador con K1). Lee el estado de cuenta de un tercero con un pago desde otra cuenta y el dashboard. Tiene que DIFERIR entre BEFORE y AFTER: así se ve que los dos lados son códigos distintos.
+     - **Prueba de vida y control positivo FUERA de `CAPTURES`** (#110, N5):
+       - el usuario restringido (un liquidador con una cuenta) se siembra en la copia ANTES de la captura BEFORE. Con una sola BD, una escritura en un lado cambiaría el otro;
+       - el script de control es **solo de lectura**, el mismo en los dos lados, con ese usuario;
+       - tres señales, con las predicciones escritas antes:
+         - el estado de cuenta de un tercero con un pago desde otra cuenta: en BEFORE no cierra contra el saldo vivo; en AFTER cierra y el pago sale con `money_movement_restricted`;
+         - el dashboard: en BEFORE muestra todas las cuentas; en AFTER, solo la suya;
+         - `GET /money-movements/{id}` de un movimiento de otra cuenta: 200 en BEFORE y 404 en AFTER.
+       - Si no difieren, los dos lados son el mismo código y el golden no probó nada.
      - Guardas de procedencia de `golden_run.sh`, con lockf y puertos 8091 y 8092.
    - **Suite completa:** diferida al checkpoint.
    - **Parity:** no aplica, porque no hay cambio de esquema; se mide con `git diff --name-only <base> -- backend/alembic backend/app/models` vacío.
@@ -238,10 +297,17 @@ Se commitea ANTES de plantar, con la predicción por fila. Un defecto en una ví
 
 ## 8. Antes del deploy, en producción (solo lectura, el Coordinador)
 
+Las tres lecturas las hace un solo script por API: `~/sac-evidencia/2026-11-20/coder-2-cuentas-restringidas/scripts/gprod_cuentas.py` (sha `99b55ecf…2b4d`).
+- Es solo GET: el único POST es el login, y cualquier otro método aborta.
+- No imprime nombres ni correos.
+- Lee las listas completas, exigiendo `len == total`.
+- **Ensayo:** contra `:8012`, sobre la copia de Costa, coincidió exacto con la predicción que salió del SQL (`gprod_cuentas_ensayo_8012.log`, `0946200e…22c4`).
+- **Desde qué árbol se corre:** uno con el mismo mapa `THIRD_PARTY_BALANCE_DIRECTION` que `main`. QA 2 verificó que el mapa es idéntico en `main` `7566bf6` y en `6898bc9`: 36 entradas, con el mismo hash (N9).
+
 - **G-prod 1:** para los dos analistas de SAC y el liquidador de Costa, cuántos movimientos crearon o anularon en una cuenta NO asignada desde su alta.
   - Si alguno da más de 0, el 403 le rompe algo que hace hoy, y Daniel decide antes del deploy: reasignar cuentas, o D2 con «solo origen».
   - Mi medición de dev (0 para el liquidador) es de una copia con corte el 17-sep, y los analistas no existen en ella.
-- **G-prod 2:** para cada analista de SAC, cuántos terceros tienen un efecto escondido distinto de 0 en su estado de cuenta. Es el mismo cálculo de `statement_escondido.py` (script `1abcdfa1…96c2`), con los datos de producción. Es lo que D4 arregla para ellos.
+- **G-prod 2:** para cada analista de SAC, cuántos terceros tienen un efecto escondido distinto de 0 en su estado de cuenta. Es el cálculo de `statement_escondido.py` (`1abcdfa1…96c2`, SQL sobre la copia), hecho por la API. Es lo que D4 arregla para ellos.
 - **G-prod 3:** cuántas cuentas activas tiene SAC. El dashboard de hoy se las muestra todas a los analistas.
 
 ## 9. Fuera de alcance
