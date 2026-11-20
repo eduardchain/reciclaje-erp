@@ -186,6 +186,14 @@ Referencia, el ensayo en la copia de dev (`EV/ensayo_marcar_recolector.log`):
   - `POST /system/users/{id}/add-to-org`;
   - la caja y el alcance;
   - la verificación con el usuario de demo.
+- **La comparación de Entradas del paso 6 corrió vacía en la demo** (C3 de QA 2):
+  - a las 17:52, rehecha con el filtro del lado del cliente, dio `0 == 0` (línea 480: las 34 Entradas eran «sin recolector»);
+  - después de crear las 2 Entradas de demo solo se miró que Ingrid tuviera `total= 2` (línea 493), sin comparar su conjunto con el del superusuario.
+  - **Re-corrida con datos a las 17:59** (`EV/paso6_paginado_8001.log`, sha `e4299a76…3857`; script `paso6_paginado_8001.py`, sha `97a5ad5b…bbf4`), con el método de C1 y la predicción escrita antes, cumplida:
+    - Entradas: el conjunto de Ingrid (DEMO-GL-1 y DEMO-GL-2) es igual al subconjunto Green Loop de las 36 del superusuario;
+    - proveedores: los 123 de Ingrid son iguales al subconjunto Green Loop de los 211 del superusuario;
+    - control positivo de la paginación: con páginas de 10, las mismas 36 Entradas (4 páginas) y los mismos 211 proveedores (22 páginas).
+  - **Lo que solo existe en producción:** más de 100 Entradas (148 a las 13:58) y 25 de Green Loop. La primera comparación con ese volumen es la del deploy.
 - **Dos correcciones que salieron de esa demo** (plan v1.13):
   - **Entradas:** `GET /inbound-orders` no tiene el parámetro `collector_id` y lo ignora en silencio (devolvió las 34). La comparación del paso 6 filtra del lado del cliente.
   - **La clave va al final:** entre el alta en la org y el alcance, Ingrid es «Recolector» sin alcance. Por eso la clave final se fija DESPUÉS del alcance.
@@ -197,9 +205,12 @@ Siguen el §16 del plan (v1.13), pasos 3 a 7, en este orden:
 4. **Antes del alcance,** se lee que exista la categoría «Empleados».
 5. **El alcance.**
 6. **La clave final**, solo con el reseteo de #85 y DESPUÉS del alcance. Hasta acá nadie conoce la clave, así que nadie puede entrar en la ventana sin alcance.
+   - **Nunca desde Usuarios** (C2 de QA 2): el botón de reseteo de Usuarios fija '123456' y lo puede usar cualquier admin de SAC. Ni durante el runbook ni después.
 7. **Verificación con su usuario:**
+   - **toda lectura de lista** con el límite máximo del endpoint (`/inbound-orders` 1000, `/suppliers` 5000, `/money-accounts` 500), exigiendo `len(items) == total` (si no, se pagina con `skip`), y comparando conjuntos de ids, no conteos (C1 de QA 2: con el límite de 100 por defecto, la lectura de Johana se trunca y la de Ingrid mira 100 de 123);
    - `my-permissions` trae `collector_scope`;
-   - las Entradas son solo las de Green Loop: se comparan con una lectura de Johana filtrada del lado del cliente por `collector_id`, nunca con `?collector_id=`;
+   - las Entradas son solo las de Green Loop: su conjunto se compara con una lectura de Johana filtrada del lado del cliente por `collector_id`, nunca con `?collector_id=`;
+   - los proveedores son solo los marcados, con la misma comparación;
    - `members` le da 403.
 - **Condición de uso R1:** báscula tiene que poner el recolector en cada Entrada de Green Loop. Daniel se lo comunica a Johana.
 
@@ -222,4 +233,8 @@ Siguen el §16 del plan (v1.13), pasos 3 a 7, en este orden:
   - en Terceros, Ingrid ve pestañas que para ella siempre están vacías (Servicios, Clientes, Inversionistas, Pasivos, Provisiones);
   - el banner del detalle de la Entrada le habla de «valorar el descuadre» a quien, por 9g, no puede dejarlo.
   - Las dos son cosméticas y las decide Daniel.
+- **El reseteo de Usuarios sobre una usuaria externa** (C2 de QA 2, la deuda de #85):
+  - Después del deploy, un clic de Johana (o de cualquier admin de SAC) en «Resetear contraseña» deja la cuenta de Ingrid, que es de Green Loop y no de SAC, con la clave constante '123456' (`organizations.py:500`, `services/user.py:107`).
+  - El alcance sigue aplicando, pero cualquiera que sepa su correo entra como ella.
+  - Es la deuda de #85 (eliminar el reseteo-a-constante), que ahora cae sobre una usuaria externa. Lo decide Daniel.
 - **Siguiente ciclo, decidido por Daniel:** el hueco de cuentas restringidas para orgs sin alcance (Costa, §6 del plan). El insumo, cuántas lecturas y escrituras de cuentas no miran `account_ids`, se saca por grep antes de planear.
