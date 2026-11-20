@@ -64,8 +64,17 @@ Control: el árbol restaurado da 12/12 (E9 no aplica, D6).
 2. La predicción de P2 es «solo E7» (§3).
 3. P10 deja E2 en verde; si cae, la causa va clasificada.
 
-*(resultados: §5, se llenan al correr)*
-
 ## 5. Resultados
 
-*(pendiente)*
+Evidencia en `~/sac-evidencia/2026-11-20/coder-1-compras-tabla/`.
+
+| Gate | Log | Resultado |
+|---|---|---|
+| Plantado P1–P12 | `plantado_r1.log` (script `plantado.py`, HEAD `d57f6a9`) | control del árbol limpio 12/12. **Diagonal OK: 12 de 12 filas como estaban predichas, cero caídas de más.** P2 tumba solo E7 (IVA 4.560 en B#24). P10 tumba E7, E10 y E11, y **E2 queda en verde**. Por fila: el reemplazo aparece una sola vez; Vite sirve la versión plantada y después la restaurada; se re-verifica el sha256 en disco. Al cerrar, los 3 archivos quedan iguales al original, `git status` limpio y `git diff HEAD` vacío |
+| Dirigidas | `dirigidas.log` | superficie de backend: `git diff --name-only 87c799f HEAD -- backend` da 0 archivos. Corren solo las 3 guardas: **52 passed, EXIT=0**, contra una predicción de 52 escrita antes. BD `reciclaje_test_coder_1`; había 6 pytest vivos, todos de otras sesiones con otra BD |
+| Lint / tsc / build | `lint_final.log`, `tsc_final.log`, `build_final.log` | 37 avisos y 0 errores (igual al techo); tsc EXIT=0; build EXIT=0 |
+| Check E1–E11 y capturas | `check_final.log`, `capturas_final/` | corren sobre el SHA final (condición 1); el SHA va en el encabezado del log |
+
+Golden: **no aplica**. Es un cambio solo de frontend (0 archivos de `backend/`), y el golden captura respuestas HTTP.
+
+Suite completa del frontend: diferida al checkpoint.
