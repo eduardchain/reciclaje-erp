@@ -3,7 +3,7 @@
 Autor: Eco Coder 1 · 20-nov-2026 · rama `coder-1/precio-por-compra` (base `de32530`)
 Nivel: **lógica** (cálculo en pantalla). Solo frontend; el backend no cambia.
 Archivo: `frontend/src/pages/inbound/InboundLiquidatePage.tsx` (matriz de #122/#123).
-Historia: v1.0 `4070017` → GO de Eco QA 1 con C1–C3; revisión de producto del Coordinador
+Historia (v1.1 + C4 + E14): v1.0 `4070017` → GO de Eco QA 1 con C1–C3; revisión de producto del Coordinador
 (sugerencias S-1 y S-2, nota E2); Daniel autorizó construir la v1.1. v1.1 `02743e2` → C4 de QA
 (P1 medía nada: E13 nuevo), antes de plantar.
 
@@ -58,6 +58,13 @@ Sin tocar `cellMode`/`cellUnit`/`cellTotal`/`handleSubmit` (el payload sale igua
   borrador fantasma de C5 de #122). La cifra que se guarda cuando SÍ cambia es `v` tal cual
   (2 decimales, lo que el usuario ve).
 - Escribir un precio (cuando sí cambia) limpia el «antes: …» de la celda.
+- **Hallado al construir (E14)**: `MoneyInput` reemplaza el texto al recibir el foco («1.300» →
+  «1300») y eso borra la selección que deja el Tab: lo que se escribe se **pega** al final (1250
+  sobre 1.300 daba «13.001.250»). Con el precio prellenado ese es el flujo normal, así que la celda
+  (cantidad y precio) y el precio base seleccionan todo después de ese render (`selectOnFocus`).
+  `MoneyInput` es compartido con Costa y Meta y **no se toca**: el mismo pegado existe hoy en todo
+  `MoneyInput` de la app al entrar con Tab a un campo con valor (preexistente; lo decide Daniel).
+  Un clic dentro de un campo que YA tiene el foco no selecciona (comportamiento del navegador).
 
 ### D3 — El modo y el origen, en una línea debajo (solo con cantidad > 0)
 `c/u · total · kg` como tres botones chicos (kg solo si `canKg`) y, a la derecha, de dónde sale
@@ -125,6 +132,7 @@ La barra cuenta lo mismo que el pie: `activeCols.length` compras, y aparte las c
 | E10 | 3 columnas, una vacía | barra y pie dicen «2 compras» |
 | E11 | Tab de punta a punta por una fila de celdas vacías y por una celda en total con «antes» | el borrador de `localStorage` queda **igual byte a byte** antes y después; el «antes» sigue visible |
 | E12 | clic en c/u con la celda en lista, en base y en propio | ningún cambio: borrador igual byte a byte, sin «antes» |
+| E14 | (hallado al construir) escribir SOBRE un prellenado: con Tab, con clic, sobre una cantidad con valor y sobre el precio base entrando con Tab | reemplaza: 4100, 4200, 12 y 705 — no «13.001.250» |
 | E13 | (C4 de QA) Entrada liquidada por API con `unit_price` 1234.56789, desliquidada; abrir Liquidar, Tab por esa celda sin tocarla | el log imprime el precargado antes; payload `unit_price` = 1234.56789 (no 1234.57) y borrador igual byte a byte |
 
 - **Plantado** (esta matriz va commiteada con la v1.1, antes de plantar). Cada defecto se planta
@@ -141,6 +149,8 @@ La barra cuenta lo mismo que el pie: `activeCols.length` compras, y aparte las c
 | P6 | sin el guard de C1 en la celda vacía | E11 | E1 |
 | P7 | clic en c/u en lista/base cae en `switchMode` | E12 | E3 |
 | P8 | `listPrices` leídos de la primera columna para todas | E2 | — |
+| P9 | sin `selectOnFocus` en la celda | E14 | casi todo (el E2E escribe como una persona: vía compartida) |
+| P9b | sin `selectOnFocus` en el precio base | E14 | E3, E4 |
 
 - Capturas a 1440 y 390 con 3 compras y precios distintos (lista A, lista B, base, propio), al
   Coordinador antes de la revisión completa de QA.
