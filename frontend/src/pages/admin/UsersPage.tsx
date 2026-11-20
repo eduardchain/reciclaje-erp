@@ -29,11 +29,13 @@ import {
   useRoles,
   useUpdateMemberRole,
   useUpdateAccountAssignments,
+  useUpdateCollectorScope,
   useCreateUser,
   useResetPassword,
   useDeleteMember,
 } from "@/hooks/useRoles";
-import { useMoneyAccounts } from "@/hooks/useMasterData";
+import { useMoneyAccounts, usePayableProviders } from "@/hooks/useMasterData";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { useAuthStore } from "@/stores/authStore";
 import { formatDate } from "@/utils/formatters";
 import type { OrgMemberResponse } from "@/types/role";
@@ -52,6 +54,14 @@ export default function UsersPage() {
   const { data: accountsData } = useMoneyAccounts();
   const updateMemberRole = useUpdateMemberRole();
   const updateAccountAssignments = useUpdateAccountAssignments();
+  const updateCollectorScope = useUpdateCollectorScope();
+  // Alcance de recolector (SAC, plan §8): solo con el flag; sin flag, cero requests.
+  const { flagEnabled } = useOrgSettings();
+  const scopeEnabled = flagEnabled("kg_ledger_enabled");
+  const { data: providersData } = usePayableProviders(undefined, scopeEnabled);
+  const collectors = scopeEnabled ? (providersData?.items ?? []) : [];
+  const collectorName = (id: string | null | undefined) =>
+    id ? (collectors.find((c) => c.id === id)?.name ?? "Recolector") : null;
   const createUser = useCreateUser();
   const resetPassword = useResetPassword();
   const deleteMember = useDeleteMember();
@@ -63,6 +73,7 @@ export default function UsersPage() {
   const [editMember, setEditMember] = useState<OrgMemberResponse | null>(null);
   const [selectedRoleId, setSelectedRoleId] = useState("");
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [selectedCollectorId, setSelectedCollectorId] = useState("");
 
   // Estado: Dialog Nuevo Usuario
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -80,6 +91,7 @@ export default function UsersPage() {
     setEditMember(member);
     setSelectedRoleId(member.role_id);
     setSelectedAccountIds(member.account_ids ?? []);
+    setSelectedCollectorId(member.collector_scope_id ?? "");
   };
 
   const toggleAccount = (accountId: string) => {
@@ -96,6 +108,9 @@ export default function UsersPage() {
     const accountsChanged =
       selectedAccountIds.length !== originalAccIds.length ||
       selectedAccountIds.some((id) => !originalAccIds.includes(id));
+
+    const collectorChanged =
+      scopeEnabled && selectedCollectorId !== (editMember.collector_scope_id ?? "");
 
     let pending = 0;
     const done = () => { pending--; if (pending <= 0) setEditMember(null); };
@@ -114,7 +129,14 @@ export default function UsersPage() {
         { onSuccess: done },
       );
     }
-    if (!roleChanged && !accountsChanged) {
+    if (collectorChanged) {
+      pending++;
+      updateCollectorScope.mutate(
+        { userId: editMember.user_id, collectorId: selectedCollectorId || null },
+        { onSuccess: done },
+      );
+    }
+    if (!roleChanged && !accountsChanged && !collectorChanged) {
       setEditMember(null);
     }
   };
@@ -189,6 +211,11 @@ export default function UsersPage() {
                       >
                         {member.role_display_name ?? member.role_name ?? "-"}
                       </Badge>
+                      {scopeEnabled && member.collector_scope_id && (
+                        <Badge variant="secondary" className="ml-1.5 bg-teal-100 text-teal-700">
+                          Alcance: {collectorName(member.collector_scope_id)}
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-sm text-slate-500">{formatDate(member.joined_at)}</TableCell>
                     <TableCell className="text-right">
@@ -261,13 +288,26 @@ export default function UsersPage() {
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
-                <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+                <div
+                  className={
+                    // flex-wrap solo con el flag (el badge de alcance puede no
+                    // caber a 390): sin flag, la tarjeta queda byte a byte.
+                    scopeEnabled
+                      ? "mt-2 flex flex-wrap items-center justify-between gap-2 text-xs"
+                      : "mt-2 flex items-center justify-between gap-2 text-xs"
+                  }
+                >
                   <Badge
                     variant="secondary"
                     className={roleBadgeColors[member.role_name ?? ""] ?? "bg-slate-100 text-slate-600"}
                   >
                     {member.role_display_name ?? member.role_name ?? "-"}
                   </Badge>
+                  {scopeEnabled && member.collector_scope_id && (
+                    <Badge variant="secondary" className="bg-teal-100 text-teal-700">
+                      Alcance: {collectorName(member.collector_scope_id)}
+                    </Badge>
+                  )}
                   <span className="text-slate-500">Desde {formatDate(member.joined_at)}</span>
                 </div>
               </div>
@@ -304,9 +344,35 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
+            {scopeEnabled && (
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Alcance: recolector</Label>
+                <p className="text-xs text-slate-400 mt-0.5 mb-2">
+                  Con alcance, el usuario solo ve las Entradas, proveedores, compras y cuentas de ese recolector
+                </p>
+                <Select
+                  value={selectedCollectorId || "__none__"}
+                  onValueChange={(v) => setSelectedCollectorId(v === "__none__" ? "" : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sin alcance" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin alcance (ve toda la organizacion)</SelectItem>
+                    {collectors.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuentas Visibles</Label>
-              <p className="text-xs text-slate-400 mt-0.5 mb-2">Dejar vacio para ver todas las cuentas</p>
+              <p className="text-xs text-slate-400 mt-0.5 mb-2">
+                {scopeEnabled && selectedCollectorId
+                  ? "Con alcance, vacio = ninguna cuenta: marca la caja del recolector"
+                  : "Dejar vacio para ver todas las cuentas"}
+              </p>
               <div className="space-y-1.5 max-h-40 overflow-y-auto border rounded-md p-2">
                 {accounts.map((acc) => (
                   <label key={acc.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
@@ -327,10 +393,10 @@ export default function UsersPage() {
             <Button variant="outline" onClick={() => setEditMember(null)}>Cancelar</Button>
             <Button
               onClick={handleSave}
-              disabled={updateMemberRole.isPending || updateAccountAssignments.isPending}
+              disabled={updateMemberRole.isPending || updateAccountAssignments.isPending || updateCollectorScope.isPending}
               className="bg-emerald-600 hover:bg-emerald-700"
             >
-              {(updateMemberRole.isPending || updateAccountAssignments.isPending) ? "Guardando..." : "Guardar"}
+              {(updateMemberRole.isPending || updateAccountAssignments.isPending || updateCollectorScope.isPending) ? "Guardando..." : "Guardar"}
             </Button>
           </DialogFooter>
         </DialogContent>

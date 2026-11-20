@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import Layout from "@/components/layout/Layout";
@@ -11,6 +11,7 @@ import Dashboard from "@/pages/Dashboard";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/NotFound";
 import { ROUTES } from "@/utils/constants";
+import { usePermissions } from "@/hooks/usePermissions";
 
 // Code-splitting: cada pagina se descarga on-demand al navegar.
 // Login/Dashboard/NotFound/Layout quedan eager (estan en el critical path).
@@ -134,6 +135,16 @@ function FP({ flag, permission, children }: { flag: string; permission: string |
   );
 }
 
+// Alcance de recolector (SAC, plan §8): su inicio es Entradas — el Dashboard
+// pide /reports/dashboard, fuera de su lista blanca. Sin alcance, el Dashboard
+// de siempre (espera al query de permisos, que el Sidebar ya pide).
+function Home() {
+  const { collectorScope, isLoading } = usePermissions();
+  if (isLoading) return null;
+  if (collectorScope) return <Navigate to={ROUTES.INBOUND} replace />;
+  return <Dashboard />;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -145,7 +156,7 @@ function App() {
           {/* Rutas protegidas */}
           <Route element={<ProtectedRoute />}>
             <Route element={<Layout />}>
-              <Route path={ROUTES.DASHBOARD} element={<Dashboard />} />
+              <Route path={ROUTES.DASHBOARD} element={<Home />} />
 
               {/* Compras */}
               <Route path={ROUTES.PURCHASES} element={<P permission="purchases.view"><PurchasesPage /></P>} />

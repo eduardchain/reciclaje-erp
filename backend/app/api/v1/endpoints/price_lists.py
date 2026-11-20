@@ -7,7 +7,7 @@ Incluye endpoint especial para obtener el precio vigente de un material.
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permission, get_db
@@ -20,6 +20,7 @@ from app.schemas.price_list import (
 )
 from app.services.base import PaginatedResponse
 from app.services.price_list import price_list
+from app.services.collector_scope import require_tp_in_scope, scope_of
 
 router = APIRouter()
 
@@ -102,6 +103,18 @@ def get_all_current_prices(
     los materiales en cero, y **nada** si no tiene lista. Ver
     `price_list.resolve_for_supplier`.
     """
+    # Alcance de recolector (fila 6, §5.7): el proveedor es OBLIGATORIO y tiene
+    # que ser de su recolector; sin el, con #98 D10, saldria la lista general
+    # entera. Y nunca el precio de venta.
+    scope = scope_of(org_context)
+    if scope is not None:
+        if third_party_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Indica el proveedor para consultar sus precios",
+            )
+        require_tp_in_scope(db, third_party_id, scope, "Tercero")
+
     if third_party_id is not None:
         items = price_list.resolve_for_supplier(
             db=db,
@@ -117,7 +130,7 @@ def get_all_current_prices(
             CurrentPriceItem(
                 material_id=item.material_id,
                 purchase_price=float(item.purchase_price),
-                sale_price=float(item.sale_price),
+                sale_price=None if scope is not None else float(item.sale_price),
             )
             for item in items
         ]

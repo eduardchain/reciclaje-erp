@@ -29,6 +29,7 @@ import {
   useUnliquidateInboundOrder,
 } from "@/hooks/useInboundOrders";
 import { useCurrentFormulas, useKgProfiles } from "@/hooks/useSacConfig";
+import { useScopeSupplierIds } from "@/hooks/useMasterData";
 import { formOrderMap, sortByFormOrder } from "@/utils/formOrder";
 import {
   formatCurrency,
@@ -86,7 +87,13 @@ export default function InboundDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const handleBack = useReturnToBack(ROUTES.INBOUND);
-  const { hasPermission } = usePermissions();
+  const { hasPermission, unscoped, collectorScope } = usePermissions();
+  // v1.6 §5.6/§8: con alcance, una compra de un proveedor fuera de su alcance
+  // se pinta SIN link (le daría 404) y con una nota que dice qué pedir.
+  // Mientras carga la lista se pinta como hoy (el 404 del servidor es la red).
+  const scopeSupplierIds = useScopeSupplierIds(collectorScope !== null);
+  const outOfScope = (supplierId: string | null | undefined) =>
+    !!supplierId && !!scopeSupplierIds && !scopeSupplierIds.has(supplierId);
   const canEdit = hasPermission("purchases.edit");
   const canCancel = hasPermission("purchases.cancel");
   const canConfirm = hasPermission("purchases.liquidate");
@@ -105,7 +112,9 @@ export default function InboundDetailPage() {
   const [unliquidateOpen, setUnliquidateOpen] = useState(false);
 
   // B.2: kg estimados client-side para drafts (los definitivos nacen al confirmar)
-  const { data: formulasData } = useCurrentFormulas();
+  // Alcance de recolector (plan §8): las formulas (kg estimados de Willard)
+  // estan fuera de su lista blanca. Sin alcance, como hoy.
+  const { data: formulasData } = useCurrentFormulas(undefined, unscoped);
   const formulas = formulasData?.items ?? [];
   const { data: profilesData } = useKgProfiles();
 
@@ -401,7 +410,9 @@ export default function InboundDetailPage() {
                     <InfoRow
                       label="Cara Financiera"
                       value={
-                        order.purchase_id ? (
+                        order.purchase_id && outOfScope(order.third_party_id) ? (
+                          `Compra #${order.purchase_number}`
+                        ) : order.purchase_id ? (
                           <PurchaseLink id={order.purchase_id}>Ver compra #{order.purchase_number}</PurchaseLink>
                         ) : (
                           "—"
@@ -494,12 +505,20 @@ export default function InboundDetailPage() {
                   )}
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium text-sm truncate">
-                      <ThirdPartyLink id={p.supplier_id}>{p.supplier_name ?? "—"}</ThirdPartyLink>
+                      {outOfScope(p.supplier_id) ? (
+                        p.supplier_name ?? "—"
+                      ) : (
+                        <ThirdPartyLink id={p.supplier_id}>{p.supplier_name ?? "—"}</ThirdPartyLink>
+                      )}
                     </span>
                     <StatusBadge status={p.status} />
                   </div>
                   <div className="flex items-center justify-between gap-2 text-sm">
-                    <PurchaseLink id={p.purchase_id}>Compra #{p.purchase_number}</PurchaseLink>
+                    {outOfScope(p.supplier_id) ? (
+                      <span>Compra #{p.purchase_number}</span>
+                    ) : (
+                      <PurchaseLink id={p.purchase_id}>Compra #{p.purchase_number}</PurchaseLink>
+                    )}
                     {canViewPrices && (
                       <span className="font-semibold tabular-nums">{fmtMoney(p.total_amount)}</span>
                     )}
@@ -515,6 +534,12 @@ export default function InboundDetailPage() {
                       <span className="font-medium text-slate-700">
                         {fmtMoney(num(p.total_amount) + iva - ret)}
                       </span>
+                    </div>
+                  )}
+                  {outOfScope(p.supplier_id) && (
+                    <div className="text-xs text-amber-700">
+                      Proveedor sin la marca de {order.collector_name ?? "tu recolector"}: pídele a SAC
+                      que lo marque en Terceros.
                     </div>
                   )}
                 </div>

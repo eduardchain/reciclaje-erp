@@ -11,10 +11,14 @@ import type {
 
 // Query keys: ["kg-ledger", "accounts" | "summary" | "statement", ...]
 
-export function useKgAccounts(filters?: { account_type?: string; include_inactive?: boolean }) {
+export function useKgAccounts(
+  filters?: { account_type?: string; include_inactive?: boolean },
+  enabled: boolean = true,
+) {
   return useQuery({
     queryKey: ["kg-ledger", "accounts", filters ?? {}],
     queryFn: () => kgLedgerService.getAccounts(filters),
+    enabled,
   });
 }
 

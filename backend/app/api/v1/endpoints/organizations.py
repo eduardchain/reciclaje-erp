@@ -19,6 +19,8 @@ from app.schemas.organization import (
     OrganizationMemberUpdate,
     OrganizationMemberResponse,
     AccountAssignmentsUpdate,
+    CollectorScopeUpdate,
+    CollectorScopeResponse,
     CreateUserWithMembership,
     WillardDistributionCentersUpdate,
     WillardDistributionCentersResponse,
@@ -43,6 +45,13 @@ from app.schemas.user import UserCreate
 from app.models.user import User
 from app.models.organization import Organization
 from sqlalchemy import select
+
+from app.services.collector_scope import (
+    deny_if_collector_scoped,
+    get_scope_row,
+    validate_scope_target,
+)
+from app.models.user import UserCollectorScope
 
 router = APIRouter()
 
@@ -210,6 +219,8 @@ def update_organization_details(
     db: Session = Depends(get_db),
 ) -> OrganizationResponse:
     """Update organization details. Only admins can update."""
+    # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
+    deny_if_collector_scoped(db, organization_id, current_user)
     role_info = _get_role_info(db, organization_id, current_user)
 
     if not role_info:
@@ -256,6 +267,8 @@ def list_organization_members(
     db: Session = Depends(get_db),
 ) -> list[OrganizationMemberResponse]:
     """Get all members of an organization with their details."""
+    # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
+    deny_if_collector_scoped(db, organization_id, current_user)
     role_info = _get_role_info(db, organization_id, current_user)
 
     if not role_info:
@@ -265,6 +278,12 @@ def list_organization_members(
         )
 
     members_list = get_organization_members(db, organization_id)
+    # Alcances de recolector de la org en UNA consulta (vacia fuera de SAC).
+    scopes = dict(db.execute(
+        select(UserCollectorScope.user_id, UserCollectorScope.collector_id).where(
+            UserCollectorScope.organization_id == organization_id
+        )
+    ).all())
 
     response = []
     for member, user in members_list:
@@ -283,6 +302,7 @@ def list_organization_members(
             "user_full_name": user.full_name,
             "account_ids": acc_ids,
             "org_count": get_user_org_count(db, member.user_id),
+            "collector_scope_id": scopes.get(member.user_id),
         }
         response.append(OrganizationMemberResponse(**member_dict))
 
@@ -302,6 +322,8 @@ def create_user_with_membership(
     db: Session = Depends(get_db),
 ) -> OrganizationMemberResponse:
     """Crear usuario nuevo con contraseña default y agregarlo a la org."""
+    # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
+    deny_if_collector_scoped(db, organization_id, current_user)
     role_info = _get_role_info(db, organization_id, current_user)
 
     if not role_info:
@@ -368,6 +390,8 @@ def add_organization_member(
     db: Session = Depends(get_db),
 ) -> OrganizationMemberResponse:
     """Add a user to the organization. Only admins can add members."""
+    # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
+    deny_if_collector_scoped(db, organization_id, current_user)
     role_info = _get_role_info(db, organization_id, current_user)
 
     if not role_info:
@@ -422,6 +446,8 @@ def update_organization_member_role(
     db: Session = Depends(get_db),
 ) -> OrganizationMemberResponse:
     """Update a member's role. Only admins can update roles."""
+    # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
+    deny_if_collector_scoped(db, organization_id, current_user)
     current_role_info = _get_role_info(db, organization_id, current_user)
 
     if not current_role_info:
@@ -481,6 +507,8 @@ def reset_member_password(
     db: Session = Depends(get_db),
 ) -> dict:
     """Resetear contraseña de un miembro a '123456'. Solo admins."""
+    # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
+    deny_if_collector_scoped(db, organization_id, current_user)
     current_role_info = _get_role_info(db, organization_id, current_user)
 
     if not current_role_info:
@@ -533,6 +561,8 @@ def remove_organization_member(
     db: Session = Depends(get_db),
 ) -> None:
     """Remover miembro. Si solo pertenece a esta org, eliminar usuario completo."""
+    # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
+    deny_if_collector_scoped(db, organization_id, current_user)
     current_role_info = _get_role_info(db, organization_id, current_user)
 
     if not current_role_info:
@@ -587,6 +617,8 @@ def leave_organization(
     db: Session = Depends(get_db),
 ) -> None:
     """Current user leaves the organization. Cannot leave if last admin."""
+    # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
+    deny_if_collector_scoped(db, organization_id, current_user)
     role_info = _get_role_info(db, organization_id, current_user)
 
     if not role_info:
@@ -618,6 +650,8 @@ def update_account_assignments(
     db: Session = Depends(get_db),
 ) -> list[str]:
     """Actualizar cuentas asignadas a un usuario. Solo admins."""
+    # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
+    deny_if_collector_scoped(db, organization_id, current_user)
     current_role_info = _get_role_info(db, organization_id, current_user)
 
     if not current_role_info:
@@ -642,3 +676,76 @@ def update_account_assignments(
 
     result = update_user_account_assignments(db, user_id, organization_id, data.account_ids)
     return [str(aid) for aid in result]
+
+
+@router.put(
+    "/{organization_id}/members/{user_id}/collector-scope",
+    response_model=CollectorScopeResponse,
+    summary="Poner o quitar el alcance de recolector de un miembro",
+)
+def update_collector_scope(
+    organization_id: UUID,
+    user_id: UUID,
+    data: CollectorScopeUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> CollectorScopeResponse:
+    """SAC, plan recolector-alcance §4. Solo admin de la org, con el flag
+    `kg_ledger_enabled`. `collector_id: null` quita el alcance. 422 si el
+    destino es admin, superusuario (N2) o el recolector no cumple §3."""
+    # §5.0: un usuario con alcance no administra (tampoco un admin con fila, T16c).
+    deny_if_collector_scoped(db, organization_id, current_user)
+    current_role_info = _get_role_info(db, organization_id, current_user)
+    if not current_role_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organizacion no encontrada o no eres miembro",
+        )
+    if not current_role_info["is_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden asignar el alcance de recolector",
+        )
+
+    from app.utils.org_settings import get_org_setting
+    if not get_org_setting(db, organization_id, "kg_ledger_enabled"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="El alcance de recolector no esta habilitado para esta organizacion",
+        )
+
+    target_role = get_user_role_in_org(db, organization_id, user_id)
+    target_user = get_user_by_id(db, user_id)
+    if not target_role or target_user is None:
+        # Un superusuario no es miembro: cae aca si no lo es; si lo es, N2 abajo.
+        if target_user is not None and target_user.is_superuser and data.collector_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No se le puede poner alcance de recolector a un superusuario",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El usuario no es miembro de esta organizacion",
+        )
+
+    row = get_scope_row(db, organization_id, user_id)
+    if data.collector_id is None:
+        if row is not None:
+            db.delete(row)
+            db.commit()
+        return CollectorScopeResponse(user_id=user_id, collector_id=None, collector_name=None)
+
+    collector = validate_scope_target(
+        db, organization_id, target_user, target_role["is_admin"], data.collector_id
+    )
+    if row is None:
+        db.add(UserCollectorScope(
+            organization_id=organization_id,
+            user_id=user_id,
+            collector_id=collector.id,
+        ))
+    else:
+        row.collector_id = collector.id
+    db.commit()
+    return CollectorScopeResponse(user_id=user_id, collector_id=collector.id, collector_name=collector.name)
+

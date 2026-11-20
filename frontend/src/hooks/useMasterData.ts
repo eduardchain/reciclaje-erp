@@ -16,17 +16,32 @@ export function useSuppliers(search?: string) {
   });
 }
 
-export function usePayableSuppliers(search?: string) {
+// Alcance de recolector (plan Ingrid v1.6 §8): los proveedores de SU alcance,
+// activos o no — el servidor filtra la lista (fila 11). Sirve para saber qué
+// compra de una Entrada puede abrir. Solo con alcance (`enabled`): para
+// cualquier otro usuario no sale ningún request.
+export function useScopeSupplierIds(enabled: boolean) {
+  const { data } = useQuery({
+    queryKey: ["third-parties", "suppliers", "scope-ids"],
+    queryFn: () => thirdPartyService.getSuppliers({ limit: SELECT_LIMIT }),
+    enabled,
+  });
+  return data ? new Set(data.items.map((s) => s.id)) : null;
+}
+
+export function usePayableSuppliers(search?: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["third-parties", "payable-suppliers", search],
     queryFn: () => thirdPartyService.getPayableSuppliers({ search, limit: SELECT_LIMIT, is_active: true }),
+    enabled,
   });
 }
 
-export function useCustomers(search?: string) {
+export function useCustomers(search?: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["third-parties", "customers", search],
     queryFn: () => thirdPartyService.getCustomers({ search, limit: SELECT_LIMIT, is_active: true }),
+    enabled,
   });
 }
 
@@ -39,6 +54,7 @@ export function useThirdParties(
     limit?: number;
     sort_by?: string;
     sort_dir?: "asc" | "desc";
+    collector_id?: string;
   },
   options?: { staleTime?: number }
 ) {
@@ -59,10 +75,11 @@ export function useMaterials(search?: string) {
   });
 }
 
-export function useWarehouses() {
+export function useWarehouses(enabled: boolean = true) {
   return useQuery({
     queryKey: ["warehouses", "list"],
     queryFn: () => warehouseService.getAll(),
+    enabled,
   });
 }
 
@@ -87,21 +104,28 @@ export function useExpenseCategories() {
   });
 }
 
-export function useExpenseCategoriesFlat() {
+export function useExpenseCategoriesFlat(enabled: boolean = true) {
   return useQuery({
     queryKey: ["expense-categories", "flat"],
     queryFn: () => expenseCategoryService.getFlat(),
+    enabled,
   });
 }
 
-export function useProvisions(search?: string, is_active?: boolean) {
+export function useProvisions(search?: string, is_active?: boolean, enabled: boolean = true) {
   return useQuery({
     queryKey: ["third-parties", "provisions", search, is_active],
     queryFn: () => thirdPartyService.getProvisions({ search, limit: SELECT_LIMIT, is_active }),
+    enabled,
   });
 }
 
-export function useLiabilities(search?: string, is_active?: boolean, includeSystem?: boolean) {
+export function useLiabilities(
+  search?: string,
+  is_active?: boolean,
+  includeSystem?: boolean,
+  enabled: boolean = true,
+) {
   // includeSystem (SAC E2 D9): suma las entidades "[Retenciones] X" — usar SOLO
   // en selectores de PAGO (sus saldos nacen de liquidaciones, no de causaciones).
   return useQuery({
@@ -113,6 +137,7 @@ export function useLiabilities(search?: string, is_active?: boolean, includeSyst
         is_active,
         ...(includeSystem ? { include_system: true } : {}),
       }),
+    enabled,
   });
 }
 
@@ -156,17 +181,19 @@ export function useUpdateRetentionConfig() {
   });
 }
 
-export function useGenericThirdParties(search?: string) {
+export function useGenericThirdParties(search?: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["third-parties", "generic", search],
     queryFn: () => thirdPartyService.getGeneric({ search, limit: SELECT_LIMIT, is_active: true }),
+    enabled,
   });
 }
 
-export function usePayableProviders(search?: string) {
+export function usePayableProviders(search?: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["third-parties", "payable-providers", search],
     queryFn: () => thirdPartyService.getPayableProviders({ search, limit: SELECT_LIMIT, is_active: true }),
+    enabled,
   });
 }
 

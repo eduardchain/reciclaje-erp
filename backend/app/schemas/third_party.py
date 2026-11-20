@@ -36,6 +36,9 @@ class ThirdPartyCreate(ThirdPartyBase):
     """
     initial_balance: Decimal = Field(Decimal("0.00"), description="Saldo inicial")
     category_ids: list[UUID] = Field(default_factory=list, description="IDs de categorias a asignar")
+    # Marca de recolector (SAC, plan recolector-alcance §3). Con alcance la
+    # fuerza el servidor (fila 15) y lo que venga aca se ignora.
+    collector_id: Optional[UUID] = Field(None, description="Recolector del tercero (SAC)")
 
 
 class ThirdPartyUpdate(BaseModel):
@@ -46,6 +49,8 @@ class ThirdPartyUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = Field(None, max_length=500)
     category_ids: Optional[list[UUID]] = Field(None, description="IDs de categorias a asignar (reemplaza todas)")
+    # Marca de recolector (§3). `null` explicito la quita (patron fields_set, #87).
+    collector_id: Optional[UUID] = Field(None, description="Recolector del tercero (SAC); null la quita")
 
 
 class ThirdPartyResponse(ThirdPartyBase):
@@ -56,6 +61,9 @@ class ThirdPartyResponse(ThirdPartyBase):
     current_balance: float
     is_active: bool
     categories: list[ThirdPartyCategoryBrief] = []
+    # Marca de recolector (SAC, §3). null fuera de SAC.
+    collector_id: Optional[UUID] = None
+    collector_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

@@ -17,6 +17,7 @@ from app.schemas.service_tariff import (
     ServiceTariffResponse,
 )
 from app.services.service_tariff import service_tariff
+from app.services.collector_scope import SCOPED_TARIFF_CODES, scope_of
 
 router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])  # H2 QA E2: re-gate por flag
 
@@ -45,6 +46,10 @@ def get_current_tariffs(
     items = service_tariff.get_current(
         db=db, organization_id=org_context["organization_id"]
     )
+    # Alcance de recolector (§5.7): solo la comision del recolector; las demas
+    # son los precios de SAC con Willard y con su planta.
+    if scope_of(org_context) is not None:
+        items = [i for i in items if getattr(i, "tariff_code", None) in SCOPED_TARIFF_CODES]
     return ServiceTariffListResponse(items=items, total=len(items))
 
 

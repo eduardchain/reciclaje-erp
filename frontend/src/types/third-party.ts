@@ -19,6 +19,9 @@ export interface ThirdPartyResponse extends BaseEntity {
   current_balance: number;
   is_active: boolean;
   categories: ThirdPartyCategory[];
+  /** SAC (alcance de recolector): el recolector del tercero, o null. */
+  collector_id?: string | null;
+  collector_name?: string | null;
 }
 
 export interface ThirdPartyCreate {
@@ -29,6 +32,8 @@ export interface ThirdPartyCreate {
   address?: string | null;
   category_ids?: string[];
   initial_balance?: number;
+  /** SAC: solo se manda si el selector «Recolector» esta a la vista. */
+  collector_id?: string | null;
 }
 
 /** GET /third-parties/similar — candidatos a duplicado (reparto por compra). */
@@ -49,6 +54,8 @@ export interface ThirdPartyUpdate {
   phone?: string | null;
   address?: string | null;
   category_ids?: string[];
+  /** SAC: null quita la marca; ausente no la toca. */
+  collector_id?: string | null;
 }
 
 // --- Retenciones: catalogo v2 (CC-006) + entidades (SAC E2 D9) --- //

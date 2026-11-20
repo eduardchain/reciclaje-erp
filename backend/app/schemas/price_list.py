@@ -57,7 +57,9 @@ class CurrentPriceItem(BaseModel):
     """Precio vigente de un material (version ligera)."""
     material_id: UUID
     purchase_price: float
-    sale_price: float
+    # null para un usuario con alcance de recolector (SAC, §5.7): son los
+    # precios de VENTA de SAC.
+    sale_price: Optional[float]
 
 
 class CurrentPricesResponse(BaseModel):

@@ -19,6 +19,11 @@ from app.schemas.third_party import (
 )
 from app.services.base import PaginatedResponse
 from app.services.third_party import third_party
+from app.services.collector_scope import (
+    scoped_create_categories,
+    not_found,
+    scope_of,
+)
 
 router = APIRouter()
 
@@ -32,6 +37,7 @@ def list_third_parties(
     role: Optional[str] = Query(None, description="Filter by role: supplier, customer, investor, provision"),
     sort_by: Optional[str] = Query(None, description="Columna a ordenar (allowlist en service)"),
     sort_dir: str = Query("asc", regex="^(asc|desc)$", description="Direccion: asc | desc"),
+    collector_id: Optional[UUID] = Query(None, description="Solo los terceros de este recolector (SAC)"),
     org_context: tuple = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db)
 ):
@@ -46,6 +52,11 @@ def list_third_parties(
     - `sort_dir`: Sort direction ("asc" or "desc")
     """
     org_id = org_context["organization_id"]
+    # Con alcance de recolector se FUERZA su recolector (fila 10); el del query
+    # se ignora.
+    scope = scope_of(org_context)
+    if scope is not None:
+        collector_id = scope
 
     return third_party.get_multi(
         db=db,
@@ -57,6 +68,7 @@ def list_third_parties(
         role=role,
         sort_by=sort_by,
         sort_order=sort_dir,
+        collector_id=collector_id,
     )
 
 
@@ -75,7 +87,7 @@ def list_suppliers(
     List only third parties with behavior_type='material_supplier'.
     """
     org_id = org_context["organization_id"]
-    
+
     return third_party.get_suppliers(
         db=db,
         organization_id=org_id,
@@ -84,7 +96,9 @@ def list_suppliers(
         is_active=is_active,
         search=search,
         sort_by=sort_by,
-        sort_order=sort_order
+        sort_order=sort_order,
+        # Con alcance: solo los de su recolector (fila 11).
+        collector_id=scope_of(org_context),
     )
 
 
@@ -210,10 +224,13 @@ def list_payable_providers(
     Usado para selectors de comisiones y gastos.
     """
     org_id = org_context["organization_id"]
+    # Con alcance: solo su recolector, que es el selector de la comision (fila 13).
+    scope = scope_of(org_context)
     return third_party.get_payable_providers(
         db=db, organization_id=org_id,
         skip=skip, limit=limit, is_active=is_active,
         search=search, sort_by=sort_by, sort_order=sort_order,
+        only_ids=[scope] if scope is not None else None,
     )
 
 
@@ -274,7 +291,9 @@ def find_similar_third_parties(
     liquidacion de la Entrada, la pantalla pregunta si ya existe. Ruta
     ESTATICA, declarada antes de /{third_party_id}."""
     return third_party.find_similar(
-        db, org_context["organization_id"], name=name, identification=identification
+        db, org_context["organization_id"], name=name, identification=identification,
+        # Con alcance: solo terceros de su recolector (fila 12).
+        collector_id=scope_of(org_context),
     )
 
 
@@ -416,12 +435,45 @@ def create_third_party(
     - All boolean flags default to False if not specified
     """
     org_id = org_context["organization_id"]
-    
+
+    scope = scope_of(org_context)
+    if scope is not None:
+        third_party_in = _scoped_create_payload(db, org_id, scope, third_party_in)
+
     return third_party.create(
         db=db,
         obj_in=third_party_in,
         organization_id=org_id
     )
+
+
+def _scoped_create_payload(
+    db: Session, org_id: UUID, scope: UUID, third_party_in: ThirdPartyCreate
+) -> ThirdPartyCreate:
+    """Fila 15 (H1): con alcance de recolector el tercero nace con SU
+    recolector (forzado), sin saldo inicial y solo como proveedor de material
+    o conductor («Empleados», v1.5). Todo se valida ANTES de escribir: un 422
+    no deja ninguna fila. El mensaje no nombra lo ajeno (M1)."""
+    from decimal import Decimal
+
+    if third_party_in.initial_balance != Decimal("0"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Con tu usuario el tercero se crea sin saldo inicial",
+        )
+    if not third_party_in.category_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Elige si el tercero es proveedor de material o conductor",
+        )
+    # v1.5: la MISMA funcion que alimenta el flat de la fila 15b.
+    allowed = {c.id for c in scoped_create_categories(db, org_id)}
+    if not set(third_party_in.category_ids) <= allowed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Con tu usuario el tercero solo puede ser proveedor de material o conductor",
+        )
+    return third_party_in.model_copy(update={"collector_id": scope})
 
 
 @router.get("/{third_party_id}", response_model=ThirdPartyResponse)
@@ -437,13 +489,18 @@ def get_third_party(
     - 404 if third party not found or doesn't belong to organization
     """
     org_id = org_context["organization_id"]
-    
-    return third_party.get_or_404(
+
+    tp = third_party.get_or_404(
         db=db,
         id=third_party_id,
         organization_id=org_id,
         detail="Tercero no encontrado"
     )
+    # Con alcance: 404 si no es de su recolector (fila 14, §5.3).
+    scope = scope_of(org_context)
+    if scope is not None and tp.collector_id != scope:
+        raise not_found("Tercero")
+    return tp
 
 
 @router.patch("/{third_party_id}", response_model=ThirdPartyResponse)
