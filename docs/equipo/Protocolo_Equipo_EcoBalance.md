@@ -13,7 +13,7 @@ Este archivo define cómo trabaja la sesión **Coordinadora** de EcoBalance con 
 
 ## 1. Roles, nombres y lugares
 
-| Rol | Nombre para SendMessage | Carpeta | Puertos (back / front) | BD de dev (5434) | BD de test (5433) |
+| Rol | Nombre para SendMessage | Worktree (donde trabaja) | Puertos (back / front) | BD de dev (5434) | BD de test (5433) |
 |---|---|---|---|---|---|
 | Coordinador | `Eco Coordinador` | `~/Projects/reciclaje-erp` (la principal, rama `develop`) | :8001 / :5174 (la integración) | `reciclaje_db` | `reciclaje_test` |
 | Coder 1 | `Eco Coder 1` | `~/Projects/reciclaje-erp-wt/coder-1` | :8011 / :5181 | `reciclaje_coder_1` | `reciclaje_test_coder_1` |
@@ -21,7 +21,14 @@ Este archivo define cómo trabaja la sesión **Coordinadora** de EcoBalance con 
 | QA 1 | `Eco QA 1` | `~/Projects/reciclaje-erp-wt/qa-1` | :8021 / :5191 | `reciclaje_qa_1` | `reciclaje_test_qa_1` |
 | QA 2 | `Eco QA 2` | `~/Projects/reciclaje-erp-wt/qa-2` | :8022 / :5192 | `reciclaje_qa_2` | `reciclaje_test_qa_2` |
 
-- **«Eco QA 1» es la sesión que antes se llamaba «QA Ecobalance»**, renombrada: ya conoce #118 a #123. Aunque la sesión se abrió en la carpeta principal, **no edita nada ahí**: trabaja en su worktree `qa-1`.
+- **Todas las sesiones viven en UNA sola ventana de VS Code** (Daniel, 20-nov), como pestañas. La ventana está abierta en la carpeta principal, la integración. Cada sesión trabaja en su worktree con rutas absolutas, y la regla es dura porque el cwd vuelve a la carpeta principal después de cada llamada:
+  1. todo Bash empieza con `cd <su worktree> && …`;
+  2. git siempre como `git -C <su worktree> …`;
+  3. Read, Edit y Write siempre con la ruta absoluta del worktree;
+  4. en la carpeta principal solo se lee, salvo el backlog propio en `ops/backlog/`;
+  5. al empezar cada tarea, la sesión guarda la salida de `git -C ~/Projects/reciclaje-erp status --short` en su carpeta de evidencia; antes de entregar la vuelve a sacar y la compara con esa copia. Lo que aparezca de más lo dejó ella. La carpeta principal nunca sale vacía (el Coordinador tiene ahí su trabajo y hay archivos sin rastrear), así que sin la copia no se puede distinguir «dejé algo» de «ya estaba».
+  No se le propone a Daniel abrir una ventana por worktree.
+- **«Eco QA 1» es la sesión que antes se llamaba «QA Ecobalance»**, renombrada: ya conoce #118 a #123. Como todas, trabaja en su worktree (`qa-1`).
 - **Cada QA verifica en su worktree, en detached sobre el SHA del coder**, no en el árbol del coder: lo que se revisa es el commit. Corre pytest con su `TEST_DATABASE_URL` y planta solo en su worktree o en copias de su scratchpad.
 - **Parejas fijas por línea de trabajo:** QA 1 revisa a Coder 1 y QA 2 revisa a Coder 2. En EcoBalance una tarea cruza back y front, así que cada QA revisa de punta a punta (backend, pantalla a 1440 y 390, golden si aplica). La pareja conserva el contexto del plan de una pasada a la otra.
 - **Todos los nombres llevan «Eco» adelante.** En esta Mac hay sesiones de otros proyectos. Antes de mandar un mensaje, el nombre se copia exacto de `ListAgents`.
@@ -171,10 +178,9 @@ Una entrega al QA o al Coordinador lleva, sin repetir contexto:
 ## 10. Horas, memoria y textos
 
 - **Toda hora que se escribe sale de `date '+%H:%M'` en ese turno**, en hora de Colombia. Si no está medida, no se pone.
-- **Memoria: la escribe solo el Coordinador.** Claude Code guarda la memoria por carpeta, así que los worktrees **no ven** la memoria del proyecto. Cada sesión:
-  - lee el índice en `~/.claude/projects/-Users-daniel-chain-Projects-reciclaje-erp/memory/MEMORY.md`, solo para leer, con las lecciones de gates antes que nada;
-  - le manda al Coordinador, en una línea, lo que aprendió y vale guardar;
-  - no guarda memoria en su carpeta.
+- **Memoria: la escribe solo el Coordinador.** Como las sesiones viven en la ventana de la carpeta principal, todas VEN la memoria del proyecto. Cada sesión:
+  - la lee, con las lecciones de gates antes de su primer gate;
+  - **no escribe en ella**: lo que aprendió y vale guardar se lo manda al Coordinador en una línea.
 - **Un dato que viene de otra sesión no entra sin medir** a un documento o a un commit.
 - **Las citas del cliente** llevan su grado: (a) textual, (b) Daniel lo afirmó y el cliente asintió, (c) inferencia nuestra. Entre comillas solo va lo textual.
 - Español, de «tú», claro y corto. Primero la conclusión.
@@ -229,6 +235,7 @@ La hace el Coordinador: no es código de producto. Va con revisión de QA como n
 6. Este protocolo, commiteado a `develop` con el GO de un QA y el OK de Daniel. Sin ese commit, los worktrees nacen sin él.
 
 ### Daniel abre las sesiones
+Daniel abre cada sesión como una pestaña nueva de Claude Code en la misma ventana de VS Code, le pone el nombre y pega su prompt.
 El Coordinador deja un prompt por sesión en `ops/prompts/<rol>.md`, listo para pegar:
 
 ```
@@ -236,8 +243,8 @@ Eres «Eco <Rol>» del proyecto EcoBalance. Tu nombre para SendMessage es «Eco 
 Coordinador: «Eco Coordinador». Tu pareja: «Eco <QA n | Coder n>».
 Lee primero: CLAUDE.md y docs/equipo/Protocolo_Equipo_EcoBalance.md.
 Las reglas de Growth Status del ~/.claude/CLAUDE.md global no aplican aquí.
-Tu memoria no es la del proyecto: lee (solo lectura) ~/.claude/projects/-Users-daniel-chain-Projects-reciclaje-erp/memory/MEMORY.md
-y, antes de tu primer gate, los archivos de lecciones de gates que ahí se listan.
+Ves la memoria del proyecto: léela (las lecciones de gates antes de tu primer gate), pero NO escribas en ella; lo que valga guardar se lo mandas al Coordinador.
+Vives en la ventana de la carpeta principal: todo Bash empieza con `cd <tu worktree> &&`, git con `git -C <tu worktree>`, Read/Edit/Write con rutas absolutas del worktree, y en la carpeta principal solo lees (y escribes tu backlog en ops/). Al empezar cada tarea guarda la salida de `git -C ~/Projects/reciclaje-erp status --short` en tu evidencia, y antes de entregar compárala con esa copia: lo que aparezca de más lo dejaste tú.
 
 Tu worktree: ~/Projects/reciclaje-erp-wt/<rol>, rama <rol>/<tarea>. Puertos: back :<p>, front :<p>.
 BD de dev: reciclaje_<rol> (DATABASE_URL en tu backend/.env). BD de test: export TEST_DATABASE_URL=…/reciclaje_test_<rol>.
