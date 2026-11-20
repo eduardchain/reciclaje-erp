@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
 import { ArrowLeft, CreditCard, XCircle, Pencil, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,6 @@ import { WarningsList } from "@/components/shared/WarningsList";
 import { useSale, useCancelSale } from "@/hooks/useSales";
 import { formatCurrency, formatDate, formatDateTime, formatWeight, formatPercentage } from "@/utils/formatters";
 import { CHARGE_TYPE_LABELS } from "@/utils/constants";
-import { useAuthStore } from "@/stores/authStore";
 import { exportSalePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AttachmentsPanel } from "@/components/shared/AttachmentsPanel";
@@ -37,8 +37,7 @@ export default function SaleDetailPage() {
   const { hasPermission } = usePermissions();
   const canViewPrices = hasPermission("sales.view_prices");
   const canViewProfit = hasPermission("sales.view_profit");
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const pdfTitle = usePdfTitle();
   const cancel = useCancelSale();
 
   const [showCancel, setShowCancel] = useState(false);
@@ -93,7 +92,7 @@ export default function SaleDetailPage() {
               <XCircle className="h-4 w-4 mr-2" />Cancelar
             </Button>
           )}
-          <Button variant="outline" onClick={() => exportSalePDF(sale, orgName, { showPrices: canViewPrices, showProfit: canViewProfit })}>
+          <Button variant="outline" onClick={() => exportSalePDF(sale, pdfTitle, { showPrices: canViewPrices, showProfit: canViewProfit })}>
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
           <Button variant="outline" onClick={handleBack}>

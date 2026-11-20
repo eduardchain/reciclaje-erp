@@ -25,6 +25,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { LinkedPaymentChoice, type AnnulChoice } from "@/components/shared/LinkedPaymentChoice";
 import { OperationListCard } from "@/components/shared/OperationListCard";
 import { usePurchases, usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
 import { purchaseService } from "@/services/purchases";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { formatLinesTotalQuantity } from "@/utils/operationLines";
@@ -32,7 +33,6 @@ import { fetchAllPages } from "@/utils/fetchAllPages";
 import { ROUTES } from "@/utils/constants";
 import type { PurchaseResponse } from "@/types/purchase";
 import type { MetricCard } from "@/types/reports";
-import { useAuthStore } from "@/stores/authStore";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 import { exportPurchasesDetailExcel } from "@/utils/excelExport";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -48,8 +48,7 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [cancelOpen, setCancelOpen] = useState(false);
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const pdfTitle = usePdfTitle();
   const cancelMutation = useCancelPurchase();
   const [annulChoice, setAnnulChoice] = useState<AnnulChoice>(null);
   const { hasPermission } = usePermissions();
@@ -104,7 +103,7 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => exportPurchasePDF(purchase, orgName)}>
+          <DropdownMenuItem onClick={() => exportPurchasePDF(purchase, pdfTitle)}>
             <FileText className="h-4 w-4 mr-2" />
             Exportar PDF
           </DropdownMenuItem>

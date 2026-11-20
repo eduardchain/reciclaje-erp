@@ -40,13 +40,62 @@ export interface AccountStatementExportData {
   }>;
 }
 
+/**
+ * Encabezado de todos los PDF (pedido de Johana 2026-11-19, D3 de Daniel):
+ * SAC no ve la marca del software, solo su nombre. Sin el flag sale identico
+ * a lo de antes, incluido el nombre vacio ("EcoBalance ERP", no "... - ").
+ * Con el flag y nombre vacio tambien "EcoBalance ERP": un encabezado en
+ * blanco es peor que la marca (A2 de QA).
+ */
+export function pdfTitle(orgName: string | undefined, isSac: boolean): string {
+  if (!orgName) return "EcoBalance ERP";
+  return isSac ? orgName : `EcoBalance ERP - ${orgName}`;
+}
+
+/** Remision vacia = sin remision, como en #117 (trim): "  " no es un numero. */
+function purchaseDocTitle(purchase: PurchaseResponse): { title: string; sub: string | null; file: string } {
+  const n = purchase.purchase_number;
+  if (!purchase.inbound_order_id) {
+    return { title: `Compra #${n}`, sub: null, file: `compra_${n}.pdf` };
+  }
+  // SAC: el titulo es la Entrada con la remision que digita Johana. Debajo va
+  // la compra (Daniel, 19-nov): una remision liquida una compra POR PROVEEDOR
+  // (#93), asi que sin el numero de compra N PDF distintos saldrian iguales y
+  // no se cruzarian con el estado de cuenta, que los nombra «Compra #N».
+  const sub = `Compra #${n}`;
+  const remision = (purchase.inbound_remission_number ?? "").trim();
+  if (!remision) {
+    return { title: "Entrada (sin remisión)", sub, file: `entrada_sin_remision_compra_${n}.pdf` };
+  }
+  // Texto libre de hasta 50: se sanea como safeName del estado de cuenta (A3)
+  const safe = remision.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 30);
+  return { title: `Entrada #${remision}`, sub, file: `entrada_${safe}_compra_${n}.pdf` };
+}
+
+/**
+ * Pinta un valor en una columna de ancho fijo (Proveedor/Cliente comparten
+ * fila con «Fecha:»). Se mide con la fuente que ya esta puesta, que es con la
+ * que se pinta. Si entra, es la llamada de siempre; si no, se parte en lineas
+ * del mismo tamano. Devuelve los mm que ocupan las lineas de mas, para correr
+ * la fila siguiente.
+ */
+function textInColumn(doc: jsPDF, value: string, x: number, y: number, maxWidth: number): number {
+  if (doc.getTextWidth(value) <= maxWidth) {
+    doc.text(value, x, y);
+    return 0;
+  }
+  const lines: string[] = doc.splitTextToSize(value, maxWidth);
+  doc.text(lines, x, y);
+  return ((lines.length - 1) * doc.getFontSize() * doc.getLineHeightFactor() * 25.4) / 72;
+}
+
 const STATUS_LABELS: Record<string, string> = {
   registered: "Registrada",
   liquidated: "Liquidada",
   cancelled: "Cancelada",
 };
 
-export function exportPurchasePDF(purchase: PurchaseResponse, orgName?: string) {
+export function exportPurchasePDF(purchase: PurchaseResponse, title?: string) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 20;
@@ -54,18 +103,47 @@ export function exportPurchasePDF(purchase: PurchaseResponse, orgName?: string) 
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
+  doc.text(title || "EcoBalance ERP", 14, y);
   y += 8;
 
-  doc.setFontSize(14);
-  doc.text(`Compra #${purchase.purchase_number}`, 14, y);
+  const docTitle = purchaseDocTitle(purchase);
+  const statusText = STATUS_LABELS[purchase.status] ?? purchase.status;
+  // La remision es texto libre de hasta 50: el titulo no puede montarse sobre
+  // el estado, que va alineado a la derecha. Cada texto se mide con SU fuente
+  // (getTextWidth usa la que este puesta). Si entra a 14 pt, se pinta igual
+  // que siempre; si no, se achica hasta 9 pt y, si aun no entra, se parte.
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  const titleMax = pageWidth - 28 - doc.getTextWidth(statusText) - 4;
+  doc.setFont("helvetica", "bold");
+  let titleSize = 14;
+  doc.setFontSize(titleSize);
+  while (titleSize > 9 && doc.getTextWidth(docTitle.title) > titleMax) {
+    titleSize -= 0.5;
+    doc.setFontSize(titleSize);
+  }
+  const titleLines: string[] =
+    doc.getTextWidth(docTitle.title) > titleMax
+      ? doc.splitTextToSize(docTitle.title, titleMax)
+      : [docTitle.title];
+  doc.text(titleLines.length === 1 ? titleLines[0] : titleLines, 14, y);
 
   // Estado badge (derecha)
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  const statusText = STATUS_LABELS[purchase.status] ?? purchase.status;
   doc.text(statusText, pageWidth - 14, y, { align: "right" });
-  y += 12;
+  // Lineas extra del titulo partido (mm = pt x factor de interlineado / 72 x 25.4)
+  const titleExtra = ((titleLines.length - 1) * titleSize * doc.getLineHeightFactor() * 25.4) / 72;
+  if (docTitle.sub) {
+    // Debajo de la ULTIMA linea del titulo, en gris; el color se restaura
+    // antes de cualquier otro texto. La compra directa no entra aca.
+    doc.setTextColor(110);
+    doc.text(docTitle.sub, 14, y + titleExtra + 5.5);
+    doc.setTextColor(0);
+    y += 13.5 + titleExtra;
+  } else {
+    y += 12 + titleExtra;
+  }
 
   // Linea separadora
   doc.setDrawColor(200);
@@ -77,13 +155,13 @@ export function exportPurchasePDF(purchase: PurchaseResponse, orgName?: string) 
   doc.setFont("helvetica", "bold");
   doc.text("Proveedor:", 14, y);
   doc.setFont("helvetica", "normal");
-  doc.text(purchase.supplier_name, 55, y);
+  const nameExtra = textInColumn(doc, purchase.supplier_name, 55, y, pageWidth / 2 + 10 - 55 - 3);
 
   doc.setFont("helvetica", "bold");
   doc.text("Fecha:", pageWidth / 2 + 10, y);
   doc.setFont("helvetica", "normal");
   doc.text(formatDate(purchase.date), pageWidth / 2 + 35, y);
-  y += 6;
+  y += 6 + nameExtra;
 
   if (purchase.vehicle_plate) {
     doc.setFont("helvetica", "bold");
@@ -157,7 +235,7 @@ export function exportPurchasePDF(purchase: PurchaseResponse, orgName?: string) 
   doc.text(`Total: ${formatCurrency(purchase.total_amount)}`, pageWidth - 14, y + 2, { align: "right" });
 
   // Descargar
-  doc.save(`compra_${purchase.purchase_number}.pdf`);
+  doc.save(docTitle.file);
 }
 
 const SALE_STATUS_LABELS: Record<string, string> = {
@@ -166,7 +244,7 @@ const SALE_STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelada",
 };
 
-export function exportSalePDF(sale: SaleResponse, orgName?: string, options?: { showPrices?: boolean; showProfit?: boolean }) {
+export function exportSalePDF(sale: SaleResponse, title?: string, options?: { showPrices?: boolean; showProfit?: boolean }) {
   const showPrices = options?.showPrices !== false;
   const showProfit = options?.showProfit !== false;
   const doc = new jsPDF();
@@ -176,7 +254,7 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string, options?: { 
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
+  doc.text(title || "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);
@@ -197,13 +275,13 @@ export function exportSalePDF(sale: SaleResponse, orgName?: string, options?: { 
   doc.setFont("helvetica", "bold");
   doc.text("Cliente:", 14, y);
   doc.setFont("helvetica", "normal");
-  doc.text(sale.customer_name, 55, y);
+  const nameExtra = textInColumn(doc, sale.customer_name, 55, y, pageWidth / 2 + 10 - 55 - 3);
 
   doc.setFont("helvetica", "bold");
   doc.text("Fecha:", pageWidth / 2 + 10, y);
   doc.setFont("helvetica", "normal");
   doc.text(formatDate(sale.date), pageWidth / 2 + 35, y);
-  y += 6;
+  y += 6 + nameExtra;
 
   if (sale.warehouse_name) {
     doc.setFont("helvetica", "bold");
@@ -341,7 +419,7 @@ const DE_STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelada",
 };
 
-export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string, options?: { showProfit?: boolean }) {
+export function exportDoubleEntryPDF(de: DoubleEntryResponse, title?: string, options?: { showProfit?: boolean }) {
   const showProfit = options?.showProfit !== false;
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -350,7 +428,7 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string, 
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
+  doc.text(title || "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);
@@ -371,13 +449,13 @@ export function exportDoubleEntryPDF(de: DoubleEntryResponse, orgName?: string, 
   doc.setFont("helvetica", "bold");
   doc.text("Proveedor:", 14, y);
   doc.setFont("helvetica", "normal");
-  doc.text(de.supplier_name, 55, y);
+  const nameExtra = textInColumn(doc, de.supplier_name, 55, y, pageWidth / 2 + 10 - 55 - 3);
 
   doc.setFont("helvetica", "bold");
   doc.text("Fecha:", pageWidth / 2 + 10, y);
   doc.setFont("helvetica", "normal");
   doc.text(formatDate(de.date), pageWidth / 2 + 35, y);
-  y += 6;
+  y += 6 + nameExtra;
 
   doc.setFont("helvetica", "bold");
   doc.text("Cliente:", 14, y);
@@ -525,7 +603,7 @@ export type AccountStatementPdfFormat = "mobile" | "desktop";
 
 export function exportAccountStatementPDF(
   data: AccountStatementExportData,
-  orgName?: string,
+  title?: string,
   format: AccountStatementPdfFormat = "mobile",
 ) {
   const isMobile = format === "mobile";
@@ -554,7 +632,7 @@ export function exportAccountStatementPDF(
   // Header — mobile sube fuente porque iPhone muestra A4 al ancho completo (210mm en ~390pt → 9pt PDF se ve como ~5pt)
   doc.setFontSize(isMobile ? 17 : 18);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
+  doc.text(title || "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);
@@ -885,7 +963,7 @@ export function exportAccountStatementPDF(
   doc.save(`estado_cuenta_${safeName}.pdf`);
 }
 
-export function exportBalanceSheetPDF(data: BalanceSheetResponse, orgName?: string) {
+export function exportBalanceSheetPDF(data: BalanceSheetResponse, title?: string) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 20;
@@ -893,7 +971,7 @@ export function exportBalanceSheetPDF(data: BalanceSheetResponse, orgName?: stri
   // Header
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
+  doc.text(title || "EcoBalance ERP", 14, y);
   y += 8;
 
   doc.setFontSize(14);
@@ -1026,7 +1104,7 @@ export function exportBalanceSheetPDF(data: BalanceSheetResponse, orgName?: stri
   doc.save("balance_general.pdf");
 }
 
-export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?: string, filtersLabel?: string) {
+export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, title?: string, filtersLabel?: string) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 20;
@@ -1060,7 +1138,7 @@ export function exportBalanceDetailedPDF(data: BalanceDetailedResponse, orgName?
   // Header
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(orgName ? `EcoBalance ERP - ${orgName}` : "EcoBalance ERP", 14, y);
+  doc.text(title || "EcoBalance ERP", 14, y);
   y += 7;
 
   doc.setFontSize(13);

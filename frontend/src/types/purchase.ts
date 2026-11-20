@@ -128,6 +128,8 @@ export interface PurchaseResponse extends BaseEntity {
   /** SAC Ciclo B (B1) — origen inbound; null para compras manuales / orgs sin recepción */
   inbound_order_id?: string | null;
   inbound_order_number?: number | null;
+  /** Remisión de la Entrada de origen: título del PDF de SAC (2026-11-19) */
+  inbound_remission_number?: string | null;
   /** SAC Ciclo D — recolector de la entrada de origen (pre-carga la comisión al liquidar) */
   collector_id?: string | null;
   collector_name?: string | null;

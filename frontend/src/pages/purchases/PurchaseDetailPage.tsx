@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
 import { ArrowLeft, CreditCard, XCircle, Pencil, FileText, PackageOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,6 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { LinkedPaymentChoice } from "@/components/shared/LinkedPaymentChoice";
 import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
-import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
 import { CHARGE_TYPE_LABELS } from "@/utils/constants";
 import { RETENTION_TYPE_LABELS } from "@/types/purchase";
@@ -42,8 +42,7 @@ export default function PurchaseDetailPage() {
   const cancel = useCancelPurchase();
   const { hasPermission } = usePermissions();
   const canViewPrices = hasPermission("purchases.view_prices");
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const pdfTitle = usePdfTitle();
 
   const [showCancel, setShowCancel] = useState(false);
   const [annulChoice, setAnnulChoice] = useState<"annul" | "advance" | null>(null);
@@ -106,7 +105,7 @@ export default function PurchaseDetailPage() {
               Cancelar
             </Button>
           )}
-          <Button variant="outline" onClick={() => exportPurchasePDF(purchase, orgName)}>
+          <Button variant="outline" onClick={() => exportPurchasePDF(purchase, pdfTitle)}>
             <FileText className="h-4 w-4 mr-2" />
             PDF
           </Button>

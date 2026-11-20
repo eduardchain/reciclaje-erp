@@ -210,6 +210,9 @@ class PurchaseResponse(PurchaseBase):
     # (solo en list y detail; None para compras manuales y orgs sin recepcion)
     inbound_order_id: Optional[UUID] = Field(None, description="Recepcion de origen (si la compra fue derivada)")
     inbound_order_number: Optional[int] = Field(None, description="Numero de la recepcion de origen")
+    # Pedido de Johana 2026-11-19: el PDF de una compra de SAC se titula con la
+    # remision que ella digita en la Entrada, no con el consecutivo de compra
+    inbound_remission_number: Optional[str] = Field(None, description="Remision de la entrada de origen")
     # SAC Ciclo D: recolector capturado en la entrada — la Liquidate page
     # pre-carga la comision (tarifa comision_green_loop x kg, editable)
     collector_id: Optional[UUID] = Field(None, description="Recolector de la entrada de origen")

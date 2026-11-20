@@ -92,7 +92,7 @@ Johana: «cambiar ese encabezado que solamente diga SAC y que donde dice compra 
 **Decisiones de Daniel (ventanita, 19-nov):**
 - **D3.** El encabezado dice solo el nombre de la org, sin «EcoBalance ERP -», en **todos** los PDF y **solo en SAC**, es decir con `kg_ledger_enabled`. Costa y Meta siguen igual.
 - **D4.** Si la Entrada no tiene remisión, el título dice «Entrada (sin remisión)».
-- **D5.** El PDF **no** lleva el número de compra. QA propuso conservar una línea «Compra #N» para conciliar contra el estado de cuenta, y Daniel eligió quitarlo. Queda como decisión escrita.
+- **D5 (revertida el mismo día).** Primero Daniel eligió quitar el número de compra. Al ver el PDF lo revirtió: «una remisión puede tener varias compras». Desde #93 una Entrada liquida una compra por proveedor, así que sin el número N PDF distintos salían iguales y no se cruzaban con el estado de cuenta. Ahora va «Compra #N» en gris debajo del título, y el archivo es `entrada_<rem>_compra_<N>.pdf`. Era la propuesta inicial de QA.
 
 **Condiciones de QA (GO de plan con A1–A4):**
 - **A1.** Commit y pasada aparte, después del commit de la sede.
@@ -102,6 +102,6 @@ Johana: «cambiar ese encabezado que solamente diga SAC y que donde dice compra 
 
 **Diseño:**
 - **Backend.** `_inbound_origin_map` suma `InboundOrder.remission_number` y `PurchaseResponse` gana `inbound_remission_number`. Se llena en list y detail, y llega null sin Entrada.
-- **Frontend.** Las 6 funciones de `pdfExport.ts` reciben el título armado, y los 10 llamadores pasan `usePdfTitle()`. Para la compra con Entrada, el título es «Entrada #<remisión>» o «Entrada (sin remisión)», y el archivo es `entrada_<remisión saneada | sin_remision>.pdf`.
+- **Frontend.** Las 6 funciones de `pdfExport.ts` reciben el título armado, y los 10 llamadores pasan `usePdfTitle()`. Para la compra con Entrada, el título es «Entrada #<remisión>» o «Entrada (sin remisión)», con «Compra #N» debajo, y el archivo es `entrada_<remisión saneada | sin_remision>_compra_<N>.pdf`.
 - **Tests backend.** Una Entrada con remisión la devuelve en detail y en list; una Entrada sin remisión devuelve null; una compra directa también da null. Plantado: no seleccionar la columna hace caer los dos primeros.
 - **Golden: no aplica, medido.** `/purchases` no está en CAPTURES.

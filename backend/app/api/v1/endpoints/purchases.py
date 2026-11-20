@@ -41,7 +41,7 @@ router = APIRouter()
 
 def _inbound_origin_map(db: Session, purchase_ids: list, organization_id: UUID) -> dict:
     """SAC Ciclo B (B1): purchase_id -> (inbound_order_id, order_number,
-    collector_id, collector_name). Ciclo D suma el recolector al MISMO lookup
+    collector_id, collector_name, remission_number). Ciclo D suma el recolector al MISMO lookup
     (outerjoin, cero queries extra) — la Liquidate page pre-carga la comision.
 
     Lookup por pagina (F3 QA): la query paginada de compras NO se toca —
@@ -66,6 +66,7 @@ def _inbound_origin_map(db: Session, purchase_ids: list, organization_id: UUID) 
             InboundOrder.order_number,
             InboundOrder.collector_id,
             TP.name,
+            InboundOrder.remission_number,
         )
         .join(InboundOrder, InboundOrderPurchase.inbound_order_id == InboundOrder.id)
         .outerjoin(TP, TP.id == InboundOrder.collector_id)
@@ -74,7 +75,10 @@ def _inbound_origin_map(db: Session, purchase_ids: list, organization_id: UUID) 
             InboundOrderPurchase.purchase_id.in_(purchase_ids),
         )
     ).all()
-    return {pid: (oid, num, cid, cname) for pid, oid, num, cid, cname in rows}
+    return {
+        pid: (oid, num, cid, cname, remision)
+        for pid, oid, num, cid, cname, remision in rows
+    }
 
 
 def _enrich_purchase_response(purchase: Purchase, db: Session = None, inbound_map: dict = None) -> dict:
@@ -120,6 +124,8 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None, inbound_ma
         # SAC Ciclo D: recolector de la entrada (pre-carga de comision al liquidar)
         data["collector_id"] = origin[2] if origin else None
         data["collector_name"] = origin[3] if origin else None
+        # PDF de SAC (2026-11-19): el titulo es la remision de la entrada
+        data["inbound_remission_number"] = origin[4] if origin else None
 
     # Resolver nombres de usuarios de auditoria
     if db:
