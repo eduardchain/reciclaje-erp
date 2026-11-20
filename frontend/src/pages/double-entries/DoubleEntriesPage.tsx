@@ -22,8 +22,8 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { OperationListCard } from "@/components/shared/OperationListCard";
 import { useDoubleEntries, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
 import { doubleEntryService } from "@/services/doubleEntries";
-import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatPercentage } from "@/utils/formatters";
 import { exportDoubleEntryPDF } from "@/utils/pdfExport";
 import { exportDoubleEntriesDetailExcel } from "@/utils/excelExport";
@@ -41,8 +41,7 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
   const location = useLocation();
   const [cancelOpen, setCancelOpen] = useState(false);
   const cancel = useCancelDoubleEntry();
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const pdfTitle = usePdfTitle();
   const { hasPermission } = usePermissions();
 
   const canEdit = de.status === "registered" && hasPermission("double_entries.edit");
@@ -93,7 +92,7 @@ function ActionsCell({ de }: { de: DoubleEntryResponse }) {
           {de.status === "liquidated" && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => exportDoubleEntryPDF(de, orgName, { showProfit: hasPermission("double_entries.view_profit") })}>
+              <DropdownMenuItem onClick={() => exportDoubleEntryPDF(de, pdfTitle, { showProfit: hasPermission("double_entries.view_profit") })}>
                 <FileText className="h-4 w-4 mr-2" />
                 Exportar PDF
               </DropdownMenuItem>

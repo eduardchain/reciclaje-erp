@@ -55,7 +55,14 @@ from sqlalchemy import create_engine, text
 from app.core.config import settings as app_settings
 from app.models import Base
 
-TEST_DATABASE_URL = "postgresql://admin:test_password@localhost:5433/reciclaje_test"
+# Misma eleccion y misma guarda que tests/conftest.py: cada sesion del equipo
+# tiene su base de test (TEST_DATABASE_URL); sin la variable, la de siempre.
+# Esta base se recrea con DROP SCHEMA, asi que solo se acepta reciclaje_test*
+# en localhost:5433.
+TEST_DATABASE_URL = (
+    os.environ.get("TEST_DATABASE_URL")
+    or "postgresql://admin:test_password@localhost:5433/reciclaje_test"
+)
 
 EXCLUDED_TABLES = {"alembic_version"}
 
@@ -224,6 +231,12 @@ def main():
         sys.exit(2)
     if "76.13.118.195" in dev_url or "ecobalance.cc" in dev_url:
         print("ABORTA: DATABASE_URL apunta a produccion — este script es dev/test only")
+        sys.exit(2)
+
+    from sqlalchemy.engine import make_url
+    _t = make_url(TEST_DATABASE_URL)
+    if _t.port != 5433 or _t.host not in ("localhost", "127.0.0.1") or not (_t.database or "").startswith("reciclaje_test"):
+        print(f"ABORTA: TEST_DATABASE_URL tiene que ser reciclaje_test* en localhost:5433 (llego {_t.host}:{_t.port}/{_t.database})")
         sys.exit(2)
 
     print(f"Dev (migrado):      {dev_url.split('@')[-1]}")

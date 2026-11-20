@@ -148,6 +148,18 @@ export function useKgProfiles(
   });
 }
 
+export function useSetFormOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (materialIds: (string | null)[]) => sacConfigService.setFormOrder(materialIds),
+    onSuccess: () => {
+      toast.success("Formato guardado");
+      qc.invalidateQueries({ queryKey: ["kg-profiles"] });
+    },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al guardar el formato")),
+  });
+}
+
 export function useUpsertKgProfile() {
   const qc = useQueryClient();
   return useMutation({

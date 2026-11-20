@@ -39,7 +39,7 @@ router = APIRouter()
 # Helper Functions
 # ============================================================================
 
-def _tax_rows(db: Session, *, sale_id=None, willard_delivery_id=None) -> list[dict]:
+def _tax_rows(db: Session, *, sale_id=None, willard_delivery_id=None, purchase_id=None) -> list[dict]:
     """IVA y retenciones de un documento, con el nombre de cada entidad.
 
     Detail-only a proposito: en el listado seria un N+1 por fila. El schema lo
@@ -54,6 +54,9 @@ def _tax_rows(db: Session, *, sale_id=None, willard_delivery_id=None) -> list[di
     )
     if sale_id is not None:
         query = query.where(DocumentTax.sale_id == sale_id)
+    elif purchase_id is not None:
+        # Reparto por compra §4 (R9): el detalle de la compra lo reusa
+        query = query.where(DocumentTax.purchase_id == purchase_id)
     else:
         query = query.where(DocumentTax.willard_delivery_id == willard_delivery_id)
     return [

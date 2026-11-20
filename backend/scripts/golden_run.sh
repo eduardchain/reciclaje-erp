@@ -18,15 +18,46 @@
 #   2. el log del server no puede decir "address already in use";
 #   3. el PID que ESCUCHA tiene que ser el que lanzamos.
 #
-# Uso: scripts/golden_run.sh <commit-base> <directorio-de-salida>
+# Uso: scripts/golden_run.sh <commit-base> <directorio-de-salida> [--db-before URL --db-after URL]
+#
+# 🔴 DOS BASES DE DATOS (plan-redondeo-precio-compras, C1 de QA)
+#
+# Sin opciones, los dos backends leen la MISMA base del `.env`. Eso sirve cuando
+# la migracion es aditiva, pero es VACUO cuando la migracion cambia como se lee
+# un valor que ya existe: con la base migrada, el codigo BASE tambien lee la
+# columna nueva (psycopg devuelve el Decimal con la escala de la BD, no la del
+# modelo), asi que los dos lados salen iguales justo en lo que se esta midiendo.
+# Con `--db-before`/`--db-after`, cada uvicorn arranca con su DATABASE_URL: el
+# lado BEFORE sobre una copia SIN migrar y el AFTER sobre la migrada.
+#
+# Guarda 4 (solo con dos bases): el esquema de las dos URLs tiene que DIFERIR.
+# Se consulta la URL QUE USA CADA PROCESO, se imprimen las columnas distintas y,
+# si no hay ninguna, aborta: dos bases con el mismo esquema no prueban la
+# migracion.
 set -euo pipefail
 
 BASE_COMMIT="${1:?falta el commit base (BEFORE)}"
 OUT="${2:?falta el directorio de salida}"
+shift 2
+DB_BEFORE=""
+DB_AFTER=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --db-before) DB_BEFORE="${2:?falta la URL de --db-before}"; shift 2 ;;
+    --db-after)  DB_AFTER="${2:?falta la URL de --db-after}"; shift 2 ;;
+    *) echo "🔴 opcion desconocida: $1"; exit 2 ;;
+  esac
+done
+if { [ -n "$DB_BEFORE" ] && [ -z "$DB_AFTER" ]; } || { [ -z "$DB_BEFORE" ] && [ -n "$DB_AFTER" ]; }; then
+  echo "🔴 ABORTA: --db-before y --db-after van juntas o ninguna."
+  exit 2
+fi
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WT="${OUT}/wt-before"
-P_BEFORE=8001
-P_AFTER=8002
+# Puertos por entorno (protocolo del equipo §1): 8001 es la integracion del
+# Coordinador, asi que cada sesion pasa los suyos. Sin variables, los de siempre.
+P_BEFORE="${GOLDEN_PORT_BEFORE:-8001}"
+P_AFTER="${GOLDEN_PORT_AFTER:-8002}"
 
 : "${SEED_SU_EMAIL:?exportar SEED_SU_EMAIL}"
 : "${SEED_SU_PASSWORD:?exportar SEED_SU_PASSWORD}"
@@ -63,15 +94,54 @@ cp "$REPO/backend/.env" "$WT/backend/.env"
 ln -sfn "$REPO/backend/venv" "$WT/backend/venv"
 echo "✓ worktree BEFORE en $(git -C "$WT" rev-parse --short HEAD)"
 
+# --- Guarda 4: con dos bases, sus esquemas tienen que DIFERIR --------------
+if [ -n "$DB_BEFORE" ]; then
+  echo "▶ dos bases: BEFORE y AFTER con DATABASE_URL propio (credenciales ocultas)"
+  if ! "$REPO/backend/venv/bin/python" - "$DB_BEFORE" "$DB_AFTER" <<'PY'
+import sys
+import psycopg2
+
+def esquema(url):
+    with psycopg2.connect(url) as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT table_name, column_name, data_type, numeric_precision, numeric_scale "
+            "FROM information_schema.columns WHERE table_schema = 'public'"
+        )
+        return {(t, col): (dt, p, sc) for t, col, dt, p, sc in cur.fetchall()}
+
+antes, despues = esquema(sys.argv[1]), esquema(sys.argv[2])
+distintas = sorted(k for k in antes.keys() | despues.keys() if antes.get(k) != despues.get(k))
+print(f"  columnas en BEFORE: {len(antes)} · en AFTER: {len(despues)} · distintas: {len(distintas)}")
+for t, col in distintas:
+    print(f"  {t}.{col}: BEFORE {antes.get((t, col))} -> AFTER {despues.get((t, col))}")
+sys.exit(0 if distintas else 1)
+PY
+  then
+    echo "🔴 ABORTA: las dos bases tienen el MISMO esquema. Un golden de dos bases"
+    echo "   cuyas bases no difieren no prueba la migracion."
+    exit 1
+  fi
+  echo "✓ guarda 4: los esquemas de las dos bases difieren (detalle arriba)"
+fi
+
 # ⚠️ El `exec` no es cosmetico: sin el, `$!` es el PID del SUBSHELL y no el de
 # uvicorn, asi que el `kill` del final mata un proceso que ya murio y deja los
 # backends VIVOS — que es exactamente la causa de C1. La primera version de este
 # script reproducia el problema que venia a evitar; lo destapo su propio control
 # positivo, no una lectura.
-(cd "$WT/backend" && exec nohup ./venv/bin/uvicorn app.main:app --port "$P_BEFORE" > "$OUT/b_before.log" 2>&1) &
-echo $! > "$OUT/pid_before"
-(cd "$REPO/backend" && exec nohup ./venv/bin/uvicorn app.main:app --port "$P_AFTER" > "$OUT/b_after.log" 2>&1) &
-echo $! > "$OUT/pid_after"
+# Con dos bases, cada proceso recibe su DATABASE_URL por entorno, que le gana
+# al `.env` (pydantic-settings). Sin opciones, el arranque es el de siempre.
+if [ -n "$DB_BEFORE" ]; then
+  (cd "$WT/backend" && export DATABASE_URL="$DB_BEFORE" && exec nohup ./venv/bin/uvicorn app.main:app --port "$P_BEFORE" > "$OUT/b_before.log" 2>&1) &
+  echo $! > "$OUT/pid_before"
+  (cd "$REPO/backend" && export DATABASE_URL="$DB_AFTER" && exec nohup ./venv/bin/uvicorn app.main:app --port "$P_AFTER" > "$OUT/b_after.log" 2>&1) &
+  echo $! > "$OUT/pid_after"
+else
+  (cd "$WT/backend" && exec nohup ./venv/bin/uvicorn app.main:app --port "$P_BEFORE" > "$OUT/b_before.log" 2>&1) &
+  echo $! > "$OUT/pid_before"
+  (cd "$REPO/backend" && exec nohup ./venv/bin/uvicorn app.main:app --port "$P_AFTER" > "$OUT/b_after.log" 2>&1) &
+  echo $! > "$OUT/pid_after"
+fi
 sleep 6
 
 # --- Guardas 2 y 3: el proceso que responde es EL QUE LANZAMOS -----------

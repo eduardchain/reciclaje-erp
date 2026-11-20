@@ -416,13 +416,18 @@ class InboundOrderService:
         from app.services.purchase import purchase as purchase_service
 
         QTY_Q = Decimal("0.0001")   # escala Numeric(15,4) de la BD
-        PRICE_Q = Decimal("0.01")   # escala Numeric(15,2)
+        # Escala Numeric(21,8) del unitario (plan-redondeo-precio-compras).
+        # Con 0.01 el error del redondeo se multiplicaba por la cantidad:
+        # $3.138.450 para 1.503 unidades nacian $3.138.444,36.
+        PRICE_Q = Decimal("0.00000001")
         # Escala REAL del reparto: al inventario entra la cantidad de
         # purchase_lines, que es Numeric(10,3). La asignacion permitia 4
         # decimales, asi que la identidad "pesado = repartido + descuadre" se
         # rompia hasta 0,0005 kg por asignacion SIN NINGUN AVISO. Con pesos en
         # kg (Q-13) dejo de ser hipotetico.
         ALLOC_Q = Decimal("0.001")
+        # Escala Numeric(15,2) de inbound_order_lines.reference_unit_price.
+        REF_Q = Decimal("0.01")
 
         # El mapa se arma aca (y no en la fase de validacion, donde estaba)
         # porque el modo por kg necesita el peso y la cantidad de la linea para
@@ -439,6 +444,20 @@ class InboundOrderService:
         # numero. Hacerlo aca y no en cada consumidor es lo que hace la
         # identidad exacta por construccion en vez de por vigilancia.
         for pl in payload.lines:
+            # C1 de QA (plan-redondeo-precio-compras): la columna es
+            # Numeric(15,2), pero el valor EN MEMORIA va sin redondear al ajuste
+            # del descuadre (pool, movimiento y aviso). Cuantizar aca hace que
+            # el numero que valora el descuadre sea el que se persiste, venga
+            # de la pantalla o del API.
+            if pl.reference_unit_price is not None:
+                pl.reference_unit_price = pl.reference_unit_price.quantize(REF_Q)
+                if pl.reference_unit_price <= 0:
+                    material = db.get(Material, pl.material_id)
+                    code = material.code if material else pl.material_id
+                    raise _err(
+                        f"El precio de referencia de {code} es demasiado bajo: "
+                        f"queda en $0 al redondear a centavos"
+                    )
             for a in pl.allocations:
                 a.quantity = a.quantity.quantize(ALLOC_Q)
                 # El schema exige > 0, pero eso es ANTES de cuantizar: 0,0004
@@ -459,18 +478,23 @@ class InboundOrderService:
                     # El peso derivado NO se puede colgar del payload (schema
                     # con extra="forbid"), asi que viaja en un mapa con clave de
                     # negocio: el material aparece una sola vez en el reparto
-                    # (D3) y la asignacion es unica por (linea, tercero).
+                    # (D3) y la asignacion es unica por (linea, COMPRA) — con
+                    # dos compras del mismo proveedor (Q-65) la llave por
+                    # proveedor pisaria un peso con otro.
                     total, peso = self._total_desde_kg(
                         db, pl.material_id, a, lines_by_material.get(pl.material_id)
                     )
                     a.total_price = total
-                    pesos_prorrateados[(pl.material_id, a.third_party_id)] = peso
+                    pesos_prorrateados[(pl.material_id, a.purchase_slot)] = peso
 
                 if a.total_price is not None:
                     # Q-15: el unitario es una formula — "costo total dividido
-                    # unidades" (Hugo). Se cuantiza a PRICE_Q para que la firma
-                    # de #93 vea el mismo numero y no dispare un
-                    # revert-and-reapply innecesario en cada re-liquidacion.
+                    # unidades" (Hugo). Se cuantiza a PRICE_Q (8 decimales) aca,
+                    # en el mismo punto donde se persiste, para que la firma de
+                    # #93 vea el mismo numero y no dispare un revert-and-reapply
+                    # innecesario en cada re-liquidacion. Con 8 decimales,
+                    # cantidad x unitario redondeado a centavos vuelve al total
+                    # digitado.
                     a.unit_price = (a.total_price / a.quantity).quantize(PRICE_Q)
                     if a.unit_price <= 0:
                         material = db.get(Material, pl.material_id)
@@ -530,15 +554,18 @@ class InboundOrderService:
                     f"({disc:+}) y no trae precio de referencia — es "
                     "obligatorio para valorar el descuadre (D6)"
                 )
-            # Proveedor duplicado en la misma linea (UNIQUE en BD — 422 legible)
-            seen_tp: set = set()
+            # Reparto por compra §3.2: una asignacion por (linea, COMPRA) —
+            # en una compra un material es UNA linea de compra (UNIQUE en BD,
+            # aca el 422 legible). El mismo proveedor SI puede repetirse en la
+            # linea si va en dos compras distintas (Q-65).
+            seen_slot: set = set()
             for a in pl.allocations:
-                if a.third_party_id in seen_tp:
+                if a.purchase_slot in seen_slot:
                     raise _err(
-                        f"El mismo proveedor aparece dos veces en la linea de "
-                        f"{material.code} — consolide las cantidades"
+                        f"El material {material.code} aparece dos veces en la "
+                        f"compra {a.purchase_slot} — consolide las cantidades"
                     )
-                seen_tp.add(a.third_party_id)
+                seen_slot.add(a.purchase_slot)
 
             plan.append({
                 "payload": pl, "order_line": order_line,
@@ -558,11 +585,27 @@ class InboundOrderService:
                 "— la liquidacion es de una sola vez (todas las lineas)"
             )
 
+        # Reparto por compra §3.2: cada compra (slot) tiene UN proveedor. Es
+        # una regla entre filas que la BD no impone; la impone este punto, que
+        # es el unico escritor de asignaciones (verificado).
+        slot_supplier: dict = {}
+        for item in plan:
+            for a in item["payload"].allocations:
+                prev = slot_supplier.setdefault(a.purchase_slot, a.third_party_id)
+                if prev != a.third_party_id:
+                    names = []
+                    for tp_id in (prev, a.third_party_id):
+                        tp = db.get(ThirdParty, tp_id)
+                        names.append(tp.name if tp else str(tp_id))
+                    raise _err(
+                        f"La compra {a.purchase_slot} tiene dos proveedores "
+                        f"({names[0]} y {names[1]}) — cada compra es de un solo "
+                        "proveedor; use otra compra para el segundo"
+                    )
+
         # Validar proveedores (activos, org) — material_supplier lo exige
         # purchase.create; aca el fail-fast con nombre
-        supplier_ids = {
-            a.third_party_id for item in plan for a in item["payload"].allocations
-        }
+        supplier_ids = set(slot_supplier.values())
         for tp_id in supplier_ids:
             self._validate_third_party(db, tp_id, organization_id)
 
@@ -593,44 +636,102 @@ class InboundOrderService:
         # nombre) y sin duplicar proveedor. El tope Σret < total de la compra
         # lo valida _apply_retentions donde siempre vivio (#79) — un 422 tardio
         # es seguro: D14 hace rollback total (criterio 27).
-        retentions_by_supplier: dict = {}
+        # Reparto por compra §3.1: por COMPRA (slot), con el proveedor como
+        # dato de control — con dos compras del mismo proveedor la llave por
+        # proveedor no sabria a cual va cada bloque.
+        retentions_by_slot: dict = {}
         for block in (payload.supplier_retentions or []):
-            if block.third_party_id not in supplier_ids:
-                tp = db.get(ThirdParty, block.third_party_id)
-                name = tp.name if tp else str(block.third_party_id)
+            self._check_slot_block(db, block, slot_supplier, "Retenciones")
+            if block.purchase_slot in retentions_by_slot:
                 raise _err(
-                    f"Retenciones para {name}, que no esta en el reparto — "
-                    "las retenciones son por proveedor asignado"
-                )
-            if block.third_party_id in retentions_by_supplier:
-                raise _err(
-                    "El mismo proveedor aparece dos veces en "
+                    f"La compra {block.purchase_slot} aparece dos veces en "
                     "supplier_retentions — consolide sus retenciones en un bloque"
                 )
-            retentions_by_supplier[block.third_party_id] = block.retentions
+            retentions_by_slot[block.purchase_slot] = block.retentions
 
         # Pago de contado por proveedor (pruebas de usuario 2026-08-11) —
         # misma forma que las retenciones: opcional, del reparto, sin duplicar.
         # La cuenta se valida aca para fallar ANTES de escribir; el monto lo
         # pone purchase.liquidate (el NETO), nunca este payload.
-        payment_by_supplier: dict = {}
+        payment_by_slot: dict = {}
         for pay in (payload.supplier_payments or []):
-            if pay.third_party_id not in supplier_ids:
-                tp = db.get(ThirdParty, pay.third_party_id)
-                name = tp.name if tp else str(pay.third_party_id)
+            self._check_slot_block(db, pay, slot_supplier, "Pago de contado")
+            if pay.purchase_slot in payment_by_slot:
                 raise _err(
-                    f"Pago de contado para {name}, que no esta en el reparto"
-                )
-            if pay.third_party_id in payment_by_supplier:
-                raise _err(
-                    "El mismo proveedor aparece dos veces en supplier_payments"
+                    f"La compra {pay.purchase_slot} aparece dos veces en supplier_payments"
                 )
             account = db.get(MoneyAccount, pay.account_id)
             if not account or account.organization_id != organization_id:
                 raise _err("Cuenta de dinero no encontrada", status.HTTP_404_NOT_FOUND)
             if not account.is_active:
                 raise _err(f"La cuenta '{account.name}' esta inactiva")
-            payment_by_supplier[pay.third_party_id] = pay.account_id
+            payment_by_slot[pay.purchase_slot] = pay.account_id
+
+        # Reparto por compra §4: IVA por compra (opcional). El tipo lo valida
+        # apply_taxes (en una compra solo `iva`); aca, que la compra exista y
+        # que el bloque no venga dos veces — ANTES de escribir.
+        taxes_by_slot: dict = {}
+        for block in (payload.purchase_taxes or []):
+            self._check_slot_block(db, block, slot_supplier, "IVA")
+            if block.purchase_slot in taxes_by_slot:
+                raise _err(
+                    f"La compra {block.purchase_slot} aparece dos veces en purchase_taxes"
+                )
+            taxes_by_slot[block.purchase_slot] = block.taxes
+
+        # Defensa dura (QA c, §3.2): la compra viva del puente en el slot s
+        # tiene que ser del proveedor que el reparto GUARDADO tenia en s. Si
+        # no coinciden, el puente y el reparto se contradicen (no lo produce
+        # ningun flujo) y reusar por slot cruzaria proveedores: 409 antes de
+        # escribir. Que el payload traiga OTRO proveedor en s no es esto — es
+        # un cambio legitimo y la compra vieja se cancela abajo.
+        bridge_slot = self._bridge_slots(db, order.id)
+        prev_slot_supplier: dict = {}
+        for line in order.lines:
+            for alloc in (line.allocations or []):
+                prev_slot_supplier.setdefault(alloc.purchase_slot, alloc.third_party_id)
+
+        existing = self._linked_purchases(db, organization_id, order.id)
+        live_by_slot: dict = {}
+        for p in existing:
+            if p.status == "liquidated":
+                # No debe pasar (unliquidate las devolvio a registered) —
+                # defensa dura antes que corromper el reparto
+                raise _err(
+                    f"La compra #{p.purchase_number} sigue liquidada — estado "
+                    "inconsistente, desliquide la entrada primero",
+                    status.HTTP_409_CONFLICT,
+                )
+            if p.status != "registered":
+                continue
+            slot = bridge_slot.get(p.id)
+            if slot is None:
+                # QA C1: una compra VIVA sin slot no la produce ningun flujo
+                # (la migracion los llena todos y `liquidate` siempre lo
+                # escribe). Mandarla a leftovers la CANCELARIA en silencio;
+                # como las otras contradicciones puente/reparto, 409 antes
+                # de escribir.
+                raise _err(
+                    f"La compra #{p.purchase_number} esta viva en la entrada sin "
+                    "compra asignada (slot) — estado inconsistente, no se reliquida",
+                    status.HTTP_409_CONFLICT,
+                )
+            expected = prev_slot_supplier.get(slot)
+            if expected is not None and expected != p.supplier_id:
+                raise _err(
+                    f"La compra #{p.purchase_number} esta en la compra {slot} de "
+                    "la entrada pero no es del proveedor guardado en esa compra — "
+                    "estado inconsistente, no se reliquida",
+                    status.HTTP_409_CONFLICT,
+                )
+            if slot in live_by_slot:
+                raise _err(
+                    f"Las compras #{live_by_slot[slot].purchase_number} y "
+                    f"#{p.purchase_number} estan vivas en la misma compra {slot} "
+                    "de la entrada — estado inconsistente",
+                    status.HTTP_409_CONFLICT,
+                )
+            live_by_slot[slot] = p
 
         # ---------- Escritura (una transaccion, commit unico al final) ----------
         warnings: list[str] = []
@@ -671,6 +772,7 @@ class InboundOrderService:
                     organization_id=organization_id,
                     inbound_line_id=order_line.id,
                     third_party_id=a.third_party_id,
+                    purchase_slot=a.purchase_slot,
                     quantity=a.quantity,
                     unit_price=a.unit_price,
                     # Q-15: el MODO es parte del reparto — sin persistirlo, el
@@ -682,7 +784,7 @@ class InboundOrderService:
                     # sea exactamente lo que se uso.
                     price_per_kg=a.price_per_kg,
                     weight_kg_used=pesos_prorrateados.get(
-                        (pl.material_id, a.third_party_id)
+                        (pl.material_id, a.purchase_slot)
                     ),
                     invoice_number=a.invoice_number,
                 ))
@@ -698,25 +800,21 @@ class InboundOrderService:
             db, organization_id, "purchase_number", "movement_number", "adjustment_number"
         )
 
-        # 2. Agrupar por proveedor -> sincronizar/crear las N compras
+        # 2. Agrupar por COMPRA (slot) -> sincronizar/crear las N compras.
+        # El slot es identidad (R6): la compra del slot n se compara contra la
+        # compra viva del MISMO slot. Mismo proveedor -> se reusa (firma de #93);
+        # otro proveedor -> la vieja se cancela y nace otra, igual que cuando
+        # se quita un proveedor y se agrega otro.
         groups: dict = {}
         for item in plan:
             for a in item["payload"].allocations:
-                groups.setdefault(a.third_party_id, []).append((item["material"], a))
+                groups.setdefault(a.purchase_slot, []).append((item["material"], a))
 
-        existing = self._linked_purchases(db, organization_id, order.id)
-        live_by_supplier: dict = {}
-        for p in existing:
-            if p.status == "registered":
-                live_by_supplier[p.supplier_id] = p
-            elif p.status == "liquidated":
-                # No debe pasar (unliquidate las devolvio a registered) —
-                # defensa dura antes que corromper el reparto
-                raise _err(
-                    f"La compra #{p.purchase_number} sigue liquidada — estado "
-                    "inconsistente, desliquide la entrada primero",
-                    status.HTTP_409_CONFLICT,
-                )
+        leftovers: list = []
+        # R8: las compras de ESTA entrada no cuentan para el aviso «Ya existen
+        # N compra(s) del mismo proveedor en esta fecha». Se le pasa el set
+        # vivo: las que nacen en este loop se agregan antes de la siguiente.
+        own_purchase_ids: set = {p.id for p in existing}
 
         vehicle_plate = order.vehicle.plate if order.vehicle else None
 
@@ -732,10 +830,15 @@ class InboundOrderService:
                 for l in p.lines
             )
 
-        purchases_to_liquidate: list = []
-        for tp_id, allocs in groups.items():
+        purchases_to_liquidate: list = []  # [(slot, purchase)]
+        for slot in sorted(groups):
+            allocs = groups[slot]
+            tp_id = slot_supplier[slot]
             invoice = next((a.invoice_number for _m, a in allocs if a.invoice_number), None)
-            existing_p = live_by_supplier.pop(tp_id, None)
+            existing_p = live_by_slot.pop(slot, None)
+            if existing_p is not None and existing_p.supplier_id != tp_id:
+                leftovers.append(existing_p)
+                existing_p = None
             if existing_p is not None:
                 if group_signature(allocs) != purchase_signature(existing_p):
                     upd = PurchaseFullUpdate(
@@ -757,7 +860,7 @@ class InboundOrderService:
                     warnings.extend(u_warnings)
                 elif invoice is not None:
                     existing_p.invoice_number = invoice
-                purchases_to_liquidate.append(existing_p)
+                purchases_to_liquidate.append((slot, existing_p))
             else:
                 purchase_in = PurchaseCreate(
                     supplier_id=tp_id,
@@ -778,19 +881,24 @@ class InboundOrderService:
                 new_p, c_warnings = purchase_service.create(
                     db, obj_in=purchase_in, organization_id=organization_id,
                     user_id=user_id, commit=False,
+                    exclude_from_duplicates=own_purchase_ids,
                 )
+                own_purchase_ids.add(new_p.id)
                 warnings.extend(c_warnings)
                 db.add(InboundOrderPurchase(
                     organization_id=organization_id,
                     inbound_order_id=order.id,
                     purchase_id=new_p.id,
+                    purchase_slot=slot,
                 ))
-                purchases_to_liquidate.append(new_p)
+                purchases_to_liquidate.append((slot, new_p))
         db.flush()
 
-        # Proveedor que salio del reparto en la re-liquidacion: su registrada
-        # se cancela (from_inbound — el guard D14 bloquea el cancel directo)
-        for leftover in live_by_supplier.values():
+        # Compra que salio del reparto en la re-liquidacion (slot quitado, o
+        # slot con otro proveedor): su registrada se cancela (from_inbound — el
+        # guard D14 bloquea el cancel directo)
+        leftovers.extend(live_by_slot.values())
+        for leftover in leftovers:
             _, x_warnings = purchase_service.cancel(
                 db, purchase_id=leftover.id, organization_id=organization_id,
                 user_id=user_id, commit=False, from_inbound=True,
@@ -803,8 +911,8 @@ class InboundOrderService:
         # 3. Liquidar las N compras (consecutivas, D21: liquidated_at = HOY).
         # Retenciones del proveedor (si las hay) entran por el MISMO camino de
         # #79: proveedor acreditado neto, entidad [Retenciones] X con el pasivo
-        for p in purchases_to_liquidate:
-            pay_account = payment_by_supplier.get(p.supplier_id)
+        for slot, p in purchases_to_liquidate:
+            pay_account = payment_by_slot.get(slot)
             # Candado anti doble pago: revertir la liquidacion NO anula el pago
             # enlazado — queda como anticipo (#16/#63, "Liquidacion != Pago"),
             # asi que re-liquidar marcando contado otra vez pagaria dos veces.
@@ -824,9 +932,10 @@ class InboundOrderService:
             purchase_service.liquidate(
                 db, purchase_id=p.id, organization_id=organization_id,
                 user_id=user_id, liquidation_date=liq_dt, commit=False,
-                retentions_data=retentions_by_supplier.get(p.supplier_id),
+                retentions_data=retentions_by_slot.get(slot),
                 immediate_payment=pay_account is not None,
                 payment_account_id=pay_account,
+                taxes_data=taxes_by_slot.get(slot),
             )
 
         # 4. Descuadres — SIEMPRE despues de las N compras (requisito de orden
@@ -1064,6 +1173,34 @@ class InboundOrderService:
             warehouse_id=order.warehouse_id,
         )
         collector.current_balance -= cc.amount
+
+    def _check_slot_block(self, db: Session, block, slot_supplier: dict, what: str) -> None:
+        """Un bloque por compra (retenciones, contado, IVA) apunta a una compra
+        DEL reparto, y su proveedor de control coincide con el de esa compra."""
+        if block.purchase_slot not in slot_supplier:
+            tp = db.get(ThirdParty, block.third_party_id)
+            name = tp.name if tp else str(block.third_party_id)
+            raise _err(
+                f"{what} para {name} (compra {block.purchase_slot}), que no esta "
+                "en el reparto — van por compra asignada"
+            )
+        if slot_supplier[block.purchase_slot] != block.third_party_id:
+            names = []
+            for tp_id in (block.third_party_id, slot_supplier[block.purchase_slot]):
+                tp = db.get(ThirdParty, tp_id)
+                names.append(tp.name if tp else str(tp_id))
+            raise _err(
+                f"{what}: la compra {block.purchase_slot} es de {names[1]}, no de "
+                f"{names[0]}"
+            )
+
+    def _bridge_slots(self, db: Session, order_id: UUID) -> dict:
+        """{purchase_id: slot} del puente de la entrada (R5: varias filas
+        pueden compartir slot — la cancelada y la nueva)."""
+        return dict(db.execute(
+            select(InboundOrderPurchase.purchase_id, InboundOrderPurchase.purchase_slot)
+            .where(InboundOrderPurchase.inbound_order_id == order_id)
+        ).all())
 
     def _linked_purchases(
         self, db: Session, organization_id: UUID, order_id: UUID
@@ -1559,6 +1696,15 @@ class InboundOrderService:
                         f"no configurado — validos: {', '.join(valid_centers)}"
                     )
 
+        # Sede (pedido de Johana 2026-11-19): corregible mientras la Entrada no
+        # tenga efectos. Va ANTES de cualquier asignacion en memoria (O3 de QA)
+        # y antes de los bloques de lineas, que validan con order.warehouse_id.
+        # Reenviar la MISMA sede es un no-op y no dispara los guards: un form
+        # que la mande siempre no puede romper la edicion de notas de una
+        # liquidada (C3 de QA).
+        if "warehouse_id" in fields_set and str(obj_in.warehouse_id) != str(order.warehouse_id):
+            self._change_warehouse(db, order, obj_in, organization_id, is_willard)
+
         if obj_in.driver_id is not None:
             self._validate_org(db, Driver, obj_in.driver_id, organization_id, "Conductor")
         if obj_in.vehicle_id is not None:
@@ -1720,6 +1866,65 @@ class InboundOrderService:
         db.commit()
         db.refresh(order)
         return order, warnings
+
+    def _change_warehouse(
+        self,
+        db: Session,
+        order: InboundOrder,
+        obj_in: InboundOrderUpdate,
+        organization_id: UUID,
+        is_willard: bool,
+    ) -> None:
+        """Cambia la sede de una Entrada sin efectos (registrada o revisada).
+
+        Con efectos (liquidada, Willard confirmada) cambiar la sede seria mover
+        inventario, kilos y plata ya registrados: se anula y se registra de
+        nuevo. No decertifica una revisada (D2 de Daniel): la revision
+        certifica pesos y cantidades, y la sede es cabecera (criterio D17)."""
+        if obj_in.warehouse_id is None:
+            raise _err("La sede es obligatoria — elija una bodega")
+        if order.status not in ("draft", "reviewed"):
+            estado = "confirmada" if is_willard else "liquidada"
+            raise _err(
+                f"La entrada esta {estado} — la sede ya no se puede cambiar. "
+                "Anulela y registrela de nuevo en la sede correcta"
+            )
+        if not is_willard:
+            # D1 de Daniel: una desliquidada vuelve a 'revisada' con sus compras
+            # VIVAS (registered), con las lineas en la sede vieja. Re-liquidar
+            # reusa esas compras cuando la firma del reparto coincide, y
+            # purchase_signature NO incluye la bodega: quedarian en la sede
+            # vieja mientras el descuadre y la comision nacen en la nueva. El
+            # puente cubre tambien el legacy 1:1 (backfill de #93).
+            vivas = [
+                p for p in self._linked_purchases(db, organization_id, order.id)
+                if p.status != "cancelled"
+            ]
+            if vivas:
+                numeros = ", ".join(f"#{p.purchase_number}" for p in vivas)
+                raise _err(
+                    f"La entrada ya tuvo compras ({numeros}) — la sede no se puede "
+                    "cambiar. Anulela y registrela de nuevo en la sede correcta"
+                )
+        self._validate_warehouse(db, obj_in.warehouse_id, organization_id)
+        order.warehouse_id = obj_in.warehouse_id
+        if is_willard and obj_in.lines is None:
+            # Con lines en el payload, el bloque de lineas ya valida contra la
+            # sede nueva; sin ellas se revalidan las persistidas (drosses solo
+            # en planta, postconsumo con cuenta de baterias del titular).
+            self._validate_willard_capture(
+                db, organization_id, order.warehouse_id, order.third_party_id,
+                [
+                    SimpleNamespace(
+                        material_id=l.material_id,
+                        quantity=l.quantity,
+                        unit_price=l.unit_price,
+                        scale_weight_kg=l.scale_weight_kg,
+                        quality_notes=l.quality_notes,
+                    )
+                    for l in order.lines
+                ],
+            )
 
     # ------------------------------------------------------------------ #
     # Lectura                                                             #
@@ -2045,6 +2250,36 @@ class InboundOrderService:
         for oid, p in rows:
             result.setdefault(oid, []).append(p)
         return result
+
+    def purchase_extras(
+        self, db: Session, organization_id: UUID, purchase_ids: list[UUID]
+    ) -> tuple[dict, dict]:
+        """Reparto por compra: slot de cada compra en su entrada y sus filas de
+        IVA (con el nombre de la entidad). Dos queries por PAGINA, cero N+1 —
+        mismo criterio que `purchases_by_order` (R2).
+
+        Devuelve ({purchase_id: slot}, {purchase_id: [(DocumentTax, nombre)]}).
+        """
+        if not purchase_ids:
+            return {}, {}
+        from app.models.document_tax import DocumentTax
+
+        slots = dict(db.execute(
+            select(InboundOrderPurchase.purchase_id, InboundOrderPurchase.purchase_slot)
+            .where(InboundOrderPurchase.purchase_id.in_(purchase_ids))
+        ).all())
+        taxes: dict = {}
+        for tax, name in db.execute(
+            select(DocumentTax, ThirdParty.name)
+            .join(ThirdParty, DocumentTax.third_party_id == ThirdParty.id)
+            .where(
+                DocumentTax.purchase_id.in_(purchase_ids),
+                DocumentTax.organization_id == organization_id,
+            )
+            .order_by(DocumentTax.created_at)
+        ).all():
+            taxes.setdefault(tax.purchase_id, []).append((tax, name))
+        return slots, taxes
 
     def discrepancy_adjustments(
         self, db: Session, organization_id: UUID, order_id: UUID

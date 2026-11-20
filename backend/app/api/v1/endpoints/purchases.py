@@ -41,7 +41,7 @@ router = APIRouter()
 
 def _inbound_origin_map(db: Session, purchase_ids: list, organization_id: UUID) -> dict:
     """SAC Ciclo B (B1): purchase_id -> (inbound_order_id, order_number,
-    collector_id, collector_name). Ciclo D suma el recolector al MISMO lookup
+    collector_id, collector_name, remission_number). Ciclo D suma el recolector al MISMO lookup
     (outerjoin, cero queries extra) — la Liquidate page pre-carga la comision.
 
     Lookup por pagina (F3 QA): la query paginada de compras NO se toca —
@@ -66,6 +66,7 @@ def _inbound_origin_map(db: Session, purchase_ids: list, organization_id: UUID) 
             InboundOrder.order_number,
             InboundOrder.collector_id,
             TP.name,
+            InboundOrder.remission_number,
         )
         .join(InboundOrder, InboundOrderPurchase.inbound_order_id == InboundOrder.id)
         .outerjoin(TP, TP.id == InboundOrder.collector_id)
@@ -74,7 +75,10 @@ def _inbound_origin_map(db: Session, purchase_ids: list, organization_id: UUID) 
             InboundOrderPurchase.purchase_id.in_(purchase_ids),
         )
     ).all()
-    return {pid: (oid, num, cid, cname) for pid, oid, num, cid, cname in rows}
+    return {
+        pid: (oid, num, cid, cname, remision)
+        for pid, oid, num, cid, cname, remision in rows
+    }
 
 
 def _enrich_purchase_response(purchase: Purchase, db: Session = None, inbound_map: dict = None) -> dict:
@@ -106,6 +110,11 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None, inbound_ma
         ],
         # SAC E2 D9 — vacio para compras sin retenciones (clientes actuales)
         "retentions": list(purchase.retentions or []),
+        # Reparto por compra §4: detail-only. Explicito y vacio aca para que un
+        # `taxes` cargado en la sesion no se cuele por el `__dict__` (los dos
+        # GET de detalle lo llenan con `_add_purchase_taxes`).
+        "taxes": [],
+        "total_with_taxes": None,
         "created_by_name": None,
         "liquidated_by_name": None,
         "cancelled_by_name": None,
@@ -120,6 +129,8 @@ def _enrich_purchase_response(purchase: Purchase, db: Session = None, inbound_ma
         # SAC Ciclo D: recolector de la entrada (pre-carga de comision al liquidar)
         data["collector_id"] = origin[2] if origin else None
         data["collector_name"] = origin[3] if origin else None
+        # PDF de SAC (2026-11-19): el titulo es la remision de la entrada
+        data["inbound_remission_number"] = origin[4] if origin else None
 
     # Resolver nombres de usuarios de auditoria
     if db:
@@ -438,7 +449,27 @@ async def get_purchase_by_number(
         db, purchase.id, org_context["organization_id"]
     )
     response_data["collector_commission_total"] = float(cc_total) if cc_total > 0 else None
+    _add_purchase_taxes(db, purchase, response_data)
     return PurchaseResponse(**response_data)
+
+
+def _add_purchase_taxes(db: Session, purchase, response_data: dict) -> None:
+    """Reparto por compra §4 (R9): IVA de la compra en el DETALLE, armado campo
+    por campo (trampa #95). `total_with_taxes` = subtotal + IVA vivo con el
+    signo del mapa por clase de dueno; None si no hay IVA vivo, asi el detalle
+    y el PDF de una compra sin IVA quedan como siempre."""
+    from app.api.v1.endpoints.sales import _tax_rows
+    from app.models.document_tax import TAX_SIGN_ON_PARTY
+
+    rows = _tax_rows(db, purchase_id=purchase.id)
+    response_data["taxes"] = rows
+    live = [r for r in rows if r["reverted_at"] is None]
+    if live:
+        # El signo es sobre el PROVEEDOR (−IVA = le debemos mas): restarlo suma
+        delta = sum(TAX_SIGN_ON_PARTY["purchase"][r["tax_type"]] * r["amount"] for r in live)
+        response_data["total_with_taxes"] = float(purchase.total_amount - delta)
+    else:
+        response_data["total_with_taxes"] = None
 
 
 @router.get(
@@ -525,6 +556,7 @@ async def get_purchase(
         db, purchase.id, org_context["organization_id"]
     )
     response_data["collector_commission_total"] = float(cc_total) if cc_total > 0 else None
+    _add_purchase_taxes(db, purchase, response_data)
     return PurchaseResponse(**response_data)
 
 

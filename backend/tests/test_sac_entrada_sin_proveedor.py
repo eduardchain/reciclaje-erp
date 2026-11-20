@@ -40,6 +40,7 @@ from tests.integration_helpers import (
     create_material_category,
     create_warehouse,
 )
+from tests.reparto_slots import con_slots
 
 INBOUND_URL = "/api/v1/inbound-orders"
 PURCHASES_URL = "/api/v1/purchases"
@@ -238,7 +239,7 @@ def _liq_line(mat, allocations, ref_price=None, unallocated=False):
 def _liquidate(client, headers, order_id, lines, expect=200, **extra):
     resp = client.post(
         f"{INBOUND_URL}/{order_id}/liquidate", headers=headers,
-        json={"lines": lines, **extra},
+        json=con_slots({"lines": lines, **extra}),
     )
     assert resp.status_code == expect, resp.text
     return resp.json()
@@ -382,7 +383,7 @@ class TestRevision:
         body = _capture(client, org_headers, wh, [_line(mat_moto, "10")])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [_liq_line(mat_moto, [_alloc(sup1, "10", "900")])]},
+            json=con_slots({"lines": [_liq_line(mat_moto, [_alloc(sup1, "10", "900")])]}),
         )
         assert resp.status_code == 400
         assert "revis" in resp.json()["detail"].lower()
@@ -601,10 +602,10 @@ class TestLiquidacion:
         )
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [
+            json=con_slots({"lines": [
                 _liq_line(mat_moto, [_alloc(sup1, "100", "900")]),
                 _liq_line(mat_balancin, []),  # sin asignaciones, sin intencion
-            ]},
+            ]}),
         )
         assert resp.status_code == 422
         assert "BALANCIN-93" in resp.json()["detail"]
@@ -702,7 +703,7 @@ class TestLiquidacion:
         )
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "900")])]},
+            json=con_slots({"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "900")])]}),
         )
         assert resp.status_code == 422
         assert "BALANCIN-93" in resp.json()["detail"]
@@ -715,7 +716,7 @@ class TestLiquidacion:
         body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "100")])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [_liq_line(mat_moto, [_alloc(sup1, "95", "900")])]},
+            json=con_slots({"lines": [_liq_line(mat_moto, [_alloc(sup1, "95", "900")])]}),
         )
         assert resp.status_code == 422
         assert "referencia" in resp.json()["detail"]
@@ -1175,7 +1176,7 @@ class TestAtomicidadYComision:
         body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "100")])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={
+            json=con_slots({
                 "lines": [_liq_line(
                     mat_moto,
                     [_alloc(sup1, "60", "900"), _alloc(sup2, "40", "900")],
@@ -1183,7 +1184,7 @@ class TestAtomicidadYComision:
                 "collector_commission": {
                     "third_party_id": str(not_provider.id), "amount": "1000",
                 },
-            },
+            }),
         )
         assert resp.status_code == 422
 
@@ -1839,7 +1840,7 @@ class TestPagoContadoYWillard:
         body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "100")])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "1000")])]},
+            json=con_slots({"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "1000")])]}),
         )
         assert resp.status_code == 422, resp.text
         detail = resp.json()["detail"]
@@ -1930,8 +1931,8 @@ class TestPagoContadoYWillard:
 
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "1000")])],
-                  "supplier_payments": pay},
+            json=con_slots({"lines": [_liq_line(mat_moto, [_alloc(sup1, "100", "1000")])],
+                  "supplier_payments": pay}),
         )
         assert resp.status_code == 422, resp.text
         assert "ya tiene un pago vivo" in resp.json()["detail"]
@@ -1957,7 +1958,7 @@ class TestPagoContadoYWillard:
         def liq(payments):
             return client.post(
                 f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-                json={"lines": line, "supplier_payments": payments},
+                json=con_slots({"lines": line, "supplier_payments": payments}),
             )
 
         r = liq([{"third_party_id": str(sup2.id), "account_id": str(account.id)}])
@@ -2158,11 +2159,13 @@ class TestLiquidarPorValorTotal:
     def test_total_deriva_el_unitario(
         self, client, org_headers, db_session, wh, mat_balancin, sup1,
     ):
-        """El caso canonico del centavo: $200.000 entre 3 unidades dan
-        $66.666,67 y el total vuelve como $200.000,01. Se acepta (D8) — hacerlo
-        exacto obligaria a tocar purchase_lines, tabla compartida, por 1 centavo.
-        Lo que NO se acepta es que sea una sorpresa: la pantalla muestra el
-        total resultante antes de guardar."""
+        """El caso canonico del centavo: $200.000 entre 3 unidades.
+
+        Re-semantizado por plan-redondeo-precio-compras v1.1: hasta ahi el
+        unitario era 66.666,67 y la compra volvia en $200.000,01 (D8 de #95 lo
+        aceptaba por no tocar purchase_lines). Johana encontro el mismo defecto
+        con $5,64 de diferencia en una Entrada de 1.503 unidades, y con el
+        unitario a 8 decimales el total digitado llega exacto."""
         order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 3)])
         _liquidate(
             client, org_headers, order["id"],
@@ -2174,12 +2177,12 @@ class TestLiquidarPorValorTotal:
             ).where(InboundLineAllocation.third_party_id == sup1.id)
         ).scalars().all()
         assert len(allocs) == 1
-        assert allocs[0].unit_price == Decimal("66666.67")
+        assert allocs[0].unit_price == Decimal("66666.66666667")
         assert allocs[0].total_price == Decimal("200000.00")  # el MODO persiste
 
         purchases = _order_purchases(db_session, order["id"])
         assert len(purchases) == 1
-        assert purchases[0].total_amount == Decimal("200000.01")
+        assert purchases[0].total_amount == Decimal("200000.00")
 
     def test_mezcla_unitario_y_total_en_la_misma_entrada(
         self, client, org_headers, db_session, wh, mat_balancin, mat_moto, sup1, sup2,
@@ -2225,11 +2228,15 @@ class TestLiquidarPorValorTotal:
         self, client, org_headers, wh, mat_balancin, sup1,
     ):
         """Sin este guard el unitario quedaria en $0 y reventaria mas abajo,
-        en purchase.liquidate, con un error que no explica nada."""
+        en purchase.liquidate, con un error que no explica nada.
+
+        Con el unitario a 8 decimales (plan-redondeo-precio-compras) $0,01
+        entre 10.000 ya NO queda en cero (0,000001): hace falta una cantidad
+        con la que total / cantidad caiga bajo 0,000000005."""
         resp = _liquidate(
             client, org_headers,
-            _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 10000)])["id"],
-            [_liq_line(mat_balancin, [_alloc(sup1, 10000, total="0.01")])],
+            _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 3000000)])["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, 3000000, total="0.01")])],
             expect=422,  # idioma del modulo: la Entrada responde 422 (#80)
         )
         assert "precio unitario queda en $0" in resp["detail"]
@@ -2303,9 +2310,9 @@ class TestLiquidarPorValorTotal:
         r = client.post(
             f"/api/v1/inbound-orders/{order['id']}/liquidate",
             headers=org_headers,
-            json={"lines": [_liq_line(
+            json=con_slots({"lines": [_liq_line(
                 mat_balancin, [_alloc(sup1, "0.0004", total="50000")], ref_price=500,
-            )]},
+            )]}),
         )
         assert r.status_code == 422, r.text
         assert "demasiado pequena" in r.json()["detail"]
@@ -2479,11 +2486,11 @@ class TestPrecioPorKg:
         )
         r = client.post(
             f"{INBOUND_URL}/{order['id']}/liquidate", headers=org_headers,
-            json={"lines": [
+            json=con_slots({"lines": [
                 _liq_line(mat_balancin, [_alloc(sup1, "10", per_kg="1000")]),
                 _liq_line(mat_grupo4, [_alloc(sup1, "5", per_kg="1000")],
                           ref_price="100"),
-            ]},
+            ]}),
         )
         assert r.status_code == 422, r.text
         assert "GRUPO4-93" in r.text
@@ -2514,9 +2521,9 @@ class TestPrecioPorKg:
 
         r = client.post(
             f"{INBOUND_URL}/{order['id']}/liquidate", headers=org_headers,
-            json={"lines": [
+            json=con_slots({"lines": [
                 _liq_line(mat_balancin, [_alloc(sup1, "10", per_kg="1000")])
-            ]},
+            ]}),
         )
         assert r.status_code == 422, r.text
         assert "peso de bascula" in r.text
@@ -2533,7 +2540,7 @@ class TestPrecioPorKg:
         ):
             r = client.post(
                 f"{INBOUND_URL}/{order['id']}/liquidate", headers=org_headers,
-                json={"lines": [_liq_line(mat_balancin, [alloc])]},
+                json=con_slots({"lines": [_liq_line(mat_balancin, [alloc])]}),
             )
             assert r.status_code == 422, r.text
 
@@ -2663,7 +2670,7 @@ class TestTarifaSobreIvaEnLaEntrada:
         body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "1000")])
         resp = client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={
+            json=con_slots({
                 "lines": [_liq_line(mat_moto, [_alloc(sup1, "1000", "1000")])],
                 "supplier_retentions": [{
                     "third_party_id": str(sup1.id),
@@ -2671,7 +2678,7 @@ class TestTarifaSobreIvaEnLaEntrada:
                                     "config_id": str(cfg_iva.id),
                                     "amount": "15000"}],
                 }],
-            },
+            }),
         )
         assert resp.status_code == 422, resp.text
         assert "sobre el IVA" in resp.text and "subtotal" in resp.text, resp.text
@@ -2686,7 +2693,7 @@ class TestTarifaSobreIvaEnLaEntrada:
         body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "1000")])
         client.post(
             f"{INBOUND_URL}/{body['id']}/liquidate", headers=org_headers,
-            json={
+            json=con_slots({
                 "lines": [_liq_line(mat_moto, [_alloc(sup1, "1000", "1000")])],
                 "supplier_retentions": [{
                     "third_party_id": str(sup1.id),
@@ -2694,7 +2701,7 @@ class TestTarifaSobreIvaEnLaEntrada:
                                     "config_id": str(cfg_iva.id),
                                     "amount": "15000"}],
                 }],
-            },
+            }),
         )
         db_session.expire_all()
         assert db_session.get(ThirdParty, sup1.id).current_balance == Decimal("0")

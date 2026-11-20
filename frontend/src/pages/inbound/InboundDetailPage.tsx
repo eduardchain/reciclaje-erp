@@ -28,7 +28,8 @@ import {
   useReviewInboundOrder,
   useUnliquidateInboundOrder,
 } from "@/hooks/useInboundOrders";
-import { useCurrentFormulas } from "@/hooks/useSacConfig";
+import { useCurrentFormulas, useKgProfiles } from "@/hooks/useSacConfig";
+import { formOrderMap, sortByFormOrder } from "@/utils/formOrder";
 import {
   formatCurrency,
   formatCurrencyDecimals,
@@ -106,6 +107,7 @@ export default function InboundDetailPage() {
   // B.2: kg estimados client-side para drafts (los definitivos nacen al confirmar)
   const { data: formulasData } = useCurrentFormulas();
   const formulas = formulasData?.items ?? [];
+  const { data: profilesData } = useKgProfiles();
 
   if (isLoading) return <div className="p-8 text-center text-slate-500">Cargando...</div>;
   if (!order) return <div className="p-8 text-center text-slate-500">Entrada no encontrada</div>;
@@ -128,20 +130,12 @@ export default function InboundDetailPage() {
   const estimatedTotalKg = showsEstimatedKg
     ? order.lines.reduce((acc, l) => acc + (estimateKgLead(formulas, l.material_id, l.quantity) ?? 0), 0)
     : null;
-  // Entrada liquidada: los materiales siempre en orden alfabético por nombre
-  // (pedido de Johana). `numeric` para que "GRUPO 2" quede antes de "GRUPO 10"
-  // y `sensitivity: base` para ignorar tildes y mayúsculas. Se copia el arreglo:
-  // `order.lines` es del cache de React Query y no se debe mutar. Antes de
-  // liquidar se conserva el orden de captura, que es el que el pesador ve.
-  const displayLines = isLiquidated
-    ? [...order.lines].sort((x, y) =>
-        (x.material_name ?? x.material_code ?? "").localeCompare(
-          y.material_name ?? y.material_code ?? "",
-          "es",
-          { numeric: true, sensitivity: "base" },
-        ),
-      )
-    : order.lines;
+  // Orden del formato en papel «Materiales recolectados» en TODOS los
+  // estados (plan-sac-orden-formato-materiales §3): con la captura como el
+  // papel, el orden que ve el pesador ya es ese. Lo que no esta en el formato
+  // va al final, alfabetico (la regla de 0862891 queda como desempate).
+  // `sortByFormOrder` devuelve una copia: `order.lines` es del cache.
+  const displayLines = sortByFormOrder(order.lines, formOrderMap(profilesData?.items));
   const purchaseTotal = isPurchaseType
     ? order.lines.reduce((acc, l) => acc + l.quantity * (l.unit_price ?? 0), 0)
     : 0;
@@ -463,23 +457,41 @@ export default function InboundDetailPage() {
         </Card>
       </div>
 
-      {/* #93: cara financiera — una tarjeta por proveedor del reparto */}
+      {/* #93: cara financiera — una tarjeta por COMPRA del reparto (reparto
+          por compra: un proveedor puede tener dos, Q-65). Orden por slot. */}
       {isPurchaseType && order.purchases.length > 0 && (
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
-              Compras por Proveedor ({order.purchases.length})
+              Compras ({order.purchases.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {order.purchases.map((p) => (
+              {[...order.purchases]
+                .sort(
+                  (a, b) =>
+                    (a.purchase_slot ?? 0) - (b.purchase_slot ?? 0) ||
+                    a.purchase_number - b.purchase_number
+                )
+                .map((p) => {
+                // IVA vivo de la compra (§4): el proveedor queda con +IVA
+                const iva = (p.taxes ?? [])
+                  .filter((t) => t.tax_type === "iva" && !t.reverted_at)
+                  .reduce((acc, t) => acc + num(t.amount), 0);
+                const ret = num(p.retentions_total);
+                return (
                 <div
                   key={p.purchase_id}
                   className={`rounded-lg border p-3 space-y-1 ${
                     p.status === "cancelled" ? "border-rose-200 bg-rose-50/50 opacity-70" : "border-slate-200"
                   }`}
                 >
+                  {p.purchase_slot != null && (
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      Compra {p.purchase_slot}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium text-sm truncate">
                       <ThirdPartyLink id={p.supplier_id}>{p.supplier_name ?? "—"}</ThirdPartyLink>
@@ -495,16 +507,19 @@ export default function InboundDetailPage() {
                   {p.invoice_number && (
                     <div className="text-xs text-slate-500">Factura: {p.invoice_number}</div>
                   )}
-                  {p.retentions_total != null && p.retentions_total > 0 && canViewPrices && (
+                  {(ret > 0 || iva > 0) && canViewPrices && (
                     <div className="text-xs text-slate-500">
-                      Retenciones: {fmtMoney(p.retentions_total)} · Neto:{" "}
+                      {iva > 0 && <>IVA: {fmtMoney(iva)} · </>}
+                      {ret > 0 && <>Retenciones: {fmtMoney(ret)} · </>}
+                      Total al proveedor:{" "}
                       <span className="font-medium text-slate-700">
-                        {fmtMoney(num(p.total_amount) - num(p.retentions_total))}
+                        {fmtMoney(num(p.total_amount) + iva - ret)}
                       </span>
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -678,9 +693,14 @@ export default function InboundDetailPage() {
                         <TableRow className="bg-slate-50/60 hover:bg-slate-50/60">
                           <TableCell colSpan={isWillard ? 5 : isLegacy ? 5 : 7} className="py-2">
                             <div className="pl-4 space-y-0.5">
-                              {line.allocations.map((a) => (
+                              {[...line.allocations]
+                                .sort((x, y) => x.purchase_slot - y.purchase_slot)
+                                .map((a) => (
                                 <div key={a.id} className="text-xs text-slate-600 flex flex-wrap gap-x-2">
-                                  <span className="font-medium">{a.third_party_name ?? "—"}</span>
+                                  <span className="font-medium">
+                                    <span className="text-slate-400 font-normal">Compra {a.purchase_slot} · </span>
+                                    {a.third_party_name ?? "—"}
+                                  </span>
                                   <span className="tabular-nums">
                                     {formatWeight(a.quantity, line.material_unit || "kg")}
                                     {canViewPrices ? ` × ${fmtMoney(a.unit_price)}` : ""}

@@ -313,3 +313,6 @@ docs/planes/evidencia-golden-*/
 # necesita viven transcritos en docs/planes/plan-sac-impuestos-en-ventas.md.
 docs/soluciones ambientales del caribe/*.PDF
 docs/soluciones ambientales del caribe/*.pdf
+
+# Equipo (protocolo docs/equipo/Protocolo_Equipo_EcoBalance.md §9): backlog y prompts por sesion
+ops/

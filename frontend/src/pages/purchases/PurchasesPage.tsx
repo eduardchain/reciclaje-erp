@@ -25,6 +25,8 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { LinkedPaymentChoice, type AnnulChoice } from "@/components/shared/LinkedPaymentChoice";
 import { OperationListCard } from "@/components/shared/OperationListCard";
 import { usePurchases, usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
+import { usePurchasePdfOrder } from "@/hooks/usePurchasePdfOrder";
 import { purchaseService } from "@/services/purchases";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { formatLinesTotalQuantity } from "@/utils/operationLines";
@@ -32,7 +34,6 @@ import { fetchAllPages } from "@/utils/fetchAllPages";
 import { ROUTES } from "@/utils/constants";
 import type { PurchaseResponse } from "@/types/purchase";
 import type { MetricCard } from "@/types/reports";
-import { useAuthStore } from "@/stores/authStore";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 import { exportPurchasesDetailExcel } from "@/utils/excelExport";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -41,6 +42,7 @@ import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 const PAGE_SIZE = 20;
 
@@ -48,8 +50,8 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [cancelOpen, setCancelOpen] = useState(false);
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const pdfTitle = usePdfTitle();
+  const orderForPdf = usePurchasePdfOrder();
   const cancelMutation = useCancelPurchase();
   const [annulChoice, setAnnulChoice] = useState<AnnulChoice>(null);
   const { hasPermission } = usePermissions();
@@ -104,7 +106,22 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => exportPurchasePDF(purchase, orgName)}>
+          <DropdownMenuItem
+            onClick={async () => {
+              // A4: el listado trae `taxes` vacío (#112), así que una compra de
+              // Entrada se exporta desde su DETALLE — si no, el PDF del listado
+              // mostraría el subtotal como total. La compra directa sigue con la
+              // fila del listado, byte a byte.
+              try {
+                const full = purchase.inbound_order_id
+                  ? await purchaseService.getById(purchase.id)
+                  : purchase;
+                exportPurchasePDF(orderForPdf(full), pdfTitle);
+              } catch {
+                toast.error("No se pudo cargar la compra para el PDF");
+              }
+            }}
+          >
             <FileText className="h-4 w-4 mr-2" />
             Exportar PDF
           </DropdownMenuItem>

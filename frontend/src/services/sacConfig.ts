@@ -135,6 +135,17 @@ export const sacConfigService = {
     return response.data;
   },
 
+  /** Formato en papel: lista COMPLETA en orden (null = renglon vacio). */
+  setFormOrder: async (
+    materialIds: (string | null)[]
+  ): Promise<MaterialKgProfileListResponse> => {
+    const response = await apiClient.put<MaterialKgProfileListResponse>(
+      "/api/v1/material-kg-profiles/form-order",
+      { material_ids: materialIds }
+    );
+    return response.data;
+  },
+
   upsertKgProfile: async (
     materialId: string,
     data: MaterialKgProfileUpsert

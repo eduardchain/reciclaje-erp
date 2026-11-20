@@ -23,6 +23,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    SmallInteger,
     String,
     UniqueConstraint,
 )
@@ -355,7 +356,9 @@ class InboundLineAllocation(Base, OrganizationMixin, TimestampMixin):
 
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
 
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    # 8 decimales: cuando se digita el valor total, el unitario es
+    # total/cantidad y tiene que llegar a la compra sin redondear a centavos.
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(21, 8), nullable=False)
 
     # Q-15 (reunion 12-ago): Johana puede digitar el VALOR TOTAL de la
     # asignacion en vez del precio unitario — "el precio unitario seria una
@@ -398,12 +401,24 @@ class InboundLineAllocation(Base, OrganizationMixin, TimestampMixin):
         comment="Factura del proveedor (D12) — llega con la liquidacion",
     )
 
+    # Reparto por compra §2: la COMPRA de la Entrada a la que va esta
+    # asignacion (1, 2, 3…). Es IDENTIDAD: la pantalla nunca renumera, y al
+    # reliquidar la compra del slot n se compara contra la del MISMO slot.
+    # Que todas las asignaciones de un slot tengan el mismo proveedor es una
+    # regla entre filas: la impone el servicio, no la BD (declarado).
+    purchase_slot: Mapped[int] = mapped_column(
+        SmallInteger,
+        nullable=False,
+        comment="Compra de la Entrada (1, 2, 3…). Q-65: un proveedor puede tener dos",
+    )
+
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_inbound_alloc_qty_positive"),
         CheckConstraint("unit_price >= 0", name="ck_inbound_alloc_price_non_negative"),
+        CheckConstraint("purchase_slot >= 1", name="ck_inbound_alloc_slot_positive"),
         UniqueConstraint(
-            "inbound_line_id", "third_party_id",
-            name="uq_inbound_alloc_line_third_party",
+            "inbound_line_id", "purchase_slot",
+            name="uq_inbound_alloc_line_slot",
         ),
         Index("ix_inbound_line_allocations_line", "inbound_line_id"),
     )
@@ -445,6 +460,15 @@ class InboundOrderPurchase(Base, OrganizationMixin, TimestampMixin):
         GUID(),
         ForeignKey("purchases.id", ondelete="CASCADE"),
         primary_key=True,
+    )
+
+    # Reparto por compra §2: slot de la compra en la Entrada. Sin UNIQUE
+    # (entrada, slot) a proposito (R5): si al reliquidar cambia el proveedor
+    # de un slot, quedan la compra cancelada y la nueva con el mismo slot.
+    purchase_slot: Mapped[Optional[int]] = mapped_column(
+        SmallInteger,
+        nullable=True,
+        comment="Slot de la compra en la Entrada (backfill en todas las filas)",
     )
 
     __table_args__ = (

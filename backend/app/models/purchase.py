@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from app.models.material import Material
     from app.models.warehouse import Warehouse
     from app.models.purchase_retention import PurchaseRetention
+    from app.models.document_tax import DocumentTax
 
 
 class Purchase(Base, OrganizationMixin, TimestampMixin):
@@ -230,6 +231,15 @@ class Purchase(Base, OrganizationMixin, TimestampMixin):
         order_by="PurchaseRetention.created_at",
     )
 
+    # Reparto por compra §4: IVA de la compra (descontable). Vacio en toda
+    # compra sin IVA y en las organizaciones que no son SAC (data-gated).
+    taxes: Mapped[List["DocumentTax"]] = relationship(
+        "DocumentTax",
+        back_populates="purchase",
+        cascade="all, delete-orphan",
+        order_by="DocumentTax.created_at",
+    )
+
     double_entry: Mapped[Optional["DoubleEntry"]] = relationship(
         "DoubleEntry",
         foreign_keys="[DoubleEntry.purchase_id]",
@@ -311,8 +321,11 @@ class PurchaseLine(Base, TimestampMixin):
         comment="Quantity purchased (allows decimals: 150.500 kg)",
     )
     
+    # 8 decimales (plan-redondeo-precio-compras): el unitario se deriva a veces
+    # como total/cantidad (Entrada, Q-15), y con 2 decimales el error se
+    # multiplicaba por la cantidad — $3.138.450 nacian $3.138.444,36.
     unit_price: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
+        Numeric(21, 8),
         nullable=False,
         comment="Price per unit",
     )

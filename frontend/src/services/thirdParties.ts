@@ -7,6 +7,7 @@ import type {
   RetentionRow,
   RetentionConfigCreate,
   RetentionConfigUpdate,
+  SimilarThirdParty,
 } from "@/types/third-party";
 import type { PaginatedResponse } from "@/types/common";
 
@@ -103,6 +104,18 @@ export const thirdPartyService = {
     if (!params.sort_dir) delete params.sort_dir;
     const response = await apiClient.get<PaginatedResponse<ThirdPartyResponse>>("/api/v1/third-parties", { params });
     return assertNotTruncated(response.data, "/", params.limit);
+  },
+
+  /** Reparto por compra §3.3: antes de crear un proveedor desde la
+   *  liquidación de la Entrada, ¿ya existe? Nombre igual sin tildes ni
+   *  mayúsculas o identificación igual sin puntos ni guiones. Endpoint
+   *  flag-gated (kg_ledger_enabled): solo llamarlo desde pantallas SAC. */
+  findSimilar: async (name: string, identification?: string | null): Promise<SimilarThirdParty[]> => {
+    const params: Record<string, string> = {};
+    if (name.trim()) params.name = name.trim();
+    if (identification && identification.trim()) params.identification = identification.trim();
+    const response = await apiClient.get<SimilarThirdParty[]>("/api/v1/third-parties/similar", { params });
+    return response.data;
   },
 
   getById: async (id: string): Promise<ThirdPartyResponse> => {

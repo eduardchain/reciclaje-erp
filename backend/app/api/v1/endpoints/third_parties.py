@@ -261,6 +261,24 @@ def list_generic_third_parties(
 # Rutas ESTATICAS: declaradas antes de /{third_party_id} para no ser capturadas.
 
 @router.get(
+    "/similar",
+    dependencies=[Depends(require_org_flag("kg_ledger_enabled"))],
+)
+def find_similar_third_parties(
+    name: Optional[str] = Query(None, max_length=200),
+    identification: Optional[str] = Query(None, max_length=50),
+    org_context: tuple = Depends(require_permission("third_parties.view")),
+    db: Session = Depends(get_db),
+):
+    """Reparto por compra §3.3 (R10): antes de crear un proveedor desde la
+    liquidacion de la Entrada, la pantalla pregunta si ya existe. Ruta
+    ESTATICA, declarada antes de /{third_party_id}."""
+    return third_party.find_similar(
+        db, org_context["organization_id"], name=name, identification=identification
+    )
+
+
+@router.get(
     "/retention-entities",
     response_model=list[RetentionRowResponse],
     dependencies=[Depends(require_org_flag("kg_ledger_enabled"))],

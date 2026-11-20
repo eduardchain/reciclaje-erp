@@ -45,7 +45,20 @@ from app.models import (
 # Test database URL (PostgreSQL on port 5433)
 # Make sure docker-compose.test.yml is running:
 # docker-compose -f docker-compose.test.yml up -d
-TEST_DATABASE_URL = "postgresql://admin:test_password@localhost:5433/reciclaje_test"
+#
+# Cada sesion del equipo tiene su propia base de test en 5433
+# (docs/equipo/Protocolo_Equipo_EcoBalance.md §1): se elige con la variable
+# TEST_DATABASE_URL. Sin la variable, la de siempre. La guarda es fail-closed
+# porque esta base se recrea con DROP SCHEMA: un TEST_DATABASE_URL apuntado a
+# la de desarrollo (5434) o a produccion la borraria entera.
+_DEFAULT_TEST_DATABASE_URL = "postgresql://admin:test_password@localhost:5433/reciclaje_test"
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or _DEFAULT_TEST_DATABASE_URL
+_url = sqlalchemy.engine.make_url(TEST_DATABASE_URL)
+if _url.port != 5433 or _url.host not in ("localhost", "127.0.0.1") or not (_url.database or "").startswith("reciclaje_test"):
+    raise RuntimeError(
+        "TEST_DATABASE_URL tiene que ser una base reciclaje_test* en localhost:5433 "
+        f"(se recrea con DROP SCHEMA); llego host={_url.host} port={_url.port} db={_url.database}"
+    )
 
 # Create test engine with specific configuration for testing
 test_engine = create_engine(

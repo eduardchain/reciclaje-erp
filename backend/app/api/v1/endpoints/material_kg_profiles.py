@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_org_flag, require_permission
 from app.schemas.material_kg_profile import (
+    MaterialFormOrderUpdate,
     MaterialKgProfileListResponse,
     MaterialKgProfileResponse,
     MaterialKgProfileUpsert,
@@ -34,6 +35,23 @@ def list_material_kg_profiles(
         organization_id=org_context["organization_id"],
         compra_regular=compra_regular,
         willard_world=willard_world,
+    )
+    return MaterialKgProfileListResponse(items=items, total=len(items))
+
+
+# F1: ruta ESTATICA declarada ANTES de las de `/{material_id}` — si va despues,
+# FastAPI intenta parsear "form-order" como UUID y responde 422.
+@router.put("/form-order", response_model=MaterialKgProfileListResponse)
+def set_material_form_order(
+    order_in: MaterialFormOrderUpdate,
+    org_context: dict = Depends(require_permission("materials.edit")),
+    db: Session = Depends(get_db),
+):
+    """Reemplaza el orden del formato en papel «Materiales recolectados»
+    (lista completa; `null` = renglon vacio). Los materiales que no vienen
+    salen del formato."""
+    items = material_kg_profile_service.set_form_order(
+        db, organization_id=org_context["organization_id"], obj_in=order_in
     )
     return MaterialKgProfileListResponse(items=items, total=len(items))
 

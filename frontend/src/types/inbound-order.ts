@@ -1,6 +1,8 @@
 // Tipos InboundOrder — Entradas (SAC, #93: entrada sin proveedor)
 // Espejo de backend/app/schemas/inbound_order.py
 
+import type { DocumentTax, DocumentTaxCreate } from "@/types/document-tax";
+
 export type InboundType = "purchase" | "willard";
 // #93 (D4): tipo compra vive draft -> reviewed -> liquidated | annulled;
 // willard conserva draft -> confirmed | annulled (B.2 intacto)
@@ -57,6 +59,8 @@ export interface InboundOrderCreate {
  */
 export interface InboundOrderUpdate {
   date?: string;
+  /** Sede: solo registrada/revisada sin compras vivas (pedido Johana 2026-11-19) */
+  warehouse_id?: string;
   /** null explícito = quitar (alineado a fields_set en el backend) */
   driver_id?: string | null;
   vehicle_id?: string | null;
@@ -76,6 +80,10 @@ export interface InboundOrderUpdate {
 
 export interface InboundAllocationCreate {
   third_party_id: string;
+  /** Reparto por compra: la compra de la Entrada a la que va (1, 2, 3…). Es
+   *  IDENTIDAD — la pantalla nunca la renumera (R6). Un proveedor puede estar
+   *  en dos (Q-65). */
+  purchase_slot: number;
   /** EXACTAMENTE uno de los tres precios (422 del backend si van varios o
    *  ninguno). El unitario es el que llega al inventario; los otros dos son
    *  formas de llegar a él — total/cantidad, o (peso prorrateado × $/kg)/cantidad. */
@@ -105,6 +113,9 @@ export interface InboundCollectorCommission {
  *  monto (editable, el precálculo % × subtotal del proveedor solo sugiere) */
 export interface InboundRetentionCreate {
   retention_type: "retefuente" | "reteiva" | "ica";
+  /** CC-013 C2: la tarifa usada, para que el servidor rechace una
+   *  `base_kind='iva'` (opcional, no se persiste) */
+  config_id?: string | null;
   /** Obligatorio en ICA (una entidad por municipio), prohibido en las demás */
   municipality?: string | null;
   /** Auditoría del precálculo ofrecido (informativos, F1 #79) */
@@ -116,6 +127,7 @@ export interface InboundRetentionCreate {
 /** Retenciones OPCIONALES por proveedor del reparto ("sí les descuenta,
  *  pero no a todas") — heredan #79 completo vía purchase.liquidate() */
 export interface InboundSupplierRetentions {
+  purchase_slot: number;
   third_party_id: string;
   retentions: InboundRetentionCreate[];
 }
@@ -123,8 +135,17 @@ export interface InboundSupplierRetentions {
 /** Pago de contado POR PROVEEDOR (pruebas de usuario 2026-08-11) — misma
  *  familia que las retenciones. El monto no viaja: el backend paga el NETO. */
 export interface InboundSupplierPayment {
+  purchase_slot: number;
   third_party_id: string;
   account_id: string;
+}
+
+/** IVA de una compra de la Entrada (§4): va a la entidad `[Impuestos] IVA`
+ *  con el signo de compra (proveedor −IVA). Ausente = sin IVA. */
+export interface InboundPurchaseTaxes {
+  purchase_slot: number;
+  third_party_id: string;
+  taxes: DocumentTaxCreate[];
 }
 
 export interface InboundLiquidateRequest {
@@ -134,10 +155,12 @@ export interface InboundLiquidateRequest {
   /** Ausente = cero efecto (data-gated D9) */
   supplier_retentions?: InboundSupplierRetentions[] | null;
   supplier_payments?: InboundSupplierPayment[] | null;
+  purchase_taxes?: InboundPurchaseTaxes[] | null;
 }
 
 export interface InboundAllocationResponse {
   id: string;
+  purchase_slot: number;
   third_party_id: string;
   third_party_name: string | null;
   quantity: number;
@@ -158,6 +181,9 @@ export interface InboundAllocationResponse {
 /** Cara financiera por proveedor — las N compras del reparto (vía puente) */
 export interface InboundPurchaseSummary {
   purchase_id: string;
+  /** Slot de la compra en la Entrada. Una cancelada puede repetir el de la
+   *  nueva (R5); null solo en filas que la migración no alcanzó. */
+  purchase_slot: number | null;
   purchase_number: number;
   supplier_id: string;
   supplier_name: string | null;
@@ -169,6 +195,9 @@ export interface InboundPurchaseSummary {
   /** Último lote de retenciones (vivas, o las revertidas más recientes tras
    *  des-liquidar) — alimenta la precarga al re-liquidar */
   retentions?: InboundRetentionDetail[];
+  /** Último lote de impuestos (IVA) de la compra — vivos, o los revertidos
+   *  más recientes tras des-liquidar. Decimal llega como string: num(). */
+  taxes?: DocumentTax[];
 }
 
 export interface InboundRetentionDetail {

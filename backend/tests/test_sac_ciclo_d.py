@@ -34,6 +34,7 @@ from app.models.third_party import ThirdParty
 from tests.integration_helpers import create_material, create_material_category, create_warehouse
 from tests.conftest import create_third_party_with_category
 from app.utils.dates import business_today, business_today_noon
+from tests.reparto_slots import con_slots
 
 INBOUND_URL = "/api/v1/inbound-orders"
 PURCHASES_URL = "/api/v1/purchases"
@@ -199,7 +200,7 @@ def _liquidate_entrada(client, headers, order, mat, tp, qty="100", price="900",
     """#93: reviewed -> liquidated con reparto de UN proveedor."""
     resp = client.post(
         f"{INBOUND_URL}/{order['id']}/liquidate", headers=headers,
-        json={
+        json=con_slots({
             "lines": [{
                 "material_id": str(mat.id),
                 "allocations": [{
@@ -208,7 +209,7 @@ def _liquidate_entrada(client, headers, order, mat, tp, qty="100", price="900",
                 }],
             }],
             **extra,
-        },
+        }),
     )
     assert resp.status_code == expect, resp.text
     return resp.json()

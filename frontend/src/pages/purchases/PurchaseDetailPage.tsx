@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
+import { usePurchasePdfOrder } from "@/hooks/usePurchasePdfOrder";
 import { ArrowLeft, CreditCard, XCircle, Pencil, FileText, PackageOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,10 +22,10 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { LinkedPaymentChoice } from "@/components/shared/LinkedPaymentChoice";
 import { ThirdPartyLink } from "@/components/shared/EntityLink";
 import { usePurchase, useCancelPurchase } from "@/hooks/usePurchases";
-import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate, formatDateTime, formatWeight } from "@/utils/formatters";
 import { CHARGE_TYPE_LABELS } from "@/utils/constants";
 import { RETENTION_TYPE_LABELS } from "@/types/purchase";
+import { TAX_TYPE_LABELS, numTax } from "@/types/document-tax";
 import { exportPurchasePDF } from "@/utils/pdfExport";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AttachmentsPanel } from "@/components/shared/AttachmentsPanel";
@@ -42,8 +44,8 @@ export default function PurchaseDetailPage() {
   const cancel = useCancelPurchase();
   const { hasPermission } = usePermissions();
   const canViewPrices = hasPermission("purchases.view_prices");
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const pdfTitle = usePdfTitle();
+  const orderForPdf = usePurchasePdfOrder();
 
   const [showCancel, setShowCancel] = useState(false);
   const [annulChoice, setAnnulChoice] = useState<"annul" | "advance" | null>(null);
@@ -106,7 +108,7 @@ export default function PurchaseDetailPage() {
               Cancelar
             </Button>
           )}
-          <Button variant="outline" onClick={() => exportPurchasePDF(purchase, orgName)}>
+          <Button variant="outline" onClick={() => exportPurchasePDF(orderForPdf(purchase), pdfTitle)}>
             <FileText className="h-4 w-4 mr-2" />
             PDF
           </Button>
@@ -336,7 +338,46 @@ export default function PurchaseDetailPage() {
         </Card>
       )}
 
-      {/* Retenciones aplicadas (SAC D9 — vacío para orgs sin flag) */}
+      {/* IVA de la compra (reparto por compra §4) — solo el detalle lo trae;
+          vacío en toda compra sin IVA, así la página queda como siempre */}
+      {(purchase.taxes?.length ?? 0) > 0 && canViewPrices && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Impuestos</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1.5 max-w-sm ml-auto">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-600">Subtotal</span>
+                <span className="tabular-nums">{formatCurrency(purchase.total_amount)}</span>
+              </div>
+              {purchase.taxes!.map((t) => (
+                <div key={t.id} className={`flex justify-between gap-2 text-sm ${t.reverted_at ? "opacity-60" : ""}`}>
+                  <span className="flex items-center gap-1.5 text-slate-600">
+                    <ThirdPartyLink id={t.third_party_id}>
+                      {TAX_TYPE_LABELS[t.tax_type] ?? t.tax_type}
+                      {t.rate != null ? ` ${numTax(t.rate)}%` : ""}
+                    </ThirdPartyLink>
+                    {t.reverted_at && (
+                      <Badge variant="outline" className="bg-rose-100 text-rose-800">Revertido</Badge>
+                    )}
+                  </span>
+                  <span className="tabular-nums">+{formatCurrency(numTax(t.amount))}</span>
+                </div>
+              ))}
+              {purchase.total_with_taxes != null && (
+                <div className="flex justify-between text-sm font-semibold border-t border-slate-200 pt-1.5">
+                  <span>Total con IVA</span>
+                  <span className="tabular-nums">{formatCurrency(numTax(purchase.total_with_taxes))}</span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Retenciones aplicadas (SAC D9 — vacío para orgs sin flag). QA C10:
+          `amount` es Decimal → string en el JSON; se suma con numTax() */}
       {purchase.retentions?.length > 0 && canViewPrices && (
         <Card className="shadow-sm">
           <CardHeader>
@@ -377,13 +418,17 @@ export default function PurchaseDetailPage() {
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">Total Retenciones</span>
                   <span className="tabular-nums text-rose-600">
-                    −{formatCurrency(purchase.retentions.reduce((s, r) => s + (r.reverted_at ? 0 : r.amount), 0))}
+                    −{formatCurrency(purchase.retentions.reduce((s, r) => s + (r.reverted_at ? 0 : numTax(r.amount)), 0))}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm font-semibold">
                   <span>Neto Acreditado al Proveedor</span>
                   <span className="tabular-nums">
-                    {formatCurrency(purchase.total_amount - purchase.retentions.reduce((s, r) => s + (r.reverted_at ? 0 : r.amount), 0))}
+                    {/* Con IVA, la base es subtotal + IVA (el proveedor quedó con los dos) */}
+                    {formatCurrency(
+                      (purchase.total_with_taxes != null ? numTax(purchase.total_with_taxes) : purchase.total_amount) -
+                        purchase.retentions.reduce((s, r) => s + (r.reverted_at ? 0 : numTax(r.amount)), 0)
+                    )}
                   </span>
                 </div>
               </div>

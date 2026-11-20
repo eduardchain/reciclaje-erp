@@ -9,10 +9,10 @@ import { ChevronRight, ChevronDown, Expand, Shrink, FileSpreadsheet, FileText, C
 import { ResponsiveFilterBar } from "@/components/shared/ResponsiveFilterBar";
 import ReportsLayout from "./ReportsLayout";
 import { useBalanceDetailed } from "@/hooks/useReports";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { exportBalanceDetailedExcel } from "@/utils/excelExport";
 import { exportBalanceDetailedPDF } from "@/utils/pdfExport";
-import { useAuthStore } from "@/stores/authStore";
 import { useDateFilter } from "@/stores/dateFilterStore";
 import { useScrollRestoration, saveScroll } from "@/hooks/useScrollRestoration";
 import {
@@ -85,8 +85,7 @@ export default function BalanceDetailedPage() {
   const { data, isLoading } = useBalanceDetailed(asOfDate || undefined);
   const navigate = useNavigate();
   const location = useLocation();
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const pdfTitle = usePdfTitle();
 
   useScrollRestoration(!isLoading);
 
@@ -336,7 +335,7 @@ export default function BalanceDetailedPage() {
               <Button variant="outline" size="sm" onClick={collapseAll} className="w-full sm:w-auto">
                 <Shrink className="w-4 h-4 mr-1" /> Colapsar
               </Button>
-              <Button variant="outline" size="sm" onClick={() => exportBalanceDetailedPDF(displayData, orgName, filtersActiveLabel)} className="w-full sm:w-auto">
+              <Button variant="outline" size="sm" onClick={() => exportBalanceDetailedPDF(displayData, pdfTitle, filtersActiveLabel)} className="w-full sm:w-auto">
                 <FileText className="w-4 h-4 mr-1" /> PDF
               </Button>
               <Button variant="outline" size="sm" onClick={() => exportBalanceDetailedExcel(displayData, filtersActiveLabel)} className="w-full sm:w-auto">

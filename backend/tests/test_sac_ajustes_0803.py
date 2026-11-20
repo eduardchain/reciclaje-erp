@@ -27,6 +27,7 @@ from app.models.purchase import Purchase
 from tests.integration_helpers import create_material, create_material_category, create_warehouse
 from tests.conftest import create_third_party_with_category
 from app.utils.dates import business_today
+from tests.reparto_slots import con_slots
 
 INBOUND_URL = "/api/v1/inbound-orders"
 KG_URL = "/api/v1/kg-ledger"
@@ -190,7 +191,7 @@ def _alloc(supplier, qty, price="1000", invoice=None):
 def _liquidate_allocs(client, headers, order_id, mat, allocs):
     resp = client.post(
         f"{INBOUND_URL}/{order_id}/liquidate", headers=headers,
-        json={"lines": [{"material_id": str(mat.id), "allocations": allocs}]},
+        json=con_slots({"lines": [{"material_id": str(mat.id), "allocations": allocs}]}),
     )
     assert resp.status_code == 200, resp.text
     return resp.json()

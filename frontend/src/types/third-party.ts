@@ -31,6 +31,17 @@ export interface ThirdPartyCreate {
   initial_balance?: number;
 }
 
+/** GET /third-parties/similar — candidatos a duplicado (reparto por compra). */
+export interface SimilarThirdParty {
+  id: string;
+  name: string;
+  identification_number: string | null;
+  is_material_supplier: boolean;
+  /** Todas sus categorías: para AGREGAR la de proveedor sin quitar ninguna
+   *  (el PATCH reemplaza la lista entera). */
+  category_ids: string[];
+}
+
 export interface ThirdPartyUpdate {
   name?: string | null;
   identification_number?: string | null;

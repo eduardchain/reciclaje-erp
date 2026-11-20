@@ -24,6 +24,14 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
+import {
+  FormatoMateriales,
+  buildFormatoSlots,
+  formatoLines,
+  formatoMaterialIds,
+  type FormatoSlot,
+  type FormatoValues,
+} from "@/components/inbound/FormatoMateriales";
 import { useCreateInboundOrder } from "@/hooks/useInboundOrders";
 import { useKgAccounts } from "@/hooks/useKgLedger";
 import { useMaterials, usePayableProviders, useWarehouses } from "@/hooks/useMasterData";
@@ -146,6 +154,13 @@ export default function InboundCreatePage() {
   // #93 D12: remision del camion — el documento de patio de la captura
   const [remissionNumber, setRemissionNumber] = useState("");
   const [lines, setLines] = useState<LineFormData[]>([createEmptyLine()]);
+  // Formato en papel (plan-sac-orden-formato-materiales §3): cantidades por
+  // renglon, solo en tipo compra
+  const [formatoValues, setFormatoValues] = useState<FormatoValues>({});
+  // Los renglones se fijan con la primera cantidad digitada: si los perfiles
+  // se refrescan con otro formato a mitad de la captura, una cantidad de un
+  // material que salio del formato no puede perderse al guardar.
+  const [pinnedSlots, setPinnedSlots] = useState<FormatoSlot[] | null>(null);
 
   // Quick-create de conductor/vehiculo (feedback Daniel: "deben ser creados
   // antes" era la friccion — ahora se crean en linea desde la captura)
@@ -228,13 +243,23 @@ export default function InboundCreatePage() {
 
   // Willard: el sub-selector de mundo filtra el picker (una recepcion = UN
   // mundo, Q-10; sin mundo elegido no hay materiales). Compra: como siempre.
+  // Formato en papel: solo tipo compra (el papel es de recolecciones; Willard
+  // no lo usa). Sin formato configurado, la captura queda como siempre.
+  const liveSlots = useMemo(() => buildFormatoSlots(profilesData?.items), [profilesData]);
+  const formatoSlots = pinnedSlots ?? liveSlots;
+  const conFormato = isPurchaseType && formatoSlots.length > 0;
+  const formatoIds = useMemo(() => formatoMaterialIds(formatoSlots), [formatoSlots]);
+
   const materialsForType = useMemo(() => {
     return materials.filter((m) => {
       const world = worldByMaterial.world.get(m.id) ?? "none";
       if (isWillard) return willardWorld !== "" && world === willardWorld;
+      // «Otros materiales» excluye los del formato: un material en dos
+      // lugares sumaria dos lineas que la Entrada rechaza
+      if (conFormato && formatoIds.has(m.id)) return false;
       return worldByMaterial.compra.get(m.id) ?? true;
     });
-  }, [materials, worldByMaterial, isWillard, willardWorld]);
+  }, [materials, worldByMaterial, isWillard, willardWorld, conFormato, formatoIds]);
 
   // Q-12 (feedback Daniel): la Recepcion solo lista bodegas RECEPTORAS — las
   // internas (molino/transito) se alimentan por Traslados, no por aca
@@ -285,6 +310,8 @@ export default function InboundCreatePage() {
     setWillardWorld("");
     setThirdPartyId("");
     setLines([createEmptyLine()]);
+    setFormatoValues({});
+    setPinnedSlots(null);
   };
 
   // Cambiar de mundo limpia las lineas que ya no aplican (homogeneidad en UI)
@@ -333,6 +360,14 @@ export default function InboundCreatePage() {
   const hasUnresolvedLines =
     isWillard && lines.some((l) => l.material_id && l.quantity > 0 && lineEstimates.get(l._key) == null);
 
+  // Con formato, una linea libre vacia (sin material ni cantidad) no cuenta:
+  // «Otros materiales» es opcional. Al guardar van primero los renglones del
+  // formato con cantidad, en su orden, y despues los otros materiales.
+  const freeLines = conFormato ? lines.filter((l) => l.material_id || l.quantity > 0) : lines;
+  const submitLines = conFormato
+    ? [...formatoLines(formatoSlots, formatoValues), ...freeLines]
+    : lines;
+
   const canSubmit =
     !!warehouseId &&
     // #93 D1: el tercero es SOLO de willard (titular cuenta kg) — la captura
@@ -342,8 +377,8 @@ export default function InboundCreatePage() {
     !isFutureDate &&
     (!isWillard || !!willardWorld) &&
     !postconsumoSinSedes &&
-    lines.length > 0 &&
-    lines.every((l) => l.material_id && l.quantity > 0);
+    submitLines.length > 0 &&
+    freeLines.every((l) => l.material_id && l.quantity > 0);
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -361,7 +396,7 @@ export default function InboundCreatePage() {
         // #93 D12: factura SOLO willard — en compra llega por proveedor al liquidar
         invoice_number: isWillard ? invoiceNumber.trim() || null : null,
         remission_number: remissionNumber.trim() || null,
-        lines: lines.map((l) => ({
+        lines: submitLines.map((l) => ({
           material_id: l.material_id,
           quantity: l.quantity,
           unit_price: isPurchaseType && l.unit_price > 0 ? l.unit_price : null,
@@ -689,16 +724,45 @@ export default function InboundCreatePage() {
         )}
       </div>
 
+      {/* Formato en papel «Materiales recolectados» (solo tipo compra) */}
+      {conFormato && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Formato</CardTitle>
+            <p className="text-xs text-slate-500">
+              En el orden del formato en papel. Digite solo los materiales que llegaron.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <FormatoMateriales
+              slots={formatoSlots}
+              values={formatoValues}
+              onChange={(id, v) => {
+                if (!pinnedSlots) setPinnedSlots(liveSlots);
+                setFormatoValues((prev) => ({ ...prev, [id]: v }));
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
+
       {/* Lineas */}
       <Card className="shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Líneas de Material</CardTitle>
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+            {conFormato ? "Otros materiales" : "Líneas de Material"}
+          </CardTitle>
           <Button variant="outline" size="sm" onClick={() => setLines((p) => [...p, createEmptyLine()])}>
             <Plus className="h-4 w-4 mr-1" />
-            Agregar Línea
+            {conFormato ? "Agregar material" : "Agregar Línea"}
           </Button>
         </CardHeader>
         <CardContent className="space-y-0">
+          {conFormato && (
+            <p className="text-xs text-slate-500 pb-2">
+              Lo que no está en el formato (opcional).
+            </p>
+          )}
           {lines.map((line, idx) => {
             const estimate = lineEstimates.get(line._key);
             return (
@@ -707,7 +771,7 @@ export default function InboundCreatePage() {
                 isFirst={idx === 0}
                 isLast={idx === lines.length - 1}
                 onDelete={() => setLines((p) => p.filter((l) => l._key !== line._key))}
-                disableDelete={lines.length === 1}
+                disableDelete={!conFormato && lines.length === 1}
               >
                 <div className="md:col-span-3">
                   <Label className={cn("text-xs font-semibold uppercase tracking-wider text-slate-500", lineLabelClass(idx))}>Material *</Label>

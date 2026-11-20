@@ -26,6 +26,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { LinkedPaymentChoice, type AnnulChoice } from "@/components/shared/LinkedPaymentChoice";
 import { OperationListCard } from "@/components/shared/OperationListCard";
 import { useSales, useSale, useCancelSale } from "@/hooks/useSales";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
 import { saleService } from "@/services/sales";
 import { formatCurrency, formatDate, formatWeight, formatPercentage } from "@/utils/formatters";
 import { formatLinesTotalQuantity } from "@/utils/operationLines";
@@ -33,7 +34,6 @@ import { fetchAllPages } from "@/utils/fetchAllPages";
 import { ROUTES } from "@/utils/constants";
 import type { SaleResponse } from "@/types/sale";
 import type { MetricCard } from "@/types/reports";
-import { useAuthStore } from "@/stores/authStore";
 import { exportSalePDF } from "@/utils/pdfExport";
 import { exportSalesDetailExcel } from "@/utils/excelExport";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -45,8 +45,7 @@ const PAGE_SIZE = 20;
 function ActionsCell({ sale }: { sale: SaleResponse }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const pdfTitle = usePdfTitle();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [annulChoice, setAnnulChoice] = useState<AnnulChoice>(null);
   const { hasPermission } = usePermissions();
@@ -103,7 +102,7 @@ function ActionsCell({ sale }: { sale: SaleResponse }) {
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => exportSalePDF(sale, orgName, { showPrices: hasPermission("sales.view_prices"), showProfit: hasPermission("sales.view_profit") })}>
+          <DropdownMenuItem onClick={() => exportSalePDF(sale, pdfTitle, { showPrices: hasPermission("sales.view_prices"), showProfit: hasPermission("sales.view_profit") })}>
             <FileText className="h-4 w-4 mr-2" />
             Exportar PDF
           </DropdownMenuItem>

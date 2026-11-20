@@ -4,6 +4,7 @@ import { cn } from "@/utils/index";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { entitySearchScore } from "@/utils/searchMatch";
 
 interface EntityOption {
   id: string;
@@ -50,14 +51,20 @@ export function EntitySelect({
           disabled={disabled || loading}
           className="w-full justify-between font-normal"
         >
-          <span className="truncate">
+          <span className="truncate" title={selectedLabel}>
             {loading ? "Cargando..." : selectedLabel || placeholder}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="p-0" style={{ width }} align="start">
-        <Command>
+      {/* Al menos el ancho del botón y nunca menos de 18rem: en columnas
+          angostas los nombres se partían en tres renglones. */}
+      <PopoverContent
+        className="p-0 w-72 max-w-[calc(100vw-1.5rem)]"
+        style={{ minWidth: width }}
+        align="start"
+      >
+        <Command filter={entitySearchScore}>
           <CommandInput placeholder="Buscar..." />
           <CommandList>
             <CommandEmpty>Sin resultados</CommandEmpty>

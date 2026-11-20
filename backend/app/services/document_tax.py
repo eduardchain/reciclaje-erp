@@ -20,7 +20,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.document_tax import TAX_SIGN_ON_CUSTOMER, DocumentTax
+from app.models.document_tax import (
+    SUBTOTAL_SIGN_ON_PARTY,
+    TAX_SIGN_ON_PARTY,
+    DocumentTax,
+    owner_kind,
+)
 from app.models.third_party import ThirdParty
 from app.services.retention_entities import normalize_entity_name
 from app.services.tax_entities import resolve_tax_entity, tax_label
@@ -51,18 +56,44 @@ def apply_taxes(
     *,
     sale_id: Optional[UUID] = None,
     willard_delivery_id: Optional[UUID] = None,
+    purchase_id: Optional[UUID] = None,
 ) -> Decimal:
-    """Aplica los impuestos capturados y devuelve el delta NETO sobre el cliente.
+    """Aplica los impuestos capturados y devuelve el delta NETO sobre el tercero
+    del documento (`customer`: el cliente de una venta o el PROVEEDOR de una
+    compra).
 
-    El signo sale de `TAX_SIGN_ON_CUSTOMER` y la entidad recibe siempre el
-    contrario. El llamador ya acredito el subtotal; esto es ADITIVO encima.
+    El signo sale de `TAX_SIGN_ON_PARTY[clase de dueno]` y la entidad recibe
+    siempre el contrario. El llamador ya aplico el subtotal; esto es ADITIVO.
     """
-    if sale_id is None and willard_delivery_id is None:
-        raise ValueError("apply_taxes necesita un dueno: sale_id o willard_delivery_id")
-    if sale_id is not None and willard_delivery_id is not None:
-        raise ValueError("apply_taxes acepta UN dueno, no dos")
+    owners = [
+        k for k, v in (
+            ("sale", sale_id),
+            ("willard_delivery", willard_delivery_id),
+            ("purchase", purchase_id),
+        ) if v is not None
+    ]
+    if not owners:
+        raise ValueError("apply_taxes necesita un dueno: sale_id, willard_delivery_id o purchase_id")
+    if len(owners) > 1:
+        raise ValueError("apply_taxes acepta UN dueno, no varios")
+    kind = owners[0]
+    signs = TAX_SIGN_ON_PARTY[kind]
+    subtotal_sign = SUBTOTAL_SIGN_ON_PARTY[kind]
 
     _require_flag(db, organization_id)
+
+    # Un tipo que no esta en el mapa de su clase no se admite: hoy una compra
+    # solo lleva IVA (sus retenciones viven en purchase_retentions, #75).
+    for t in taxes_data:
+        if t.tax_type not in signs:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"{tax_label(t.tax_type, t.municipality)} no se registra en este "
+                    "documento. En una compra solo va el IVA; las retenciones se "
+                    "capturan en su bloque."
+                ),
+            )
 
     # Una fila por (tipo, municipio): dos IVA sobre el mismo documento es
     # captura duplicada, y en ICA la entidad es por municipio.
@@ -79,12 +110,14 @@ def apply_taxes(
             )
         seen.add(key)
 
+    # "Suma a la factura" = mismo signo que el subtotal sobre el tercero; "se
+    # retiene" = el contrario. Asi el guard vale igual para venta y compra.
     added = sum(
-        (Decimal(str(t.amount)) for t in taxes_data if TAX_SIGN_ON_CUSTOMER[t.tax_type] > 0),
+        (Decimal(str(t.amount)) for t in taxes_data if signs[t.tax_type] == subtotal_sign),
         Decimal("0"),
     )
     withheld = sum(
-        (Decimal(str(t.amount)) for t in taxes_data if TAX_SIGN_ON_CUSTOMER[t.tax_type] < 0),
+        (Decimal(str(t.amount)) for t in taxes_data if signs[t.tax_type] == -subtotal_sign),
         Decimal("0"),
     )
     if withheld >= subtotal + added:
@@ -115,7 +148,7 @@ def apply_taxes(
     net = Decimal("0")
     for t in taxes_data:
         amount = Decimal(str(t.amount))
-        sign = TAX_SIGN_ON_CUSTOMER[t.tax_type]
+        sign = signs[t.tax_type]
         base_amount = iva_total if getattr(t, "base_kind", "subtotal") == "iva" else subtotal
         entity = resolve_tax_entity(db, organization_id, t.tax_type, t.municipality)
 
@@ -123,6 +156,7 @@ def apply_taxes(
             organization_id=organization_id,
             sale_id=sale_id,
             willard_delivery_id=willard_delivery_id,
+            purchase_id=purchase_id,
             third_party_id=entity.id,
             tax_type=t.tax_type,
             municipality=t.municipality.strip() if t.municipality else None,
@@ -146,6 +180,7 @@ def revert_taxes(
     *,
     sale_id: Optional[UUID] = None,
     willard_delivery_id: Optional[UUID] = None,
+    purchase_id: Optional[UUID] = None,
 ) -> Decimal:
     """Deshace los impuestos vivos de un documento y devuelve el delta aplicado.
 
@@ -161,15 +196,17 @@ def revert_taxes(
         query = query.where(DocumentTax.sale_id == sale_id)
     elif willard_delivery_id is not None:
         query = query.where(DocumentTax.willard_delivery_id == willard_delivery_id)
+    elif purchase_id is not None:
+        query = query.where(DocumentTax.purchase_id == purchase_id)
     else:
-        raise ValueError("revert_taxes necesita un dueno: sale_id o willard_delivery_id")
+        raise ValueError("revert_taxes necesita un dueno: sale_id, willard_delivery_id o purchase_id")
 
     # Timestamp de AUDITORIA, no fecha de negocio: responde *cuando exactamente*
     # y nunca se usa para cortar un reporte (regla del reloj unico, #87/#91).
     now = datetime.now(timezone.utc)
     net = Decimal("0")
     for tax in db.execute(query).scalars().all():
-        sign = TAX_SIGN_ON_CUSTOMER[tax.tax_type]
+        sign = TAX_SIGN_ON_PARTY[owner_kind(tax)][tax.tax_type]
         entity = db.get(ThirdParty, tax.third_party_id)
         if entity is not None:
             entity.current_balance += sign * tax.amount

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
 import { ArrowLeft, FileText, XCircle, Pencil, CheckCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,6 @@ import { useDoubleEntry, useCancelDoubleEntry } from "@/hooks/useDoubleEntries";
 import { formatCurrency, formatDate, formatDateTime, formatWeight, formatPercentage } from "@/utils/formatters";
 import { exportDoubleEntryPDF } from "@/utils/pdfExport";
 import { CHARGE_TYPE_LABELS } from "@/utils/constants";
-import { useAuthStore } from "@/stores/authStore";
 import { usePermissions } from "@/hooks/usePermissions";
 
 const statusBorderMap: Record<string, string> = {
@@ -34,8 +34,7 @@ export default function DoubleEntryDetailPage() {
   const { hasPermission } = usePermissions();
   const canViewProfit = hasPermission("double_entries.view_profit");
   const [showCancel, setShowCancel] = useState(false);
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const pdfTitle = usePdfTitle();
 
   if (isLoading) return <div className="space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>;
   if (!de) return <div className="text-center py-12 text-slate-500">Doble partida no encontrada</div>;
@@ -55,7 +54,7 @@ export default function DoubleEntryDetailPage() {
               </Button>
           )}
           {de.status === "liquidated" && (
-            <Button variant="outline" onClick={() => exportDoubleEntryPDF(de, orgName, { showProfit: canViewProfit })}>
+            <Button variant="outline" onClick={() => exportDoubleEntryPDF(de, pdfTitle, { showProfit: canViewProfit })}>
               <FileText className="h-4 w-4 mr-2" />Exportar PDF
             </Button>
           )}

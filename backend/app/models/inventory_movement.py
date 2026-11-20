@@ -109,8 +109,12 @@ class InventoryMovement(Base, OrganizationMixin, TimestampMixin):
         comment="Quantity moved (positive=in, negative=out)",
     )
     
+    # 8 decimales, igual que `purchase_lines.unit_price`: la reversa de una
+    # compra saca del pool con ESTE costo (#66 H1); si guardara 2 decimales
+    # mientras el pool recibio 8, la diferencia quedaria en el promedio o en
+    # el P&L (plan-redondeo-precio-compras §2).
     unit_cost: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
+        Numeric(21, 8),
         nullable=False,
         comment="Cost per unit at time of movement",
     )

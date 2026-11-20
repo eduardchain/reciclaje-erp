@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { EntityLink } from "@/components/shared/EntityLink";
 import { ROUTES, buildRoute } from "@/utils/constants";
@@ -18,7 +19,8 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { MovementListCard } from "@/components/shared/MovementListCard";
 import { useThirdPartyMovements } from "@/hooks/useMoneyMovements";
 import { useThirdParties } from "@/hooks/useMasterData";
-import { useAuthStore } from "@/stores/authStore";
+import { useQuery } from "@tanstack/react-query";
+import { thirdPartyService } from "@/services/thirdParties";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { exportAccountStatementPDF, type AccountStatementPdfFormat } from "@/utils/pdfExport";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -197,9 +199,22 @@ export default function AccountStatementPage() {
   }, [pdfFormat]);
 
   const { data: thirdPartiesData } = useThirdParties(undefined, { staleTime: 0 });
-  const thirdParties = thirdPartiesData?.items ?? [];
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const listedThirdParties = thirdPartiesData?.items ?? [];
+  // El listado excluye las entidades de sistema ([Impuestos] IVA por Pagar,
+  // [Retenciones] X). Si la URL trae una (link desde el detalle de una compra
+  // con IVA), se carga por su id para que el selector y el PDF la nombren.
+  const missingFromList =
+    !!thirdPartyId && !!thirdPartiesData && !listedThirdParties.some((t) => t.id === thirdPartyId);
+  const { data: unlistedThirdParty } = useQuery({
+    queryKey: ["third-parties", "detail", thirdPartyId],
+    queryFn: () => thirdPartyService.getById(thirdPartyId),
+    enabled: missingFromList,
+  });
+  const thirdParties =
+    missingFromList && unlistedThirdParty?.id === thirdPartyId
+      ? [...listedThirdParties, unlistedThirdParty]
+      : listedThirdParties;
+  const pdfTitle = usePdfTitle();
 
   const filters = {
     ...(dateFrom ? { date_from: dateFrom } : {}),
@@ -285,7 +300,7 @@ export default function AccountStatementPage() {
               <SelectItem value="desktop">Escritorio (tabla)</SelectItem>
             </SelectContent>
           </Select>
-          <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData(), orgName, pdfFormat)} className="flex-1 sm:flex-none">
+          <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData(), pdfTitle, pdfFormat)} className="flex-1 sm:flex-none">
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
           <Button size="sm" variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())} className="flex-1 sm:flex-none">

@@ -30,6 +30,7 @@ from app.schemas.inbound_order import (
     InboundPurchaseSummary,
     InboundRetentionDetail,
 )
+from app.schemas.document_tax import DocumentTaxResponse
 from app.services.inbound_order import inbound_order_service
 
 router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])
@@ -43,6 +44,9 @@ def _page_context(db: Session, org_id: UUID, orders: list[InboundOrder]) -> dict
     audit = inbound_order_service.willard_confirm_audit(db, org_id, order_ids)
     worlds = inbound_order_service.willard_worlds_by_order(db, org_id, orders)
     purchases = inbound_order_service.purchases_by_order(db, org_id, order_ids)
+    slots, taxes = inbound_order_service.purchase_extras(
+        db, org_id, [p.id for plist in purchases.values() for p in plist]
+    )
     user_ids = set()
     for o in orders:
         user_ids.add(o.created_by)
@@ -64,7 +68,23 @@ def _page_context(db: Session, org_id: UUID, orders: list[InboundOrder]) -> dict
             select(User.id, User.full_name, User.email).where(User.id.in_(user_ids))
         ).all()
         names = {uid: (full_name or email) for uid, full_name, email in rows}
-    return {"audit": audit, "worlds": worlds, "names": names, "purchases": purchases}
+    return {
+        "audit": audit, "worlds": worlds, "names": names, "purchases": purchases,
+        "purchase_slots": slots, "purchase_taxes": taxes,
+    }
+
+
+def _last_tax_batch(rows: list) -> list:
+    """Mismo criterio que `_last_retention_batch`, sobre (DocumentTax, nombre):
+    las vivas si las hay; si no, el ultimo lote revertido (precarga)."""
+    live = [r for r in rows if r[0].reverted_at is None]
+    if live:
+        return live
+    reverted = [r for r in rows if r[0].reverted_at is not None]
+    if not reverted:
+        return []
+    last = max(r[0].reverted_at for r in reverted)
+    return [r for r in reverted if r[0].reverted_at == last]
 
 
 def _last_retention_batch(retentions: list) -> list:
@@ -120,6 +140,9 @@ def _enrich(
                     id=a.id,
                     third_party_id=a.third_party_id,
                     third_party_name=a.third_party.name if a.third_party else None,
+                    # Reparto por compra: el campo se arma A MANO (trampa #95) —
+                    # sin esta linea la pantalla no sabria a que compra va
+                    purchase_slot=a.purchase_slot,
                     quantity=a.quantity,
                     unit_price=a.unit_price,
                     # Q-15: sin esto la pantalla re-abriria el reparto en modo
@@ -164,10 +187,13 @@ def _enrich(
     ctx = ctx or {}
     names = ctx.get("names", {})
     bridge_purchases = ctx.get("purchases", {}).get(order.id, [])
+    purchase_slots = ctx.get("purchase_slots", {})
+    purchase_taxes = ctx.get("purchase_taxes", {})
     purchase_summaries = [
         InboundPurchaseSummary(
             purchase_id=p.id,
             purchase_number=p.purchase_number,
+            purchase_slot=purchase_slots.get(p.id),
             supplier_id=p.supplier_id,
             supplier_name=p.supplier.name if p.supplier else None,
             status=p.status,
@@ -194,6 +220,15 @@ def _enrich(
                     amount=r.amount,
                 )
                 for r in _last_retention_batch(p.retentions or [])
+            ],
+            taxes=[
+                DocumentTaxResponse(
+                    id=t.id, third_party_id=t.third_party_id, third_party_name=name,
+                    tax_type=t.tax_type, municipality=t.municipality,
+                    concept=t.concept, rate=t.rate, base_amount=t.base_amount,
+                    amount=t.amount, reverted_at=t.reverted_at,
+                )
+                for t, name in _last_tax_batch(purchase_taxes.get(p.id, []))
             ],
         )
         for p in bridge_purchases

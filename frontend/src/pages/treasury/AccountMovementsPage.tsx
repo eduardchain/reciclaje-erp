@@ -13,8 +13,8 @@ import { MoneyDisplay } from "@/components/shared/MoneyDisplay";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { MovementListCard } from "@/components/shared/MovementListCard";
 import { useAccountMovements } from "@/hooks/useMoneyMovements";
+import { usePdfTitle } from "@/hooks/usePdfTitle";
 import { useMoneyAccounts } from "@/hooks/useMasterData";
-import { useAuthStore } from "@/stores/authStore";
 import { formatCurrency, formatDate } from "@/utils/formatters";
 import { exportAccountStatementPDF, type AccountStatementPdfFormat } from "@/utils/pdfExport";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -114,8 +114,7 @@ export default function AccountMovementsPage() {
 
   const { data: accountsData } = useMoneyAccounts();
   const accounts = accountsData?.items ?? [];
-  const { organizationId, organizations } = useAuthStore();
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
+  const pdfTitle = usePdfTitle();
 
   const filters = {
     ...(dateFrom ? { date_from: dateFrom } : {}),
@@ -184,7 +183,7 @@ export default function AccountMovementsPage() {
               <SelectItem value="desktop">Escritorio (tabla)</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData(), orgName, pdfFormat)}>
+          <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementPDF(buildExportData(), pdfTitle, pdfFormat)}>
             <FileText className="h-4 w-4 mr-2" />PDF
           </Button>
           <Button variant="outline" disabled={!canExport} onClick={() => exportAccountStatementExcel(buildExportData())}>

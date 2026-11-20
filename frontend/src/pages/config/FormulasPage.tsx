@@ -21,6 +21,7 @@ import { exportMaterialsKgExcel } from "@/utils/excelExport";
 import { formatDate, formatDateTime, getApiErrorMessage } from "@/utils/formatters";
 import { ROUTES } from "@/utils/constants";
 import ConfigLayout from "./ConfigLayout";
+import { FormatoCapturaSection } from "./FormatoCapturaSection";
 import {
   formulaTypeForUnit,
   type MaterialConversionFormulaResponse,
@@ -517,6 +518,11 @@ export default function FormulasPage() {
           </Table>
         </div>
       )}
+
+      {/* Orden del formato en papel de la captura (plan-sac-orden-formato-materiales D3) */}
+      <div className="mt-6">
+        <FormatoCapturaSection profiles={profilesData?.items ?? []} canEdit={canEdit} />
+      </div>
 
       {/* Formulario unificado: crear/editar material + clasificación + factor (C1) */}
       <Dialog open={dialogOpen} onOpenChange={(o) => !saving && setDialogOpen(o)}>
