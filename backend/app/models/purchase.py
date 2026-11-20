@@ -311,8 +311,11 @@ class PurchaseLine(Base, TimestampMixin):
         comment="Quantity purchased (allows decimals: 150.500 kg)",
     )
     
+    # 8 decimales (plan-redondeo-precio-compras): el unitario se deriva a veces
+    # como total/cantidad (Entrada, Q-15), y con 2 decimales el error se
+    # multiplicaba por la cantidad — $3.138.450 nacian $3.138.444,36.
     unit_price: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
+        Numeric(21, 8),
         nullable=False,
         comment="Price per unit",
     )

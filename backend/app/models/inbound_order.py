@@ -355,7 +355,9 @@ class InboundLineAllocation(Base, OrganizationMixin, TimestampMixin):
 
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
 
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    # 8 decimales: cuando se digita el valor total, el unitario es
+    # total/cantidad y tiene que llegar a la compra sin redondear a centavos.
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(21, 8), nullable=False)
 
     # Q-15 (reunion 12-ago): Johana puede digitar el VALOR TOTAL de la
     # asignacion en vez del precio unitario — "el precio unitario seria una

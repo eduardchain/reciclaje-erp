@@ -297,7 +297,11 @@ class TestCogsFinalizedAtLiquidation:
             )
             .one()
         )
-        assert mv.unit_cost == expected_cost
+        # plan-redondeo-precio-compras v1.1 (§3, fila "Venta liquidada"):
+        # inventory_movements.unit_cost paso a Numeric(21,8), asi que el
+        # movimiento guarda el promedio tal cual (4 decimales) en vez de
+        # redondearlo a 2. El COGS sigue saliendo de sale_lines.unit_cost (2).
+        assert mv.unit_cost == avg_at_liquidation
 
         # Extraer del pool NO cambia el promedio
         db_session.refresh(ml_material)

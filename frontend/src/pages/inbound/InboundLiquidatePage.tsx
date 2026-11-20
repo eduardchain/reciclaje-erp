@@ -101,16 +101,23 @@ function newAlloc(price = 0): AllocRow {
 }
 
 /** Q-15/D8: el efecto REAL del valor total digitado. El backend deriva el
- *  unitario a 2 decimales y después re-multiplica, así que $200.000 entre 3
- *  vuelven como $200.000,01. Se calcula igual acá para que el centavo nunca
- *  sea una sorpresa contra la factura: se acepta, pero se muestra.
+ *  unitario como total/cantidad a 8 decimales y después re-multiplica, así que
+ *  la compra vuelve al total digitado al centavo. Con 2 decimales (hasta el
+ *  19-nov) el error se multiplicaba por la cantidad: $3.138.450 para 1.503
+ *  unidades nacían $3.138.444,36 (plan-redondeo-precio-compras). Se calcula
+ *  igual acá, y el aviso ámbar de abajo queda para el caso que llegue a
+ *  diferir, que con 8 decimales no se espera.
  *
  *  ⚠️ La vista previa puede diferir en 1 centavo del valor persistido en un
  *  empate exacto: acá es `Math.round` sobre float (half up) y allá
  *  `Decimal.quantize` (HALF_EVEN). Igualar el modo de redondeo NO lo cierra —
  *  float y Decimal difieren en la representación, no solo en el redondeo — y
  *  pintar el número del servidor exigiría un round-trip que antes de guardar
- *  no existe. Con montos en pesos el empate al medio centavo no ocurre. */
+ *  no existe. Con montos en pesos el empate al medio centavo no ocurre.
+ *  `cantidad × 1e8` cabe sin pérdida en un `number` para las cantidades
+ *  reales (la mayor línea medida es 45.660). */
+const PRICE_SCALE = 1e8;
+const roundPrice = (v: number): number => Math.round(v * PRICE_SCALE) / PRICE_SCALE;
 /** Peso prorrateado de una asignación: el estimador es kg/unidad de la LÍNEA
  *  (no una proporción del total repartido), así que el peso de cada proveedor
  *  depende solo de su propia cantidad. Con el denominador puesto en la suma de
@@ -124,16 +131,27 @@ export const allocWeight = (a: AllocRow, l: LineState): number =>
 const effUnitPrice = (a: AllocRow, l?: LineState): number => {
   if (a.price_per_kg != null && l && a.quantity > 0) {
     const peso = allocWeight(a, l);
-    return Math.round(((peso * a.price_per_kg) / a.quantity) * 100) / 100;
+    return roundPrice((peso * a.price_per_kg) / a.quantity);
   }
   if (a.total_price != null && a.quantity > 0) {
-    return Math.round((a.total_price / a.quantity) * 100) / 100;
+    return roundPrice(a.total_price / a.quantity);
   }
   return a.unit_price;
 };
 
+/** Lo que la compra va a sumar por esta asignación: cantidad × unitario,
+ *  redondeado a centavos como la columna `total_price` de la línea. */
 const effAllocTotal = (a: AllocRow, l?: LineState): number =>
-  a.quantity * effUnitPrice(a, l);
+  Math.round(a.quantity * effUnitPrice(a, l) * 100) / 100;
+
+/** C1 de QA (plan-redondeo-precio-compras): el unitario de 8 decimales es
+ *  para CALCULAR, no para editar. Todo valor que sale de `effUnitPrice` hacia
+ *  un estado que se pinta en un `MoneyInput` de 2 decimales (referencia,
+ *  unitario al rotar el modo, "Repartir todo") se redondea a centavos ACÁ:
+ *  si no, el `MoneyInput` lo redondea solo en el blur y la compra vuelve a
+ *  nacer con el total viejo, en silencio, por un cambio de foco. Quien quiere
+ *  el total exacto usa el modo total, que no pasa por el unitario. */
+const toCents = (v: number): number => Math.round(v * 100) / 100;
 
 /** El peso colombiano se pinta sin decimales en toda la app (`formatCurrency`),
  *  y en el reparto eso BORRABA justo el dato que D8 promete mostrar: el aviso
@@ -535,7 +553,7 @@ export default function InboundLiquidatePage() {
         let refPrice = l.refPrice;
         if (!l.refTouched && refPrice <= 0) {
           const touched = allocations.find((a) => a._key === allocKey);
-          const eff = touched ? effUnitPrice(touched, l) : 0;
+          const eff = touched ? toCents(effUnitPrice(touched, l)) : 0;
           if (eff > 0) refPrice = eff;
         }
         return { ...l, allocations, refPrice };
@@ -561,6 +579,7 @@ export default function InboundLiquidatePage() {
           allocations: l.allocations.map((a) => {
             if (a._key !== allocKey) return a;
             const unitario = effUnitPrice(a, l);
+            const unitarioEditable = toCents(unitario);
             switch (allocMode(a)) {
               case "unit":
                 return {
@@ -571,7 +590,7 @@ export default function InboundLiquidatePage() {
                 };
               case "total": {
                 if (!puedeKg) {
-                  return { ...a, unit_price: unitario, total_price: null, price_per_kg: null };
+                  return { ...a, unit_price: unitarioEditable, total_price: null, price_per_kg: null };
                 }
                 const peso = allocWeight(a, l);
                 return {
@@ -584,7 +603,7 @@ export default function InboundLiquidatePage() {
                 };
               }
               default:
-                return { ...a, unit_price: unitario, total_price: null, price_per_kg: null };
+                return { ...a, unit_price: unitarioEditable, total_price: null, price_per_kg: null };
             }
           }),
         };
@@ -652,7 +671,7 @@ export default function InboundLiquidatePage() {
         // NO la lista general (D3: nada se hereda de otra lista).
         const priced = l.allocations.find((a) => allocPriced(a));
         const precio = priced
-          ? effUnitPrice(priced, l)
+          ? toCents(effUnitPrice(priced, l))
           : precios.get(l.material_id) ?? l.refPrice;
         return {
           ...l,
@@ -1044,8 +1063,9 @@ export default function InboundLiquidatePage() {
                               effUnitPrice(a, l)
                             )} c/u`
                           : a.total_price != null
-                            ? // D8: el total que realmente queda. $200.000 entre 3
-                              // vuelven como $200.000,01 — se acepta, pero se ve
+                            ? // D8: el total que realmente queda. Con el unitario a
+                              // 8 decimales vuelve al digitado; si alguna vez
+                              // difiere, el ámbar de arriba lo pinta
                               `${fmtMoney(effUnitPrice(a, l))} c/u → ${fmtMoney(effAllocTotal(a, l))}`
                             : `Total ${fmtMoney(effAllocTotal(a, l))}`}
                       </p>

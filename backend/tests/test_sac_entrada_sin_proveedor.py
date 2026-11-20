@@ -2158,11 +2158,13 @@ class TestLiquidarPorValorTotal:
     def test_total_deriva_el_unitario(
         self, client, org_headers, db_session, wh, mat_balancin, sup1,
     ):
-        """El caso canonico del centavo: $200.000 entre 3 unidades dan
-        $66.666,67 y el total vuelve como $200.000,01. Se acepta (D8) — hacerlo
-        exacto obligaria a tocar purchase_lines, tabla compartida, por 1 centavo.
-        Lo que NO se acepta es que sea una sorpresa: la pantalla muestra el
-        total resultante antes de guardar."""
+        """El caso canonico del centavo: $200.000 entre 3 unidades.
+
+        Re-semantizado por plan-redondeo-precio-compras v1.1: hasta ahi el
+        unitario era 66.666,67 y la compra volvia en $200.000,01 (D8 de #95 lo
+        aceptaba por no tocar purchase_lines). Johana encontro el mismo defecto
+        con $5,64 de diferencia en una Entrada de 1.503 unidades, y con el
+        unitario a 8 decimales el total digitado llega exacto."""
         order = _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 3)])
         _liquidate(
             client, org_headers, order["id"],
@@ -2174,12 +2176,12 @@ class TestLiquidarPorValorTotal:
             ).where(InboundLineAllocation.third_party_id == sup1.id)
         ).scalars().all()
         assert len(allocs) == 1
-        assert allocs[0].unit_price == Decimal("66666.67")
+        assert allocs[0].unit_price == Decimal("66666.66666667")
         assert allocs[0].total_price == Decimal("200000.00")  # el MODO persiste
 
         purchases = _order_purchases(db_session, order["id"])
         assert len(purchases) == 1
-        assert purchases[0].total_amount == Decimal("200000.01")
+        assert purchases[0].total_amount == Decimal("200000.00")
 
     def test_mezcla_unitario_y_total_en_la_misma_entrada(
         self, client, org_headers, db_session, wh, mat_balancin, mat_moto, sup1, sup2,
@@ -2225,11 +2227,15 @@ class TestLiquidarPorValorTotal:
         self, client, org_headers, wh, mat_balancin, sup1,
     ):
         """Sin este guard el unitario quedaria en $0 y reventaria mas abajo,
-        en purchase.liquidate, con un error que no explica nada."""
+        en purchase.liquidate, con un error que no explica nada.
+
+        Con el unitario a 8 decimales (plan-redondeo-precio-compras) $0,01
+        entre 10.000 ya NO queda en cero (0,000001): hace falta una cantidad
+        con la que total / cantidad caiga bajo 0,000000005."""
         resp = _liquidate(
             client, org_headers,
-            _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 10000)])["id"],
-            [_liq_line(mat_balancin, [_alloc(sup1, 10000, total="0.01")])],
+            _captured_reviewed(client, org_headers, wh, [_line(mat_balancin, 3000000)])["id"],
+            [_liq_line(mat_balancin, [_alloc(sup1, 3000000, total="0.01")])],
             expect=422,  # idioma del modulo: la Entrada responde 422 (#80)
         )
         assert "precio unitario queda en $0" in resp["detail"]

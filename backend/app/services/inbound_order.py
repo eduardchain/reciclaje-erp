@@ -416,13 +416,18 @@ class InboundOrderService:
         from app.services.purchase import purchase as purchase_service
 
         QTY_Q = Decimal("0.0001")   # escala Numeric(15,4) de la BD
-        PRICE_Q = Decimal("0.01")   # escala Numeric(15,2)
+        # Escala Numeric(21,8) del unitario (plan-redondeo-precio-compras).
+        # Con 0.01 el error del redondeo se multiplicaba por la cantidad:
+        # $3.138.450 para 1.503 unidades nacian $3.138.444,36.
+        PRICE_Q = Decimal("0.00000001")
         # Escala REAL del reparto: al inventario entra la cantidad de
         # purchase_lines, que es Numeric(10,3). La asignacion permitia 4
         # decimales, asi que la identidad "pesado = repartido + descuadre" se
         # rompia hasta 0,0005 kg por asignacion SIN NINGUN AVISO. Con pesos en
         # kg (Q-13) dejo de ser hipotetico.
         ALLOC_Q = Decimal("0.001")
+        # Escala Numeric(15,2) de inbound_order_lines.reference_unit_price.
+        REF_Q = Decimal("0.01")
 
         # El mapa se arma aca (y no en la fase de validacion, donde estaba)
         # porque el modo por kg necesita el peso y la cantidad de la linea para
@@ -439,6 +444,20 @@ class InboundOrderService:
         # numero. Hacerlo aca y no en cada consumidor es lo que hace la
         # identidad exacta por construccion en vez de por vigilancia.
         for pl in payload.lines:
+            # C1 de QA (plan-redondeo-precio-compras): la columna es
+            # Numeric(15,2), pero el valor EN MEMORIA va sin redondear al ajuste
+            # del descuadre (pool, movimiento y aviso). Cuantizar aca hace que
+            # el numero que valora el descuadre sea el que se persiste, venga
+            # de la pantalla o del API.
+            if pl.reference_unit_price is not None:
+                pl.reference_unit_price = pl.reference_unit_price.quantize(REF_Q)
+                if pl.reference_unit_price <= 0:
+                    material = db.get(Material, pl.material_id)
+                    code = material.code if material else pl.material_id
+                    raise _err(
+                        f"El precio de referencia de {code} es demasiado bajo: "
+                        f"queda en $0 al redondear a centavos"
+                    )
             for a in pl.allocations:
                 a.quantity = a.quantity.quantize(ALLOC_Q)
                 # El schema exige > 0, pero eso es ANTES de cuantizar: 0,0004
@@ -468,9 +487,12 @@ class InboundOrderService:
 
                 if a.total_price is not None:
                     # Q-15: el unitario es una formula — "costo total dividido
-                    # unidades" (Hugo). Se cuantiza a PRICE_Q para que la firma
-                    # de #93 vea el mismo numero y no dispare un
-                    # revert-and-reapply innecesario en cada re-liquidacion.
+                    # unidades" (Hugo). Se cuantiza a PRICE_Q (8 decimales) aca,
+                    # en el mismo punto donde se persiste, para que la firma de
+                    # #93 vea el mismo numero y no dispare un revert-and-reapply
+                    # innecesario en cada re-liquidacion. Con 8 decimales,
+                    # cantidad x unitario redondeado a centavos vuelve al total
+                    # digitado.
                     a.unit_price = (a.total_price / a.quantity).quantize(PRICE_Q)
                     if a.unit_price <= 0:
                         material = db.get(Material, pl.material_id)
