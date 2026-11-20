@@ -44,6 +44,9 @@ T1_CASES = [
     ("B frontera: 1 palabra de 7 letras NO", "Ferrosa", "Ferrosa Industrial", None),
     ("B frontera: 1 palabra de 8 letras SÍ", "Ferrosas", "Ferrosas Industrial", "similar"),
     ("B frontera: 2 palabras cortas SÍ", "Ana Maria", "Ana Maria Lopez", "similar"),
+    # «anamaria» tiene 8 letras y pasa también por el umbral de letras: este caso
+    # (2 palabras, 6 letras) es el único que mide el umbral de PALABRAS (P9a).
+    ("B frontera: 2 palabras de 6 letras SÍ", "Ana Paz", "Ana Paz Lopez", "similar"),
     ("B: 1 palabra corta NO", "Ana", "Ana Maria Lopez", None),
     ("B: nombre corto «green» NO", "green", "Bio Green Loop- Maquila", None),
     ("control T5: comparten 1 palabra de 2", "Ferretería El Tornillo", "El Tornillo Feliz", None),
