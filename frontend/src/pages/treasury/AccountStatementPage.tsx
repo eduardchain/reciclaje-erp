@@ -19,6 +19,8 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { MovementListCard } from "@/components/shared/MovementListCard";
 import { useThirdPartyMovements } from "@/hooks/useMoneyMovements";
 import { useThirdParties } from "@/hooks/useMasterData";
+import { useQuery } from "@tanstack/react-query";
+import { thirdPartyService } from "@/services/thirdParties";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { exportAccountStatementPDF, type AccountStatementPdfFormat } from "@/utils/pdfExport";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -197,7 +199,21 @@ export default function AccountStatementPage() {
   }, [pdfFormat]);
 
   const { data: thirdPartiesData } = useThirdParties(undefined, { staleTime: 0 });
-  const thirdParties = thirdPartiesData?.items ?? [];
+  const listedThirdParties = thirdPartiesData?.items ?? [];
+  // El listado excluye las entidades de sistema ([Impuestos] IVA por Pagar,
+  // [Retenciones] X). Si la URL trae una (link desde el detalle de una compra
+  // con IVA), se carga por su id para que el selector y el PDF la nombren.
+  const missingFromList =
+    !!thirdPartyId && !!thirdPartiesData && !listedThirdParties.some((t) => t.id === thirdPartyId);
+  const { data: unlistedThirdParty } = useQuery({
+    queryKey: ["third-parties", "detail", thirdPartyId],
+    queryFn: () => thirdPartyService.getById(thirdPartyId),
+    enabled: missingFromList,
+  });
+  const thirdParties =
+    missingFromList && unlistedThirdParty?.id === thirdPartyId
+      ? [...listedThirdParties, unlistedThirdParty]
+      : listedThirdParties;
   const pdfTitle = usePdfTitle();
 
   const filters = {
