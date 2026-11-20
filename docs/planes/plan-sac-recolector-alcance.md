@@ -1,4 +1,22 @@
-# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.4)
+# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.5)
+
+**v1.5 (20-nov):** un hueco de la v1.4 que encontré midiendo la pantalla, y la regla de la categoría de conductor. El resto del cuerpo aprobado no cambia.
+- **El hueco.** Fila 15 exige `category_ids`, y Ingrid no tenía forma de conocerlos: `GET /third-party-categories/flat` no estaba en la lista blanca. `CreateSupplierDialog` quedaba sin categorías («No hay una categoría de proveedor de material»), así que con la v1.4 no podía crear un proveedor desde la liquidación.
+  - Lo medí con un sondeo de red: Playwright como un usuario con alcance contra `:8012`/`:5182`, 10 pantallas, anotando toda respuesta ≥ 400 (`sondeo_red_r1.log`). Dio 26 respuestas 403.
+  - 25 de esas 403 son de la pantalla: piden lo que el backend ya le niega. Se cierran en el frontend (§8).
+  - La que queda es este hueco, y se cierra con la **fila 15b**.
+  - Visto bueno de Eco QA 2 a la idea, y el Coordinador confirma que no hace falta Daniel: cumple lo ya decidido (Ingrid crea sus proveedores y, por H5, sus conductores) y solo expone nombres de categorías.
+- **La categoría de conductor** (Coordinador, 20-nov): una sola, con un nombre fijo, **«Empleados»**.
+  - Ya existe en producción, porque la crea la carga del Sheet (Tipo «empleado», #114), y es donde Johana clasifica hoy al único conductor de Green Loop, DANIEL DE LA HOZ (GREENLOP). No hace falta ninguna escritura en prod.
+  - Se reconoce **por nombre** con `normalize_entity_name` y **falla cerrado** (lección de #112 D4b): si alguien la renombra o la desactiva, Ingrid solo puede crear proveedores. Nunca se abre a «cualquier generic».
+  - Lo fija T24.
+- **Una sola fuente** (pedido de Eco QA 2): la función `scoped_create_categories(db, org)` decide lo que la 15b **ofrece** y lo que la fila 15 **acepta**. Con dos listas, la pantalla podría ofrecer una categoría que el servidor rechaza, o al revés. Reemplaza a la constante `SCOPED_CREATE_BEHAVIORS`. T23 lo mide de punta a punta: «un id que trae el flat → 201».
+- **Frontend (§8), medido:** el menú, el inicio, Entradas, el detalle, la liquidación y Nuevo Movimiento dejan de pedir lo que el backend niega, **solo con alcance**.
+  - Para cualquier otro usuario, cada pantalla queda byte a byte igual.
+  - La prueba (Coordinador, la misma que le pidió QA 1 a Coder 1) es doble: el registro de red de un usuario normal de Costa, con 0 requests de más o de menos antes y después, y una captura de Costa de cada pantalla tocada.
+  - Para el usuario con alcance, el sondeo se re-corre con **0 respuestas ≥ 400** (pedido de Eco QA 2).
+  - El 403 del servidor sigue siendo la red: el frontend solo esconde.
+- **Matriz:** P41 a P44.
 
 **v1.4 (20-nov):** dos hallazgos de la construcción, los dos llevados al Coordinador, y los nits n4/n5 de la revisión de la v1.3 (`ad8f5a2`, `~/sac-evidencia/2026-11-20/qa-2-ingrid/revision_plan_v1.3.md`). El cuerpo aprobado no cambia fuera de lo que sigue.
 - **(a) Celda del cuadrante quién × flag:** «con alcance, flag off» en `GET /inbound-orders/{id}` decía 200/404, y eso no puede pasar: el router de Entradas tiene `require_org_flag`, que corta con 403 a todos, incluido el admin (#75), antes de que el alcance opine. Queda 403/403, y **T16b se mide en las rutas sin flag** (`/third-parties`, `/purchases`, `/money-movements`). P15 sigue cayendo por T16b. Acordado con el Coordinador.
@@ -30,7 +48,7 @@
 
 **Autor:** Eco Coder 2 · **Revisa:** Eco QA 2 · **Nivel:** lógica · **Rama:** `coder-2/recolector-alcance` (base `de32530`)
 **Evidencia:** `~/sac-evidencia/2026-11-20/coder-2-recolector-alcance/` (inventarios, mediciones y los scripts que los producen).
-**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. La v1.3 (`ad8f5a2`) tiene GO de Eco QA 2; la v1.4 vuelve a QA 2 con su sha.
+**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. La v1.4 (`f6c4623`) tiene GO de Eco QA 2; la v1.5 vuelve a QA 2 con su sha.
 
 ---
 
@@ -147,13 +165,13 @@ Son 7 + 8 + 1 + 1 + 1 + 9 = **27**. Las tres pruebas:
 
 Rol propuesto «Recolector» (13 permisos existentes, **cero permisos nuevos**): `purchases.view`, `purchases.view_prices`, `purchases.liquidate`, `third_parties.view`, `third_parties.create`, `treasury.view_statements`, `treasury.view_accounts`, `treasury.view_movements`, `treasury.view_all_movements` (v1.4, decisión de Daniel), `treasury.create_movements`, `materials.view`, `materials.view_prices`, `tariffs.view`.
 
-`scripts/alcance_rol.py` sobre el inventario AST da **89 rutas** a las que llegan esos permisos (v1.4: `treasury.view_all_movements` no lo exige ninguna ruta como dependencia, así que el número no cambia) (`alcance_rol_ingrid.tsv`). Las **31 filas** de §5.2 están todas dentro de esas 89 (la 27b, `payment-to-generic`, entra por H5 = a, decidida). Lo medí con un `grep -F` de las 31 contra `alcance_rol_ingrid.tsv`: aparecen las 31, una vez cada una. Las **otras 58 quedan cerradas para el usuario con alcance**. La cifra exacta la fija T2b. Por ejemplo, quedan cerradas:
+`scripts/alcance_rol.py` sobre el inventario AST da **89 rutas** a las que llegan esos permisos (v1.4: `treasury.view_all_movements` no lo exige ninguna ruta como dependencia, así que el número no cambia) (`alcance_rol_ingrid.tsv`). Las **32 filas** de §5.2 están todas dentro de esas 89 (la 27b, `payment-to-generic`, entra por H5 = a, decidida; la 15b, `GET /third-party-categories/flat`, está en la línea 88 del tsv con `third_parties.view`). Lo medí con un `grep -F` de las 31 de la v1.4 contra `alcance_rol_ingrid.tsv`: aparecen las 31, una vez cada una; la 15b la agrega la v1.5. Las **otras 57 quedan cerradas para el usuario con alcance**. La cifra exacta la fija T2b. Por ejemplo, quedan cerradas:
 - los 15 POST de tesorería fuera de S7;
 - `PATCH /purchases/{id}/liquidate`, la liquidación directa sin pasar por la Entrada;
 - `POST /inbound-orders/{id}/confirm`, que confirma una Willard;
 - `/third-parties/customers`, `/investors`, `/liabilities`, `/provisions`, `/generic` y `/payable-suppliers`;
 - `/third-parties/retention-entities` y `retention-configs` (S5);
-- las categorías de terceros;
+- las demás rutas de categorías de terceros: el listado paginado, el detalle `GET /third-party-categories/{id}`, el alta, la edición y la baja. Solo `/flat` se abre (fila 15b);
 - las listas de precios por proveedor (`/price-list-groups/*`, que revelan la membresía de los proveedores de SAC);
 - `/purchases/pending`, `/by-number`, `/supplier/{id}`, `check-duplicate` y `check-invoice`;
 - `/money-movements/summary` y `/by-number`;
@@ -180,7 +198,8 @@ Notación: `alc(tp)` = `tp.collector_id == scope`; `cta(k)` = `k ∈ cuentas asi
 | 12 | `GET /third-parties/similar` | se fuerza `alc` (no revela nombres de proveedores de SAC) |
 | 13 | `GET /third-parties/payable-providers` | devuelve solo el recolector de su alcance (selector de la comisión, S6) |
 | 14 | `GET /third-parties/{id}` | 404 si no `alc` |
-| 15 | `POST /third-parties` | `collector_id` = scope, **forzado por el servidor**, con lo que venga en el payload. **H1:** `initial_balance ≠ 0` → 422, porque si no Ingrid podría inventar una CxP sin movimiento (rompe #55) y pagarla desde K1. `category_ids`: cada categoría tiene que tener `behavior_type ∈ {material_supplier, generic}` (proveedor o conductor, S2); cualquier otra (investor/«Socios», customer, liability, provision, service_provider) → 422; vacío → 422 (un tercero sin categoría no sirve en su selector). `ThirdPartyCreate` no cambia para quien no tiene alcance. |
+| 15 | `POST /third-parties` | `collector_id` = scope, **forzado por el servidor**, con lo que venga en el payload. **H1:** `initial_balance ≠ 0` → 422, porque si no Ingrid podría inventar una CxP sin movimiento (rompe #55) y pagarla desde K1. `category_ids`: cada categoría tiene que estar en `scoped_create_categories` (v1.5, la **misma** función que alimenta la fila 15b): toda categoría activa de proveedor de material, y la de conductor solo si es «Empleados» (S2). Cualquier otra → 422: investor/«Socios», customer, liability, provision, service_provider, y también un generic que no sea «Empleados» (por ejemplo «Genérico»). Vacío → 422 (un tercero sin categoría no sirve en su selector). `ThirdPartyCreate` no cambia para quien no tiene alcance. |
+| 15b | `GET /third-party-categories/flat` | (v1.5) Devuelve **solo** `scoped_create_categories(db, org)`, en la forma de siempre. El `behavior_type` del query se aplica como intersección: con `customer`, la respuesta va vacía. La función:<br>• toda categoría **activa** con `behavior_type = material_supplier`;<br>• la generic cuyo nombre, pasado por `normalize_entity_name`, es igual al de la constante `SCOPED_CONDUCTOR_CATEGORY = "Empleados"`.<br>**Falla cerrado:** renombrada o desactivada, no aparece ninguna generic, y nunca «cualquier generic». El esquema solo trae id, nombre, nombre a mostrar, padre, tipo y activo, sin montos (verificado por Eco QA 2). Las categorías de sistema (Retenciones, Impuestos) son liability, así que quedan fuera. Las demás rutas de categorías siguen cerradas (T1) |
 | 16 | `GET /purchases` | se fuerza `alc(purchase.supplier)` |
 | 17 | `GET /purchases/{id}` | 404 si no `alc(supplier)` |
 | 18 | `GET /attachments` | solo dueño compra con `alc(supplier)`; venta y transformación → 404 |
@@ -198,7 +217,7 @@ Notación: `alc(tp)` = `tp.collector_id == scope`; `cta(k)` = `k ∈ cuentas asi
 | 29 | `GET /money-movements/{id}/evidence` | el predicado de la fila 25 (solo lectura) |
 | 30 | `POST /money-movements/{id}/evidence` | **H2:** el predicado de la fila 28. Así no reemplaza la evidencia de un movimiento de Johana |
 
-Son 31 filas (30 más la 27b). Las filas 2 y 3, y las 29 y 30, pueden reducirse si la pantalla no las usa; se cierran en la construcción y **la lista final la fija T2b** (doble entrada, §12).
+Son 32 filas (30 más la 15b y la 27b). Las filas 2 y 3, y las 29 y 30, pueden reducirse si la pantalla no las usa; se cierran en la construcción y **la lista final la fija T2b** (doble entrada, §12).
 
 ### 5.7 Lista blanca de CAMPOS (H3)
 
@@ -213,6 +232,7 @@ Green Loop es otra empresa: que una ruta esté permitida no quiere decir que tod
 | `GET /inbound-orders/{id}` | `discrepancy_adjustments` (valorado al precio de referencia), `liquidated_by_name` y demás nombres de usuarios | se quedan | Es su Entrada; el descuadre lo valoró ella misma al liquidar (#93) |
 | `GET /money-movements/third-party/{id}` | nombre de una cuenta de SAC en un pago viejo | se queda (D-E1) | El saldo corrido tiene que cuadrar con el vivo (#55) |
 | `GET /third-parties*` | `current_balance` de sus terceros | se queda | Es el saldo de lo suyo |
+| `GET /third-party-categories/flat` (v1.5) | las demás categorías de terceros de SAC | **fuera**: solo las de `scoped_create_categories` | Ve los nombres de las categorías de proveedor de SAC y el de «Empleados». No hay montos ni miembros |
 
 **Test:** T19, «ausencia de lo de SAC», con usuario con alcance y su control sin alcance en el mismo test:
 - en `/materials`, los cuatro campos son `null` en **todas** las filas; el control ve números distintos de 0 en al menos una fila (contra la vacuidad: el fixture siembra stock por API);
@@ -293,6 +313,26 @@ Va con capturas a 1440 y 390; la de Daniel es condición de deploy.
   Todo es `enabled: !scope` en los hooks, para que no salgan 403 en la consola.
 - **Barra superior:** chip «Green Loop» para que Ingrid sepa por qué ve menos.
 - **Sin alcance**, ninguna pantalla compartida cambia: el selector de Johana sigue igual (S1).
+
+**v1.5, lo que medí y cómo se cierra.** Sondeo de red como usuario con alcance (`sondeo_red_r1.log`). Toda respuesta ≥ 400, por pantalla:
+
+| Pantalla | Rutas con 403 de alcance | Cierre, **solo con alcance** |
+|---|---|---|
+| `/` Dashboard | `/reports/dashboard` | el inicio redirige a Entradas |
+| `/inbound` | `/warehouses` (filtro de sede) | `enabled: !scope`, sin el filtro |
+| `/inbound/:id` | `/material-conversion-formulas/current` (kg estimados de Willard) | `enabled: !scope` |
+| `/inbound/:id/liquidate` | `/kg-ledger/accounts`, `/third-parties/retention-entities` | `enabled: !scope`; sin retenciones ni IVA, comisión fija |
+| `/third-parties` | `/third-party-categories/flat` | **fila 15b (backend)** |
+| `/treasury/new` | `payable-suppliers`, `customers`, `provisions`, `liabilities` (×2), `generic`, `/expense-categories/flat` | solo los tres tipos de S7, y el selector de tercero sale de `GET /third-parties` (fila 10, filtrado por el servidor) |
+
+Además, el **menú**: con alcance muestra solo Entradas, Tesorería (Movimientos, Terceros, Cuentas) y Terceros. Las otras entradas que su rol alcanzaría (Gastos Masivos, Retenciones, Listas de Precios, Cat. Terceros, Tarifas, Precio del Plomo) le darían 403.
+
+**Prueba de que las pantallas compartidas no cambian** (Coordinador):
+- un usuario normal de Costa (sin alcance) recorre las pantallas tocadas antes y después del cambio, y el registro de red es igual: **0 requests de más o de menos**;
+- una captura de Costa de cada pantalla tocada, a 1440 y 390;
+- con alcance, el sondeo se re-corre con **0 respuestas ≥ 400** (`sondeo_red_r2.log`, pedido de Eco QA 2).
+
+El frontend solo esconde; el 403 del servidor sigue siendo la red.
 
 ## 9. Marca inicial (carga)
 
@@ -382,7 +422,8 @@ Archivo nuevo `tests/test_sac_recolector_alcance.py`.
 | 9 liquidar | 200 con A; la comisión queda en tarifa × base aunque no se mande `amount` (D-a = a) | 422 con B, 422 con C (los dos **sin el nombre**, M1), 403 con K2, 422 comisión a X, 422 `amount` distinto del calculado (D-a = a), 422 con retención/IVA; **las 7 tablas sin cambios** | 200 con B; la comisión toma el `amount` digitado |
 | 10–13 listados de terceros | solo GL (+ D en 10) | sin B ni C | ven B y C |
 | 14 tercero detalle | 200 A | 404 B | 200 B |
-| 15 crear tercero | nace con GL aunque el payload diga X; con categoría material_supplier → 201 | `initial_balance` ≠ 0 → 422; categoría investor, customer o liability → 422; sin categoría → 422. **Ninguna fila escrita** | nace sin marca, con su `initial_balance` y cualquier categoría (comportamiento de hoy) |
+| 15 crear tercero | nace con GL aunque el payload diga X; con categoría material_supplier → 201; con «Empleados» → 201 (v1.5) | `initial_balance` ≠ 0 → 422; categoría investor, customer o liability → 422; generic «Genérico» → 422 (v1.5); sin categoría → 422. **Ninguna fila escrita** | nace sin marca, con su `initial_balance` y cualquier categoría (comportamiento de hoy) |
+| 15b categorías (v1.5) | solo las categorías de proveedor de material y «Empleados»; un id de ese flat sirve para crear (201) | con `?behavior_type=customer` → vacío; «Genérico» no aparece | ve todas, con o sin `behavior_type` |
 | 16–17 compras | lista y detalle de A, **también la que nació en E_none** (S8, D-b = a) | 404 compra de B | ven la de B |
 | 18–19 adjuntos | lista y descarga de la compra de A | 404 compra de B y venta | 200 |
 | 20 estado de cuenta | A: **corrido == vivo** con un pago desde K2 adentro | 404 B | B 200 |
@@ -439,6 +480,17 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
   - **no aparece** el ajuste de B ni el lado K2 del fondeo;
   - **aparece** el ajuste de A (cuenta NULL, tercero marcado);
   - control: `ingrid_libre` (mismo rol, sin alcance) ve el ajuste de B, así que su ausencia en `ingrid` la produce el alcance y no el escenario. Contra la vacuidad, antes de comparar se exige que la lista de `ingrid` no esté vacía.
+- **T23, la fila 15b** (v1.5):
+  - `ingrid` recibe en el flat **exactamente** las categorías activas de proveedor de material más «Empleados»;
+  - **de punta a punta, la misma función:** cada id del flat que recibe sirve para crear un tercero con alcance (201), y un id que **no** está en su flat (por ejemplo «Genérico») da 422 al crear;
+  - con `?behavior_type=customer`, `ingrid` recibe la lista vacía, y el control no;
+  - control: `ingrid_libre` recibe ≥ 3 behaviors distintos.
+- **T24, el conductor por nombre, fallando cerrado** (v1.5, condición del Coordinador):
+  - con «Empleados» activa, aparece en el flat y sirve para crear;
+  - renombrada por ORM a «EMPLEADOS» (otra caja), **sigue** apareciendo: `normalize_entity_name`;
+  - renombrada a «Empleados SAC», **desaparece** del flat, crear con su id da 422, y **ninguna** otra generic toma su lugar;
+  - desactivada, desaparece.
+  - Contra la vacuidad: antes de renombrar se exige que aparezca.
 - **T20** (N1): borrar físicamente por ORM al recolector cuando tiene un alcance o terceros marcados → `IntegrityError`. La fila de alcance y la marca siguen ahí.
 - **T21, el script de la marca** (v1.3, §9). Archivo propio `tests/test_marcar_recolector.py`. Las funciones son puras (normalizar, verificar la org, armar el plan) y reciben los JSON con la forma real de las respuestas: los campos se copian de `OrganizationResponse` y `ThirdPartyResponse`, nunca más permisivos que el backend (memoria *fake-más-permisivo*). Casos:
   - **normalización**, con los nombres reales:
@@ -456,7 +508,7 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
   - **org:** sin `kg_ledger_enabled` → aborta (exit 2); recolector que no es service_provider → aborta;
   - **`--esperado`:** distinto → sorpresa, sin escrituras;
   - **con sorpresa y `--apply` no se escribe nada:** el cliente HTTP es un doble que cuenta las llamadas, y se afirma 0 `PATCH`.
-  - **Ensayo a archivo contra mi backend de dev** (`:8012`, la SAC activa de mi copia): dry-run → 124 a marcar y exit 0; `--apply --esperado 124` → 124 `PATCH`; re-correr → 0 a marcar, 124 «ya marcado» y exit 0; un tercero re-marcado por ORM con el recolector X → exit 3 y 0 escrituras. Las 4 corridas van con su comando y su `EXIT` en el log (`ensayo_marcar_recolector.log`).
+  - **Ensayo a archivo contra mi backend de dev** (`:8012`, la SAC activa de mi copia): dry-run → 124 a marcar y exit 0; `--apply --esperado 124` → 124 `PATCH`; re-correr → 0 a marcar, 124 «ya marcado» y exit 0; un tercero re-marcado por ORM con el recolector X → exit 3 y 0 escrituras. Las 4 corridas van con su comando y su `EXIT` en el log (`ensayo_marcar_recolector.log`). (v1.5: suma una quinta, `--apply --esperado 123` → exit 3 y 0 escrituras.)
 - **T17, el balance:** en el detallado vivo y as-of, A y A2 van en el grupo «Recolector: GL» dentro de CxP y de anticipos, con totales iguales a los de antes de marcar. Contra la vacuidad: se exige `total != 0` y `grupos ≥ 2` **antes** de comparar (#110). Y en una org sin marcas, el response es igual campo por campo al de sin código, con cero claves nuevas.
 - **T18, no-regresión de la otra org:** una org sin flag y sin alcances; un usuario restringido por cuentas sigue viendo lo que ve hoy en las 4 lecturas, salvo lo que decida Daniel en §6.
 
@@ -525,6 +577,11 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
 | P39 | con sorpresa, `--apply` escribe lo que no es sorpresa | T21: 0 `PATCH` con sorpresa |
 | P40 | con alcance, el listado de movimientos sigue filtrando por `created_by` aunque el rol tenga `view_all_movements` (v1.4) | T22: el fondeo de Johana no aparece |
 
+| P41 | la fila 15b sin el filtro forzado: el flat con alcance devuelve todas las categorías (v1.5) | T23 |
+| P42 | `scoped_create_categories` reconoce al conductor por `behavior_type = generic`, sin mirar el nombre | T24 («Empleados SAC» renombrada sigue apareciendo) y T23 («Genérico» aparece) — vía |
+| P43 | la fila 15 valida con su propia lista de behaviors (`material_supplier`, `generic`) en vez de llamar a la función (plantado **solo** en la validación) | T23 y T24: crear con «Genérico» da 201. **No debe caer** la parte del flat de T23: si cae, la validación y el flat no están separados y P43 no se distingue de P42 |
+| P44 | el nombre se compara con `==` sin `normalize_entity_name` | T24: «EMPLEADOS» desaparece |
+
 **Dirección peligrosa a buscar celda por celda antes de plantar:** un test que debía caer y no cae. El candidato más probable es P7 si los cuatro listados comparten helper. Por eso el test se parametriza por ruta y el defecto se planta en una sola.
 
 ## 14. Riesgos y fuera de alcance
@@ -574,10 +631,12 @@ Revisión de producto del Coordinador. Todo lo hace el Coordinador con el OK de 
    - su rol es «Recolector», con los 13 permisos de §5.1 (v1.4); `payment-to-generic` (H5 = a) usa el mismo `treasury.create_movements`. Ningún permiso es nuevo.
 4. **Su caja:** `PUT /organizations/{org}/members/{ingrid}/account-assignments` con la cuenta real de la caja de Green Loop (K1 de producción). **Antes** de poner el alcance, para que en ningún momento vea cuentas que no son suyas. Igual, con alcance y sin asignaciones vería cero (fila 21).
 5. **Su alcance:** `PUT /organizations/{org}/members/{ingrid}/collector-scope` con el id del tercero «Green Loop».
+   - **Antes (v1.5), una lectura:** que exista la categoría de terceros «Empleados», activa y generic, en la SAC activa. Si no existe, Ingrid solo puede crear proveedores (falla cerrado), y Daniel decide si se crea.
 6. **Verificación**, con lecturas en producción y su usuario:
    - `my-permissions` trae `collector_scope`;
    - `GET /inbound-orders` da solo Entradas con recolector Green Loop (al principio puede ser 0, por R1);
    - `GET /third-parties/suppliers` da solo los marcados;
    - `GET /money-accounts` da solo su caja;
+   - `GET /third-party-categories/flat` da solo las de proveedor de material y «Empleados» (v1.5);
    - `GET /organizations/{org}/members` da 403.
 7. **Condición de uso (R1):** Daniel le comunica a Johana que báscula tiene que poner el recolector en las Entradas de Green Loop.
