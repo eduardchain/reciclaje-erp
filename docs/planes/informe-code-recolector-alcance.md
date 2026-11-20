@@ -179,18 +179,28 @@ Referencia, el ensayo en la copia de dev (`EV/ensayo_marcar_recolector.log`):
   - la verificación: suppliers con 123, todos marcados; una sola cuenta; categorías «Empleados» y «Proveedor Material»; `members` en 403, con Johana en 200 como control.
 - **Por qué hubo un desvío:** la membresía se dio por admin de org, porque en esa BD no había un superusuario con clave conocida.
 - **Lo que NO es el comportamiento final:** en ese ensayo `tax-entities` dio 422, porque `c00a133` todavía no tenía la ruta y la petición caía en `/{third_party_id}`. Sobre `c0ef770` da 403 con el prefijo de alcance, como muestran el test nuevo y `QA/red/ingrid_sondeo_c0ef770.log` (sha `bf850683…aaba`).
-- **No los ensayó nadie:**
-  - el alta del usuario en la org por `/system`;
-  - el reseteo de clave de #85.
+- **El alta por `/system` y el reseteo de #85:** QA 2 no los ensayó. Se ensayaron después de integrar, en la demo de la dev principal: `:8001`, BD `reciclaje_db` (`demo_ingrid_8001.log`, sha `b200b3e4…77ed`). Ahí corrió el runbook entero:
+  - la marca: 124, y la re-corrida 0;
+  - el registro con una clave temporal descartada;
+  - el reseteo de #85;
+  - `POST /system/users/{id}/add-to-org`;
+  - la caja y el alcance;
+  - la verificación con el usuario de demo.
+- **Dos correcciones que salieron de esa demo** (plan v1.13):
+  - **Entradas:** `GET /inbound-orders` no tiene el parámetro `collector_id` y lo ignora en silencio (devolvió las 34). La comparación del paso 6 filtra del lado del cliente.
+  - **La clave va al final:** entre el alta en la org y el alcance, Ingrid es «Recolector» sin alcance. Por eso la clave final se fija DESPUÉS del alcance.
 
-  El Coordinador los ejecuta por primera vez en producción.
-
-Siguen igual que en §16, pasos 3 a 7:
-- **Clave:** solo con el reseteo de #85, nunca con la clave fija.
-- **Rol:** «Recolector», con los 13 permisos de §5.1.
-- **Orden:** la caja va antes que el alcance.
-- **Antes del alcance,** se lee que exista la categoría «Empleados».
-- **Verificación con su usuario:** `my-permissions` trae `collector_scope`; las Entradas son solo las de Green Loop; `members` le da 403.
+Siguen el §16 del plan (v1.13), pasos 3 a 7, en este orden:
+1. **Registro** con una clave temporal aleatoria que no se guarda.
+2. **Membresía** con `POST /system/users/{id}/add-to-org`, con el rol «Recolector» y sus 13 permisos de §5.1. Nunca por el alta de miembros, que deja la clave fija.
+3. **La caja**, antes del alcance.
+4. **Antes del alcance,** se lee que exista la categoría «Empleados».
+5. **El alcance.**
+6. **La clave final**, solo con el reseteo de #85 y DESPUÉS del alcance. Hasta acá nadie conoce la clave, así que nadie puede entrar en la ventana sin alcance.
+7. **Verificación con su usuario:**
+   - `my-permissions` trae `collector_scope`;
+   - las Entradas son solo las de Green Loop: se comparan con una lectura de Johana filtrada del lado del cliente por `collector_id`, nunca con `?collector_id=`;
+   - `members` le da 403.
 - **Condición de uso R1:** báscula tiene que poner el recolector en cada Entrada de Green Loop. Daniel se lo comunica a Johana.
 
 ## 6. Notas para Daniel o para ciclos propios (no bloquean)
