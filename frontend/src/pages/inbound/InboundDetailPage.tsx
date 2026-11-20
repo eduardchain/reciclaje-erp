@@ -132,11 +132,18 @@ function PurchasesTable({
   lines,
   totals,
   canViewPrices,
+  outOfScope,
+  collectorName,
 }: {
   purchases: InboundPurchaseSummary[];
   lines: InboundOrderLineResponse[];
   totals: PurchaseTotals;
   canViewPrices: boolean;
+  /** Alcance de recolector (#129, plan D6): la MISMA regla de las tarjetas —
+   *  proveedor fuera del alcance → Compra y Proveedor sin link (darían 404) y
+   *  la nota ámbar debajo del proveedor. Sin alcance siempre da false. */
+  outOfScope: (supplierId: string | null | undefined) => boolean;
+  collectorName: string | null | undefined;
 }) {
   const money = "text-right tabular-nums whitespace-nowrap";
   return (
@@ -165,6 +172,7 @@ function PurchasesTable({
             const cancelled = p.status === "cancelled";
             const counts = countsAsLiquidated(p);
             const moneyCls = cn(money, cancelled && "line-through");
+            const out = outOfScope(p.supplier_id);
             return (
               <TableRow
                 key={p.purchase_id}
@@ -176,16 +184,30 @@ function PurchasesTable({
                   !cancelled && !counts && "text-slate-500"
                 )}
               >
-                <TableCell className="whitespace-nowrap">
-                  <PurchaseLink id={p.purchase_id}>Compra #{p.purchase_number}</PurchaseLink>
+                <TableCell className="whitespace-nowrap" data-col="compra">
+                  {out ? (
+                    <span>Compra #{p.purchase_number}</span>
+                  ) : (
+                    <PurchaseLink id={p.purchase_id}>Compra #{p.purchase_number}</PurchaseLink>
+                  )}
                   {p.purchase_slot != null && (
                     <div className="text-[11px] uppercase tracking-wider text-slate-400">
                       Compra {p.purchase_slot}
                     </div>
                   )}
                 </TableCell>
-                <TableCell className="max-w-[220px]">
-                  <ThirdPartyLink id={p.supplier_id}>{p.supplier_name ?? "—"}</ThirdPartyLink>
+                <TableCell className="max-w-[220px]" data-col="proveedor">
+                  {out ? (
+                    p.supplier_name ?? "—"
+                  ) : (
+                    <ThirdPartyLink id={p.supplier_id}>{p.supplier_name ?? "—"}</ThirdPartyLink>
+                  )}
+                  {out && (
+                    <div data-testid="out-of-scope-note" className="text-xs text-amber-700 mt-0.5 whitespace-normal">
+                      Proveedor sin la marca de {collectorName ?? "tu recolector"}: pídele a SAC
+                      que lo marque en Terceros.
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">{p.invoice_number || "—"}</TableCell>
                 <TableCell>
@@ -690,6 +712,8 @@ export default function InboundDetailPage() {
               lines={order.lines}
               totals={totals}
               canViewPrices={canViewPrices}
+              outOfScope={outOfScope}
+              collectorName={order.collector_name}
             />
             {/* Bajo md: las tarjetas de siempre + una de totales */}
             <div className="md:hidden grid grid-cols-1 sm:grid-cols-2 gap-3">

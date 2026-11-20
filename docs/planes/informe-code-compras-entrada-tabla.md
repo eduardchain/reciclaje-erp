@@ -78,3 +78,27 @@ Evidencia en `~/sac-evidencia/2026-11-20/coder-1-compras-tabla/`.
 Golden: **no aplica**. Es un cambio solo de frontend (0 archivos de `backend/`), y el golden captura respuestas HTTP.
 
 Suite completa del frontend: diferida al checkpoint.
+
+## 6. Delta tras la entrada de Ingrid (develop `d5d9267`, decisión #129)
+
+| Paso | SHA | Qué |
+|---|---|---|
+| Merge de develop | `3fcb5ba` | sin conflictos de texto: Ingrid toca las tarjetas, el «Cara Financiera» y el listado (hunks fuera de los míos, como preveía D6) |
+| Alcance en la tabla | *(este commit)* | `PurchasesTable` recibe `outOfScope` y `collectorName`. Con la MISMA regla de las tarjetas de Ingrid: proveedor fuera del alcance → Compra y Proveedor sin link y la nota ámbar debajo del proveedor. Sin alcance, `outOfScope` da siempre false y la tabla queda byte a byte como en `0732eab` |
+
+**E9** (`e2e_e9.mjs`, en la BD dev propia; escenario restaurado en `finally`):
+- **Escenario:**
+  - SUP_A marcado con el recolector Green Loop (dentro del alcance) y SUP_B sin marca (fuera).
+  - Entrada D #41 con recolector Green Loop, liquidada en dos compras.
+  - Alcance Green Loop TEMPORAL para un miembro no admin (david); se le quita al terminar.
+- **Asserts:**
+  - E9a: tabla a 1440, la compra de dentro con los 2 links y sin nota; la de fuera sin links y con nota.
+  - E9b: tarjetas a 390, la misma regla (paridad con el código de Ingrid).
+  - E9c: **control positivo**, el admin sin alcance ve los 2 links en las dos filas.
+- **Antes del plantado:** `e9_r1.log` da 3/3 sobre el árbol con el delta.
+
+**Matriz del delta, escrita antes de plantar:**
+
+| P | Defecto | Cae (predicción) |
+|---|---|---|
+| P13 | la tabla ignora `outOfScope` (las celdas con link siempre) | **E9a, y solo E9a.** E9b queda verde (las tarjetas son de Ingrid) y E9c también (sin alcance no cambia nada) |
