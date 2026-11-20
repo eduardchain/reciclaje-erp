@@ -1,4 +1,9 @@
-# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.2)
+# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.3)
+
+**v1.3 (20-nov):** Daniel autorizó la construcción sobre el cuerpo de la v1.2 (`700c87a`, GO de Eco QA 2, revisión `~/sac-evidencia/2026-11-20/qa-2-ingrid/revision_plan_v1.2.md`, sha256 `d11d1fe1…d247`) y, antes de arrancar, **cambió la decisión 4** (vía el Coordinador). Solo cambia la **marca inicial**; el cuerpo aprobado (alcance, lista blanca, tests T1–T20, matriz P1–P33) no se toca.
+- **Decisión 4 nueva:** «todo lo que diga green loop es green loop». No se le manda lista a Johana; la marca sale de una **regla sobre el nombre normalizado**, con dos exclusiones (§9, §15.4, §16 paso 2).
+- **Lo que pidió Eco QA 2 para la regla** (`~/sac-evidencia/2026-11-20/qa-2-ingrid/medir_regla_greenloop.log`): la org por id, las exclusiones ruidosas, los inactivos decididos, la idempotencia, dry-run por defecto con exit ≠ 0 ante cualquier sorpresa, y un test de la normalización con los casos reales (§9, T21, P34–P39).
+- **Nits de QA 2 a la v1.2:** n1, la FK autorreferente pasa a NO ACTION (§10); n2, el 128 de §2.7 explicado con su artefacto; n3, se limpian las marcas «pendiente de Daniel» de S2, S6, S7, §5.1, la fila 27b y el cuadrante.
 
 **v1.2 (20-nov):** cambios después del GO de Eco QA 2 a la v1.1 (`d271135`, revisión `~/sac-evidencia/2026-11-20/qa-2-ingrid/revision_plan_v1.1.md`, sha256 `97a97be2…a92c`).
 - **§15.3 decidida** por Daniel, vía el Coordinador: todas las recomendadas. Ninguna fila del cuerpo cambia.
@@ -19,7 +24,7 @@
 
 **Autor:** Eco Coder 2 · **Revisa:** Eco QA 2 · **Nivel:** lógica · **Rama:** `coder-2/recolector-alcance` (base `de32530`)
 **Evidencia:** `~/sac-evidencia/2026-11-20/coder-2-recolector-alcance/` (inventarios, mediciones y los scripts que los producen).
-**Estado:** plan. No se construye nada sin el GO de Eco QA 2 y la autorización de Daniel.
+**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. El script de la marca (§9) sigue esta v1.3, que vuelve a Eco QA 2 con su sha.
 
 ---
 
@@ -43,12 +48,12 @@ Las citas llevan su grado: (a) textual, (b) Daniel lo afirmó y el cliente asint
 | # | Supuesto | Por qué así |
 |---|---|---|
 | **S1 (Q-70)** | Un tercero marcado de Green Loop sigue siéndolo aunque alguna vez le venda directo a SAC. El filtro es **estricto para Ingrid** y **no cambia nada para quien no tiene alcance**: Johana sigue viendo todos los proveedores en todas las Entradas. | Con esto, la respuesta de Q-70 no cambia el modelo. Si es «sí, venden directo», Johana igual los ve; si es «no», tampoco cambia nada. |
-| S2 | La marca va en **cualquier tercero**, no solo en proveedores de material: los conductores reciben anticipos desde la caja de Green Loop (fila «Provisionales de Green Loop a conductores», 11-ago). ⚠️ **Pendiente de Daniel (H5, §15):** un conductor *generic* no se le puede pagar con `supplier-payment` ni con `advance-payment`, porque exigen material_supplier/service_provider/liability (`money_movement.py:105` y `:642`). Hay dos opciones: (a) sumar `payment-to-generic` al alcance (fila 27b, recomendada); (b) sacar los pagos a conductores del alcance de su caja. | En la copia de dev, «DANIEL DE LA HOZ (GREENLOP)» es de la categoría *Empleados* (generic), no proveedor (medido). |
+| S2 | La marca va en **cualquier tercero**, no solo en proveedores de material: los conductores reciben anticipos desde la caja de Green Loop (fila «Provisionales de Green Loop a conductores», 11-ago). Un conductor *generic* no se le puede pagar con `supplier-payment` ni con `advance-payment`, porque exigen material_supplier/service_provider/liability (`money_movement.py:105` y `:642`). **Decidido (H5 = a, §15.3):** `payment-to-generic` entra al alcance (fila 27b). | En la copia de dev, «DANIEL DE LA HOZ (GREENLOP)» es de la categoría *Empleados* (generic), no proveedor (medido). |
 | S3 | El recolector mismo (el tercero «Green Loop», service_provider) **no** entra al alcance de Ingrid: su saldo con SAC (comisiones) es asunto de Johana. | No lo pidió el cliente. |
 | S4 | Ingrid **no** crea, revisa, edita, desliquida ni anula Entradas: solo las ve y las liquida. | La captura es de báscula y la revisión de Erwin (Q-19). |
 | S5 | En la liquidación de Ingrid **no** van retenciones (#93) ni IVA de compra (#122): si vienen en el payload, da 422. Johana sí los puede poner. | Las entidades `[Retenciones]`/`[Impuestos]` son pasivos de SAC, y su selector expone esos saldos. ⚠️ **Riesgo, se le pregunta a Johana aparte (Coordinador):** si una compra de Green Loop lleva retención o IVA, esa Entrada la tiene que liquidar Johana, no Ingrid. No cambia el plan. |
-| S6 (**D-a**, §15, pendiente de Daniel) | **Propuesta recomendada:** la comisión del recolector (#83 D11) la causa la liquidación de Ingrid, pero **el monto lo fija el servidor**: tarifa vigente `comision_green_loop` × la base sugerida de #93 D11 (kg + unidades × `kg_per_unit`). El tercero es siempre su recolector. Si manda un `amount` distinto al calculado → 422. Para Johana (sin alcance) no cambia nada: el monto digitado manda (#79 F1). | Es la deuda de SAC con Green Loop, y la digitaría una empleada de Green Loop: conflicto de interés (QA 2, D-a). La comisión nace en la liquidación y no se agrega después, así que dejarla a Johana exige un camino nuevo. |
-| S7 | Desde su caja, Ingrid solo puede hacer pagos a proveedor (`supplier-payment`), anticipos (`advance-payment`) y, si Daniel elige (a) en H5, pagos a terceros generic (`payment-to-generic`, conductores), siempre a terceros de su alcance, y anular **esos mismos** movimientos. Fondear la caja es un `transfer` que hace Johana. | Es lo mínimo que describe «llevar la caja». Gastos de la caja de Green Loop: no se pidieron. |
+| S6 (**D-a = a**, decidida, §15.3) | La comisión del recolector (#83 D11) la causa la liquidación de Ingrid, pero **el monto lo fija el servidor**: tarifa vigente `comision_green_loop` × la base sugerida de #93 D11 (kg + unidades × `kg_per_unit`). El tercero es siempre su recolector. Si manda un `amount` distinto al calculado → 422. Para Johana (sin alcance) no cambia nada: el monto digitado manda (#79 F1). | Es la deuda de SAC con Green Loop, y la digitaría una empleada de Green Loop: conflicto de interés (QA 2, D-a). La comisión nace en la liquidación y no se agrega después, así que dejarla a Johana exige un camino nuevo. |
+| S7 | Desde su caja, Ingrid solo puede hacer pagos a proveedor (`supplier-payment`), anticipos (`advance-payment`) y (H5 = a, decidida) pagos a terceros generic (`payment-to-generic`, conductores), siempre a terceros de su alcance, y anular **esos mismos** movimientos. Fondear la caja es un `transfer` que hace Johana. | Es lo mínimo que describe «llevar la caja». Gastos de la caja de Green Loop: no se pidieron. |
 | S8 (**D-b**, §15) | Una Entrada es de Ingrid **solo si su recolector es el de su alcance**. En cambio, una **compra** es suya si su **proveedor** tiene la marca, así venga de una Entrada sin recolector o sea directa. | Son las dos reglas que asintió el cliente: «Entradas con recolector Green Loop» (L226-229, b) y «las liquidaciones de sus proveedores» (L213-217, b). Alinearlas es la decisión D-b. |
 
 ## 2. Lo medido (cada dato con su artefacto)
@@ -64,10 +69,10 @@ Las citas llevan su grado: (a) textual, (b) Daniel lo afirmó y el cliente asint
 4. **El listado de movimientos con cuentas restringidas filtra mal:** deja pasar todo movimiento con `account_id IS NULL` (`services/money_movement.py:1328-1331`). Eso incluye todas las causaciones de la org (`expense_accrual`, `commission_accrual`, intereses…), de cualquier tercero.
 5. **El estado de cuenta de un tercero, para un usuario restringido, rompe el invariante de #55.** Filtra los movimientos por cuenta (`money_movements.py:926-934`) pero sigue cerrando contra el saldo vivo del tercero, así que el saldo corrido deja de cuadrar.
 6. **Costa tiene hoy 2 usuarios con cuentas restringidas (6 asignaciones).** Lo midió el Coordinador en dev y lo re-medí en mi copia (`medicion_asignaciones_dev.log`). Los defectos 3 a 5 ya afectan a un cliente.
-7. **Datos de Green Loop en la copia de dev** (`reciclaje_coder_2`, org SAC activa; `medicion_gl_dev.log`). ⚠️ La copia **no es una réplica limpia**: trae las pruebas locales que se hicieron sobre `reciclaje_db` (`medicion_origen_lista.log`). Los 128 terceros de abajo sí vienen de producción: nacieron en la carga del 10-nov 19:05, medido por `created_at`.
+7. **Datos de Green Loop en la copia de dev** (`reciclaje_coder_2`, org SAC activa; `medicion_gl_dev.log`). ⚠️ La copia **no es una réplica limpia**: trae las pruebas locales que se hicieron sobre `reciclaje_db` (`medicion_origen_lista.log`). Los terceros de abajo sí vienen de producción: **128 = los 124 con sufijo + 4 sin sufijo** que un patrón amplio también atrapa («Green Loop», «BIOGREENLOOP», «ASOCIACION BIOGREEN RECYCLING» y «ECOGREEN»), y los 128 nacieron en la carga del 10-nov a las 19:05. Lo dice `created_at` agrupado por minuto: `medicion_origen_lista.log` (primera línea, `2026-11-10 19:05 | 128 | 124`), producido por `scripts/medir_origen_lista.sql`.
    - **124 terceros** con el sufijo `(GREENLOOP)` o `(GREENLOP)` en el nombre. 123 son *Proveedor Material* y 1 es *Empleados* (generic): «DANIEL DE LA HOZ (GREENLOP)».
-   - Las dos «excepciones» que nombró Johana **ya llevan el sufijo en esta copia**: «ADALBERTO AVILA (GREENLOOP)» y «DANIEL DE LA HOZ (GREENLOP)». Según el Coordinador, que tiene la transcripción, Johana dijo de Adalberto que «es Greenloop, pero no dice Greenloop» (L51). La cita me llega de otra sesión y no la medí yo. Si es así, alguien ya lo renombró después de la reunión (Daniel le mostró cómo, L56). No cambia nada: lo resuelve la lista que mande Johana (Q-71, 📎).
-   - Hay nombres parecidos que **no** llevan el sufijo y que un patrón amplio atraparía: «BIOGREENLOOP» (−$150.000.000), «ASOCIACION BIOGREEN RECYCLING», «ECOGREEN». **La marca inicial no se hace por regex**: va una lista explícita (§9).
+   - Las dos «excepciones» que nombró Johana **ya llevan el sufijo en esta copia**: «ADALBERTO AVILA (GREENLOOP)» y «DANIEL DE LA HOZ (GREENLOP)». Según el Coordinador, que tiene la transcripción, Johana dijo de Adalberto que «es Greenloop, pero no dice Greenloop» (L51). La cita me llega de otra sesión y no la medí yo. Si es así, alguien ya lo renombró después de la reunión (Daniel le mostró cómo, L56). No cambia nada: con la decisión 4 nueva (v1.3) los dos entran por la regla del nombre, y a Johana ya no se le manda lista.
+   - Hay nombres parecidos que **no** llevan el sufijo y que un patrón amplio atraparía: «BIOGREENLOOP» (−$150.000.000), «ASOCIACION BIOGREEN RECYCLING», «ECOGREEN». **v1.3:** la marca inicial sale de la regla de §9 (nombre normalizado que contiene «greenloop» o «greenlop»). «ASOCIACION BIOGREEN RECYCLING» y «ECOGREEN» no la cumplen; «BIOGREENLOOP» sí, y se excluye por decisión de Daniel. Medido en la SAC activa de mi copia: **126 cumplen la regla, 0 inactivos, 124 después de las dos exclusiones** (`medicion_regla_v13.log`, de `scripts/medir_regla_v13.sql`). Eco QA 2 midió lo mismo en su copia (`medir_regla_greenloop.log`).
    - ~~0 de 34 Entradas tienen recolector~~ **Dato retirado (v1.2):** las 34 Entradas de la copia son en su mayoría **pruebas locales**. Hay remisiones «REM-DEV-ORDEN», «SMOKE-REDONDEO» y «PANTALLA-P6», creadas en dev por johana@sac.com, hugo@sac.com y admin.revision@example.com; johana y hugo también son usuarios de prueba en dev. Artefactos: `medicion_fechas_lista.log` (las Entradas de prueba, con remisión y usuario) y `medicion_origen_lista.log` (34 Entradas en total: 3 con remisión de prueba por patrón y 1 de un usuario @example.com; las demás no se distinguen por esos dos criterios, y por eso el número entero se retira). Así que el número no dice nada sobre producción. Cuántas Entradas de producción tienen recolector lo mide el Coordinador por lectura. R1 sigue en pie como condición de uso.
 8. **La agrupación por categoría del balance detallado (#38) no sirve para esto.** `_load_tp_behavior_map` guarda «la primera categoría por behavior_type» de una consulta **sin ORDER BY** (`services/reports.py:222-266`), así que un proveedor con dos categorías de material cae en un grupo arbitrario.
 9. **Inventario de rutas:** hay **300 rutas montadas** en `/api/v1`, más `/health`. Mi conteo por decoradores da 306; las 6 de diferencia son de `endpoints/deferred_expenses.py`, que **no está montado**. Conciliado contra el de QA 2 con `comm` (`inventario_endpoints_todos.tsv`).
@@ -136,7 +141,7 @@ Son 7 + 8 + 1 + 1 + 1 + 9 = **27**. Las tres pruebas:
 
 Rol propuesto «Recolector» (12 permisos existentes, **cero permisos nuevos**): `purchases.view`, `purchases.view_prices`, `purchases.liquidate`, `third_parties.view`, `third_parties.create`, `treasury.view_statements`, `treasury.view_accounts`, `treasury.view_movements`, `treasury.create_movements`, `materials.view`, `materials.view_prices`, `tariffs.view`.
 
-`scripts/alcance_rol.py` sobre el inventario AST da **89 rutas** a las que llegan esos permisos (`alcance_rol_ingrid.tsv`). Las **31 filas** de §5.2 están todas dentro de esas 89; la 27b, `payment-to-generic`, depende de H5. Lo medí con un `grep -F` de las 31 contra `alcance_rol_ingrid.tsv`: aparecen las 31, una vez cada una. Las **otras 58 quedan cerradas para el usuario con alcance**. La cifra exacta la fija T2b. Por ejemplo, quedan cerradas:
+`scripts/alcance_rol.py` sobre el inventario AST da **89 rutas** a las que llegan esos permisos (`alcance_rol_ingrid.tsv`). Las **31 filas** de §5.2 están todas dentro de esas 89 (la 27b, `payment-to-generic`, entra por H5 = a, decidida). Lo medí con un `grep -F` de las 31 contra `alcance_rol_ingrid.tsv`: aparecen las 31, una vez cada una. Las **otras 58 quedan cerradas para el usuario con alcance**. La cifra exacta la fija T2b. Por ejemplo, quedan cerradas:
 - los 15 POST de tesorería fuera de S7;
 - `PATCH /purchases/{id}/liquidate`, la liquidación directa sin pasar por la Entrada;
 - `POST /inbound-orders/{id}/confirm`, que confirma una Willard;
@@ -182,12 +187,12 @@ Notación: `alc(tp)` = `tp.collector_id == scope`; `cta(k)` = `k ∈ cuentas asi
 | 25 | `GET /money-movements/{id}` | el mismo predicado; si no, 404 |
 | 26 | `POST /money-movements/supplier-payment` | `cta(account)` (si no, 403) y `alc(tp)` (si no, 404). El guard de tipo de tercero existente no se toca |
 | 27 | `POST /money-movements/advance-payment` | igual |
-| 27b | `POST /money-movements/payment-to-generic` | **Solo si Daniel elige (a) en H5.** Mismas reglas que la fila 26: es el pago o anticipo a un conductor *generic* de su alcance (S2). Si elige (b), esta fila sale; `payment_to_generic` sale también de PROPIOS (fila 28) y `generic` sale de las categorías permitidas en la fila 15 |
+| 27b | `POST /money-movements/payment-to-generic` | **H5 = a, decidida.** Mismas reglas que la fila 26: es el pago o anticipo a un conductor *generic* de su alcance (S2) |
 | 28 | `POST /money-movements/{id}/annul` | **H2:** cuatro condiciones, todas:<br>• `movement_type ∈ PROPIOS = {payment_to_supplier, advance_payment, payment_to_generic}`;<br>• `alc(tp)`;<br>• `cta(account)`;<br>• `transfer_pair_id IS NULL`.<br>Si falta alguna → 404. Así no anula un `transfer_in` de K1 que hizo Johana (`annul` anula también el par en K2, `money_movement.py:1126-1133`), ni un pago de Johana a B desde K1, ni una causación |
 | 29 | `GET /money-movements/{id}/evidence` | el predicado de la fila 25 (solo lectura) |
 | 30 | `POST /money-movements/{id}/evidence` | **H2:** el predicado de la fila 28. Así no reemplaza la evidencia de un movimiento de Johana |
 
-Son 31 filas (30 más la 27b, que depende de H5). Las filas 2 y 3, y las 29 y 30, pueden reducirse si la pantalla no las usa; se cierran en la construcción y **la lista final la fija T2b** (doble entrada, §12).
+Son 31 filas (30 más la 27b). Las filas 2 y 3, y las 29 y 30, pueden reducirse si la pantalla no las usa; se cierran en la construcción y **la lista final la fija T2b** (doble entrada, §12).
 
 ### 5.7 Lista blanca de CAMPOS (H3)
 
@@ -285,18 +290,51 @@ Va con capturas a 1440 y 390; la de Daniel es condición de deploy.
 
 ## 9. Marca inicial (carga)
 
-`scripts/marcar_recolector.py --collector "Green Loop" --lista <archivo> [--dry-run]`:
-- lee una **lista explícita de nombres**, la que mande Johana (Q-71);
-- resuelve cada nombre exacto y aborta si hay ambiguos o faltantes;
-- imprime la lista y marca vía `PATCH`.
+**Decisión 4 nueva (Daniel, 20-nov, vía el Coordinador; reemplaza la de la v1.2):** «todo lo que diga green loop es green loop». A Johana **no** se le manda lista. La regla corre contra la base que se marca (en producción, al deploy), nunca contra una lista sacada de dev, porque los ids de producción son otros.
 
-**Decidido por Daniel (20-nov, vía el Coordinador; decisión 4):** a Johana se le proponen los **124 con sufijo** `(GREENLOOP)`/`(GREENLOP)`, y ella confirma o corrige. Mientras tanto, la marca inicial es **esa lista explícita**, con los nombres exactos escritos en un archivo, nunca un regex. La lista sale de un `SELECT` sobre la base que se vaya a marcar, y el dry-run la imprime completa. Contra producción la corre solo el Coordinador, con el OK de Daniel (escritura en prod).
+`scripts/marcar_recolector.py --api-url <url> --org-id <uuid> --collector-id <uuid> [--apply] [--esperado N]`. Las credenciales salen solo de `SEED_SU_EMAIL`/`SEED_SU_PASSWORD` y no se imprimen (#114).
+
+**La regla.** Se marca un tercero si cumple las cuatro condiciones:
+1. es de la org de `--org-id`. **Nunca por nombre:** en dev hay cinco orgs «SAC» (cuatro inactivas) y cuatro «SAC (archivada …)», y la regla atraparía 876 terceros. Costa tiene «Bio Green Loop- Maquila» y «Maquila Greenloop», que también la cumplen (Eco QA 2, `medir_regla_greenloop.log`). Es la trampa de #93 y #112;
+2. su **nombre normalizado** contiene `greenloop` o `greenlop`. Normalizar es: NFKD, quitar las marcas diacríticas, minúsculas y dejar solo `a-z`; se borra todo lo demás (espacios, guiones, paréntesis, dígitos). La función es una sola y la cubre T21;
+3. está activo;
+4. no está en las exclusiones.
+
+**Exclusiones.** Cada una se imprime con su motivo:
+- el **recolector mismo**, por su id (`--collector-id`). Es S3, y además la marca no puede apuntar a su propio tercero (§3);
+- **«BIOGREENLOOP»**, por nombre normalizado exacto `biogreenloop`. Es proveedor de material con saldo −$150.000.000. Decisión de Daniel del 20-nov: queda fuera, como el recolector, porque parece la cuenta de la empresa Green Loop con SAC, y esa la maneja Johana.
+
+Si una exclusión **no aparece** entre los que cumplen la regla, o aparece más de una vez, la corrida es ruidosa y sale con **exit 3** (fail-loud). El nombre pudo cambiar en producción, y entonces ese tercero quedaría marcado sin que nadie lo viera.
+
+«ASOCIACION BIOGREEN RECYCLING» y «ECOGREEN» no cumplen la regla y no se marcan.
+
+**Inactivos: se saltan.** Se listan con el motivo «inactivo» y no cambian el exit. Un tercero inactivo tiene saldo 0, porque desactivar lo exige, y no aparece en los selectores; si se reactiva, se marca a mano con `PATCH`. En la SAC activa de las dos copias hay 0.
+
+**Idempotencia:**
+- ya marcado con el mismo recolector → se salta, con el motivo «ya marcado»;
+- marcado con **otro** recolector → no se pisa, y **exit 3**;
+- marcado con este recolector pero fuera de la regla (una marca hecha a mano) → se lista como informativo, no se desmarca y no cambia el exit.
+
+**Antes de la primera escritura, aborta con exit 2 si:**
+- la org no existe o está inactiva: `GET /organizations/{id}` le da 404 al superusuario;
+- la org no tiene `kg_ledger_enabled`;
+- el recolector no existe en esa org, está inactivo o no es service_provider. Son las reglas de §3; el `PATCH` las volvería a validar, pero así se detecta antes de escribir la primera fila;
+- el listado de terceros no trae `len == total`. Se pagina hasta el total, como `list_all` de #115.
+
+**Salida.** Dry-run por defecto; `--apply` escribe con `PATCH /third-parties/{id}` y `{"collector_id": …}`.
+- Imprime los conteos: cumplen la regla, activos, excluidos por motivo, ya marcados y a marcar. Después, la lista de los que marca y la de los excluidos con su motivo.
+- `--esperado N` (opcional): si los «a marcar» no son N, sale con exit 3 sin escribir. El Coordinador escribe la predicción antes de correr.
+- **Con cualquier sorpresa (exit 3) no escribe nada**, ni con `--apply`. El plan entero se arma antes de la primera escritura.
+- Un `PATCH` que falla detiene la corrida con exit 1. Lo ya marcado queda y se re-corre: es idempotente.
+- **Exit 0 solo si no hubo sorpresas.** Un script que muere no se puede leer como «nada que marcar».
+
+Contra producción la corre solo el Coordinador, con el OK de Daniel (§16).
 
 ## 10. Migración: una sola línea
 
 `e7f9a1b3c5d8_recolector_alcance.py`, `down_revision = d6e8f0a2b4c7` (cabeza actual, `alembic heads`). El id está libre (grep vacío). Cambios:
-- `third_parties.collector_id` UUID nullable, FK `third_parties.id` con nombre por defecto (`create_foreign_key(None, …)`, lección de #111), **`ondelete="RESTRICT"` explícito** (N1), e índice `ix_third_parties_collector_id`;
-- tabla `user_collector_scopes` con `UNIQUE(organization_id, user_id)` e índice por `organization_id` (lo declara el mixin, lección de #100). Sus tres FKs llevan **`ondelete="RESTRICT"` explícito** (N1). **No se calca el CASCADE de `user_account_assignments`** (`models/user.py:113-119`): con CASCADE, borrar al recolector borra la fila de alcance, y entonces Ingrid **ve todo** (fail-open). Hoy el borrado de un tercero es lógico (`third_parties.py:473`) y no se llega a eso por API; con RESTRICT queda imposible por construcción. El parity check compara el `ondelete` entre modelo y migración.
+- `third_parties.collector_id` UUID nullable, FK `third_parties.id` con nombre por defecto (`create_foreign_key(None, …)`, lección de #111), **sin `ondelete`, o sea NO ACTION** (n1 de QA 2 a la v1.2), e índice `ix_third_parties_collector_id`. Es una FK **autorreferente**: en PostgreSQL, RESTRICT se chequea fila por fila durante la sentencia, así que un DELETE de varias filas que incluya al recolector y a sus marcados podría fallar según el orden. NO ACTION se chequea al final de la sentencia. Las dos impiden borrar solo al recolector, que es lo que importa. Hoy no hay borrados masivos (grep vacío en `app/`, `scripts/` y `tests/`, QA 2). **Sin `relationship` inversa en el ORM:** con la cascada por defecto de SQLAlchemy, la sesión pondría NULL en los marcados antes del DELETE, y T20 dejaría de medir la base;
+- tabla `user_collector_scopes` con `UNIQUE(organization_id, user_id)` e índice por `organization_id` (lo declara el mixin, lección de #100). Sus tres FKs llevan **`ondelete="RESTRICT"` explícito** (N1). Ninguna es autorreferente, así que el problema del orden de n1 no aplica: la fila de alcance vive en otra tabla y un DELETE de terceros no la puede borrar en la misma sentencia. Tampoco hay `relationship` inversa hacia el alcance, por la misma razón que en `collector_id`. **No se calca el CASCADE de `user_account_assignments`** (`models/user.py:113-119`): con CASCADE, borrar al recolector borra la fila de alcance, y entonces Ingrid **ve todo** (fail-open). Hoy el borrado de un tercero es lógico (`third_parties.py:473`) y no se llega a eso por API; con RESTRICT queda imposible por construcción. El parity check compara el `ondelete` entre modelo y migración.
 
 El modelo declara lo mismo, y la paridad se verifica con `schema_parity_check.py`. Es aditiva pura: NULL y tabla vacía en las 7 orgs.
 
@@ -335,17 +373,17 @@ Archivo nuevo `tests/test_sac_recolector_alcance.py`.
 |---|---|---|---|
 | 7 Entradas lista | ve E_GL | no ve E_none ni E_X; con `?collector_id=X` sigue viendo solo E_GL | ve las 3 |
 | 8 Entrada detalle | 200 | 404 (E_none, E_X) | 200 |
-| 9 liquidar | 200 con A; si D-a = servidor, la comisión queda en tarifa × base aunque no se mande `amount` | 422 con B, 422 con C (los dos **sin el nombre**, M1), 403 con K2, 422 comisión a X, 422 `amount` distinto del calculado (si D-a = servidor), 422 con retención/IVA; **las 7 tablas sin cambios** | 200 con B; la comisión toma el `amount` digitado |
+| 9 liquidar | 200 con A; la comisión queda en tarifa × base aunque no se mande `amount` (D-a = a) | 422 con B, 422 con C (los dos **sin el nombre**, M1), 403 con K2, 422 comisión a X, 422 `amount` distinto del calculado (D-a = a), 422 con retención/IVA; **las 7 tablas sin cambios** | 200 con B; la comisión toma el `amount` digitado |
 | 10–13 listados de terceros | solo GL (+ D en 10) | sin B ni C | ven B y C |
 | 14 tercero detalle | 200 A | 404 B | 200 B |
 | 15 crear tercero | nace con GL aunque el payload diga X; con categoría material_supplier → 201 | `initial_balance` ≠ 0 → 422; categoría investor, customer o liability → 422; sin categoría → 422. **Ninguna fila escrita** | nace sin marca, con su `initial_balance` y cualquier categoría (comportamiento de hoy) |
-| 16–17 compras | lista y detalle de A, **también la que nació en E_none** (S8 / D-b tal como está; si Daniel alinea por Entrada, esta celda pasa a 404) | 404 compra de B | ven la de B |
+| 16–17 compras | lista y detalle de A, **también la que nació en E_none** (S8, D-b = a) | 404 compra de B | ven la de B |
 | 18–19 adjuntos | lista y descarga de la compra de A | 404 compra de B y venta | 200 |
 | 20 estado de cuenta | A: **corrido == vivo** con un pago desde K2 adentro | 404 B | B 200 |
 | 21–23 caja | solo K1; sin asignaciones → **ninguna** | K2 403 | sin asignaciones ve K1 y K2 (comportamiento actual, regresión) |
 | 24–25 movimientos | ve K1 y la causación de A | no ve la causación de B (cuenta NULL); detalle de K2 404 | ve todo |
 | 26–27 pagar/anticipar | K1→A 201 | K2 403; →B 404; **→D 400 (guard de tipo existente, intacto)** | K2→B 201 |
-| 27b pago a generic (si H5 = a) | K1→D 201 | K2 403; →E (generic sin marca) 404 | K2→E 201 |
+| 27b pago a generic (H5 = a) | K1→D 201 | K2 403; →E (generic sin marca) 404 | K2→E 201 |
 | 28 anular | su pago K1→A | transferencia K1↔K2 de Johana: **404, y el par en K2 sigue `confirmed`**; pago de Johana K1→B 404; causación de A (cuenta NULL) 404; movimiento de K2 404 | anula todo lo que hoy anula |
 | 29–30 evidencia | ver y subir en su pago K1→A | subir en el pago de Johana K1→B 404 (su evidencia no cambia); ver la de un movimiento de K2 404 | 200 |
 | §5.0 miembros | `GET /organizations/{id}` 200 (con `settings`) | `GET …/members` 403 y las otras 8 de miembros 403 | `GET …/members` 200 |
@@ -391,6 +429,23 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
   - **T16c:** una fila de alcance sobre un admin, puesta por ORM, **sigue** restringiendo (fail-closed).
   - **T16d** (N2): poner alcance a un superusuario → 422, y no se escribe ninguna fila.
 - **T20** (N1): borrar físicamente por ORM al recolector cuando tiene un alcance o terceros marcados → `IntegrityError`. La fila de alcance y la marca siguen ahí.
+- **T21, el script de la marca** (v1.3, §9). Archivo propio `tests/test_marcar_recolector.py`. Las funciones son puras (normalizar, verificar la org, armar el plan) y reciben los JSON con la forma real de las respuestas: los campos se copian de `OrganizationResponse` y `ThirdPartyResponse`, nunca más permisivos que el backend (memoria *fake-más-permisivo*). Casos:
+  - **normalización**, con los nombres reales:
+    - «ABRAHAM CABARCAS (GREENLOOP)» → cumple;
+    - «DANIEL DE LA HOZ (GREENLOP)» → cumple;
+    - «Bio Green Loop- Maquila» → cumple (espacios y guion);
+    - «Maquila Greenloop» → cumple;
+    - «GRÉENLOOP SAS» → cumple: **sin NFKD no cumple**, porque al borrar la «É» queda «grenloop»;
+    - «ASOCIACION BIOGREEN RECYCLING» → no cumple;
+    - «ECOGREEN» → no cumple;
+    - «CARLOS CASTAÑO (GREENLOOP)» → cumple y la «Ñ» no rompe nada;
+  - **exclusiones:** el recolector y «BIOGREENLOOP» salen con su motivo; sin «BIOGREENLOOP» en la lista → sorpresa (exit 3); con dos → sorpresa; el recolector fuera de la regla → sorpresa;
+  - **inactivo** → saltado con su motivo, sin sorpresa;
+  - **idempotencia:** ya marcado con el mismo → saltado; marcado con otro → sorpresa, y la lista «a marcar» no lo trae;
+  - **org:** sin `kg_ledger_enabled` → aborta (exit 2); recolector que no es service_provider → aborta;
+  - **`--esperado`:** distinto → sorpresa, sin escrituras;
+  - **con sorpresa y `--apply` no se escribe nada:** el cliente HTTP es un doble que cuenta las llamadas, y se afirma 0 `PATCH`.
+  - **Ensayo a archivo contra mi backend de dev** (`:8012`, la SAC activa de mi copia): dry-run → 124 a marcar y exit 0; `--apply --esperado 124` → 124 `PATCH`; re-correr → 0 a marcar, 124 «ya marcado» y exit 0; un tercero re-marcado por ORM con el recolector X → exit 3 y 0 escrituras. Las 4 corridas van con su comando y su `EXIT` en el log (`ensayo_marcar_recolector.log`).
 - **T17, el balance:** en el detallado vivo y as-of, A y A2 van en el grupo «Recolector: GL» dentro de CxP y de anticipos, con totales iguales a los de antes de marcar. Contra la vacuidad: se exige `total != 0` y `grupos ≥ 2` **antes** de comparar (#110). Y en una org sin marcas, el response es igual campo por campo al de sin código, con cero claves nuevas.
 - **T18, no-regresión de la otra org:** una org sin flag y sin alcances; un usuario restringido por cuentas sigue viendo lo que ve hoy en las 4 lecturas, salvo lo que decida Daniel en §6.
 
@@ -399,7 +454,7 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
 ```bash
 cd /Users/daniel.chain/Projects/reciclaje-erp-wt/coder-2/backend
 grep -lE '/api/v1/(third-parties|purchases|inbound-orders|money-movements|money-accounts|attachments|roles|organizations)|/api/v1/reports/balance-detailed|collector_id|account_assignments|UserAccountAssignment' tests/*.py | sort > $EV/dirigidas.txt
-printf '%s\n' tests/test_reloj_de_negocio.py tests/test_advisory_locks.py tests/test_crucible_charges.py tests/test_sac_recolector_alcance.py >> $EV/dirigidas.txt
+printf '%s\n' tests/test_reloj_de_negocio.py tests/test_advisory_locks.py tests/test_crucible_charges.py tests/test_sac_recolector_alcance.py tests/test_marcar_recolector.py >> $EV/dirigidas.txt
 sort -u -o $EV/dirigidas.txt $EV/dirigidas.txt
 TEST_DATABASE_URL=postgresql://admin:test_password@localhost:5433/reciclaje_test_coder_2 \
   lockf -k ~/.cache/ecobalance/tests.lock ./venv/bin/pytest $(cat $EV/dirigidas.txt) -q -p no:cacheprovider > $EV/dirigidas.log 2>&1; echo "EXIT=$?" >> $EV/dirigidas.log
@@ -448,9 +503,15 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
 | P28 | `/service-tariffs/current` sin el filtro | T19, tarifas |
 | P29 | `GET …/members` sin el `deny_if_collector_scoped` | T1c |
 | P30 | una ruta nueva sin contexto de org (se monta una de prueba en el plantado) | T1b |
-| P31 | con alcance, se respeta el `amount` digitado de la comisión (D-a = servidor) | fila 9, comisión |
+| P31 | con alcance, se respeta el `amount` digitado de la comisión (D-a = a) | fila 9, comisión |
 | P32 | `PUT …/collector-scope` acepta a un superusuario | T16d |
 | P33 | `ondelete="CASCADE"` en `user_collector_scopes.collector_id` (en modelo y migración) | T20 |
+| P34 | la normalización no borra lo que no es letra (espacios, guiones, paréntesis) | T21: «Bio Green Loop- Maquila» |
+| P35 | la normalización sin NFKD | T21: «GRÉENLOOP SAS». **No debe caer** «CARLOS CASTAÑO (GREENLOOP)»: si cae, la Ñ rompe la regla y P35 mide otra cosa |
+| P36 | si la exclusión de «BIOGREENLOOP» no aparece, se sigue en silencio | T21: exclusión ausente → exit 3 |
+| P37 | un tercero marcado con otro recolector se pisa | T21: marcado con otro |
+| P38 | la org se valida sin mirar `kg_ledger_enabled` | T21: org sin flag |
+| P39 | con sorpresa, `--apply` escribe lo que no es sorpresa | T21: 0 `PATCH` con sorpresa |
 
 **Dirección peligrosa a buscar celda por celda antes de plantar:** un test que debía caer y no cae. El candidato más probable es P7 si los cuatro listados comparten helper. Por eso el test se parametriza por ruta y el defecto se planta en una sola.
 
@@ -473,7 +534,7 @@ Las pide el Coordinador; me las pasa él. Se anotan con su fuente: un mensaje de
 
 1. **El hueco de cuentas de §6 para las orgs sin alcance (Costa):** CICLO PROPIO, justo después. Este ciclo no le cambia nada a Costa (T18).
 2. **Balance General:** solo el Detallado agrupa a Green Loop, sin claves nuevas en el General (§7).
-4. **Lista de la marca inicial:** a Johana se le proponen los 124 con sufijo y ella confirma o corrige. Mientras tanto, la lista es esa, explícita y nunca un regex (§9).
+4. **Marca inicial — cambiada por Daniel antes de construir (v1.3):** «todo lo que diga green loop es green loop». Se marca por la regla del nombre normalizado de §9, con dos exclusiones: el recolector y «BIOGREENLOOP». No se le manda lista a Johana; el xlsx de la v1.2 queda como evidencia y no sale a ningún lado. *(La versión anterior, «a Johana se le proponen los 124 con sufijo y ella confirma», queda sin efecto.)*
 
 3. **Supuestos S1–S8 y las cuatro decisiones abiertas: Daniel aceptó todas las recomendadas** (20-nov, vía el Coordinador):
    - S1–S8 tal como están; los gastos desde la caja de Ingrid quedan fuera (S7);
@@ -482,18 +543,23 @@ Las pide el Coordinador; me las pasa él. Se anotan con su fuente: un mensaje de
    - **D-a**: (a), el servidor fija el monto de la comisión;
    - **D-b**: (a), las compras son de Ingrid por la marca del proveedor.
 
-   El cuerpo del plan ya se leía con estas opciones desde la v1.1, así que ninguna fila cambia. Las marcas «pendiente de Daniel» y «solo si Daniel elige (a)» que quedan en S2, S6, la fila 27b y el cuadrante son de la v1.1: hoy se leen como decididas en (a).
+   El cuerpo del plan ya se leía con estas opciones desde la v1.1, así que ninguna fila cambia. Las marcas «pendiente de Daniel» y «solo si Daniel elige (a)» de S2, S6, S7, §5.1, la fila 27b y el cuadrante se limpiaron en la v1.3.
 
 ## 16. Runbook de deploy
 
 Revisión de producto del Coordinador. Todo lo hace el Coordinador con el OK de Daniel, porque son escrituras en producción.
 
 1. **Migración** `e7f9a1b3c5d8`, vía `/deploy` (aditiva: columna NULL y tabla vacía).
-2. **Marca inicial:** primero `scripts/marcar_recolector.py --collector "Green Loop" --lista <archivo> --dry-run` contra producción; se revisa la lista impresa y se compara con la que confirmó Johana. Después, la corrida real. Antes del deploy se verifica en producción que existe el tercero «Green Loop» (service_provider) y que su nombre coincide.
+2. **Marca inicial (v1.3):**
+   - **Antes:** se leen en producción el id de la org SAC activa y el del tercero «Green Loop», que tiene que ser service_provider y estar activo. Los dos ids van escritos en el log, nunca resueltos por nombre dentro del script.
+   - **Predicción:** se escribe en el log cuántos se espera marcar. En la copia de dev son 124; en producción se cuentan antes con una lectura que aplique la misma regla.
+   - **Dry-run:** `scripts/marcar_recolector.py --api-url <prod> --org-id <id> --collector-id <id> --esperado <N>`. Se revisan los marcados y los excluidos con su motivo. Exit ≠ 0 detiene todo y decide Daniel.
+   - **Corrida real:** la misma línea con `--apply`, con el OK de Daniel.
+   - **Re-corrida:** tiene que dar 0 a marcar y exit 0.
 3. **El usuario de Ingrid:**
    - se crea por la vía de superusuario;
    - **su clave se fija solo con el reseteo de #85** (`POST /system/users/{id}/reset-password`), con la clave que defina Daniel, **NUNCA con la clave fija** que dejan las altas de miembros (la deuda de #85);
-   - su rol es «Recolector», con los 12 permisos de §5.1, más `payment-to-generic` si H5 = (a), que usa el mismo `treasury.create_movements`. Ningún permiso es nuevo.
+   - su rol es «Recolector», con los 12 permisos de §5.1; `payment-to-generic` (H5 = a) usa el mismo `treasury.create_movements`. Ningún permiso es nuevo.
 4. **Su caja:** `PUT /organizations/{org}/members/{ingrid}/account-assignments` con la cuenta real de la caja de Green Loop (K1 de producción). **Antes** de poner el alcance, para que en ningún momento vea cuentas que no son suyas. Igual, con alcance y sin asignaciones vería cero (fila 21).
 5. **Su alcance:** `PUT /organizations/{org}/members/{ingrid}/collector-scope` con el id del tercero «Green Loop».
 6. **Verificación**, con lecturas en producción y su usuario:
