@@ -24,7 +24,7 @@ CONSERVANDO el reparto — sin quemar consecutivos. El annul de una liquidada
 delega en unliquidate y despues cancela (D14 fix 3).
 """
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 from typing import Optional
 from uuid import UUID
@@ -378,6 +378,7 @@ class InboundOrderService:
         payload: InboundLiquidateRequest,
         organization_id: UUID,
         user_id: UUID,
+        require_full_allocation: bool = False,
     ) -> tuple[InboundOrder, list[str]]:
         """Liquidacion ATOMICA de la Entrada (D14): reparto -> N compras
         liquidadas + ajustes de descuadre + comision del recolector, en UNA
@@ -509,6 +510,9 @@ class InboundOrderService:
         payload_materials: set = set()
         new_material_lines: list = []
         plan: list[dict] = []  # [{line(payload), order_line|None, material, disc}]
+        # 9g del alcance (plan Ingrid v1.10): materiales que no quedan
+        # repartidos del todo. Solo con `require_full_allocation`.
+        gaps: list[str] = []
 
         for pl in payload.lines:
             if pl.material_id in payload_materials:
@@ -538,6 +542,28 @@ class InboundOrderService:
 
             allocated = sum((a.quantity for a in pl.allocations), Decimal("0"))
             disc = (weighed - allocated).quantize(QTY_Q)
+
+            # 9g (plan Ingrid v1.10, Daniel: «Que no deje descuadre»). Con
+            # alcance de recolector TODO lo pesado se reparte: el descuadre se
+            # valora al precio de referencia y aterriza en los libros de SAC
+            # (#93 D6/D7), y con alcance ese precio lo fijaria el recolector.
+            # Usa el MISMO `disc` de arriba (una sola definicion), va ANTES de
+            # D8/D16 (que le hablarian del precio de referencia) y junta todos
+            # los materiales en un 422 despues del lazo. Una linea con pesado 0
+            # marcada sin proveedor no tiene descuadre y pasa.
+            if require_full_allocation and disc != 0:
+                unit = material.default_unit or "kg"
+                if not pl.allocations:
+                    gaps.append(
+                        f"{material.code}: "
+                        f"{'marcado sin proveedor' if pl.unallocated_intentional else 'sin repartir'}"
+                        f" ({weighed.normalize():f} {unit} pesados)"
+                    )
+                elif disc > 0:
+                    gaps.append(f"{material.code}: faltan {disc.normalize():f} {unit} por repartir")
+                else:
+                    gaps.append(f"{material.code}: se repartieron {(-disc).normalize():f} {unit} de más")
+                continue
 
             # D8: se bloquea la AUSENCIA de intencion, no el monto
             if not pl.allocations and not pl.unallocated_intentional:
@@ -571,6 +597,10 @@ class InboundOrderService:
                 "payload": pl, "order_line": order_line,
                 "material": material, "disc": disc, "weighed": weighed,
             })
+
+        if gaps:
+            from app.services.collector_scope import FULL_ALLOCATION, FULL_ALLOCATION_TAIL
+            raise _err(f"{FULL_ALLOCATION} — {'; '.join(gaps)}. {FULL_ALLOCATION_TAIL}")
 
         # Completitud (D14 "todo de una"): toda linea de la entrada debe venir
         # en el reparto — una olvidada seria un descuadre del 100% en silencio
@@ -1009,6 +1039,15 @@ class InboundOrderService:
                 user_id, liq_dt,
             )
 
+        # D-E2(b) (v1.8): proveedor del reparto sin la marca del recolector
+        # de la Entrada -> aviso en la respuesta (no bloquea). Solo si alguien
+        # tiene el alcance de ese recolector.
+        from app.services.collector_scope import unmarked_supplier_warnings
+        warnings.extend(unmarked_supplier_warnings(
+            db, organization_id, order.collector_id,
+            {a.third_party_id for pl in payload.lines for a in pl.allocations},
+        ))
+
         order.status = "liquidated"
         # Hora REAL del clic (auditoria, NO frontera de corte — esa es liq_dt,
         # el dia de negocio). Es un instante puro, por eso now(utc) y no el
@@ -1173,6 +1212,43 @@ class InboundOrderService:
             warehouse_id=order.warehouse_id,
         )
         collector.current_balance -= cc.amount
+
+    def suggested_collector_commission(
+        self, db: Session, order: InboundOrder, organization_id: UUID
+    ) -> Decimal:
+        """Comision del recolector que fija el SERVIDOR para un usuario con
+        alcance (D-a, plan recolector-alcance S6): tarifa vigente
+        `comision_green_loop` x lo PESADO (#93 D11) — kg directos + unidades x
+        `kg_per_unit`. Espejo de `commissionBase`/`suggestedCommission` de
+        InboundLiquidatePage: una linea por unidad sin `kg_per_unit` no suma
+        (la pantalla la marca «sin resolver»), y se redondea a centavos con
+        half-up como `Math.round(x * 100) / 100`. 0 si no hay tarifa."""
+        from app.models.service_tariff import ServiceTariff
+
+        tariff = db.execute(
+            select(ServiceTariff)
+            .where(
+                ServiceTariff.organization_id == organization_id,
+                ServiceTariff.tariff_code == "comision_green_loop",
+            )
+            .order_by(ServiceTariff.created_at.desc(), ServiceTariff.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if tariff is None or not tariff.unit_price_cop or tariff.unit_price_cop <= 0:
+            return Decimal("0")
+        base = Decimal("0")
+        for line in order.lines:
+            qty = Decimal(str(line.quantity or 0))
+            if qty <= 0:
+                continue
+            unit = (line.material.default_unit or "kg") if line.material else "kg"
+            if unit == "kg":
+                base += qty
+            elif tariff.kg_per_unit is not None:
+                base += qty * Decimal(str(tariff.kg_per_unit))
+        return (base * Decimal(str(tariff.unit_price_cop))).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
 
     def _check_slot_block(self, db: Session, block, slot_supplier: dict, what: str) -> None:
         """Un bloque por compra (retenciones, contado, IVA) apunta a una compra
@@ -1948,8 +2024,13 @@ class InboundOrderService:
         date_to: Optional[datetime] = None,
         skip: int = 0,
         limit: int = 100,
+        collector_id: Optional[UUID] = None,
     ) -> tuple[list[InboundOrder], int]:
         q = select(InboundOrder).where(InboundOrder.organization_id == organization_id)
+        # Alcance de recolector (SAC, fila 7): un WHERE propio, en AND con todo
+        # lo demas — la busqueda corre DENTRO de este filtro (§5.4, P19).
+        if collector_id is not None:
+            q = q.where(InboundOrder.collector_id == collector_id)
         if inbound_type:
             q = q.where(InboundOrder.inbound_type == inbound_type)
         if status_filter:
@@ -2254,32 +2335,90 @@ class InboundOrderService:
     def purchase_extras(
         self, db: Session, organization_id: UUID, purchase_ids: list[UUID]
     ) -> tuple[dict, dict]:
-        """Reparto por compra: slot de cada compra en su entrada y sus filas de
-        IVA (con el nombre de la entidad). Dos queries por PAGINA, cero N+1 —
-        mismo criterio que `purchases_by_order` (R2).
+        """Reparto por compra: slot de cada compra en su entrada y el lote de
+        retenciones e IVA de su ULTIMA liquidacion (`last_liquidation_batch`,
+        la precarga). Cuatro queries por PAGINA, cero N+1 — mismo criterio que
+        `purchases_by_order` (R2).
 
-        Devuelve ({purchase_id: slot}, {purchase_id: [(DocumentTax, nombre)]}).
+        Devuelve ({purchase_id: slot}, {purchase_id: (retenciones, impuestos)}).
         """
         if not purchase_ids:
             return {}, {}
-        from app.models.document_tax import DocumentTax
-
         slots = dict(db.execute(
             select(InboundOrderPurchase.purchase_id, InboundOrderPurchase.purchase_slot)
             .where(InboundOrderPurchase.purchase_id.in_(purchase_ids))
         ).all())
-        taxes: dict = {}
+        return slots, self.last_liquidation_batch(db, organization_id, purchase_ids)
+
+    def last_liquidation_batch(
+        self, db: Session, organization_id: UUID, purchase_ids
+    ) -> dict:
+        """Retenciones e IVA de la ULTIMA liquidacion de cada compra (plan
+        Ingrid v1.7, c1 de QA 2). La usan la precarga al re-liquidar y la regla
+        9f del alcance: UNA sola definicion, sin copias.
+
+        La ultima liquidacion se reconoce por su checkpoint de costo: el MCH
+        `purchase_liquidation` se escribe por linea y sin condicion
+        (purchase.py, `record_cost_change` dentro de `liquidate`) y des-liquidar
+        no lo borra (append-only, D20b de #93). Las filas de esa liquidacion
+        tienen `created_at` IGUAL al del checkpoint porque los tres modelos usan
+        `TimestampMixin` (`server_default=func.now()`) y `now()` de PG vale lo
+        mismo en toda la transaccion. Invariante (n6): NO hay commit entre el
+        MCH y las filas de retencion (`_apply_retentions`) e IVA
+        (`apply_taxes`) — las tres nacen en el mismo `purchase.liquidate()`, y
+        la Entrada lo llama con commit=False (D14). Si alguien mete un commit
+        en medio, el lote queda vacio y la precarga lo muestra.
+
+        Por que no «las vivas, o si no el ultimo lote revertido»: una
+        liquidacion SIN retenciones no deja filas, asi que tras L1 con
+        retencion → des-liquidar → L2 sin retencion → des-liquidar ese
+        criterio resucitaba el lote de L1. Y las retenciones se revierten con
+        un `datetime.now()` POR FILA (purchase.py, `_revert_liquidation_effects`),
+        asi que agrupar por `reverted_at` partia un lote de dos en dos lotes.
+
+        Devuelve {purchase_id: (list[PurchaseRetention],
+        list[(DocumentTax, nombre de la entidad)])}; una compra nunca
+        liquidada queda con las dos listas vacias.
+        """
+        from sqlalchemy import func
+        from app.models.document_tax import DocumentTax
+        from app.models.material_cost_history import MaterialCostHistory
+        from app.models.purchase_retention import PurchaseRetention
+
+        ids = list(set(purchase_ids))
+        out: dict = {pid: ([], []) for pid in ids}
+        if not ids:
+            return out
+        last = dict(db.execute(
+            select(MaterialCostHistory.source_id, func.max(MaterialCostHistory.created_at))
+            .where(
+                MaterialCostHistory.organization_id == organization_id,
+                MaterialCostHistory.source_type == "purchase_liquidation",
+                MaterialCostHistory.source_id.in_(ids),
+            )
+            .group_by(MaterialCostHistory.source_id)
+        ).all())
+        if not last:
+            return out
+        for ret in db.execute(
+            select(PurchaseRetention)
+            .where(PurchaseRetention.purchase_id.in_(list(last)))
+            .order_by(PurchaseRetention.created_at, PurchaseRetention.id)
+        ).scalars():
+            if ret.created_at == last[ret.purchase_id]:
+                out[ret.purchase_id][0].append(ret)
         for tax, name in db.execute(
             select(DocumentTax, ThirdParty.name)
             .join(ThirdParty, DocumentTax.third_party_id == ThirdParty.id)
             .where(
-                DocumentTax.purchase_id.in_(purchase_ids),
+                DocumentTax.purchase_id.in_(list(last)),
                 DocumentTax.organization_id == organization_id,
             )
-            .order_by(DocumentTax.created_at)
+            .order_by(DocumentTax.created_at, DocumentTax.id)
         ).all():
-            taxes.setdefault(tax.purchase_id, []).append((tax, name))
-        return slots, taxes
+            if tax.created_at == last[tax.purchase_id]:
+                out[tax.purchase_id][1].append((tax, name))
+        return out
 
     def discrepancy_adjustments(
         self, db: Session, organization_id: UUID, order_id: UUID

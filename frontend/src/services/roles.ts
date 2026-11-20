@@ -8,6 +8,7 @@ import type {
   PermissionsByModule,
   OrgMemberResponse,
   CreateUserWithMembership,
+  CollectorScopeResponse,
 } from "@/types/role";
 
 export const rolesService = {
@@ -42,6 +43,9 @@ export const rolesService = {
 
   updateAccountAssignments: (orgId: string, userId: string, accountIds: string[]) =>
     apiClient.put<string[]>(`/api/v1/organizations/${orgId}/members/${userId}/account-assignments`, { account_ids: accountIds }).then((r) => r.data),
+
+  updateCollectorScope: (orgId: string, userId: string, collectorId: string | null) =>
+    apiClient.put<CollectorScopeResponse>(`/api/v1/organizations/${orgId}/members/${userId}/collector-scope`, { collector_id: collectorId }).then((r) => r.data),
 
   createUserWithMembership: (orgId: string, data: CreateUserWithMembership) =>
     apiClient.post<OrgMemberResponse>(`/api/v1/organizations/${orgId}/members/create-user`, data).then((r) => r.data),

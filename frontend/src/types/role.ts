@@ -1,3 +1,9 @@
+/** Recolector al que esta acotado el usuario (SAC). Null = sin alcance. */
+export interface CollectorScopeInfo {
+  id: string;
+  name: string;
+}
+
 export interface MyPermissions {
   role_id: string;
   role_name: string;
@@ -5,6 +11,7 @@ export interface MyPermissions {
   is_admin: boolean;
   permissions: string[];
   assigned_account_ids: string[];
+  collector_scope?: CollectorScopeInfo | null;
 }
 
 export interface RoleListItem {
@@ -69,6 +76,13 @@ export interface OrgMemberResponse {
   user_full_name: string | null;
   account_ids: string[];
   org_count: number;
+  collector_scope_id?: string | null;
+}
+
+export interface CollectorScopeResponse {
+  user_id: string;
+  collector_id: string | null;
+  collector_name: string | null;
 }
 
 export interface CreateUserWithMembership {

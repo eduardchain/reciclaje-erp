@@ -219,6 +219,26 @@ class ReportService:
         )
 
     @staticmethod
+    def _load_collector_labels(db: Session, organization_id: UUID) -> dict[UUID, str]:
+        """Grupo «Recolector: <nombre>» del Balance Detallado (#124, §7).
+
+        UNA consulta: los terceros con marca de recolector y el nombre del
+        recolector. Incluye inactivos (existian al corte, igual que
+        `_load_tp_behavior_map`). En una org sin marcas devuelve {} y el
+        agrupado por categoria queda identico por construccion."""
+        from sqlalchemy.orm import aliased
+        Collector = aliased(ThirdParty)
+        rows = db.execute(
+            select(ThirdParty.id, Collector.name)
+            .join(Collector, Collector.id == ThirdParty.collector_id)
+            .where(
+                ThirdParty.organization_id == organization_id,
+                ThirdParty.collector_id.is_not(None),
+            )
+        ).all()
+        return {tp_id: f"Recolector: {name}" for tp_id, name in rows}
+
+    @staticmethod
     def _load_tp_behavior_map(db: Session, organization_id: UUID) -> tuple[dict, dict, dict, dict]:
         """Pre-carga behavior_types, category_names, categoria por behavior y CODIGOS.
 
@@ -2022,6 +2042,7 @@ class ReportService:
             if section_key:
                 groups = self._group_by_category(
                     items, section_key, tp_cat_by_behavior, self.SECTION_BEHAVIORS,
+                    tp_collector_label,
                 )
             return BalanceDetailedSection(
                 label=label, total=round(total, 2), items=items, groups=groups,
@@ -2124,6 +2145,7 @@ class ReportService:
 
         # Pre-cargar behavior_types y category_names
         tp_behaviors, tp_cat_names, tp_cat_by_behavior, tp_cat_codes = self._load_tp_behavior_map(db, organization_id)
+        tp_collector_label = self._load_collector_labels(db, organization_id)
 
         # Buckets para clasificacion
         tp_buckets: dict[str, list[BalanceDetailedItem]] = {
@@ -2237,6 +2259,7 @@ class ReportService:
 
         # Pre-cargar metadatos de terceros (incluye inactivos — existían al corte)
         tp_behaviors, tp_cat_names, tp_cat_by_behavior, tp_cat_codes = self._load_tp_behavior_map(db, organization_id)
+        tp_collector_label = self._load_collector_labels(db, organization_id)
         tp_objs = {
             tp.id: tp for tp in db.scalars(
                 select(ThirdParty).where(
@@ -2255,6 +2278,7 @@ class ReportService:
             if section_key:
                 groups = self._group_by_category(
                     items, section_key, tp_cat_by_behavior, self.SECTION_BEHAVIORS,
+                    tp_collector_label,
                 )
             return BalanceDetailedSection(
                 label=label, total=round(total, 2), items=items, groups=groups,
@@ -2495,15 +2519,32 @@ class ReportService:
         section_key: str,
         tp_cat_by_behavior: dict,
         section_behaviors: dict,
+        tp_collector_label: dict | None = None,
     ) -> list[BalanceDetailedGroup] | None:
-        """Agrupa items por categoria de tercero. Retorna None si no hay agrupacion util."""
+        """Agrupa items por categoria de tercero. Retorna None si no hay agrupacion util.
+
+        Recolector (#124, §7): un tercero con marca va al grupo «Recolector:
+        <nombre>», que manda sobre la categoria. Si la seccion tiene al menos
+        uno, se agrupa SIEMPRE (aunque sea un solo item o un solo grupo): lo de
+        Green Loop tiene que leerse por aparte. Sin marcas (`{}`, las otras
+        orgs) el camino es el de siempre, linea por linea."""
         behaviors = section_behaviors.get(section_key)
-        if not behaviors or len(items) < 2:
+        if not behaviors:
+            return None
+        collector_labels = tp_collector_label or {}
+        has_collector = bool(collector_labels) and any(
+            UUID(i.id) in collector_labels for i in items
+        )
+        if len(items) < 2 and not has_collector:
             return None
 
         groups: dict[str, list[BalanceDetailedItem]] = {}
         for item in items:
             tp_id_uuid = UUID(item.id)
+            collector_label = collector_labels.get(tp_id_uuid)
+            if collector_label is not None:
+                groups.setdefault(collector_label, []).append(item)
+                continue
             cat_map = tp_cat_by_behavior.get(tp_id_uuid, {})
             # Buscar la primera categoria que matchee algun behavior_type de la seccion
             cat_name = None
@@ -2514,8 +2555,8 @@ class ReportService:
             label = cat_name or "Sin Categoría"
             groups.setdefault(label, []).append(item)
 
-        # Solo agrupar si hay mas de 1 grupo distinto
-        if len(groups) <= 1:
+        # Solo agrupar si hay mas de 1 grupo distinto (o si hay un recolector)
+        if len(groups) <= 1 and not has_collector:
             return None
 
         # Ordenar por total descendente, "Sin Categoría" siempre al final

@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
+import { usePermissions } from "@/hooks/usePermissions";
 import { thirdPartyService } from "@/services/thirdParties";
 import { getApiErrorMessage } from "@/utils/formatters";
 import type { SimilarThirdParty } from "@/types/third-party";
@@ -55,6 +56,10 @@ export function CreateSupplierDialog({
   onCreated: (id: string, name: string) => void;
 }) {
   const qc = useQueryClient();
+  // Alcance de recolector (plan §5.5): editar un tercero existente esta fuera
+  // de su lista blanca, asi que no se le ofrece agregar la categoria.
+  const { collectorScope } = usePermissions();
+  const scoped = collectorScope !== null;
   const [name, setName] = useState("");
   const [identification, setIdentification] = useState("");
   const [phone, setPhone] = useState("");
@@ -222,6 +227,11 @@ export function CreateSupplierDialog({
                       {!m.is_material_supplier && " · no es proveedor de material"}
                     </p>
                   </div>
+                  {scoped && !m.is_material_supplier ? (
+                    <p className="text-xs text-slate-500 sm:text-right">
+                      Para usarlo como proveedor, SAC tiene que agregarle la categoría
+                    </p>
+                  ) : (
                   <Button
                     size="sm"
                     variant="outline"
@@ -231,6 +241,7 @@ export function CreateSupplierDialog({
                   >
                     {m.is_material_supplier ? "Usar este" : "Agregar categoría y usar"}
                   </Button>
+                  )}
                 </div>
               ))}
               <p className="text-xs text-amber-700">

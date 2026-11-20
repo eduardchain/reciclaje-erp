@@ -17,7 +17,15 @@ from sqlalchemy.orm import Session
 
 from app.utils.dates import business_today
 from app.api.deps import require_permission, get_db
-from app.services.organization import get_user_account_assignments
+from app.services.collector_scope import (
+    accounts_for,
+    movement_owned,
+    movement_visible,
+    not_found,
+    require_account_in_scope,
+    require_tp_in_scope,
+    scope_of,
+)
 from app.schemas.money_movement import (
     SupplierPaymentCreate,
     CustomerCollectionCreate,
@@ -135,11 +143,34 @@ ACCOUNT_BALANCE_DIRECTION = {
 # ---------------------------------------------------------------------------
 
 def _get_allowed_accounts(db: Session, ctx: dict) -> list[UUID] | None:
-    """Retorna lista de account_ids permitidos o None si ve todo."""
-    if ctx["is_admin"]:
-        return None
-    assigned = get_user_account_assignments(db, ctx["user_id"], ctx["organization_id"])
-    return assigned if assigned else None
+    """Retorna lista de account_ids permitidos o None si ve todo.
+
+    Con alcance de recolector (#124) la lista vacia es NINGUNA y el rol admin
+    no la salta; la regla vive en `collector_scope.accounts_for`."""
+    return accounts_for(db, ctx)
+
+
+def _guard_scoped_payment(db: Session, ctx: dict, account_id: UUID, third_party_id: UUID) -> None:
+    """Filas 26, 27 y 27b: con alcance, la cuenta tiene que estar asignada (403)
+    y el tercero tiene que llevar la marca del recolector (404). Sin alcance no
+    hace nada: el guard de tipo de tercero de cada servicio sigue igual."""
+    scope = scope_of(ctx)
+    if scope is None:
+        return
+    require_account_in_scope(db, ctx, account_id)
+    require_tp_in_scope(db, third_party_id, scope)
+
+
+def _require_movement_visible(db: Session, ctx: dict, movement) -> None:
+    """Filas 25 y 29: con alcance, 404 si el movimiento no se ve."""
+    if scope_of(ctx) is not None and not movement_visible(db, ctx, movement):
+        raise not_found("Movimiento")
+
+
+def _require_movement_owned(db: Session, ctx: dict, movement) -> None:
+    """Filas 28 y 30 (H2): con alcance, 404 si no es un pago propio."""
+    if scope_of(ctx) is not None and not movement_owned(db, ctx, movement):
+        raise not_found("Movimiento")
 
 
 def _to_response(movement, db: Session = None) -> dict:
@@ -182,6 +213,7 @@ def create_supplier_payment(
 
     Efectos: account(-), supplier.balance(+)
     """
+    _guard_scoped_payment(db, org_context, data.account_id, data.supplier_id)
     movement = money_movement.pay_supplier(
         db=db,
         data=data,
@@ -434,6 +466,7 @@ def create_advance_payment(
 
     Efectos: account(-), supplier.balance(+) — proveedor nos debe.
     """
+    _guard_scoped_payment(db, org_context, data.account_id, data.supplier_id)
     movement = money_movement.pay_advance(
         db=db,
         data=data,
@@ -532,6 +565,7 @@ def create_payment_to_generic(
     """
     Pago a tercero generico — account(-), third_party.balance(+).
     """
+    _guard_scoped_payment(db, org_context, data.account_id, data.third_party_id)
     movement = money_movement.pay_generic(
         db=db,
         data=data,
@@ -691,6 +725,7 @@ def list_money_movements(
         search=search,
         allowed_account_ids=allowed,
         created_by_filter=created_by_filter,
+        collector_scope_id=scope_of(org_context),
         adjustment_class=adjustment_class,
         commission_source=commission_source,
         pnl_section=pnl_section,
@@ -862,6 +897,14 @@ def get_by_third_party(
 
     org_id = org_context["organization_id"]
 
+    # Alcance de recolector (#124, fila 20): 404 si el tercero no es suyo; si lo
+    # es, historia COMPLETA sin filtro de cuentas (D-E1): el saldo corrido tiene
+    # que cerrar contra el saldo vivo (#55), y un pago viejo de Johana desde una
+    # cuenta de SAC es parte de esa historia.
+    scope = scope_of(org_context)
+    if scope is not None:
+        require_tp_in_scope(db, third_party_id, scope)
+
     # Default: ultimos 90 dias si no se provee date_from
     effective_date_from = date_from if date_from else (business_today() - timedelta(days=90))
     date_from_dt = datetime.combine(effective_date_from, dt_time.min, tzinfo=tz.utc)
@@ -923,7 +966,7 @@ def get_by_third_party(
                        len(events), filter_dt, kwargs))
 
     # 1. MoneyMovements confirmados y anulados
-    allowed = _get_allowed_accounts(db, org_context)
+    allowed = None if scope is not None else _get_allowed_accounts(db, org_context)
     mm_query = sa_select(MoneyMovement).where(
         MoneyMovement.organization_id == org_id,
         MoneyMovement.third_party_id == third_party_id,
@@ -1722,6 +1765,7 @@ def upload_evidence(
 
     org_id = str(org_context["organization_id"])
     mov = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+    _require_movement_owned(db, org_context, mov)
 
     # Validar extension
     ext = (file.filename or "").rsplit(".", 1)[-1].lower() if file.filename else ""
@@ -1775,6 +1819,7 @@ def download_evidence(
     from app.core.config import settings
 
     mov = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+    _require_movement_visible(db, org_context, mov)
 
     if not mov.evidence_url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El movimiento no tiene comprobante adjunto")
@@ -1821,6 +1866,7 @@ def get_movement(
 ):
     """Obtener un movimiento por ID."""
     movement = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+    _require_movement_visible(db, org_context, movement)
     return _to_response(movement, db)
 
 
@@ -1842,6 +1888,9 @@ def annul_movement(
     Si es transferencia, anula el par automaticamente.
     Retorna warnings si la anulacion deja una provision en sobregiro.
     """
+    if scope_of(org_context) is not None:
+        target = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+        _require_movement_owned(db, org_context, target)
     movement, warnings = money_movement.annul(
         db=db,
         movement_id=movement_id,

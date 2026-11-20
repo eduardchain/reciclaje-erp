@@ -296,7 +296,7 @@ class InboundPurchaseSummary(BaseModel):
     retentions_total: Optional[float] = None
     retentions: list[InboundRetentionDetail] = []
     # §4: IVA del ultimo lote (vivo, o el ultimo revertido para la precarga al
-    # reliquidar — mismo criterio que `_last_retention_batch`)
+    # reliquidar — `last_liquidation_batch`, plan Ingrid v1.7)
     taxes: list[DocumentTaxResponse] = []
 
 

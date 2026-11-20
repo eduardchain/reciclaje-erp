@@ -16,6 +16,8 @@ from app.schemas.material import (
 from app.services.base import PaginatedResponse
 from app.services.material import material
 
+from app.services.collector_scope import MATERIAL_HIDDEN_FIELDS, scope_of
+
 router = APIRouter()
 
 
@@ -46,8 +48,8 @@ def list_materials(
     - `limit`: Current page size
     """
     org_id = org_context["organization_id"]
-    
-    return material.get_multi(
+
+    result = material.get_multi(
         db=db,
         organization_id=org_id,
         skip=skip,
@@ -57,6 +59,12 @@ def list_materials(
         sort_by=sort_by,
         sort_order=sort_order
     )
+    # Alcance de recolector (§5.7): sin stock ni costo de SAC.
+    if scope_of(org_context) is not None:
+        for item in result.items:
+            for field in MATERIAL_HIDDEN_FIELDS:
+                item[field] = None
+    return result
 
 
 @router.post("", response_model=MaterialResponse, status_code=status.HTTP_201_CREATED)
@@ -130,13 +138,20 @@ def get_material(
     - 404 if material not found or doesn't belong to organization
     """
     org_id = org_context["organization_id"]
-    
-    return material.get_or_404(
+
+    obj = material.get_or_404(
         db=db,
         id=material_id,
         organization_id=org_id,
         detail="Material no encontrado"
     )
+    # Alcance de recolector (§5.7): sin stock ni costo de SAC.
+    if scope_of(org_context) is not None:
+        data = MaterialResponse.model_validate(obj).model_dump()
+        for field in MATERIAL_HIDDEN_FIELDS:
+            data[field] = None
+        return MaterialResponse(**data)
+    return obj
 
 
 @router.patch("/{material_id}", response_model=MaterialResponse)

@@ -32,6 +32,8 @@ from app.services.purchase import purchase as purchase_service
 logger = logging.getLogger(__name__)
 
 # Create router
+from app.services.collector_scope import in_scope, not_found, scope_of
+
 router = APIRouter()
 
 
@@ -335,6 +337,8 @@ async def list_purchases(
             sort_by=sort_by,
             sort_dir=sort_dir,
             warehouse_id=warehouse_id,
+            # Alcance de recolector (fila 16): se FUERZA su recolector.
+            collector_id=scope_of(org_context),
         )
         
         # Enrich each purchase with joined data (+ origen inbound B1, por pagina)
@@ -545,6 +549,10 @@ async def get_purchase(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Compra no encontrada",
         )
+    # Alcance de recolector (fila 17): 404 si su proveedor no es del alcance.
+    scope = scope_of(org_context)
+    if scope is not None and not in_scope(purchase.supplier, scope):
+        raise not_found("Compra")
     
     inbound_map = _inbound_origin_map(db, [purchase.id], org_context["organization_id"])
     response_data = _enrich_purchase_response(purchase, db, inbound_map=inbound_map)

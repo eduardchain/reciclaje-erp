@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permission, get_db
+from app.services.collector_scope import scope_of, scoped_create_categories
 from app.schemas.third_party_category import (
     ThirdPartyCategoryCreate,
     ThirdPartyCategoryUpdate,
@@ -73,12 +74,21 @@ def get_flat_categories(
     org_context: dict = Depends(require_permission("third_parties.view")),
     db: Session = Depends(get_db),
 ):
-    """Lista plana con display_name para selectors (ej: 'PROVEEDORES > Locales')."""
-    return third_party_category.get_flat(
+    """Lista plana con display_name para selectors (ej: 'PROVEEDORES > Locales').
+
+    Con alcance de recolector (SAC, fila 15b): SOLO las categorias con que ese
+    usuario puede crear un tercero (`scoped_create_categories`, la misma funcion
+    que valida el alta). El `behavior_type` del query se aplica como
+    interseccion: con otro tipo, la lista va vacia."""
+    result = third_party_category.get_flat(
         db=db,
         organization_id=org_context["organization_id"],
         behavior_type=behavior_type,
     )
+    if scope_of(org_context) is not None:
+        allowed = {c.id for c in scoped_create_categories(db, org_context["organization_id"])}
+        result.items = [i for i in result.items if i.id in allowed]
+    return result
 
 
 @router.get("/{category_id}", response_model=ThirdPartyCategoryResponse)
