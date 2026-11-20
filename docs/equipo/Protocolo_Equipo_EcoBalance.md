@@ -117,6 +117,21 @@ Este protocolo le agrega dos niveles. **El nivel chico lo aprobó Daniel el 20-n
   - golden medido como «aplica / no aplica», y si aplica, de dos bases cuando cambian tipos de columna.
   - **Pasada final del QA:** lee `git diff <base> <sha>` entero, sin el resumen del autor, y busca los caminos vecinos (quién llama al código tocado, otras entradas a la pantalla, los datos guardados, las otras 2 orgs).
 - **La suite completa corre solo en el checkpoint.** La corre el Coordinador una vez, sobre todo lo integrado, con la predicción sacada de un comando (regla del 19-nov).
+
+### Qué tests corre cada uno (Daniel, 20-nov)
+La suite completa tarda cerca de una hora y no se lanza para verificar una entrega. **Cada uno corre solo lo de su cambio, y la ronda final es una sola:**
+
+| Quién | Cuándo | Qué corre |
+|---|---|---|
+| Autor, nivel chico | en cada entrega | lint (techo 37), `tsc`, `build`, las tres guardas del árbol, capturas a 1440 y 390 |
+| Autor, nivel lógica | en cada entrega | lo del nivel chico, más las **dirigidas**: los tests que salen de un `grep` sobre la superficie tocada. El comando del `grep` va escrito en el log y en el plan, porque el set lo define un comando y no la memoria. Además, el **plantado** con su matriz commiteada antes y el **golden** medido como aplica / no aplica (de dos bases si cambian tipos de columna) |
+| QA | en cada pasada | **la misma lista que corrió el autor, y nada más.** Solo la amplía si encuentra una superficie que el `grep` no cubrió, y lo dice con el comando. Verifica el plantado y el golden contra sus artefactos (logs, sha, matriz), sin re-correrlos enteros salvo las filas que decida re-plantar |
+| Coordinador | al integrar | nada nuevo: la rama ya está al día con `develop` (§6) y el QA ya re-corrió las dirigidas sobre la punta |
+| Coordinador | en el checkpoint, antes del deploy | **la suite completa, una sola vez**, sobre todo lo integrado, con la predicción del conteo escrita antes y sacada de un comando; más el golden si aplica |
+
+- **Nadie más corre la suite completa.** Si un coder o un QA cree que hace falta, se lo dice al Coordinador.
+- Lo de más de ~200 tests, y todo golden, va dentro de `lockf -k ~/.cache/ecobalance/tests.lock`. Las bases ya están separadas, pero dos corridas grandes a la vez se pelean la CPU, y una suite llegó a tardar el doble por eso.
+- En la entrega va **la lista exacta** de lo que se corrió, con su conteo y la ruta del log.
 - **La pantalla de Daniel es condición de deploy.** El front no va a producción sin que Daniel lo haya visto en la integración.
 
 ## 6. Git e integración
