@@ -1,4 +1,12 @@
-# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.8)
+# Plan — SAC: Ingrid / Green Loop, usuario con alcance de recolector (v1.9)
+
+**v1.9 (20-nov):** responde a QA 2. Dio GO a la v1.7 (`9b09307`) y a la v1.8 (`de0d714`); las revisiones son `revision_plan_v1.7.md` (`edac1352…a8f5`) y `revision_plan_v1.8.md` (`87f93baa…6acc`), en `~/sac-evidencia/2026-11-20/qa-2-ingrid/`.
+- **c3, una celda vacía en T25e.** §5.6 dice «sin marca, o con la de otro recolector», pero ningún caso ponía un proveedor con la marca de **otro** recolector, así que un aviso escrito `collector_id IS NULL` pasaba T25e entero. Se agregan el caso «E_GL con C (marca X) → un aviso que nombra a C» y **P53**.
+- **n6:** el invariante de `last_liquidation_batch` va en su docstring con las líneas: sin commit entre el MCH y las filas de retención e IVA. QA 2 verificó la sospecha de `reverted_at` contra el código: es **real en las retenciones** (`purchase.py:1023`, `datetime.now()` por fila) y **no en el IVA** (`document_tax.py:206`, un solo `now`). Predicción para T25d contra el código viejo: con dos retenciones, la precarga trae **una**.
+- **n7:** en P49, «T25d no cae».
+- **n8:** el usuario con alcance que dispara el aviso tiene que estar **activo** (`User.is_active`).
+- **n9:** en el caso 1 de T25e, B va en **dos** compras de la misma Entrada (Q-65), y se exige **un** aviso.
+- **n10:** §5.6 declara el camino vecino: si alguien le quita la marca a un proveedor **después** de liquidar, no hay aviso, y la red es la nota del detalle (§8).
 
 **v1.8 (20-nov): Daniel eligió D-E2(b)** («Sí, aviso al liquidar», por ventanita, 20-nov ~14:25, vía el Coordinador). Con eso cambia la decisión 3 de la mañana, que había sido (a) (§15). La v1.7 (`9b09307`) ya estaba con QA 2, así que esto va encima como v1.8, sin reescribirla.
 - **El aviso** (§5.6). Cuando alguien liquida una Entrada con recolector y reparte a un proveedor que no tiene esa marca, la **respuesta de liquidar** trae un aviso en `warnings[]`, y la pantalla lo muestra en el toast que ya existe. Avisa, no bloquea (#17/#76).
@@ -76,7 +84,7 @@
 
 **Autor:** Eco Coder 2 · **Revisa:** Eco QA 2 · **Nivel:** lógica · **Rama:** `coder-2/recolector-alcance` (base `de32530`)
 **Evidencia:** `~/sac-evidencia/2026-11-20/coder-2-recolector-alcance/` (inventarios, mediciones y los scripts que los producen).
-**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. La v1.6 (`919157a`) tiene GO de Eco QA 2 a la 9e y a T25. La v1.7 (`9b09307`) y la v1.8 vuelven a QA 2 con su sha.
+**Estado:** construcción autorizada por Daniel (20-nov, vía el Coordinador) sobre el cuerpo de `700c87a`. La v1.7 (`9b09307`) y la v1.8 (`de0d714`) tienen GO de Eco QA 2; la v1.9 (c3 y notas) va con el commit de la matriz, antes de plantar.
 
 ---
 
@@ -305,6 +313,8 @@ Green Loop es otra empresa: que una ruta esté permitida no quiere decir que tod
     - **Cuándo:** la Entrada tiene recolector, un proveedor del reparto no tiene esa marca (sin marca, o con la de otro recolector), y ese recolector tiene al menos un usuario con alcance en la org. Sin ese usuario nadie pierde nada y no se avisa.
     - **Uno por proveedor**, ordenados por nombre. El texto es «El proveedor {X} no tiene la marca de {recolector}: {usuario} verá esta compra en la Entrada, pero no podrá abrirla. Si es de {recolector}, márcalo en Terceros → Recolector.» `{usuario}` es el nombre de quien tiene el alcance; con más de uno, se nombran todos y el verbo va en plural.
     - Un usuario con alcance nunca lo recibe: la fila 9 le exige que todo el reparto sea suyo.
+    - **n8 (v1.9):** cuenta solo un usuario con alcance **activo** (`User.is_active`).
+    - **n10, camino vecino (v1.9):** el aviso sale solo al liquidar. Si la marca se quita después (`PATCH /third-parties/{id}`), no hay aviso, y la red es la nota del detalle de Ingrid (§8).
 - **Su caja muestra todo lo que pasa por su caja.** Si Johana paga a B desde K1, Ingrid ve ese movimiento con el nombre de B, porque la cuenta es suya (fila 24). Es correcto por definición de «su caja».
 - **D-E1:** en el estado de cuenta de un proveedor suyo puede aparecer el nombre de una cuenta de SAC (§5.2).
 
@@ -556,7 +566,8 @@ En las rutas que no tienen flag (`/purchases`, `/third-parties`, `/money-movemen
 - **T25d, la precarga usa la misma función** (v1.7). Mismo escenario L1/L2 → el detalle de la Entrada (`GET /inbound-orders/{id}`, leído como Johana) trae `retentions == []` y `taxes == []` en esa compra. Y una liquidación con **dos** retenciones (ReteFuente e ICA), des-liquidada → el detalle trae las **dos**. Este segundo caso mide la sospecha de `reverted_at` por fila: se corre una vez contra el código viejo, con el resultado a archivo, antes de afirmar en el informe si el defecto existía.
 - **T25c, regla 9e** (v1.6). Johana liquida una Entrada GL con A en la compra 1 y B en la compra 2, y la des-liquida. Ingrid manda la compra 2 con A: el reparto es todo suyo, así que solo 9e la puede rechazar → 422 con el mensaje de 9e, y la compra de B sigue `registered`. Control: Johana manda el mismo cuerpo → 200, y la compra de B queda cancelada (R6). El control prueba que el escenario sí cancela la compra ajena, o sea que el 422 es lo que la protege. Segundo control: Johana des-liquida otra vez; ahora la compra de B está **cancelada** en el puente y todas las vivas son de A → Ingrid re-liquida → 200. Sin él, una regla que contara las canceladas bloquearía para siempre una Entrada que SAC ya corrigió (P48).
 - **T25e, el aviso de D-E2(b)** (v1.8). Se lee de la **respuesta HTTP** del `POST …/liquidate`, no del retorno del servicio (#100 D4d). Johana liquida:
-  - E_GL con A y B → `warnings` trae **un** aviso, que nombra a B, a Green Loop y a Ingrid y dice «Terceros → Recolector»;
+  - E_GL con A y B, con B en **dos** compras (Q-65, n9) → `warnings` trae **un** aviso, que nombra a B, a Green Loop y a Ingrid y dice «Terceros → Recolector»;
+  - **c3 (v1.9):** E_GL con A y C (marca de X) → un aviso que nombra a C;
   - **control positivo**, otra Entrada GL toda de A → `warnings` no trae ningún aviso de marca;
   - E_X (recolector X, sin usuario con alcance) con B → sin aviso. Es la condición «solo si alguien lo pierde».
   - Contra la vacuidad, en el caso 1 se exige que la compra de B exista y que Ingrid reciba 404 al abrirla: el aviso dice la verdad.
@@ -635,10 +646,11 @@ Se commitea **antes** de plantar. Las filas que tocan una vía compartida (marca
 | P46 | la regla 9f mira solo las retenciones, no el IVA (plantado **solo** en el IVA) | T25b, el caso del IVA. **No debe caer** el de la retención |
 | P47 | sin la regla 9e (v1.6) | T25c: la compra de B queda cancelada |
 | P48 | la regla 9e cuenta también las compras canceladas del puente | T25c, el segundo control: con la compra de B ya cancelada, Ingrid recibe 422 en vez de 200 |
-| P49 | la 9f usa «el último lote que exista» (el criterio de los helpers viejos) en vez del de la última liquidación (v1.7) | T25b, los dos controles de c1 (retención e IVA): Ingrid recibe 422 en vez de 200 |
+| P49 | la 9f usa «el último lote que exista» (el criterio de los helpers viejos) en vez del de la última liquidación (v1.7) | T25b, los dos controles de c1 (retención e IVA): Ingrid recibe 422 en vez de 200. **T25d no cae** (n7): la precarga sigue con la función nueva |
 | P50 | la precarga vuelve a su helper propio y la regla sigue con `last_liquidation_batch` (plantado **solo** en la precarga) | T25d, el escenario L1/L2. **No deben caer** T25b ni sus controles: si caen, la regla y la precarga no están separadas en el plantado y P50 no se distingue de P49 |
 | P51 | sin el aviso de D-E2(b) (v1.8) | T25e, caso 1 |
 | P52 | el aviso no mira si el recolector tiene un usuario con alcance | T25e, caso E_X. **No debe caer** el caso 1 |
+| P53 | el aviso solo mira `collector_id IS NULL`: no avisa por un proveedor con la marca de otro recolector (v1.9, c3) | T25e, el caso de C. **No debe caer** el caso 1 |
 
 **Dirección peligrosa a buscar celda por celda antes de plantar:** un test que debía caer y no cae. El candidato más probable es P7 si los cuatro listados comparten helper. Por eso el test se parametriza por ruta y el defecto se planta en una sola.
 
