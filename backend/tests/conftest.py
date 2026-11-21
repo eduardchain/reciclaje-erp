@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Generator
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ from app.api.deps import get_db  # Override the deps.get_db that endpoints actua
 from app.models import Base  # Import Base from models to get all registered tables
 from app.core.security import get_password_hash, create_access_token
 from app.services.role import role_service
+from tests._test_db_url import resolve_test_database_url
 
 # Import all models to ensure they are registered with Base.metadata
 from app.models import (
@@ -48,17 +50,12 @@ from app.models import (
 #
 # Cada sesion del equipo tiene su propia base de test en 5433
 # (docs/equipo/Protocolo_Equipo_EcoBalance.md §1): se elige con la variable
-# TEST_DATABASE_URL. Sin la variable, la de siempre. La guarda es fail-closed
-# porque esta base se recrea con DROP SCHEMA: un TEST_DATABASE_URL apuntado a
-# la de desarrollo (5434) o a produccion la borraria entera.
-_DEFAULT_TEST_DATABASE_URL = "postgresql://admin:test_password@localhost:5433/reciclaje_test"
-TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or _DEFAULT_TEST_DATABASE_URL
-_url = sqlalchemy.engine.make_url(TEST_DATABASE_URL)
-if _url.port != 5433 or _url.host not in ("localhost", "127.0.0.1") or not (_url.database or "").startswith("reciclaje_test"):
-    raise RuntimeError(
-        "TEST_DATABASE_URL tiene que ser una base reciclaje_test* en localhost:5433 "
-        f"(se recrea con DROP SCHEMA); llego host={_url.host} port={_url.port} db={_url.database}"
-    )
+# TEST_DATABASE_URL. La regla vive en tests/_test_db_url.py, compartida con
+# scripts/schema_parity_check.py: desde un worktree la variable es obligatoria
+# (sin ella caeria en reciclaje_test, la base de la suite del checkpoint), y la
+# guarda fail-closed de siempre exige reciclaje_test* en localhost:5433 porque
+# esta base se recrea con DROP SCHEMA.
+TEST_DATABASE_URL = resolve_test_database_url(os.environ, Path(__file__))
 
 # Create test engine with specific configuration for testing
 test_engine = create_engine(
