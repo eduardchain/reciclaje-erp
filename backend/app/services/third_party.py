@@ -22,6 +22,9 @@ from app.models.double_entry import DoubleEntry
 from app.schemas.third_party import ThirdPartyCreate, ThirdPartyUpdate, ThirdPartyResponse
 from app.services.base import CRUDBase, Select, PaginatedResponse
 
+# Plan similar-por-contenido D2: tope de parecidos por consulta (la medición
+# dio 3 como peor caso). Los idénticos van todos.
+SIMILAR_LIMIT = 5
 
 class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
     """CRUD operations for ThirdParty with custom methods."""
@@ -174,12 +177,20 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         organization_id: UUID,
         name: Optional[str] = None,
         identification: Optional[str] = None,
+        collector_id: Optional[UUID] = None,
     ) -> list[dict]:
-        """Reparto por compra §3.3: terceros ACTIVOS de la org que ya podrian
-        ser el que se va a crear — nombre igual sin tildes ni mayusculas
-        (`normalize_entity_name`, #78) o identificacion igual sin puntos,
-        guiones ni espacios. La tabla no tiene unicidad: este es el unico freno
-        a un duplicado. No incluye entidades de sistema (no son proveedores).
+        """`collector_id` (SAC, alcance de recolector, fila 12): solo terceros
+        con esa marca — no revela nombres de proveedores de SAC.
+
+        Reparto por compra §3.3: terceros ACTIVOS de la org que ya podrian
+        ser el que se va a crear. `match="exact"`: nombre igual sin tildes ni
+        mayusculas (`normalize_entity_name`, #78) o identificacion igual sin
+        puntos, guiones ni espacios — la pantalla bloquea. `match="similar"`:
+        se parece por contenido (`utils/name_match.py`, plan
+        similar-por-contenido) — la pantalla avisa y deja crear igual. Los
+        exact van todos y primero; los similar, hasta `SIMILAR_LIMIT`. La tabla
+        no tiene unicidad: este es el unico freno a un duplicado. No incluye
+        entidades de sistema (no son proveedores).
 
         Devuelve id, nombre, identificacion, si es proveedor de material y sus
         categorias (la pantalla las necesita para AGREGAR la de proveedor sin
@@ -195,18 +206,38 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         if not want_name and not want_id:
             return []
 
-        candidates = db.execute(
-            select(ThirdParty).where(
-                ThirdParty.organization_id == organization_id,
-                ThirdParty.is_active.is_(True),
-                ThirdParty.is_system_entity.isnot(True),
-            )
-        ).scalars().all()
-        matches = [
-            tp for tp in candidates
-            if (want_name and normalize_entity_name(tp.name or "") == want_name)
-            or (want_id and clean_id(tp.identification_number) == want_id)
-        ]
+        cand_q = select(ThirdParty).where(
+            ThirdParty.organization_id == organization_id,
+            ThirdParty.is_active.is_(True),
+            ThirdParty.is_system_entity.isnot(True),
+        )
+        if collector_id is not None:
+            cand_q = cand_q.where(ThirdParty.collector_id == collector_id)
+        candidates = db.execute(cand_q).scalars().all()
+        # Plan similar-por-contenido v1.1: el criterio corre SOLO sobre estos
+        # candidatos, ya filtrados por org, activos, sin sistema y por el
+        # alcance de recolector (fila 12) — nunca abre una consulta propia, asi
+        # que no puede revelar lo que el alcance esconde.
+        from app.utils.name_match import name_match_kind
+
+        kind_of: dict = {}
+        for tp in candidates:
+            kind = None
+            if want_id and clean_id(tp.identification_number) == want_id:
+                kind = "exact"  # D4: identificacion igual, como hoy
+            elif want_name:
+                kind = name_match_kind(name, tp.name or "")
+            if kind is not None:
+                kind_of[tp.id] = kind
+
+        def by_name(t: ThirdParty) -> tuple:
+            return (normalize_entity_name(t.name or ""), str(t.id))
+
+        exact = sorted((tp for tp in candidates if kind_of.get(tp.id) == "exact"), key=by_name)
+        similar = sorted(
+            (tp for tp in candidates if kind_of.get(tp.id) == "similar"), key=by_name
+        )[:SIMILAR_LIMIT]
+        matches = exact + similar  # D2: exact todos y primero; similar con tope
         if not matches:
             return []
         ids = [tp.id for tp in matches]
@@ -230,8 +261,11 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
                     b == "material_supplier" for _c, b in cats.get(tp.id, [])
                 ),
                 "category_ids": [c for c, _b in cats.get(tp.id, [])],
+                # exact: el mismo tercero, la pantalla bloquea; similar: se
+                # parece, la pantalla avisa y deja crear igual (D3, O1).
+                "match": kind_of[tp.id],
             }
-            for tp in sorted(matches, key=lambda t: (normalize_entity_name(t.name or ""), str(t.id)))
+            for tp in matches
         ]
 
     @staticmethod
@@ -277,8 +311,15 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         sort_by: str = "name",
         sort_order: str = "asc",
         include_system: bool = False,
+        collector_id: Optional[UUID] = None,
+        only_ids: Optional[list[UUID]] = None,
     ) -> PaginatedResponse:
-        """Helper generico para listar terceros con filtros."""
+        """Helper generico para listar terceros con filtros.
+
+        `collector_id`: solo los terceros con esa marca de recolector (SAC,
+        plan recolector-alcance §5.2 filas 10-11 y §7). `only_ids`: solo esos
+        ids (fila 13). Los dos van ANTES del conteo, asi que `total` cuenta lo
+        filtrado (§5.4)."""
         from sqlalchemy import func
 
         query = self._base_query(organization_id)
@@ -287,6 +328,12 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
 
         if extra_filter is not None:
             query = query.where(extra_filter)
+
+        if collector_id is not None:
+            query = query.where(self.model.collector_id == collector_id)
+
+        if only_ids is not None:
+            query = query.where(self.model.id.in_(only_ids))
 
         if is_active is not None:
             query = query.where(self.model.is_active == is_active)
@@ -343,9 +390,11 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         search: Optional[str] = None,
         role: Optional[str] = None,
         sort_by: str = "name",
-        sort_order: str = "asc"
+        sort_order: str = "asc",
+        collector_id: Optional[UUID] = None,
     ) -> PaginatedResponse:
-        """Get third parties con filtro opcional por rol (behavior_type)."""
+        """Get third parties con filtro opcional por rol (behavior_type) y por
+        recolector (SAC, §7)."""
         extra_filter = None
         if role and role in self.ROLE_BEHAVIOR_MAP:
             extra_filter = self._behavior_type_filter(self.ROLE_BEHAVIOR_MAP[role])
@@ -357,6 +406,7 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             skip=skip, limit=limit,
             is_active=is_active, search=search,
             sort_by=sort_by, sort_order=sort_order,
+            collector_id=collector_id,
         )
 
     def create(
@@ -367,10 +417,16 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
     ) -> ThirdParty:
         """Crear tercero con asignacion opcional de categorias."""
         category_ids = obj_in.category_ids
-        obj_data = obj_in.model_dump(exclude={"initial_balance", "category_ids"})
+        obj_data = obj_in.model_dump(exclude={"initial_balance", "category_ids", "collector_id"})
         obj_data["organization_id"] = organization_id
         obj_data["initial_balance"] = obj_in.initial_balance
         obj_data["current_balance"] = obj_in.initial_balance
+
+        # Marca de recolector (SAC, §3): se valida antes de escribir nada.
+        if obj_in.collector_id is not None:
+            from app.services.collector_scope import validate_collector_mark
+            validate_collector_mark(db, organization_id, None, obj_in.collector_id)
+            obj_data["collector_id"] = obj_in.collector_id
 
         db_obj = self.model(**obj_data)
         db.add(db_obj)
@@ -408,6 +464,15 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         update_data = obj_in.model_dump(exclude_unset=True)
 
         category_ids = update_data.pop("category_ids", None)
+
+        # Marca de recolector (SAC, §3). `fields_set` (#87): mandar null la
+        # QUITA; no mandarla no la toca. Editar categorias no la toca (T15).
+        if "collector_id" in update_data:
+            new_collector = update_data.pop("collector_id")
+            if new_collector is not None:
+                from app.services.collector_scope import validate_collector_mark
+                validate_collector_mark(db, organization_id, id, new_collector)
+            db_obj.collector_id = new_collector
 
         for field, value in update_data.items():
             setattr(db_obj, field, value)
@@ -510,7 +575,8 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         is_active: Optional[bool] = None,
         search: Optional[str] = None,
         sort_by: str = "name",
-        sort_order: str = "asc"
+        sort_order: str = "asc",
+        collector_id: Optional[UUID] = None,
     ) -> PaginatedResponse:
         """Get material suppliers (behavior_type='material_supplier')."""
         return self._get_filtered_list(
@@ -520,6 +586,7 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             skip=skip, limit=limit,
             is_active=is_active, search=search,
             sort_by=sort_by, sort_order=sort_order,
+            collector_id=collector_id,
         )
 
     def get_payable_suppliers(
@@ -620,7 +687,8 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         is_active: Optional[bool] = None,
         search: Optional[str] = None,
         sort_by: str = "name",
-        sort_order: str = "asc"
+        sort_order: str = "asc",
+        only_ids: Optional[list[UUID]] = None,
     ) -> PaginatedResponse:
         """Get terceros con behavior_type service_provider (comisionistas)."""
         return self._get_filtered_list(
@@ -630,6 +698,7 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
             skip=skip, limit=limit,
             is_active=is_active, search=search,
             sort_by=sort_by, sort_order=sort_order,
+            only_ids=only_ids,
         )
 
     def get_investors(

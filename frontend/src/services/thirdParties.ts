@@ -5,6 +5,7 @@ import type {
   ThirdPartyCreate,
   ThirdPartyUpdate,
   RetentionRow,
+  TaxEntityRow,
   RetentionConfigCreate,
   RetentionConfigUpdate,
   SimilarThirdParty,
@@ -92,6 +93,8 @@ interface ThirdPartyFilters {
   is_active?: boolean;
   sort_by?: string;
   sort_dir?: "asc" | "desc";
+  /** SAC: solo los terceros de este recolector. */
+  collector_id?: string;
 }
 
 export const thirdPartyService = {
@@ -172,6 +175,13 @@ export const thirdPartyService = {
   getRetentionRows: async (): Promise<RetentionRow[]> => {
     const response = await apiClient.get<RetentionRow[]>("/api/v1/third-parties/retention-entities");
     return response.data;
+  },
+
+  // Impuestos y retenciones (plan v1.2 D1): entidades «[Impuestos] X».
+  // Endpoint flag-gated (kg_ledger_enabled): NO llamar sin gate (F2 QA).
+  getTaxEntityRows: async (): Promise<TaxEntityRow[]> => {
+    const response = await apiClient.get<TaxEntityRow[]>("/api/v1/third-parties/tax-entities");
+    return response.data.map((r) => ({ ...r, current_balance: Number(r.current_balance) }));
   },
 
   createRetentionConfig: async (data: RetentionConfigCreate): Promise<RetentionRow> => {

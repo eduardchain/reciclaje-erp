@@ -83,6 +83,12 @@ class UserRoleAssignment(BaseModel):
     role_id: UUID
 
 
+class CollectorScopeInfo(BaseModel):
+    """Recolector del alcance del usuario (SAC, plan recolector-alcance §4)."""
+    id: UUID
+    name: str
+
+
 class MyPermissionsResponse(BaseModel):
     """Permisos del usuario actual."""
     role_id: Optional[UUID] = None
@@ -91,3 +97,5 @@ class MyPermissionsResponse(BaseModel):
     is_admin: bool
     permissions: list[str]
     assigned_account_ids: list[str] = []
+    # Alcance de recolector (SAC, plan recolector-alcance §4): {id, name} o None.
+    collector_scope: Optional[CollectorScopeInfo] = None

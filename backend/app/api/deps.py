@@ -1,7 +1,7 @@
 from typing import Generator
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status, Header
+from fastapi import Depends, HTTPException, Request, status, Header
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -94,6 +94,7 @@ async def get_current_superuser(
 
 
 async def get_required_org_context(
+    request: Request,
     x_organization_id: str = Header(..., alias="X-Organization-ID"),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -104,7 +105,13 @@ async def get_required_org_context(
 
     Returns dict with:
         organization_id, user_id, user_role, user_role_id,
-        user_permissions, is_admin, user
+        user_permissions, is_admin, user, collector_scope_id
+
+    🔴 Alcance de recolector (SAC, plan recolector-alcance §4/§5): si el usuario
+    tiene una fila en `user_collector_scopes`, solo pasa a los endpoints de
+    `SCOPED_ENDPOINTS` (deny-by-default, 403 «Fuera de tu alcance»). Lo decide
+    la FILA: ni el flag ni `is_admin` lo saltan (T16b/T16c). El superusuario
+    no tiene alcance (return temprano, y el endpoint de alcance lo rechaza, N2).
     """
     # Validate UUID format
     try:
@@ -131,6 +138,12 @@ async def get_required_org_context(
     # Load permissions
     role, perms = role_service.get_user_permissions(db, current_user.id, org_uuid)
 
+    # Alcance de recolector: una consulta por indice unico (org, user) — R2.
+    from app.services.collector_scope import get_scope_row, enforce_route_allowed
+    scope_row = get_scope_row(db, org_uuid, current_user.id)
+    if scope_row is not None:
+        enforce_route_allowed(db, request.scope.get("endpoint"), scope_row.collector_id)
+
     return {
         "organization_id": org_uuid,
         "user_id": current_user.id,
@@ -139,6 +152,7 @@ async def get_required_org_context(
         "user_permissions": perms,
         "is_admin": role_info["is_admin"],
         "user": current_user,
+        "collector_scope_id": scope_row.collector_id if scope_row is not None else None,
     }
 
 
@@ -162,6 +176,7 @@ def _build_superuser_context(db: Session, org_uuid: UUID, user: User) -> dict:
         "user_permissions": all_perms,
         "is_admin": True,
         "user": user,
+        "collector_scope_id": None,
     }
 
 

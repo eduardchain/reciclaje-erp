@@ -30,6 +30,7 @@ import {
 import { saveScroll, useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { formatCurrency, formatDate, formatWeight } from "@/utils/formatters";
 import { formatLinesTotalQuantity } from "@/utils/operationLines";
+import { countsAsLiquidated } from "@/utils/inboundPurchases";
 import { buildRoute, ROUTES } from "@/utils/constants";
 import { cn } from "@/utils";
 import {
@@ -123,11 +124,12 @@ function AgingBadge({ createdAt }: { createdAt: string }) {
   );
 }
 
-/** Total $ de una entrada tipo compra: liquidada = Σ compras del reparto;
- *  pendiente = referencia capturada (puede ser 0 — #93 captura sin precios) */
+/** Total $ de una entrada tipo compra: liquidada = Σ compras LIQUIDADAS del
+ *  reparto; pendiente = referencia capturada (puede ser 0 — #93 captura sin
+ *  precios). Una desliquidada vuelve a ser pendiente (O1, `countsAsLiquidated`). */
 function purchaseTotal(order: InboundOrderResponse): number {
-  const live = order.purchases.filter((p) => p.status !== "cancelled");
-  if (live.length > 0) return live.reduce((acc, p) => acc + p.total_amount, 0);
+  const liquidated = order.purchases.filter(countsAsLiquidated);
+  if (liquidated.length > 0) return liquidated.reduce((acc, p) => acc + p.total_amount, 0);
   return order.lines.reduce((acc, l) => acc + l.quantity * (l.unit_price ?? 0), 0);
 }
 
@@ -144,13 +146,16 @@ export function entradaPartyLabel(order: InboundOrderResponse): string {
 export default function InboundOrdersPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { hasPermission } = usePermissions();
+  const { hasPermission, collectorScope, unscoped } = usePermissions();
+  // Alcance de recolector (SAC, plan §8): sin filtro de sede — /warehouses esta
+  // fuera de su lista blanca. Sin alcance, todo como hoy.
+  const scoped = collectorScope !== null;
   const canCreate = hasPermission("purchases.create");
   const canLiquidate = hasPermission("purchases.liquidate");
   const canReview = hasPermission("purchases.review");
   const canViewPrices = hasPermission("purchases.view_prices");
 
-  const { data: warehousesData } = useWarehouses();
+  const { data: warehousesData } = useWarehouses(unscoped);
   const { data: suppliersData } = useSuppliers();
   const warehouses = warehousesData?.items ?? [];
   const suppliers = suppliersData?.items ?? [];
@@ -577,6 +582,7 @@ export default function InboundOrdersPage() {
                 <SelectItem value="willard_drosses">Willard · Drosses</SelectItem>
               </SelectContent>
             </Select>
+            {!scoped && (
             <Select value={warehouseFilter} onValueChange={(v) => { setWarehouseFilter(v); setPage(0); }}>
               <SelectTrigger className="w-full sm:w-44">
                 <SelectValue placeholder="Todas las sedes" />
@@ -588,6 +594,7 @@ export default function InboundOrdersPage() {
                 ))}
               </SelectContent>
             </Select>
+            )}
             {/* Combobox con escritura (patron EntitySelect de los formularios —
                 asi manejan terceros en toda la app); re-seleccionar limpia */}
             <div className="w-full sm:w-56">

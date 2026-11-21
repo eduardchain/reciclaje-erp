@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Building2, Check, ChevronDown, KeyRound, LogOut, Menu, Settings, User } from "lucide-react";
+import { Building2, Check, ChevronDown, KeyRound, LogOut, Menu, Settings, Truck, User } from "lucide-react";
 import EcoBalanceLogo from "@/components/EcoBalanceLogo";
 import {
   DropdownMenu,
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLogout, useCurrentUser, useCurrentOrganization, useChangePassword } from "@/hooks/useAuth";
 import { useAuthStore } from "@/stores/authStore";
+import { usePermissions } from "@/hooks/usePermissions";
 import { getApiErrorMessage } from "@/utils/formatters";
 
 interface HeaderProps {
@@ -31,6 +32,9 @@ export default function Header({ onMenuClick }: HeaderProps = {}) {
   const logout = useLogout();
   const changePassword = useChangePassword();
   const location = useLocation();
+  // Alcance de recolector (SAC, plan §8): el chip le dice al usuario por que ve
+  // menos. Misma query ["permissions", orgId] del Sidebar: cero requests nuevos.
+  const { collectorScope } = usePermissions();
 
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -113,6 +117,18 @@ export default function Header({ onMenuClick }: HeaderProps = {}) {
           </div>
 
           <div className="flex items-center gap-2 md:gap-4">
+            {collectorScope && (
+              <span
+                className="flex items-center gap-1 text-xs font-medium bg-teal-100 text-teal-700 px-2 py-1 rounded-lg"
+                title={`Solo ves lo de ${collectorScope.name}`}
+                aria-label={`Solo ves lo de ${collectorScope.name}`}
+              >
+                <Truck className="w-3.5 h-3.5 shrink-0" />
+                {/* A 390 el nombre tapa el logo: en movil solo el icono (el nombre
+                    queda en el title y en el aria-label). */}
+                <span className="hidden sm:inline max-w-[160px] truncate">{collectorScope.name}</span>
+              </span>
+            )}
             {/* Selector de org o pill estatico */}
             {showOrgSelector ? (
               <DropdownMenu>

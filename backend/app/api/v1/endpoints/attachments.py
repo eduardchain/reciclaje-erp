@@ -22,6 +22,7 @@ from app.schemas.attachment import (
 )
 from app.services import attachment as attachment_service
 from app.services.attachment import OWNER_PERMISSIONS
+from app.services.collector_scope import in_scope, not_found, scope_of
 
 router = APIRouter()
 
@@ -46,6 +47,26 @@ def _check(org_context: dict, owner_type: str, action: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Permisos insuficientes: se requiere {' o '.join(sorted(perms))}",
         )
+
+
+def _check_scope(db: Session, org_context: dict, owner_type: str, owner_id: UUID) -> None:
+    """Filas 18-19: con alcance de recolector solo se ven los adjuntos de una
+    COMPRA cuyo proveedor es del alcance; venta, transformacion o compra ajena
+    -> 404 (§5.3). Va aparte de `_check`: el bypass de admin de los permisos
+    no salta el alcance (T16c)."""
+    scope = scope_of(org_context)
+    if scope is None:
+        return
+    if owner_type != "purchase":
+        raise not_found("Adjunto")
+    from app.models.purchase import Purchase
+    purchase = db.get(Purchase, owner_id)
+    if (
+        purchase is None
+        or purchase.organization_id != org_context["organization_id"]
+        or not in_scope(purchase.supplier, scope)
+    ):
+        raise not_found("Adjunto")
 
 
 def _resolve_owner(
@@ -80,6 +101,9 @@ def list_attachments(
 ):
     """Adjuntos de una operacion."""
     owner_type, owner_id = _resolve_owner(purchase_id, sale_id, transformation_id)
+    # El alcance va ANTES del permiso: una venta da 404 (fila 18) y no el 403
+    # de un permiso que el rol del recolector no tiene.
+    _check_scope(db, org_context, owner_type, owner_id)
     _check(org_context, owner_type, "view")
     items = attachment_service.list_for_owner(
         db, owner_type, owner_id, org_context["organization_id"]
@@ -123,7 +147,8 @@ def download_attachment(
     att = attachment_service.get_or_404(
         db, attachment_id, org_context["organization_id"]
     )
-    owner_type, _ = attachment_service.owner_of(att)
+    owner_type, owner_id = attachment_service.owner_of(att)
+    _check_scope(db, org_context, owner_type, owner_id)  # antes del permiso (fila 19)
     _check(org_context, owner_type, "view")
 
     path = os.path.join(settings.UPLOAD_DIR, att.file_path)

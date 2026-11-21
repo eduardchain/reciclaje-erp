@@ -20,6 +20,8 @@ export function usePermissions() {
       isAdmin: true,
       roleName: "Super Admin",
       assignedAccountIds: [],
+      collectorScope: null,
+      unscoped: true,
       isLoading: false,
       hasPermission: () => true,
       hasAnyPermission: () => true,
@@ -43,6 +45,13 @@ export function usePermissions() {
     isAdmin: data?.is_admin ?? false,
     roleName: data?.role_display_name ?? "",
     assignedAccountIds: data?.assigned_account_ids ?? [],
+    // Alcance de recolector (SAC): el backend ya filtra; la pantalla solo deja
+    // de pedir lo que el backend le niega (plan §8).
+    collectorScope: data?.collector_scope ?? null,
+    // true SOLO cuando ya se sabe que no hay alcance. Es el `enabled` de los
+    // queries que un usuario con alcance no puede pedir: mientras cargan los
+    // permisos no se dispara nada, y sin alcance la request sale igual que hoy.
+    unscoped: !isLoading && !data?.collector_scope,
     isLoading,
     hasPermission,
     hasAnyPermission,

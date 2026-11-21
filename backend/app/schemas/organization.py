@@ -183,6 +183,8 @@ class OrganizationMemberResponse(BaseModel):
     user_full_name: str | None = None
     account_ids: list[UUID] = []
     org_count: int = 1
+    # Alcance de recolector (SAC, plan recolector-alcance §4). None = sin alcance.
+    collector_scope_id: UUID | None = None
 
     class Config:
         from_attributes = True
@@ -191,6 +193,19 @@ class OrganizationMemberResponse(BaseModel):
 class AccountAssignmentsUpdate(BaseModel):
     """Schema para actualizar cuentas asignadas a un usuario."""
     account_ids: list[UUID] = []
+
+
+class CollectorScopeUpdate(BaseModel):
+    """Poner (o quitar con null) el alcance de recolector de un miembro (§4)."""
+    model_config = ConfigDict(extra="forbid")
+
+    collector_id: UUID | None
+
+
+class CollectorScopeResponse(BaseModel):
+    user_id: UUID
+    collector_id: UUID | None = None
+    collector_name: str | None = None
 
 
 class CreateUserWithMembership(BaseModel):

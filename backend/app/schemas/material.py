@@ -80,10 +80,13 @@ class MaterialResponse(MaterialBase):
     """Schema for Material responses."""
     id: UUID
     organization_id: UUID
-    current_stock: float
-    current_stock_liquidated: float
-    current_stock_transit: float
-    current_average_cost: float
+    # Optional por el alcance de recolector (SAC, §5.7): para un usuario con
+    # alcance llegan en null (inventario y costo de SAC). Sin alcance llegan con
+    # su numero de siempre: un float no nulo se serializa igual.
+    current_stock: Optional[float]
+    current_stock_liquidated: Optional[float]
+    current_stock_transit: Optional[float]
+    current_average_cost: Optional[float]
     sort_order: int = 0
     is_active: bool
     business_unit_name: Optional[str] = None
@@ -101,6 +104,6 @@ class MaterialResponse(MaterialBase):
         return data
 
     @field_serializer('current_stock', 'current_stock_liquidated', 'current_stock_transit', 'current_average_cost')
-    def serialize_decimal(self, value: Decimal) -> float:
-        """Convert Decimal to float for JSON serialization."""
-        return float(value)
+    def serialize_decimal(self, value: Optional[Decimal]) -> Optional[float]:
+        """Convert Decimal to float for JSON serialization (None con alcance, §5.7)."""
+        return None if value is None else float(value)

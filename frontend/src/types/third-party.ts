@@ -19,6 +19,9 @@ export interface ThirdPartyResponse extends BaseEntity {
   current_balance: number;
   is_active: boolean;
   categories: ThirdPartyCategory[];
+  /** SAC (alcance de recolector): el recolector del tercero, o null. */
+  collector_id?: string | null;
+  collector_name?: string | null;
 }
 
 export interface ThirdPartyCreate {
@@ -29,6 +32,8 @@ export interface ThirdPartyCreate {
   address?: string | null;
   category_ids?: string[];
   initial_balance?: number;
+  /** SAC: solo se manda si el selector «Recolector» esta a la vista. */
+  collector_id?: string | null;
 }
 
 /** GET /third-parties/similar — candidatos a duplicado (reparto por compra). */
@@ -40,6 +45,9 @@ export interface SimilarThirdParty {
   /** Todas sus categorías: para AGREGAR la de proveedor sin quitar ninguna
    *  (el PATCH reemplaza la lista entera). */
   category_ids: string[];
+  /** exact: el mismo tercero (la ventana bloquea); similar: se parece por
+   *  contenido (avisa y deja crear igual). Plan similar-por-contenido D2. */
+  match: "exact" | "similar";
 }
 
 export interface ThirdPartyUpdate {
@@ -49,6 +57,8 @@ export interface ThirdPartyUpdate {
   phone?: string | null;
   address?: string | null;
   category_ids?: string[];
+  /** SAC: null quita la marca; ausente no la toca. */
+  collector_id?: string | null;
 }
 
 // --- Retenciones: catalogo v2 (CC-006) + entidades (SAC E2 D9) --- //
@@ -69,6 +79,23 @@ export interface RetentionRow {
   base_kind: string | null;
   name: string | null;
   current_balance: number;
+  is_active: boolean;
+}
+
+/**
+ * Fila de GET /third-parties/tax-entities — entidades «[Impuestos] X» (IVA y
+ * retenciones que le practican a la org). La naturaleza (por pagar / a favor)
+ * la decide el SIGNO de `current_balance`, nunca el nombre: `taxBalanceNature`.
+ */
+export interface TaxEntityRow {
+  entity_id: string;
+  name: string;
+  /** Rótulo para la pantalla: «IVA», «ICA Bogotá». El nombre va de subtítulo. */
+  label: string;
+  tax_type: "iva" | "retefuente" | "reteiva" | "ica" | null;
+  municipality: string | null;
+  current_balance: number;
+  /** Sin filtro en el servidor: una inactiva con saldo se muestra (plan v1.2 C3). */
   is_active: boolean;
 }
 

@@ -91,6 +91,9 @@ interface NavChild {
   // esta encendido. Las entradas SIN orgFlag JAMAS dependen del query de
   // settings (regla de no-regresion §5.1 del plan E1).
   orgFlag?: string;
+  // Inverso, como en NavItem: se OCULTA si el flag esta encendido. "Listas Precios"
+  // (general, #35) en SAC, cuya compra usa solo Listas por Proveedor (#98 D3).
+  hideWhenOrgFlag?: string;
 }
 
 interface NavItem {
@@ -210,7 +213,7 @@ const orgNavItems: NavItem[] = [
       { name: "Cuentas", path: ROUTES.TREASURY_ACCOUNT_MOVEMENTS, icon: <CreditCard className="w-4 h-4" />, permission: "treasury.view_accounts" },
       { name: "Provisiones", path: ROUTES.TREASURY_PROVISIONS, icon: <Tag className="w-4 h-4" />, permission: "treasury.view_provisions" },
       { name: "Pasivos", path: ROUTES.TREASURY_LIABILITIES, icon: <Scale className="w-4 h-4" />, permission: "treasury.view_liabilities" },
-      { name: "Retenciones", path: ROUTES.TREASURY_RETENTIONS, icon: <Percent className="w-4 h-4" />, permission: "third_parties.view", orgFlag: "kg_ledger_enabled" },
+      { name: "Impuestos y retenciones", path: ROUTES.TREASURY_RETENTIONS, icon: <Percent className="w-4 h-4" />, permission: "third_parties.view", orgFlag: "kg_ledger_enabled" },
       { name: "Gastos Diferidos", path: ROUTES.TREASURY_SCHEDULED, icon: <CalendarClock className="w-4 h-4" />, permission: "treasury.view_scheduled" },
       { name: "Activos Fijos", path: ROUTES.TREASURY_FIXED_ASSETS, icon: <Building2 className="w-4 h-4" />, permission: "treasury.view_fixed_assets" },
       { name: "Obligaciones", path: ROUTES.TREASURY_OBLIGATIONS, icon: <Landmark className="w-4 h-4" />, permission: "treasury.view_obligations" },
@@ -277,7 +280,7 @@ const orgNavItems: NavItem[] = [
       { name: "Cuentas", path: ROUTES.CONFIG_ACCOUNTS, icon: <CreditCard className="w-4 h-4" />, permission: "treasury.manage_accounts" },
       { name: "Unidades Negocio", path: ROUTES.CONFIG_BUSINESS_UNITS, icon: <Building className="w-4 h-4" />, permission: "config.view_business_units" },
       { name: "Cat. Gastos", path: ROUTES.CONFIG_EXPENSE_CATEGORIES, icon: <Tag className="w-4 h-4" />, permission: "treasury.manage_expenses" },
-      { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" />, permission: "materials.view_prices" },
+      { name: "Listas Precios", path: ROUTES.CONFIG_PRICE_LISTS, icon: <ListOrdered className="w-4 h-4" />, permission: "materials.view_prices", hideWhenOrgFlag: "kg_ledger_enabled" },
       { name: "Cat. Terceros", path: ROUTES.CONFIG_THIRD_PARTY_CATEGORIES, icon: <Users className="w-4 h-4" />, permission: "third_parties.create" },
       { name: "Tarifas", path: ROUTES.CONFIG_TARIFFS, icon: <Receipt className="w-4 h-4" />, permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
       { name: "Precio del Plomo", path: ROUTES.CONFIG_LEAD_PRICE, icon: <Receipt className="w-4 h-4" />, permission: "tariffs.view", orgFlag: "kg_ledger_enabled" },
@@ -299,6 +302,17 @@ const orgNavItems: NavItem[] = [
   },
 ];
 
+// Alcance de recolector (SAC, plan recolector-alcance §8): con alcance, el menu
+// muestra SOLO estas rutas — las demas le darian 403 «Fuera de tu alcance» en el
+// backend (lista blanca §5.2). Sin alcance este set no se consulta.
+const SCOPE_PATHS = new Set<string>([
+  ROUTES.INBOUND,
+  ROUTES.TREASURY,
+  ROUTES.TREASURY_ACCOUNT_STATEMENT,
+  ROUTES.TREASURY_ACCOUNT_MOVEMENTS,
+  ROUTES.THIRD_PARTIES,
+]);
+
 interface SidebarProps {
   mode?: "desktop" | "mobile";
   onNavigate?: () => void;
@@ -308,7 +322,8 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
   const location = useLocation();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [collapsedDesktop, setCollapsedDesktop] = useState(false);
-  const { hasPermission, hasAnyPermission, isLoading } = usePermissions();
+  const { hasPermission, hasAnyPermission, isLoading, collectorScope } = usePermissions();
+  const scoped = collectorScope !== null;
   const { flagEnabled } = useOrgSettings();
   const user = useAuthStore((s) => s.user);
   const organizationId = useAuthStore((s) => s.organizationId);
@@ -339,17 +354,19 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
     const checkFlag = (flag?: string) => !flag || flagEnabled(flag);
     // W1: ocultar-si-flag — solo la consulta la entrada que lo declara
     const checkHide = (flag?: string) => !flag || !flagEnabled(flag);
+    // Alcance: solo se consulta con alcance; sin el, todo pasa como hoy.
+    const checkScope = (path: string) => !scoped || SCOPE_PATHS.has(path);
 
     const filtered = orgNavItems
       .map((item) => {
         if (item.children) {
           const filteredChildren = item.children.filter(
-            (child) => checkPerm(child.permission) && checkFlag(child.orgFlag)
+            (child) => checkPerm(child.permission) && checkFlag(child.orgFlag) && checkHide(child.hideWhenOrgFlag) && checkScope(child.path)
           );
           if (filteredChildren.length === 0) return null;
           return { ...item, children: filteredChildren };
         }
-        if (!checkPerm(item.permission) || !checkFlag(item.orgFlag) || !checkHide(item.hideWhenOrgFlag)) return null;
+        if (!checkPerm(item.permission) || !checkFlag(item.orgFlag) || !checkHide(item.hideWhenOrgFlag) || !checkScope(item.path)) return null;
         return item;
       })
       .filter(Boolean) as NavItem[];
@@ -367,7 +384,7 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
       lastSection = item.section;
       return item;
     });
-  }, [isLoading, hasPermission, hasAnyPermission, isSystemMode, isSuperuser, flagEnabled]);
+  }, [isLoading, hasPermission, hasAnyPermission, isSystemMode, isSuperuser, flagEnabled, scoped]);
 
   const toggleExpand = (name: string) => {
     setExpanded((prev) => ({ ...prev, [name]: !prev[name] }));

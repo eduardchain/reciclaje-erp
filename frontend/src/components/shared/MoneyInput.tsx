@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 
 function getFormatter(decimals: number) {
@@ -23,6 +23,12 @@ interface MoneyInputProps {
 /**
  * Input de monto con separador de miles (formato colombiano: 1.000.000).
  * Muestra formateado cuando no tiene foco; permite edicion libre con foco.
+ *
+ * Al entrar con teclado (Tab, Shift+Tab, `.focus()`) selecciona todo, para que
+ * escribir REEMPLACE el valor. El foco cambia «1.300» por «1300», y ese cambio de
+ * `value` en un input controlado borra la seleccion del Tab: escribir 1250 daba
+ * «13.001.250». Con mouse o dedo no se selecciona: el clic deja el cursor donde
+ * se hizo, para corregir un digito (plan-moneyinput-seleccion.md).
  */
 export function MoneyInput({
   value,
@@ -37,6 +43,10 @@ export function MoneyInput({
   const [focused, setFocused] = useState(false);
   const [displayValue, setDisplayValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  // D1: el foco llego por puntero (mouse, dedo, lapiz) -> no seleccionar
+  const pointerDownRef = useRef(false);
+  // D2: seleccionar todo cuando el texto crudo ya este pintado
+  const selectPendingRef = useRef(false);
 
   useEffect(() => {
     if (!focused) {
@@ -44,12 +54,23 @@ export function MoneyInput({
     }
   }, [value, focused]);
 
+  // D2: corre en el mismo commit que pinta el texto crudo, antes de la tecla siguiente
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!selectPendingRef.current || !el) return;
+    selectPendingRef.current = false;
+    if (document.activeElement === el) el.select();
+  }, [displayValue, focused]);
+
   const handleFocus = () => {
+    selectPendingRef.current = !pointerDownRef.current;
+    pointerDownRef.current = false;
     setFocused(true);
     setDisplayValue(value ? String(value) : "");
   };
 
   const handleBlur = () => {
+    pointerDownRef.current = false; // D3
     setFocused(false);
     // Aceptar tanto "1.5" (US) como "1,5" (CO) como decimal cuando decimals > 0.
     // El regex de handleChange ya garantiza un solo separador, asi que basta con
@@ -81,6 +102,7 @@ export function MoneyInput({
       onChange={handleChange}
       onFocus={handleFocus}
       onBlur={handleBlur}
+      onPointerDown={() => { pointerDownRef.current = true; }}
       placeholder={placeholder}
       className={className}
       disabled={disabled}

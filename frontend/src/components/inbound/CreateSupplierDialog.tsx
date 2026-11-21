@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
+import { usePermissions } from "@/hooks/usePermissions";
 import { thirdPartyService } from "@/services/thirdParties";
 import { getApiErrorMessage } from "@/utils/formatters";
 import type { SimilarThirdParty } from "@/types/third-party";
@@ -38,9 +39,16 @@ import type { SimilarThirdParty } from "@/types/third-party";
  *   manda la suya más la nueva, nunca solo la nueva.
  * - No existe → se crea con la categoría de proveedor de material.
  *
- * No ofrece «crear igual» a propósito: el match es por nombre sin tildes ni
- * mayúsculas o por identificación limpia, o sea que es el mismo tercero. Si no
- * lo es, basta con distinguir el nombre.
+ * Dos clases de resultado (plan similar-por-contenido v1.1, D3):
+ * - `exact` (nombre igual sin tildes ni mayúsculas, o identificación limpia
+ *   igual): es el mismo tercero → BLOQUEA, sin «crear igual». Si no lo es,
+ *   basta con distinguir el nombre.
+ * - `similar` (se parece por contenido): solo AVISA (O1 de Daniel, 20-nov) y
+ *   el botón pasa a «Crear igual», que crea sin volver a preguntar. En SAC la
+ *   mayoría de los parecidos medidos son cuentas aparte a propósito
+ *   («… - Préstamo»), así que bloquear trabaría un uso legítimo.
+ * Un resultado sin `match` (backend anterior) cuenta como exact: la dirección
+ * conservadora.
  *
  * `onCreated(id, name)`: el nombre viaja para que el selector lo pinte antes
  * de que vuelva la lista de proveedores invalidada.
@@ -55,12 +63,18 @@ export function CreateSupplierDialog({
   onCreated: (id: string, name: string) => void;
 }) {
   const qc = useQueryClient();
+  // Alcance de recolector (plan §5.5): editar un tercero existente esta fuera
+  // de su lista blanca, asi que no se le ofrece agregar la categoria.
+  const { collectorScope } = usePermissions();
+  const scoped = collectorScope !== null;
   const [name, setName] = useState("");
   const [identification, setIdentification] = useState("");
   const [phone, setPhone] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [matches, setMatches] = useState<SimilarThirdParty[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const hasExact = (matches ?? []).some((m) => m.match !== "similar");
+  const onlySimilar = (matches?.length ?? 0) > 0 && !hasExact;
 
   const { data: catData } = useThirdPartyCategoriesFlat("material_supplier");
   const categories = (catData?.items ?? []).filter((c) => c.is_active);
@@ -92,14 +106,17 @@ export function CreateSupplierDialog({
     onOpenChange(false);
   };
 
-  const handleContinue = async () => {
+  // `skipSearch`: «Crear igual» — el usuario ya vio los parecidos (D3)
+  const handleContinue = async (skipSearch = false) => {
     if (!name.trim() || busy) return;
     setBusy(true);
     try {
-      const found = await thirdPartyService.findSimilar(name, identification);
-      if (found.length > 0) {
-        setMatches(found);
-        return;
+      if (!skipSearch) {
+        const found = await thirdPartyService.findSimilar(name, identification);
+        if (found.length > 0) {
+          setMatches(found);
+          return;
+        }
       }
       if (!categoryId) {
         toast.error("No hay una categoría de proveedor de material. Créela en Configuración → Terceros.");
@@ -206,9 +223,13 @@ export function CreateSupplierDialog({
           )}
 
           {matches && matches.length > 0 && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-2">
+            <div
+              data-testid="similar-panel"
+              data-kind={hasExact ? "exact" : "similar"}
+              className="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-2"
+            >
               <p className="text-sm text-amber-800">
-                {matches.length === 1 ? "Ya existe:" : "Ya existen:"}
+                {hasExact ? (matches.length === 1 ? "Ya existe:" : "Ya existen:") : "Se parece a:"}
               </p>
               {matches.map((m) => (
                 <div
@@ -220,8 +241,14 @@ export function CreateSupplierDialog({
                     <p className="text-xs text-slate-500">
                       {m.identification_number || "sin identificación"}
                       {!m.is_material_supplier && " · no es proveedor de material"}
+                      {hasExact && m.match === "similar" && " · se parece"}
                     </p>
                   </div>
+                  {scoped && !m.is_material_supplier ? (
+                    <p className="text-xs text-slate-500 sm:text-right">
+                      Para usarlo como proveedor, SAC tiene que agregarle la categoría
+                    </p>
+                  ) : (
                   <Button
                     size="sm"
                     variant="outline"
@@ -231,10 +258,13 @@ export function CreateSupplierDialog({
                   >
                     {m.is_material_supplier ? "Usar este" : "Agregar categoría y usar"}
                   </Button>
+                  )}
                 </div>
               ))}
               <p className="text-xs text-amber-700">
-                Si es otro tercero, cambie el nombre o la identificación para distinguirlo.
+                {hasExact
+                  ? "Si es otro tercero, cambie el nombre o la identificación para distinguirlo."
+                  : "Si es otro tercero, puede crearlo igual."}
               </p>
             </div>
           )}
@@ -249,11 +279,12 @@ export function CreateSupplierDialog({
             Cancelar
           </Button>
           <Button
-            onClick={handleContinue}
-            disabled={!name.trim() || busy || (matches?.length ?? 0) > 0}
+            data-testid="create-supplier-submit"
+            onClick={() => handleContinue(onlySimilar)}
+            disabled={!name.trim() || busy || hasExact}
             className="w-full sm:w-auto"
           >
-            {busy ? "Buscando..." : "Crear proveedor"}
+            {busy ? "Buscando..." : onlySimilar ? "Crear igual" : "Crear proveedor"}
           </Button>
         </DialogFooter>
       </DialogContent>

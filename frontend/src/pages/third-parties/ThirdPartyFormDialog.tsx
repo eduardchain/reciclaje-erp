@@ -4,9 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 import { useCreateThirdParty, useUpdateThirdParty } from "@/hooks/useCrudData";
-import { useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
+import { usePayableProviders, useThirdPartyCategoriesFlat } from "@/hooks/useMasterData";
+import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { ThirdPartyResponse } from "@/types/third-party";
 
 interface Props {
@@ -40,6 +43,15 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
   const update = useUpdateThirdParty();
   const { data: categoriesData } = useThirdPartyCategoriesFlat();
   const categories = categoriesData?.items ?? [];
+  // Selector «Recolector» (SAC, plan §8): flag + third_parties.edit, sin alcance
+  // (con alcance el servidor fuerza su recolector). Misma query que el filtro
+  // del listado: cero requests de mas.
+  const { flagEnabled } = useOrgSettings();
+  const { hasPermission, unscoped } = usePermissions();
+  const showCollector = flagEnabled("kg_ledger_enabled") && unscoped && hasPermission("third_parties.edit");
+  const { data: collectorsData } = usePayableProviders(undefined, showCollector);
+  const collectorOptions = (collectorsData?.items ?? []).filter((c) => c.id !== editItem?.id);
+  const [collectorId, setCollectorId] = useState("");
 
   const [name, setName] = useState("");
   const [identification, setIdentification] = useState("");
@@ -56,9 +68,11 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
       setPhone(editItem.phone ?? "");
       setAddress(editItem.address ?? "");
       setCategoryIds((editItem.categories ?? []).map((c) => c.id));
+      setCollectorId(editItem.collector_id ?? "");
     } else {
       setName(""); setIdentification(""); setEmail(""); setPhone(""); setAddress("");
       setCategoryIds([]);
+      setCollectorId("");
     }
   }, [editItem, open]);
 
@@ -77,10 +91,16 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
     };
     const opts = { onSuccess: () => onOpenChange(false) };
 
+    // collector_id va como propiedad DIRECTA (TS no revisa claves dentro de un
+    // spread) y solo si el selector esta a la vista: sin flag el payload queda
+    // igual que siempre (undefined no viaja en el JSON). Al editar, solo si
+    // CAMBIO: re-mandar la misma marca la re-validaria contra un recolector que
+    // pudo quedar inactivo y una edicion de telefono daria 422.
     if (editItem) {
-      update.mutate({ id: editItem.id, data: base }, opts);
+      const changed = showCollector && collectorId !== (editItem.collector_id ?? "");
+      update.mutate({ id: editItem.id, data: { ...base, collector_id: changed ? collectorId || null : undefined } }, opts);
     } else {
-      create.mutate({ ...base, initial_balance: 0 }, opts);
+      create.mutate({ ...base, initial_balance: 0, collector_id: showCollector && collectorId ? collectorId : undefined }, opts);
     }
   };
 
@@ -110,6 +130,26 @@ export default function ThirdPartyFormDialog({ open, onOpenChange, editItem }: P
             <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Telefono</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
           </div>
           <div><Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Direccion</Label><Input value={address} onChange={(e) => setAddress(e.target.value)} /></div>
+          {showCollector && (
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Recolector</Label>
+              <Select value={collectorId || "__none__"} onValueChange={(v) => setCollectorId(v === "__none__" ? "" : v)}>
+                <SelectTrigger><SelectValue placeholder="Sin recolector" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sin recolector</SelectItem>
+                  {collectorOptions.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                  {/* La marca actual aunque su recolector ya no este en la lista
+                      (inactivo): un Select sin su opcion se pinta vacio. */}
+                  {editItem?.collector_id && !collectorOptions.some((c) => c.id === editItem.collector_id) && (
+                    <SelectItem value={editItem.collector_id}>{editItem.collector_name ?? "Recolector actual"}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-400 mt-1">Lo ve el usuario de ese recolector, y en el Balance Detallado sale en el grupo del recolector.</p>
+            </div>
+          )}
           {isRestrictedType ? (
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tipo</Label>

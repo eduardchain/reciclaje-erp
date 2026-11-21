@@ -107,6 +107,21 @@ export function useUpdateAccountAssignments() {
   });
 }
 
+export function useUpdateCollectorScope() {
+  const qc = useQueryClient();
+  const organizationId = useAuthStore((s) => s.organizationId);
+  return useMutation({
+    mutationFn: ({ userId, collectorId }: { userId: string; collectorId: string | null }) =>
+      rolesService.updateCollectorScope(organizationId!, userId, collectorId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org-members"] });
+      qc.invalidateQueries({ queryKey: ["permissions"] });
+      toast.success("Alcance actualizado");
+    },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al actualizar el alcance")),
+  });
+}
+
 export function useCreateUser() {
   const qc = useQueryClient();
   const organizationId = useAuthStore((s) => s.organizationId);
