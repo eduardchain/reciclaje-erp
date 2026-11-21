@@ -22,6 +22,9 @@ from app.models.double_entry import DoubleEntry
 from app.schemas.third_party import ThirdPartyCreate, ThirdPartyUpdate, ThirdPartyResponse
 from app.services.base import CRUDBase, Select, PaginatedResponse
 
+# Plan similar-por-contenido D2: tope de parecidos por consulta (la medición
+# dio 3 como peor caso). Los idénticos van todos.
+SIMILAR_LIMIT = 5
 
 class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
     """CRUD operations for ThirdParty with custom methods."""
@@ -180,10 +183,14 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         con esa marca — no revela nombres de proveedores de SAC.
 
         Reparto por compra §3.3: terceros ACTIVOS de la org que ya podrian
-        ser el que se va a crear — nombre igual sin tildes ni mayusculas
-        (`normalize_entity_name`, #78) o identificacion igual sin puntos,
-        guiones ni espacios. La tabla no tiene unicidad: este es el unico freno
-        a un duplicado. No incluye entidades de sistema (no son proveedores).
+        ser el que se va a crear. `match="exact"`: nombre igual sin tildes ni
+        mayusculas (`normalize_entity_name`, #78) o identificacion igual sin
+        puntos, guiones ni espacios — la pantalla bloquea. `match="similar"`:
+        se parece por contenido (`utils/name_match.py`, plan
+        similar-por-contenido) — la pantalla avisa y deja crear igual. Los
+        exact van todos y primero; los similar, hasta `SIMILAR_LIMIT`. La tabla
+        no tiene unicidad: este es el unico freno a un duplicado. No incluye
+        entidades de sistema (no son proveedores).
 
         Devuelve id, nombre, identificacion, si es proveedor de material y sus
         categorias (la pantalla las necesita para AGREGAR la de proveedor sin
@@ -207,11 +214,30 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
         if collector_id is not None:
             cand_q = cand_q.where(ThirdParty.collector_id == collector_id)
         candidates = db.execute(cand_q).scalars().all()
-        matches = [
-            tp for tp in candidates
-            if (want_name and normalize_entity_name(tp.name or "") == want_name)
-            or (want_id and clean_id(tp.identification_number) == want_id)
-        ]
+        # Plan similar-por-contenido v1.1: el criterio corre SOLO sobre estos
+        # candidatos, ya filtrados por org, activos, sin sistema y por el
+        # alcance de recolector (fila 12) — nunca abre una consulta propia, asi
+        # que no puede revelar lo que el alcance esconde.
+        from app.utils.name_match import name_match_kind
+
+        kind_of: dict = {}
+        for tp in candidates:
+            kind = None
+            if want_id and clean_id(tp.identification_number) == want_id:
+                kind = "exact"  # D4: identificacion igual, como hoy
+            elif want_name:
+                kind = name_match_kind(name, tp.name or "")
+            if kind is not None:
+                kind_of[tp.id] = kind
+
+        def by_name(t: ThirdParty) -> tuple:
+            return (normalize_entity_name(t.name or ""), str(t.id))
+
+        exact = sorted((tp for tp in candidates if kind_of.get(tp.id) == "exact"), key=by_name)
+        similar = sorted(
+            (tp for tp in candidates if kind_of.get(tp.id) == "similar"), key=by_name
+        )[:SIMILAR_LIMIT]
+        matches = exact + similar  # D2: exact todos y primero; similar con tope
         if not matches:
             return []
         ids = [tp.id for tp in matches]
@@ -235,8 +261,11 @@ class CRUDThirdParty(CRUDBase[ThirdParty, ThirdPartyCreate, ThirdPartyUpdate]):
                     b == "material_supplier" for _c, b in cats.get(tp.id, [])
                 ),
                 "category_ids": [c for c, _b in cats.get(tp.id, [])],
+                # exact: el mismo tercero, la pantalla bloquea; similar: se
+                # parece, la pantalla avisa y deja crear igual (D3, O1).
+                "match": kind_of[tp.id],
             }
-            for tp in sorted(matches, key=lambda t: (normalize_entity_name(t.name or ""), str(t.id)))
+            for tp in matches
         ]
 
     @staticmethod
