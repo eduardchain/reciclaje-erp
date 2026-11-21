@@ -12,9 +12,8 @@ Este playbook documenta como migrar los datos maestros de un cliente nuevo a una
 
 ## Flujo
 
-1. **Dry-run sin --apply** — valida sin tocar la BD ni requerir login (igual exige `MIGRATE_ADMIN_PASSWORD`: el dry-run no puede saber si el admin es nuevo):
+1. **Dry-run sin --apply** — valida sin tocar la BD ni requerir login:
    ```bash
-   MIGRATE_ADMIN_PASSWORD='<clave inicial del admin>' \
    ./venv/bin/python3 scripts/migrate_org.py \
      --excel <path/al/excel.xlsx> \
      --org-name "<Nombre del cliente>" \
@@ -23,7 +22,6 @@ Este playbook documenta como migrar los datos maestros de un cliente nuevo a una
 2. **Revisar warnings/errors** en el output. `Errores: 0` es prerequisito para apply.
 3. **Aplicar** (requiere superuser + confirmacion manual):
    ```bash
-   MIGRATE_ADMIN_PASSWORD='<clave inicial del admin>' \
    ./venv/bin/python3 scripts/migrate_org.py \
      --excel <path> \
      --org-name "<Nombre>" \
@@ -194,7 +192,7 @@ Al crear la org via `POST /api/v1/system/organizations`, el backend ya siembra:
 - **5 roles de sistema**: `admin`, `bascula`, `liquidador`, `planillador`, `viewer`.
 - **7 categorias default de ThirdParty**: `Proveedor Material`, `Proveedor Servicios`, `Cliente`, `Socios`, `Generico`, `Provision`, `Pasivo`.
 - **71 permisos** (catalogo global, M:N con roles via `role_permissions`).
-- **Usuario admin** con el email/nombre del flag `--admin-email`. Si el email es nuevo, nace con la clave de `MIGRATE_ADMIN_PASSWORD` (variable de entorno, mínimo 8, obligatoria también en `--dry-run`; nunca como argumento). Si el email ya existía, la variable se ignora y el admin conserva su clave.
+- **Usuario admin** con el email/nombre del flag `--admin-email`. Si el email es nuevo, el script le genera al azar, en memoria, una clave que nadie conoce (no se imprime ni se guarda): el admin nace sin clave utilizable y soporte le pone la real desde Sistema → Usuarios → Resetear contraseña (#85), para entregársela al cliente por un canal privado. Si el email ya existía, conserva su clave. El script no pide ninguna clave del admin, tampoco en `--dry-run`.
 
 ## Re-ejecucion (idempotencia) y --reset-org
 

@@ -46,20 +46,7 @@ Luego, con AskUserQuestion en un solo mensaje (4 preguntas paralelas):
 
 Si el usuario ya dio alguno en el prompt inicial, no preguntarlo de nuevo — leerlo del contexto.
 
-**Clave inicial del admin del cliente (`MIGRATE_ADMIN_PASSWORD`).** `migrate_org.py` la exige SIEMPRE, también en `--dry-run`, y aborta sin ella antes de tocar el API. Va solo por variable de entorno: **nunca se pregunta por AskUserQuestion, nunca se escribe en el chat y nunca va como argumento**.
-- En los pasos de DEV (3 y 4) se usa una clave desechable generada en el mismo comando: el admin de la org TEST no se le entrega a nadie.
-- Para PROD (pasos 6 y 8), el operador la escribe él mismo en su terminal, fuera de esta conversación, en un archivo con permisos 600:
-  ```bash
-  mkdir -p ~/.ecobalance && umask 077 && read -rs -p "Clave inicial del admin: " P && printf '%s' "$P" > ~/.ecobalance/migrate_admin_password && unset P
-  ```
-  y los comandos la leen con `MIGRATE_ADMIN_PASSWORD="$(cat ~/.ecobalance/migrate_admin_password)"`. Su contenido no se muestra nunca.
-- **El archivo tiene que ser de ESTA corrida.** Si quedó de una migración anterior, el cliente nuevo nacería con la clave del cliente anterior sin que nadie lo note. Por eso, al empezar este paso 1, la skill anota la hora de inicio (no es un secreto, se guarda en un archivo aparte, porque el shell no conserva variables entre comandos):
-  ```bash
-  mkdir -p ~/.ecobalance && date +%s > ~/.ecobalance/migrate_skill_start
-  ```
-  y el paso 6 empieza por la verificación de frescura (paso 6.0). Al final la skill borra el archivo ella misma (paso 8.1), también si aborta después del paso 6.
-- ⚠️ **Excepción declarada a la regla del repo «credenciales nunca escritas en archivos»:** esta clave vive unos minutos en un archivo 600 que crea el operador. Es más seguro que pasarla por el chat o por un argumento, pero es una excepción y la decide Daniel.
-- Si el email del admin ya existía, el backend ignora esa clave y el admin conserva la suya: el API no dice cuál de los dos casos ocurrió.
+**La clave del admin del cliente NO se pide.** Si el email del admin es nuevo, `migrate_org.py` le genera al azar, en memoria, una clave que nadie conoce: no se imprime, no se escribe en ningún archivo y no viaja por el chat ni por un argumento. El admin nace sin una clave utilizable. La real se la pone Daniel después desde Sistema → Usuarios → Resetear contraseña (#85) y se la entrega al cliente por un canal privado; el reporte final lo trae como PASO PENDIENTE. Si el email ya existía, el admin conserva la suya: el API no dice cuál de los dos casos ocurrió.
 
 ### 2. Pre-flight checks
 
@@ -124,7 +111,6 @@ cd /Users/daniel.chain/Projects/reciclaje-erp/backend
 
 ```bash
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
-MIGRATE_ADMIN_PASSWORD="$(openssl rand -base64 18)" \
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
   --api-url http://localhost:8000 \
@@ -154,7 +140,6 @@ TEST_ORG_NAME="${ORG_NAME} TEST"
 TEST_ADMIN_EMAIL="test_$(date +%s)@ecobalance.com"
 
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
-MIGRATE_ADMIN_PASSWORD="$(openssl rand -base64 18)" \
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
   --api-url http://localhost:8000 \
@@ -207,18 +192,6 @@ Si el usuario dice no → ABORTAR limpio. Decirle que la org TEST quedo en dev (
 
 ### 6. Dry-run en PROD (validacion contra DB real)
 
-**6.0. Verificar que la clave del admin es de esta corrida** (sin mostrar su contenido). Si falla, ABORTAR y pedirle al operador que la recree con el comando del paso 1:
-
-```bash
-F=~/.ecobalance/migrate_admin_password; START=$(cat ~/.ecobalance/migrate_skill_start 2>/dev/null)
-if [ -z "$START" ]; then echo "ABORTA: falta la hora de inicio del paso 1"; exit 1; fi
-if [ ! -e "$F" ]; then echo "ABORTA: no existe $F"; exit 1; fi
-if [ ! -s "$F" ]; then echo "ABORTA: $F esta vacio"; exit 1; fi
-if [ "$(stat -f %Lp "$F")" != "600" ]; then echo "ABORTA: $F tiene permisos $(stat -f %Lp "$F"), no 600"; exit 1; fi
-if [ "$(stat -f %m "$F")" -lt "$START" ]; then echo "ABORTA: $F es anterior a esta corrida (puede ser la clave de otro cliente): recrealo"; exit 1; fi
-echo "OK: clave del admin creada en esta corrida"
-```
-
 Pedir credenciales prod:
 
 ```
@@ -232,7 +205,6 @@ AskUserQuestion (2 preguntas):
 
 ```bash
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
-MIGRATE_ADMIN_PASSWORD="$(cat ~/.ecobalance/migrate_admin_password)" \
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
   --api-url https://api.ecobalance.cc \
@@ -259,8 +231,9 @@ LISTO PARA APLICAR EN PRODUCCION
 
 Org a crear:           {ORG_NAME}
 Admin a crear:         {ADMIN_NAME} <{ADMIN_EMAIL}>
-Clave inicial:         la de ~/.ecobalance/migrate_admin_password si el admin es nuevo;
-                       si el email ya existia, conserva la suya
+Clave del admin:       si el admin es nuevo, nace SIN clave utilizable; Daniel le pone la real
+                       desde Sistema → Usuarios → Resetear contraseña (#85). Si el email ya
+                       existia, conserva la suya
 API:                   https://api.ecobalance.cc
 Entidades a crear:     ~{N terceros} + {N materiales} + {N cuentas} + {N activos}
 Inventario:            {N items} con valuacion ${X}
@@ -287,7 +260,6 @@ Si no confirma → ABORTAR. Decirle al usuario que el dry-run prod quedo en `/tm
 
 ```bash
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
-MIGRATE_ADMIN_PASSWORD="$(cat ~/.ecobalance/migrate_admin_password)" \
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
   --api-url https://api.ecobalance.cc \
@@ -308,17 +280,6 @@ Si falla parcialmente (ej: cae en fase 8 despues de crear categorias y materiale
 - Capturar el org_id parcialmente creado del log.
 - Reportar al usuario que la org existe parcialmente en prod.
 - Proponer dos opciones: (a) soft-deletar la org desde `/system/organizations` y re-correr; (b) intentar continuar con `--skip-phase` desde donde fallo.
-
-### 8.1. Borrar la clave del admin (SIEMPRE)
-
-La skill borra el archivo ella misma, no lo deja en manos del operador. Va al terminar el paso 8, salga bien o mal, y también en cualquier aborto posterior al paso 6 (dry-run prod fallido, confirmación 2 negada):
-
-```bash
-rm -f ~/.ecobalance/migrate_admin_password ~/.ecobalance/migrate_skill_start
-test ! -e ~/.ecobalance/migrate_admin_password && echo "OK: clave del admin borrada"
-```
-
-Recordarle al operador que le entregue la clave al cliente por un canal privado, si el admin era nuevo (si el email ya existía, conserva la suya).
 
 ### 9. Cleanup dev (opcional)
 
@@ -341,7 +302,8 @@ Si si: hacer `DELETE /api/v1/system/organizations/{TEST_ORG_ID}` via curl.
 
 **Cliente:** {ORG_NAME}
 **Admin:** {ADMIN_NAME} <{ADMIN_EMAIL}>
-**Clave inicial:** si el admin era nuevo, la que el operador dejó en `~/.ecobalance/migrate_admin_password` (se entrega al cliente por un canal privado y el archivo se borra); si el email ya existía, conserva la suya.
+**Clave del admin:** si era nuevo, nace SIN clave utilizable (el script le puso una al azar que nadie conoce). Si el email ya existía, conserva la suya.
+**⚠️ PASO PENDIENTE de Daniel:** poner la clave real del admin desde Sistema → Usuarios → Resetear contraseña (#85) y entregársela al cliente por un canal privado. Hasta entonces el admin no puede entrar.
 **URL de login:** https://app.ecobalance.cc/login
 
 **Datos creados en prod:**
@@ -394,7 +356,7 @@ Si fallo:
 2. **Nunca pasar `--reset-org` con `--api-url https://...`.** Si el usuario lo pide, refusar.
 3. **Nunca correr `alembic upgrade` desde esta skill.** Si hay migraciones pendientes en dev, abortar y pedir al usuario correrlas manualmente. En prod, las migraciones SOLO se aplican via `/deploy`.
 4. **Nunca skipear las dos confirmaciones criticas** (post-test dev y pre-apply prod), incluso si el usuario dice "vai sin preguntar". Estas son las salvaguardas core de la skill.
-5. **Si el dry-run prod falla**, NO seguir a apply. El cliente tiene que corregir el Excel o tu tienes que limpiar prod primero. Antes de terminar, correr el paso 8.1 (borrar la clave del admin).
+5. **Si el dry-run prod falla**, NO seguir a apply. El cliente tiene que corregir el Excel o tu tienes que limpiar prod primero.
 6. **Logs en `/tmp/migration-*.log`** se conservan toda la sesion para auditoria. No borrar.
 7. **Si necesitas editar el Excel programaticamente** (con `openpyxl` desde Python),
    pedile al usuario que **cierre Excel.app primero**. Si el archivo esta abierto

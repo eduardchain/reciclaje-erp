@@ -307,7 +307,7 @@ class TestBorradoIntacto:
         assert gone is None or gone.is_active is False
 
 
-# ---------------------------------------------- T11: migrate_org.py (D3b, C1)
+# ------------------------------------------- T11: migrate_org.py (D3b v1.2, clave al azar)
 
 def _migrate_module():
     spec = importlib.util.spec_from_file_location("migrate_org_t11", BACKEND / "scripts" / "migrate_org.py")
@@ -316,46 +316,95 @@ def _migrate_module():
     return mod
 
 
+class _FakeApi:
+    """Responde como el APIClient del script; el 422 REFLEJA el payload en `input`, como FastAPI."""
+
+    def __init__(self, post_status=201):
+        self.post_status = post_status
+        self.posts = []
+
+    def get(self, path, params=None):
+        return 200, []
+
+    def post(self, path, data=None):
+        self.posts.append((path, data))
+        if self.post_status == 201:
+            return 201, {"id": "org-t11"}
+        return 422, {"detail": [{"type": "value_error", "loc": ["body"], "msg": "rechazado", "input": data}]}
+
+
+class _TestClientApi:
+    """Lleva la interfaz del APIClient del script (get/post → (status, json)) al backend real."""
+
+    def __init__(self, client, headers):
+        self.client, self.headers = client, headers
+
+    def get(self, path, params=None):
+        r = self.client.get(path, headers=self.headers, params=params or {})
+        return r.status_code, r.json()
+
+    def post(self, path, data=None):
+        r = self.client.post(path, headers=self.headers, json=data or {})
+        return r.status_code, r.json()
+
+
 class TestMigrateOrg:
-    @pytest.mark.parametrize("modo", [["--dry-run"], ["--apply", "--superuser-email", "su@x.com",
-                                                     "--superuser-password", "x"]])
-    @pytest.mark.parametrize("valor", [None, "7letras"])
-    def test_t11_sin_clave_aborta_antes_de_tocar_nada(self, tmp_path, modo, valor):
+    @pytest.mark.parametrize("camino", ["exito", "error"])
+    def test_t11a_la_clave_no_se_filtra(self, camino, capsys, caplog):
+        caplog.set_level(logging.DEBUG)
+        mod = _migrate_module()
+        api = _FakeApi(post_status=201 if camino == "exito" else 422)
+        org_id = mod.ensure_org_and_admin(api, "Org T11", "t11@example.com", "Admin T11", False)
+        assert org_id == ("org-t11" if camino == "exito" else None)
+        (path, payload), = api.posts
+        assert path == "/api/v1/system/organizations"
+        assert set(payload) == {"name", "admin_email", "admin_full_name", "admin_password"}
+        clave = payload["admin_password"]
+        assert isinstance(clave, str) and 8 <= len(clave) <= 100
+        out = capsys.readouterr()
+        logs = " ".join(r.getMessage() for r in caplog.records)
+        assert clave not in out.out and clave not in out.err and clave not in logs
+        if camino == "exito":
+            assert "SIN clave conocida" in out.out and "conserva la suya" in out.out
+        else:
+            # Control: el print de error SI sale, con la clave tapada.
+            assert "ERROR creando org: 422" in out.out and "***" in out.out
+
+    def test_t11a_dos_corridas_dos_claves(self):
+        mod = _migrate_module()
+        claves = []
+        for _ in range(2):
+            api = _FakeApi()
+            mod.ensure_org_and_admin(api, "Org T11", "t11@example.com", "Admin T11", False)
+            claves.append(api.posts[0][1]["admin_password"])
+        assert claves[0] != claves[1]
+
+    def test_t11b_admin_nuevo_sin_clave_utilizable(self, client, su_headers, db_session):
+        mod = _migrate_module()
+        api = _TestClientApi(client, su_headers)
+        org_id = mod.ensure_org_and_admin(api, "Org T11b", "t11b@example.com", "Admin T11b", False)
+        assert org_id is not None
+        admin = db_session.query(User).filter(User.email == "t11b@example.com").one()
+        for conocida in ("123456", "12345678", "t11b@example.com", "Admin T11b"):
+            assert _login(client, "t11b@example.com", conocida) == 401, conocida
+        assert _login(client, "t11b@example.com", "") != 200
+        # Control: con la clave que pone soporte (#85), entra.
+        r = client.post(f"{API}/system/users/{admin.id}/reset-password", headers=su_headers,
+                        json={"new_password": "real-t11b-ok"})
+        assert r.status_code == 200, r.text
+        assert _login(client, "t11b@example.com", "real-t11b-ok") == 200
+
+    def test_t11c_dry_run_no_pide_clave(self, tmp_path):
         import os
         env = {k: v for k, v in os.environ.items() if k != "MIGRATE_ADMIN_PASSWORD"}
-        if valor is not None:
-            env["MIGRATE_ADMIN_PASSWORD"] = valor
-        # Puerto 9: nadie escucha. Si el script llegara al API, el error seria otro.
+        # Puerto 9: nadie escucha. El dry-run es offline y no deberia llamarlo.
         r = subprocess.run(
             [sys.executable, str(BACKEND / "scripts" / "migrate_org.py"), "--file", str(tmp_path / "no.xlsx"),
              "--api-url", "http://127.0.0.1:9", "--org-name", "Org T11", "--admin-email", "t11@example.com",
-             "--admin-name", "Admin T11", *modo],
+             "--admin-name", "Admin T11", "--dry-run"],
             cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60,
         )
         out = r.stdout + r.stderr
         assert r.returncode == 1, out
-        assert "MIGRATE_ADMIN_PASSWORD" in r.stderr
-        assert "MIGRACION" not in r.stdout and "Autenticando" not in out and "Hojas:" not in out
-        if valor:
-            assert valor not in out
-
-    def test_t11_control_con_clave_el_post_la_lleva(self):
-        mod = _migrate_module()
-        assert mod.admin_password_from_env({"MIGRATE_ADMIN_PASSWORD": "ocho-ok-1"}) == "ocho-ok-1"
-
-        class FakeApi:
-            def __init__(self):
-                self.posts = []
-
-            def get(self, path, params=None):
-                return 200, []
-
-            def post(self, path, data=None):
-                self.posts.append((path, data))
-                return 201, {"id": "org-t11"}
-
-        api = FakeApi()
-        assert mod.ensure_org_and_admin(api, "Org T11", "t11@example.com", "Admin T11", False, "ocho-ok-1") == "org-t11"
-        assert api.posts == [("/api/v1/system/organizations", {
-            "name": "Org T11", "admin_email": "t11@example.com",
-            "admin_full_name": "Admin T11", "admin_password": "ocho-ok-1"})]
+        assert "MIGRACION" in r.stdout and "no.xlsx' no encontrado" in out
+        assert "MIGRATE_ADMIN_PASSWORD" not in out and "clave" not in out.lower()
