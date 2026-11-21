@@ -416,10 +416,10 @@ class DemoOrgSeeder:
             # Workaround: re-activar los 2 usuarios demo via ORM directo.
             self._reactivate_demo_users()
 
-        # El endpoint /system/organizations crea un User admin con password "123456"
-        # hardcoded si el email no existe. Para que la password sea la que queremos,
-        # pre-creamos el usuario via /auth/register y dejamos que el endpoint de org
-        # detecte el email existente y lo reutilice.
+        # El endpoint /system/organizations exige admin_password si el email no
+        # existe (400 sin ella) y la IGNORA si ya existe. Pre-creamos el usuario via
+        # /auth/register con la password que queremos y dejamos que el endpoint de
+        # org detecte el email existente y lo reutilice.
         self._pre_register_user(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_FULL_NAME)
 
         body = {

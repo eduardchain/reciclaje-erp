@@ -23,6 +23,11 @@ Diferencias vs migrate_metarecycling.py (script anterior, hardcoded MetaRecyclin
 
 Uso:
     cd backend
+    # La clave inicial del admin va SOLO por variable de entorno, nunca por argumento
+    # (D3b del plan quitar-clave-constante). Se exige siempre, tambien en --dry-run:
+    # si el admin es nuevo nace con ella; si el email ya existia, se ignora y el
+    # admin conserva la suya.
+    MIGRATE_ADMIN_PASSWORD='<clave inicial, minimo 8>' \\
     ./venv/bin/python scripts/migrate_org.py \\
         --file ../data/migration_<org>.xlsx \\
         --org-name "Mi Empresa SAS" \\
@@ -59,6 +64,7 @@ Hojas del Excel (12; MapeoUN es read-only, las otras 11 escriben):
                             cuenta_pago, unidad_negocio, unidades_negocio (CSV), notas
 """
 import argparse
+import os
 import sys
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -326,8 +332,32 @@ def reset_org(api: APIClient, org_name: str, dry_run: bool) -> bool:
     return False
 
 
+ADMIN_PASSWORD_ENV = "MIGRATE_ADMIN_PASSWORD"
+ADMIN_PASSWORD_MIN = 8  # calco de SystemOrgCreate.admin_password / UserCreate.password
+
+
+def admin_password_from_env(environ) -> str:
+    """Clave inicial del admin, desde MIGRATE_ADMIN_PASSWORD (D3b del plan quitar-clave-constante).
+
+    Se exige SIEMPRE, en --dry-run y en --apply: el dry-run es offline (no hay login),
+    asi que no puede saber si el admin es nuevo; con una sola regla el dry-run avisa lo
+    mismo que el apply va a exigir. Si falta o es corta, SystemExit antes de cualquier
+    llamada al API (antes de --reset-org y de crear la org). Jamas se imprime.
+    """
+    pwd = environ.get(ADMIN_PASSWORD_ENV) or ""
+    if len(pwd) < ADMIN_PASSWORD_MIN:
+        motivo = "no esta definida" if not pwd else f"tiene menos de {ADMIN_PASSWORD_MIN} caracteres"
+        raise SystemExit(
+            f"ERROR: {ADMIN_PASSWORD_ENV} {motivo}. Es la clave inicial del admin si el email es "
+            f"nuevo (si ya existe, se ignora). Exportala en el mismo comando, minimo "
+            f"{ADMIN_PASSWORD_MIN} caracteres; nunca va como argumento."
+        )
+    return pwd
+
+
 def ensure_org_and_admin(
-    api: APIClient, org_name: str, admin_email: str, admin_name: str, dry_run: bool
+    api: APIClient, org_name: str, admin_email: str, admin_name: str, dry_run: bool,
+    admin_password: str,
 ) -> Optional[str]:
     st, resp = api.get("/api/v1/system/organizations", {"include_inactive": "true"})
     if st != 200:
@@ -348,12 +378,19 @@ def ensure_org_and_admin(
     if dry_run:
         print(f"  (dry-run) Crearia org '{org_name}' + admin {admin_email}")
         return "00000000-0000-0000-0000-000000000000"
-    payload = {"name": org_name, "admin_email": admin_email, "admin_full_name": admin_name}
+    payload = {
+        "name": org_name,
+        "admin_email": admin_email,
+        "admin_full_name": admin_name,
+        "admin_password": admin_password,
+    }
     st, resp = api.post("/api/v1/system/organizations", payload)
     if st == 201:
+        # El API no dice cual de los dos casos ocurrio (D3), asi que se nombran los dos.
         print(
-            f"  ORG '{org_name}' creada (id={resp['id']}). "
-            f"Admin: {admin_email} (password default '123456' si era usuario nuevo)."
+            f"  ORG '{org_name}' creada (id={resp['id']}). Admin: {admin_email}. "
+            f"Si el admin era nuevo, su clave es la de {ADMIN_PASSWORD_ENV}; "
+            f"si ya existia, conserva la suya."
         )
         return resp["id"]
     print(f"  ERROR creando org: {st} - {resp}")
@@ -1346,6 +1383,9 @@ def main():
     )
     args = parser.parse_args()
 
+    # D3b: antes de leer el Excel y de cualquier llamada al API.
+    admin_password = admin_password_from_env(os.environ)
+
     dry_run = args.dry_run
     skip_phases = {int(p.strip()) for p in args.skip_phase.split(",") if p.strip()}
     tolerance = parse_decimal(args.balance_tolerance, "100.00")
@@ -1406,7 +1446,9 @@ def main():
         print(f"  (dry-run) Crearia (o reusaria) org '{args.org_name}' con admin {args.admin_email}")
         org_id = "00000000-0000-0000-0000-000000000000"
     else:
-        org_id = ensure_org_and_admin(api, args.org_name, args.admin_email, args.admin_name, dry_run)
+        org_id = ensure_org_and_admin(
+            api, args.org_name, args.admin_email, args.admin_name, dry_run, admin_password
+        )
         if not org_id:
             sys.exit(1)
     api.set_org(org_id)

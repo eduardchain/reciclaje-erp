@@ -38,6 +38,8 @@ export interface SystemOrgCreate {
   name: string;
   admin_email: string;
   admin_full_name?: string | null;
+  /** Obligatoria si el admin es nuevo (mínimo 8); si el email ya existe, se ignora. */
+  admin_password?: string;
 }
 
 export interface SystemOrgUpdate {

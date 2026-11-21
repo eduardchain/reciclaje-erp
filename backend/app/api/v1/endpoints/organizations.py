@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -22,6 +23,7 @@ from app.schemas.organization import (
     CollectorScopeUpdate,
     CollectorScopeResponse,
     CreateUserWithMembership,
+    ResetMemberPasswordRequest,
     WillardDistributionCentersUpdate,
     WillardDistributionCentersResponse,
 )
@@ -38,6 +40,7 @@ from app.services.organization import (
     get_user_account_assignments,
     update_user_account_assignments,
     get_user_org_count,
+    users_in_other_active_org,
     update_willard_distribution_centers,
 )
 from app.services.user import get_user_by_email, get_user_by_id, create_user, reset_password, delete_user
@@ -54,6 +57,7 @@ from app.services.collector_scope import (
 from app.models.user import UserCollectorScope
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _get_role_info(db: Session, organization_id: UUID, user: User) -> dict | None:
@@ -285,6 +289,12 @@ def list_organization_members(
         )
     ).all())
 
+    # D5 (plan quitar-clave-constante): quienes estan tambien en otra org ACTIVA,
+    # en UNA consulta. Solo gobierna el boton de resetear; `org_count` sigue igual.
+    other_active = users_in_other_active_org(
+        db, [m.user_id for m, _ in members_list], organization_id
+    )
+
     response = []
     for member, user in members_list:
         if user.is_superuser:
@@ -302,6 +312,7 @@ def list_organization_members(
             "user_full_name": user.full_name,
             "account_ids": acc_ids,
             "org_count": get_user_org_count(db, member.user_id),
+            "in_other_active_org": member.user_id in other_active,
             "collector_scope_id": scopes.get(member.user_id),
         }
         response.append(OrganizationMemberResponse(**member_dict))
@@ -321,7 +332,11 @@ def create_user_with_membership(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> OrganizationMemberResponse:
-    """Crear usuario nuevo con contraseña default y agregarlo a la org."""
+    """Crear usuario nuevo con la clave que eligio el admin y agregarlo a la org.
+
+    D2 del plan quitar-clave-constante: no hay clave por defecto. La clave se
+    valida con `UserCreate` (min 8) y no vuelve en la respuesta ni en logs.
+    """
     # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
     deny_if_collector_scoped(db, organization_id, current_user)
     role_info = _get_role_info(db, organization_id, current_user)
@@ -347,12 +362,8 @@ def create_user_with_membership(
         )
 
     try:
-        # Crear usuario con contraseña default
-        user_data = UserCreate(email=data.email, password="12345678", full_name=data.full_name)
+        user_data = UserCreate(email=data.email, password=data.password, full_name=data.full_name)
         new_user = create_user(db, user_data)
-
-        # Resetear a 123456 (bypass min_length del schema)
-        reset_password(db, new_user.id)
 
         # Agregar como miembro
         membership = add_member(db, organization_id, new_user.id, data.role_id)
@@ -503,10 +514,17 @@ def update_organization_member_role(
 def reset_member_password(
     organization_id: UUID,
     user_id: UUID,
+    data: ResetMemberPasswordRequest,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Resetear contraseña de un miembro a '123456'. Solo admins."""
+    """Fijar la clave que elige el admin para un miembro (patron #85). Solo admins.
+
+    D1: la clave viene en el cuerpo y nunca vuelve. D5: si el miembro pertenece
+    tambien a OTRA org activa, 403 — un admin de esta org no puede fijar la clave
+    con la que se entra a la otra; ese reseteo lo hace soporte (Sistema).
+    D7: las sesiones ya emitidas siguen validas hasta que vence su token.
+    """
     # §5.0 (H4): un usuario con alcance de recolector no administra miembros.
     deny_if_collector_scoped(db, organization_id, current_user)
     current_role_info = _get_role_info(db, organization_id, current_user)
@@ -539,14 +557,30 @@ def reset_member_password(
             detail="El usuario no es miembro de esta organizacion",
         )
 
-    result = reset_password(db, user_id)
+    if users_in_other_active_org(db, [user_id], organization_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Este usuario también pertenece a otra organización: "
+                "el reseteo lo hace soporte (Sistema → Usuarios)"
+            ),
+        )
+
+    result = reset_password(db, user_id, data.new_password)
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Usuario no encontrado",
         )
 
-    return {"message": "Contraseña reseteada exitosamente"}
+    # D6, calco de #85 D5: auditoria por log. SOLO actor, objetivo y org;
+    # JAMAS el payload ni la clave.
+    logger.warning(
+        "member_password_reset org_id=%s actor_id=%s actor_email=%s target_id=%s target_email=%s",
+        organization_id, current_user.id, current_user.email, result.id, result.email,
+    )
+
+    return {"message": "Contraseña actualizada"}
 
 
 @router.delete(

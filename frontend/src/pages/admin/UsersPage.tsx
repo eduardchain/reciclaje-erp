@@ -80,9 +80,32 @@ export default function UsersPage() {
   const [newEmail, setNewEmail] = useState("");
   const [newFullName, setNewFullName] = useState("");
   const [newRoleId, setNewRoleId] = useState("");
+  // D2 (plan quitar-clave-constante): la clave la elige el admin, mínimo 8 (UserCreate).
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
+  const newPasswordTooShort = newPassword.length > 0 && newPassword.length < 8;
+  const newPasswordMismatch = newPasswordConfirm.length > 0 && newPassword !== newPasswordConfirm;
+  const canCreate =
+    !!newEmail && !!newFullName && !!newRoleId &&
+    newPassword.length >= 8 && newPassword === newPasswordConfirm && !createUser.isPending;
 
-  // Estado: Confirmar Resetear Contraseña
+  // Estado: Resetear Contraseña (D1, patrón #85: mínimo 6, la clave no vuelve)
   const [resetTarget, setResetTarget] = useState<OrgMemberResponse | null>(null);
+  const [resetPwd, setResetPwd] = useState("");
+  const [resetPwdConfirm, setResetPwdConfirm] = useState("");
+  const resetPwdTooShort = resetPwd.length > 0 && resetPwd.length < 6;
+  const resetPwdMismatch = resetPwdConfirm.length > 0 && resetPwd !== resetPwdConfirm;
+  const canReset = resetPwd.length >= 6 && resetPwd === resetPwdConfirm && !resetPassword.isPending;
+  const openReset = (member: OrgMemberResponse) => {
+    setResetTarget(member);
+    setResetPwd("");
+    setResetPwdConfirm("");
+  };
+  const closeReset = () => {
+    setResetTarget(null);
+    setResetPwd("");
+    setResetPwdConfirm("");
+  };
 
   // Estado: Confirmar Eliminar
   const [deleteTarget, setDeleteTarget] = useState<OrgMemberResponse | null>(null);
@@ -141,27 +164,50 @@ export default function UsersPage() {
     }
   };
 
+  const closeCreate = () => {
+    setShowCreateDialog(false);
+    setNewEmail("");
+    setNewFullName("");
+    setNewRoleId("");
+    setNewPassword("");
+    setNewPasswordConfirm("");
+  };
+
   const handleCreateUser = () => {
-    if (!newEmail || !newFullName || !newRoleId) return;
+    if (!canCreate) return;
     createUser.mutate(
-      { email: newEmail, full_name: newFullName, role_id: newRoleId },
-      {
-        onSuccess: () => {
-          setShowCreateDialog(false);
-          setNewEmail("");
-          setNewFullName("");
-          setNewRoleId("");
-        },
-      },
+      { email: newEmail, full_name: newFullName, role_id: newRoleId, password: newPassword },
+      { onSuccess: closeCreate },
     );
   };
 
   const handleResetPassword = () => {
-    if (!resetTarget) return;
-    resetPassword.mutate(resetTarget.user_id, {
-      onSuccess: () => setResetTarget(null),
-    });
+    if (!resetTarget || !canReset) return;
+    resetPassword.mutate(
+      { userId: resetTarget.user_id, newPassword: resetPwd },
+      { onSuccess: closeReset },
+    );
   };
+
+  // D5: si el miembro también está en otra org ACTIVA, el reseteo lo hace soporte.
+  // El backend lo respalda con 403; la pantalla lo dice antes.
+  const resetItem = (member: OrgMemberResponse) =>
+    member.in_other_active_org ? (
+      <DropdownMenuItem disabled className="flex-col items-start gap-0.5" data-testid="reset-disabled">
+        <span className="flex items-center">
+          <KeyRound className="h-4 w-4 mr-2" />
+          Resetear Contraseña
+        </span>
+        <span className="text-[11px] text-slate-500 pl-6 max-w-[14rem] whitespace-normal">
+          También pertenece a otra organización: el reseteo lo hace soporte
+        </span>
+      </DropdownMenuItem>
+    ) : (
+      <DropdownMenuItem onClick={() => openReset(member)}>
+        <KeyRound className="h-4 w-4 mr-2" />
+        Resetear Contraseña
+      </DropdownMenuItem>
+    );
 
   const handleDelete = () => {
     if (!deleteTarget) return;
@@ -230,10 +276,7 @@ export default function UsersPage() {
                             <UserCog className="h-4 w-4 mr-2" />
                             Configurar Usuario
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => setResetTarget(member)}>
-                            <KeyRound className="h-4 w-4 mr-2" />
-                            Resetear Contraseña
-                          </DropdownMenuItem>
+                          {resetItem(member)}
                           {member.user_id !== currentUserId && (
                             <DropdownMenuItem
                               onClick={() => setDeleteTarget(member)}
@@ -272,10 +315,7 @@ export default function UsersPage() {
                         <UserCog className="h-4 w-4 mr-2" />
                         Configurar Usuario
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setResetTarget(member)}>
-                        <KeyRound className="h-4 w-4 mr-2" />
-                        Resetear Contraseña
-                      </DropdownMenuItem>
+                      {resetItem(member)}
                       {member.user_id !== currentUserId && (
                         <DropdownMenuItem
                           onClick={() => setDeleteTarget(member)}
@@ -403,7 +443,7 @@ export default function UsersPage() {
       </Dialog>
 
       {/* Dialog: Nuevo Usuario */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+      <Dialog open={showCreateDialog} onOpenChange={(open) => (open ? setShowCreateDialog(true) : closeCreate())}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Nuevo Usuario</DialogTitle>
@@ -444,14 +484,43 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-xs text-slate-400">La contraseña por defecto sera: <strong>123456</strong></p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="new-user-password" className="text-xs font-semibold uppercase tracking-wider text-slate-500">Contraseña</Label>
+                <Input
+                  id="new-user-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Mínimo 8 caracteres"
+                  className="mt-1"
+                />
+                {newPasswordTooShort && <p className="text-xs text-red-600 mt-1">Debe tener al menos 8 caracteres.</p>}
+              </div>
+              <div>
+                <Label htmlFor="new-user-password-confirm" className="text-xs font-semibold uppercase tracking-wider text-slate-500">Confirmar</Label>
+                <Input
+                  id="new-user-password-confirm"
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPasswordConfirm}
+                  onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                  className="mt-1"
+                />
+                {newPasswordMismatch && <p className="text-xs text-red-600 mt-1">Las contraseñas no coinciden.</p>}
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">
+              Entrégale esta contraseña en persona o por un canal privado. El sistema no la vuelve a mostrar.
+            </p>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={closeCreate} className="w-full sm:w-auto">Cancelar</Button>
             <Button
               onClick={handleCreateUser}
-              disabled={createUser.isPending || !newEmail || !newFullName || !newRoleId}
-              className="bg-emerald-600 hover:bg-emerald-700"
+              disabled={!canCreate}
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700"
             >
               {createUser.isPending ? "Creando..." : "Crear Usuario"}
             </Button>
@@ -459,16 +528,57 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Confirm: Resetear Contraseña */}
-      <ConfirmDialog
-        open={!!resetTarget}
-        onOpenChange={(open) => !open && setResetTarget(null)}
-        onConfirm={handleResetPassword}
-        title="Resetear Contraseña"
-        description={`La contraseña de ${resetTarget?.user_full_name ?? resetTarget?.user_email} sera reseteada a "123456".`}
-        confirmLabel="Resetear"
-        loading={resetPassword.isPending}
-      />
+      {/* Dialog: Resetear Contraseña (D1, patrón #85) */}
+      <Dialog open={!!resetTarget} onOpenChange={(open) => !open && closeReset()}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Resetear Contraseña</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="rounded-md bg-slate-50 border p-3 text-sm">
+              <div className="font-medium">{resetTarget?.user_full_name ?? "-"}</div>
+              <div className="text-slate-500 text-xs mt-0.5">{resetTarget?.user_email}</div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="member-new-password">Nueva contraseña</Label>
+              <Input
+                id="member-new-password"
+                type="password"
+                autoComplete="new-password"
+                value={resetPwd}
+                onChange={(e) => setResetPwd(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+              />
+              {resetPwdTooShort && <p className="text-xs text-red-600">Debe tener al menos 6 caracteres.</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="member-confirm-password">Confirmar contraseña</Label>
+              <Input
+                id="member-confirm-password"
+                type="password"
+                autoComplete="new-password"
+                value={resetPwdConfirm}
+                onChange={(e) => setResetPwdConfirm(e.target.value)}
+              />
+              {resetPwdMismatch && <p className="text-xs text-red-600">Las contraseñas no coinciden.</p>}
+            </div>
+            <p className="text-xs text-amber-800 rounded-md border border-amber-200 bg-amber-50 p-3">
+              Las sesiones que esa persona tenga abiertas siguen válidas hasta 7 días.
+              Entrégale la contraseña por un canal privado: el sistema no se la envía.
+            </p>
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={closeReset} className="w-full sm:w-auto">Cancelar</Button>
+            <Button
+              onClick={handleResetPassword}
+              disabled={!canReset}
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700"
+            >
+              {resetPassword.isPending ? "Guardando..." : "Resetear Contraseña"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Confirm: Eliminar Usuario */}
       <ConfirmDialog

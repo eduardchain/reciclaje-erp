@@ -130,7 +130,7 @@ export function useCreateUser() {
       rolesService.createUserWithMembership(organizationId!, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["org-members"] });
-      toast.success("Usuario creado exitosamente (contraseña: 123456)");
+      toast.success("Usuario creado");
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al crear usuario")),
   });
@@ -139,10 +139,10 @@ export function useCreateUser() {
 export function useResetPassword() {
   const organizationId = useAuthStore((s) => s.organizationId);
   return useMutation({
-    mutationFn: (userId: string) =>
-      rolesService.resetPassword(organizationId!, userId),
+    mutationFn: ({ userId, newPassword }: { userId: string; newPassword: string }) =>
+      rolesService.resetPassword(organizationId!, userId, newPassword),
     onSuccess: () => {
-      toast.success("Contraseña reseteada a 123456");
+      toast.success("Contraseña actualizada");
     },
     onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al resetear contraseña")),
   });

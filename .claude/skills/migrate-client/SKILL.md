@@ -46,6 +46,15 @@ Luego, con AskUserQuestion en un solo mensaje (4 preguntas paralelas):
 
 Si el usuario ya dio alguno en el prompt inicial, no preguntarlo de nuevo — leerlo del contexto.
 
+**Clave inicial del admin del cliente (`MIGRATE_ADMIN_PASSWORD`).** `migrate_org.py` la exige SIEMPRE, también en `--dry-run`, y aborta sin ella antes de tocar el API. Va solo por variable de entorno: **nunca se pregunta por AskUserQuestion, nunca se escribe en el chat y nunca va como argumento**.
+- En los pasos de DEV (3 y 4) se usa una clave desechable generada en el mismo comando: el admin de la org TEST no se le entrega a nadie.
+- Para PROD (pasos 6 y 8), el operador la escribe él mismo en su terminal, fuera de esta conversación, en un archivo con permisos 600:
+  ```bash
+  mkdir -p ~/.ecobalance && umask 077 && read -rs -p "Clave inicial del admin: " P && printf '%s' "$P" > ~/.ecobalance/migrate_admin_password && unset P
+  ```
+  y los comandos la leen con `MIGRATE_ADMIN_PASSWORD="$(cat ~/.ecobalance/migrate_admin_password)"`. Antes del paso 6, verificar solo que el archivo existe (`test -s ~/.ecobalance/migrate_admin_password`), sin mostrar su contenido. Al terminar, el operador lo borra.
+- Si el email del admin ya existía, el backend ignora esa clave y el admin conserva la suya: el API no dice cuál de los dos casos ocurrió.
+
 ### 2. Pre-flight checks
 
 Verificar requisitos antes de tocar nada:
@@ -109,6 +118,7 @@ cd /Users/daniel.chain/Projects/reciclaje-erp/backend
 
 ```bash
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
+MIGRATE_ADMIN_PASSWORD="$(openssl rand -base64 18)" \
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
   --api-url http://localhost:8000 \
@@ -138,6 +148,7 @@ TEST_ORG_NAME="${ORG_NAME} TEST"
 TEST_ADMIN_EMAIL="test_$(date +%s)@ecobalance.com"
 
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
+MIGRATE_ADMIN_PASSWORD="$(openssl rand -base64 18)" \
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
   --api-url http://localhost:8000 \
@@ -203,6 +214,7 @@ AskUserQuestion (2 preguntas):
 
 ```bash
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
+MIGRATE_ADMIN_PASSWORD="$(cat ~/.ecobalance/migrate_admin_password)" \
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
   --api-url https://api.ecobalance.cc \
@@ -229,7 +241,8 @@ LISTO PARA APLICAR EN PRODUCCION
 
 Org a crear:           {ORG_NAME}
 Admin a crear:         {ADMIN_NAME} <{ADMIN_EMAIL}>
-Password inicial:      "123456" (el cliente debera cambiarla en primer login)
+Clave inicial:         la de ~/.ecobalance/migrate_admin_password si el admin es nuevo;
+                       si el email ya existia, conserva la suya
 API:                   https://api.ecobalance.cc
 Entidades a crear:     ~{N terceros} + {N materiales} + {N cuentas} + {N activos}
 Inventario:            {N items} con valuacion ${X}
@@ -256,6 +269,7 @@ Si no confirma → ABORTAR. Decirle al usuario que el dry-run prod quedo en `/tm
 
 ```bash
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
+MIGRATE_ADMIN_PASSWORD="$(cat ~/.ecobalance/migrate_admin_password)" \
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
   --api-url https://api.ecobalance.cc \
@@ -298,7 +312,7 @@ Si si: hacer `DELETE /api/v1/system/organizations/{TEST_ORG_ID}` via curl.
 
 **Cliente:** {ORG_NAME}
 **Admin:** {ADMIN_NAME} <{ADMIN_EMAIL}>
-**Password inicial:** 123456 (cambiar en primer login)
+**Clave inicial:** si el admin era nuevo, la que el operador dejó en `~/.ecobalance/migrate_admin_password` (se entrega al cliente por un canal privado y el archivo se borra); si el email ya existía, conserva la suya.
 **URL de login:** https://app.ecobalance.cc/login
 
 **Datos creados en prod:**
