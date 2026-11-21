@@ -1,4 +1,8 @@
-# Plan — Cuentas restringidas por usuario: que la asignación de cuentas también limite lo que se ESCRIBE (v1.2)
+# Plan — Cuentas restringidas por usuario: que la asignación de cuentas también limite lo que se ESCRIBE (v1.3)
+
+**v1.3 (20-nov, pasada 1 de QA 2 sobre el código, `qa-2-cuentas/pasada1_4006fb8.md` sha `e15cec57…0334`):**
+- **PC1:** el listener mira también la relación `account` de un movimiento. La FK `account_id` se sincroniza DENTRO del flush, después de `before_flush` (medido por QA 2, `fk_en_before_flush.log`, `c7988a27…749c`): `MoneyMovement(account=K3)` llegaba sin cuenta y pasaba como D3, y `mov.account = K3` llegaba con la cuenta vieja. Hoy está latente (ningún camino de `app/` asigna por la relación), y se cierra por el mismo argumento que C4 (§2.1, cuatro tests nuevos en T15, P17).
+- **PC2:** P1 no tumba T13, que solo afirma que `get_required_org_context` deja `account_actor` (eso no depende del listener). La fila de P1 se corrige.
 
 **v1.2 (20-nov, ronda 2 de QA 2, `revision_plan_v1.0.md` sha `4c474e91…3e65`):** se fijan los permisos de cada usuario de prueba (R1–R3).
 - **R1:** T5 usaba al liquidador, que no tiene `treasury.view_statements`. Daba 403 antes y después: «fallaba en la base» por la razón equivocada y nunca pasaba. Ahora usa al analista y afirma el 200 antes que el saldo.
@@ -69,8 +73,10 @@ Hoy un usuario puede tener cuentas asignadas (`user_account_assignments`, pantal
 
   | Fila | Insert | Update | Delete |
   |---|---|---|---|
-  | `MoneyMovement` | su `account_id` | la cuenta VIEJA (historia del atributo) y la NUEVA, las dos | su `account_id` |
+  | `MoneyMovement` | su `account_id` y la cuenta de la relación `account` | la cuenta VIEJA (historia del atributo) y la NUEVA, las dos, por `account_id` y por la relación `account` | su `account_id` |
   | `MoneyAccount` | su `id` (una cuenta nueva nunca está en el conjunto) | su `id` | su `id` |
+
+- **Por qué también la relación (PC1, v1.3):** la FK `account_id` se sincroniza dentro del flush, después de `before_flush`. Una cuenta asignada por `account=` no está todavía en `account_id`: en un insert llega None, y en un update llega la vieja. Se mira la historia de la relación (`added` y `deleted`, que no dispara cargas); una cuenta agregada sin `id` es una cuenta nueva, y corta (D6).
 
 - **Solo cuentan los cambios netos, en las dos clases** (historia de atributos con `has_changes()`, o `session.is_modified`). Leer una fila o asignarle el mismo valor no cuenta. Importa porque `CRUDBase.update` hace `setattr` genérico (`base.py:307`).
   - Hoy ningún camino cambia el `account_id` de un movimiento (`grep "\.account_id = "` en `app/` da 0). La regla de la cuenta vieja y la nueva es para el camino que se escriba mañana, que es el argumento del listener.
@@ -221,7 +227,7 @@ Fixture: una org con 3 cuentas (K1, K2, K3). Los permisos de cada usuario se esc
 | **T12** | **Con alcance (Ingrid), el listener coincide con las reglas existentes:** una escritura en una cuenta no asignada da 403 aunque el endpoint estuviera en la lista blanca. Se monta parcheando el chequeo explícito, para ver que la red sola también corta. |
 | **T13** | **El contexto lo carga** (guarda del mecanismo, N6). Sin rutas de prueba en `app/`: el test reemplaza `get_db` con `dependency_overrides` por un generador que guarda la sesión que entrega. Después de un request del liquidador, `db.info["account_actor"]` trae su `user_id` y su organización; después de uno del superusuario, `is_admin` es True. |
 | **T14** | **Cambia SOLO la cuenta** (C1 de QA 2). Un rol custom con `treasury.manage_accounts` y K1 asignada:<br>• `PATCH /money-accounts/{K3}` (el nombre) y `DELETE /money-accounts/{K3}` → 403, y K3 queda igual (nombre, `is_active`);<br>• `POST /money-accounts` → 403, sin cuenta nueva;<br>• **control:** el mismo `PATCH` sobre K1 → 200. |
-| **T15** | **Updates de movimientos, en el listener** (C4). No hay camino HTTP que cambie la cuenta de un movimiento, así que va con una sesión directa y `account_actor` puesto a mano (el liquidador con K1):<br>• cambiar un movimiento de K3 a K1 → 403;<br>• de K1 a K3 → 403;<br>• asignar a un movimiento de K3 el mismo `account_id` y la misma descripción → no hay 403, porque no hay cambio neto;<br>• lo mismo sobre `MoneyAccount` K3 (el mismo nombre) → no hay 403. |
+| **T15** | **Updates de movimientos, en el listener** (C4). No hay camino HTTP que cambie la cuenta de un movimiento, así que va con una sesión directa y `account_actor` puesto a mano (el liquidador con K1):<br>• cambiar un movimiento de K3 a K1 → 403;<br>• de K1 a K3 → 403;<br>• asignar a un movimiento de K3 el mismo `account_id` y la misma descripción → no hay 403, porque no hay cambio neto;<br>• lo mismo sobre `MoneyAccount` K3 (el mismo nombre) → no hay 403;<br>• **por la relación `account` (PC1, v1.3), un test por celda:** insert con `account=K3` → 403; `mov.account = K3` desde K1 → 403; `mov.account = K1` desde K3 → 403;<br>• control: insert con `account=K1` → no hay 403, y la fila queda con `account_id` = K1. |
 
 **Dirigidas** (regla del 19-nov):
 - el set sale de un `grep` sobre la superficie tocada, escrito en el log con el comando: `accounts_for|_get_allowed_accounts|movement_visible|treasury-dashboard|get_treasury_dashboard|money-accounts|third-party/` en `tests/`;
@@ -236,7 +242,7 @@ Se commitea ANTES de plantar, con la predicción por fila. Un defecto en una ví
 
 | P | Defecto plantado | Debe caer |
 |---|---|---|
-| P1 | El listener no se registra | T1, T2, T9, T12, T13 |
+| P1 | El listener no se registra | Al menos T1, T2, T3 (control), T9, T12, T14 y los casos K3 de T15. **No tumba T13** (PC2, v1.3): T13 solo afirma que `get_required_org_context` deja `account_actor`, y `deps.py` importa `register_actor` aunque el listener no se registre |
 | P2 | `get_required_org_context` no deja `account_actor` | T1, T2, T9, T13 |
 | P3 | El listener mira solo inserts, no updates ni deletes | T2 (las reversas son updates), T8 si cae al listener |
 | P4 | El listener mira `MoneyMovement` pero no `MoneyAccount` | T14 (PATCH y DELETE de K3). **No tumba T2:** las reversas de activos cambian la cuenta Y el movimiento en el mismo flush (C1 de QA 2) |
@@ -252,6 +258,7 @@ Se commitea ANTES de plantar, con la predicción por fila. Un defecto en una ví
 | P14 | En un update de movimiento se mira solo la cuenta nueva | T15, el caso K3→K1 |
 | P15 | Se usa `session.dirty` sin cambios netos | T15, el caso del mismo valor sobre K3 |
 | P16 | El evento de una cuenta no visible sale con `source="money_movement"` | T5, la celda del enlace |
+| P17 | `_touched` no mira la relación `account` de un movimiento (solo `account_id`) | T15, los tests «insert con `account=K3`» y «`account=K3` desde K1». El test «`account=K1` desde K3» **queda verde a propósito:** `account_id` todavía tiene la vieja. El control con K1 queda verde |
 
 **Dirección peligrosa:** un test que debía caer y no cae. Si aparece, se agrega el test que faltaba antes de seguir (como P24 y P33 en Ingrid).
 
