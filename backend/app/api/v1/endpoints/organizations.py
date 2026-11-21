@@ -41,6 +41,7 @@ from app.services.organization import (
     update_user_account_assignments,
     get_user_org_count,
     users_in_other_active_org,
+    user_in_other_active_org,
     update_willard_distribution_centers,
 )
 from app.services.user import get_user_by_email, get_user_by_id, create_user, reset_password, delete_user
@@ -557,7 +558,7 @@ def reset_member_password(
             detail="El usuario no es miembro de esta organizacion",
         )
 
-    if users_in_other_active_org(db, [user_id], organization_id):
+    if user_in_other_active_org(db, user_id, organization_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(

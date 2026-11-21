@@ -65,6 +65,15 @@ export default function SystemOrganizationsPage() {
   const [deactivateTarget, setDeactivateTarget] = useState<SystemOrgResponse | null>(null);
   const [confirmName, setConfirmName] = useState("");
 
+  // O3 de QA: cerrar (Cancelar, Esc o tras crear) limpia todo, también la clave.
+  const closeCreate = () => {
+    setShowCreate(false);
+    setNewName("");
+    setNewAdminEmail("");
+    setNewAdminName("");
+    setNewAdminPassword("");
+  };
+
   const handleCreate = () => {
     if (!newName || !newAdminEmail) return;
     createOrg.mutate(
@@ -75,13 +84,7 @@ export default function SystemOrganizationsPage() {
         admin_password: newAdminPassword || undefined,
       },
       {
-        onSuccess: () => {
-          setShowCreate(false);
-          setNewName("");
-          setNewAdminEmail("");
-          setNewAdminName("");
-          setNewAdminPassword("");
-        },
+        onSuccess: closeCreate,
       },
     );
   };
@@ -285,7 +288,7 @@ export default function SystemOrganizationsPage() {
       )}
 
       {/* Dialog: Crear Organizacion */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+      <Dialog open={showCreate} onOpenChange={(open) => (open ? setShowCreate(true) : closeCreate())}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Nueva Organizacion</DialogTitle>
@@ -338,7 +341,7 @@ export default function SystemOrganizationsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
+            <Button variant="outline" onClick={closeCreate}>Cancelar</Button>
             <Button
               onClick={handleCreate}
               disabled={!newName.trim() || !newAdminEmail.trim() || adminPasswordTooShort || createOrg.isPending}

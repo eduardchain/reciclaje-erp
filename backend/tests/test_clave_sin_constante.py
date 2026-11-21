@@ -197,14 +197,20 @@ class TestSistemaAdminNuevo:
 
 def _scan(root: Path) -> list[str]:
     """`archivo:linea` de toda linea con 123456/12345678 con limites de digito, bajo
-    backend/app y frontend/src de `root`. La misma funcion corre sobre el arbol vivo
+    backend/app y frontend/src de `root`. Recorre TODO archivo de texto (no solo
+    .py/.ts/.tsx: un .json o .js futuro tambien cuenta) y salta los que no
+    decodifican como UTF-8 (binarios). La misma funcion corre sobre el arbol vivo
     y sobre el de 161b204 (control positivo)."""
     hits = []
     for top in ("backend/app", "frontend/src"):
         for p in sorted((root / top).rglob("*")):
-            if not p.is_file() or "__pycache__" in p.parts or p.suffix not in {".py", ".ts", ".tsx"}:
+            if not p.is_file() or "__pycache__" in p.parts:
                 continue
-            for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            try:
+                text = p.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            for i, line in enumerate(text.splitlines(), 1):
                 if CONSTANT.search(line):
                     hits.append(f"{p.relative_to(root)}:{i}")
     return hits
