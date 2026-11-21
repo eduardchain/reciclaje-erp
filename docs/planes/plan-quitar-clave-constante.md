@@ -1,4 +1,6 @@
-# Plan: quitar el reseteo y el alta con clave constante (v1.1)
+# Plan: quitar el reseteo y el alta con clave constante (v1.2)
+
+- **v1.2** (decisión de Daniel del 20-nov, vía el Coordinador). D3b cambia: `migrate_org.py` ya no recibe la clave del admin. La genera al azar EN MEMORIA y nadie la conoce. Por construcción salen `MIGRATE_ADMIN_PASSWORD`, el archivo `~/.ecobalance/migrate_admin_password` y su chequeo de frescura, así que la C1 de la pasada 1 y la O5 de QA desaparecen. T11 se rehace y el plantado de `migrate_org` cambia. También quedan registradas las decisiones de Daniel sobre O1, O2 y O3 (§6).
 
 - **v1.1** (GO de QA 1 sobre v1.0 `f716855`, con 3 condiciones): C1 suma los consumidores del API que D3 rompe, `migrate_org.py` y la skill `/migrate-client` (§1b, D3b, T11). C2 hace que D5 use un predicado APARTE que solo mira orgs activas, sin tocar `get_user_org_count`, que decide el borrado del usuario (D5, T4, T10). C3 fija el patrón de la guarda D4 con límites de dígito, con control positivo sobre el árbol de `161b204` (D4, T8). Además se declara un efecto de D5 (add_member por `user_id`).
 
@@ -83,11 +85,23 @@ El hash no se lee desde producción. Se mide sobre una **réplica**: `replicate_
 - Si el email NO existe y falta la clave, 400 en el mismo bloque donde hoy se exige `admin_full_name`.
 - Si el email YA existe, la clave se IGNORA: no se pisa la clave de un usuario existente (T7).
 
-**D3b. `migrate_org.py` toma la clave del admin de una variable de entorno (C1).**
-- `MIGRATE_ADMIN_PASSWORD`, nunca un argumento de línea de comandos: la regla de credenciales del repo. Se manda como `admin_password` en el `POST /system/organizations`.
-- **Se exige SIEMPRE, en `--dry-run` y en `--apply`, y se valida con el mismo mínimo de D3 (8).** Si falta o es corta, el script aborta antes de la fase 0, o sea antes del `--reset-org` y antes de crear la org.
-- Por qué siempre y no «solo si el admin es nuevo»: el dry-run es OFFLINE por diseño (#28, `migrate_org.py:1392`, sin login), así que no puede saber si el admin existe. Dos reglas, una por modo, dejarían un dry-run verde y un apply que se cae. Con una sola regla el dry-run avisa lo mismo que va a exigir el apply. Si el admin ya existe, el backend ignora la clave (D3), así que exportarla no cambia nada.
-- Se corrigen el print de `:356`, `SKILL.md` (l.232 y l.301: la clave inicial la define el operador en la variable, no viaja por el chat ni por un argumento, y se entrega al cliente por un canal privado), `MIGRATION.md` l.195 y el comentario de `seed_demo_org.py:419`.
+**D3b. `migrate_org.py` genera la clave del admin EN MEMORIA, y nadie la conoce** (decisión de Daniel, v1.2).
+- Al crear la org, el script genera `secrets.token_urlsafe(32)`, unos 43 caracteres, por encima del mínimo de 8 de D3. La manda como `admin_password` en el `POST /system/organizations`.
+- Nunca se imprime, nunca se escribe en un archivo ni en un log, y nunca viaja por argumento. Vive solo en la variable local de la función que arma el payload.
+- **Caminos de fuga revisados** (pedido de QA, sobre `161b204`):
+  - El `APIClient` de `migrate_org.py` (l.231-275) no imprime ni loguea el cuerpo de ningún request. Solo `login` imprime `resp.text`, y esa respuesta es del login, no de este POST.
+  - `requests` no loguea el cuerpo.
+  - El único camino que imprime algo del servidor después de este POST es el error de `ensure_org_and_admin` (`ERROR creando org: {st} - {resp}`). Un 422 de FastAPI trae `input` con lo que recibió, y si un día la validación del modelo reflejara el payload, la clave saldría por ahí. Por eso ese print **reemplaza la clave por `***`** antes de imprimir.
+  - El 201 del endpoint (`SystemOrgResponse`) no lleva la clave.
+- El generador es `secrets`, nunca `random`, sin semilla ni valor por defecto: una semilla fija sería la constante entrando por otra puerta. La longitud (43) queda entre el mínimo de 8 y el `max_length` de 100 de `SystemOrgCreate.admin_password`.
+- **El admin nuevo nace sin una clave utilizable:** no puede entrar hasta que soporte le ponga la real desde Sistema → Usuarios → Resetear contraseña (#85). Daniel se la entrega al cliente por un canal privado.
+- Si el email del admin YA existe, el servidor ignora la clave (D3, T7) y no cambia nada.
+- El dry-run sigue offline y no pide nada. No hay variable de entorno ni archivo; por eso no queda nada viejo que se pueda leer (C1 y O5 de QA desaparecen por construcción).
+- El print de `:356`, `SKILL.md` (l.232 y l.301), `MIGRATION.md` l.195 y el reporte final de la skill dicen lo mismo: «El admin nace sin clave utilizable. Pon la clave real desde Sistema → Usuarios → Resetear contraseña (#85) y entrégasela al cliente por un canal privado».
+  - Si el email ya existía, dicen además que el admin conserva la suya, porque el API no informa cuál de los dos casos ocurrió.
+  - En el reporte final de la skill esto va como **PASO PENDIENTE de Daniel**, no como nota.
+- Se corrige el comentario de `seed_demo_org.py:419`.
+- **Fuera de alcance:** la clave del SUPERUSUARIO en la skill (pasos 4, 6 y 8, hoy por AskUserQuestion y como argumento). Está en el backlog del Coordinador como P3.
 
 **D4. Cero constantes.**
 - `services/user.reset_password(db, user_id, new_password)` exige la clave.
@@ -163,7 +177,11 @@ El hash no se lee desde producción. Se mide sobre una **réplica**: `replicate_
 | T8 | guarda D4: 0 coincidencias del patrón con límites de dígito en `backend/app` y `frontend/src`. **Control positivo:** la misma función sobre `git archive 161b204` de esas carpetas encuentra exactamente los 11 sitios de D4 (archivo y línea) |
 | T9 | se conservan los 403 de hoy (no admin, superusuario como objetivo, usuario con alcance), cada uno con su control en 200 |
 | T10 | no-regresión del borrado (C2): quitar de esta org a un miembro que también está en una org INACTIVA NO borra el usuario (sigue existiendo, con su membresía en la inactiva). **Control:** quitar a un miembro solo de esta org lo borra, como hoy |
-| T11 | `migrate_org.py` (D3b): sin `MIGRATE_ADMIN_PASSWORD`, y con una de 7 caracteres, termina con exit ≠ 0 y el mensaje que nombra la variable, en `--dry-run` y en `--apply`, sin ninguna llamada al API (un cliente falso que falla si lo llaman). **Control:** con la variable, el `POST /system/organizations` del apply lleva `admin_password` |
+| T11a | `migrate_org.py` (D3b), no-fuga, patrón del test de #85. `ensure_org_and_admin` corre con un API falso que captura el payload, en el camino de éxito Y en el de error. En el de error, el falso responde un 422 que REFLEJA la clave en `input`. La clave del payload no aparece en stdout ni en stderr (capsys), ni en ningún registro de log (caplog). **Controles:** el payload SÍ lleva `admin_password`, con longitud entre 8 y 100. Dos corridas generan dos claves distintas, o sea que no es una constante. En el camino de error, el print sí aparece, con `***` en el lugar de la clave |
+| T11b | admin nuevo sin login posible. Un adaptador lleva el API del script al backend real (TestClient y superusuario), y `ensure_org_and_admin` crea la org. El admin nuevo da 401 con toda clave conocida: `123456`, `12345678`, vacía, su email y su nombre. **Control:** el superusuario le pone una clave por #85, y con ella el login da 200 |
+| T11c | el dry-run no pide nada: el script en `--dry-run`, sin variables de entorno de clave, pasa del arranque. Cae recién por el Excel que no existe, con su mensaje propio, no por una clave |
+
+**Sale de la tabla:** el T11 de la v1.1 («sin `MIGRATE_ADMIN_PASSWORD` aborta en los dos modos»). La variable ya no existe. T11c fija lo contrario: el dry-run no pide nada.
 
 **Tests existentes que cambian de semántica** (sale del grep de `reset-password` y `create-user` sobre `tests/`): `test_user_management.py` (7 tests, entre ellos `test_created_user_can_login_with_default_password`, que hoy afirma JUSTO lo que se quita), `test_organizations.py:690` y las llamadas de `test_sac_recolector_alcance.py`. La lista exacta, con el antes y el después de cada uno, va en la pasada 1.
 
@@ -177,7 +195,10 @@ El hash no se lee desde producción. Se mide sobre una **réplica**: `replicate_
 - «el literal en el front» → T8;
 - «D5 con `get_user_org_count`» → el control «otra org inactiva» de T4;
 - «`get_user_org_count` cambiado a solo activas» → T10;
-- «`migrate_org` sin el chequeo de la variable» → T11;
+- «`migrate_org` manda una clave fija» → T11a (dos corridas, misma clave);
+- «`migrate_org` imprime la clave» → T11a;
+- «el print de error no redacta la clave» → T11a, en el camino de error;
+- «`migrate_org` sin `admin_password` en el payload» → T11a y T11b (el servidor responde 400 y la org no nace);
 - «la guarda con comillas» → el control positivo de T8 (encuentra menos de 11).
 La matriz se commitea antes de plantar.
 
@@ -193,7 +214,7 @@ La matriz se commitea antes de plantar.
   - (b) un ciclo aparte con `must_change_password` (Q1 de #85), que obliga a cambiarla en el siguiente login;
   - (c) soporte resetea por #85 a cada usuario de la lista.
 
-  Recomiendo (b) como siguiente ciclo y, mientras tanto, (a) con la lista. La decisión espera la medición sobre la réplica.
-- **O2 (QA, de acuerdo): dos mínimos de longitud**, 8 al crear y 6 al resetear. Es una asimetría heredada, y unificar tocaría también `ChangePassword` y #85. Recomiendo no tocarla en este ciclo.
-- **O3 (Daniel; QA de acuerdo): D5 cierra el reseteo de cualquier usuario multi-org desde una org.** La alternativa es permitirlo cuando el admin lo es también en TODAS las orgs del objetivo. Recomiendo cerrar: es simple y fail-closed, y #85 cubre el caso. El costo es el conteo de H1 en la réplica.
+  **Decidido por Daniel (20-nov): «dejarla así».** Con los usuarios que hoy tienen una clave constante no se hace nada: ni `must_change_password` ni reseteo por soporte. La medición sobre la réplica (§2) deja de ser un gate de decisión.
+- **O2 (QA, de acuerdo; decidido por Daniel: no se toca): dos mínimos de longitud**, 8 al crear y 6 al resetear. Es una asimetría heredada, y unificar tocaría también `ChangePassword` y #85.
+- **O3 (decidido por Daniel: cerrar; QA de acuerdo): D5 cierra el reseteo de cualquier usuario multi-org desde una org.** El reseteo de quien también está en otra org activa lo hace soporte desde Sistema (#85).
 - **Fuera de alcance:** `seed_sac_org.py --users-password` (solo en local; contra un remoto no crea usuarios, #115) y la invalidación de sesiones (#85 D4).
