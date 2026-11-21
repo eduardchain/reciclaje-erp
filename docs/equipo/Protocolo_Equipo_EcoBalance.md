@@ -30,6 +30,7 @@ Este archivo define cómo trabaja la sesión **Coordinadora** de EcoBalance con 
   No se le propone a Daniel abrir una ventana por worktree.
 - **«Eco QA 1» es la sesión que antes se llamaba «QA Ecobalance»**, renombrada: ya conoce #118 a #123. Como todas, trabaja en su worktree (`qa-1`).
 - **Cada QA verifica en su worktree, en detached sobre el SHA del coder**, no en el árbol del coder: lo que se revisa es el commit. Corre pytest con su `TEST_DATABASE_URL` y planta solo en su worktree o en copias de su scratchpad.
+- **Desde un worktree, `TEST_DATABASE_URL` es obligatoria** (guarda del conftest, `4efbeaf`). Sin ella, pytest y `scripts/schema_parity_check.py` abortan y dicen qué base exportar, en vez de caer en `reciclaje_test` y hacerle DROP SCHEMA a la suite del checkpoint. Contar tests con `--collect-only` también la exige. Solo en la carpeta principal sigue valiendo el default `reciclaje_test`. El checkpoint corre desde un worktree y es el dueño de esa base, así que su `suite.sh` la exporta explícita. La guarda exige nombrar una base, no que sea la propia: exportar la de otra sesión pasa igual, y eso sigue siendo una regla de equipo.
 - **Parejas fijas por línea de trabajo:** QA 1 revisa a Coder 1 y QA 2 revisa a Coder 2. En EcoBalance una tarea cruza back y front, así que cada QA revisa de punta a punta (backend, pantalla a 1440 y 390, golden si aplica). La pareja conserva el contexto del plan de una pasada a la otra.
 - **Todos los nombres llevan «Eco» adelante.** En esta Mac hay sesiones de otros proyectos. Antes de mandar un mensaje, el nombre se copia exacto de `ListAgents`.
 - **El QA habla directo con su coder.** El Coordinador no hace de cartero. El coder le devuelve el delta al QA.
@@ -242,7 +243,7 @@ Una entrega al QA o al Coordinador lleva, sin repetir contexto:
 
 ### Tarea 0, infraestructura
 La hace el Coordinador: no es código de producto. Va con revisión de QA como nivel chico.
-1. **`conftest.py` lee `TEST_DATABASE_URL` del entorno**, con el valor de hoy por defecto. Hoy está fijo en `reciclaje_test`, así que dos sesiones con pytest se invalidan las corridas.
+1. **`conftest.py` lee `TEST_DATABASE_URL` del entorno**, con el valor de hoy por defecto. Hoy está fijo en `reciclaje_test`, así que dos sesiones con pytest se invalidan las corridas. Desde `4efbeaf` ese default vale solo en la carpeta principal: desde un worktree, sin la variable, aborta (§1).
 2. **`golden_run.sh` toma los puertos del entorno.** Hoy usa 8001 y 8002 fijos, y 8001 es la integración.
 3. **`ops/` va al `.gitignore`.**
 4. **Un script de capturas** fuera del repo (`~/.cache/ecobalance/capturas/`), con su propio Playwright y un navegador sin perfil, que reciba la URL, la sesión de login y los anchos 1440/390.
