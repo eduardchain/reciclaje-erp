@@ -22,6 +22,29 @@ import {
   useSuppliers,
 } from "@/hooks/useMasterData";
 import { retentionRowLabel } from "@/pages/treasury/RetentionsPage";
+import {
+  IVA_DEFAULT_RATE_PCT,
+  buildRetentionPayload,
+  defaultRetentionConfig,
+  effAmount,
+  isUsableConfig,
+  ivaPayload,
+  ivaRatePatch,
+  newRetRow,
+  pctOf,
+  precargaIva,
+  precargaRetentions,
+  rateOutOfRange,
+  rateWarning,
+  rateWarningText,
+  reviveDraftIvaRate,
+  reviveDraftRetentions,
+  staleNote,
+  withAmount,
+  withConfig,
+  withRate,
+} from "@/utils/taxRows";
+import type { RetRow } from "@/utils/taxRows";
 import { useCurrentTariffs, useKgProfiles } from "@/hooks/useSacConfig";
 import { formOrderMap, sortByFormOrder } from "@/utils/formOrder";
 import { useKgAccounts } from "@/hooks/useKgLedger";
@@ -113,13 +136,6 @@ interface LineState {
   cells: Record<number, CellState>;
 }
 
-interface RetRow {
-  _key: number;
-  config_id: string;
-  amount: number;
-  touched: boolean;
-}
-
 interface PurchaseCol {
   slot: number;
   third_party_id: string;
@@ -128,6 +144,8 @@ interface PurchaseCol {
    *  precarga de un reparto guardado pisaría el precio que se guardó. */
   listPrices: Record<string, number>;
   withIva: boolean;
+  /** T8: el % del IVA (19 al marcar la casilla), editable */
+  ivaRate: number;
   ivaAmount: number;
   ivaTouched: boolean;
   retentions: RetRow[];
@@ -141,8 +159,9 @@ type CellMode = "row" | "list" | OwnMode;
 /** Plan v1.1 D1b (S-1 del Coordinador): el de la fila queda de respaldo. */
 const BASE_PRICE_HINT = "se usa en las compras sin lista ni precio propio";
 
-/** Q-66 sin respuesta: la casilla «Con IVA» nace apagada (Daniel: «IVA opcional»). */
-const IVA_RATE_PCT = 19;
+/** Q-66 sin respuesta: la casilla «Con IVA» nace apagada (Daniel: «IVA opcional»).
+ *  T8: el % es libre; 19 es solo el valor inicial y la referencia del aviso. */
+const IVA_RATE_PCT = IVA_DEFAULT_RATE_PCT;
 
 /** Reglas 9e/9f del alcance (plan Ingrid v1.6/v1.7): el mismo texto que el
  * 422 del servidor (`RELIQUIDATE_FOREIGN_SUPPLIER` / `RELIQUIDATE_TAXES`). */
@@ -168,6 +187,7 @@ const newCol = (slot: number, third_party_id = ""): PurchaseCol => ({
   invoice: "",
   listPrices: {},
   withIva: false,
+  ivaRate: IVA_RATE_PCT,
   ivaAmount: 0,
   ivaTouched: false,
   retentions: [],
@@ -192,6 +212,10 @@ const toCents = (v: number): number => Math.round(v * 100) / 100;
 
 /** El peso se pinta sin decimales en toda la app; acá los decimales aparecen
  *  SOLO cuando existen (D8: el centavo tiene que verse). */
+/** Un % con hasta 4 decimales, en formato colombiano (2,5 · 0,966). */
+const fmtRate = (v: number): string =>
+  new Intl.NumberFormat("es-CO", { maximumFractionDigits: 4 }).format(v);
+
 const fmtMoney = (v: number): string =>
   Math.abs(v - Math.round(v)) < 0.005 ? formatCurrency(v) : formatCurrencyDecimals(v);
 
@@ -419,11 +443,17 @@ function assertDraftShape(d: Draft): void {
     if (!isObj(col) || typeof col.slot !== "number" || typeof col.third_party_id !== "string" ||
         typeof col.invoice !== "string" || !isObj(col.listPrices) ||
         typeof col.withIva !== "boolean" || typeof col.ivaAmount !== "number" ||
+        // T8: un borrador de antes del cambio no trae `ivaRate`
+        !(col.ivaRate === undefined || typeof col.ivaRate === "number") ||
         typeof col.ivaTouched !== "boolean" || !Array.isArray(col.retentions) ||
         !(col.paymentAccount === null || typeof col.paymentAccount === "string")) bad();
     for (const r of col.retentions as unknown[]) {
       if (!isObj(r) || typeof r._key !== "number" || typeof r.config_id !== "string" ||
-          typeof r.amount !== "number" || typeof r.touched !== "boolean") bad();
+          typeof r.amount !== "number" || typeof r.touched !== "boolean" ||
+          // T2b: `rate` falta en un borrador de antes del cambio
+          !(r.rate === undefined || typeof r.rate === "number") ||
+          !(r.staleRate === undefined || isNumOrNull(r.staleRate)) ||
+          !(r.staleLabel === undefined || typeof r.staleLabel === "string")) bad();
     }
   }
 }
@@ -574,14 +604,18 @@ export default function InboundLiquidatePage() {
 
   // Catálogo de retenciones (v2 #79) — la ruta ya está gated por el flag (FP)
   const { data: retentionRows } = useRetentionRows(unscoped);
+  // T3: las funciones de taxRows reciben el catálogo SIN filtrar; las
+  // tarifas que se pueden usar las decide `isUsableConfig`, en un solo lugar
+  const retentionCatalog = useMemo(() => retentionRows ?? [], [retentionRows]);
   const retentionConfigs = useMemo(
-    () => (retentionRows ?? []).filter((r) => r.config_id && r.is_active),
-    [retentionRows],
+    () => retentionCatalog.filter((r) => r.config_id && r.is_active),
+    [retentionCatalog],
   );
   const configById = useMemo(
-    () => new Map(retentionConfigs.map((r) => [r.config_id as string, r])),
-    [retentionConfigs],
+    () => new Map(retentionCatalog.filter(isUsableConfig).map((r) => [r.config_id as string, r])),
+    [retentionCatalog],
   );
+  const defaultConfig = useMemo(() => defaultRetentionConfig(retentionCatalog), [retentionCatalog]);
 
   useEffect(() => {
     // Espera al catálogo: la precarga mapea cada retención guardada a su tarifa
@@ -608,27 +642,13 @@ export default function InboundLiquidatePage() {
       const same = order.purchases.filter((p) => p.purchase_slot === col.slot);
       const p = same.find((x) => x.status !== "cancelled") ?? same[same.length - 1];
       if (!p) continue;
-      col.retentions = (p.retentions ?? [])
-        .map((r) => {
-          const cfg = retentionConfigs.find(
-            (c) =>
-              c.retention_type === r.retention_type &&
-              (c.municipality ?? null) === (r.municipality ?? null),
-          );
-          if (!cfg?.config_id) return null; // tarifa borrada: se re-elige
-          // `touched`: si Johana lo había editado, reaparece tal cual
-          return { _key: nextKey(), config_id: cfg.config_id, amount: num(r.amount), touched: true };
-        })
-        .filter(Boolean) as RetRow[];
+      // T1'/T2: vuelve la tasa GUARDADA (la tarifa solo da el tipo); si no
+      // queda ninguna tarifa usable de ese tipo, la fila sigue y avisa
+      // C1: con alcance no se precarga ninguna (no hay catálogo ni pie)
+      col.retentions = precargaRetentions(p.retentions ?? [], retentionCatalog, scoped, nextKey);
       const iva = (p.taxes ?? []).find((t) => t.tax_type === "iva");
-      if (iva) {
-        col.withIva = true;
-        col.ivaAmount = num(iva.amount);
-        // Si era el 19 % de su base, sigue siendo sugerido y se recalcula al
-        // cambiar cantidades; si Johana lo había editado, reaparece tal cual
-        col.ivaTouched =
-          num(iva.amount) !== Math.round(num(iva.base_amount) * IVA_RATE_PCT) / 100;
-      }
+      // T8: «editado» se mide contra la tasa guardada, no contra 19
+      if (iva) Object.assign(col, precargaIva(iva));
     }
     const initialCols = [...bySlot.values()];
     const startCols = initialCols.length > 0 ? initialCols : [newCol(1)];
@@ -645,11 +665,12 @@ export default function InboundLiquidatePage() {
       if (d && d.sig === draftSig) {
         try {
           assertDraftShape(d);
-          // QA C4: una tarifa que ya no está activa no se restaura (el clic en
-          // Liquidar no tendría con qué armar el bloque)
+          // T2b: una retención cuya tarifa ya no sirve no desaparece: pasa a
+          // otra usable de su tipo, o queda sin tarifa con la nota
           const draftCols = d.cols.map((c) => ({
             ...c,
-            retentions: c.retentions.filter((r) => !r.config_id || configById.has(r.config_id)),
+            ivaRate: reviveDraftIvaRate(c.ivaRate),
+            retentions: reviveDraftRetentions(c.retentions, retentionCatalog, scoped),
           }));
           keyCounter = Math.max(
             keyCounter,
@@ -675,7 +696,7 @@ export default function InboundLiquidatePage() {
     // `scoped` es dependencia REAL: si la Entrada carga antes que los permisos,
     // el init corta (sin retenciones y aun sin saber del alcance) y tiene que
     // volver a correr cuando se sabe que el usuario tiene alcance.
-  }, [order, initialized, retentionRows, retentionConfigs, configById, draftKey, draftSig, scoped]);
+  }, [order, initialized, retentionRows, retentionCatalog, draftKey, draftSig, scoped]);
 
   // Guardar el borrador en cada cambio; si lo digitado vuelve a lo del
   // servidor, se borra (así no aparece «recuperado» sin haber nada)
@@ -900,6 +921,7 @@ export default function InboundLiquidatePage() {
       paymentAccount: null,
       invoice: "",
       withIva: false,
+      ivaRate: IVA_RATE_PCT,
       ivaAmount: 0,
       ivaTouched: false,
     });
@@ -1006,19 +1028,14 @@ export default function InboundLiquidatePage() {
 
   // ---------- retenciones / IVA por compra ----------
 
-  const suggestedRet = (configId: string, base: number) => {
-    const cfg = configById.get(configId);
-    if (!cfg || cfg.rate_pct == null) return 0;
-    return Math.round(base * cfg.rate_pct) / 100; // % × subtotal a 2 dec
-  };
-  const effRetAmount = (r: RetRow, base: number) =>
-    r.touched ? r.amount : suggestedRet(r.config_id, base);
+  // T4: el último que se tocó gana (funciones puras de taxRows)
+  const effRetAmount = (r: RetRow, base: number) => effAmount(r, base);
 
-  const updateRet = (slot: number, key: number, patch: Partial<RetRow>) =>
+  const updateRet = (slot: number, key: number, fn: (r: RetRow) => RetRow) =>
     setCols((prev) =>
       prev.map((c) =>
         c.slot === slot
-          ? { ...c, retentions: c.retentions.map((r) => (r._key === key ? { ...r, ...patch } : r)) }
+          ? { ...c, retentions: c.retentions.map((r) => (r._key === key ? fn(r) : r)) }
           : c
       )
     );
@@ -1032,7 +1049,8 @@ export default function InboundLiquidatePage() {
     setCols((prev) =>
       prev.map((c) =>
         c.slot === slot
-          ? { ...c, retentions: [...c.retentions, { _key: nextKey(), config_id: "", amount: 0, touched: false }] }
+          // D3: la ReteFuente general se propone solo al apretar «+ Retención»
+          ? { ...c, retentions: [...c.retentions, newRetRow(defaultConfig, nextKey())] }
           : c
       )
     );
@@ -1057,11 +1075,7 @@ export default function InboundLiquidatePage() {
       .map((l) => ({ l, c: l.cells[col.slot] }))
       .filter(({ c }) => c && c.quantity > 0) as { l: LineState; c: CellState }[];
     const subtotal = rows.reduce((acc, { l, c }) => acc + cellTotal(c, col, l), 0);
-    const iva = col.withIva
-      ? col.ivaTouched
-        ? col.ivaAmount
-        : Math.round(subtotal * IVA_RATE_PCT) / 100
-      : 0;
+    const iva = col.withIva ? (col.ivaTouched ? col.ivaAmount : pctOf(subtotal, col.ivaRate)) : 0;
     const ret = col.retentions.reduce((acc, r) => acc + effRetAmount(r, subtotal), 0);
     const qtyByUnit: Record<string, number> = {};
     for (const { l, c } of rows) {
@@ -1132,6 +1146,10 @@ export default function InboundLiquidatePage() {
       problems.push(`${tag}: falta elegir la tarifa de una retención`);
     } else if (col.retentions.some((r) => !configById.has(r.config_id))) {
       problems.push(`${tag}: una retención usa una tarifa que ya no está activa — elíjala de nuevo`);
+    } else if (col.retentions.some((r) => rateOutOfRange(r.rate))) {
+      const r = col.retentions.find((x) => rateOutOfRange(x.rate))!;
+      const cfg = configById.get(r.config_id);
+      problems.push(`${tag}: el % de ${cfg ? retentionRowLabel(cfg) : "una retención"} debe estar entre 0 y 100`);
     } else if (col.retentions.length > 0 && st.subtotal <= 0) {
       problems.push(`${tag}: su subtotal es $0, no hay base sobre la cual retener`);
     } else if (col.retentions.some((r) => effRetAmount(r, st.subtotal) <= 0)) {
@@ -1139,7 +1157,8 @@ export default function InboundLiquidatePage() {
     } else if (st.ret > 0 && st.ret >= st.subtotal + st.iva) {
       problems.push(`${tag}: las retenciones deben ser menores al total (${fmtMoney(st.subtotal + st.iva)})`);
     }
-    if (col.withIva && st.iva <= 0) problems.push(`${tag}: el IVA quedó en $0`);
+    if (col.withIva && rateOutOfRange(col.ivaRate)) problems.push(`${tag}: el % de IVA debe estar entre 0 y 100`);
+    else if (col.withIva && st.iva <= 0) problems.push(`${tag}: el IVA quedó en $0`);
     // Contado sin cuenta es un error silencioso: nacería a crédito sin avisar
     if (col.paymentAccount === "") problems.push(`${tag}: pago de contado sin cuenta`);
   }
@@ -1208,19 +1227,8 @@ export default function InboundLiquidatePage() {
         retentionBlocks.push({
           purchase_slot: col.slot,
           third_party_id: col.third_party_id,
-          retentions: rows.map(({ r, cfg }) => {
-            return {
-              retention_type: cfg.retention_type,
-              // CC-013 C2: la tarifa usada, para que el servidor rechace una
-              // `base_kind='iva'`
-              config_id: cfg.config_id,
-              municipality: cfg.retention_type === "ica" ? cfg.municipality ?? null : undefined,
-              amount: effRetAmount(r, st.subtotal),
-              // Auditoría del precálculo (F1: el backend los persiste)
-              rate: cfg.rate_pct ?? undefined,
-              base: cfg.rate_pct != null ? st.subtotal : undefined,
-            };
-          }),
+          // T4: va el % digitado, no el del catálogo; el monto es la verdad (#79 F1)
+          retentions: rows.map(({ r, cfg }) => buildRetentionPayload(r, cfg, st.subtotal)),
         });
       }
       if (col.paymentAccount) {
@@ -1234,7 +1242,7 @@ export default function InboundLiquidatePage() {
         taxBlocks.push({
           purchase_slot: col.slot,
           third_party_id: col.third_party_id,
-          taxes: [{ tax_type: "iva", rate: IVA_RATE_PCT, base_kind: "subtotal", amount: st.iva }],
+          taxes: [ivaPayload(col.ivaRate, st.iva)],
         });
       }
     }
@@ -1539,12 +1547,48 @@ export default function InboundLiquidatePage() {
     );
   };
 
+  /** T7/T9: % y monto en la misma fila, el % angosto; el monto siempre a la vista. */
+  const renderRateAmount = (o: {
+    rate: number;
+    onRate: (v: number) => void;
+    amount: number;
+    onAmount: (v: number) => void;
+    amountInvalid: boolean;
+    rateLabel: string;
+  }) => (
+    <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-1 gap-y-0.5">
+      <span className="text-[10px] text-slate-400">{o.rateLabel}</span>
+      <span className="text-[10px] text-slate-400">Monto</span>
+      <div className="relative" data-field="tax-rate">
+        <MoneyInput
+          value={o.rate}
+          onChange={o.onRate}
+          decimals={4}
+          // T11: el monto se recalcula mientras se escribe el %
+          liveChange
+          className={cn("h-8 pr-5 text-sm", rateOutOfRange(o.rate) && "border-red-300")}
+        />
+        <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
+          %
+        </span>
+      </div>
+      <div data-field="tax-amount">
+      <MoneyInput
+        value={o.amount}
+        onChange={o.onAmount}
+        decimals={2}
+        className={cn("h-8 text-sm", o.amountInvalid && "border-red-300")}
+      />
+      </div>
+    </div>
+  );
+
   const renderFooter = (col: PurchaseCol) => {
     const st = statsBySlot.get(col.slot)!;
     if (st.rows.length === 0) {
       return <p className="text-xs text-slate-400">Sin materiales — no nace compra.</p>;
     }
-    const suggestedIva = Math.round(st.subtotal * IVA_RATE_PCT) / 100;
+    const suggestedIva = pctOf(st.subtotal, col.ivaRate);
     return (
       <div className="space-y-2 text-xs">
         <div className="flex items-baseline justify-between gap-2">
@@ -1561,26 +1605,39 @@ export default function InboundLiquidatePage() {
           <label className="flex items-center gap-1.5 text-slate-600 cursor-pointer">
             <Checkbox
               checked={col.withIva}
-              onCheckedChange={(v) => updateCol(col.slot, { withIva: v === true, ivaTouched: false, ivaAmount: 0 })}
+              onCheckedChange={(v) =>
+                updateCol(col.slot, { withIva: v === true, ivaRate: IVA_RATE_PCT, ivaTouched: false, ivaAmount: 0 })
+              }
             />
-            Con IVA ({IVA_RATE_PCT}%)
+            Con IVA
           </label>
           {col.withIva && (
             <>
-              <MoneyInput
-                value={st.iva}
+              {renderRateAmount({
+                rate: col.ivaRate,
+                // T4: pasar por el % sin cambiarlo no cuenta como tocarlo
+                onRate: (v) => {
+                  const patch = ivaRatePatch(col.ivaRate, v);
+                  if (patch) updateCol(col.slot, patch);
+                },
+                amount: st.iva,
                 // C5: solo un valor DISTINTO congela el IVA; un Tab no
-                onChange={(v) => v !== st.iva && updateCol(col.slot, { ivaAmount: v, ivaTouched: true })}
-                decimals={2}
-                className={cn("h-8 text-sm", st.iva <= 0 && "border-red-300")}
-              />
+                onAmount: (v) => v !== st.iva && updateCol(col.slot, { ivaAmount: v, ivaTouched: true }),
+                amountInvalid: st.iva <= 0,
+                rateLabel: "% del subtotal",
+              })}
+              {rateWarning(col.ivaRate, IVA_RATE_PCT) && (
+                <p className="text-[11px] text-amber-700">
+                  {rateWarningText(col.ivaRate, IVA_RATE_PCT, "el IVA habitual")}
+                </p>
+              )}
               {col.ivaTouched && st.iva !== suggestedIva && (
                 <button
                   type="button"
                   className="text-[11px] text-indigo-600 hover:underline"
                   onClick={() => updateCol(col.slot, { ivaTouched: false, ivaAmount: 0 })}
                 >
-                  Sugerido: {fmtMoney(suggestedIva)}
+                  Sugerido: {fmtMoney(suggestedIva)} ({fmtRate(col.ivaRate)}%)
                 </button>
               )}
             </>
@@ -1595,57 +1652,72 @@ export default function InboundLiquidatePage() {
               + Retención
             </button>
           </div>
-          {col.retentions.map((r) => (
-            <div key={r._key} className="space-y-1">
-              <div className="flex items-center gap-1">
-                <Select
-                  value={r.config_id || undefined}
-                  onValueChange={(v) => updateRet(col.slot, r._key, { config_id: v, touched: false })}
-                >
-                  <SelectTrigger className={cn("h-8 text-xs flex-1", !r.config_id && "border-red-300")}>
-                    <SelectValue placeholder="Tarifa..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* 🔴 CC-013 C2: una tarifa «sobre el IVA» no se precalcula
-                        acá (% × subtotal); el servidor la rechaza. Q-68 abierta. */}
-                    {retentionConfigs
-                      .filter((cfg) => cfg.base_kind !== "iva" || cfg.config_id === r.config_id)
-                      .map((cfg) => (
-                        <SelectItem key={cfg.config_id} value={cfg.config_id as string}>
-                          {retentionRowLabel(cfg)} ({cfg.rate_pct}%)
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                <button
-                  type="button"
-                  onClick={() => removeRet(col.slot, r._key)}
-                  className="text-slate-400 hover:text-red-500"
-                  title="Quitar retención"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+          {col.retentions.map((r) => {
+            const cfg = configById.get(r.config_id);
+            const ref = cfg?.rate_pct != null ? Number(cfg.rate_pct) : null;
+            const amount = effRetAmount(r, st.subtotal);
+            const suggested = pctOf(st.subtotal, r.rate);
+            return (
+              <div key={r._key} className="space-y-1">
+                <div className="flex items-center gap-1">
+                  <Select
+                    value={r.config_id || undefined}
+                    onValueChange={(v) => {
+                      const next = configById.get(v);
+                      if (next) updateRet(col.slot, r._key, (row) => withConfig(row, next));
+                    }}
+                  >
+                    <SelectTrigger className={cn("h-8 text-xs flex-1 min-w-0", !r.config_id && "border-red-300")}>
+                      <SelectValue placeholder="Tipo de retención..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* 🔴 CC-013 C2: una tarifa «sobre el IVA» no se precalcula
+                          acá (% × subtotal); el servidor la rechaza. Q-68 abierta. */}
+                      {retentionConfigs
+                        .filter((c) => c.base_kind !== "iva" || c.config_id === r.config_id)
+                        .map((c) => (
+                          <SelectItem key={c.config_id} value={c.config_id as string}>
+                            {retentionRowLabel(c)}
+                            {c.config_id === defaultConfig?.config_id ? " · por defecto" : ""}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <button
+                    type="button"
+                    onClick={() => removeRet(col.slot, r._key)}
+                    className="text-slate-400 hover:text-red-500"
+                    title="Quitar retención"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                {renderRateAmount({
+                  rate: r.rate,
+                  onRate: (v) => updateRet(col.slot, r._key, (row) => withRate(row, v)),
+                  amount,
+                  onAmount: (v) => v !== amount && updateRet(col.slot, r._key, (row) => withAmount(row, v)),
+                  amountInvalid: st.subtotal > 0 && amount <= 0,
+                  rateLabel: "% del subtotal",
+                })}
+                {!r.config_id && r.staleLabel && (
+                  <p className="text-[11px] text-red-600">{staleNote(r.staleLabel)}</p>
+                )}
+                {ref != null && rateWarning(r.rate, ref) && (
+                  <p className="text-[11px] text-amber-700">{rateWarningText(r.rate, ref, "la tarifa")}</p>
+                )}
+                {r.touched && amount !== suggested && (
+                  <button
+                    type="button"
+                    className="text-[11px] text-indigo-600 hover:underline"
+                    onClick={() => updateRet(col.slot, r._key, (row) => ({ ...row, touched: false, amount: 0 }))}
+                  >
+                    Sugerido: {formatCurrency(suggested)} ({fmtRate(r.rate)}%)
+                  </button>
+                )}
               </div>
-              <MoneyInput
-                value={effRetAmount(r, st.subtotal)}
-                onChange={(v) =>
-                  v !== effRetAmount(r, st.subtotal) && updateRet(col.slot, r._key, { amount: v, touched: true })
-                }
-                decimals={2}
-                className={cn("h-8 text-sm", st.subtotal > 0 && effRetAmount(r, st.subtotal) <= 0 && "border-red-300")}
-              />
-              {r.config_id && r.touched && effRetAmount(r, st.subtotal) !== suggestedRet(r.config_id, st.subtotal) && (
-                <button
-                  type="button"
-                  className="text-[11px] text-indigo-600 hover:underline"
-                  onClick={() => updateRet(col.slot, r._key, { touched: false, amount: 0 })}
-                >
-                  Sugerido: {formatCurrency(suggestedRet(r.config_id, st.subtotal))} (
-                  {configById.get(r.config_id)?.rate_pct}%)
-                </button>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
         </>)}
 

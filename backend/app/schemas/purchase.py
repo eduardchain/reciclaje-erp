@@ -263,7 +263,10 @@ class PurchaseRetentionCreate(BaseModel):
     # una tarifa `base_kind='iva'` en un documento que no lleva IVA. Ausente =
     # camino de siempre byte a byte (ningun payload previo lo manda).
     config_id: Optional[UUID] = None
-    rate: Optional[Decimal] = Field(None, gt=0, description="Tasa informativa")
+    # T12 (plan-sac-retefuente-porcentajes): tope en 100 — la columna es
+    # Numeric(7,4) y desde 1000 desbordaba con 500 (DataError). Ninguna tasa
+    # real pasa de 100 y el catalogo ya lo exige (ck_retention_configs_rate_range).
+    rate: Optional[Decimal] = Field(None, gt=0, le=100, description="Tasa informativa")
     base: Optional[Decimal] = Field(None, gt=0, description="Base informativa")
     amount: Decimal = Field(..., gt=0)
 

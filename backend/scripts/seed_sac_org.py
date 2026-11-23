@@ -1268,9 +1268,40 @@ class SacSeeder:
                 )
 
     def create_retention_configs(self) -> None:
-        """El POST responde 409 si la tarifa ya existe (#79) — se tolera."""
+        """Siembra las tarifas que FALTAN.
+
+        T6 de plan-sac-retefuente-porcentajes: el POST solo responde 409 ante
+        una tarifa ACTIVA (#79 D14), asi que una tarifa que Johana desactivo
+        renacia en cada provision — y con ella el default de «+ Retencion».
+        Antes de cada POST se lee el catalogo completo (`retention-entities`
+        trae tambien las inactivas) y se omite la que ya exista con el mismo
+        (tipo, municipio, concepto) normalizados, activa o no. El 409 se sigue
+        tolerando por si otra sesion la crea entre la lectura y el POST.
+        """
         logging.info("[13] Configs de retencion")
+        existentes: dict[tuple, dict] = {}
+        if not self.api.dry_run:
+            # El MISMO criterio de unicidad del servicio (find_active_config)
+            from app.services.retention_entities import normalize_entity_name as norm
+
+            def clave(tipo: str, muni: Optional[str], concepto: Optional[str]) -> tuple:
+                return (tipo, norm(muni) if muni else None, norm(concepto) if concepto else None)
+
+            for row in self.api.get("/third-parties/retention-entities"):
+                if row.get("config_id"):
+                    existentes[clave(row["retention_type"], row.get("municipality"),
+                                     row.get("concept"))] = row
         for rc in RETENTION_CONFIGS:
+            if existentes:
+                ya = existentes.get(clave(rc["retention_type"], rc.get("municipality"),
+                                          rc.get("concept")))
+                if ya is not None:
+                    logging.warning(
+                        "    %s-%s: ya existe (%s, %s%%) — no se vuelve a crear",
+                        rc["retention_type"], rc.get("municipality", ""),
+                        "activa" if ya.get("is_active") else "INACTIVA", ya.get("rate_pct"),
+                    )
+                    continue
             self.api.post_tolerating(
                 "/third-parties/retention-configs", rc, ok_codes=(409,),
                 label=f"{rc['retention_type']}-{rc.get('municipality', '')}",

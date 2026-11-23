@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { defaultRetentionConfig } from "@/utils/taxRows";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,6 +47,9 @@ export default function RetentionsPage() {
 
   // La ruta ya está gated por FP (flag + permiso) — acá el fetch va directo.
   const { data, isLoading } = useRetentionRows(true);
+  // T3/D1: la tarifa que «+ Retención» propone al liquidar una Entrada. Sale
+  // del catálogo SIN filtrar, con la MISMA función que usa esa pantalla.
+  const defaultConfigId = defaultRetentionConfig(data ?? [])?.config_id ?? null;
   const rows = (data ?? []).filter(
     (r) =>
       (showInactive || r.is_active) &&
@@ -313,6 +317,9 @@ export default function RetentionsPage() {
                           {!r.is_active && <Badge variant="secondary" className="text-xs">Inactiva</Badge>}
                           {!r.entity_id && <Badge variant="secondary" className="text-xs">Sin uso aún</Badge>}
                           {!r.config_id && <Badge variant="secondary" className="text-xs text-amber-700">Sin tarifa</Badge>}
+                          {r.config_id && r.config_id === defaultConfigId && (
+                            <Badge variant="outline" data-testid="default-mark" className="text-xs text-emerald-700 border-emerald-200">Se propone al liquidar</Badge>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
@@ -351,6 +358,9 @@ export default function RetentionsPage() {
                           <Badge variant="outline" className="text-[10px] text-indigo-600 border-indigo-200">Sistema</Badge>
                           {!r.is_active && <Badge variant="secondary" className="text-[10px]">Inactiva</Badge>}
                           {!r.entity_id && <Badge variant="secondary" className="text-[10px]">Sin uso aún</Badge>}
+                          {r.config_id && r.config_id === defaultConfigId && (
+                            <Badge variant="outline" data-testid="default-mark" className="text-[10px] text-emerald-700 border-emerald-200">Se propone al liquidar</Badge>
+                          )}
                           {r.entity_id && <NatureBadge balance={r.current_balance} small />}
                         </div>
                       </div>
