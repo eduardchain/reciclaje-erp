@@ -1,4 +1,10 @@
-# Plan: retenciones e IVA con porcentaje libre al liquidar una Entrada (v1.3)
+# Plan: retenciones e IVA con porcentaje libre al liquidar una Entrada (v1.4)
+
+- **v1.4** (condiciones de QA 1 sobre la v1.3 `4d72cff`; veredicto en `~/sac-evidencia/2026-11-23/qa-1-retefuente/veredicto_plan_v1.3.md`):
+  - C1: P1 predice U1, U2, U5 y E1. U3 queda verde porque «No declarante» ya tiene 3,5; U5 cae porque Barranquilla tiene 0,7 y la guardada es 0,966.
+  - C2: cada caso dice si lee el campo de la fila (`row.amount`) o el monto efectivo (`effAmount`).
+  - O1: la nota de T2 es una sola, neutra, y sirve igual para la tarifa inactiva y para la de `base_kind='iva'`.
+  - O2: el parseo de `MoneyInput` vive en una sola función, que usan el camino vivo y el blur.
 
 - **v1.3** (decisiones de Daniel del 23-nov, vía el Coordinador). El plan cambia de fondo.
   - **D1.** «Hay varios factores que influyen, el tipo de compra, el régimen fiscal del proveedor, el producto, etc. Por eso lo ideal es que la casilla de retención sea libre, que uno simplemente escriba el porcentaje». Y después: «dejemos rete IVA e ICA también libres. O sea, todo lo que sea impuestos, dejémoslo libres».
@@ -67,7 +73,7 @@ Los comandos y su salida están en `barrido_consumidores.log`.
 
 **T2. Si no queda ninguna tarifa usable de ese tipo, la fila NO desaparece.**
 - Queda con `config_id: ""`, `staleRate` = la tasa guardada, el monto guardado y `touched: true`.
-- Una nota debajo dice: «Ya no hay una tarifa activa de Retención en la Fuente: reactívela en Tesorería → Retenciones o quite la retención». En ICA nombra el municipio.
+- Una nota debajo dice: «No hay una tarifa activa de Retención en la Fuente sobre el subtotal: créela o reactívela en Tesorería → Retenciones, o quite la retención». En ICA nombra el municipio. Es un solo texto para los dos casos (O1): la tarifa inactiva (U4, U6) y la tarifa activa pero calculada sobre el IVA (U8), donde «reactívela» no serviría.
 - La validación que ya existe («falta elegir la tarifa de una retención») bloquea Liquidar. Es fail-closed.
 
 **T2b. El borrador tampoco la borra.** `reviveDraftRetention(row, catalog)` reemplaza el filtro de `:648-653`:
@@ -127,7 +133,8 @@ Se mide con capturas a 1440 y 390, sin scroll horizontal.
 
 **T11. El monto se actualiza mientras se escribe el %** (pedido de Daniel).
 - Hoy `MoneyInput` llama `onChange` solo en el blur (`MoneyInput.tsx:72-86`): mientras se escribe, cambia solo el texto mostrado.
-- **Opción:** una prop opcional `liveChange?: boolean`, **apagada por defecto**. Con ella, `handleChange` también llama `onChange` con el valor parseado (la misma normalización y el mismo redondeo que el blur). El blur no cambia.
+- **Opción:** una prop opcional `liveChange?: boolean`, **apagada por defecto**. Con ella, `handleChange` también llama `onChange` con el valor parseado. El blur no cambia.
+- **Un solo parseo** (O2): la normalización, el redondeo a `decimals` y el piso `min` que hoy están dentro de `handleBlur` (`:76-84`) se extraen a una función del módulo, `parseDisplay(display, decimals, min)`, que llaman el blur y el camino vivo. Con la prop apagada el blur da exactamente lo mismo: la extracción no cambia ni una operación.
 - La usan solo las casillas de % de esta pantalla.
 - `MoneyInput` es compartido: 74 usos en 39 archivos (`grep -rn "<MoneyInput"`), y ninguno pasa la prop nueva. Con la prop apagada, el código que corre es el de hoy: la rama nueva está detrás de un `if (liveChange)`. No se toca la selección al entrar con Tab (#126), que sigue haciendo falta para escribir encima del % precargado.
 - **Descarté** un componente `PercentInput` aparte: tendría que copiar la lógica de selección de #126, y una copia de esa lógica es justo cómo volvería el defecto de «13.001.250».
@@ -150,10 +157,10 @@ El frontend no tiene infraestructura de tests. Como en #123, las funciones puras
 
 | # | Caso | Esperado |
 |---|---|---|
-| U1 | Precarga: guardada ReteFuente «3.5000», $35.000. Catálogo: [general] | general, `rate` 3,5 (número), $35.000, `touched` |
+| U1 | Precarga: guardada ReteFuente «3.5000», $35.000. Catálogo: [general] | general, `rate` 3,5 (número), `row.amount` 35.000, `touched` |
 | U2 | La misma guardada. Catálogo: [«Compras» 2,5, general], con Compras primero | general, `rate` 3,5 |
 | U3 | La misma. Catálogo: [general **inactiva**, «No declarante» 3,5 activa] | «No declarante», `rate` 3,5 |
-| U4 | La misma. Catálogo: [general inactiva] | T2: `config_id ""`, `staleRate` 3,5, monto y `touched` conservados |
+| U4 | La misma. Catálogo: [general inactiva] | T2: `config_id ""`, `staleRate` 3,5, `row.amount` 35.000 y `touched` conservados |
 | U5 | ICA Barranquilla «0.9660». Catálogo: [ICA Soledad 0,7, ICA Barranquilla 0,7] | Barranquilla, `rate` 0,966 |
 | U6 | ICA Barranquilla. Catálogo: [ICA Soledad] | T2 |
 | U7 | ReteFuente con `rate` nulo. Catálogo: [general] | general, `rate` 2,5 |
@@ -162,21 +169,21 @@ El frontend no tiene infraestructura de tests. Como en #123, las funciones puras
 | U10 | Default con [general inactiva, «No declarante» activa] | Ninguna |
 | U11 | Default con [«Compras» 2,5 activa] | Ninguna |
 | U12 | Default con [general `iva`] | Ninguna |
-| U13 | Borrador {«No declarante», `rate` 3,5, sin tocar}. Catálogo: [«No declarante» inactiva, general activa] | Fila con general, `rate` 3,5, `touched` falso |
+| U13 | Borrador {«No declarante», `rate` 3,5, `row.amount` 0, sin tocar}. Catálogo: [«No declarante» inactiva, general activa] | Fila con general, `rate` 3,5, `row.amount` 0, `touched` falso |
 | U14 | Borrador {«No declarante», `rate` 3,5}. Catálogo: [«No declarante» inactiva] | T2 con `staleRate` 3,5 |
 | U15 | Borrador con general activa | Igual |
 | U16 | Borrador anterior al cambio (sin `rate`), general activa | `rate` 2,5 |
-| U17 | Secuencia T4, base 1.000: `newRetRow`(general) → 25; `withRate` 3,5 → 35; `withAmount` 30 → 30; `withRate` 4 → 40; base 2.000 → 80; `withAmount` 70 → 70; base 3.000 → 70 | Esos montos, en ese orden |
-| U18 | Fila con monto editado (30, `touched`) → `withConfig`(«No declarante» 3,5) | `rate` 3,5, `touched` falso, monto 35 a base 1.000 |
+| U17 | Secuencia T4, se lee `effAmount`; base 1.000: `newRetRow`(general) → 25; `withRate` 3,5 → 35; `withAmount` 30 → 30; `withRate` 4 → 40; base 2.000 → 80; `withAmount` 70 → 70; base 3.000 → 70 | Esos montos, en ese orden |
+| U18 | Fila con monto editado (`row.amount` 30, `touched`) → `withConfig`(«No declarante» 3,5) | `rate` 3,5, `touched` falso y `effAmount` 35 a base 1.000 |
 | U19 | `rateWarning`: (25; 2,5) sí · (3,5; 2,5) no · (12,5; 2,5) no · (12,51; 2,5) sí · (0,5; 2,5) no · (0,49; 2,5) sí · (5; 19) no · (1,9; 19) sí · (15; 2) sí | Esos |
 | U20 | Payload de retención: `rate` 3,5, monto editado 30.000, base 1.000.000, general | `{retention_type: "retefuente", config_id: general, rate: 3.5, base: 1000000, amount: 30000}` |
-| U21 | Precarga del IVA: {rate «5.0000», base 1.000.000, monto 50.000} | `ivaRate` 5, monto 50.000, `ivaTouched` falso |
+| U21 | Precarga del IVA: {rate «5.0000», base 1.000.000, monto 50.000} | `ivaRate` 5, `ivaAmount` 50.000, `ivaTouched` falso |
 | U22 | Precarga del IVA: {rate «19.0000», base 1.000.000, monto 189.000} | `ivaRate` 19, `ivaTouched` verdadero |
 | U23 | Precarga del IVA con `rate` nulo, base 1.000.000, monto 190.000 | `ivaRate` 19, `ivaTouched` falso |
 | U24 | Payload del IVA con `ivaRate` 5 | `rate: 5` |
 | U25 | Borrador anterior al cambio, columna sin `ivaRate` | `ivaRate` 19 |
 | U26 | `rateOutOfRange`: 0 sí · −1 sí · 0,0001 no · 100 no · 100,01 sí | Esos |
-| U27 | Fila con `rate` 3,5 y monto editado 30 (`touched`) → `withRate`(3,5), el mismo valor | La misma fila: `touched` verdadero, monto 30 |
+| U27 | Fila con `rate` 3,5 y monto editado (`row.amount` 30, `touched`) → `withRate`(3,5), el mismo valor | Lee los CAMPOS de la fila, no `effAmount`: `touched` verdadero y `row.amount` 30. Así P16 (que solo cambia `effAmount`) no la toca |
 
 **e2e a 1440 y 390:**
 - **E1, reliquidar con % libre.** Se liquida una Entrada con ReteFuente al 3,5 digitado y se desliquida. Al abrir Liquidar, la fila trae «Retención en la Fuente», 3,5 y el mismo monto, sin «Sugerido». Al reliquidar, `rate` = 3,5 (leído por la API, no por el ORM).
@@ -206,7 +213,7 @@ La matriz va commiteada antes de plantar y no se reescribe.
 
 | P | Defecto | Debe caer | Tipo |
 |---|---|---|---|
-| P1 | La precarga toma `cfg.rate_pct` en lugar de la tasa guardada (el código de hoy) | U1, U2, U3, E1 | exacta |
+| P1 | La precarga toma `cfg.rate_pct` en lugar de la tasa guardada (el código de hoy) | U1, U2, U5, E1 (U3 queda verde: «No declarante» ya tiene 3,5) | exacta |
 | P2 | La precarga deja `rate` como string (sin `num()`) | U1, U2, U3, U5 | ≥ |
 | P3 | Sin tarifa usable, la fila se descarta (el código de hoy) | U4, U6, U8, E2 | exacta |
 | P4 | `pickTypeConfig` sin preferir la general (toma la primera) | U2 | exacta |
@@ -245,7 +252,7 @@ La matriz va commiteada antes de plantar y no se reescribe.
 - **Parity:** no aplica (cero migraciones).
 - **Suite completa:** diferida al checkpoint.
 - **Pantalla:** capturas a 1440 y 390 (T9).
-- **`MoneyInput` compartido** (T11): el e2e de #126 (`~/sac-evidencia/2026-11-20/coder-1-moneyinput-seleccion/e2e_moneyinput.mjs`, commit `a5bea01`), corrido contra la rama, tiene que dar lo mismo que en develop. Es la medida de que la prop apagada no cambió nada.
+- **`MoneyInput` compartido** (T11 y O2): el e2e de #126 (`~/sac-evidencia/2026-11-20/coder-1-moneyinput-seleccion/e2e_moneyinput.mjs`, commit `a5bea01`), corrido contra la rama, tiene que dar lo mismo que en develop. Es la medida de que la prop apagada no cambió nada.
 
 ## 9. Fuera de alcance
 
