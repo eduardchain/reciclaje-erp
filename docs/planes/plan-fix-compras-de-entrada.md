@@ -8,6 +8,7 @@ v1.1 · 23-nov-2026 · Coder 2 · nivel **lógica**: servicio de compras compart
 - **C3:** se suma T3b, un material que ENTRA a una compra que ya existe.
 - **P8, hueco propio:** P8 se planta por organización y no «siempre», y T10/T12 llevan una Entrada en su misma organización. Se suma P8b para editar.
 - **O1–O3:** en A2 (populate_existing), C1 (T4a cubre el contado) y B2 (texto del 422).
+- **Después del GO** (veredicto_plan_v1.1.md 8dafe84e, plan aprobado commiteado en 760aa82): D1 y D2 quedan decididas, se suma la nota O4 en B2 y la precisión O5 en P8. No cambian el arreglo, los tests ni las predicciones.
 
 | Parte | Defecto | Dónde | Evidencia |
 |---|---|---|---|
@@ -21,8 +22,8 @@ Lo de esta sesión está en `~/sac-evidencia/2026-11-23/bug-total-compra-130/cod
 - De B hay 0 casos en las 182 Entradas de producción (lectura del Coordinador).
 - Las lecturas de producción que pide este plan están en §C5.
 
-**Decisiones que esperan a Daniel (al autorizar el plan):**
-- **D1** (B2): una compra de Entrada no se edita desde Compras. Revierte #75 D7b.
+**Decisiones de Daniel** (23-nov, al autorizar el plan v1.1 con el GO de QA 2 8dafe84e; llegaron por el Coordinador). Las dos, las recomendadas:
+- **D1** (B2): una compra de Entrada no se edita desde Compras, ningún campo. Revierte #75 D7b.
 - **D2** (B3): ocultar «Cancelar» además de «Liquidar» y «Editar».
 
 ---
@@ -201,7 +202,12 @@ Editar una compra `liquidated` ya da 400 por estado. Lo único que se cierra es 
 **Qué depende hoy de editar la compra derivada** (`editar_derivada_dependencias.log`):
 - `test_edit_derived_purchase_allowed` (test_inbound_orders.py:624) afirma el 200 de D7b. Se re-semantiza a `…_blocked` (T14): esa es la reversión, a la vista.
 - El 422 de la Entrada al editar la factura de una compra tipo compra (inbound_order.py:1938) dice «…editela al liquidar (o en la compra del proveedor correspondiente)». Tiene dos problemas: con D1 el paréntesis manda a una puerta cerrada, y «editela al liquidar» no le dice qué hacer a quien ya liquidó la Entrada (el formateador que miente, #97; O3 de QA 2). El texto nuevo dice el camino real:
-  > «La factura vive en el reparto de cada compra: escríbala al liquidar. Si la Entrada ya está liquidada, revierta la liquidación y vuelva a liquidar con la factura en el reparto.»
+  > «La factura vive en el reparto de cada compra: escríbala al liquidar. Si la Entrada ya está liquidada, revierta la liquidación y vuelva a liquidar con la factura en el reparto; la liquidación quedará con la fecha del día en que vuelva a liquidar.»
+
+  **O4, nota de QA 2 después del GO.** Re-liquidar pone `liq_dt = business_today_noon()` a TODAS las compras de la Entrada, también a las que se reusan (inbound_order.py:768 y 964, #93 D21).
+  - Si la factura se corrige otro día, se mueven la fecha de liquidación y su efecto en los cortes (#61). Por eso el texto lo avisa.
+  - Es un costo previo y no lo causa D1: una compra `liquidated` tampoco se podía editar antes (400 por estado), así que corregir la factura de una Entrada liquidada ya obligaba a revertir y re-liquidar.
+  - Va como desviación declarada en el informe.
 
   Ese camino funciona sin tocar las líneas de la compra, porque la firma (l.857–861) no incluye la factura. Al re-liquidar con el mismo reparto, la compra se reusa y la l.892 le escribe `invoice_number`. También cambia «por proveedor» por «de cada compra», porque desde #122 el reparto es por compra.
 - En el frontend, nadie lleva a `/purchases/:id/edit` desde las pantallas de Entradas.
@@ -294,7 +300,7 @@ La matriz se commitea con el plan, antes de plantar. Las predicciones van escrit
 | P5 | Mover el `expire` a la rama `commit=True` (fuera del `else`) | igual que P1 | T6, T9–T14 |
 | P6 | Quitar el guard de `liquidate` (el código de hoy) | T9, T13a | todos los demás |
 | P7 | `inbound_order.py:962` sin `from_inbound=True` | **toda liquidación de Entrada, también la primera y también en el setup**: T1, T2, T3, T3b, T4a, T4b, T5, T6, T8, T9, T10, T11, T12, T13a, T13b, T14, T16+, y al menos el resto de las suites de Entradas. El puente se graba con el `flush` de la l.925, antes de la l.962, así que el guard encuentra la Entrada desde la primera liquidación (medido por QA 2, `p7_probe.txt` c000a929) | T7a, T7b |
-| P8 | El guard de `liquidate` mira la ORGANIZACIÓN y no la compra: el helper sin el filtro `purchase_id`, con `.limit(1)`, conservando el mensaje con ese número | T10, y dentro de la matriz solo T10. Al menos: fuera de la matriz, cualquier test que liquide una compra directa en una organización que tenga una Entrada | todos los demás. T9 y T13a siguen en 400 con el número correcto, porque su organización tiene una sola Entrada |
+| P8 | El guard de `liquidate` no mira la compra: el helper sin el filtro `purchase_id`, con `.limit(1)`, conservando el mensaje con ese número. En rigor mira la BASE entera, no la organización; en un test es lo mismo, porque conftest recrea el esquema por test (conftest.py:84–131; O5 de QA 2) | T10, y dentro de la matriz solo T10. Al menos: fuera de la matriz, cualquier test que liquide una compra directa en una base que tenga una Entrada | todos los demás. T9 y T13a siguen en 400 con el número correcto, porque su base tiene una sola Entrada |
 | P8b | Lo mismo que P8, en el guard de `update` | T12, y dentro de la matriz solo T12 (al menos, igual que P8) | todos los demás. T11, T13b y T14 siguen en 400 |
 | P9 | Quitar el guard de `update` | T11, T13b, T14 | todos los demás |
 | P10 | `inbound_order.py:886` sin `from_inbound=True` | T1, T2, T3, T3b, T4a, T4b, T5, T8, T16+: toda re-liquidación con el reparto cambiado da 400. Al menos: también los tests existentes que re-liquiden con el reparto cambiado | T6, T7a, T7b, T9, T10, T11, T12, T13a, T13b, T14: no re-liquidan con el reparto cambiado (T9 y T11 re-liquidan con el MISMO) o no pasan por la l.886 |
