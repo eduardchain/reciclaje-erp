@@ -518,6 +518,40 @@ def update_organization(
     return organization
 
 
+def users_in_other_active_org(
+    db: Session, user_ids: list[UUID], organization_id: UUID
+) -> set[UUID]:
+    """De `user_ids`, los que son miembros de OTRA org ACTIVA, distinta de esta.
+
+    D5 del plan quitar-clave-constante (H1): el admin de una org no resetea la
+    clave de alguien que tambien entra a otra org. Solo cuentan orgs activas:
+    los miembros de una org dada de baja ya reciben 403 en ella (#29), asi que
+    ahi no hay riesgo. UNA consulta para todos los ids (el listado).
+
+    ⚠️ No reemplaza a `get_user_org_count`: esa cuenta TODAS las membresias y
+    decide si quitar a un miembro BORRA el usuario; cambiarla a solo activas
+    borraria a quien sigue en una org inactiva.
+    """
+    if not user_ids:
+        return set()
+    rows = db.execute(
+        select(OrganizationMember.user_id)
+        .join(Organization, Organization.id == OrganizationMember.organization_id)
+        .where(
+            OrganizationMember.user_id.in_(user_ids),
+            OrganizationMember.organization_id != organization_id,
+            Organization.is_active.is_(True),
+        )
+        .distinct()
+    ).scalars().all()
+    return set(rows)
+
+
+def user_in_other_active_org(db: Session, user_id: UUID, organization_id: UUID) -> bool:
+    """Un solo usuario: ver `users_in_other_active_org`."""
+    return user_id in users_in_other_active_org(db, [user_id], organization_id)
+
+
 def get_user_org_count(db: Session, user_id: UUID) -> int:
     """Cuenta cuantas organizaciones tiene el usuario."""
     return db.execute(

@@ -50,8 +50,10 @@ export const rolesService = {
   createUserWithMembership: (orgId: string, data: CreateUserWithMembership) =>
     apiClient.post<OrgMemberResponse>(`/api/v1/organizations/${orgId}/members/create-user`, data).then((r) => r.data),
 
-  resetPassword: (orgId: string, userId: string) =>
-    apiClient.post(`/api/v1/organizations/${orgId}/members/${userId}/reset-password`).then((r) => r.data),
+  resetPassword: (orgId: string, userId: string, newPassword: string) =>
+    apiClient
+      .post(`/api/v1/organizations/${orgId}/members/${userId}/reset-password`, { new_password: newPassword })
+      .then((r) => r.data),
 
   deleteMember: (orgId: string, userId: string) =>
     apiClient.delete(`/api/v1/organizations/${orgId}/members/${userId}`),

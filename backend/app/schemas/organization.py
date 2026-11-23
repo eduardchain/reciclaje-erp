@@ -183,6 +183,10 @@ class OrganizationMemberResponse(BaseModel):
     user_full_name: str | None = None
     account_ids: list[UUID] = []
     org_count: int = 1
+    # D5 del plan quitar-clave-constante: el miembro pertenece ademas a OTRA org
+    # ACTIVA. Gobierna solo el reseteo de clave; `org_count` (que cuenta tambien
+    # orgs dadas de baja) sigue decidiendo el dialogo de quitar y el borrado.
+    in_other_active_org: bool = False
     # Alcance de recolector (SAC, plan recolector-alcance §4). None = sin alcance.
     collector_scope_id: UUID | None = None
 
@@ -209,7 +213,23 @@ class CollectorScopeResponse(BaseModel):
 
 
 class CreateUserWithMembership(BaseModel):
-    """Schema para crear usuario nuevo con membership en la org."""
+    """Schema para crear usuario nuevo con membership en la org.
+
+    La clave la elige el admin (D2 del plan quitar-clave-constante): calco de
+    `UserCreate.password` (min 8), el schema con el que se crea el usuario. No
+    vuelve en la respuesta ni se escribe en logs.
+    """
     email: EmailStr
     full_name: str
     role_id: UUID
+    password: str = Field(..., min_length=8, max_length=100)
+
+
+class ResetMemberPasswordRequest(BaseModel):
+    """Reseteo de clave de un miembro por el admin de la org (D1, patron #85).
+
+    min_length=6 es calco de `ChangePassword.new_password` y de
+    `ResetPasswordRequest` de Sistema. La clave NUNCA vuelve en el response
+    ni se escribe en logs.
+    """
+    new_password: str = Field(..., min_length=6)

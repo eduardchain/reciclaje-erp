@@ -14,6 +14,10 @@ class SystemOrgCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
     admin_email: EmailStr
     admin_full_name: str | None = Field(None, max_length=255)
+    # D3 del plan quitar-clave-constante: obligatoria si el admin es NUEVO (400);
+    # si el email ya existe se IGNORA, nunca pisa la clave de un usuario existente.
+    # Minimo 8: calco de UserCreate.password, el alta de usuario.
+    admin_password: str | None = Field(None, min_length=8, max_length=100)
 
 
 class SystemOrgUpdate(BaseModel):

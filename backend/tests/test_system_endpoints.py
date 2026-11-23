@@ -116,6 +116,7 @@ class TestSystemCreateOrganization:
                 "name": "New Corp",
                 "admin_email": "newadmin@example.com",
                 "admin_full_name": "New Admin",
+                "admin_password": "clave-newadmin-1",
             },
         )
         assert resp.status_code == 201

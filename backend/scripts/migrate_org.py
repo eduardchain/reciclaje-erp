@@ -23,6 +23,10 @@ Diferencias vs migrate_metarecycling.py (script anterior, hardcoded MetaRecyclin
 
 Uso:
     cd backend
+    # La clave del admin NO se pide (D3b del plan quitar-clave-constante v1.2): si el
+    # admin es nuevo, el script le genera una al azar en memoria que nadie conoce, y
+    # la real se la pone soporte desde Sistema -> Usuarios -> Resetear contrasena (#85).
+    # Si el email ya existia, el admin conserva la suya.
     ./venv/bin/python scripts/migrate_org.py \\
         --file ../data/migration_<org>.xlsx \\
         --org-name "Mi Empresa SAS" \\
@@ -59,6 +63,7 @@ Hojas del Excel (12; MapeoUN es read-only, las otras 11 escriben):
                             cuenta_pago, unidad_negocio, unidades_negocio (CSV), notas
 """
 import argparse
+import secrets
 import sys
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -326,6 +331,24 @@ def reset_org(api: APIClient, org_name: str, dry_run: bool) -> bool:
     return False
 
 
+ADMIN_KEY_MSG = (
+    "Si el admin era nuevo, nace SIN clave conocida: asignale la real desde "
+    "Sistema -> Usuarios -> Resetear contrasena (#85) y entregasela al cliente por un "
+    "canal privado. Si ya existia, conserva la suya."
+)
+
+
+def _random_admin_password() -> str:
+    """Clave del admin nuevo, al azar y en memoria (D3b del plan quitar-clave-constante v1.2).
+
+    `secrets`, nunca `random`, sin semilla ni valor por defecto: una semilla fija seria la
+    constante entrando por otra puerta. token_urlsafe(32) da 43 caracteres, dentro de
+    8..100 de SystemOrgCreate.admin_password. Nadie la conoce: no se imprime, no se
+    escribe en archivo ni log, no viaja por argumento.
+    """
+    return secrets.token_urlsafe(32)
+
+
 def ensure_org_and_admin(
     api: APIClient, org_name: str, admin_email: str, admin_name: str, dry_run: bool
 ) -> Optional[str]:
@@ -348,15 +371,20 @@ def ensure_org_and_admin(
     if dry_run:
         print(f"  (dry-run) Crearia org '{org_name}' + admin {admin_email}")
         return "00000000-0000-0000-0000-000000000000"
-    payload = {"name": org_name, "admin_email": admin_email, "admin_full_name": admin_name}
+    admin_password = _random_admin_password()
+    payload = {
+        "name": org_name,
+        "admin_email": admin_email,
+        "admin_full_name": admin_name,
+        "admin_password": admin_password,
+    }
     st, resp = api.post("/api/v1/system/organizations", payload)
     if st == 201:
-        print(
-            f"  ORG '{org_name}' creada (id={resp['id']}). "
-            f"Admin: {admin_email} (password default '123456' si era usuario nuevo)."
-        )
+        # El API no dice cual de los dos casos ocurrio (D3), asi que se nombran los dos.
+        print(f"  ORG '{org_name}' creada (id={resp['id']}). Admin: {admin_email}. {ADMIN_KEY_MSG}")
         return resp["id"]
-    print(f"  ERROR creando org: {st} - {resp}")
+    # Un 422 de FastAPI refleja en `input` lo que recibio: la clave no sale por aca.
+    print(f"  ERROR creando org: {st} - {str(resp).replace(admin_password, '***')}")
     return None
 
 
