@@ -203,9 +203,10 @@ export interface InboundPurchaseSummary {
 export interface InboundRetentionDetail {
   retention_type: "retefuente" | "reteiva" | "ica";
   municipality: string | null;
-  rate: number | null;
-  base: number | null;
-  amount: number;
+  /** Decimal: llega como string («3.5000»). La precarga lo pasa por num(). */
+  rate: number | string | null;
+  base: number | string | null;
+  amount: number | string;
 }
 
 /** Ajuste de descuadre generado al liquidar (D7) — la ganancia/pérdida que la

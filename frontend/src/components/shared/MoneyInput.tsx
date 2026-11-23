@@ -8,6 +8,23 @@ function getFormatter(decimals: number) {
   });
 }
 
+/**
+ * El parseo del texto mostrado: el MISMO para el blur y para `liveChange`
+ * (plan-sac-retefuente-porcentajes O2). Acepta tanto "1.5" (US) como "1,5"
+ * (CO) como decimal cuando decimals > 0; el regex de handleChange ya garantiza
+ * un solo separador, asi que basta con normalizar coma a punto. Para
+ * decimals=0 (montos), el separador se ignora.
+ */
+export function parseDisplay(display: string, decimals: number, min: number | undefined): number {
+  const normalized = decimals > 0
+    ? display.replace(",", ".")
+    : display.replace(/[.,]/g, "");
+  const parsed = parseFloat(normalized) || 0;
+  const factor = Math.pow(10, decimals);
+  const rounded = Math.round(parsed * factor) / factor;
+  return min !== undefined && rounded < min ? min : rounded;
+}
+
 interface MoneyInputProps {
   value: number;
   onChange: (value: number) => void;
@@ -18,6 +35,10 @@ interface MoneyInputProps {
   disabled?: boolean;
   /** Decimales permitidos (default: 0 para montos, usar 2 o 4 para cantidades) */
   decimals?: number;
+  /** Llama `onChange` tambien mientras se escribe, no solo en el blur (T11 de
+   *  plan-sac-retefuente-porcentajes). Apagada por defecto: sin ella corre el
+   *  codigo de siempre. */
+  liveChange?: boolean;
 }
 
 /**
@@ -38,6 +59,7 @@ export function MoneyInput({
   className,
   disabled,
   decimals = 0,
+  liveChange = false,
 }: MoneyInputProps) {
   const formatter = getFormatter(decimals);
   const [focused, setFocused] = useState(false);
@@ -72,17 +94,7 @@ export function MoneyInput({
   const handleBlur = () => {
     pointerDownRef.current = false; // D3
     setFocused(false);
-    // Aceptar tanto "1.5" (US) como "1,5" (CO) como decimal cuando decimals > 0.
-    // El regex de handleChange ya garantiza un solo separador, asi que basta con
-    // normalizar coma a punto. Para decimals=0 (montos), el separador se ignora.
-    const normalized = decimals > 0
-      ? displayValue.replace(",", ".")
-      : displayValue.replace(/[.,]/g, "");
-    const parsed = parseFloat(normalized) || 0;
-    const factor = Math.pow(10, decimals);
-    const rounded = Math.round(parsed * factor) / factor;
-    const final = min !== undefined && rounded < min ? min : rounded;
-    onChange(final);
+    onChange(parseDisplay(displayValue, decimals, min));
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,6 +102,7 @@ export function MoneyInput({
     // Permitir digitos, punto decimal y signo negativo
     if (raw === "" || raw === "-" || /^-?\d*[.,]?\d*$/.test(raw)) {
       setDisplayValue(raw);
+      if (liveChange) onChange(parseDisplay(raw, decimals, min));
     }
   };
 
