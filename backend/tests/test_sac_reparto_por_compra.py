@@ -346,7 +346,7 @@ class TestSlots:
         assert _bal(db_session, sup_a.id) == 0 and _bal(db_session, sup_b.id) == 0
 
     def test_t16_slots_son_identidad(
-        self, client, org_headers, db_session, wh, sup_a, sup_b, sup_c, m1,
+        self, client, org_headers, db_session, test_organization, wh, sup_a, sup_b, sup_c, m1,
     ):
         """R6: quitar la compra del MEDIO no renumera: la 3 se sigue llamando 3
         y conserva su numero de compra; la 2 sale cancelada como sobrante."""
@@ -362,6 +362,20 @@ class TestSlots:
         assert rows[by_slot[3]][2] == "liquidated" and rows[by_slot[3]][3] == 3
         assert rows[by_slot[2]][2] == "cancelled"
         assert len(rows) == 3
+        # T16+ (plan-fix-compras-de-entrada A1): este test ya pasaba por
+        # update(commit=False) al cambiar 100→150 y nunca miraba el total. Los
+        # montos van a mano: 150 kg × $1.000, contra los $100.000 de antes.
+        db_session.expire_all()
+        totales = {n: db_session.execute(select(Purchase.total_amount).where(
+            Purchase.purchase_number == n,
+            Purchase.organization_id == test_organization.id,
+        )).scalar_one() for n in (by_slot[1], by_slot[3])}
+        assert totales == {by_slot[1]: Decimal("150000"), by_slot[3]: Decimal("150000")}
+        assert _bal(db_session, sup_a.id) == Decimal("-150000")
+        assert _bal(db_session, sup_c.id) == Decimal("-150000")
+        assert _bal(db_session, sup_b.id) == 0
+        for tp in (sup_a, sup_b, sup_c):
+            _corrido_cierra(client, org_headers, db_session, tp.id)
 
     def test_t17_aviso_de_duplicado_solo_fuera_de_la_entrada(
         self, client, org_headers, db_session, wh, sup_a, m1,

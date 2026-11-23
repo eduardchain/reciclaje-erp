@@ -621,12 +621,14 @@ class TestPurchaseDerivation:
             f"/api/v1/purchases/{pid}", headers=org_headers
         ).json()["status"] == "cancelled"
 
-    def test_edit_derived_purchase_allowed(
+    def test_edit_derived_purchase_blocked(
         self, client, org_headers, warehouse, willard_tp, mat_regular,
     ):
-        """El edit directo de una compra puente REGISTERED (post-unliquidate)
-        se permite (flujo Erwin §7.2) — la re-liquidacion lo sincroniza por
-        firma de todos modos."""
+        """T14 (plan-fix-compras-de-entrada, D1 de Daniel 23-nov): el edit
+        directo de una compra de Entrada REGISTERED (post-unliquidate) ya NO se
+        permite. Revierte el «se permite» de #75 D7b: editarla por fuera dejaba
+        la compra distinta del reparto, que es la fuente de verdad. Se corrige
+        desde la Entrada."""
         result = self._liquidated(
             client, org_headers, warehouse, mat_regular, willard_tp
         )
@@ -644,8 +646,11 @@ class TestPurchaseDerivation:
                 }]
             },
         )
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["lines"][0]["quantity"] == 450
+        assert resp.status_code == 400, resp.text
+        assert f"Entrada #{result['order_number']}" in resp.json()["detail"]
+        lines = client.get(f"/api/v1/purchases/{pid}", headers=org_headers).json()["lines"]
+        assert [(float(ln["quantity"]), float(ln["unit_price"])) for ln in lines] == [
+            (500.0, 1200.0)]
 
     def test_supplier_behavior_enforced(
         self, client, org_headers, db_session, test_organization, warehouse, mat_regular,

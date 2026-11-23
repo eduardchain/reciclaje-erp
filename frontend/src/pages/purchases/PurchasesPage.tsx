@@ -63,9 +63,13 @@ function ActionsCell({ purchase }: { purchase: PurchaseResponse }) {
   const linkedPaymentTotal = linkedQuery.data?.linked_payment_total ?? 0;
   const linkedLoading = cancelOpen && isLiquidated && linkedQuery.isLoading;
 
-  const canEdit = purchase.status === "registered" && !purchase.double_entry_id && hasPermission("purchases.edit");
-  const canLiquidate = purchase.status === "registered" && !purchase.double_entry_id && hasPermission("purchases.liquidate");
-  const canCancel = (purchase.status === "registered" || purchase.status === "liquidated") && !purchase.double_entry_id && hasPermission("purchases.cancel");
+  // Una compra de Entrada se maneja SOLO desde su Entrada: el servidor
+  // rechaza editarla, liquidarla o cancelarla (D1/D2 de Daniel, 23-nov,
+  // plan-fix-compras-de-entrada.md B3). No ofrecer lo que el servidor rechaza.
+  const fromInbound = !!purchase.inbound_order_id;
+  const canEdit = purchase.status === "registered" && !purchase.double_entry_id && !fromInbound && hasPermission("purchases.edit");
+  const canLiquidate = purchase.status === "registered" && !purchase.double_entry_id && !fromInbound && hasPermission("purchases.liquidate");
+  const canCancel = (purchase.status === "registered" || purchase.status === "liquidated") && !purchase.double_entry_id && !fromInbound && hasPermission("purchases.cancel");
 
   const currentUrl = location.pathname + location.search;
 
