@@ -632,6 +632,25 @@ export default function InboundDetailPage() {
                     }
                   />
                 )}
+                {/* Entrada #142: «Total Liquidado» es el subtotal y no dice que
+                    hubo retención. Con retenciones, el neto que queda al
+                    proveedor va debajo; sin ellas, la tarjeta no cambia. */}
+                {canViewPrices && totals.count > 0 && totals.ret > 0 && (
+                  <>
+                    <InfoRow
+                      label="Retenciones"
+                      value={
+                        <span className="font-semibold tabular-nums">{fmtMoney(-totals.ret)}</span>
+                      }
+                    />
+                    <InfoRow
+                      label="Total al proveedor"
+                      value={
+                        <span className="font-semibold tabular-nums">{fmtMoney(totals.total)}</span>
+                      }
+                    />
+                  </>
+                )}
                 {/* Legacy 1:1 (ciclos B-D): la cara financiera es la derivada */}
                 {isLegacy && (
                   <>
