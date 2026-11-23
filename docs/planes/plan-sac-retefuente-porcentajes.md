@@ -1,4 +1,10 @@
-# Plan: elegir el % de ReteFuente al liquidar una Entrada, con uno por defecto (v1.0)
+# Plan: elegir el % de ReteFuente al liquidar una Entrada, con uno por defecto (v1.1)
+
+- **v1.1** (condiciones de QA 1 sobre la v1.0 `2a97489`; veredicto en `~/sac-evidencia/2026-11-23/qa-1-retefuente/veredicto_plan_v1.0.md`):
+  - C1: el borrador también borraba en silencio una retención cuya tarifa se desactivó. Va a T2b, con U14–U16, E5 y P12.
+  - C2: la matriz se reescribió, cada fila marcada «exacta» o «≥». Las funciones reciben el catálogo **sin filtrar** y comparten un solo predicado (`isUsableConfig`), así que el chequeo de `is_active` sostiene casos (P6) y no es defensivo.
+  - C3: la precarga ignora las tarifas `base_kind='iva'`. Va a T1, con U13 y P7.
+  - C4: §2 dice lo cierto sobre `PurchaseLiquidatePage` y sobre `RetentionsPage` (un solo predicado del default).
 
 - **Pedido** (Johana, vía Daniel, 23-nov): en ReteFuente maneja porcentajes distintos. Quiere elegir el porcentaje al liquidar una Entrada, y que venga uno por defecto, el de hoy.
 - **Autor:** Eco Coder 1. Rama `coder-1/retefuente-porcentajes` sobre develop `dea2320`.
@@ -15,43 +21,57 @@
 
 **Falta:**
 1. **El defecto de la precarga** (pre-existente, registrado en #112 como defecto 3). Al reliquidar una Entrada desliquidada (#93 D20), `InboundLiquidatePage.tsx:611-617` reconoce la tarifa guardada solo por (tipo, municipio). Con dos ReteFuente toma **la primera del catálogo**, y al liquidar manda **su** `rate`. El monto queda bien, porque la fila llega con `touched: true` (#79 F1). Lo que se corrompe es la tasa de auditoría, y el «Sugerido» muestra otra tasa. Hoy no muerde: hay una sola ReteFuente. **Empieza a morder el día que Johana cree la segunda**, que es justo lo que pide este cambio. Por eso va primero.
-2. **Una tarifa guardada que ya no está en el catálogo desaparece de la precarga EN SILENCIO** (`:618`, `if (!cfg) return null`). Si Johana reliquida sin notarlo, la compra nace sin la retención y al proveedor se le debe de más. Es la misma familia que el punto 1, y aparece en cuanto haya que desactivar una tarifa.
+2. **Una retención cuya tarifa ya no está activa desaparece EN SILENCIO, por dos caminos:**
+   - la precarga del servidor: `:618`, `if (!cfg) return null`;
+   - el borrador de `localStorage`: `:648-653`, `retentions.filter((r) => !r.config_id || configById.has(r.config_id))`. Este camino lo encontró QA 1 (C1); mi barrido buscó `retentionConfigs.find` y este usa `configById.has`.
+
+   Si Johana liquida sin notarlo, la compra nace sin la retención y al proveedor se le debe de más. Es la misma familia que el punto 1, y aparece en cuanto haya que desactivar una tarifa.
 3. **Ninguna tarifa viene por defecto.** «+ Retención» agrega la fila con el selector vacío y en rojo.
 
 ## 2. Barrido de consumidores
 
-Comandos y salida en `barrido_consumidores.log`.
+Comandos y salida en `barrido_consumidores.log`. Lo que agregó QA 1 está marcado.
 
 | Archivo | Usos | ¿Lo toca el plan? |
 |---|---|---|
-| `pages/inbound/InboundLiquidatePage.tsx` | 10 | **Sí.** Es la única precarga que reconoce una tarifa guardada (grep `retentionConfigs.find`: un solo resultado, `:613`) |
-| `pages/treasury/RetentionsPage.tsx` | 13 | Solo con D1-B, para mostrar cuál es la tarifa por defecto. Con D1-C, también la marca |
-| `pages/purchases/PurchaseLiquidatePage.tsx` (compartida, 7 orgs) | 8 | **No.** Arranca vacía, sin precarga. Para SAC es inalcanzable desde el canal único (#80 B1), y en las otras orgs las retenciones están detrás del flag. El default no se agrega acá: nadie de SAC llega |
+| `pages/inbound/InboundLiquidatePage.tsx` | 10 | **Sí, en dos caminos.** La precarga del servidor (`:611-617`, el único `retentionConfigs.find`) y la restauración del borrador (`:648-653`, `configById.has`; C1 de QA 1) |
+| `pages/treasury/RetentionsPage.tsx` | 13 | **Sí, con D1-A** (y con C). Muestra «Se propone al liquidar» junto a la tarifa que devuelve **la misma** `defaultRetentionConfig` que usa la liquidación: un solo predicado, no dos (C4 b). Con D1-C, además, el interruptor |
+| `pages/purchases/PurchaseLiquidatePage.tsx` (compartida, 7 orgs) | 8 | **No, fuera de alcance. Pero SAC SÍ llega a ella**, y la v1.0 decía lo contrario (C4 a). Una compra de Entrada desliquidada vuelve a `registered`, `canLiquidate` solo mira status, DP y permiso (`PurchaseDetailPage.tsx:69`, `PurchasesPage.tsx:67`, verificado), `purchase.liquidate` no tiene guard de Entrada (lectura de QA 1), y el detalle de la Entrada enlaza a la compra. Queda fuera porque arranca vacía: no tiene precarga, así que no sufre §1.1 ni §1.2, y el default no se le agrega. Que se pueda liquidar sola una compra de Entrada, saltándose la liquidación atómica (#93 D14), es otro hallazgo; QA 1 se lo pasa al Coordinador |
 | `components/shared/DocumentTaxesCard.tsx`, `pages/sales/SaleLiquidatePage.tsx`, `pages/willard/WillardDeliveryDetailPage.tsx` | 8 / 2 / 2 | **No.** Son impuestos de venta y salidas (#112), con otro selector y otras entidades |
 | `hooks/useMasterData.ts`, `services/thirdParties.ts`, `types/third-party.ts` | 3 / 7 / 1 | No (lectura del catálogo, sin cambios de contrato) |
-| `backend/.../inbound_orders.py:196` (`InboundRetentionDetail`) | 1 | No. Ya devuelve `rate`, que es lo que la precarga necesita |
+| `InboundRetentionDetail`: schema en `schemas/inbound_order.py:271`, construido en `endpoints/inbound_orders.py:196` (O1) | 1 | No. Ya devuelve `rate`, que es lo que la precarga necesita |
 
 ## 3. Decisiones técnicas (las propongo yo; las revisa QA)
 
 **T1. La precarga reconoce la tarifa por (tipo, municipio, TASA), no por `config_id`.**
 - Lo que se guarda en `purchase_retentions` es `rate`. El concepto y el `config_id` no se guardan (#112 e: `config_id` viaja sin persistir). Si se reconoce por la tasa, la reliquidación vuelve a guardar **la misma tasa** que tenía. Esa es la invariante que importa.
+- **Solo son candidatas las tarifas que pasan `isUsableConfig` (T3): activas y con `base_kind='subtotal'`** (C3). El PATCH permite cambiar `base_kind` (`schemas/third_party.py:142`). Una tarifa sobre el IVA que coincide en (tipo, tasa) se mostraría en el selector (`:1611` deja pasar la ya elegida), y el servidor la rechaza recién al liquidar (#112 e). Esa fila cae en T2.
 - Cómo se compara: `rate` es `Numeric(7,4)` y llega como **string** («2.5000», trampa #93). `rate_pct` es `Numeric(5,2)` y llega como float. Se comparan `Math.round(num(x) × 10000)` de cada lado, con `num()` en la frontera. El tipo `InboundRetentionDetail.rate: number` miente y se corrige a `number | string | null`.
-- **Si hay varias con la misma tasa** (dos conceptos al 2,5 %): se prefiere la que no tiene concepto, y si no la hay, la primera del catálogo. Es inocuo, porque lo que se guarda es idéntico. Se declara.
-- **Sin tasa guardada** (filas viejas con `rate` nulo; hoy son 0 en prod): si hay exactamente una tarifa de ese (tipo, municipio), se usa esa, como hoy. Si hay varias, se aplica T2.
+- **Si hay varias con la misma tasa** (dos conceptos al 2,5 %): se prefiere la que no tiene concepto, y si no la hay, la primera del catálogo. Es inocuo, porque lo que se guarda es idéntico. Se declara. La función **no confía en el orden de la API** (que hoy pone primero la general, `retention_entities.py:196`): la preferencia la decide ella.
+- **Sin tasa guardada** (filas viejas con `rate` nulo; hoy son 0 en prod, O3): si hay exactamente una candidata de ese (tipo, municipio), se usa esa, como hoy. Si hay varias, se aplica T2.
 - **Descartado:** guardar `config_id` en `purchase_retentions`. Costaría una migración en una tabla compartida y no mejora nada. Si Johana edita la tasa de una tarifa en el catálogo (el PATCH lo permite), reconocer por `config_id` mostraría la tasa NUEVA con el monto viejo y guardaría esa mezcla. Reconocer por la tasa deja la fila sin tarifa y le pide elegir, que es lo correcto: la tasa cambió.
 
-**T2. Una retención guardada que no encuentra su tarifa NO desaparece** (arreglo del punto 2 de §1).
+**T2. Una retención guardada que no encuentra su tarifa NO desaparece** (arreglo de §1.2, camino del servidor).
 - Queda la fila con `config_id: ""`, su monto guardado y `touched: true`, y una nota debajo: «La tarifa de 3,5 % ya no está activa: elija otra o quite la retención».
 - La validación que ya existe («falta elegir la tarifa de una retención») bloquea el Liquidar hasta que se elija o se quite. Fail-closed: lo peor que pasa es un clic de más, nunca una compra sin la retención que tenía.
 - La tasa vieja que muestra la nota se guarda en un campo opcional de la fila (`staleRate?: number`). `assertDraftShape` lo acepta si es número o si falta, así que un borrador escrito antes del cambio sigue siendo válido.
 
-**T3. El default vive en una función pura y solo se usa al apretar «+ Retención».**
-- Las dos funciones van en `utils/retentionDefaults.ts`: `matchSavedRetention(saved, configs)` (T1/T2) y `defaultRetentionConfig(configs, …)` (D1). Las usa solo `InboundLiquidatePage`.
+**T2b. El borrador tampoco la borra** (C1, camino de `localStorage`).
+- El filtro de `:648-653` se reemplaza por `reviveDraftRetention(row, catalog)`, pura:
+  - si la fila tiene `config_id` y esa tarifa es candidata (activa y `subtotal`), queda igual;
+  - si la tiene y ya no es candidata, se convierte en fila T2: `config_id: ""`, `staleRate` = el `rate_pct` de esa tarifa, tomado de `retentionRows`, que **sí** trae las inactivas (`list_retention_rows`, sin filtro de estado);
+  - si no la tiene (fila sin elegir), queda igual.
+- El monto y `touched` se conservan. Si la fila no estaba tocada, el monto mostrado queda en 0, y la validación bloquea igual por la tarifa que falta.
+
+**T3. El default vive en una función pura, con un solo predicado.**
+- Las funciones van en `utils/retentionDefaults.ts`: `matchSavedRetention(saved, catalog)` (T1 y T2), `reviveDraftRetention(row, catalog)` (T2b) y `defaultRetentionConfig(catalog)` (D1).
+- **Las tres reciben `retentionRows` sin filtrar** (C2), y deciden qué tarifa sirve con **un solo predicado**, `isUsableConfig(cfg)`: tiene `config_id`, está activa y es `base_kind='subtotal'`. Como el catálogo llega sin filtrar, ese chequeo sostiene casos (U3, U10, U14 por `is_active`; U12, U13, U16 por `base_kind`) en vez de ser defensivo. `retentionConfigs` (la lista filtrada de `:578`) sigue alimentando el selector, como hoy.
+- `defaultRetentionConfig` la usan **dos pantallas**: Liquidar Entrada, al apretar «+ Retención», y Tesorería → Retenciones, para la marca «Se propone al liquidar». Si la regla cambia, cambia en las dos.
 - Con default, la fila nueva nace con esa tarifa elegida y `touched: false`, o sea con el monto precalculado. Cambiarla es el mismo selector de hoy.
 - El default **nunca** es una tarifa inactiva ni una `base_kind='iva'`: el servidor la rechaza en compras (#112 e), y ofrecerla por defecto sería ofrecer un 422.
 - En el selector, la tarifa por defecto lleva «· por defecto», para que se vea por qué vino elegida.
 
-**T4. Mobile 390.** El bloque de retenciones vive en la tarjeta de cada compra y no cambia de forma. Lo nuevo es la nota de T2 (texto que se parte en varias líneas, sin ancho fijo) y el «· por defecto» dentro del item del selector. Se mide con captura a 1440 y a 390 y sin scroll horizontal.
+**T4. Mobile 390.** El bloque de retenciones vive en la tarjeta de cada compra y no cambia de forma. Lo nuevo es la nota de T2 y T2b (texto que se parte en varias líneas, sin ancho fijo), el «· por defecto» dentro del item del selector y la marca de Tesorería → Retenciones. Se mide con capturas a 1440 y a 390, sin scroll horizontal.
 
 **T6. El seeder no vuelve a crear una tarifa que Johana desactivó** (lo encontré verificando el plan; con A es necesario).
 - Hoy `create_retention_configs` (`seed_sac_org.py:1270-1277`) hace POST de cada tarifa de `RETENTION_CONFIGS` y solo tolera el 409, que el servicio devuelve únicamente si hay una tarifa **activa** igual (`find_active_config`). Si Johana desactiva la ReteFuente general, la próxima provisión la crea de nuevo, activa al 2,5 %, y con A **el default resucita** sin que nadie lo decida. Es la familia de «el seeder no pisa lo que no puso él» (#109, #116).
@@ -89,49 +109,59 @@ Comandos y salida en `barrido_consumidores.log`.
 
 El frontend no tiene infraestructura de tests. Como en #123, las funciones puras se prueban con casos por `node`, y la pantalla con e2e de Playwright contra `:8011`/`:5181` y la base `reciclaje_coder_1`. Los datos de prueba se crean por API **solo en local**.
 
-**Casos puros** (`utils/retentionDefaults.ts`):
+**Casos puros** (`utils/retentionDefaults.ts`). Todas las tasas guardadas van como string, como las manda la API.
 
 | # | Caso | Esperado |
 |---|---|---|
-| U1 | Guardada «2.5000» (string). Catálogo: general 2,5 y «No declarante» 3,5 | La general |
+| U1 | Guardada «2.5000». Catálogo: general 2,5 y «No declarante» 3,5 | La general |
 | U2 | Guardada «3.5000», mismo catálogo | «No declarante». **Es el defecto de hoy**: el código actual da la general |
-| U3 | Guardada 3,5. Catálogo: solo la general 2,5 | Sin tarifa, con `staleRate: 3.5` (T2) |
-| U4 | Dos tarifas al 2,5 (general y «Compras») | La general |
+| U3 | Guardada «3.5000». Catálogo: general 2,5 activa y «No declarante» 3,5 **inactiva** | Sin tarifa, con `staleRate: 3.5` (T2) |
+| U4 | Dos al 2,5, con «Compras» **antes** que la general en el catálogo | La general |
 | U5 | Dos al 2,5, las dos con concepto | La primera del catálogo |
-| U6 | ICA: guardada «Barranquilla» 0,7, catálogo con ICA Barranquilla 0,7 y Soledad 0,7 | Barranquilla (el municipio también decide) |
-| U7 | `rate` nulo y una sola tarifa de ese tipo | Esa |
-| U8 | `rate` nulo y dos | Sin tarifa (T2) |
+| U6 | ICA: guardada «Barranquilla» «0.7000». Catálogo con ICA **Soledad** 0,7 antes que Barranquilla 0,7 | Barranquilla (el municipio también decide) |
+| U7 | `rate` nulo y una sola candidata de ese tipo | Esa |
+| U8 | `rate` nulo y dos candidatas | Sin tarifa (T2), sin `staleRate` |
 | U9 | `defaultRetentionConfig`: general activa, `base_kind=subtotal` | La general |
-| U10 | La general inactiva | Ninguna |
+| U10 | La general inactiva (el catálogo la trae igual) | Ninguna |
 | U11 | Solo hay ReteFuente con concepto | Ninguna (con A) |
 | U12 | La general con `base_kind='iva'` | Ninguna |
+| U13 | Guardada «2.5000». Catálogo: general 2,5 con `base_kind='iva'` y «No declarante» 3,5 | Sin tarifa, con `staleRate: 2.5` (C3) |
+| U14 | Borrador con «No declarante», que ahora está inactiva en el catálogo | Fila T2: `config_id ""`, `staleRate: 3.5`, mismo monto y `touched` |
+| U15 | Borrador con la general, activa | Igual que antes |
+| U16 | Borrador con una tarifa que ahora tiene `base_kind='iva'` | Fila T2 con su tasa |
 
 **e2e a 1440 y 390:**
 - **E1, reliquidar.** Una Entrada liquidada con ReteFuente 3,5 «No declarante» se desliquida y se abre Liquidar. La fila precarga «No declarante (3,5 %)», con el mismo monto y sin «Sugerido». Al liquidar, `purchase_retentions.rate` = 3,5 (se lee por la API, no por el ORM).
 - **E2, tarifa desactivada.** Se desactiva «No declarante» y se reabre Liquidar. La fila sigue ahí, sin tarifa, con la nota y con Liquidar bloqueado («falta elegir la tarifa»). Se elige la general, y Liquidar se habilita.
 - **E3, default.** «+ Retención» en una compra nueva trae «Retención en la Fuente · por defecto (2,5 %)» y el monto precalculado. Se elige otra tarifa, y el monto se recalcula.
 - **E4, sin default.** Con la general desactivada, «+ Retención» deja el selector vacío, como hoy.
+- **E5, borrador con tarifa desactivada** (C1). Se abre Liquidar, se agrega una retención «No declarante» (queda en el borrador) y se sale sin liquidar. Se desactiva «No declarante» y se vuelve a abrir. La fila sigue, sin tarifa y con la nota de 3,5 %, y Liquidar queda bloqueado.
+- **E6, la marca en Tesorería → Retenciones.** La general muestra «Se propone al liquidar» y ninguna otra fila la muestra. Con la general desactivada, ninguna fila la muestra.
 - **Control positivo de E1:** con el código de `dea2320`, E1 guarda 2,5. Esa es la diagonal del plantado P1.
 
 **Backend:** con A, cero cambios en `app/`. El único test de Python es el del seeder (T6). Con B: el endpoint (feliz, sin historia, compra revertida que no cuenta, 403 sin flag, 403 con alcance, y RBAC con control positivo).
 
 ## 6. Plantado
 
-La matriz va commiteada antes de plantar y no se reescribe.
+La matriz va commiteada antes de plantar y no se reescribe. «Exacta» = caen esos y ningún otro. «≥» = caen al menos esos, porque el defecto vive en una vía que comparten otros casos.
 
-| P | Defecto | Debe caer |
-|---|---|---|
-| P1 | Volver a reconocer por (tipo, municipio): el código de hoy | U2, E1 |
-| P2 | Comparar `rate` sin `num()` (string contra número) | U1, U2, U4 (≥) |
-| P3 | Tarifa no encontrada → se descarta la fila (el código de hoy) | U3, U8, E2 |
-| P4 | Empate de tasa sin preferir la general | U4 |
-| P5 | Ignorar el municipio en el reconocimiento | U6 |
-| P6 | El default no mira `is_active` | U10, E4 |
-| P7 | El default no mira `base_kind` | U12 |
-| P8 | El default acepta una tarifa con concepto | U11 |
-| P9 | «+ Retención» con `touched: true` (el monto no se precalcula) | E3 |
-| P10 | El seeder vuelve a ignorar las tarifas inactivas (el código de hoy) | el test de T6, caso inactiva |
-| P11 | El seeder compara sin normalizar el concepto | el test de T6 con concepto en otra grafía (≥) |
+Los chequeos de `is_active` y `base_kind` se plantan **una vez**, en `isUsableConfig`, porque es el único lugar donde viven (T3). Plantarlos por separado en cada función mediría tres copias que el diseño no tiene.
+
+| P | Defecto | Debe caer | Tipo |
+|---|---|---|---|
+| P1 | Reconocer por (tipo, municipio) sin la tasa: el código de hoy | U2, U3, U13, E1, E2 | exacta |
+| P2 | Comparar la tasa con `===` sin normalizar (string contra número) | U1, U2, U4, U5, U6, E1 | exacta |
+| P3 | Tarifa no encontrada → se descarta la fila (el código de hoy) | U3, U8, U13, E2 | exacta |
+| P4 | Empate de tasa sin preferir la general (se queda con la primera del catálogo) | U4 | exacta |
+| P5 | Ignorar el municipio en el reconocimiento | U6 | exacta |
+| P6 | `isUsableConfig` no mira `is_active` | U3, U10, U14, E2, E4, E5, E6 | exacta |
+| P7 | `isUsableConfig` no mira `base_kind` (C3) | U12, U13, U16 | exacta |
+| P8 | El default acepta una tarifa con concepto | U11 | exacta |
+| P9 | «+ Retención» con `touched: true` (el monto no se precalcula) | E3 | exacta |
+| P10 | El seeder vuelve a ignorar las tarifas inactivas (el código de hoy) | caso «inactiva» del test de T6 | exacta |
+| P11 | El seeder compara sin normalizar | caso «otra grafía» del test de T6 | exacta |
+| P12 | El borrador vuelve a filtrar la fila: el código de hoy (C1) | U14, U16, E5 | exacta |
+| P13 | Tesorería → Retenciones marca con su propio predicado (`retefuente` y sin concepto, sin mirar `is_active`) | E6 | exacta |
 
 ## 7. Gates (nivel lógica, flujo del 17-nov)
 
