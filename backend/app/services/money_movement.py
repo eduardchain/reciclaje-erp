@@ -1345,10 +1345,9 @@ class CRUDMoneyMovement:
                 )
             )
         elif allowed_account_ids is not None:
-            query = query.where(
-                (MoneyMovement.account_id.in_(allowed_account_ids))
-                | (MoneyMovement.account_id.is_(None))
-            )
+            # Cuenta permitida o NULL (D3): el predicado de account_access.
+            from app.services.account_access import account_filter_clause
+            query = query.where(account_filter_clause(allowed_account_ids))
 
         # Filtro de visibilidad: sin permiso view_all, solo ver movimientos propios.
         # Los movimientos con created_by=NULL son automáticos (comisiones, etc.)
@@ -1529,10 +1528,8 @@ class CRUDMoneyMovement:
             .group_by(MoneyMovement.movement_type)
         )
         if allowed_account_ids is not None:
-            query = query.where(
-                (MoneyMovement.account_id.in_(allowed_account_ids))
-                | (MoneyMovement.account_id.is_(None))
-            )
+            from app.services.account_access import account_filter_clause
+            query = query.where(account_filter_clause(allowed_account_ids))
 
         if date_from:
             query = query.where(MoneyMovement.date >= date_from)

@@ -301,7 +301,7 @@ Se commitea ANTES de plantar, con la predicción por fila. Un defecto en una ví
 5. **Gates:**
    - **Dirigidas:** el set de §4 a archivo, con la predicción escrita antes.
      - Todo pytest lleva `TEST_DATABASE_URL` exportado hacia `reciclaje_test_coder_2` en el MISMO comando. Lo de más de 200 tests, y el golden, esperan el lock del Coordinador.
-   - **Plantado:** P1–P12 contra la matriz commiteada.
+   - **Plantado:** P1–P17 contra la matriz commiteada.
    - **Golden: aplica**, porque toca `money_movements.py`, `money_accounts.py`, `reports.py` y un listener sobre toda sesión.
      - `CAPTURES` corre como superusuario, así que por construcción da 0/0 en `/money-accounts`, `/money-movements` y los dos estados de cuenta.
      - Una sola BD alcanza: no hay cambio de esquema.

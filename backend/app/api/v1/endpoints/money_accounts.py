@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from fastapi import HTTPException
 from app.api.deps import require_permission, get_db
+from app.models.money_account import MoneyAccount
 from app.schemas.money_account import (
     MoneyAccountCreate,
     MoneyAccountUpdate,
@@ -18,7 +19,7 @@ from app.schemas.money_account import (
 )
 from app.services.base import PaginatedResponse
 from app.services.money_account import money_account
-from app.services.collector_scope import accounts_for
+from app.services.account_access import accounts_for
 
 router = APIRouter()
 
@@ -26,8 +27,8 @@ router = APIRouter()
 def _get_allowed_accounts(db: Session, ctx: dict) -> list[UUID] | None:
     """Retorna lista de account_ids permitidos o None si ve todo.
 
-    Con alcance de recolector (#124) la lista vacia es NINGUNA y el rol admin
-    no la salta; la regla vive en `collector_scope.accounts_for`."""
+    Con alcance de recolector (#129) la lista vacia es NINGUNA y el rol admin
+    no la salta; la regla vive en `account_access.accounts_for`."""
     return accounts_for(db, ctx)
 
 
@@ -44,7 +45,9 @@ def list_money_accounts(
 ):
     """Listar cuentas de dinero con paginacion y filtros."""
     allowed = _get_allowed_accounts(db, org_context)
-    result = money_account.get_multi(
+    # Cuentas asignadas: el filtro va en la CONSULTA, antes de contar y de
+    # paginar. Filtrar la pagina ya cortada dejaba `total` y la pagina mal.
+    return money_account.get_multi(
         db=db,
         organization_id=org_context["organization_id"],
         skip=skip,
@@ -53,15 +56,8 @@ def list_money_accounts(
         search=search,
         sort_by=sort_by,
         sort_order=sort_order,
+        extra_filters=None if allowed is None else [MoneyAccount.id.in_(list(allowed))],
     )
-    # Filtrar por cuentas asignadas si aplica
-    if allowed is not None:
-        allowed_set = set(allowed)
-        filtered = [i for i in result.items if i["id"] in allowed_set]
-        result = PaginatedResponse(
-            items=filtered, total=len(filtered), skip=skip, limit=limit
-        )
-    return result
 
 
 @router.post("", response_model=MoneyAccountResponse, status_code=status.HTTP_201_CREATED)

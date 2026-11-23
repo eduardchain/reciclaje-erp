@@ -31,6 +31,7 @@ from app.schemas.reports import (
     TreasuryDashboardResponse,
 )
 from app.services.reports import report_service
+from app.services.account_access import accounts_for
 
 router = APIRouter()
 
@@ -317,11 +318,13 @@ def get_treasury_dashboard(
     Dashboard financiero de tesoreria.
 
     Incluye: cuentas por tipo, CxC/CxP, provisiones, MTD ingresos/egresos,
-    y ultimos 10 movimientos.
+    y ultimos 10 movimientos. Con cuentas asignadas, solo las suyas (las
+    cuenta-NULL siguen, D3); sin asignaciones o admin, todas.
     """
     return report_service.get_treasury_dashboard(
         db=db,
         organization_id=org_context["organization_id"],
+        allowed_account_ids=accounts_for(db, org_context),
     )
 
 
