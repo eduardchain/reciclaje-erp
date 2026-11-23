@@ -885,7 +885,7 @@ class InboundOrderService:
                     )
                     existing_p, u_warnings = purchase_service.update(
                         db, existing_p.id, upd, organization_id,
-                        user_id=user_id, commit=False,
+                        user_id=user_id, commit=False, from_inbound=True,
                     )
                     warnings.extend(u_warnings)
                 elif invoice is not None:
@@ -966,6 +966,7 @@ class InboundOrderService:
                 immediate_payment=pay_account is not None,
                 payment_account_id=pay_account,
                 taxes_data=taxes_by_slot.get(slot),
+                from_inbound=True,
             )
 
         # 4. Descuadres — SIEMPRE despues de las N compras (requisito de orden
@@ -1934,9 +1935,17 @@ class InboundOrderService:
             elif order.purchase is not None:
                 order.purchase.invoice_number = obj_in.invoice_number
             else:
+                # O3/O4 (plan-fix-compras-de-entrada.md B2): la compra ya no se
+                # edita desde Compras (D1). El camino real es el reparto; la
+                # firma no incluye la factura, asi que re-liquidar reusa la
+                # compra y le escribe invoice_number — pero con la fecha del
+                # dia (D21), y eso se avisa.
                 raise _err(
-                    "La factura vive en el reparto, por proveedor — editela al "
-                    "liquidar (o en la compra del proveedor correspondiente)"
+                    "La factura vive en el reparto de cada compra: escríbala al "
+                    "liquidar. Si la Entrada ya está liquidada, revierta la "
+                    "liquidación y vuelva a liquidar con la factura en el "
+                    "reparto; la liquidación quedará con la fecha del día en "
+                    "que vuelva a liquidar."
                 )
 
         db.commit()

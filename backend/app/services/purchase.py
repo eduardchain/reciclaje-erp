@@ -35,6 +35,33 @@ from app.services.material_cost_history import material_cost_history_service
 from app.services.money_movement import money_movement as mm_service
 
 
+def _linked_inbound_number(db: Session, purchase_id: UUID) -> Optional[int]:
+    """Numero de la Entrada viva (no anulada) a la que pertenece la compra, o
+    None si es una compra directa.
+
+    UN solo predicado para las tres puertas de Compras — cancelar (#93 D14),
+    liquidar y editar (plan-fix-compras-de-entrada.md B2): si divergen, una
+    compra de Entrada se liquida o se edita por fuera y la Entrada queda
+    trabada (re-liquidar 409, desliquidar 400, cancelar 400). Se lee por la
+    PUENTE, que cubre el legacy 1:1 backfilleado y las N del reparto (#122).
+    Una Entrada anulada no retiene sus compras: la salida de un estado ya
+    trabado es anular la Entrada y despues cancelar la compra suelta.
+    """
+    # Import local, tal como estaba dentro de cancel
+    from app.models.inbound_order import InboundOrder, InboundOrderPurchase
+    return db.execute(
+        select(InboundOrder.order_number)
+        .join(
+            InboundOrderPurchase,
+            InboundOrderPurchase.inbound_order_id == InboundOrder.id,
+        )
+        .where(
+            InboundOrderPurchase.purchase_id == purchase_id,
+            InboundOrder.status != "annulled",
+        )
+    ).scalar_one_or_none()
+
+
 class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
     """CRUD operations for Purchase with inventory and financial logic."""
 
@@ -388,9 +415,15 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         collector_commission_data: Optional[object] = None,
         commit: bool = True,
         taxes_data: Optional[List] = None,
+        from_inbound: bool = False,
     ) -> Purchase:
         """
         Liquidar compra registrada (cambiar status a 'liquidated').
+
+        from_inbound=True: solo lo pasa la liquidacion de la Entrada. La
+        excepcion al guard de la Entrada va por este kwarg y NUNCA por
+        commit=False — commit dice como se compone la transaccion, no quien
+        llama (plan-fix-compras-de-entrada.md B2, plantado P11).
 
         Confirma precios, mueve stock de transito a liquidado, recalcula costo
         promedio, y actualiza saldo del proveedor. NO involucra pago (cuenta de dinero).
@@ -438,6 +471,21 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Compra ya esta {purchase.status}. Solo se pueden liquidar compras registradas."
             )
+
+        # Una compra de Entrada se liquida SOLO desde la Entrada: liquidarla
+        # sola la deja sin descuadre, comision, IVA ni retenciones, y traba la
+        # Entrada (QA 1, 23-nov). Va despues del check de estado: solo cambia
+        # el caso registered, que es el defectuoso.
+        if not from_inbound:
+            linked_number = _linked_inbound_number(db, purchase_id)
+            if linked_number is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Esta compra pertenece a la Entrada #{linked_number} — "
+                        "liquídela desde la Entrada"
+                    ),
+                )
 
         if liquidation_date is not None:
             doc_date = purchase.date.date() if hasattr(purchase.date, "date") else purchase.date
@@ -749,18 +797,7 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         # cambio. El deadlock que Ciclo C resolvio no vuelve: el annul de la
         # Entrada ahora SI cubre liquidadas (delega en unliquidate, D14 fix 3).
         if not from_inbound:
-            from app.models.inbound_order import InboundOrder, InboundOrderPurchase
-            linked_number = db.execute(
-                select(InboundOrder.order_number)
-                .join(
-                    InboundOrderPurchase,
-                    InboundOrderPurchase.inbound_order_id == InboundOrder.id,
-                )
-                .where(
-                    InboundOrderPurchase.purchase_id == purchase_id,
-                    InboundOrder.status != "annulled",
-                )
-            ).scalar_one_or_none()
+            linked_number = _linked_inbound_number(db, purchase_id)
             if linked_number is not None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -1209,12 +1246,19 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         organization_id: UUID,
         user_id: Optional[UUID] = None,
         commit: bool = True,
+        from_inbound: bool = False,
     ) -> tuple[Purchase, list[str]]:
         """
         Edicion completa de compra (metadata + proveedor + lineas).
 
         commit=False (#93, patron #20/#75): la re-liquidacion de una Entrada
         sincroniza sus compras registradas dentro de UNA transaccion.
+
+        from_inbound=True: solo lo pasa la re-liquidacion de la Entrada. Una
+        compra de Entrada no se edita desde Compras, ningun campo (D1 de
+        Daniel, 23-nov, revierte #75 D7b): proveedor, lineas, fecha, factura
+        y placa ya salen de la Entrada. La excepcion va por este kwarg y
+        NUNCA por commit=False (plantado P11).
 
         Estrategia Revert-and-Reapply:
         1. Revertir efectos de lineas actuales (inventario, stock, costo)
@@ -1254,6 +1298,20 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No se puede editar una compra vinculada a doble partida"
             )
+
+        # D1: editar una compra de Entrada desliquidada la mueve sin que la
+        # Entrada se entere, y al re-liquidar cae en la trampa de QA 2 (E1) o
+        # en el total viejo (E2). Mismo predicado que cancel y liquidate.
+        if not from_inbound:
+            linked_number = _linked_inbound_number(db, purchase_id)
+            if linked_number is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Esta compra pertenece a la Entrada #{linked_number} — "
+                        "corrija el reparto desde la Entrada"
+                    ),
+                )
 
         old_total = purchase.total_amount
         old_supplier_id = purchase.supplier_id
@@ -1434,6 +1492,21 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             db.refresh(purchase)
         else:
             db.flush()
+            # Bug #130: las lineas y comisiones se reescribieron con DELETE
+            # masivo + db.add, que NO tocan la coleccion ya cargada. Sin esto
+            # quien compone la transaccion lee las filas borradas: liquidate
+            # recalculaba total_amount con las lineas viejas y lo grababa (el
+            # proveedor quedaba con la deuda vieja). Va despues del flush (la
+            # sesion es autoflush=False): la proxima carga encuentra las
+            # filas nuevas. commit=True no lo necesita: commit + refresh.
+            reescritas = [
+                nombre for nombre, cambio in (
+                    ("lines", obj_in.lines is not None),
+                    ("commissions", obj_in.commissions is not None),
+                ) if cambio
+            ]
+            if reescritas:
+                db.expire(purchase, reescritas)
 
         print(f"✏️ Purchase #{purchase.purchase_number} updated")
 

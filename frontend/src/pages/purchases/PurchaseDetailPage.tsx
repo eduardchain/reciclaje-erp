@@ -66,9 +66,13 @@ export default function PurchaseDetailPage() {
     );
   };
 
-  const canEdit = purchase?.status === "registered" && !purchase?.double_entry_id && hasPermission("purchases.edit");
-  const canLiquidate = purchase?.status === "registered" && !purchase?.double_entry_id && hasPermission("purchases.liquidate");
-  const canCancel = (purchase?.status === "registered" || purchase?.status === "liquidated") && !purchase?.double_entry_id && hasPermission("purchases.cancel");
+  // Una compra de Entrada se maneja SOLO desde su Entrada: el servidor
+  // rechaza editarla, liquidarla o cancelarla (D1/D2 de Daniel, 23-nov,
+  // plan-fix-compras-de-entrada.md B3). Queda el enlace a la Entrada.
+  const fromInbound = !!purchase?.inbound_order_id;
+  const canEdit = purchase?.status === "registered" && !purchase?.double_entry_id && !fromInbound && hasPermission("purchases.edit");
+  const canLiquidate = purchase?.status === "registered" && !purchase?.double_entry_id && !fromInbound && hasPermission("purchases.liquidate");
+  const canCancel = (purchase?.status === "registered" || purchase?.status === "liquidated") && !purchase?.double_entry_id && !fromInbound && hasPermission("purchases.cancel");
 
   if (isLoading) {
     return (

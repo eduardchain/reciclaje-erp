@@ -20,9 +20,19 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.core.security import get_password_hash  # noqa: F401  (usado en fixtures)
+from app.models.document_tax import DocumentTax
+from app.models.inventory_movement import InventoryMovement
+from app.models.money_account import MoneyAccount
+from app.schemas.purchase import (
+    PurchaseCommissionCreate,
+    PurchaseFullUpdate,
+    PurchaseLineCreate,
+)
+from app.services import purchase as purchase_module
 from app.models.inbound_order import InboundLineAllocation, InboundOrderPurchase
 from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.material import Material
@@ -2738,3 +2748,517 @@ class TestTarifaSobreIvaEnLaEntrada:
         db_session.expire_all()
         # 1.000.000 acreditado menos 25.000 retenidos: NETO (#75 D9)
         assert db_session.get(ThirdParty, sup1.id).current_balance == Decimal("-975000")
+
+
+# ---------------------------------------------------------------------------
+# plan-fix-compras-de-entrada.md (23-nov): A — el total viejo al re-liquidar
+# (bug #130) y B — las puertas de Compras que liquidaban o editaban una compra
+# de Entrada por fuera. Los T* son los del plan (§C1). Los montos van a mano,
+# nunca leidos de total_amount: un `total == Σ lineas` cuadra aunque los dos
+# lados esten viejos.
+# ---------------------------------------------------------------------------
+
+STATEMENT_URL = "/api/v1/money-movements/third-party"
+RETEFUENTE_ENTITY = "[Retenciones] ReteFuente"
+IVA_ENTITY = "[Impuestos] IVA por Pagar"
+
+
+def _statement_close(client, headers, tp_id):
+    """(saldo corrido al cierre, saldo vivo) del estado de cuenta (#55)."""
+    resp = client.get(
+        f"{STATEMENT_URL}/{tp_id}", headers=headers,
+        params={"date_from": "2020-01-01", "limit": 500},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    items = data["items"]
+    return (items[-1]["balance_after"] if items else 0.0), data["current_balance"]
+
+
+def _bal(db, tp):
+    db.expire_all()
+    return db.get(ThirdParty, tp.id).current_balance
+
+
+def _unliquidate(client, headers, order_id):
+    resp = client.post(f"{INBOUND_URL}/{order_id}/unliquidate", headers=headers)
+    assert resp.status_code == 200, resp.text
+
+
+def _purchase_movements(db, purchase_id):
+    db.expire_all()
+    return db.execute(
+        select(InventoryMovement).where(
+            InventoryMovement.reference_id == purchase_id,
+            InventoryMovement.movement_type == "purchase",
+        )
+    ).scalars().all()
+
+
+def _lines_total(p):
+    return sum(line.quantity * line.unit_price for line in p.lines)
+
+
+class TestReliquidarYPuertasDeLaCompraDeEntrada:
+
+    @pytest.fixture
+    def mat_b(self, db_session, test_organization, client, org_headers):
+        mat = _mat(db_session, test_organization.id, "CHATARRA-130", unit="kg")
+        _set_profile(client, org_headers, mat.id)
+        return mat
+
+    @pytest.fixture
+    def account(self, db_session, test_organization):
+        acc = MoneyAccount(
+            name="Caja 130", account_type="cash",
+            current_balance=Decimal("1000000"),
+            organization_id=test_organization.id, is_active=True,
+        )
+        db_session.add(acc)
+        db_session.commit()
+        db_session.refresh(acc)
+        return acc
+
+    @staticmethod
+    def _entity(db, name):
+        db.expire_all()
+        return db.execute(
+            select(ThirdParty).where(ThirdParty.name == name)
+        ).scalar_one_or_none()
+
+    @staticmethod
+    def _direct_purchase(client, headers, wh, mat, sup, qty, price, **extra):
+        resp = client.post(PURCHASES_URL, headers=headers, json={
+            "supplier_id": str(sup.id), "date": _past(),
+            "lines": [{"material_id": str(mat.id), "warehouse_id": str(wh.id),
+                       "quantity": qty, "unit_price": price}],
+            **extra,
+        })
+        assert resp.status_code == 201, resp.text
+        return UUID(resp.json()["id"])
+
+    @staticmethod
+    def _liquidated_entrada(client, headers, db, wh, mat, sup, qty="100", price="1000"):
+        """Entrada con UNA compra liquidada (sup, slot 1). Devuelve
+        (body, id de la compra, numero de la compra, total)."""
+        body = _captured_reviewed(client, headers, wh, [_line(mat, qty, weight=qty)])
+        _liquidate(client, headers, body["id"], [_liq_line(mat, [_alloc(sup, qty, price)])])
+        (p,) = _order_purchases(db, body["id"])
+        return body, p.id, p.purchase_number, p.total_amount
+
+    @staticmethod
+    def _spy_update(monkeypatch):
+        llamadas = []
+        original = purchase_module.purchase.update
+
+        def espia(*args, **kwargs):
+            llamadas.append(kwargs.get("commit"))
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(purchase_module.purchase, "update", espia)
+        return llamadas
+
+    # ---------------- A: el total al re-liquidar ----------------
+
+    def test_t1_reliquidar_con_cantidad_cambiada(
+        self, client, org_headers, db_session, wh, sup1, mat_moto,
+    ):
+        """El caso de la #130: la MISMA compra pasa de 100 a 102 kg a $1.000.
+        Pesado 100, asi que el descuadre de −2 va a resultados a $1.000."""
+        body, pid, pnum, total0 = self._liquidated_entrada(
+            client, org_headers, db_session, wh, mat_moto, sup1)
+        assert total0 == Decimal("100000")  # lo viejo vale distinto de lo nuevo
+        _unliquidate(client, org_headers, body["id"])
+        _liquidate(client, org_headers, body["id"], [
+            _liq_line(mat_moto, [_alloc(sup1, "102", "1000")], ref_price="1000")])
+
+        (p,) = _order_purchases(db_session, body["id"])
+        assert (p.id, p.purchase_number) == (pid, pnum)
+        assert p.total_amount == Decimal("102000")
+        assert _lines_total(p) == Decimal("102000")
+        assert _bal(db_session, sup1) == Decimal("-102000")
+        corrido, vivo = _statement_close(client, org_headers, sup1.id)
+        assert corrido == pytest.approx(-102000.0) and vivo == pytest.approx(-102000.0)
+        (mov,) = _purchase_movements(db_session, pid)
+        assert (mov.quantity, mov.unit_cost) == (Decimal("102"), Decimal("1000"))
+        mat = db_session.get(Material, mat_moto.id)
+        assert mat.current_stock == Decimal("100")  # 102 comprados − 2 del descuadre
+        assert mat.current_stock_transit == 0
+        # O2 de QA 2: el descuadre, pesado 100 − repartido 102, a la referencia.
+        # Fuente 1, la fila por ORM: cantidad firmada (#93), valor sin signo.
+        (adj,) = [a for a in _order_adjustments(db_session, body["id"])
+                  if a.status == "confirmed"]
+        assert adj.adjustment_type == "decrease"
+        assert adj.quantity == Decimal("-2")
+        assert adj.unit_cost == Decimal("1000")
+        assert adj.total_value == Decimal("2000")
+        # Fuente 2, el detalle por HTTP (lo que ve Johana): cantidad positiva,
+        # valor firmado por el negocio (perdida = negativo)
+        detalle = client.get(f"{INBOUND_URL}/{body['id']}", headers=org_headers).json()
+        (row,) = [a for a in detalle["discrepancy_adjustments"] if a["status"] == "confirmed"]
+        assert row["adjustment_type"] == "decrease"
+        assert Decimal(str(row["quantity"])) == Decimal("2")
+        assert Decimal(str(row["total_value"])) == Decimal("-2000")
+
+    def test_t2_reliquidar_con_precio_cambiado(
+        self, client, org_headers, db_session, wh, sup1, mat_moto,
+    ):
+        body, pid, _, total0 = self._liquidated_entrada(
+            client, org_headers, db_session, wh, mat_moto, sup1)
+        assert total0 == Decimal("100000")
+        _unliquidate(client, org_headers, body["id"])
+        _liquidate(client, org_headers, body["id"], [
+            _liq_line(mat_moto, [_alloc(sup1, "100", "1100")])])
+
+        (p,) = _order_purchases(db_session, body["id"])
+        assert p.id == pid
+        assert p.total_amount == Decimal("110000")
+        assert _lines_total(p) == Decimal("110000")
+        assert _bal(db_session, sup1) == Decimal("-110000")
+        corrido, vivo = _statement_close(client, org_headers, sup1.id)
+        assert corrido == pytest.approx(-110000.0) and vivo == pytest.approx(-110000.0)
+        (mov,) = _purchase_movements(db_session, pid)
+        assert mov.unit_cost == Decimal("1100")
+        assert db_session.get(Material, mat_moto.id).current_average_cost == Decimal("1100")
+
+    def test_t3_sale_una_linea_de_la_compra(
+        self, client, org_headers, db_session, wh, sup1, sup2, mat_moto, mat_b,
+    ):
+        """La compra 1 pasa de {A,B} a {A}: con el bug, la coleccion vieja
+        tiene MAS lineas y el total queda de mas."""
+        body = _captured_reviewed(client, org_headers, wh, [
+            _line(mat_moto, "100"), _line(mat_b, "50", weight="50")])
+        _liquidate(client, org_headers, body["id"], [
+            _liq_line(mat_moto, [_alloc(sup1, "100", "1000")]),
+            _liq_line(mat_b, [_alloc(sup1, "50", "1000")])])
+        (p0,) = _order_purchases(db_session, body["id"])
+        pid = p0.id
+        assert p0.total_amount == Decimal("150000")
+        _unliquidate(client, org_headers, body["id"])
+        _liquidate(client, org_headers, body["id"], [
+            _liq_line(mat_moto, [_alloc(sup1, "100", "1000")]),
+            _liq_line(mat_b, [_alloc(sup2, "50", "1000")])])
+
+        by_sup = {p.supplier_id: p for p in _order_purchases(db_session, body["id"])}
+        p1, p2 = by_sup[sup1.id], by_sup[sup2.id]
+        assert p1.id == pid and p1.status == "liquidated" and p2.status == "liquidated"
+        assert [(line.material_id, line.quantity) for line in p1.lines] == [
+            (mat_moto.id, Decimal("100"))]
+        assert p1.total_amount == Decimal("100000") and _lines_total(p1) == Decimal("100000")
+        assert p2.total_amount == Decimal("50000")
+        assert _bal(db_session, sup1) == Decimal("-100000")
+        assert _bal(db_session, sup2) == Decimal("-50000")
+        for tp, esperado in ((sup1, -100000.0), (sup2, -50000.0)):
+            corrido, vivo = _statement_close(client, org_headers, tp.id)
+            assert corrido == pytest.approx(esperado) and vivo == pytest.approx(esperado)
+
+    def test_t3b_un_material_entra_a_una_compra_que_ya_existe(
+        self, client, org_headers, db_session, wh, sup1, sup2, mat_moto, mat_b,
+    ):
+        """C3 de QA 2, el opuesto de T3: la compra 1 pasa de {A} a {A,B}. Con
+        el bug, la coleccion vieja tiene MENOS lineas y el total queda corto."""
+        body = _captured_reviewed(client, org_headers, wh, [
+            _line(mat_moto, "100"), _line(mat_b, "50", weight="50")])
+        _liquidate(client, org_headers, body["id"], [
+            _liq_line(mat_moto, [_alloc(sup1, "100", "1000")]),
+            _liq_line(mat_b, [_alloc(sup2, "50", "1000")])])
+        by_sup = {p.supplier_id: p for p in _order_purchases(db_session, body["id"])}
+        p1_id, p1_num = by_sup[sup1.id].id, by_sup[sup1.id].purchase_number
+        p2_id = by_sup[sup2.id].id
+        assert by_sup[sup1.id].total_amount == Decimal("100000")
+        _unliquidate(client, org_headers, body["id"])
+        _liquidate(client, org_headers, body["id"], [
+            _liq_line(mat_moto, [_alloc(sup1, "100", "1000")]),
+            _liq_line(mat_b, [_alloc(sup1, "50", "1000")])])
+
+        db_session.expire_all()
+        p1 = db_session.get(Purchase, p1_id)
+        p2 = db_session.get(Purchase, p2_id)
+        assert (p1.status, p1.purchase_number) == ("liquidated", p1_num)
+        assert p2.status == "cancelled"  # sobrante (from_inbound)
+        assert sorted((str(line.material_id), line.quantity) for line in p1.lines) == sorted([
+            (str(mat_moto.id), Decimal("100")), (str(mat_b.id), Decimal("50"))])
+        assert p1.total_amount == Decimal("150000") and _lines_total(p1) == Decimal("150000")
+        assert _bal(db_session, sup1) == Decimal("-150000")
+        assert _bal(db_session, sup2) == 0
+        movs = {m.material_id: (m.quantity, m.unit_cost)
+                for m in _purchase_movements(db_session, p1_id)}
+        assert movs == {mat_moto.id: (Decimal("100"), Decimal("1000")),
+                        mat_b.id: (Decimal("50"), Decimal("1000"))}
+        for tp, esperado in ((sup1, -150000.0), (sup2, 0.0)):
+            corrido, vivo = _statement_close(client, org_headers, tp.id)
+            assert corrido == pytest.approx(esperado) and vivo == pytest.approx(esperado)
+
+    def test_t4a_contado_con_retencion_chica(
+        self, client, org_headers, db_session, wh, sup1, mat_moto, account,
+    ):
+        """Cubre el §6 del barrido de QA 2 (O2): con el arreglo el pago de
+        contado nace con el neto del total NUEVO, asi que el residuo no nace.
+        Con el bug saldria 100.000 − 1.000 = 99.000."""
+        body, pid, _, _ = self._liquidated_entrada(
+            client, org_headers, db_session, wh, mat_moto, sup1)
+        _unliquidate(client, org_headers, body["id"])
+        _liquidate(
+            client, org_headers, body["id"],
+            [_liq_line(mat_moto, [_alloc(sup1, "102", "1000")], ref_price="1000")],
+            supplier_retentions=[{
+                "third_party_id": str(sup1.id),
+                "retentions": [{"retention_type": "retefuente", "amount": "1000"}],
+            }],
+            supplier_payments=[{
+                "third_party_id": str(sup1.id), "account_id": str(account.id),
+            }],
+        )
+        db_session.expire_all()
+        (pago,) = db_session.execute(select(MoneyMovement).where(
+            MoneyMovement.purchase_id == pid,
+            MoneyMovement.movement_type == "payment_to_supplier",
+            MoneyMovement.status == "confirmed",
+        )).scalars().all()
+        assert pago.amount == Decimal("101000")  # 102.000 − 1.000
+        assert db_session.get(MoneyAccount, account.id).current_balance == Decimal("899000")
+        assert db_session.get(Purchase, pid).total_amount == Decimal("102000")
+        assert _bal(db_session, sup1) == 0
+
+    def test_t4b_tope_de_la_retencion_contra_el_total_nuevo(
+        self, client, org_headers, db_session, wh, sup1, mat_moto,
+    ):
+        """C2 de QA 2: la retencion (105.000) cae ESTRICTAMENTE entre el total
+        viejo (100.000) y el nuevo (120.000). Con el bug, 422 «debe ser menor
+        al total de la compra ($100000.00)» (S4 de QA 2)."""
+        body, pid, _, _ = self._liquidated_entrada(
+            client, org_headers, db_session, wh, mat_moto, sup1)
+        _unliquidate(client, org_headers, body["id"])
+        _liquidate(
+            client, org_headers, body["id"],
+            [_liq_line(mat_moto, [_alloc(sup1, "120", "1000")], ref_price="1000")],
+            supplier_retentions=[{
+                "third_party_id": str(sup1.id),
+                "retentions": [{"retention_type": "retefuente", "amount": "105000"}],
+            }],
+        )
+        db_session.expire_all()
+        p = db_session.get(Purchase, pid)
+        assert p.total_amount == Decimal("120000")
+        assert [r.amount for r in p.retentions if r.reverted_at is None] == [Decimal("105000")]
+        assert _bal(db_session, sup1) == Decimal("-15000")  # −120.000 + 105.000, neto (#75)
+        assert self._entity(db_session, RETEFUENTE_ENTITY).current_balance == Decimal("-105000")
+        corrido, vivo = _statement_close(client, org_headers, sup1.id)
+        assert corrido == pytest.approx(-15000.0) and vivo == pytest.approx(-15000.0)
+
+    def test_t5_iva_sobre_el_subtotal_nuevo(
+        self, client, org_headers, db_session, wh, sup1, mat_moto,
+    ):
+        body, pid, _, _ = self._liquidated_entrada(
+            client, org_headers, db_session, wh, mat_moto, sup1)
+        _unliquidate(client, org_headers, body["id"])
+        _liquidate(
+            client, org_headers, body["id"],
+            [_liq_line(mat_moto, [_alloc(sup1, "102", "1000")], ref_price="1000")],
+            purchase_taxes=[{
+                "third_party_id": str(sup1.id),
+                "taxes": [{"tax_type": "iva", "rate": "19", "amount": "19380"}],
+            }],
+        )
+        db_session.expire_all()
+        tax = db_session.execute(select(DocumentTax).where(
+            DocumentTax.purchase_id == pid, DocumentTax.reverted_at.is_(None),
+        )).scalar_one()
+        assert tax.base_amount == Decimal("102000")
+        assert _bal(db_session, sup1) == Decimal("-121380")  # −(102.000 + 19.380)
+        assert self._entity(db_session, IVA_ENTITY).current_balance == Decimal("19380")
+        corrido, vivo = _statement_close(client, org_headers, sup1.id)
+        assert corrido == pytest.approx(-121380.0) and vivo == pytest.approx(-121380.0)
+
+    def test_t6_reuso_sin_cambios_no_llama_update(
+        self, client, org_headers, db_session, wh, sup1, mat_moto, monkeypatch,
+    ):
+        """Control: el arreglo de A no toca el camino de reuso."""
+        body, pid, _, _ = self._liquidated_entrada(
+            client, org_headers, db_session, wh, mat_moto, sup1)
+        _unliquidate(client, org_headers, body["id"])
+        llamadas = self._spy_update(monkeypatch)
+        _liquidate(client, org_headers, body["id"], [
+            _liq_line(mat_moto, [_alloc(sup1, "100", "1000")])])
+        assert llamadas == []
+        (p,) = _order_purchases(db_session, body["id"])
+        assert p.id == pid and p.total_amount == Decimal("100000")
+        assert _bal(db_session, sup1) == Decimal("-100000")
+
+    def test_t7a_contrato_update_sin_commit_devuelve_las_lineas_nuevas(
+        self, client, org_headers, db_session, test_organization, wh, sup1, mat_moto,
+    ):
+        """update(commit=False) devuelve la compra como esta en la base: una
+        compra DIRECTA, sin Entrada, a nivel servicio."""
+        pid = self._direct_purchase(client, org_headers, wh, mat_moto, sup1, "100", "1000")
+        db_session.expire_all()
+        upd = PurchaseFullUpdate(lines=[PurchaseLineCreate(
+            material_id=mat_moto.id, warehouse_id=wh.id,
+            quantity=Decimal("150"), unit_price=Decimal("1200"),
+        )])
+        p, _ = purchase_module.purchase.update(
+            db_session, pid, upd, test_organization.id, commit=False)
+        assert [(line.quantity, line.unit_price) for line in p.lines] == [
+            (Decimal("150"), Decimal("1200"))]
+        assert p.total_amount == Decimal("180000")
+        assert _lines_total(p) == Decimal("180000")
+        db_session.rollback()
+
+    def test_t7b_contrato_update_sin_commit_devuelve_las_comisiones_nuevas(
+        self, client, org_headers, db_session, test_organization, wh, sup1, mat_moto, collector,
+    ):
+        pid = self._direct_purchase(
+            client, org_headers, wh, mat_moto, sup1, "100", "1000",
+            commissions=[{"third_party_id": str(collector.id), "concept": "Comision 130",
+                          "commission_type": "fixed", "commission_value": "5000"}],
+        )
+        db_session.expire_all()
+        upd = PurchaseFullUpdate(commissions=[PurchaseCommissionCreate(
+            third_party_id=collector.id, concept="Comision 130",
+            commission_type="fixed", commission_value=Decimal("7000"),
+        )])
+        p, _ = purchase_module.purchase.update(
+            db_session, pid, upd, test_organization.id, commit=False)
+        assert [c.commission_value for c in p.commissions] == [Decimal("7000")]
+        db_session.rollback()
+
+    def test_t8_dos_compras_cambia_una(
+        self, client, org_headers, db_session, wh, sup1, sup2, mat_moto, monkeypatch,
+    ):
+        body = _captured_reviewed(client, org_headers, wh, [_line(mat_moto, "200", weight="200")])
+        _liquidate(client, org_headers, body["id"], [_liq_line(mat_moto, [
+            _alloc(sup1, "100", "1000"), _alloc(sup2, "100", "1000")])])
+        _unliquidate(client, org_headers, body["id"])
+        llamadas = self._spy_update(monkeypatch)
+        _liquidate(client, org_headers, body["id"], [_liq_line(mat_moto, [
+            _alloc(sup1, "100", "1100"), _alloc(sup2, "100", "1000")])])
+        assert llamadas == [False]  # solo la del slot 1, componible
+
+        by_sup = {p.supplier_id: p for p in _order_purchases(db_session, body["id"])}
+        assert by_sup[sup1.id].total_amount == Decimal("110000")
+        assert _lines_total(by_sup[sup1.id]) == Decimal("110000")
+        assert by_sup[sup2.id].total_amount == Decimal("100000")
+        assert _bal(db_session, sup1) == Decimal("-110000")
+        assert _bal(db_session, sup2) == Decimal("-100000")
+        for tp, esperado in ((sup1, -110000.0), (sup2, -100000.0)):
+            corrido, vivo = _statement_close(client, org_headers, tp.id)
+            assert corrido == pytest.approx(esperado) and vivo == pytest.approx(esperado)
+
+    # ---------------- B: las puertas de Compras ----------------
+
+    def test_t9_liquidar_la_compra_sola_400_y_la_entrada_no_queda_trabada(
+        self, client, org_headers, db_session, wh, sup1, mat_moto,
+    ):
+        """El caso de QA 1. Despues, re-liquidar la Entrada con el MISMO
+        reparto: la compra se reusa y update no se llama."""
+        body, pid, _, _ = self._liquidated_entrada(
+            client, org_headers, db_session, wh, mat_moto, sup1)
+        _unliquidate(client, org_headers, body["id"])
+
+        resp = client.patch(f"{PURCHASES_URL}/{pid}/liquidate", headers=org_headers, json={})
+        assert resp.status_code == 400, resp.text
+        assert f"Entrada #{body['order_number']}" in resp.json()["detail"]
+        db_session.expire_all()
+        assert db_session.get(Purchase, pid).status == "registered"
+        assert _bal(db_session, sup1) == 0
+        mat = db_session.get(Material, mat_moto.id)
+        assert (mat.current_stock_transit, mat.current_stock_liquidated) == (
+            Decimal("100"), Decimal("0"))
+        orden = client.get(f"{INBOUND_URL}/{body['id']}", headers=org_headers).json()
+        assert orden["status"] == "reviewed"
+
+        _liquidate(client, org_headers, body["id"], [
+            _liq_line(mat_moto, [_alloc(sup1, "100", "1000")])])
+        (p,) = _order_purchases(db_session, body["id"])
+        assert (p.id, p.status, p.total_amount) == (pid, "liquidated", Decimal("100000"))
+        assert _bal(db_session, sup1) == Decimal("-100000")
+
+    def test_t10_par_compra_directa_se_liquida(
+        self, client, org_headers, db_session, wh, sup1, sup2, mat_moto,
+    ):
+        """Par de T9. La organizacion YA tiene una Entrada: asi el par tambien
+        detecta un guard que mire la organizacion en vez de la compra (P8)."""
+        self._liquidated_entrada(client, org_headers, db_session, wh, mat_moto, sup1)
+        did = self._direct_purchase(client, org_headers, wh, mat_moto, sup2, "50", "1000")
+        resp = client.patch(f"{PURCHASES_URL}/{did}/liquidate", headers=org_headers, json={})
+        assert resp.status_code == 200, resp.text
+        db_session.expire_all()
+        p = db_session.get(Purchase, did)
+        assert (p.status, p.total_amount) == ("liquidated", Decimal("50000"))
+        assert _bal(db_session, sup2) == Decimal("-50000")
+
+    def test_t11_editar_la_compra_sola_400_y_la_entrada_reliquida_exacta(
+        self, client, org_headers, db_session, wh, sup1, sup2, mat_moto,
+    ):
+        """El caso de QA 2 (E1 proveedor, E2 cantidad). Despues, re-liquidar
+        con el reparto guardado (el MISMO) da el total exacto."""
+        body, pid, _, _ = self._liquidated_entrada(
+            client, org_headers, db_session, wh, mat_moto, sup1)
+        _unliquidate(client, org_headers, body["id"])
+        cambios = (
+            {"supplier_id": str(sup2.id)},
+            {"lines": [{"material_id": str(mat_moto.id), "warehouse_id": str(wh.id),
+                        "quantity": "70", "unit_price": "1000"}]},
+        )
+        for cambio in cambios:
+            resp = client.patch(f"{PURCHASES_URL}/{pid}", headers=org_headers, json=cambio)
+            assert resp.status_code == 400, resp.text
+            assert f"Entrada #{body['order_number']}" in resp.json()["detail"]
+        db_session.expire_all()
+        p = db_session.get(Purchase, pid)
+        assert p.supplier_id == sup1.id
+        assert [line.quantity for line in p.lines] == [Decimal("100")]
+        assert db_session.get(Material, mat_moto.id).current_stock_transit == Decimal("100")
+
+        _liquidate(client, org_headers, body["id"], [
+            _liq_line(mat_moto, [_alloc(sup1, "100", "1000")])])
+        (p,) = _order_purchases(db_session, body["id"])
+        assert p.total_amount == Decimal("100000") and _lines_total(p) == Decimal("100000")
+        assert _bal(db_session, sup1) == Decimal("-100000")
+        assert _bal(db_session, sup2) == 0
+
+    def test_t12_par_editar_compra_directa(
+        self, client, org_headers, db_session, wh, sup1, sup2, mat_moto,
+    ):
+        """Par de T11, en una organizacion que YA tiene una Entrada (P8b)."""
+        self._liquidated_entrada(client, org_headers, db_session, wh, mat_moto, sup1)
+        did = self._direct_purchase(client, org_headers, wh, mat_moto, sup2, "50", "1000")
+        resp = client.patch(f"{PURCHASES_URL}/{did}", headers=org_headers, json={
+            "lines": [{"material_id": str(mat_moto.id), "warehouse_id": str(wh.id),
+                       "quantity": "60", "unit_price": "1000"}]})
+        assert resp.status_code == 200, resp.text
+        db_session.expire_all()
+        assert db_session.get(Purchase, did).total_amount == Decimal("60000")
+
+    def test_t13a_servicio_liquidate_sin_from_inbound_400(
+        self, client, org_headers, db_session, test_organization, wh, sup1, mat_moto,
+    ):
+        """commit=False SIN from_inbound sobre una compra de Entrada: 400. Es
+        lo que distingue «la excepcion es el kwarg» de «la excepcion es
+        commit=False» (P11)."""
+        body, pid, _, _ = self._liquidated_entrada(
+            client, org_headers, db_session, wh, mat_moto, sup1)
+        _unliquidate(client, org_headers, body["id"])
+        db_session.expire_all()
+        with pytest.raises(HTTPException) as exc:
+            purchase_module.purchase.liquidate(
+                db_session, purchase_id=pid, organization_id=test_organization.id,
+                commit=False)
+        assert exc.value.status_code == 400
+        assert f"Entrada #{body['order_number']}" in exc.value.detail
+        db_session.rollback()
+
+    def test_t13b_servicio_update_sin_from_inbound_400(
+        self, client, org_headers, db_session, test_organization, wh, sup1, mat_moto,
+    ):
+        body, pid, _, _ = self._liquidated_entrada(
+            client, org_headers, db_session, wh, mat_moto, sup1)
+        _unliquidate(client, org_headers, body["id"])
+        db_session.expire_all()
+        with pytest.raises(HTTPException) as exc:
+            purchase_module.purchase.update(
+                db_session, pid, PurchaseFullUpdate(notes="por fuera"),
+                test_organization.id, commit=False)
+        assert exc.value.status_code == 400
+        assert f"Entrada #{body['order_number']}" in exc.value.detail
+        db_session.rollback()
