@@ -173,7 +173,7 @@ export default function AccountMovementsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Movimientos de Cuenta" description="Historial de movimientos con saldo corrido por cuenta">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Select value={pdfFormat} onValueChange={(v) => setPdfFormat(v as AccountStatementPdfFormat)}>
             <SelectTrigger className="h-9 w-full sm:w-32 text-xs" title="Formato PDF">
               <SelectValue />

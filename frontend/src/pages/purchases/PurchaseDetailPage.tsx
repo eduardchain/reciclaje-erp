@@ -93,7 +93,7 @@ export default function PurchaseDetailPage() {
         title={`Compra #${purchase.purchase_number}`}
         description={`Proveedor: ${purchase.supplier_name}`}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canEdit && (
               <Button variant="outline" onClick={() => navigate(`/purchases/${id}/edit`)}>
                 <Pencil className="h-4 w-4 mr-2" />

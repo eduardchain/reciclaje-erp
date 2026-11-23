@@ -76,7 +76,7 @@ export default function SaleDetailPage() {
   return (
     <div className="space-y-6">
       <PageHeader title={`Venta #${sale.sale_number}`} description={`Cliente: ${sale.customer_name}`}>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {sale.status === "registered" && !sale.double_entry_id && hasPermission("sales.edit") && (
               <Button variant="outline" onClick={() => navigate(`/sales/${id}/edit`)}>
                 <Pencil className="h-4 w-4 mr-2" />Editar
