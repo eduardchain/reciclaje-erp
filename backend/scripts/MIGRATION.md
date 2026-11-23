@@ -192,7 +192,7 @@ Al crear la org via `POST /api/v1/system/organizations`, el backend ya siembra:
 - **5 roles de sistema**: `admin`, `bascula`, `liquidador`, `planillador`, `viewer`.
 - **7 categorias default de ThirdParty**: `Proveedor Material`, `Proveedor Servicios`, `Cliente`, `Socios`, `Generico`, `Provision`, `Pasivo`.
 - **71 permisos** (catalogo global, M:N con roles via `role_permissions`).
-- **Usuario admin** con el email/nombre del flag `--admin-email`. Password default `123456` (cambiar en UI en primer login).
+- **Usuario admin** con el email/nombre del flag `--admin-email`. Si el email es nuevo, el script le genera al azar, en memoria, una clave que nadie conoce (no se imprime ni se guarda): el admin nace sin clave utilizable y soporte le pone la real desde Sistema → Usuarios → Resetear contraseña (#85), para entregársela al cliente por un canal privado. Si el email ya existía, conserva su clave. El script no pide ninguna clave del admin, tampoco en `--dry-run`.
 
 ## Re-ejecucion (idempotencia) y --reset-org
 

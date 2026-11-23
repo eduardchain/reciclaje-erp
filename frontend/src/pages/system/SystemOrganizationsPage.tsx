@@ -50,6 +50,10 @@ export default function SystemOrganizationsPage() {
   const [newName, setNewName] = useState("");
   const [newAdminEmail, setNewAdminEmail] = useState("");
   const [newAdminName, setNewAdminName] = useState("");
+  // D3 (plan quitar-clave-constante): la clave del admin NUEVO la elige el superusuario
+  // (mínimo 8). Si el email ya existe, el backend la ignora y el admin conserva la suya.
+  const [newAdminPassword, setNewAdminPassword] = useState("");
+  const adminPasswordTooShort = newAdminPassword.length > 0 && newAdminPassword.length < 8;
 
   // Editar org
   const [editOrg, setEditOrg] = useState<SystemOrgResponse | null>(null);
@@ -61,6 +65,15 @@ export default function SystemOrganizationsPage() {
   const [deactivateTarget, setDeactivateTarget] = useState<SystemOrgResponse | null>(null);
   const [confirmName, setConfirmName] = useState("");
 
+  // O3 de QA: cerrar (Cancelar, Esc o tras crear) limpia todo, también la clave.
+  const closeCreate = () => {
+    setShowCreate(false);
+    setNewName("");
+    setNewAdminEmail("");
+    setNewAdminName("");
+    setNewAdminPassword("");
+  };
+
   const handleCreate = () => {
     if (!newName || !newAdminEmail) return;
     createOrg.mutate(
@@ -68,14 +81,10 @@ export default function SystemOrganizationsPage() {
         name: newName,
         admin_email: newAdminEmail,
         admin_full_name: newAdminName || undefined,
+        admin_password: newAdminPassword || undefined,
       },
       {
-        onSuccess: () => {
-          setShowCreate(false);
-          setNewName("");
-          setNewAdminEmail("");
-          setNewAdminName("");
-        },
+        onSuccess: closeCreate,
       },
     );
   };
@@ -279,7 +288,7 @@ export default function SystemOrganizationsPage() {
       )}
 
       {/* Dialog: Crear Organizacion */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+      <Dialog open={showCreate} onOpenChange={(open) => (open ? setShowCreate(true) : closeCreate())}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Nueva Organizacion</DialogTitle>
@@ -314,13 +323,28 @@ export default function SystemOrganizationsPage() {
                 className="mt-1"
               />
             </div>
-            <p className="text-xs text-slate-400">Si se crea un usuario nuevo, la contraseña sera: <strong>123456</strong></p>
+            <div>
+              <Label htmlFor="new-admin-password" className="text-xs font-semibold uppercase tracking-wider text-slate-500">Contraseña del Admin (solo si es nuevo)</Label>
+              <Input
+                id="new-admin-password"
+                type="password"
+                autoComplete="new-password"
+                value={newAdminPassword}
+                onChange={(e) => setNewAdminPassword(e.target.value)}
+                placeholder="Mínimo 8 caracteres"
+                className="mt-1"
+              />
+              {adminPasswordTooShort && <p className="text-xs text-red-600 mt-1">Debe tener al menos 8 caracteres.</p>}
+              <p className="text-[11px] text-slate-400 mt-1">
+                Si el email ya existe, se ignora y el usuario conserva su contraseña.
+              </p>
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
+            <Button variant="outline" onClick={closeCreate}>Cancelar</Button>
             <Button
               onClick={handleCreate}
-              disabled={!newName.trim() || !newAdminEmail.trim() || createOrg.isPending}
+              disabled={!newName.trim() || !newAdminEmail.trim() || adminPasswordTooShort || createOrg.isPending}
               className="bg-emerald-600 hover:bg-emerald-700"
             >
               {createOrg.isPending ? "Creando..." : "Crear Organizacion"}

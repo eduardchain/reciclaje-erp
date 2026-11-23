@@ -695,7 +695,8 @@ class TestSuperuserBypassOrgMembership:
         r = client.post(
             f"/api/v1/organizations/{test_organization.id}/members/create-user",
             headers=headers,
-            json={"email": "newby@example.com", "full_name": "Newby", "role_id": str(viewer_role_id)},
+            json={"email": "newby@example.com", "full_name": "Newby", "role_id": str(viewer_role_id),
+                  "password": "clave-newby-1"},
         )
         assert r.status_code == 201
         assert r.json()["user_email"] == "newby@example.com"

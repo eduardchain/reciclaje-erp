@@ -83,9 +83,17 @@ def create_system_organization(
                 status_code=400,
                 detail="admin_full_name es requerido cuando el email no existe",
             )
+        # D3 (plan quitar-clave-constante): un admin nuevo nace con la clave que
+        # elige el superusuario; no hay clave por defecto. Si el email YA existe,
+        # admin_password se ignora y su clave no cambia.
+        if not data.admin_password:
+            raise HTTPException(
+                status_code=400,
+                detail="admin_password es requerido cuando el email no existe",
+            )
         admin_user = User(
             email=data.admin_email,
-            hashed_password=get_password_hash("123456"),
+            hashed_password=get_password_hash(data.admin_password),
             full_name=data.admin_full_name,
             is_active=True,
         )
