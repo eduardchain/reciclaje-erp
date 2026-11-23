@@ -76,6 +76,8 @@ export interface OrgMemberResponse {
   user_full_name: string | null;
   account_ids: string[];
   org_count: number;
+  /** D5: también pertenece a otra org ACTIVA → el reseteo lo hace soporte. */
+  in_other_active_org?: boolean;
   collector_scope_id?: string | null;
 }
 
@@ -89,4 +91,6 @@ export interface CreateUserWithMembership {
   email: string;
   full_name: string;
   role_id: string;
+  /** La elige el admin (mínimo 8). No vuelve en la respuesta. */
+  password: string;
 }

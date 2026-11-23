@@ -4173,9 +4173,18 @@ class ReportService:
         self,
         db: Session,
         organization_id: UUID,
+        allowed_account_ids: Optional[list[UUID]] = None,
     ) -> TreasuryDashboardResponse:
-        """Dashboard financiero de tesoreria con datos actuales y MTD."""
+        """Dashboard financiero de tesoreria con datos actuales y MTD.
+
+        `allowed_account_ids` (cuentas restringidas): `None` = todas, byte a byte
+        lo de siempre. Con lista, las cuentas, sus totales, el MTD y los recientes
+        se acotan al mismo predicado del listado de movimientos: cuenta permitida
+        o NULL (D3). CxC, CxP y provisiones son de terceros y no cambian."""
         from sqlalchemy.orm import joinedload
+        from app.services.account_access import account_filter_clause
+
+        mm_clause = account_filter_clause(allowed_account_ids)
 
         # 1. Cuentas agrupadas por tipo
         accounts_query = (
@@ -4186,6 +4195,8 @@ class ReportService:
             )
             .order_by(MoneyAccount.name)
         )
+        if allowed_account_ids is not None:
+            accounts_query = accounts_query.where(MoneyAccount.id.in_(list(allowed_account_ids)))
         accounts = list(db.scalars(accounts_query).all())
 
         cash_accounts = []
@@ -4252,7 +4263,7 @@ class ReportService:
         now = datetime.now(tz=timezone.utc)
         first_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
 
-        mtd_rows = db.execute(
+        mtd_query = (
             select(
                 MoneyMovement.movement_type,
                 func.coalesce(func.sum(MoneyMovement.amount), 0),
@@ -4263,7 +4274,10 @@ class ReportService:
                 MoneyMovement.date >= first_of_month,
             )
             .group_by(MoneyMovement.movement_type)
-        ).all()
+        )
+        if mm_clause is not None:
+            mtd_query = mtd_query.where(mm_clause)
+        mtd_rows = db.execute(mtd_query).all()
 
         mtd_income = Decimal("0")
         mtd_expense = Decimal("0")
@@ -4287,6 +4301,8 @@ class ReportService:
             .order_by(MoneyMovement.date.desc(), MoneyMovement.movement_number.desc())
             .limit(10)
         )
+        if mm_clause is not None:
+            recent_query = recent_query.where(mm_clause)
         recent = list(db.scalars(recent_query).unique().all())
         recent_items = [
             RecentMovementItem(

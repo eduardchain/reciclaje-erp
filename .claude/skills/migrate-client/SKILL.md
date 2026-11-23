@@ -46,6 +46,8 @@ Luego, con AskUserQuestion en un solo mensaje (4 preguntas paralelas):
 
 Si el usuario ya dio alguno en el prompt inicial, no preguntarlo de nuevo — leerlo del contexto.
 
+**La clave del admin del cliente NO se pide.** Si el email del admin es nuevo, `migrate_org.py` le genera al azar, en memoria, una clave que nadie conoce: no se imprime, no se escribe en ningún archivo y no viaja por el chat ni por un argumento. El admin nace sin una clave utilizable. La real se la pone Daniel después desde Sistema → Usuarios → Resetear contraseña (#85) y se la entrega al cliente por un canal privado; el reporte final lo trae como PASO PENDIENTE. Si el email ya existía, el admin conserva la suya: el API no dice cuál de los dos casos ocurrió.
+
 ### 2. Pre-flight checks
 
 Verificar requisitos antes de tocar nada:
@@ -229,7 +231,9 @@ LISTO PARA APLICAR EN PRODUCCION
 
 Org a crear:           {ORG_NAME}
 Admin a crear:         {ADMIN_NAME} <{ADMIN_EMAIL}>
-Password inicial:      "123456" (el cliente debera cambiarla en primer login)
+Clave del admin:       si el admin es nuevo, nace SIN clave utilizable; Daniel le pone la real
+                       desde Sistema → Usuarios → Resetear contraseña (#85). Si el email ya
+                       existia, conserva la suya
 API:                   https://api.ecobalance.cc
 Entidades a crear:     ~{N terceros} + {N materiales} + {N cuentas} + {N activos}
 Inventario:            {N items} con valuacion ${X}
@@ -298,7 +302,8 @@ Si si: hacer `DELETE /api/v1/system/organizations/{TEST_ORG_ID}` via curl.
 
 **Cliente:** {ORG_NAME}
 **Admin:** {ADMIN_NAME} <{ADMIN_EMAIL}>
-**Password inicial:** 123456 (cambiar en primer login)
+**Clave del admin:** si era nuevo, nace SIN clave utilizable (el script le puso una al azar que nadie conoce). Si el email ya existía, conserva la suya.
+**⚠️ PASO PENDIENTE de Daniel:** poner la clave real del admin desde Sistema → Usuarios → Resetear contraseña (#85) y entregársela al cliente por un canal privado. Hasta entonces el admin no puede entrar.
 **URL de login:** https://app.ecobalance.cc/login
 
 **Datos creados en prod:**

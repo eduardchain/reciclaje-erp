@@ -28,6 +28,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, exists
 from sqlalchemy.orm import Session
 
+# `accounts_for` (que cuentas ve y mueve el usuario) vive en
+# `services/account_access.py` desde el ciclo de cuentas restringidas: es la
+# regla de TODOS los usuarios, no solo de los que tienen alcance. Se re-exporta
+# para los llamadores de este modulo.
+from app.services.account_access import accounts_for  # noqa: F401
+
 from app.models.third_party import ThirdParty
 from app.models.third_party_category import ThirdPartyCategory
 from app.models.user import User, UserCollectorScope
@@ -239,24 +245,18 @@ def require_account_in_scope(db: Session, ctx: dict, account_id: Optional[UUID])
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes acceso a esta cuenta")
 
 
-def accounts_for(db: Session, ctx: dict) -> Optional[list[UUID]]:
-    """Cuentas que ve el usuario. Con alcance: las asignadas, y lista vacia =
-    NINGUNA aunque el rol sea admin. Sin alcance: el comportamiento de hoy
-    (admin o sin asignaciones = None = todas)."""
-    if scope_of(ctx) is not None:
-        return list(allowed_account_ids(db, ctx))
-    if ctx["is_admin"]:
-        return None
-    from app.services.organization import get_user_account_assignments
-    assigned = get_user_account_assignments(db, ctx["user_id"], ctx["organization_id"])
-    return assigned if assigned else None
 
 
 def movement_visible(db: Session, ctx: dict, movement) -> bool:
-    """Filas 24, 25 y 29: `cta(account)` o (`account IS NULL` y `alc(tp)`)."""
+    """Filas 24, 25 y 29: `cta(account)` o (`account IS NULL` y `alc(tp)`).
+
+    La rama de cuenta delega en `account_access.account_visible` (un solo
+    predicado, #111); con alcance `accounts_for` nunca da `None`, asi que la
+    lista vacia sigue siendo NINGUNA. La rama NULL con alcance se queda aca."""
+    from app.services.account_access import account_visible
     scope = scope_of(ctx)
     if movement.account_id is not None:
-        return movement.account_id in allowed_account_ids(db, ctx)
+        return account_visible(db, ctx, movement.account_id)
     return in_scope(movement.third_party, scope)
 
 

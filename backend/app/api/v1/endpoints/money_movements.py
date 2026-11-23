@@ -17,8 +17,8 @@ from sqlalchemy.orm import Session
 
 from app.utils.dates import business_today
 from app.api.deps import require_permission, get_db
+from app.services.account_access import RESTRICTED_SOURCE, accounts_for, account_visible
 from app.services.collector_scope import (
-    accounts_for,
     movement_owned,
     movement_visible,
     not_found,
@@ -145,8 +145,8 @@ ACCOUNT_BALANCE_DIRECTION = {
 def _get_allowed_accounts(db: Session, ctx: dict) -> list[UUID] | None:
     """Retorna lista de account_ids permitidos o None si ve todo.
 
-    Con alcance de recolector (#124) la lista vacia es NINGUNA y el rol admin
-    no la salta; la regla vive en `collector_scope.accounts_for`."""
+    Con alcance de recolector (#129) la lista vacia es NINGUNA y el rol admin
+    no la salta; la regla vive en `account_access.accounts_for`."""
     return accounts_for(db, ctx)
 
 
@@ -162,8 +162,17 @@ def _guard_scoped_payment(db: Session, ctx: dict, account_id: UUID, third_party_
 
 
 def _require_movement_visible(db: Session, ctx: dict, movement) -> None:
-    """Filas 25 y 29: con alcance, 404 si el movimiento no se ve."""
-    if scope_of(ctx) is not None and not movement_visible(db, ctx, movement):
+    """404 si el usuario no puede ver el movimiento.
+
+    Con alcance (filas 25 y 29 de Ingrid): `movement_visible`, sin cambio.
+    Sin alcance (cuentas restringidas, C1): la cuenta del movimiento tiene que
+    ser visible; una cuenta NULL siempre lo es (D3). Admin, superusuario y
+    usuarios sin asignaciones ven todo, como hoy. Va ANTES de tocar nada (el
+    borrado de evidencia saca el archivo del disco antes del commit)."""
+    if scope_of(ctx) is not None:
+        if not movement_visible(db, ctx, movement):
+            raise not_found("Movimiento")
+    elif not account_visible(db, ctx, movement.account_id):
         raise not_found("Movimiento")
 
 
@@ -771,6 +780,7 @@ def get_by_number(
     movement = money_movement.get_by_number(db, movement_number, org_context["organization_id"])
     if not movement:
         raise HTTPException(status_code=404, detail="Movimiento no encontrado")
+    _require_movement_visible(db, org_context, movement)
     return _to_response(movement, db)
 
 
@@ -965,18 +975,26 @@ def get_by_third_party(
                        num if isinstance(num, int) else 0,
                        len(events), filter_dt, kwargs))
 
-    # 1. MoneyMovements confirmados y anulados
+    # 1. MoneyMovements confirmados y anulados.
+    # D4 (cuentas restringidas): SIN filtro por cuenta. El evento no muestra la
+    # cuenta, y filtrarlo dejaba el saldo corrido sin cerrar contra el vivo (#55)
+    # para el usuario restringido. C3: para ese usuario (sin alcance), el
+    # evento de una cuenta que no ve sale con `source=RESTRICTED_SOURCE`, que la
+    # pantalla pinta sin enlace (su detalle le daria 404). Con `allowed` None
+    # (admin, superusuario, sin asignaciones) sale byte a byte igual.
     allowed = None if scope is not None else _get_allowed_accounts(db, org_context)
+    allowed_set = None if allowed is None else {UUID(str(a)) for a in allowed}
     mm_query = sa_select(MoneyMovement).where(
         MoneyMovement.organization_id == org_id,
         MoneyMovement.third_party_id == third_party_id,
         MoneyMovement.status.in_(["confirmed", "annulled"]),
     )
-    if allowed is not None:
-        mm_query = mm_query.where(
-            (MoneyMovement.account_id.in_(allowed)) | (MoneyMovement.account_id.is_(None))
-        )
     for m in db.scalars(mm_query).all():
+        mm_source = (
+            RESTRICTED_SOURCE
+            if allowed_set is not None and m.account_id is not None and m.account_id not in allowed_set
+            else "money_movement"
+        )
         direction = THIRD_PARTY_BALANCE_DIRECTION.get(m.movement_type, 0)
         _evt(m.date, m.created_at, 1, filter_dt=m.date,
              id=str(m.id), date=m.date.isoformat(),
@@ -984,7 +1002,7 @@ def get_by_third_party(
              amount=float(m.amount), direction=direction,
              status=m.status, reference_number=m.reference_number,
              movement_number=m.movement_number,
-             source="money_movement", source_id=str(m.id), source_number=m.movement_number,
+             source=mm_source, source_id=str(m.id), source_number=m.movement_number,
              **_null_ops)
 
     # 2. Compras liquidadas (standalone, no doble partida)
@@ -1765,6 +1783,7 @@ def upload_evidence(
 
     org_id = str(org_context["organization_id"])
     mov = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+    _require_movement_visible(db, org_context, mov)
     _require_movement_owned(db, org_context, mov)
 
     # Validar extension
@@ -1844,6 +1863,7 @@ def delete_evidence(
     from app.core.config import settings
 
     mov = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+    _require_movement_visible(db, org_context, mov)
 
     if not mov.evidence_url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El movimiento no tiene comprobante adjunto")
@@ -1888,9 +1908,9 @@ def annul_movement(
     Si es transferencia, anula el par automaticamente.
     Retorna warnings si la anulacion deja una provision en sobregiro.
     """
-    if scope_of(org_context) is not None:
-        target = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
-        _require_movement_owned(db, org_context, target)
+    target = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+    _require_movement_visible(db, org_context, target)
+    _require_movement_owned(db, org_context, target)
     movement, warnings = money_movement.annul(
         db=db,
         movement_id=movement_id,
@@ -1921,6 +1941,8 @@ def update_movement_classification(
     Solo para movimientos confirmed de tipo: expense, expense_accrual, provision_expense,
     deferred_expense, depreciation_expense.
     """
+    target = money_movement.get_or_404(db, movement_id, org_context["organization_id"])
+    _require_movement_visible(db, org_context, target)
     movement = money_movement.update_classification(
         db=db,
         movement_id=movement_id,

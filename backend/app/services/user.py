@@ -104,12 +104,12 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
     return user
 
 
-def reset_password(db: Session, user_id: UUID) -> User | None:
-    """Resetear contraseña a '123456'."""
+def reset_password(db: Session, user_id: UUID, new_password: str) -> User | None:
+    """Fijar la clave que eligio el operador (patron #85). No hay clave por defecto."""
     user = get_user_by_id(db, user_id)
     if not user:
         return None
-    user.hashed_password = get_password_hash("123456")
+    user.hashed_password = get_password_hash(new_password)
     db.commit()
     db.refresh(user)
     return user

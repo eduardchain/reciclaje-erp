@@ -169,6 +169,9 @@ function resolveSourceLink(m: StatementItem): string | null {
     case "sale": return buildRoute(ROUTES.SALE_DETAIL, { id: docId });
     case "double_entry": return buildRoute(ROUTES.DOUBLE_ENTRY_DETAIL, { id: docId });
     case "money_movement": return buildRoute(ROUTES.TREASURY_MOVEMENT_DETAIL, { id: docId });
+    // Cuentas restringidas (C3): movimiento de una cuenta que el usuario no ve.
+    // Sin enlace a propósito: el detalle le daría 404.
+    case "money_movement_restricted": return null;
     default: return null;
   }
 }

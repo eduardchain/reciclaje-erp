@@ -28,6 +28,7 @@ class TestCreateUserWithMembership:
                 "email": "nuevo@example.com",
                 "full_name": "Usuario Nuevo",
                 "role_id": str(viewer_role_id),
+                "password": "clave-elegida-1",
             },
             headers=auth_headers,
         )
@@ -39,7 +40,7 @@ class TestCreateUserWithMembership:
         assert data["role_id"] == str(viewer_role_id)
         assert data["org_count"] == 1
 
-    def test_created_user_can_login_with_default_password(
+    def test_created_user_logs_in_with_chosen_password(
         self, client, auth_headers, test_organization, db_session
     ):
         viewer_role_id = _get_role_id(db_session, test_organization.id, "viewer")
@@ -50,17 +51,24 @@ class TestCreateUserWithMembership:
                 "email": "logintest@example.com",
                 "full_name": "Login Test",
                 "role_id": str(viewer_role_id),
+                "password": "clave-elegida-1",
             },
             headers=auth_headers,
         )
 
-        # Verificar que puede loguearse con 123456
+        # Entra con la clave que eligio el admin (plan quitar-clave-constante D2),
+        # y ya no con la constante de antes.
         response = client.post(
             "/api/v1/auth/login/json",
-            json={"email": "logintest@example.com", "password": "123456"},
+            json={"email": "logintest@example.com", "password": "clave-elegida-1"},
         )
         assert response.status_code == 200
         assert "access_token" in response.json()
+        response = client.post(
+            "/api/v1/auth/login/json",
+            json={"email": "logintest@example.com", "password": "123" + "456"},
+        )
+        assert response.status_code == 401
 
     def test_create_user_duplicate_email(self, client, auth_headers, test_organization, db_session):
         viewer_role_id = _get_role_id(db_session, test_organization.id, "viewer")
@@ -72,6 +80,7 @@ class TestCreateUserWithMembership:
                 "email": "dup@example.com",
                 "full_name": "Dup User",
                 "role_id": str(viewer_role_id),
+                "password": "clave-elegida-1",
             },
             headers=auth_headers,
         )
@@ -83,6 +92,7 @@ class TestCreateUserWithMembership:
                 "email": "dup@example.com",
                 "full_name": "Dup User 2",
                 "role_id": str(viewer_role_id),
+                "password": "clave-elegida-1",
             },
             headers=auth_headers,
         )
@@ -109,6 +119,7 @@ class TestCreateUserWithMembership:
                 "email": "blocked@example.com",
                 "full_name": "Blocked",
                 "role_id": str(viewer_role_id),
+                "password": "clave-elegida-1",
             },
             headers=auth_headers_user2,
         )
@@ -135,17 +146,23 @@ class TestResetPassword:
         response = client.post(
             f"/api/v1/organizations/{test_organization.id}/members/{test_user2.id}/reset-password",
             headers=auth_headers,
+            json={"new_password": "clave-elegida-2"},
         )
 
         assert response.status_code == 200
-        assert "reseteada" in response.json()["message"].lower()
+        assert response.json()["message"] == "Contraseña actualizada"
 
-        # Verificar que puede loguearse con 123456
+        # Entra con la clave que eligio el admin (D1), no con la constante.
         login_response = client.post(
             "/api/v1/auth/login/json",
-            json={"email": "testuser2@example.com", "password": "123456"},
+            json={"email": "testuser2@example.com", "password": "clave-elegida-2"},
         )
         assert login_response.status_code == 200
+        login_response = client.post(
+            "/api/v1/auth/login/json",
+            json={"email": "testuser2@example.com", "password": "123" + "456"},
+        )
+        assert login_response.status_code == 401
 
     def test_reset_password_non_member(
         self, client, auth_headers, test_organization, test_user2
@@ -154,6 +171,7 @@ class TestResetPassword:
         response = client.post(
             f"/api/v1/organizations/{test_organization.id}/members/{test_user2.id}/reset-password",
             headers=auth_headers,
+            json={"new_password": "clave-elegida-2"},
         )
 
         assert response.status_code == 404
@@ -173,6 +191,7 @@ class TestResetPassword:
         response = client.post(
             f"/api/v1/organizations/{test_organization.id}/members/{test_user.id}/reset-password",
             headers=auth_headers_user2,
+            json={"new_password": "clave-elegida-2"},
         )
 
         assert response.status_code == 403

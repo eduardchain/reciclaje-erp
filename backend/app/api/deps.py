@@ -10,6 +10,8 @@ from app.core.security import decode_access_token
 from app.services.user import get_user_by_id
 from app.services.organization import get_user_role_in_org
 from app.services.role import role_service
+# Importarlo registra el listener `before_flush` de cuentas restringidas (T13).
+from app.services.account_access import register_actor
 from app.models.user import User
 from app.models.organization import Organization
 
@@ -144,7 +146,7 @@ async def get_required_org_context(
     if scope_row is not None:
         enforce_route_allowed(db, request.scope.get("endpoint"), scope_row.collector_id)
 
-    return {
+    ctx = {
         "organization_id": org_uuid,
         "user_id": current_user.id,
         "user_role": role_info["role_name"],
@@ -154,6 +156,10 @@ async def get_required_org_context(
         "user": current_user,
         "collector_scope_id": scope_row.collector_id if scope_row is not None else None,
     }
+    # Cuentas restringidas (§2.1): el usuario del request queda en la sesion
+    # para el listener de escrituras. Una asignacion de diccionario, sin consulta.
+    register_actor(db, ctx)
+    return ctx
 
 
 def _build_superuser_context(db: Session, org_uuid: UUID, user: User) -> dict:
@@ -168,7 +174,7 @@ def _build_superuser_context(db: Session, org_uuid: UUID, user: User) -> dict:
             detail="Organizacion no encontrada o inactiva",
         )
     all_perms = role_service.get_all_permission_codes(db)
-    return {
+    ctx = {
         "organization_id": org_uuid,
         "user_id": user.id,
         "user_role": "superadmin",
@@ -178,6 +184,8 @@ def _build_superuser_context(db: Session, org_uuid: UUID, user: User) -> dict:
         "user": user,
         "collector_scope_id": None,
     }
+    register_actor(db, ctx)
+    return ctx
 
 
 async def get_optional_org_context(
