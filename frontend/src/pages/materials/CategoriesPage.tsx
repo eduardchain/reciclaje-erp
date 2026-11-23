@@ -54,7 +54,7 @@ export default function CategoriesPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Categorias de Material" description="Clasificacion de materiales">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => navigate(kgMode ? ROUTES.CONFIG_FORMULAS : ROUTES.MATERIALS)}>
             <ArrowLeft className="h-4 w-4 mr-2" />{kgMode ? "Materiales (kg)" : "Materiales"}
           </Button>
