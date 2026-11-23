@@ -1,4 +1,6 @@
-# Plan: retenciones e IVA con porcentaje libre al liquidar una Entrada (v1.4)
+# Plan: retenciones e IVA con porcentaje libre al liquidar una Entrada (v1.5)
+
+- **v1.5** (pedido del Coordinador, sobre la medición de QA 1 en `~/sac-evidencia/2026-11-23/qa-1-rate-sin-tope/medicion.log`). Solo suma el tope del servidor (T12): `le=100` en los dos schemas, sus tests (B0–B5, uno por camino de entrada) y dos filas de plantado (P27, P28). Lo demás es la v1.4 con GO de QA 1 (`7d7a05d`, veredicto `veredicto_plan_v1.4.md`), sin cambios.
 
 - **v1.4** (condiciones de QA 1 sobre la v1.3 `4d72cff`; veredicto en `~/sac-evidencia/2026-11-23/qa-1-retefuente/veredicto_plan_v1.3.md`):
   - C1: P1 predice U1, U2, U5 y E1. U3 queda verde porque «No declarante» ya tiene 3,5; U5 cae porque Barranquilla tiene 0,7 y la guardada es 0,966.
@@ -34,8 +36,8 @@ En la tarjeta de cada compra, en Liquidar Entrada:
 - **El monto cambia mientras se escribe el %**, no al salir de la casilla (T11).
 - **Error de dedo** (25 en lugar de 2,5): aparece un aviso en ámbar junto al %, sin bloquear (T7). El monto está siempre a la vista al lado del %.
 
-**El backend no cambia.**
-- `PurchaseRetentionCreate.rate` y `DocumentTaxCreate.rate` ya son libres (`gt=0`, informativos), y el monto es la verdad (#79 F1, #112 D1).
+**El backend solo gana un tope (T12).**
+- `PurchaseRetentionCreate.rate` y `DocumentTaxCreate.rate` ya son libres (`gt=0`, informativos), y el monto es la verdad (#79 F1, #112 D1). No tienen tope: con `rate` = 1000 la columna `Numeric(7,4)` desborda y el servidor da **500** (medido por QA 1). T12 les pone `le=100`, el mismo tope de la pantalla (T5).
 - La entidad de una retención depende solo del tipo, y del municipio en ICA (#78).
 - Lo que hoy se guarda en `rate` es la tasa del catálogo. Con este cambio se guarda la que se usó.
 
@@ -140,6 +142,37 @@ Se mide con capturas a 1440 y 390, sin scroll horizontal.
 - **Descarté** un componente `PercentInput` aparte: tendría que copiar la lógica de selección de #126, y una copia de esa lógica es justo cómo volvería el defecto de «13.001.250».
 - Mientras se escribe pueden pasar valores intermedios («3,» → 3). Cada uno recalcula el monto, que es lo que se pidió. Una casilla vacía da 0, el monto queda en $0, y la validación lo muestra.
 
+**T12. El servidor topa la tasa en 100** (#103 D3: un validador para todos los puntos de entrada).
+- `le=100` en `PurchaseRetentionCreate.rate` (`schemas/purchase.py:266`) y en `DocumentTaxCreate.rate` (`schemas/document_tax.py:46`). Queda `gt=0, le=100`. Un valor fuera de rango da **422**, donde antes había un 500 por `DataError` (`Numeric(7,4)` desborda desde 1000).
+- **Alcance compartido.** Barrido por SÍMBOLO, `grep -rn -w <símbolo> backend/app`, con salida en `~/sac-evidencia/2026-11-23/coder-1-retefuente/barrido_t12.log`:
+  - `PurchaseRetentionCreate`, 5 líneas, 2 campos que lo usan:
+    - `PurchaseLiquidateRequest.retentions` (`schemas/purchase.py:315`): la liquidación de compras de **todas las orgs**, detrás del flag `kg_ledger_enabled`, en `PATCH /purchases/{id}/liquidate` (`endpoints/purchases.py:651`);
+    - `InboundSupplierRetentions.retentions` (`schemas/inbound_order.py:206`): la Entrada, campo `supplier_retentions`.
+  - `DocumentTaxCreate`, 7 líneas, 3 campos que lo usan:
+    - `InboundPurchaseTaxes.taxes` (`schemas/inbound_order.py:233`): el IVA de compra de la Entrada, campo `purchase_taxes`;
+    - `SaleLiquidateRequest.taxes` (`schemas/sale.py:258`): **ventas** (#112);
+    - `WillardDeliveryLiquidate.taxes` (`schemas/willard_delivery.py:112`): **Salidas de Plomo** (#112).
+  - O sea que el tope corre también en la liquidación de compras de las otras orgs y en ventas y Salidas, que esta versión no toca en pantalla.
+- **Nada legítimo pasa de 100.**
+  - El catálogo tiene `CHECK rate_pct <= 100` (`ck_retention_configs_rate_range`, `models/retention_config.py:86`).
+  - Las pantallas mandan `cfg.rate_pct`, la constante 19 o, desde este plan, un % topado en 100 (T5).
+  - Ninguna tasa real (IVA, ReteFuente, ReteIVA, ICA) pasa de 100.
+  - Ningún test existente manda un `rate` de tres cifras: `grep -rnE '"rate"\s*:\s*[0-9]{3,}|rate=Decimal\("[0-9]{3,}' backend/tests` da 0 líneas.
+- Solo cambian los schemas de ENTRADA (`*Create`). Las respuestas (`DocumentTaxResponse.rate`, `InboundRetentionDetail.rate`) no cambian.
+- **Tests** en `tests/test_tax_rate_tope.py`, por HTTP, contra la base de cada worktree.
+  - Cada camino se prueba con tres valores, parametrizados: **1000 → 422**, **100.01 → 422** y **100 → 200**.
+  - En cada 422 se afirma que **no quedó nada escrito**: el documento sigue en su estado de antes, y no hay compras nuevas, filas en `purchase_retentions` o `document_taxes`, ni cambio en el saldo del tercero.
+
+| # | Camino (schema) | Esperado con 1000 / 100.01 / 100 |
+|---|---|---|
+| B1 | Liquidar compra directa, `retentions` (`PurchaseRetentionCreate`), con el flag | 422 / 422 / 200. En el 422, la compra sigue `registered`, con 0 retenciones y el saldo del proveedor igual |
+| B2 | Liquidar Entrada, `supplier_retentions` (`PurchaseRetentionCreate`) | 422 / 422 / 200. En el 422, la Entrada sigue `reviewed`, con 0 compras nacidas y 0 retenciones |
+| B3 | Liquidar Entrada, `purchase_taxes` (`DocumentTaxCreate`) | 422 / 422 / 200. En el 422, igual que B2, con 0 `document_taxes` |
+| B4 | Liquidar venta, `taxes` (`DocumentTaxCreate`) | 422 / 422 / 200. En el 422, la venta sigue `registered`, con 0 `document_taxes` y el saldo del cliente igual |
+| B5 | Liquidar Salida de Plomo, `taxes` (`DocumentTaxCreate`) | 422 / 422 / 200. En el 422, la Salida sigue sin liquidar y con 0 `document_taxes` |
+
+- **B0, control positivo.** Se corre el mismo test de QA 1 (`~/sac-evidencia/2026-11-23/qa-1-rate-sin-tope/test_qa1_rate_sin_tope.py`, sobre `dea2320`; su log `medicion.log` da 500 con 1000 en la retención y en el IVA) contra la rama. Con el cambio, esos dos casos tienen que dar **422** y no `DataError`. Su log va a `control_b0.log`, junto al de QA 1.
+
 **T10. Alcance de recolector (#129).** Con alcance no hay IVA ni retenciones (S5), así que nada de esto corre para Ingrid.
 
 ## 5. Decisiones de Daniel
@@ -202,7 +235,7 @@ El frontend no tiene infraestructura de tests. Como en #123, las funciones puras
 - **E8, ICA libre.** ICA Barranquilla trae 0,7. Se digita 0,966 y el monto se recalcula. Al liquidar, `rate` = 0,966.
 - **Capturas a 1440 y 390** del pie de una compra con dos retenciones, el IVA, el aviso y la nota, y de Tesorería → Retenciones.
 
-**Backend:** sin cambios en `app/`. El único test de Python es el del seeder (T6).
+**Backend:** el único cambio en `app/` es el tope de T12, con B1–B6. Además está el test del seeder (T6).
 
 ## 7. Plantado
 
@@ -239,6 +272,8 @@ La matriz va commiteada antes de plantar y no se reescribe.
 | P24 | `rateOutOfRange` acepta 0 | U26 | exacta |
 | P25 | `MoneyInput` ignora `liveChange` (llama `onChange` solo en el blur) | E3, E7 | exacta |
 | P26 | `withRate` resetea `touched` aunque el valor sea el mismo | U27, E3 | exacta |
+| P27 | `PurchaseRetentionCreate.rate` sin `le=100` (el de hoy) | B1 y B2, en los casos 1000 y 100.01; con 1000 vuelve el 500. B3, B4 y B5 quedan verdes | exacta |
+| P28 | `DocumentTaxCreate.rate` sin `le=100` (el de hoy) | B3, B4 y B5, en los casos 1000 y 100.01. B1 y B2 quedan verdes | exacta |
 
 ## 8. Gates (nivel lógica, flujo del 17-nov)
 
@@ -248,7 +283,8 @@ La matriz va commiteada antes de plantar y no se reescribe.
   - los casos puros y el e2e;
   - las tres guardas (`test_reloj_de_negocio.py`, `test_advisory_locks.py`, `test_crucible_charges.py`).
 - **Plantado** contra la matriz de §7.
-- **Golden:** no aplica, medido (sin cambios en `app/`).
+- **Golden: no aplica, medido con comando** (T12 sí toca `app/`). El cambio solo restringe cuerpos de POST/PATCH. El golden captura solo lecturas: se extrae `CAPTURES` de `golden_capture.py` y se muestra que ninguna es una escritura ni manda `rate`. Además, `git diff --stat dea2320` en `app/` debe tocar solo `schemas/purchase.py` y `schemas/document_tax.py`, y en clases `*Create`. Las respuestas no cambian. Las dos salidas van a `golden_no_aplica.log`.
+- **Dirigidas** (T12): `test_tax_rate_tope.py` (los cuatro caminos de B1–B5), más el grep en `backend/tests` de `PurchaseRetentionCreate`, `DocumentTaxCreate`, `supplier_retentions`, `purchase_taxes`, `retentions` y `"taxes"`, más las tres guardas. El comando, el set resultante y la predicción (`--collect-only`) van escritos en el log antes de correr.
 - **Parity:** no aplica (cero migraciones).
 - **Suite completa:** diferida al checkpoint.
 - **Pantalla:** capturas a 1440 y 390 (T9).
