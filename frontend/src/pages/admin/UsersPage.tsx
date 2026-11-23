@@ -117,6 +117,12 @@ export default function UsersPage() {
     setSelectedCollectorId(member.collector_scope_id ?? "");
   };
 
+  // D1 (cuentas restringidas): la asignacion no restringe a un admin de sistema,
+  // salvo con alcance de recolector (#129), donde vacio = ninguna y el admin no la salta.
+  const selectedRole = roles?.find((r) => r.id === selectedRoleId);
+  const adminIgnoresAccounts =
+    selectedRole?.name === "admin" && selectedRole.is_system_role && !(scopeEnabled && selectedCollectorId);
+
   const toggleAccount = (accountId: string) => {
     setSelectedAccountIds((prev) =>
       prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId],
@@ -407,12 +413,17 @@ export default function UsersPage() {
               </div>
             )}
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuentas Visibles</Label>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cuentas</Label>
               <p className="text-xs text-slate-400 mt-0.5 mb-2">
                 {scopeEnabled && selectedCollectorId
                   ? "Con alcance, vacio = ninguna cuenta: marca la caja del recolector"
-                  : "Dejar vacio para ver todas las cuentas"}
+                  : "Solo podrá ver y mover estas cuentas. Vacío: todas"}
               </p>
+              {adminIgnoresAccounts && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 mb-2">
+                  Con rol Administrador, las cuentas asignadas no restringen nada
+                </p>
+              )}
               <div className="space-y-1.5 max-h-40 overflow-y-auto border rounded-md p-2">
                 {accounts.map((acc) => (
                   <label key={acc.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">

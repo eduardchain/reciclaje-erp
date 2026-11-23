@@ -159,7 +159,8 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         is_active: Optional[bool] = None,
         search: Optional[str] = None,
         sort_by: str = "created_at",
-        sort_order: str = "desc"
+        sort_order: str = "desc",
+        extra_filters: Optional[list] = None,
     ) -> PaginatedResponse:
         """
         Get multiple records with pagination and filters.
@@ -187,6 +188,11 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         # Apply search if provided (subclasses can override)
         if search:
             query = self._apply_search_filter(query, search)
+
+        # Filtros extra del llamador, ANTES del conteo y de paginar (cuentas
+        # restringidas: filtrar despues de paginar dejaba `total` y la pagina mal).
+        for clause in extra_filters or ():
+            query = query.where(clause)
         
         # Get total count
         count_query = select(func.count()).select_from(query.subquery())
