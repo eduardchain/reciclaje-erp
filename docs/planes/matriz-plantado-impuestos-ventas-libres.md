@@ -64,3 +64,19 @@
 - Al cerrar, los 2 sha tienen que coincidir con los de arriba.
 - Vite sirve el árbol vivo (:5181). El back (:8011) no se toca: ningún P es de backend.
 - Cada corrida verifica que vite responda 200 sobre el módulo plantado antes de medir. Un plantado que no compila no mide nada.
+
+## Addendum P24 (23-nov, veredicto `6169c1f5…` de QA 1) — escrito y commiteado ANTES de re-plantar
+
+- **P24 original: PELIGROSA, cayó.** E3 no cayó en dos corridas (18:41 y 18:44). La base de la reteIVA salía de `effectiveIva`, que repetía la regla `touched ? amount : sugerido` en vez de llamar a `effectiveTaxAmount`. Con P24, la tarjeta mostraba un IVA de 190.000 mientras la reteIVA se calculaba sobre 100.000, y E3 solo miraba la reteIVA y el rótulo. Medido en `sonda24_P24_e.log` y `sonda24_control_e.log`. La fila de arriba no se reescribe.
+- **Arreglo (a):** `effectiveIva` delega en `effectiveTaxAmount(iva, rows, lineAmounts, [])`. Queda un solo predicado.
+- **Arreglo (b):**
+  - E3 afirma además el EFECTO: el IVA tocado sigue en pantalla en «100.000» y el neto es +85.000 → 1.085.000, en 1440 y en 390.
+  - **U22:** con el IVA tocado a 100.000, `taxRowBase(reteIVA) == effectiveTaxAmount(IVA) == effectiveIva == 100.000` y el sugerido de la reteIVA es 15.000.
+
+| P | Defecto plantado | Archivo | Caen |
+|---|---|---|---|
+| P24 (re) | `effectiveTaxAmount` ignora `touched` (igual que arriba), con (a) aplicado | utils | ≥ U6, U8, U14, U15, U22, E3, E6 |
+| P24b | `effectiveIva` vuelve a `suggestedIva(lineAmounts, iva.rate)` sin mirar `touched` | utils | ≥ U8, U15, U22, E3 |
+
+- Agregué U8 y U15 a lo que pidió QA (U22 y E3) al releer los casos: los dos leen la base de la reteIVA con el IVA tocado. Las dos filas llevan ≥ porque `effectiveIva` es una vía compartida.
+- E3 con P24b: el neto pasa a +71.500 (IVA 100.000 en pantalla, reteIVA 28.500 sobre 190.000).
