@@ -103,7 +103,7 @@ export default function Header({ onMenuClick }: HeaderProps = {}) {
     <>
       <header className="bg-white border-b border-slate-200/80 h-16 flex items-center px-3 md:px-6">
         <div className="flex items-center justify-between w-full gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 shrink-0">
             {onMenuClick && (
               <button
                 onClick={onMenuClick}
@@ -116,7 +116,7 @@ export default function Header({ onMenuClick }: HeaderProps = {}) {
             <EcoBalanceLogo textColor="dark" />
           </div>
 
-          <div className="flex items-center gap-2 md:gap-4">
+          <div className="flex items-center gap-2 md:gap-4 min-w-0">
             {collectorScope && (
               <span
                 className="flex items-center gap-1 text-xs font-medium bg-teal-100 text-teal-700 px-2 py-1 rounded-lg"
@@ -133,14 +133,14 @@ export default function Header({ onMenuClick }: HeaderProps = {}) {
             {showOrgSelector ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-1.5 text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors focus:outline-none">
+                  <button className="flex items-center min-w-0 gap-1.5 text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors focus:outline-none">
                     {isSystemMode ? (
-                      <Settings className="w-3.5 h-3.5" />
+                      <Settings className="w-3.5 h-3.5 shrink-0" />
                     ) : (
-                      <Building2 className="w-3.5 h-3.5" />
+                      <Building2 className="w-3.5 h-3.5 shrink-0" />
                     )}
-                    <span className="font-medium max-w-[120px] sm:max-w-[180px] truncate">{currentOrgLabel}</span>
-                    <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="font-medium max-w-[120px] sm:max-w-[180px] truncate" title={currentOrgLabel}>{currentOrgLabel}</span>
+                    <ChevronDown className="w-3.5 h-3.5 shrink-0 text-slate-400" />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64 max-h-80 overflow-y-auto">
@@ -176,9 +176,9 @@ export default function Header({ onMenuClick }: HeaderProps = {}) {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : org ? (
-              <div className="flex items-center gap-1.5 text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
-                <Building2 className="w-3.5 h-3.5" />
-                <span className="font-medium">{org.name}</span>
+              <div className="flex items-center min-w-0 gap-1.5 text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
+                <Building2 className="w-3.5 h-3.5 shrink-0" />
+                <span className="font-medium truncate" title={org.name}>{org.name}</span>
               </div>
             ) : null}
 
