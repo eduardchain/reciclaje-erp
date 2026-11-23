@@ -40,6 +40,11 @@ docker-compose -f docker-compose.test.yml logs -f
 - **Password:** test_password
 - **Network:** reciclaje_test_network
 
+**Qué base usa cada corrida.** `conftest.py` y `scripts/schema_parity_check.py` leen `TEST_DATABASE_URL` del entorno, con una sola regla (`tests/_test_db_url.py`):
+- **En la carpeta principal**, sin la variable usan `reciclaje_test`.
+- **Desde un worktree** (`~/Projects/reciclaje-erp-wt/<rol>`), la variable es obligatoria. Sin ella abortan y dicen qué exportar, por ejemplo `TEST_DATABASE_URL=postgresql://admin:test_password@localhost:5433/reciclaje_test_qa_1`. Así ningún pytest olvidado cae en la base de la suite del checkpoint.
+- En los dos casos, solo se acepta una base `reciclaje_test*` en `localhost:5433`, porque se recrea con DROP SCHEMA.
+
 ### 2. Instalar Dependencias de Testing
 
 ```bash

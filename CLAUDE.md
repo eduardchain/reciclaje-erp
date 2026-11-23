@@ -170,7 +170,7 @@ cd backend && ./scripts/replicate_prod.sh
 - **Si necesitas datos reales**, primero replica produccion a local con `replicate_prod.sh`.
 - **Despues de `replicate_prod.sh`, SIEMPRE re-correr `./venv/bin/alembic upgrade head`** si hay migraciones locales que prod aun no tiene — el DROP SCHEMA de la replica las borra y el backend local revienta con `UndefinedTable`.
 - **`seed_test_data.py`** y cualquier script de carga apuntan a la BD configurada en `.env` (debe ser desarrollo).
-- **Tests (`conftest.py`)** usan `TEST_DATABASE_URL` hardcoded (`admin:test_password@localhost:5433/reciclaje_test`). No dependen de `.env`.
+- **Tests (`conftest.py`)** leen `TEST_DATABASE_URL` del entorno y no dependen de `.env`. La regla vive en `tests/_test_db_url.py` y la comparte `schema_parity_check.py`. En la carpeta principal, sin la variable usan `reciclaje_test`. Desde un worktree la variable es obligatoria y, sin ella, abortan, porque `reciclaje_test` es la base de la suite del checkpoint y el 20-nov un pytest olvidado le hizo DROP SCHEMA a mitad de corrida. Solo se acepta `reciclaje_test*` en localhost:5433.
 
 ## Architecture
 
