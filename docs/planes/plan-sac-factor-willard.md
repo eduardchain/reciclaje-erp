@@ -1,6 +1,6 @@
-# Plan: elegir el factor de conversión de Willard al liquidar (v1.1)
+# Plan: elegir el factor de conversión de Willard al liquidar (v1.2)
 
-> **v1.1 (24-nov):** Q-76 respondida por Daniel («está bien al 59»). Sale la acción propia de corregir una Willard liquidada (era D6 en v1.0). Un factor mal escogido se corrige por el camino que ya existe: anular y registrar de nuevo (D6 nuevo, medido). Cambian §1, D3, D5, D6, D7, §7, §8 y §10. Entran también las notas de QA 1 sobre la v1.0 (`~/sac-evidencia/2026-11-24/qa-1-factor-willard/notas_plan_v1.0.md`): A1 y A2 en D3, A3 en D8, A4 en D5, A5 en D6, O1 en D1 y O2 en D1 y D2.
+> **v1.1 (24-nov):** Q-76 respondida por Daniel («está bien al 59»). Sale la acción propia de corregir una Willard liquidada (era D6 en v1.0). Un factor mal escogido se corrige por el camino que ya existe: anular y registrar de nuevo (D6 nuevo, medido). Cambian §1, D3, D5, D6, D7, §7, §8 y §10. **v1.2:** C1 y O1 del veredicto de QA 1 sobre la v1.1 (`veredicto_plan_v1.1.md`): los dos costos que faltaban en D6 y T8 con valores esperados. Entran también las notas de QA 1 sobre la v1.0 (`~/sac-evidencia/2026-11-24/qa-1-factor-willard/notas_plan_v1.0.md`): A1 y A2 en D3, A3 en D8, A4 en D5, A5 en D6, O1 en D1 y O2 en D1 y D2.
 
 - **Pedido:** SAC, 24-nov, autorizado por Daniel («esos dos, dale»). Inventario, sección D, filas del 24-nov.
 - **Nivel:** lógica (contrato del back, migración, regla de kilos).
@@ -125,7 +125,15 @@ Pedido del Coordinador (24-nov): con Q-76 respondida, la acción propia de corre
 
 - «Anular» está en el detalle de una Willard liquidada (`InboundDetailPage.tsx:480`, `purchases.cancel`). `_revert_willard_effects` (l.1587) devuelve el inventario y anula los movimientos kg por `source_id` (l.1656-1669), sin recalcular nada. La Entrada anulada desaparece de todos los cortes (#41), así que la deuda con Willard queda como si no hubiera existido.
 - Registrar de nuevo con la **misma remisión** y la **fecha original** está permitido: la remisión no tiene unicidad (solo se busca y ordena, `inbound_order.py:2125`, `:2231`) y la fecha solo no puede ser futura (`schemas/inbound_order.py:79`). Después se revisa y se liquida escogiendo el factor bueno (D3).
-- Costo para el usuario: volver a capturar las líneas y pasar por revisión, y la Entrada nueva lleva otro número interno. Es la misma regla que ya rige para cambiar la sede de una liquidada (#118: «anúlela y regístrela de nuevo»).
+- **Costos, todos (C1 de QA 1):**
+  1. **Trabajo:** volver a capturar las líneas y pasar otra vez por revisión.
+  2. **Lo que queda a la vista (C1 a):** la misma remisión dos veces en Entradas, una anulada y una viva, y la viva con otro número interno.
+  3. **No mueve solo kilos (C1 b):**
+     - La anulación saca cada línea del inventario al costo guardado en la línea (`line.unit_cost`, remoción ponderada #66).
+     - Si el pool del material estaba negativo, la diferencia va a `annul_cost_adjustment`, la 8.ª fuente de la línea de sobreventa del P&L (#75).
+     - La Entrada nueva entra al costo promedio de ESE día (identidad D2), con su MCH de hoy.
+     - Por eso el costo promedio y el valor del inventario de SCR-SG pueden cambiar aunque los kilos vuelvan iguales: si entre la liquidación y la anulación entró material a otro costo, o si el pool estaba negativo. Es el mismo argumento que la v1.0 usó para no reusar D18.
+  - Es la misma regla que ya rige para cambiar la sede de una liquidada (#118: «anúlela y regístrela de nuevo»).
 - **Este costo lo acepta o no Daniel (A5):** va en la ventanita de autorización junto con el runbook de §8. Si no lo acepta, la alternativa es un plan aparte (último párrafo de D6).
 
 **Editar con revert-and-reapply (#75 D18) no sirve hoy** como camino del usuario:
@@ -187,9 +195,9 @@ Nuevo archivo `backend/tests/test_sac_factor_willard.py`:
 | T5c | A3: `lead_percentage_applied` por HTTP en el detalle y en el listado; en una Entrada anulada da None y `conversion_option` se sigue viendo |
 | T6 | Edición D18 (cambia la cantidad) de una confirmada con escurrido: conserva escurrido; kilos = cantidad nueva × 0,56 |
 | T7 | Edición D18 cuando la opción ya no está en la vigente: 422 y nada cambia |
-| T8 | Anular una confirmada con escurrido: la cuenta kg vuelve a 0 y el inventario al de antes; registrarla de nuevo con la misma remisión y la fecha original, revisarla y liquidarla con pinza da cantidad × 0,59 en la fecha original (D6 medido con el camino que existe) |
-| T10 | Con alternativas en la fórmula, traslado y retorno de dross usan el defecto |
+| T8 | D6 medido con el camino que existe: anular una confirmada con escurrido, registrarla de nuevo con la misma remisión y la fecha original, revisarla y liquidarla con pinza. Afirma: la cuenta kg queda en cantidad × 0,59 en la fecha original; la remisión aparece dos veces (una anulada); y el costo promedio y el valor del inventario de SCR-SG antes y después, con los **valores esperados escritos en el test** (no «igual»), en tres casos: (a) nada entra entre medio: promedio y valor sin cambio; (b) entre la liquidación y la anulación se liquida una compra de SCR-SG a otro precio: promedio y valor esperados calculados a mano (remoción a `line.unit_cost`, reingreso al promedio de ese día); (c) pool negativo al anular: `annul_cost_adjustment` esperado escrito y su efecto en la línea de sobreventa del P&L |
 | T9 | D2: versión nueva sin `label`/`alternatives` las copia de la vigente; con `null` explícito las quita |
+| T10 | Con alternativas en la fórmula, traslado y retorno de dross usan el defecto |
 | T11 | El cuerpo de `confirm` no cambia el permiso: un rol con `purchases.view` y sin `purchases.liquidate` recibe 403 con cuerpo, con un GET en 200 como control positivo |
 
 Front (sin infra de test): casos puros del helper de opciones en un arnés `node` y e2e a 1440 y 390:
