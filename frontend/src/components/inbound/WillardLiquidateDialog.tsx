@@ -123,7 +123,7 @@ export function WillardLiquidateDialog({ order, open, onOpenChange, description,
                   value={opt.value ?? DEFAULT_FACTOR}
                   onValueChange={(v) => setChosen((c) => ({ ...c, [line.materialId]: v }))}
                 >
-                  <SelectTrigger className="w-full sm:w-56" aria-label={`Factor de ${line.label}`}>
+                  <SelectTrigger className="w-full sm:w-72" aria-label={`Factor de ${line.label}`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
