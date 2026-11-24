@@ -1,8 +1,16 @@
-# Plan — Entradas y Salidas «de control» (SAC, v1.1)
+# Plan — Entradas y Salidas «de control» (SAC, v1.2)
 
 **Autor:** Eco Coder 2 · **Fecha:** 2026-11-24 · **Rama:** `coder-2/documentos-control` sobre develop `5139940`
 **Nivel:** lógica (migración, reglas de estado en un servicio con dinero, guards en servicios compartidos si se aprueba D5).
 **Autorización:** Daniel, 24-nov («esos dos, dale»), vía Coordinador. Este documento es SOLO el plan; construir exige el GO de QA 2 y después la autorización de Daniel.
+
+**Cambios v1.1 → v1.2** (GO condicionado de QA 2, `veredicto_plan_v1.1_5e9140fe.md`, `1f24ed16`):
+- **C1:** la llave de la remisión es UNA sola expresión SQL, `remission_key`, que usan el orden, la marca «Repetida» y el aviso. No hay normalización en Python. Se agregan T23 (paridad con el conjunto de frontera) y P23.
+- **C2:** un hueco se mide contra **toda** la org, sin importar la fecha ni el estado. Con búsqueda activa no se intercalan huecos. Se agregan los filtros remisión desde y hasta, y T24, T25 y P24.
+- **O1:** la fila de la lista y `InboundLiquidatePage` con una Entrada solo de control (§4.4).
+- **O2:** el tercero de la Salida de control no puede ser una entidad de sistema (§4.3).
+- **O3:** Salidas de Plomo queda fuera del talonario, por escrito (§4.5).
+- **O4:** que las Entradas Willard usen el mismo talonario es grado (c), y queda D11 para confirmarlo.
 
 **Cambios v1.0 → v1.1:**
 - **Q-75 respondida** (Daniel, 24-nov, vía Coordinador): las salidas de control usan el **mismo talonario de remisiones** que las Entradas. Por eso:
@@ -164,7 +172,7 @@ Son los mismos permisos que Salidas de Plomo, así que no hace falta ningún per
 - al menos una línea;
 - una fila por material;
 - bodega activa de la org y que no sea de tránsito (`validate_not_transit_warehouse`);
-- tercero activo de la org, sin restricción de categoría (a quién se entregan estibas no es un rol);
+- tercero activo de la org, sin restricción de categoría (a quién se entregan estibas no es un rol), salvo las **entidades de sistema** (`is_system_entity`: `[Impuestos]`, `[Retenciones]`, prepagos), que dan 422, como en los otros selectores (O2 de QA 2). El selector de la pantalla tampoco las ofrece;
 - fecha no futura con `business_today()`.
 
 **Efectos: cero**, en crear, editar y anular. Ningún movimiento de inventario, kg, tesorería ni ajuste. Lo afirma un test por conteo de tablas (T13).
@@ -180,10 +188,12 @@ Son los mismos permisos que Salidas de Plomo, así que no hace falta ningún per
   - Entrada cerrada: badge gris «Cerrada sin valor», fila de auditoría «Cerrada» con el formato de auditoría (como «Anulada», 1e5a912) y el botón «Reabrir»;
   - Entrada mixta: nota «N líneas de control no se liquidan».
 - **Lista:**
+  - la fila de una Entrada solo de control en Registrada o Revisada no ofrece «Liquidar», que llevaría a una matriz vacía y a un 422 (R8d). Ofrece **«Cerrar sin valor»**, que abre el mismo diálogo del detalle (O1 de QA 2). Para saberlo, el response gana `is_control_only` (bool). Se calcula por página con **una** consulta de los perfiles de los materiales de la página (lookup por página, sin N+1) y se lee al momento, como R2;
   - badge gris «Sin valor»;
   - «Total $» queda en «—»;
   - el filtro de estado gana la opción «Cerradas sin valor». Las pestañas no cambian.
-- **Liquidar (`InboundLiquidatePage`):**
+- **Liquidar (`InboundLiquidatePage`), entrando por URL con una Entrada solo de control:** no pinta la matriz. Muestra un aviso, «Esta Entrada es solo de control: ciérrela sin valor», con un enlace al detalle. Es el mismo patrón del aviso que ya pinta para un estado que no se puede liquidar (l.820).
+- **Liquidar (`InboundLiquidatePage`), Entrada mixta:**
   - las filas de control no entran a la matriz;
   - se listan aparte, en solo lectura, con «control, no se liquida»;
   - `assertDraftShape` y la firma del borrador ignoran esas filas.
@@ -192,26 +202,85 @@ Son los mismos permisos que Salidas de Plomo, así que no hace falta ningún per
 
 **Por qué una vista común y no un solo documento con dirección.** Meter la salida dentro de `inbound_orders` con una columna de dirección haría que cada camino de la Entrada tuviera que preguntarse «¿es de salida?»: liquidar, reparto, descuadre, comisión, puente de compras, Willard, alcance de recolector y `display_status`. Es la misma clase de defecto que #89/#93 (una columna con dos semánticas) y chocaría con el trabajo de Coder 1. Los dos documentos solo comparten la **remisión**, así que lo común es una **lectura**, no un modelo.
 
-**`GET /remissions`** (router con `require_org_flag("kg_ledger_enabled")`, permisos `purchases.view` **y** `sales.view`, fuera de `SCOPED_ENDPOINTS`):
-- Una fila por documento: Entradas (tipo compra y Willard) y Salidas de control. Las anuladas **también** salen, marcadas: una remisión anulada usó su papel, así que cubre el número y no es un hueco.
-- Columnas: remisión, documento («Entrada #N» o «Salida de control #N»), dirección (entra o sale), fecha, estado, materiales en una línea y enlace al detalle.
-- **Orden:** el mismo orden natural de #117 (`_remission_order`), que se generaliza a un helper que recibe la expresión de la remisión. Así la vista y el orden de la lista de Entradas no pueden divergir. Primero las numéricas por valor («0012» = 12), después las de texto con `lower() COLLATE "C"`, y las vacías al final. El desempate es por fecha y número de documento.
-- **Cómo se arma:** `UNION ALL` de dos `SELECT` mínimos (remisión, tipo, id, número, fecha, estado), paginado sobre la unión. Los materiales se cargan después, solo para las filas de la página (lookup por página, nunca un join 1:N: #89/#93 R2).
-- **Filtro:** rango de fechas (por defecto, el mes en curso) y una búsqueda por remisión.
-- **Huecos** (lo que Johana quiere revisar): entre dos remisiones **numéricas** vecinas del rango filtrado, si la diferencia es mayor que 1, el servidor intercala una fila «Faltan N: de A a B». Va sobre la lista entera del rango, no por página: una página sola no ve el vecino. El tamaño es acotado (en prod, ~190 remisiones en 18 días), y el cálculo es un recorrido lineal sobre los números ordenados. Las de texto no tienen vecino, así que no generan hueco; salen al final sin análisis.
-- Las Entradas **sin** remisión no están en el talonario: no salen en la vista, y el encabezado dice cuántas Entradas del rango no tienen remisión, para que no se pierdan en silencio.
-- **Pantalla:** «Talonario de remisiones», con un botón desde la lista de Entradas y otro desde la de Salidas de control. Dual render: tabla en escritorio y tarjetas a 390. Las filas de hueco van en ámbar.
+**Qué documentos entran al talonario:**
+- las Entradas, tipo compra y Willard;
+- las Salidas de control.
 
-**Remisión repetida — se AVISA, no se rechaza (D8).**
-- **Normalización única**, `normalize_remission` (helper nuevo, junto al de la Entrada): solo dígitos → el entero sin ceros a la izquierda; si no, `trim()` + minúsculas. Es la misma igualdad que usa el orden (#117), así que en la vista dos remisiones «iguales» siempre quedan juntas.
-- En el **create y el update** (solo cuando cambia la remisión) de una Entrada **o** de una Salida de control, si otro documento **no anulado** de la org, de cualquiera de los dos tipos, tiene la misma remisión normalizada, la respuesta lleva un `warning` que **nombra** el otro documento («La remisión 16300 ya está en la Entrada #142»). El documento se guarda igual.
-- **Por qué avisar y no rechazar:**
-  1. Hoy la Entrada no valida nada (§1, medido). Un 422 nuevo podría trabar la edición de la cabecera de una Entrada que ya esté repetida en prod (G-prod 4 lo mide).
-  2. Un rechazo exigiría un lock o un índice único **entre dos tablas**, que PostgreSQL no tiene; habría que serializar con un advisory lock, y eso suma un rango a `RANK`.
-  3. Es la filosofía del repo: #17/#76, «avisar, no bloquear».
-  Además, la vista marca las repetidas con un badge «Repetida», así que el aviso no depende de que alguien lo lea en un toast.
-- **Los avisos llegan por HTTP** (lección de #100 D4d). El create de la Entrada ya devuelve `warnings` (`endpoints/inbound_orders.py` l.300-308); la Salida de control nace con el campo. Los tests leen el aviso **de la respuesta**, no del servicio.
-- La Entrada **Willard** comparte el talonario: las remisiones 16272, 16341 y 16391 de Q-76 están dentro del rango de las de ESTIBAS. Por eso entra a la vista y al aviso. Es lectura y aviso; el camino Willard no se toca.
+**Lo que queda fuera:**
+- Salidas de Plomo, porque su `remission_number` es el número de **Willard**, digitado a mano (#105, Q-27), y no el talonario de SAC (O3 de QA 2);
+- ⚠️ que las Entradas **Willard** usen el mismo talonario es una **inferencia nuestra, de grado (c)** (O4): sus remisiones de Q-76 (16272, 16341 y 16391) caen dentro del rango de las de ESTIBAS. Se confirma con Daniel (D11). Si la respuesta es que no, se excluyen con un `WHERE inbound_type = 'purchase'` en la vista y en el aviso, sin otro cambio.
+
+#### La llave de la remisión: UNA sola implementación, en SQL (C1 de QA 2)
+
+`remission_key(col)` (helper nuevo en `services/inbound_order.py`, junto a `_remission_order`) construye, a partir de una columna o de un parámetro ligado, las expresiones que usan **todos** los consumidores:
+- `r = NULLIF(TRIM(col), '')` es la **vacía**, la misma definición que hoy usa #117.
+- `numerica = CASE WHEN r ~ '^[0-9]+$' THEN CAST(r AS NUMERIC) END`. El regex de PostgreSQL es **ASCII**, así que «١٢» y «²» son texto. `NUMERIC` no tiene límite de dígitos, así que una remisión de 20 dígitos no desborda.
+- `texto = lower(r)` (el `lower` de PostgreSQL). Para **ordenar** se le agrega `COLLATE "C"`, igual que hoy. Para **comparar** se usa la igualdad del `lower` del mismo servidor.
+- `llave = CASE WHEN numerica IS NOT NULL THEN 'n:' || CAST(numerica AS TEXT) ELSE 't:' || texto END`. Es NULL si la remisión es vacía. «0012», «12» y « 12 » dan `n:12`. «R-12» y «r-12 » dan `t:r-12`. «012a», «12.0» y «16.300» dan `t:…`, distintos de `n:12` y de `n:16300`.
+
+**Quién la usa, y ninguno normaliza en Python:**
+1. `_remission_order` (el orden de la lista de Entradas, #117), que pasa a construirse con `remission_key` sin cambiar ninguna llave. Los tests de #117 son la red de que el refactor no cambió el orden.
+2. El orden de la vista del talonario.
+3. La marca **«Repetida»** de la vista: `COUNT(*) OVER (PARTITION BY llave)` mayor que 1 sobre la unión de los documentos **no anulados**. Las vacías no son repetidas, porque su llave es NULL y se excluyen.
+4. El **aviso** de create y update: una consulta que compara `remission_key(columna) = remission_key(:remision_nueva)` en las dos tablas. La remisión que entra se normaliza **en SQL**, con el mismo helper aplicado al parámetro ligado.
+
+No hay `normalize_remission` en Python. Si en la construcción apareciera la necesidad de uno (no la hay en este diseño), usaría `re.fullmatch(r"[0-9]+", s)` y nunca `str.isdigit()`, y entraría al test de paridad.
+
+#### La vista: `GET /remissions`
+
+**Acceso:** router con `require_org_flag("kg_ledger_enabled")`, permisos `purchases.view` **y** `sales.view`, fuera de `SCOPED_ENDPOINTS`.
+
+**Filas:** una por documento, de los que entran al talonario. Las anuladas **también** salen, marcadas: usaron su papel, así que cubren su número.
+
+**Columnas:**
+- remisión;
+- documento («Entrada #N» o «Salida de control #N»);
+- dirección (entra o sale);
+- fecha y estado;
+- materiales en una línea;
+- marca «Repetida»;
+- enlace al detalle.
+
+**Cómo se arma:** `UNION ALL` de dos `SELECT` mínimos, paginado sobre la unión. Los materiales se cargan después, solo para las filas de la página (lookup por página, nunca un join 1:N: #89/#93 R2).
+
+**Filtros:**
+- remisión **desde** y **hasta**, numéricas;
+- fecha opcional;
+- búsqueda por remisión.
+
+**Orden:**
+- **Por defecto**, sin filtros, de la remisión más alta a la más baja, para que lo reciente quede arriba. El orden de #117 tiene sus dos sentidos.
+- El desempate es por fecha y número de documento.
+
+**Huecos (C2 de QA 2): se miden contra la org, nunca contra lo filtrado.**
+- Un número es **hueco** solo si **ningún** documento del talonario de la org lo tiene, cualquiera sea su fecha o su estado (las anuladas cubren su número).
+- El servidor arma **una vez por pedido** el conjunto de llaves numéricas de toda la org. Es chico: en prod hay ~190 remisiones en 18 días.
+- Entre dos filas numéricas **consecutivas de la lista filtrada y ordenada**, intercala una fila «Faltan N: de A a B» por cada tramo de números que no esté en ese conjunto. Si la 16305 está fechada en noviembre, la vista de diciembre **no** muestra un hueco entre 16304 y 16306.
+- El cálculo va sobre la lista **filtrada entera**, no sobre la página (T22).
+- Las filas de texto no tienen vecino numérico, así que no generan hueco y salen al final.
+- **Con búsqueda activa no se intercalan huecos**: el resultado de una búsqueda no es un tramo del talonario.
+
+**Entradas sin remisión:** no están en el talonario y no salen en la vista. El encabezado dice cuántas Entradas sin remisión hay dentro del filtro de fecha, para que no se pierdan en silencio.
+
+**Pantalla:**
+- «Talonario de remisiones», con un botón desde la lista de Entradas y otro desde la de Salidas de control;
+- dual render: tabla en escritorio y tarjetas a 390;
+- las filas de hueco van en ámbar.
+
+#### Remisión repetida: se AVISA, no se rechaza (D8)
+
+**Cuándo avisa:** en el **create y el update** (solo cuando cambia la remisión) de una Entrada **o** de una Salida de control. Si otro documento del talonario, **no anulado**, tiene la misma `llave`, la respuesta lleva un `warning` que **nombra** el otro documento: «La remisión 16300 ya está en la Entrada #142». El documento se guarda igual.
+
+**Por qué avisar y no rechazar:**
+1. Hoy la Entrada no valida nada (§1, medido). Un 422 nuevo podría trabar la edición de la cabecera de una Entrada que ya esté repetida en prod (G-prod 4 lo mide).
+2. Un rechazo exigiría unicidad **entre dos tablas**, que PostgreSQL no da con un índice. Habría que serializar con un advisory lock, y eso suma un rango a `RANK`.
+3. Es la filosofía del repo: #17/#76, «avisar, no bloquear».
+
+La vista marca las repetidas con «Repetida», así que el aviso no depende de que alguien lea un toast.
+
+**Los avisos llegan por HTTP** (lección de #100 D4d). El create de la Entrada ya devuelve `warnings` (`endpoints/inbound_orders.py` l.300-308), y la Salida de control nace con el campo. Los tests leen el aviso **de la respuesta**, no del servicio.
+
+**Camino Willard:** el aviso en el create y el update de la Entrada **Willard** es una consulta de solo lectura que se agrega a la respuesta. No toca `_validate_willard_capture`, `confirm` ni `_apply_willard_effects`.
 
 ## 5. Decisiones que pide el plan (las toma Daniel, vía Coordinador)
 
@@ -227,6 +296,7 @@ Son los mismos permisos que Salidas de Plomo, así que no hace falta ningún per
 | D8 | Remisión repetida entre Entradas y Salidas de control: ¿avisar o rechazar? | **Avisar** con el documento nombrado, y marcar «Repetida» en la vista del talonario (§4.5) | Rechazar con 422: hace falta medir antes que prod no tenga repetidas (G-prod 4), porque si las tiene se traba la edición de esas Entradas. Además exige un advisory lock entre dos tablas |
 | D9 | ¿Dónde vive la vista del talonario? | Página propia «Talonario de remisiones», con un botón desde la lista de Entradas y otro desde la de Salidas de control | Una pestaña dentro de Entradas: queda escondida para quien entra por Salidas, y la lista de Entradas ya tiene sus propias pestañas por estado |
 | D10 | Cerrar sin valor una Entrada que tiene compras registradas en el puente (desliquidada; C1 de QA 2) | **Rechazar** con 422, que nombra las compras y ofrece anular o liquidar. Es la única forma de no perder en silencio el residuo de costo de la desliquidación, que solo entra al P&L al anular | Cancelar las compras dentro del mismo cierre (como `annul`, l.1707-1719): el cierre deja de tener cero efectos, y el residuo de `annul_cost_adjustment` no entraría nunca al P&L, porque `reports.py` solo lo lee de las anuladas |
+| D11 | Confirmar un hecho (O4 de QA 2): ¿las Entradas **Willard** usan el mismo talonario de remisiones que las de compra? Hoy es una inferencia nuestra, grado (c), por el rango de Q-76 | Incluirlas en la vista y en el aviso, mientras Daniel no diga otra cosa | Excluirlas: un `WHERE inbound_type = 'purchase'` en la vista y en el aviso. Si están en el talonario y se excluyen, sus números saldrían como huecos falsos |
 
 R8c (la comisión excluye el control) no se pregunta: sale literal de «no tenerlas en cuenta».
 
@@ -285,8 +355,11 @@ R8c (la comisión excluye el control) no se pregunta: sale literal de «no tener
 | T6c (C1) | Mixta re-liquidada cuando el slot tenía **solo** la línea de control: su compra queda `cancelled` con el aviso «salió del reparto», y las otras compras se liquidan |
 | T18 (C1) | Cerrar una Entrada desliquidada que conserva compras `registered` → 422 que nombra las compras. Cero cambios: sigue `reviewed` y las compras siguen `registered`. Con `annul_cost_adjustment != 0` forzado por ORM, y sin compras vivas, → 422 también |
 | T19 | Salida de control sin remisión, con `""` o con `"  "` → 422. El PATCH tampoco la deja vaciar |
-| T20 | Remisión repetida: crear una Salida de control con la remisión de una Entrada no anulada → 201 con el aviso que **nombra** la Entrada, leído **de la respuesta HTTP**. Al revés también (una Entrada con la remisión de una salida). «0016300» se cruza con «16300». Contra una **anulada** no hay aviso |
-| T21 | Vista del talonario: Entradas y Salidas de control intercaladas por remisión, con la anulada incluida y marcada. Hay una fila de hueco «Faltan 2: de 16301 a 16302» entre 16300 y 16303. Las remisiones de texto van al final y sin hueco. Una repetida sale con la marca. El encabezado cuenta las Entradas sin remisión |
+| T20 | Remisión repetida: crear una Salida de control con la remisión de una Entrada no anulada → 201 con el aviso que **nombra** la Entrada, leído **de la respuesta HTTP**. Al revés también (una Entrada con la remisión de una salida). «0016300» se cruza con «16300». Contra una **anulada** no hay aviso. Un update que no cambia la remisión no avisa |
+| T21 | Vista del talonario: Entradas y Salidas de control intercaladas por remisión, con la anulada incluida y marcada. Hay una fila de hueco «Faltan 2: de 16301 a 16302» entre 16300 y 16303. Las remisiones de texto van al final y sin hueco. Una repetida sale con la marca. El encabezado cuenta las Entradas sin remisión. Una Salida de Plomo con remisión 16301 **no** tapa el hueco (O3) |
+| T23 (C1) | **Paridad de la llave** con el conjunto de frontera, por HTTP y en los tres consumidores (orden de la lista de Entradas, «Repetida» de la vista, aviso). «0012» = «12» = « 12 » (una sola llave, se marcan repetidas y avisan); «012a», «R-12», «12.0» y «16.300» son texto y distintos de 12 y de 16300; «R-12» = «r-12 »; «١٢» es texto y distinto de 12; «» y «   » son vacías: no salen en la vista, no son repetidas entre sí y no avisan; un número de 20 dígitos ordena y se compara sin error. El orden de la lista de Entradas (#117) queda igual que antes del refactor: lo sostienen los tests de #117, sin cambiar |
+| T24 (C2) | Hueco medido contra la org: 16304 y 16306 en diciembre, 16305 fechada en noviembre. La vista filtrada a diciembre **no** muestra hueco. Sin la 16305 en ningún lado, sí lo muestra. Una 16305 **anulada** también lo tapa |
+| T25 (C2) | Con búsqueda activa («163») no hay filas de hueco. Con el filtro desde y hasta (16300–16310), los huecos de dentro salen y los de fuera no |
 | T22 | Vista del talonario con paginación: el hueco entre la última fila de una página y la primera de la siguiente sale igual (se calcula sobre el rango, no sobre la página) |
 
 **Plantado** (la matriz va commiteada ANTES de plantar, con la predicción escrita):
@@ -315,6 +388,9 @@ R8c (la comisión excluye el control) no se pregunta: sale literal de «no tener
 | P20 | La vista excluye las anuladas (aparece un hueco falso) | T21 |
 | P21 | Los huecos se calculan por página | T22 |
 | P22 | El aviso cuenta a las anuladas | T20 |
+| P23 (C1) | La llave decide «numérica» con `str.isdigit()` en Python, o con un regex sin anclas, en lugar del regex ASCII anclado de SQL | T23 («١٢» se cruza con «12») |
+| P24 (C2) | Los huecos se calculan sobre el rango filtrado y no sobre el conjunto de la org | T24 |
+| P25 (C2) | Con búsqueda activa se intercalan huecos | T25 |
 
 **e2e** (Playwright, 1440 y 390): marcar ESTIBAS; capturar una Entrada solo de estibas; cerrar, ver el badge y que salió de la bandeja; reabrir; Entrada mixta con la fila de control fuera de la matriz; crear una Salida de control con la remisión de una Entrada y ver el aviso; anularla; abrir el Talonario de remisiones con una fila de hueco y una repetida. Capturas con control positivo.
 
