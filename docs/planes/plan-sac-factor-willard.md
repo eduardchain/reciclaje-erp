@@ -1,4 +1,6 @@
-# Plan: elegir el factor de conversión de Willard al liquidar (v1.0)
+# Plan: elegir el factor de conversión de Willard al liquidar (v1.1)
+
+> **v1.1 (24-nov):** Q-76 respondida por Daniel («está bien al 59»). Sale la acción propia de corregir una Willard liquidada (era D6 en v1.0). Un factor mal escogido se corrige por el camino que ya existe: anular y registrar de nuevo (D6 nuevo, medido). Cambian §1, D3, D5, D6, D7, §7, §8 y §10. Entran también las notas de QA 1 sobre la v1.0 (`~/sac-evidencia/2026-11-24/qa-1-factor-willard/notas_plan_v1.0.md`): A1 y A2 en D3, A3 en D8, A4 en D5, A5 en D6, O1 en D1 y O2 en D1 y D2.
 
 - **Pedido:** SAC, 24-nov, autorizado por Daniel («esos dos, dale»). Inventario, sección D, filas del 24-nov.
 - **Nivel:** lógica (contrato del back, migración, regla de kilos).
@@ -13,7 +15,7 @@
   - Solo en Entradas de **Willard**; la compra regular no maneja factor.
   - Q-73 sin objeto: ese seco no llega a planta. Traslados, maquila y deuda intersede no cambian.
   - Q-74: una sola cuenta. El libro en kilos no se parte; basta guardar el factor escogido en cada línea.
-- Abierta: **Q-76** (§8).
+- **Q-76**, respondida por Daniel el 24-nov: «está bien al 59» (§8).
 
 Contexto: CC-001 (16-jul, #77) resolvió escurrido y pinza como **dos materiales**. La respuesta del 24-nov lo cambia a **un material con dos factores**. Este plan no revive el `subtype` que #77 borró ni crea una segunda fórmula vigente.
 
@@ -64,13 +66,14 @@ Contexto: CC-001 (16-jul, #77) resolvió escurrido y pinza como **dos materiales
   - Entre 1 y 5 alternativas. Cada `label` de 1 a 40 caracteres, sin espacios a los lados.
   - Los nombres no se repiten, comparados con `normalize_entity_name` (#78), contando el del defecto.
   - Cada `lead_percentage` en (0, 1], distinto del defecto y de las demás: una opción que no cambia el número no es una opción.
-- `canonical_parameters` convierte a float también **dentro** de `alternatives`. Hoy solo convierte el primer nivel, y un `Decimal` anidado revienta el JSONB con 500 (racional H1).
+- `canonical_parameters` convierte a float de forma **recursiva**, también dentro de `alternatives` (O2). Hoy solo convierte el primer nivel, y un `Decimal` anidado revienta el JSONB con 500 (racional H1).
+- **Declarado (O1):** el servidor acepta `alternatives` en cualquier `drosses_to_lead`, también en un material que no es de Willard (por ejemplo DROSS-CRI). Ahí son inertes: el único lector de la lista es la confirmación de una Willard (D3), y los demás leen `lead_percentage`. La pantalla solo ofrece el editor en materiales con mundo Willard (D7).
 
 ### D2 — Ningún escritor borra la lista sin querer (lección de #103 D4)
 
 FormulasPage arma `{lead_percentage}` solo (l.253) y el seeder igual (l.1041): al versionar, borrarían la lista en silencio.
 
-- **Servidor:** al crear una versión, si el cuerpo **no trae** `label`/`alternatives` (clave ausente, `model_fields_set`) y la vigente sí los tiene, se **copian** de la vigente. Para quitarlas hay que mandarlas explícitas en `null`. Así ningún escritor actual ni futuro las pierde por omisión. Si la copia choca con la validación de D1 (por ejemplo, el defecto nuevo es igual a una alternativa), da 422 y dice que se edite la lista.
+- **Servidor:** al crear una versión, si el cuerpo **no trae** `label`/`alternatives` (clave ausente según `model_fields_set` del submodelo `DrossesToLeadParams`, O2) y la vigente sí los tiene, se **copian** de la vigente. Para quitarlas hay que mandarlas explícitas en `null`: `canonical_parameters` usa `exclude_none`, así que un `null` explícito no llega al JSONB. Así ningún escritor actual ni futuro las pierde por omisión. Si la copia choca con la validación de D1 (por ejemplo, el defecto nuevo es igual a una alternativa), da 422 y dice que se edite la lista.
 - **FormulasPage:** edita la lista y siempre la manda; `changed()` (l.279) compara también la lista.
 - **Seeder:** no se toca. Compara solo `lead_percentage` (l.1043-1046), y si versiona, el servidor copia la lista.
 - **`archivar_org_sac.py`:** compara `parameters["lead_percentage"]` (o `kg_lead_per_unit`) por nombre, no «el único valor».
@@ -86,11 +89,15 @@ FormulasPage arma `{lead_percentage}` solo (l.253) y el seeder igual (l.1041): a
   - **Sin cuerpo, o un material que no viene:** factor por defecto. Es el comportamiento de hoy, byte a byte (T2).
   - La llave es `material_id` porque hay una línea por material (UNIQUE, #93 D3) y `confirm` recrea las líneas: el id de línea no sobrevive.
 - Columna nueva `inbound_order_lines.conversion_option` (`String(40)`, nullable; NULL = el defecto). `inbound_order_lines` es tabla exclusiva de SAC.
-- Se resuelve en **un solo helper**, `_resolve_lead_factor(formula, option) -> (pct, label)`. Lo usan `_apply_willard_effects` y la corrección (D6). Errores 422, todos antes de escribir:
+- Se resuelve en **un solo helper**, `_resolve_lead_factor(formula, option) -> (pct, label)`. Lo usa `_apply_willard_effects`, que es el camino de efectos de la confirmación y del revert-and-reapply de D18. Errores 422, todos antes de escribir:
   - opción para un material cuya fórmula no tiene alternativas;
   - opción que no está en la lista (el mensaje nombra el material y las opciones válidas);
   - material que no está en la Entrada;
-  - opción en una línea de baterías.
+  - opción en una línea de baterías;
+  - un `material_id` repetido en `conversion_options` (A1).
+- **Cómo se compara y qué se guarda (A2):** la opción se compara con `normalize_entity_name` (#78), el mismo criterio de la unicidad de D1, contra el nombre del defecto y los de las alternativas de la vigente.
+  - Si coincide con el **defecto**, se guarda **NULL**. NULL siempre es el defecto; nunca queda guardado el nombre del defecto.
+  - Si coincide con una **alternativa**, se guarda su nombre **canónico**, tal como está en la fórmula, no lo que se escribió («seco ESCURRIDO» se guarda «Seco escurrido»).
 - **Por qué al liquidar y no al capturar:** es el pedido, y quien liquida es quien sabe qué mandó Willard. La captura (David) y la revisión no cambian: sus schemas no ganan el campo.
 - **Kilos estimados del borrador:** siguen con el defecto. El diálogo de liquidar muestra el estimado con la opción escogida.
 
@@ -107,24 +114,27 @@ FormulasPage arma `{lead_percentage}` solo (l.253) y el seeder igual (l.1041): a
 - En el revert-and-reapply, cada material conserva la opción que tenía su línea vieja. Un material nuevo entra con el defecto.
 - Si la opción guardada ya no está en la lista vigente, da 422 («el factor X ya no está en la lista de SCR-SG; corríjalo primero») y no escribe nada. Volver al defecto en silencio cambiaría la deuda con Willard sin que nadie lo decida.
 - El borrador (draft/reviewed) no tiene opción: se escoge al liquidar.
+- **Declarado (A4):** la opción se guarda por **nombre**. Si una versión nueva de la fórmula cambia el % de una alternativa conservando el nombre, una re-aplicación D18 toma el % nuevo sin avisar. Es lo mismo que hoy pasa con el defecto: D18 re-aplica con la vigente (#35).
+- Hoy D18 no tiene botón: el detalle oculta «Editar» en todo lo liquidado (`InboundDetailPage.tsx:431`, desde #93) y solo se llega por URL o API. D5 existe para que ese camino no cambie la deuda en silencio, no para corregir factores (eso es D6).
 
-### D6 — Corregir el factor de una Entrada ya liquidada
+### D6 — Un factor mal escogido: anular y registrar de nuevo (sin código nuevo)
 
-`POST /inbound-orders/{id}/conversion-options`:
+Pedido del Coordinador (24-nov): con Q-76 respondida, la acción propia de corregir se queda sin caso. Para un error futuro, medir si basta el camino que ya existe.
 
-- **Acceso:** permiso `purchases.liquidate`, el mismo de liquidar; el router ya va detrás de `kg_ledger_enabled`.
-- **Cuerpo:** las mismas opciones de D3 más `reason`, obligatorio (mínimo 3 caracteres).
-- **Solo Willard confirmada.** Si no lo es, 400. Si nada cambia, 422.
-- **Qué hace, por cada línea que cambia de opción:**
-  1. anula su `KgLedgerMovement` (ubicado por `inventory_movement_id`), con el motivo;
-  2. escribe uno nuevo con `add_kg_movement` (#107, escritor único): misma cuenta, `transaction_date = order.date`, snapshot con la opción nueva;
-  3. actualiza `line.conversion_option`.
+**Basta, y es anular.** Lo medido sobre `5139940`:
 
-  Todo en una transacción.
-- **No toca** inventario, costo promedio ni historial de costo (MCH). El factor solo mueve kilos.
-- **Por qué no reusar el revert-and-reapply de D18:** sacaría y volvería a meter el inventario, escribiría historial de costo y podría dejar la diferencia de costo de un pool negativo (micro-gap de E2) para cambiar un número que no es de inventario. El cálculo y el snapshot sí son los mismos: salen del helper de D3 y del mismo constructor del snapshot que usa `_apply_willard_effects`.
-- **Fecha:** el movimiento corregido queda en `order.date`, porque la deuda era esa desde ese día. Los cortes del libro kg anteriores a hoy cambian por la diferencia. Eso es una corrección, igual que una edición D18, y queda auditada en el movimiento anulado.
-- **Anular después** anula todo lo vivo por `source_id` (l.1658); no cambia nada.
+- «Anular» está en el detalle de una Willard liquidada (`InboundDetailPage.tsx:480`, `purchases.cancel`). `_revert_willard_effects` (l.1587) devuelve el inventario y anula los movimientos kg por `source_id` (l.1656-1669), sin recalcular nada. La Entrada anulada desaparece de todos los cortes (#41), así que la deuda con Willard queda como si no hubiera existido.
+- Registrar de nuevo con la **misma remisión** y la **fecha original** está permitido: la remisión no tiene unicidad (solo se busca y ordena, `inbound_order.py:2125`, `:2231`) y la fecha solo no puede ser futura (`schemas/inbound_order.py:79`). Después se revisa y se liquida escogiendo el factor bueno (D3).
+- Costo para el usuario: volver a capturar las líneas y pasar por revisión, y la Entrada nueva lleva otro número interno. Es la misma regla que ya rige para cambiar la sede de una liquidada (#118: «anúlela y regístrela de nuevo»).
+- **Este costo lo acepta o no Daniel (A5):** va en la ventanita de autorización junto con el runbook de §8. Si no lo acepta, la alternativa es un plan aparte (último párrafo de D6).
+
+**Editar con revert-and-reapply (#75 D18) no sirve hoy** como camino del usuario:
+
+- no tiene botón para una liquidada (D5);
+- habilitarlo abriría también la edición de cantidades y fecha de una Willard liquidada, que es una decisión de producto aparte;
+- y agregaría el factor al cuerpo del PATCH de las líneas, justo la trampa de #103 D4 que D5 evita.
+
+Si Daniel lo quiere, va en otro plan.
 
 ### D7 — Pantalla
 
@@ -132,13 +142,15 @@ FormulasPage arma `{lead_percentage}` solo (l.253) y el seeder igual (l.1041): a
 - **Diálogo de liquidar Willard** (detalle de la Entrada y fila del listado de Entradas): si alguna línea tiene un material con alternativas, por cada una muestra un selector con el defecto preseleccionado y los kilos estimados en vivo. Sin alternativas, el diálogo queda como hoy.
   - Hoy los dos puntos de entrada son diálogos separados (`InboundDetailPage:1083` e `InboundOrdersPage:625`). Pasan a un componente compartido.
   - El listado necesita las fórmulas: `useCurrentFormulas(undefined, enabled)` (F2, ya existe).
-- **Detalle de la Entrada:** cada línea de Willard muestra el factor usado («Seco escurrido · 56 %»), leído de la respuesta. Una Willard confirmada con alguna línea con alternativas muestra «Corregir factor» (`purchases.liquidate`), con motivo obligatorio.
-- **Estado de cuenta kg:** se ve en la descripción (D4) y en el movimiento anulado de la corrección.
+- **Detalle de la Entrada:** cada línea de Willard muestra el factor usado («Seco escurrido · 56 %»), leído de la respuesta. No hay acción de corregir (D6).
+- **Estado de cuenta kg:** el factor se ve en la descripción del movimiento (D4).
 - **Responsive:** el selector por línea es `w-full sm:w-auto` y el diálogo usa el base de shadcn (CLAUDE.md, responsive).
 
 ### D8 — Respuesta
 
-- `InboundOrderLineResponse` gana `conversion_option` y `lead_percentage_applied`. El segundo sale del snapshot del movimiento kg de la línea (`applied`, o `parameters.lead_percentage` si no hay), no de la fórmula de hoy, que pudo cambiar.
+- `InboundOrderLineResponse` gana `conversion_option` y `lead_percentage_applied`.
+- `lead_percentage_applied` sale del snapshot del movimiento kg **confirmado** de la línea, por el mismo camino de `kg_lead` (A3): `kg_deltas_by_movement` (`inbound_order.py:2468`, ya filtra `confirmed`) trae también el snapshot. No es una query nueva por orden: el listado (`inbound_orders.py:459`) sigue con una sola. Se usa `applied.lead_percentage`, o `parameters.lead_percentage` si no hay `applied`. No se lee de la fórmula de hoy, que pudo cambiar.
+- **Declarado:** en una Entrada anulada todo su kg está anulado, así que `lead_percentage_applied` da None (igual que `kg_lead` hoy). `conversion_option` sí se sigue viendo, porque vive en la línea.
 - El endpoint arma las líneas **campo por campo** (`inbound_orders.py:147`, trampa #95), así que los dos campos se agregan ahí y los tests los leen por HTTP.
 
 ## 4. Lo que no cambia
@@ -170,16 +182,15 @@ Nuevo archivo `backend/tests/test_sac_factor_willard.py`:
 | T2 | Confirmar sin cuerpo, con fórmula sin alternativas: kilos y snapshot byte a byte los de hoy (dict completo) |
 | T3 | Confirmar con «Seco escurrido»: kilos = cantidad × 0,56; `conversion_option` y `lead_percentage_applied` leídos por HTTP; snapshot con `applied`; la descripción del estado de cuenta kg lo nombra |
 | T4 | Fórmula con alternativas y sin elección: defecto 0,59 y `applied` con el nombre del defecto |
-| T5 | Los 422 de D3, cada uno sin escribir nada: la Entrada sigue `reviewed`, 0 movimientos kg y 0 de inventario |
+| T5 | Los 422 de D3, incluido el material repetido (A1), cada uno sin escribir nada: la Entrada sigue `reviewed`, 0 movimientos kg y 0 de inventario |
+| T5b | A2: escoger el defecto por su nombre guarda NULL; escoger «seco ESCURRIDO» guarda «Seco escurrido» y da 0,56 |
+| T5c | A3: `lead_percentage_applied` por HTTP en el detalle y en el listado; en una Entrada anulada da None y `conversion_option` se sigue viendo |
 | T6 | Edición D18 (cambia la cantidad) de una confirmada con escurrido: conserva escurrido; kilos = cantidad nueva × 0,56 |
 | T7 | Edición D18 cuando la opción ya no está en la vigente: 422 y nada cambia |
-| T8 | Corrección pinza → escurrido: el movimiento viejo queda anulado, el nuevo en `order.date` con 0,56; inventario, costo promedio y MCH iguales (conteos y valores); el saldo de la cuenta baja cantidad × 0,03; saldo corrido == saldo vivo (#55) |
-| T9 | Corrección: sobre una no confirmada da 400; sin cambios, 422; sin motivo, 422 |
-| T10 | Anular después de corregir: la cuenta vuelve a 0 |
-| T11 | Con alternativas en la fórmula, traslado y retorno de dross usan el defecto |
-| T12 | D2: versión nueva sin `label`/`alternatives` las copia de la vigente; con `null` explícito las quita |
-| T13 | Permiso: un rol con `purchases.view` y sin `purchases.liquidate` recibe 403 en la corrección, con un GET en 200 como control positivo |
-| T14 | Sin el flag, la corrección da 403 |
+| T8 | Anular una confirmada con escurrido: la cuenta kg vuelve a 0 y el inventario al de antes; registrarla de nuevo con la misma remisión y la fecha original, revisarla y liquidarla con pinza da cantidad × 0,59 en la fecha original (D6 medido con el camino que existe) |
+| T10 | Con alternativas en la fórmula, traslado y retorno de dross usan el defecto |
+| T9 | D2: versión nueva sin `label`/`alternatives` las copia de la vigente; con `null` explícito las quita |
+| T11 | El cuerpo de `confirm` no cambia el permiso: un rol con `purchases.view` y sin `purchases.liquidate` recibe 403 con cuerpo, con un GET en 200 como control positivo |
 
 Front (sin infra de test): casos puros del helper de opciones en un arnés `node` y e2e a 1440 y 390:
 
@@ -189,16 +200,13 @@ Front (sin infra de test): casos puros del helper de opciones en un arnés `node
 | E2 | Liquidar desde el detalle escogiendo escurrido; los kilos estimados cambian |
 | E3 | Liquidar desde la fila del listado; el selector aparece |
 | E4 | El detalle muestra el factor usado |
-| E5 | Corregir el factor con motivo; el estado de cuenta kg muestra el anulado y el nuevo |
-| E6 | Entrada sin materiales con alternativas: el diálogo queda como hoy |
+| E5 | Entrada sin materiales con alternativas: el diálogo queda como hoy |
 
-## 8. Q-76 (abierta): supuesto
+## 8. Q-76: respondida
 
-- **Supuesto:** las 3 Entradas de Willard con SCR-SG ya liquidadas al 59 % (remisiones 16272, 16341, 16391) **quedan en pinza**, que es el defecto y lo que tienen hoy. Sin backfill: su `conversion_option` queda NULL = defecto.
-- Si Johana dice que alguna era escurrido, se corrige **desde la pantalla** con D6, en producción, por quien tenga `purchases.liquidate`. Es una escritura de negocio con motivo, no un script nuestro contra prod.
-- Las 3 en Revisada (16300, 16415, 16436): si se liquidan antes del deploy, quedan en 59 % y se corrigen igual. Después del deploy, Johana escoge al liquidar.
-- **Tamaño del error si alguna era escurrido:** el 3 % de sus kilos. La 16272 (8.452 kg) daría 253,56 kg de plomo de más en la deuda con Willard.
-- **Runbook del deploy:** después del deploy, alguien con permiso agrega en Config → Materiales (kg) la alternativa «Seco escurrido 56 %» a SCR-SG y le pone nombre «Seco pinza» al defecto. No va en el seeder: el seeder no pisa lo que no puso él, y la lista es dato del cliente. Decide Daniel quién lo hace.
+- Daniel, 24-nov: «está bien al 59». Las 3 Willard con SCR-SG ya liquidadas (remisiones 16272, 16341, 16391) **se quedan al 59 %** (pinza, el defecto). No hay datos que corregir ni backfill: su `conversion_option` queda NULL = defecto.
+- Las 3 en Revisada (16300, 16415, 16436) las liquida SAC cuando exista la opción.
+- **Runbook del deploy, abierto para la autorización de Daniel:** quién agrega en producción, en Configuración → Materiales (kg), la alternativa «Seco escurrido 56 %» a SCR-SG y el nombre «Seco pinza» al defecto. No va en el seeder: el seeder no pisa lo que no puso él, y la lista es dato del cliente.
 
 ## 9. Fuera de alcance
 
@@ -206,6 +214,7 @@ Front (sin infra de test): casos puros del helper de opciones en un arnés `node
 - Elegir el factor en la captura o en la revisión.
 - Que el traslado, las Salidas o el crisol usen una alternativa (Q-73: no aplica).
 - Partir la cuenta kg por factor (Q-74).
+- Una acción para corregir el factor de una Willard liquidada, y habilitar «Editar» en una Willard liquidada (D6).
 
 ## 10. Gates (flujo QA)
 
@@ -221,13 +230,13 @@ Front (sin infra de test): casos puros del helper de opciones en un arnés `node
    | P3 | D2 sin copiar la lista |
    | P4 | D5 vuelve al defecto en lugar de conservar |
    | P5 | D5 sin el 422 de opción desaparecida |
-   | P6 | D6 a una fecha distinta de `order.date` |
-   | P7 | D6 sin anular el movimiento viejo |
-   | P8 | D6 tocando inventario |
-   | P9 | `canonical_parameters` sin convertir lo anidado |
-   | P10 | La respuesta sin los campos nuevos (trampa #95) |
-   | P11 | La corrección sin permiso |
-   | P12 | Validación sin el «distinto del defecto» |
+   | P6 | `canonical_parameters` sin convertir lo anidado |
+   | P7 | La respuesta sin los campos nuevos (trampa #95) |
+   | P8 | Validación sin el «distinto del defecto» |
+   | P9 | `confirm` aplica la opción después de escribir (un 422 deja movimientos escritos; rompe T5) |
+   | P10 | Sin el 422 del material repetido (A1) |
+   | P11 | Guardar el nombre del defecto en lugar de NULL, o el texto escrito en lugar del canónico (A2) |
+   | P12 | `lead_percentage_applied` leído de la fórmula de hoy en vez del snapshot (A3) |
 
 5. Dirigidas desde el grep de los símbolos tocados y de sus importadores, más las 3 guardas, con la predicción escrita antes.
 6. e2e a 1440 y 390.
