@@ -355,6 +355,10 @@ def _paginado(filas):
     return {"items": filas, "total": len(filas)}
 
 
+# La clave que el backend guarda por tipo (schemas/material_conversion_formula.py)
+CLAVE_FORMULA = {"battery_to_lead": "kg_lead_per_unit", "drosses_to_lead": "lead_percentage"}
+
+
 def _como_el_seeder():
     """Las respuestas de una org recien provista por el seeder: cero avisos."""
     bodegas = [{"name": w[0], "id": f"wh-{w[0]}", "is_active": True} for w in seed.WAREHOUSES]
@@ -373,7 +377,7 @@ def _como_el_seeder():
         "/service-tariffs/current": _paginado([{"tariff_code": t["tariff_code"], "unit_price_cop": t["unit_price_cop"]}
                                                for t in seed.TARIFFS]),
         "/material-conversion-formulas/current": _paginado([
-            {"material_code": m[0], "formula_type": m[6], "parameters": {"valor": m[7]}}
+            {"material_code": m[0], "formula_type": m[6], "parameters": {CLAVE_FORMULA[m[6]]: m[7]}}
             for m in seed.MATERIALS if m[6]]),
         "/material-kg-profiles": _paginado([
             {"material_code": m[0], "willard_world": m[4], "compra_regular": m[5], "lead_product": m[8]}
@@ -455,7 +459,10 @@ class TestRevisar:
          "terceros con saldo distinto de 0: Nuevo", 2),
         (lambda r: r["/money-accounts"]["items"][0].update(current_balance=10), "cuentas de dinero con saldo", 1),
         (lambda r: _primer(r, "/service-tariffs/current").update(unit_price_cop="1"), "vigente en 1", 1),
-        (lambda r: _primer(r, "/material-conversion-formulas/current").update(parameters={"valor": 1.0}),
+        # Control positivo de los dos casos de TestRevisarFormulas: la MISMA
+        # clave con otro valor si se avisa
+        (lambda r: _primer(r, "/material-conversion-formulas/current")["parameters"].update(
+            {k: 0.123 for k in _primer(r, "/material-conversion-formulas/current")["parameters"]}),
          "fórmulas vigentes distintas", 1),
         (lambda r: _primer(r, "/material-kg-profiles").update(lead_product="crudo"), "perfiles kg distintos", 1),
         (lambda r: _primer(r, "/third-parties/retention-entities").update(rate_pct=4.0), "Tarifas de retención distintas", 1),
@@ -500,6 +507,30 @@ class TestRevisar:
         assert "No se pudo leer /transfers" in texto
         assert "No se pudo leer completo /roles" in texto
         assert "se leyeron 0 de 5" in texto
+
+
+def _formula_de_tipo(r, formula_type):
+    filas = r["/material-conversion-formulas/current"]["items"]
+    return next(f for f in filas if f["formula_type"] == formula_type)
+
+
+class TestRevisarFormulas:
+    """plan-sac-factor-willard D2 (C1 de QA 1): se compara la clave del tipo por
+    NOMBRE. Las claves extra de una formula valida no la vuelven «distinta»."""
+
+    def test_drosses_con_factores_de_willard_no_es_distinta(self):
+        def cambio(r):
+            _formula_de_tipo(r, "drosses_to_lead")["parameters"].update(
+                label="Seco pinza",
+                alternatives=[{"label": "Seco escurrido", "lead_percentage": 0.01}])
+        assert A.revisar(FakeApiRevisar(respuestas=_con(cambio))) == []
+
+    def test_bateria_con_material_reference_no_es_distinta(self):
+        # El codigo anterior tomaba "el unico valor" y con dos claves la daba
+        # distinta en falso: arreglo de paso, sostenido aca
+        def cambio(r):
+            _formula_de_tipo(r, "battery_to_lead")["parameters"].update(material_reference="07")
+        assert A.revisar(FakeApiRevisar(respuestas=_con(cambio))) == []
 
 
 class TestSeederNoCreaUsuariosEnRemoto:

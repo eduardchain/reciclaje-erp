@@ -282,6 +282,15 @@ class InboundOrderLine(Base, OrganizationMixin, TimestampMixin):
 
     quality_notes: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # plan-sac-factor-willard D3: factor de Willard escogido al liquidar. NULL =
+    # el factor por defecto de la formula (lead_percentage); si no, el nombre
+    # CANONICO de una alternativa de la formula vigente. Solo lineas Willard.
+    conversion_option: Mapped[Optional[str]] = mapped_column(
+        String(40),
+        nullable=True,
+        comment="Factor de Willard escogido (nombre de la alternativa); NULL = el defecto",
+    )
+
     # #93 D3/D6: precio del material EN ESTA ENTRADA — el que la UI pre-llena
     # en cada reparto nuevo y el que valora el descuadre (ambos sentidos).
     # Nace al liquidar; obligatorio si la linea queda con descuadre != 0 (D16).

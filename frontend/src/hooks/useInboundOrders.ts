@@ -89,7 +89,10 @@ export function useUpdateInboundOrder() {
 export function useConfirmInboundOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => inboundOrderService.confirm(id),
+    mutationFn: (args: string | { id: string; conversionOptions?: { material_id: string; option: string | null }[] }) =>
+      typeof args === "string"
+        ? inboundOrderService.confirm(args)
+        : inboundOrderService.confirm(args.id, args.conversionOptions ?? []),
     onSuccess: (order) => {
       // B.2: los efectos (inventario + kg) nacen aca — misma invalidacion que el create
       invalidateAfterInboundOrder(qc);

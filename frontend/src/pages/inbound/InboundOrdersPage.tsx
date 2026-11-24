@@ -17,12 +17,11 @@ import { DataTable } from "@/components/shared/DataTable";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { EntitySelect } from "@/components/shared/EntitySelect";
 import { SearchInput } from "@/components/shared/SearchInput";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { WillardLiquidateDialog } from "@/components/inbound/WillardLiquidateDialog";
 import { OperationListCard } from "@/components/shared/OperationListCard";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSuppliers, useWarehouses } from "@/hooks/useMasterData";
 import {
-  useConfirmInboundOrder,
   useEntriesStatusCounts,
   useInboundOrders,
   useReviewInboundOrder,
@@ -235,7 +234,6 @@ export default function InboundOrdersPage() {
 
   // Liquidar desde la fila: willard = dialogo inline; compra #93 = reparto;
   // legacy 1:1 = formulario de la compra derivada (W-C1)
-  const confirmOrder = useConfirmInboundOrder();
   const reviewOrder = useReviewInboundOrder();
   const [willardToLiquidate, setWillardToLiquidate] = useState<InboundOrderResponse | null>(null);
 
@@ -616,19 +614,11 @@ export default function InboundOrdersPage() {
       />
 
       {/* Liquidar willard desde la fila (verbo unico — el efecto es el confirm B.2) */}
-      <ConfirmDialog
+      <WillardLiquidateDialog
+        order={willardToLiquidate}
         open={!!willardToLiquidate}
         onOpenChange={(o) => { if (!o) setWillardToLiquidate(null); }}
-        title={`Liquidar Entrada #${willardToLiquidate?.order_number ?? ""}`}
         description="El material entra al inventario y mueve el libro kg con la fórmula vigente (sin efecto financiero — entrada Willard)."
-        confirmLabel="Liquidar"
-        loading={confirmOrder.isPending}
-        onConfirm={() => {
-          if (!willardToLiquidate) return;
-          confirmOrder.mutate(willardToLiquidate.id, {
-            onSuccess: () => setWillardToLiquidate(null),
-          });
-        }}
       />
     </div>
   );

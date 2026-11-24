@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 # CC-002: se elimino scrap_with_terminal_to_lead — scrap-con-borne es un
 # material mas con su % (drosses_to_lead). Quedan 2 formas segun la unidad.
@@ -42,11 +42,71 @@ class BatteryToLeadParams(BaseModel):
     material_reference: Optional[Literal["07", "08", "1", "2", "3", "4", "5"]] = None
 
 
+LEAD_LABEL_MAX = 40
+MAX_LEAD_ALTERNATIVES = 5
+
+
+class LeadAlternative(BaseModel):
+    """Un factor alternativo con nombre (factor de Willard, plan-sac-factor-willard D1)."""
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(..., min_length=1, max_length=LEAD_LABEL_MAX)
+    lead_percentage: Decimal = Field(..., gt=0, le=1)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _strip(cls, v):
+        return v.strip() if isinstance(v, str) else v
+
+
 class DrossesToLeadParams(BaseModel):
-    """Porcentaje de plomo del dross (0-1]. Cubre scrap-con-borne (CC-002)."""
+    """Porcentaje de plomo del dross (0-1]. Cubre scrap-con-borne (CC-002).
+
+    Factor de Willard (plan-sac-factor-willard D1): `lead_percentage` es SIEMPRE
+    el factor por defecto, y es lo unico que leen traslado, Salidas, crisol y
+    las pantallas. `label` le pone nombre al defecto y `alternatives` lista los
+    otros factores que se pueden escoger al liquidar una Entrada de Willard.
+    Sin `alternatives` la formula es la de siempre."""
     model_config = ConfigDict(extra="forbid")
 
     lead_percentage: Decimal = Field(..., gt=0, le=1)
+    label: Optional[str] = Field(None, min_length=1, max_length=LEAD_LABEL_MAX)
+    alternatives: Optional[list[LeadAlternative]] = None
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _strip(cls, v):
+        return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _validate_alternatives(self):
+        if self.alternatives is None:
+            return self
+        if not (1 <= len(self.alternatives) <= MAX_LEAD_ALTERNATIVES):
+            raise ValueError(
+                f"Los factores alternativos van de 1 a {MAX_LEAD_ALTERNATIVES} "
+                "(para quitarlos, mande alternatives en null)"
+            )
+        if not self.label:
+            raise ValueError(
+                "Con factores alternativos, el factor por defecto necesita nombre (label)"
+            )
+        from app.services.retention_entities import normalize_entity_name
+
+        seen_names = {normalize_entity_name(self.label)}
+        seen_pcts = {self.lead_percentage}
+        for alt in self.alternatives:
+            name = normalize_entity_name(alt.label)
+            if name in seen_names:
+                raise ValueError(f"El nombre de factor '{alt.label}' esta repetido")
+            seen_names.add(name)
+            if alt.lead_percentage in seen_pcts:
+                raise ValueError(
+                    f"El factor '{alt.label}' tiene el mismo porcentaje que otro de "
+                    "la lista — una opcion que no cambia el numero no es una opcion"
+                )
+            seen_pcts.add(alt.lead_percentage)
+        return self
 
 
 PARAMS_MODEL_BY_TYPE = {
@@ -86,8 +146,24 @@ class MaterialConversionFormulaCreate(BaseModel):
         Decimal revienta con 500. El Anexo D almacena numeros JSON; el
         consumidor de E2 convierte con Decimal(str(x)) al leer (exacto).
         """
-        dumped = self._parsed_params.model_dump(exclude_none=True)
-        return {k: (float(v) if isinstance(v, Decimal) else v) for k, v in dumped.items()}
+        return _json_native(self._parsed_params.model_dump(exclude_none=True))
+
+    @property
+    def params_fields_set(self) -> set[str]:
+        """Claves de `parameters` que el cuerpo TRAJO (D2: ausente != null)."""
+        return set(self._parsed_params.model_fields_set) if self._parsed_params else set()
+
+
+def _json_native(value):
+    """Decimal -> float de forma RECURSIVA (O2 de QA 1): un Decimal anidado en
+    `alternatives` revienta el write path del JSONB con 500 (racional H1)."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, dict):
+        return {k: _json_native(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_native(v) for v in value]
+    return value
 
 
 class MaterialConversionFormulaResponse(BaseModel):

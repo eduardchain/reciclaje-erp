@@ -59,9 +59,15 @@ export const inboundOrderService = {
   },
 
   // B.2: draft -> confirmed (efectos inventario + kg nacen aca) — solo willard
-  confirm: async (id: string): Promise<InboundOrderResponse> => {
+  // plan-sac-factor-willard D3: cuerpo opcional con el factor escogido por
+  // material; sin él (o vacío) = el defecto, como antes
+  confirm: async (
+    id: string,
+    conversionOptions: { material_id: string; option: string | null }[] = []
+  ): Promise<InboundOrderResponse> => {
     const response = await apiClient.post<InboundOrderResponse>(
-      `/api/v1/inbound-orders/${id}/confirm`
+      `/api/v1/inbound-orders/${id}/confirm`,
+      conversionOptions.length > 0 ? { conversion_options: conversionOptions } : undefined
     );
     return response.data;
   },
