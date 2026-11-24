@@ -9,10 +9,11 @@ Usuarios:
   - gerente@demo.ecobalance.com / 12345678   (Administrador)
   - bascula@demo.ecobalance.com / 12345678   (Bascula)
 
-Uso (default dry-run):
-    ./venv/bin/python scripts/seed_demo_org.py --superuser-email <admin@x> --superuser-password <pwd>
-    ./venv/bin/python scripts/seed_demo_org.py --apply --superuser-email <admin@x> --superuser-password <pwd>
-    ./venv/bin/python scripts/seed_demo_org.py --apply --reset --superuser-email <admin@x> --superuser-password <pwd>
+Uso (default dry-run; hace login tambien en dry-run). Las credenciales del
+superusuario salen SOLO del entorno (SEED_SU_EMAIL / SEED_SU_PASSWORD), nunca de
+un argumento: se cargan de ~/.config/sac-prod.env en el MISMO comando:
+    F=~/.config/sac-prod.env
+    SEED_SU_EMAIL="$(sed -n 's/^SEED_SU_EMAIL=//p' "$F")" SEED_SU_PASSWORD="$(sed -n 's/^SEED_SU_PASSWORD=//p' "$F")" ./venv/bin/python scripts/seed_demo_org.py --target dev [--apply] [--reset]
 
 Reglas:
   - Todo via API REST (jamas SQL directo).
@@ -1309,6 +1310,38 @@ class DemoOrgSeeder:
 # ============================================================================
 
 
+CLAVE_EN_ARGV = (
+    "ERROR: --superuser-password ya no se acepta: en la línea de comandos la clave "
+    "queda a la vista de ps y en el historial. Cárguela en SEED_SU_PASSWORD "
+    "(ver ~/.config/sac-prod.env)."
+)
+
+COMO_CORRERLO = (
+    "Córralo así, en un solo comando:\n"
+    "  F=~/.config/sac-prod.env\n"
+    "  SEED_SU_EMAIL=\"$(sed -n 's/^SEED_SU_EMAIL=//p' \"$F\")\" "
+    "SEED_SU_PASSWORD=\"$(sed -n 's/^SEED_SU_PASSWORD=//p' \"$F\")\" "
+    "./venv/bin/python scripts/seed_demo_org.py --target dev [--apply]"
+)
+
+
+def credenciales_faltantes(email: str | None, password: str | None) -> str:
+    """Primera linea del error cuando faltan credenciales, o "" si estan las dos.
+
+    Nombra SOLO lo que falta y nunca un valor (plan migrate-client-clave-entorno §4.4).
+    """
+    falta_email, falta_clave = not email, not password
+    if falta_email and falta_clave:
+        cuerpo = "faltan SEED_SU_EMAIL y SEED_SU_PASSWORD en el entorno."
+    elif falta_email:
+        cuerpo = "falta SEED_SU_EMAIL en el entorno (o --superuser-email)."
+    elif falta_clave:
+        cuerpo = "falta SEED_SU_PASSWORD en el entorno."
+    else:
+        return ""
+    return f"ERROR: {cuerpo} La clave del superusuario ya no va por la línea de comandos."
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true",
@@ -1319,14 +1352,22 @@ def main() -> int:
                         help="Entorno destino (default dev). Selecciona base URL automaticamente.")
     parser.add_argument("--base-url", default=None,
                         help="Override base URL del backend (usualmente derivado de --target)")
-    parser.add_argument("--superuser-email", required=True,
-                        help="Email del superuser para autenticar")
-    parser.add_argument("--superuser-password", required=True,
-                        help="Password del superuser")
+    parser.add_argument("--superuser-email", default=os.environ.get("SEED_SU_EMAIL"),
+                        help="Email del superuser (por defecto SEED_SU_EMAIL)")
+    # D1 (plan migrate-client-clave-entorno): definido solo para rechazarlo sin
+    # repetir el valor; la clave sale de SEED_SU_PASSWORD.
+    parser.add_argument("--superuser-password", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--yes-i-mean-prod", action="store_true",
                         help="Confirmacion explicita requerida para --target=prod --apply")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
+    if args.superuser_password is not None:
+        print(CLAVE_EN_ARGV, file=sys.stderr)
+        sys.exit(2)
+    su_password = os.environ.get("SEED_SU_PASSWORD")
+    faltan = credenciales_faltantes(args.superuser_email, su_password)
+    if faltan:
+        raise SystemExit(f"{faltan}\n{COMO_CORRERLO}")
 
     setup_logging(args.verbose)
 
@@ -1351,7 +1392,7 @@ def main() -> int:
         logging.warning("=" * 70)
 
     api = APIClient(base_url, dry_run=not args.apply, target=args.target)
-    api.login(args.superuser_email, args.superuser_password)
+    api.login(args.superuser_email, su_password)
 
     seeder = DemoOrgSeeder(api)
     try:

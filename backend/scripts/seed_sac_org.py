@@ -19,10 +19,13 @@ Que crea:
     maquila_intersede_cv_jm $1.500 per_kg_lead).
   - 3 configs de retencion (retefuente 2.5%, reteiva 2.0%, ICA Barranquilla 0.7%).
 
-Uso (default dry-run):
-    ./venv/bin/python scripts/seed_sac_org.py --superuser-email <su> --superuser-password <pwd>
-    ./venv/bin/python scripts/seed_sac_org.py --apply --superuser-email <su> --superuser-password <pwd>
-    ./venv/bin/python scripts/seed_sac_org.py --apply --reset ...   # borra la org SAC previa
+Uso (default dry-run). Las credenciales del superusuario salen SOLO del entorno
+(SEED_SU_EMAIL / SEED_SU_PASSWORD), nunca de un argumento: se cargan de
+~/.config/sac-prod.env en el MISMO comando:
+    F=~/.config/sac-prod.env
+    SEED_SU_EMAIL="$(sed -n 's/^SEED_SU_EMAIL=//p' "$F")" \\
+    SEED_SU_PASSWORD="$(sed -n 's/^SEED_SU_PASSWORD=//p' "$F")" \\
+    ./venv/bin/python scripts/seed_sac_org.py [--apply] [--reset ...]   # --reset borra la org SAC previa
 
 Reglas:
   - Todo via API REST (jamas SQL directo). SOLO contra dev (localhost:8000).
@@ -1422,6 +1425,22 @@ class SacSeeder:
             logging.warning("=" * 70)
 
 
+CLAVE_EN_ARGV = (
+    "ERROR: --superuser-password ya no se acepta: en la línea de comandos la clave "
+    "queda a la vista de ps y en el historial. Cárguela en SEED_SU_PASSWORD "
+    "(ver ~/.config/sac-prod.env)."
+)
+
+
+def rechazar_clave_en_argv(args) -> None:
+    """D1 del plan migrate-client-clave-entorno: si la clave vino por argumento,
+    corta con exit 2 SIN repetir el valor. La comparten archivar_org_sac.py y
+    load_sac_opening.py (importan este modulo)."""
+    if getattr(args, "superuser_password", None) is not None:
+        print(CLAVE_EN_ARGV, file=sys.stderr)
+        sys.exit(2)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Recrear org SAC (solo maestros) en dev")
     parser.add_argument("--apply", action="store_true", help="Ejecutar de verdad (default dry-run)")
@@ -1434,7 +1453,9 @@ def main() -> None:
         help=f"Backend destino (default {BASE_URL}). Produccion: https://api.ecobalance.cc",
     )
     parser.add_argument("--superuser-email", default=os.environ.get("SEED_SU_EMAIL"))
-    parser.add_argument("--superuser-password", default=os.environ.get("SEED_SU_PASSWORD"))
+    # D1 (plan migrate-client-clave-entorno): definido solo para rechazarlo sin
+    # repetir el valor; la clave sale de SEED_SU_PASSWORD.
+    parser.add_argument("--superuser-password", default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--users-password", default="12345678",
         help=("Password para usuarios SAC creados EN LOCAL (los existentes conservan la "
@@ -1457,6 +1478,8 @@ def main() -> None:
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
+    rechazar_clave_en_argv(args)
+    args.superuser_password = os.environ.get("SEED_SU_PASSWORD")
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -1465,8 +1488,8 @@ def main() -> None:
 
     if not args.superuser_email or not args.superuser_password:
         raise SystemExit(
-            "Faltan credenciales: --superuser-email/--superuser-password "
-            "o env SEED_SU_EMAIL/SEED_SU_PASSWORD"
+            "Faltan credenciales: SEED_SU_EMAIL/SEED_SU_PASSWORD en el entorno "
+            "(ver ~/.config/sac-prod.env)"
         )
 
     api = APIClient(dry_run=not args.apply, base_url=args.api_url)

@@ -37,14 +37,15 @@ AskUserQuestion:
   - Cual es la ruta absoluta del Excel del cliente?
 ```
 
-Luego, con AskUserQuestion en un solo mensaje (4 preguntas paralelas):
+Luego, con AskUserQuestion en un solo mensaje (3 preguntas paralelas):
 
 - **Nombre de la organizacion** (razon social tal cual aparecera en facturas): texto libre
 - **Email del admin del cliente** (el usuario maestro que recibira las credenciales): texto libre
 - **Nombre completo del admin** (persona que vera el sistema): texto libre
-- **Email del superuser EcoBalance** (la persona con permisos para crear orgs en prod): texto libre (usualmente eduardo.d.chain@gmail.com)
 
 Si el usuario ya dio alguno en el prompt inicial, no preguntarlo de nuevo — leerlo del contexto.
+
+**El email y la clave del superusuario NO se piden.** Salen de `~/.config/sac-prod.env` (`SEED_SU_EMAIL` / `SEED_SU_PASSWORD`), cargados en el mismo comando que corre el script (regla 9). Nunca se pregunta la clave por el chat ni se pasa como argumento: `migrate_org.py` rechaza `--superuser-password`.
 
 **La clave del admin del cliente NO se pide.** Si el email del admin es nuevo, `migrate_org.py` le genera al azar, en memoria, una clave que nadie conoce: no se imprime, no se escribe en ningún archivo y no viaja por el chat ni por un argumento. El admin nace sin una clave utilizable. La real se la pone Daniel después desde Sistema → Usuarios → Resetear contraseña (#85) y se la entrega al cliente por un canal privado; el reporte final lo trae como PASO PENDIENTE. Si el email ya existía, el admin conserva la suya: el API no dice cuál de los dos casos ocurrió.
 
@@ -68,7 +69,13 @@ curl -s http://localhost:8000/health  # debe responder {"status":"healthy"...}
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend && ./venv/bin/alembic current
 # Comparar contra heads(). Si difiere: 'alembic upgrade head' antes de continuar.
 
+# 4. Credenciales del superusuario en el archivo, SIN mostrar la clave
+F=~/.config/sac-prod.env
+test -r "$F" && grep -c '^SEED_SU_PASSWORD=.' "$F"   # debe dar 1
+sed -n 's/^SEED_SU_EMAIL=//p' "$F"                     # la cuenta con la que se va a entrar
 ```
+
+Si el archivo no existe o no tiene la clave, ABORTAR y pedirle al usuario que lo cree (chmod 600). **Nunca** pedir la clave por el chat como alternativa.
 
 Si cualquiera falla, ABORTAR y reportar al usuario. No continuar.
 
@@ -109,52 +116,57 @@ cd /Users/daniel.chain/Projects/reciclaje-erp/backend
 
 ### 3. Dry-run en DEV (validacion de estructura)
 
+El dry-run es OFFLINE: no hace login ni necesita credenciales.
+
 ```bash
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
+set -o pipefail
+shasum -a 256 "$EXCEL_PATH"   # anotarlo: el paso 6 lo compara
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
-  --api-url http://localhost:8000 \
   --org-name "$ORG_NAME" \
   --admin-email "$ADMIN_EMAIL" \
   --admin-name "$ADMIN_NAME" \
   --dry-run 2>&1 | tee /tmp/migration-dryrun-dev.log
+echo "EXIT=$?"
 ```
 
-**Interpretar resultado:**
-- Si termina con `DRY-RUN COMPLETADO` → estructura del Excel OK, pasar a paso 4.
-- Si termina con `ERROR` → mostrar ultimas 30 lineas del log al usuario, ABORTAR. El cliente tiene que corregir el Excel.
+**Interpretar resultado** (con `set -o pipefail`, `EXIT` es el de `migrate_org`, no el del `tee`):
+- `EXIT=0`, `Errores:  0` en el RESUMEN y termina con `Done.` → estructura del Excel OK, pasar a paso 4.
+- Cualquier otro caso (exit 1, `Errores:` mayor que 0, `ABORTANDO`, `ERROR`) → mostrar ultimas 30 lineas del log al usuario, ABORTAR. El cliente tiene que corregir el Excel.
 
 ### 4. Apply en DEV (integration test real)
 
 Usar el mismo `org_name` pero con sufijo `_TEST` para diferenciarlo en dev. **Siempre `--reset-org`** para garantizar slate limpio (solo afecta orgs de test en dev, nunca prod).
 
-Pedir password del superuser dev (admin@ecobalance.com):
-
-```
-AskUserQuestion:
-  - Password del superuser DEV (admin@ecobalance.com)?
-```
+Las credenciales salen de `~/.config/sac-prod.env`, cargadas en el MISMO comando (el Bash de la sesion no conserva variables entre llamadas, asi que un `export` en otra llamada no llega). Dev es una replica de produccion (`replicate_prod.sh`), asi que el superusuario es la misma cuenta.
 
 ```bash
 TEST_ORG_NAME="${ORG_NAME} TEST"
 TEST_ADMIN_EMAIL="test_$(date +%s)@ecobalance.com"
 
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
+set -o pipefail
+F=~/.config/sac-prod.env
+SEED_SU_EMAIL="$(sed -n 's/^SEED_SU_EMAIL=//p' "$F")" \
+SEED_SU_PASSWORD="$(sed -n 's/^SEED_SU_PASSWORD=//p' "$F")" \
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
   --api-url http://localhost:8000 \
-  --superuser-email admin@ecobalance.com \
-  --superuser-password "$DEV_SUPERUSER_PASSWORD" \
   --org-name "$TEST_ORG_NAME" \
   --admin-email "$TEST_ADMIN_EMAIL" \
   --admin-name "Test Admin" \
   --apply \
   --reset-org 2>&1 | tee /tmp/migration-apply-dev.log
+echo "EXIT=$?"
 ```
 
-**Verificar resultado:**
-- Script termina con `MIGRACION COMPLETADA EXITOSAMENTE` y `Balance Sheet diff: $0.00`.
-- Si no, mostrar ultimas 50 lineas, ABORTAR, reportar al usuario.
+El prefijo `VAR=… comando` pone las variables solo en el entorno de `migrate_org`: ni el `tee` ni el shell que sigue las reciben, y en `ps` se ven los `sed` con la ruta del archivo, nunca el valor.
+
+**Verificar resultado** (`EXIT` es el de `migrate_org` gracias a `pipefail`):
+- `EXIT=0`, `Errores:  0`, `OK    Balance General cuadra`, `Verificacion: N OK, 0 FAIL` y termina con `Done.`.
+- Si el login da 401: dev no tiene la cuenta del archivo (o tiene otra clave). Replicar produccion o crear el superusuario local y volver a correr. **Nunca** pedir la clave por el chat.
+- Cualquier otro caso: mostrar ultimas 50 lineas, ABORTAR, reportar al usuario.
 
 Capturar los counts del reporte final (org_id, terceros, materiales, cuentas, activos fijos, etc.) — los usaremos en el reporte y en el confirm.
 
@@ -174,8 +186,8 @@ Counts:
   - Cuentas: N (con saldo inicial sumando $X)
   - Activos fijos: N
   - Inventario inicial: N items (valuacion $Y)
-Balance Sheet diff: $0.00 ✓
-Verificaciones: 9/9 OK
+Balance General cuadra ✓
+Verificacion: N OK, 0 FAIL
 
 El test en dev fue exitoso. Listo para proceder a PRODUCCION?
 ```
@@ -184,19 +196,18 @@ El test en dev fue exitoso. Listo para proceder a PRODUCCION?
 AskUserQuestion:
   question: "El test en dev fue exitoso. Quieres proceder a producir la migracion en PROD?"
   options:
-    - "Si, hacer dry-run en prod" (Recommended)
+    - "Si, hacer el dry-run final" (Recommended)
     - "No, cancelar"
 ```
 
 Si el usuario dice no → ABORTAR limpio. Decirle que la org TEST quedo en dev (org_id) y puede revisarla.
 
-### 6. Dry-run en PROD (validacion contra DB real)
+### 6. Dry-run final con los datos reales (offline)
 
-Pedir credenciales prod:
+Es el mismo dry-run OFFLINE del paso 3: no se conecta a produccion ni pide credenciales. Lo que agrega: corre sobre el Excel tal como esta justo antes de produccion (el cliente pudo tocarlo durante los pasos 4 y 5) y con el nombre de la org recien confirmado.
 
 ```
-AskUserQuestion (2 preguntas):
-  - Password del superuser PROD (email ya dado)?
+AskUserQuestion:
   - Confirmas que el nombre real de la org en prod es: "{ORG_NAME}"?
     Opciones:
       - "Si, ese es el nombre correcto"
@@ -205,24 +216,25 @@ AskUserQuestion (2 preguntas):
 
 ```bash
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
+set -o pipefail
+shasum -a 256 "$EXCEL_PATH"   # comparar con el del paso 3
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
-  --api-url https://api.ecobalance.cc \
-  --superuser-email "$PROD_SUPERUSER_EMAIL" \
-  --superuser-password "$PROD_SUPERUSER_PASSWORD" \
   --org-name "$ORG_NAME" \
   --admin-email "$ADMIN_EMAIL" \
   --admin-name "$ADMIN_NAME" \
   --dry-run 2>&1 | tee /tmp/migration-dryrun-prod.log
+echo "EXIT=$?"
 ```
 
 **Interpretar:**
-- `DRY-RUN COMPLETADO` sin errores → OK, pasar a paso 7.
-- Errores tipicos: email del admin ya existe en otra org, nombres de categorias duplicados con seeds defaults, etc. Reportar al usuario, ABORTAR.
+- Si el sha256 del Excel es el mismo del paso 3, decirlo en una linea: el resultado es el mismo. Si cambio, volver a la auditoria (paso 2.5) antes de seguir (regla 8).
+- `EXIT=0`, `Errores:  0` y `Done.` → OK, pasar a paso 7.
+- Cualquier otro caso: reportar al usuario, ABORTAR. El dry-run es offline: NO detecta lo que depende de la base (por ejemplo, una org con el mismo nombre ya creada). Un email de admin que ya existe no es un error: el admin conserva su clave (#132).
 
 ### 7. Confirmacion 2 (CRITICA — antes de prod)
 
-Esta es la confirmacion mas importante. Se ejecuta DESPUES de un dry-run prod exitoso, ANTES del apply.
+Esta es la confirmacion mas importante. Se ejecuta DESPUES de un dry-run final exitoso, ANTES del apply.
 
 Mostrar resumen final:
 
@@ -252,7 +264,7 @@ AskUserQuestion:
     - "No, abortar"
 ```
 
-Si no confirma → ABORTAR. Decirle al usuario que el dry-run prod quedo en `/tmp/migration-dryrun-prod.log` por si quiere revisar.
+Si no confirma → ABORTAR. Decirle al usuario que el dry-run final quedo en `/tmp/migration-dryrun-prod.log` por si quiere revisar.
 
 ### 8. Apply en PROD
 
@@ -260,21 +272,27 @@ Si no confirma → ABORTAR. Decirle al usuario que el dry-run prod quedo en `/tm
 
 ```bash
 cd /Users/daniel.chain/Projects/reciclaje-erp/backend
+set -o pipefail
+F=~/.config/sac-prod.env
+SEED_SU_EMAIL="$(sed -n 's/^SEED_SU_EMAIL=//p' "$F")" \
+SEED_SU_PASSWORD="$(sed -n 's/^SEED_SU_PASSWORD=//p' "$F")" \
 ./venv/bin/python scripts/migrate_org.py \
   --file "$EXCEL_PATH" \
   --api-url https://api.ecobalance.cc \
-  --superuser-email "$PROD_SUPERUSER_EMAIL" \
-  --superuser-password "$PROD_SUPERUSER_PASSWORD" \
   --org-name "$ORG_NAME" \
   --admin-email "$ADMIN_EMAIL" \
   --admin-name "$ADMIN_NAME" \
   --apply 2>&1 | tee /tmp/migration-apply-prod.log
+echo "EXIT=$?"
 ```
 
-**Verificar:**
-- `MIGRACION COMPLETADA EXITOSAMENTE` al final.
-- `Balance Sheet diff: $0.00` (o dentro de tolerancia).
-- `9/9 OK` en checks.
+**Verificar** (`EXIT` es el de `migrate_org` gracias a `pipefail`; el script sale con 1 si hay errores o algun FAIL):
+- `EXIT=0`.
+- `Errores:  0` en el RESUMEN.
+- `OK    Balance General cuadra` y `Verificacion: N OK, 0 FAIL`.
+- Termina con `Done.`.
+
+**Con `--skip-phase`** la verificacion final NO corre (solo corre si no se salto ninguna fase), asi que no aparecen `Verificacion` ni `Balance General cuadra`. El criterio es `EXIT=0` + `Errores:  0`, y el reporte final dice «Verificacion final NO corrio (--skip-phase X): los conteos y el cuadre del balance no se comprobaron».
 
 Si falla parcialmente (ej: cae en fase 8 despues de crear categorias y materiales):
 - Capturar el org_id parcialmente creado del log.
@@ -293,7 +311,7 @@ AskUserQuestion:
     - "No, dejarla para revision"
 ```
 
-Si si: hacer `DELETE /api/v1/system/organizations/{TEST_ORG_ID}` via curl.
+Si si: pedirle al usuario que la desactive desde la pantalla de dev, Sistema → Organizaciones → «Desactivar» sobre `{TEST_ORG_NAME}` (pide escribir el nombre). La skill NO la borra con curl: haria falta un token del superusuario, o sea la clave, en un argumento o en el chat.
 
 ### 10. Reporte final
 
@@ -315,8 +333,8 @@ Si si: hacer `DELETE /api/v1/system/organizations/{TEST_ORG_ID}` via curl.
 - Activos fijos: N
 - Inventario inicial: N items (valuacion $Y)
 
-**Balance Sheet diff:** $0.00 ✓
-**Verificaciones:** 9/9 OK
+**Balance General cuadra** ✓
+**Verificacion:** N OK, 0 FAIL (con `--skip-phase`: «Verificacion final NO corrio (--skip-phase X): los conteos y el cuadre del balance no se comprobaron»)
 
 **Logs guardados:**
 - /tmp/migration-dryrun-dev.log
@@ -356,7 +374,7 @@ Si fallo:
 2. **Nunca pasar `--reset-org` con `--api-url https://...`.** Si el usuario lo pide, refusar.
 3. **Nunca correr `alembic upgrade` desde esta skill.** Si hay migraciones pendientes en dev, abortar y pedir al usuario correrlas manualmente. En prod, las migraciones SOLO se aplican via `/deploy`.
 4. **Nunca skipear las dos confirmaciones criticas** (post-test dev y pre-apply prod), incluso si el usuario dice "vai sin preguntar". Estas son las salvaguardas core de la skill.
-5. **Si el dry-run prod falla**, NO seguir a apply. El cliente tiene que corregir el Excel o tu tienes que limpiar prod primero.
+5. **Si el dry-run final falla**, NO seguir a apply. El cliente tiene que corregir el Excel o tu tienes que limpiar prod primero.
 6. **Logs en `/tmp/migration-*.log`** se conservan toda la sesion para auditoria. No borrar.
 7. **Si necesitas editar el Excel programaticamente** (con `openpyxl` desde Python),
    pedile al usuario que **cierre Excel.app primero**. Si el archivo esta abierto
@@ -367,3 +385,8 @@ Si fallo:
 8. **El dry-run es OFFLINE** (no llama al API). Si el cliente cambia algo despues
    del dry-run, **vuelve a correr la auditoria (paso 2.5) ANTES del apply**, no
    te confies del dry-run anterior.
+9. **La clave del superusuario nunca se pide por el chat ni va en un argumento.**
+   Sale de `~/.config/sac-prod.env`, cargada en el MISMO comando que corre el
+   script (`SEED_SU_EMAIL="$(sed …)" SEED_SU_PASSWORD="$(sed …)" ./venv/bin/python …`).
+   `migrate_org.py` rechaza `--superuser-password` sin repetir el valor. No correr
+   `ps -E` ni imprimir el entorno: mostraria la clave.
