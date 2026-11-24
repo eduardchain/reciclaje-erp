@@ -45,6 +45,12 @@ export const ROUTES = {
   CRUCIBLE_CHARGE_DETAIL: "/willard-deliveries/crisol/:id",
   WILLARD_DELIVERY_EDIT: "/willard-deliveries/:id/edit",
   WILLARD_DELIVERY_DETAIL: "/willard-deliveries/:id",
+  // Documentos de control: Salida de control y Talonario de remisiones (Q-75)
+  CONTROL_DISPATCHES: "/control-dispatches",
+  CONTROL_DISPATCH_NEW: "/control-dispatches/new",
+  CONTROL_DISPATCH_EDIT: "/control-dispatches/:id/edit",
+  CONTROL_DISPATCH_DETAIL: "/control-dispatches/:id",
+  REMISSION_BOOK: "/remissions",
   TRANSFERS: "/transfers",
   TRANSFER_NEW: "/transfers/new",
   TRANSFER_DETAIL: "/transfers/:id",

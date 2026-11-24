@@ -412,9 +412,15 @@ const removeDraft = (key: string) => {
  *  pesado, el peso de báscula (la vista por kg), la referencia, el reparto
  *  guardado y el estado de las compras. Si alguien desliquidó y repartió
  *  distinto desde otro equipo, el borrador viejo ya no tapa lo nuevo. */
+/** Documentos de control: las lineas de control (estibas, tubulares,
+ *  electrolito) no se liquidan — no entran a la matriz, a la firma ni al
+ *  payload. Un solo filtro para las tres (el servidor da 422 si llegan). */
+const liquidableLines = (order: InboundOrderResponse) =>
+  order.lines.filter((l) => !l.is_control);
+
 const orderSignature = (order: InboundOrderResponse): string =>
   [
-    ...order.lines.map((l) =>
+    ...liquidableLines(order).map((l) =>
       [
         l.material_id,
         num(l.quantity),
@@ -485,7 +491,7 @@ function assertDraftShape(d: Draft): void {
 /* ------------------------------------------------------------------ */
 
 function initLines(order: InboundOrderResponse): LineState[] {
-  return order.lines.map((l) => {
+  return liquidableLines(order).map((l) => {
     const rowPrice = num(l.reference_unit_price ?? l.unit_price ?? 0);
     const cells: Record<number, CellState> = {};
     // Re-liquidación (D20): el reparto anterior se conserva, por SLOT
@@ -650,7 +656,7 @@ export default function InboundLiquidatePage() {
 
     // Columnas = los slots del reparto guardado, con su proveedor y factura
     const bySlot = new Map<number, PurchaseCol>();
-    for (const l of order.lines) {
+    for (const l of liquidableLines(order)) {
       for (const a of l.allocations) {
         const col = bySlot.get(a.purchase_slot) ?? newCol(a.purchase_slot, a.third_party_id);
         if (!col.invoice && a.invoice_number) col.invoice = a.invoice_number;
@@ -753,12 +759,18 @@ export default function InboundLiquidatePage() {
     for (const p of profilesData?.items ?? []) map.set(p.material_id, p.compra_regular);
     return map;
   }, [profilesData]);
+  // Un material de control nunca se reparte (el servidor da 422)
+  const controlMaterialIds = useMemo(
+    () => new Set((profilesData?.items ?? []).filter((p) => p.control_only).map((p) => p.material_id)),
+    [profilesData]
+  );
   const extraOptions = useMemo(() => {
     const present = new Set(lines.map((l) => l.material_id));
     return materials.filter(
-      (m) => !present.has(m.id) && (compraByMaterial.get(m.id) ?? true)
+      (m) => !present.has(m.id) && !controlMaterialIds.has(m.id) &&
+        (compraByMaterial.get(m.id) ?? true)
     );
-  }, [materials, lines, compraByMaterial]);
+  }, [materials, lines, compraByMaterial, controlMaterialIds]);
 
   // Tarifa vigente comision_green_loop (precio + regla de los kg/unidad)
   const greenLoopTariff = (tariffsData?.items ?? []).find(
@@ -817,11 +829,20 @@ export default function InboundLiquidatePage() {
   if (order.status !== "reviewed") {
     return (
       <GuardMessage
-        text={`La entrada está ${order.display_status === "liquidated" ? "Liquidada" : "en un estado que no permite liquidar"} — vuelva al detalle.`}
+        text={`La entrada está ${order.display_status === "liquidated" ? "Liquidada" : order.display_status === "closed" ? "Cerrada sin valor" : "en un estado que no permite liquidar"} — vuelva al detalle.`}
         onBack={() => navigate(backTo)}
       />
     );
   }
+  if (order.is_control_only) {
+    return (
+      <GuardMessage
+        text="Esta Entrada es solo de control: no se liquida, ciérrela sin valor desde el detalle."
+        onBack={() => navigate(buildRoute(ROUTES.INBOUND_DETAIL, { id: order.id }))}
+      />
+    );
+  }
+  const controlLines = order.lines.filter((l) => l.is_control);
 
   const colBySlot = new Map(cols.map((c) => [c.slot, c]));
 
@@ -1839,6 +1860,22 @@ export default function InboundLiquidatePage() {
           >
             Descartar borrador
           </Button>
+        </div>
+      )}
+
+      {controlLines.length > 0 && (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          <p className="font-medium text-slate-700">
+            {controlLines.length === 1 ? "1 línea de control" : `${controlLines.length} líneas de control`} — no se liquida{controlLines.length === 1 ? "" : "n"}:
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {controlLines.map((l) => (
+              <li key={l.id} className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-3">
+                <span>{l.material_code} - {l.material_name}</span>
+                <span className="text-slate-500">{formatWeight(num(l.quantity), l.material_unit)} · control, sin valor</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

@@ -74,9 +74,20 @@ function readableParams(f: MaterialConversionFormulaResponse): string {
   return JSON.stringify(p);
 }
 
+/** Documentos de control: badge gris de la marca, al lado de la clasificación. */
+function ControlPill() {
+  return (
+    <span className="inline-flex px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-xs font-medium">
+      Control
+    </span>
+  );
+}
+
 function ClassificationBadge({ row }: { row: MaterialKgRow }) {
   const cls = classificationOf(row);
+  const control = row.profile?.control_only ?? false;
   if (cls === "unclassified") {
+    if (control) return <ControlPill />;
     return (
       <span className="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-xs font-medium">
         Sin clasificar
@@ -92,6 +103,7 @@ function ClassificationBadge({ row }: { row: MaterialKgRow }) {
     <span className="inline-flex items-center gap-1 flex-wrap">
       <ClassPill cls={cls} />
       {cls !== "compra" && row.profile?.compra_regular && <ClassPill cls="compra" />}
+      {control && <ControlPill />}
     </span>
   );
 }
@@ -182,6 +194,7 @@ export default function FormulasPage() {
   const [classification, setClassification] = useState<Classification>("compra");
   const [alsoCompra, setAlsoCompra] = useState(false);
   const [leadProduct, setLeadProduct] = useState<LeadProduct>("none");
+  const [controlOnly, setControlOnly] = useState(false);
   const [kgPerUnit, setKgPerUnit] = useState("");
   const [batteryRef, setBatteryRef] = useState<string>("none");
   const [leadPct, setLeadPct] = useState("");
@@ -191,6 +204,14 @@ export default function FormulasPage() {
   const [notes, setNotes] = useState("");
 
   const isWillard = classification !== "compra";
+  // §4.1: un material Willard o de plomo no puede ser de control (el servidor
+  // da 422 en las dos direcciones). La casilla se apaga con el motivo.
+  const controlBlockedReason = isWillard
+    ? "Un material Willard no puede ser de control."
+    : leadProduct !== "none"
+      ? "Un plomo entregable no puede ser de control."
+      : null;
+  const effControlOnly = controlBlockedReason ? false : controlOnly;
   const derivedType = formulaTypeForUnit(unit);
   // Guard F3 (frontend-only): con fórmula vigente la unidad no se cambia
   const unitLocked = !!editRow?.formula;
@@ -205,6 +226,7 @@ export default function FormulasPage() {
     setBusinessUnitId("");
     setClassification("compra");
     setLeadProduct("none");
+    setControlOnly(false);
     setAlsoCompra(false);
     setKgPerUnit("");
     setBatteryRef("none");
@@ -227,6 +249,7 @@ export default function FormulasPage() {
     setClassification(cls === "unclassified" ? "compra" : cls);
     setAlsoCompra(cls !== "compra" && cls !== "unclassified" ? (row.profile?.compra_regular ?? false) : false);
     setLeadProduct(row.profile?.lead_product ?? "none");
+    setControlOnly(row.profile?.control_only ?? false);
     const f = row.formula;
     setFactorLabel("");
     setAltDrafts([]);
@@ -288,6 +311,8 @@ export default function FormulasPage() {
     qc.invalidateQueries({ queryKey: ["materials"] });
     qc.invalidateQueries({ queryKey: ["kg-profiles"] });
     qc.invalidateQueries({ queryKey: ["conversion-formulas"] });
+    // La marca de control cambia lo que las Entradas muestran (is_control)
+    qc.invalidateQueries({ queryKey: ["inbound-orders"] });
   };
 
   /** ¿La fórmula del form difiere de la vigente? (sin cambio → no se postea: append-only) */
@@ -357,6 +382,21 @@ export default function FormulasPage() {
       }
 
       const prevProfile = editRow?.profile;
+      const prevControl = prevProfile?.control_only ?? false;
+      const setControl = async (value: boolean): Promise<boolean> => {
+        try {
+          await sacConfigService.setKgControl(materialId, value);
+          return true;
+        } catch (e) {
+          toast.error(
+            getApiErrorMessage(e, "Falló la marca de control") +
+              " — el material quedó guardado; corríjala desde Editar"
+          );
+          return false;
+        }
+      };
+      // Desmarcar ANTES de reclasificar (Willard/plomo con la marca puesta = 422)
+      if (prevControl && !effControlOnly && !(await setControl(false))) return;
       const profileChanged =
         !prevProfile ||
         prevProfile.willard_world !== willardWorld ||
@@ -377,6 +417,9 @@ export default function FormulasPage() {
           return;
         }
       }
+
+      // Marcar DESPUÉS: la clasificación ya quedó sin Willard ni plomo
+      if (!prevControl && effControlOnly && !(await setControl(true))) return;
 
       if (factorChanged() && parameters) {
         try {
@@ -655,6 +698,23 @@ export default function FormulasPage() {
               <p className="text-xs text-slate-400 mt-1">
                 Solo el plomo marcado acá puede salir hacia Willard a saldar la deuda en kg.
                 El crudo se entrega en las tres modalidades; el puro normalmente se vende.
+              </p>
+            </div>
+
+            <div>
+              <label className={`flex items-center gap-2 text-sm ${controlBlockedReason ? "text-slate-400" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={effControlOnly}
+                  disabled={!!controlBlockedReason}
+                  onChange={(e) => setControlOnly(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                Solo control (sin valor)
+              </label>
+              <p className="text-xs text-slate-400 mt-1">
+                {controlBlockedReason ??
+                  "Estibas, tubulares, electrolito: entran y salen con su remisión, sin precio, sin inventario ni plata. Una Entrada con solo estos materiales se cierra sin valor."}
               </p>
             </div>
 

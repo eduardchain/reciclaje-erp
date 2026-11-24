@@ -45,6 +45,7 @@ SEQUENCES: dict[str, tuple[str, str, str | None]] = {
     "transfer_number": ("transfers", "transfer_number", None),
     "willard_delivery": ("willard_deliveries", "delivery_number", "series"),
     "crucible_number": ("crucible_charges", "charge_number", None),
+    "control_dispatch_number": ("control_dispatches", "dispatch_number", None),
     "purchase_number": ("purchases", "purchase_number", None),
     "sale_number": ("sales", "sale_number", None),
     "movement_number": ("money_movements", "movement_number", None),
@@ -64,6 +65,9 @@ RANK: dict[str, int] = {
     # estable de lock_sequences y la comparacion `<` no verian dos flujos que
     # tomaran (willard, crucible) en orden cruzado.
     "crucible_number": 14,
+    # Salida de control (plan-sac-documentos-control §4.3): documento, rango
+    # unico en la banda 10-15. Se toma solo y al crear.
+    "control_dispatch_number": 15,
     "purchase_number": 20,
     "sale_number": 21,
     "movement_number": 30,

@@ -67,6 +67,7 @@ from app.schemas.purchase import PurchaseCreate, PurchaseFullUpdate, PurchaseLin
 from app.services.inventory_costing import incorporate_into_pool, remove_from_pool
 from app.services.material_cost_history import material_cost_history_service
 from app.utils.org_settings import get_org_setting
+from app.services.remission_book import duplicate_remission_warning, remission_order
 
 # D1/CC-004: el ruteo de la cuenta kg es POR LINEA segun willard_world del
 # material (no por un tipo de encabezado). El inbound_type solo distingue
@@ -208,6 +209,13 @@ class InboundOrderService:
             )
             self._persist_mirror_lines(db, order, obj_in.lines, organization_id)
 
+        # Talonario (Q-75, D8): remision repetida se AVISA, no se rechaza.
+        dup = duplicate_remission_warning(
+            db, organization_id, obj_in.remission_number, exclude_inbound_id=order.id
+        )
+        if dup:
+            warnings.append(dup)
+
         db.commit()
         db.refresh(order)
         return order, warnings
@@ -254,7 +262,8 @@ class InboundOrderService:
         order = self._get_or_404(db, order_id, organization_id)
         if order.status != "draft":
             labels = {"reviewed": "ya esta revisada", "liquidated": "ya esta liquidada",
-                      "confirmed": "ya esta confirmada", "annulled": "esta anulada"}
+                      "confirmed": "ya esta confirmada", "annulled": "esta anulada",
+                      "closed": "esta cerrada sin valor"}
             raise _err(
                 f"No se puede revisar: la entrada {labels.get(order.status, order.status)}",
                 status.HTTP_400_BAD_REQUEST,
@@ -263,6 +272,98 @@ class InboundOrderService:
         order.status = "reviewed"
         order.reviewed_by = user_id
         order.reviewed_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(order)
+        return order
+
+    # ------------------------------------------------------------------ #
+    # Documentos de control (plan-sac-documentos-control v1.2 §4.2)       #
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def control_material_ids(db: Session, organization_id: UUID, material_ids) -> set:
+        """Delegado: el predicado vive en `material_kg_profile` (uno solo para
+        Entrada, Salida de control y los guards D5)."""
+        from app.services.material_kg_profile import control_material_ids
+        return control_material_ids(db, organization_id, material_ids)
+
+    def close(
+        self, db: Session, order_id: UUID, organization_id: UUID, user_id: UUID
+    ) -> InboundOrder:
+        """Cierre sin valor de una Entrada SOLO de control (R1-R5): conserva
+        numero y remision, sale de la bandeja y no tiene NINGUN efecto — solo
+        status y auditoria."""
+        order = self._get_or_404(db, order_id, organization_id)
+        if order.inbound_type in WILLARD_INBOUND_TYPES:
+            raise _err(
+                "Una recepcion Willard no se cierra sin valor",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if order.status not in ("draft", "reviewed"):
+            labels = {"liquidated": "esta liquidada", "confirmed": "esta confirmada",
+                      "annulled": "esta anulada", "closed": "ya esta cerrada sin valor"}
+            raise _err(
+                f"No se puede cerrar sin valor: la entrada {labels.get(order.status, order.status)}",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if not order.lines:
+            raise _err(
+                "La entrada no tiene lineas — no hay nada que cerrar",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        control = self.control_material_ids(
+            db, organization_id, [l.material_id for l in order.lines]
+        )
+        valued = sorted(
+            (l.material.code if l.material else str(l.material_id))
+            for l in order.lines if l.material_id not in control
+        )
+        if valued:
+            raise _err(
+                "Solo se cierra sin valor una entrada con TODOS sus materiales de "
+                f"control. Tiene materiales con valor: {', '.join(valued)} — liquidela"
+            )
+        # R2b (C1 de QA 2, D10): una entrada desliquidada conserva sus compras
+        # registered en el puente. Cerrarla las dejaria vivas (#134 las
+        # congela) y el residuo de la desliquidacion (annul_cost_adjustment)
+        # solo entra al P&L al ANULAR (reports.py lo lee de status annulled):
+        # en una cerrada se perderia en silencio.
+        live = [
+            p for p in self._linked_purchases(db, organization_id, order.id)
+            if p.status != "cancelled"
+        ]
+        if live:
+            nums = ", ".join(f"#{p.purchase_number}" for p in live)
+            raise _err(
+                f"La entrada tiene compras vivas ({nums}) de una liquidacion "
+                "anterior — anulela o vuelva a liquidarla; no se puede cerrar sin valor"
+            )
+        if order.annul_cost_adjustment != 0:
+            raise _err(
+                "La entrada guarda una diferencia de costo de una liquidacion "
+                "revertida — solo se reconoce al anularla; no se puede cerrar sin valor"
+            )
+        order.status = "closed"
+        order.closed_at = datetime.now(timezone.utc)
+        order.closed_by = user_id
+        db.commit()
+        db.refresh(order)
+        return order
+
+    def reopen(
+        self, db: Session, order_id: UUID, organization_id: UUID, user_id: UUID
+    ) -> InboundOrder:
+        """R6 (D3): deshace un cierre por error SIN anular (anular romperia el
+        consecutivo que el cierre existe para cuidar). Vuelve exactamente al
+        estado de antes: el cierre no borra la revision."""
+        order = self._get_or_404(db, order_id, organization_id)
+        if order.status != "closed":
+            raise _err(
+                "Solo se reabre una entrada cerrada sin valor",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        order.status = "reviewed" if order.reviewed_at is not None else "draft"
+        order.closed_at = None
+        order.closed_by = None
         db.commit()
         db.refresh(order)
         return order
@@ -288,9 +389,16 @@ class InboundOrderService:
                 )
             ).scalars()
         }
+        # D4 (documentos de control): el peso certifica lo que se VALORA
+        # (#95 Q-13); una linea de control no se valora — no se exige.
+        control = self.control_material_ids(
+            db, order.organization_id, [l.material_id for l in order.lines]
+        )
         faltantes: list[str] = []
         for line in order.lines:
             if line.scale_weight_kg is not None and line.scale_weight_kg > 0:
+                continue
+            if line.material_id in control:
                 continue
             material = materials.get(line.material_id)
             unit = (material.default_unit or "").strip().lower() if material else ""
@@ -419,6 +527,30 @@ class InboundOrderService:
             raise _err("La entrada ya esta liquidada", status.HTTP_400_BAD_REQUEST)
         if order.status == "annulled":
             raise _err("La entrada esta anulada", status.HTTP_400_BAD_REQUEST)
+        if order.status == "closed":
+            raise _err(
+                "La entrada esta cerrada sin valor — reabrala para liquidarla",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Documentos de control (R8/R8d): las lineas de control no se reparten,
+        # no tienen descuadre ni comision. Se decide con la marca AL MOMENTO.
+        control_ids = self.control_material_ids(
+            db, organization_id,
+            [l.material_id for l in order.lines] + [pl.material_id for pl in payload.lines],
+        )
+        if order.lines and all(l.material_id in control_ids for l in order.lines):
+            raise _err(
+                "Esta entrada es solo de control: no se liquida, cierrela sin valor"
+            )
+        for pl in payload.lines:
+            if pl.material_id in control_ids:
+                material = db.get(Material, pl.material_id)
+                code = material.code if material else pl.material_id
+                raise _err(
+                    f"{code} es de control: no se reparte ni se liquida — "
+                    "quitelo del reparto"
+                )
 
         from app.services.inventory_adjustment import inventory_adjustment
         from app.services.purchase import purchase as purchase_service
@@ -615,6 +747,7 @@ class InboundOrderService:
             l.material.code if l.material else str(l.material_id)
             for l in order.lines
             if l.material_id not in payload_materials
+            and l.material_id not in control_ids  # R8: el control no se reparte
         ]
         if missing:
             raise _err(
@@ -798,6 +931,13 @@ class InboundOrderService:
                 InboundLineAllocation.inbound_line_id.in_(line_ids)
             ).delete(synchronize_session=False)
             db.flush()
+
+        # R8b: una linea de control no lleva precio de referencia ni marca de
+        # "sin proveedor" (pudo tenerlos de una liquidacion previa a la marca).
+        for l in order.lines:
+            if l.material_id in control_ids:
+                l.reference_unit_price = None
+                l.unallocated_intentional = False
 
         for item in plan:
             order_line = item["order_line"]
@@ -1244,10 +1384,14 @@ class InboundOrderService:
         ).scalar_one_or_none()
         if tariff is None or not tariff.unit_price_cop or tariff.unit_price_cop <= 0:
             return Decimal("0")
+        # R8c: «no tenerlas en cuenta» — el control no paga comision.
+        control = self.control_material_ids(
+            db, organization_id, [l.material_id for l in order.lines]
+        )
         base = Decimal("0")
         for line in order.lines:
             qty = Decimal(str(line.quantity or 0))
-            if qty <= 0:
+            if qty <= 0 or line.material_id in control:
                 continue
             unit = (line.material.default_unit or "kg") if line.material else "kg"
             if unit == "kg":
@@ -1795,6 +1939,15 @@ class InboundOrderService:
             # revertir, D9; respuesta 4: "ajustar la cantidad pesada y liquidar").
             # Liquidada: solo cabecera cosmetica — el reparto/compras ya
             # existen; para tocar cantidades hay que desliquidar (D20).
+            if order.status == "closed":
+                # R7 (documentos de control): cerrada sin valor = terminal como
+                # una liquidada; la cabecera sigue editable.
+                offending = {"lines", "date"} & set(fields_set.keys())
+                if offending:
+                    raise _err(
+                        f"La entrada esta cerrada sin valor — {', '.join(sorted(offending))} "
+                        "exige reabrirla primero"
+                    )
             if order.status == "liquidated":
                 blocked = {"lines", "date", "willard_distribution_center"}
                 offending = blocked & set(fields_set.keys())
@@ -1989,7 +2142,17 @@ class InboundOrderService:
             order.notes = obj_in.notes
         if "remission_number" in fields_set:
             # #93 D12: remision del camion — dato de referencia (criterio notes)
+            changed = (obj_in.remission_number or "").strip() != (order.remission_number or "").strip()
             order.remission_number = obj_in.remission_number
+            # Talonario (Q-75, D8): solo si cambia — un form que la reenvia
+            # igual no debe repetir el aviso en cada guardado.
+            if changed:
+                dup = duplicate_remission_warning(
+                    db, organization_id, obj_in.remission_number,
+                    exclude_inbound_id=order.id,
+                )
+                if dup:
+                    warnings.append(dup)
         if "invoice_number" in fields_set:
             # Willard: columna propia. Legacy 1:1: la compra derivada. Tipo
             # compra #93: la factura vive POR PROVEEDOR en el reparto → 422.
@@ -2032,7 +2195,11 @@ class InboundOrderService:
         if obj_in.warehouse_id is None:
             raise _err("La sede es obligatoria — elija una bodega")
         if order.status not in ("draft", "reviewed"):
-            estado = "confirmada" if is_willard else "liquidada"
+            estado = (
+                "confirmada" if is_willard
+                else "cerrada sin valor" if order.status == "closed"
+                else "liquidada"
+            )
             raise _err(
                 f"La entrada esta {estado} — la sede ya no se puede cambiar. "
                 "Anulela y registrela de nuevo en la sede correcta"
@@ -2117,6 +2284,7 @@ class InboundOrderService:
                 "reviewed": ["reviewed"],
                 "liquidated": ["liquidated", "confirmed"],  # confirmed = willard
                 "annulled": ["annulled"],
+                "closed": ["closed"],  # documentos de control
             }
             q = q.where(
                 InboundOrder.status.in_(status_map.get(display_status, [display_status]))
@@ -2266,48 +2434,16 @@ class InboundOrderService:
 
     @staticmethod
     def _remission_order(desc: bool) -> list:
-        """Orden natural de la remision (plan columna Remision, D2) sobre TODA
-        la lista. Johana la llena a mano: es texto libre de hasta 50, sin strip.
-
-        Con r = NULLIF(TRIM(remission_number), ''):
-        1. Vacia (NULL, '' o solo espacios) al FINAL en los dos sentidos: quien
-           ordena por remision quiere ver primero las que la tienen.
-        2. Valor numerico, SOLO si r es solo digitos: el CASE es lo que impide
-           castear texto (sin el, la primera remision de texto da DataError).
-           «0012» vale 12. Para el texto es NULL, y su posicion va EXPLICITA:
-           numericas antes que texto en asc, texto antes en desc. Los NULLS
-           coinciden con el default de PG (quitarlos no cambia nada medible,
-           P9); se escriben para el lector.
-        3. Texto: lower(r) COLLATE "C" — orden independiente de la collation
-           del server (dev/test en Alpine ordena por bytes y prod no se puede
-           medir desde aca; lower() como en #108). OJO: lower(r) y DESPUES el
-           COLLATE; `lower(r COLLATE "C")` solo pasaria a minuscula el ASCII.
-        4. Desempate order_number DESC (unico por org): orden TOTAL, asi la
-           paginacion con skip no repite ni salta filas aunque la remision se
-           repita.
-        """
-        # UNA sola definicion de "vacia" para las cuatro llaves: NULL, '' y
-        # solo espacios dan NULL. Con TRIM solo, «  » quedaba '' en la llave de
-        # texto y NULL en la otra vacia: en desc PG pone los NULL primero, asi
-        # que la llave 3 desempataba las vacias ANTES que order_number (lo
-        # encontro T3 en la construccion; T2 pasaba por coincidencia).
-        r = func.nullif(func.trim(InboundOrder.remission_number), "")
-        vacia = r.is_(None)
-        numerica = case((r.op("~")("^[0-9]+$"), cast(r, Numeric)), else_=None)
-        texto = func.lower(r).collate("C")
-        if desc:
-            return [
-                vacia.asc(),
-                numerica.desc().nulls_first(),
-                texto.desc(),
-                InboundOrder.order_number.desc(),
-            ]
-        return [
-            vacia.asc(),
-            numerica.asc().nulls_last(),
-            texto.asc(),
-            InboundOrder.order_number.desc(),
-        ]
+        """Orden natural de la remision (#117) sobre TODA la lista. Desde los
+        documentos de control (C1 de QA 2) la llave vive en UN solo lugar,
+        `services/remission_book.remission_key`, que tambien usan el talonario
+        y el aviso de remision repetida. Las llaves no cambiaron: vacia al
+        final, numericas por valor, texto lower COLLATE "C", desempate
+        order_number DESC (orden TOTAL para la paginacion)."""
+        return remission_order(
+            InboundOrder.remission_number, desc=desc,
+            tiebreak=[InboundOrder.order_number.desc()],
+        )
 
     @staticmethod
     def display_status_of(order: InboundOrder) -> str:
@@ -2320,6 +2456,9 @@ class InboundOrderService:
             return "registered"
         if order.status == "reviewed":
             return "reviewed"
+        # Documentos de control: ANTES del fallback, que pintaria «Liquidada».
+        if order.status == "closed":
+            return "closed"
         # liquidated (compra) | confirmed (willard) | legacy edge
         return "liquidated"
 

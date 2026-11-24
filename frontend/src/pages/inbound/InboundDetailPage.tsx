@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, CheckCircle2, ClipboardCheck, Clock, Pencil, Undo2 } from "lucide-react";
+import { ArrowLeft, Archive, CheckCircle2, ClipboardCheck, Clock, Pencil, RotateCcw, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +25,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import {
   useAnnulInboundOrder,
   useInboundOrder,
+  useReopenInboundOrder,
   useReviewInboundOrder,
   useUnliquidateInboundOrder,
 } from "@/hooks/useInboundOrders";
@@ -48,6 +49,7 @@ import {
 import { buildRoute, ROUTES } from "@/utils/constants";
 import { estimateKgLead, willardCenterLabel } from "./InboundCreatePage";
 import { EntradaStatusBadge, EntradaTypeBadge } from "./InboundOrdersPage";
+import { CloseControlDialog } from "./CloseControlDialog";
 import {
   INBOUND_TYPE_LABELS,
   PURCHASE_INBOUND_TYPES,
@@ -81,6 +83,7 @@ const statusBorderMap: Record<string, string> = {
   reviewed: "border-t-[3px] border-t-sky-400",
   liquidated: "border-t-[3px] border-t-emerald-400",
   annulled: "border-t-[3px] border-t-rose-400",
+  closed: "border-t-[3px] border-t-slate-400",
 };
 
 function InfoRow({ label, value, long = false }: { label: string; value: React.ReactNode; long?: boolean }) {
@@ -336,6 +339,9 @@ export default function InboundDetailPage() {
   const annulOrder = useAnnulInboundOrder();
   const reviewOrder = useReviewInboundOrder();
   const unliquidateOrder = useUnliquidateInboundOrder();
+  const reopenOrder = useReopenInboundOrder();
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [reopenOpen, setReopenOpen] = useState(false);
   const [annulOpen, setAnnulOpen] = useState(false);
   const [annulReason, setAnnulReason] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -358,9 +364,14 @@ export default function InboundDetailPage() {
   const isReviewed = order.display_status === "reviewed";
   const isLiquidated = order.display_status === "liquidated";
   const isRegistered = order.display_status === "registered";
+  const isClosed = order.display_status === "closed";
   // #93: legacy 1:1 (ciclos B-D) — la fila vieja tiene purchase_id y su cara
   // financiera se maneja en la compra derivada, no con el reparto nuevo
   const isLegacy = isPurchaseType && !!order.purchase_id;
+  // Documentos de control: TODAS sus lineas son de control -> se cierra sin
+  // valor en vez de liquidarse (la marca se lee al momento, R2).
+  const isControlOnly = isPurchaseType && !isLegacy && order.is_control_only;
+  const controlLineCount = order.lines.filter((l) => l.is_control).length;
   // Los kg de plomo NACEN al liquidar: hasta entonces se muestra el estimado
   // con la fórmula vigente. Antes se condicionaba a `isDraft`, pero al meter
   // la revisión de Willard apareció un estado intermedio donde ya no era draft
@@ -439,7 +450,8 @@ export default function InboundDetailPage() {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Volver
         </Button>
-        {canEdit && order.status !== "annulled" && !isLiquidated && (
+        {/* Cerrada sin valor: terminal (lineas y fecha piden reabrirla) */}
+        {canEdit && order.status !== "annulled" && !isLiquidated && !isClosed && (
           <Button
             variant="outline"
             onClick={() => navigate(buildRoute(ROUTES.INBOUND_EDIT, { id: order.id }))}
@@ -463,7 +475,21 @@ export default function InboundDetailPage() {
         )}
         {/* Liquidar: willard REVISADA -> confirm; compra revisada -> reparto;
             legacy 1:1 -> liquidacion de la compra derivada */}
-        {canConfirm && (
+        {/* Documentos de control: «Cerrar sin valor» reemplaza a Liquidar */}
+        {/* Cerrar y reabrir no están en la lista del alcance de recolector (#129) */}
+        {canConfirm && unscoped && isControlOnly && (isRegistered || isReviewed) && (
+          <Button onClick={() => setCloseOpen(true)} className="bg-slate-700 hover:bg-slate-800">
+            <Archive className="h-4 w-4 mr-2" />
+            Cerrar sin valor
+          </Button>
+        )}
+        {isClosed && canCancel && unscoped && (
+          <Button variant="outline" onClick={() => setReopenOpen(true)}>
+            <RotateCcw className="h-4 w-4 mr-2" />
+            Reabrir
+          </Button>
+        )}
+        {canConfirm && !isControlOnly && (
           (isWillard && isReviewed) ? (
             <Button onClick={() => setConfirmOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
               <CheckCircle2 className="h-4 w-4 mr-2" />
@@ -504,7 +530,9 @@ export default function InboundDetailPage() {
               ? "El siguiente paso es la revisión: alguien con permiso certifica el peso de báscula y la marca Revisada. Al liquidar, el material entra al inventario y mueve el libro kg — los kg mostrados son estimados con la fórmula vigente."
               : isLegacy
                 ? "Al liquidar se confirman los precios y la compra tiene efecto financiero (saldo del proveedor, costo promedio, retenciones)."
-                : "El siguiente paso es la revisión: alguien con permiso valida lo pesado y la marca Revisada. Después se liquida con el reparto de proveedores."}
+                : isControlOnly
+                  ? "Todos sus materiales son de control: no se liquida, se cierra sin valor. Queda registrada con su número y su remisión."
+                  : "El siguiente paso es la revisión: alguien con permiso valida lo pesado y la marca Revisada. Después se liquida con el reparto de proveedores."}
           </div>
         </div>
       )}
@@ -513,10 +541,25 @@ export default function InboundDetailPage() {
         <div className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
           <ClipboardCheck className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
-            <span className="font-semibold">Revisada — lista para liquidar.</span>{" "}
-            {isWillard
+            <span className="font-semibold">
+              {isControlOnly ? "Revisada — lista para cerrar sin valor." : "Revisada — lista para liquidar."}
+            </span>{" "}
+            {isControlOnly
+              ? "Todos sus materiales son de control: al cerrarla no nacen compras ni se mueve inventario."
+              : isWillard
               ? "Al liquidar, el material entra al inventario al costo promedio vigente y se emite la deuda en kg de plomo con Willard."
               : "Al liquidar se reparte cada material entre sus proveedores: nacen las compras, se valora el descuadre contra lo pesado y se causa la comisión del recolector."}
+          </div>
+        </div>
+      )}
+
+      {isClosed && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <Archive className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <span className="font-semibold">Cerrada sin valor.</span>{" "}
+            Sus materiales son de control: la entrada conserva su número y su
+            remisión, pero no creó compras ni movió inventario ni plata.
           </div>
         </div>
       )}
@@ -582,6 +625,19 @@ export default function InboundDetailPage() {
                     name={order.liquidated_by_name}
                     date={order.liquidated_at ? formatDate(order.liquidated_at) : null}
                     time={order.liquidated_ts ? formatTime(order.liquidated_ts) : null}
+                  />
+                }
+                long
+              />
+            )}
+            {isClosed && (order.closed_by_name || order.closed_at) && (
+              <InfoRow
+                label="Cerrada sin valor por"
+                value={
+                  <AuditValue
+                    name={order.closed_by_name ?? "—"}
+                    date={order.closed_at ? formatDate(order.closed_at) : null}
+                    time={order.closed_at ? formatTime(order.closed_at) : null}
                   />
                 }
                 long
@@ -929,6 +985,14 @@ export default function InboundDetailPage() {
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Líneas</CardTitle>
+          {isPurchaseType && !isControlOnly && controlLineCount > 0 && (
+            <p className="text-xs text-slate-500">
+              {controlLineCount === 1
+                ? "1 línea de control no se liquida"
+                : `${controlLineCount} líneas de control no se liquidan`}{" "}
+              (se registra solo por el consecutivo).
+            </p>
+          )}
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto -mx-3 sm:mx-0">
@@ -964,6 +1028,9 @@ export default function InboundDetailPage() {
                         <TableCell>
                           <span className="font-medium">{line.material_code}</span>
                           <span className="text-slate-500"> — {line.material_name}</span>
+                          {line.is_control && (
+                            <span className="ml-2 text-xs text-slate-500">(control)</span>
+                          )}
                           {line.unallocated_intentional && (
                             <span className="ml-2 text-xs text-slate-400">(sin proveedor, intencional)</span>
                           )}
@@ -1132,6 +1199,17 @@ export default function InboundDetailPage() {
         onConfirm={() =>
           unliquidateOrder.mutate(order.id, { onSuccess: () => setUnliquidateOpen(false) })
         }
+      />
+
+      <CloseControlDialog order={closeOpen ? order : null} onClose={() => setCloseOpen(false)} />
+      <ConfirmDialog
+        open={reopenOpen}
+        onOpenChange={setReopenOpen}
+        title={`Reabrir Entrada #${order.order_number}`}
+        description={`Vuelve a ${order.reviewed_at ? "Revisada" : "Registrada"} y otra vez a la bandeja. No anula nada: el número y la remisión se conservan.`}
+        confirmLabel="Reabrir"
+        loading={reopenOrder.isPending}
+        onConfirm={() => reopenOrder.mutate(order.id, { onSuccess: () => setReopenOpen(false) })}
       />
 
       {/* Anular */}

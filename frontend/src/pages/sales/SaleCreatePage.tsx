@@ -100,8 +100,14 @@ export default function SaleCreatePage() {
   const { flagEnabled } = useOrgSettings();
   const kgEnabled = flagEnabled("kg_ledger_enabled");
   const { data: kgProfiles } = useKgProfiles(undefined, kgEnabled);
+  // Documentos de control (D5): lo de control tampoco se vende — sale por
+  // Salidas de control. Mismo filtro, mismo fail-open, misma linea existente.
   const leadIds = useMemo(
-    () => new Set((kgProfiles?.items ?? []).filter((p) => p.lead_product !== "none").map((p) => p.material_id)),
+    () => new Set(
+      (kgProfiles?.items ?? [])
+        .filter((p) => p.lead_product !== "none" || p.control_only)
+        .map((p) => p.material_id),
+    ),
     [kgProfiles],
   );
   const materials = materialsData?.items ?? [];

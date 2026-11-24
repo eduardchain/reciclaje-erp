@@ -76,6 +76,9 @@ export const invalidateAfterObligation = (qc: QueryClient) => {
 // tipos purchase/ruta derivan una Purchase registrada (transito)
 export const invalidateAfterInboundOrder = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["inbound-orders"] });
+  // Talonario de remisiones (Q-75): crear, editar remision, cerrar o reabrir
+  // una Entrada cambia la vista comun.
+  qc.invalidateQueries({ queryKey: ["remissions"] });
   qc.invalidateQueries({ queryKey: ["kg-ledger"] });
   qc.invalidateQueries({ queryKey: ["purchases"] });
   invalidateInventory(qc);
@@ -88,6 +91,16 @@ export const invalidateAfterInboundOrder = (qc: QueryClient) => {
 export const invalidateAfterEntradaLiquidation = (qc: QueryClient) => {
   invalidateAfterPurchaseLiquidateOrCancel(qc);
   qc.invalidateQueries({ queryKey: ["kg-ledger"] });
+  // Anular una Entrada la marca anulada en el talonario (cubre su numero).
+  qc.invalidateQueries({ queryKey: ["remissions"] });
+};
+
+// Salida de control (documentos de control): CERO efectos — no toca
+// inventario, kg ni plata. Solo su modulo y el talonario de remisiones, que
+// la muestra intercalada con las Entradas (Q-75).
+export const invalidateAfterControlDispatch = (qc: QueryClient) => {
+  qc.invalidateQueries({ queryKey: ["control-dispatches"] });
+  qc.invalidateQueries({ queryKey: ["remissions"] });
 };
 
 // Movimiento manual kg / anulacion (SAC E2, D17): solo toca el ledger kg

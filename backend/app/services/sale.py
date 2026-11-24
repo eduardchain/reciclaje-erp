@@ -36,6 +36,7 @@ from app.services.money_movement import money_movement as mm_service
 from app.models.material_cost_history import MaterialCostHistory
 from app.services.base import CRUDBase
 from app.services.inventory_costing import incorporate_into_pool
+from app.services.material_kg_profile import guard_no_control_materials
 from app.services.material_cost_history import material_cost_history_service
 from app.utils.dates import business_today
 
@@ -126,6 +127,13 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
         if not is_double_entry and not from_willard_delivery:
             self._guard_lead_products(
                 db, organization_id, [l.material_id for l in obj_in.lines]
+            )
+        # D5 (documentos de control): estibas/tubulares/electrolito salen por
+        # la Salida de control, sin valor. DPs excluidas (no tocan inventario).
+        if not is_double_entry:
+            guard_no_control_materials(
+                db, organization_id, [l.material_id for l in obj_in.lines],
+                "registre su salida en Salidas de control",
             )
         
         # Step 2: Validate customer
@@ -814,6 +822,10 @@ class CRUDSale(CRUDBase[Sale, SaleCreate, SaleUpdate]):
             # liquidada, asi que nunca llega aca (update exige `registered`).
             self._guard_lead_products(
                 db, organization_id, [l.material_id for l in obj_in.lines]
+            )
+            guard_no_control_materials(
+                db, organization_id, [l.material_id for l in obj_in.lines],
+                "registre su salida en Salidas de control",
             )
             # 3a. Revertir efectos de lineas actuales (devolver stock)
             for line in sale.lines:

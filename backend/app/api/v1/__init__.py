@@ -12,7 +12,7 @@ from .endpoints import (
     reports,
     service_tariffs, material_conversion_formulas, fleet, lead_market_prices,
     kg_ledger, inbound_orders, material_kg_profiles, willard_deliveries,
-    crucible_charges,
+    crucible_charges, control_dispatches,
     attachments,
     transfers,
 )
@@ -58,6 +58,8 @@ api_router.include_router(kg_ledger.router, prefix="/kg-ledger", tags=["kg-ledge
 api_router.include_router(inbound_orders.router, prefix="/inbound-orders", tags=["inbound-orders"])
 api_router.include_router(willard_deliveries.router, prefix="/willard-deliveries", tags=["willard-deliveries"])
 api_router.include_router(crucible_charges.router, prefix="/crucible-charges", tags=["crucible-charges"])
+api_router.include_router(control_dispatches.router, prefix="/control-dispatches", tags=["control-dispatches"])
+api_router.include_router(control_dispatches.remissions_router, prefix="/remissions", tags=["remissions"])
 api_router.include_router(attachments.router, prefix="/attachments", tags=["attachments"])
 # SAC E3.1 (plan-sac-e3-1-traslados-maquila.md §2.4) — gated two_step_transfers_enabled
 api_router.include_router(transfers.router, prefix="/transfers", tags=["transfers"])
