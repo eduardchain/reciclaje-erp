@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from app.models.inbound_order import InboundOrder
 from app.models.user import User
 from app.schemas.inbound_order import (
     InboundAllocationResponse,
+    InboundConfirmRequest,
     InboundLiquidateRequest,
     InboundOrderAnnulRequest,
     InboundOrderCreate,
@@ -98,19 +99,25 @@ def _enrich(
     movimientos inbound_receipt vivos (deque — display only)."""
     kg_by_signature: dict = defaultdict(deque)
     for mov in receipt_movements:
-        delta = kg_by_movement.get(mov.id)
-        if delta is not None:
-            kg_by_signature[(mov.material_id, mov.quantity)].append(delta)
+        kg = kg_by_movement.get(mov.id)
+        if kg is not None:
+            kg_by_signature[(mov.material_id, mov.quantity)].append(kg)
 
     is_purchase_type = order.inbound_type == "purchase"
     lines = []
     total_kg = None
     for line in order.lines:
         kg_lead = None
+        lead_pct_applied = None
+        lead_label_applied = None
         bucket = kg_by_signature.get((line.material_id, line.quantity))
         if bucket:
-            kg_lead = bucket.popleft()
+            kg_lead, kg_snapshot = bucket.popleft()
             total_kg = (total_kg or 0) + kg_lead
+            # D8 (A3 de QA 1): el factor usado sale del snapshot del kg
+            # CONFIRMADO de la linea, no de la formula de hoy
+            lead_pct_applied = inbound_order_service.applied_lead_percentage(kg_snapshot)
+            lead_label_applied = inbound_order_service.applied_lead_label(kg_snapshot)
         # #93: reparto y descuadre por linea (solo tipo compra)
         allocations = []
         allocated_qty = None
@@ -157,6 +164,10 @@ def _enrich(
                 scale_weight_kg=line.scale_weight_kg,
                 quality_notes=line.quality_notes,
                 kg_lead=kg_lead,
+                # plan-sac-factor-willard D8: a mano (trampa #95)
+                conversion_option=line.conversion_option,
+                lead_percentage_applied=lead_pct_applied,
+                lead_factor_label_applied=lead_label_applied,
                 reference_unit_price=line.reference_unit_price,
                 unallocated_intentional=line.unallocated_intentional,
                 allocations=allocations,
@@ -518,18 +529,23 @@ def update_inbound_order(
 @router.post("/{order_id}/confirm", response_model=InboundOrderResponse)
 def confirm_inbound_order(
     order_id: UUID,
+    body: Optional[InboundConfirmRequest] = Body(None),
     org_context: dict = Depends(require_permission("purchases.liquidate")),
     db: Session = Depends(get_db),
 ):
     """B.2 + Q-16: reviewed -> confirmed — los efectos (inventario D2 + kg D5 +
     MCH H1a) nacen aca, por el MISMO camino del 1-paso previo. Solo tipos
     Willard (una orden tipo compra se confirma liquidando su compra derivada).
-    Desde Q-16 el paso previo es la REVISION, no la captura."""
+    Desde Q-16 el paso previo es la REVISION, no la captura.
+
+    Cuerpo OPCIONAL (plan-sac-factor-willard D3): el factor de Willard
+    escogido por material. Sin cuerpo = el defecto, como antes."""
     order = inbound_order_service.confirm(
         db,
         order_id=order_id,
         organization_id=org_context["organization_id"],
         user_id=org_context["user_id"],
+        conversion_options=body.conversion_options if body else None,
     )
     order = inbound_order_service.get(db, order.id, org_context["organization_id"])
     return _enrich_one(db, order, org_context["organization_id"])

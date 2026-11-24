@@ -344,8 +344,14 @@ def revisar(api) -> list[str]:
         distintas = []
         for f in todas("/material-conversion-formulas/current"):
             m = por_codigo.get(f["material_code"])
-            valores = list((f.get("parameters") or {}).values())
-            param = _numero(valores[0]) if len(valores) == 1 else None
+            # plan-sac-factor-willard D2: la formula puede llevar ademas `label`
+            # y `alternatives` (factores de Willard); se compara la clave del
+            # tipo por NOMBRE, no "el unico valor" (con la lista daria distinta
+            # en falso)
+            clave = {"battery_to_lead": "kg_lead_per_unit",
+                     "drosses_to_lead": "lead_percentage"}.get(f["formula_type"])
+            crudo = (f.get("parameters") or {}).get(clave) if clave else None
+            param = _numero(crudo) if crudo is not None else None
             if m is None or m[6] != f["formula_type"] or m[7] is None or param != _numero(m[7]):
                 distintas.append(f"{f['material_code']} ({f['formula_type']} {f.get('parameters')})")
         if distintas:

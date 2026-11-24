@@ -17,13 +17,13 @@ import {
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { WillardLiquidateDialog } from "@/components/inbound/WillardLiquidateDialog";
 import { AdjustmentLink, PurchaseLink, ThirdPartyLink } from "@/components/shared/EntityLink";
 import { cn } from "@/utils";
 import { useReturnToBack } from "@/hooks/useReturnToBack";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   useAnnulInboundOrder,
-  useConfirmInboundOrder,
   useInboundOrder,
   useReviewInboundOrder,
   useUnliquidateInboundOrder,
@@ -55,6 +55,7 @@ import {
   type InboundOrderLineResponse,
   type InboundPurchaseSummary,
 } from "@/types/inbound-order";
+import { pctText } from "@/utils/willardFactors";
 
 /** El backend serializa Decimal como STRING ("0.0000") aunque el tipo TS diga
  *  number. Para PINTAR da igual (Intl lo coacciona), pero toda COMPARACION
@@ -333,7 +334,6 @@ export default function InboundDetailPage() {
 
   const { data: order, isLoading } = useInboundOrder(id!);
   const annulOrder = useAnnulInboundOrder();
-  const confirmOrder = useConfirmInboundOrder();
   const reviewOrder = useReviewInboundOrder();
   const unliquidateOrder = useUnliquidateInboundOrder();
   const [annulOpen, setAnnulOpen] = useState(false);
@@ -367,6 +367,17 @@ export default function InboundDetailPage() {
   // y los kg todavía no existían — el estimado se borraba justo en Revisada,
   // que es cuando el revisor lo está mirando para certificar.
   const showsEstimatedKg = isWillard && (isRegistered || isReviewed);
+  // plan-sac-factor-willard D7: el factor que usó cada línea liquidada. Solo
+  // si escogió una alternativa o si su material tiene factores de Willard; el
+  // % sale de la respuesta (snapshot del kg), no de la fórmula de hoy.
+  // D7 (O1 de QA 1): nombre y % salen los DOS del snapshot del kg confirmado,
+  // nunca de la formula de hoy. Sin factores alternativos al liquidar no hay
+  // nombre y no se pinta nada (no hubo nada que escoger).
+  const factorUsed = (line: InboundOrderLineResponse): string | null => {
+    const name = line.lead_factor_label_applied;
+    if (!name || line.lead_percentage_applied == null) return null;
+    return `${name} · ${pctText(num(line.lead_percentage_applied))}`;
+  };
   const estimatedTotalKg = showsEstimatedKg
     ? order.lines.reduce((acc, l) => acc + (estimateKgLead(formulas, l.material_id, l.quantity) ?? 0), 0)
     : null;
@@ -1008,9 +1019,16 @@ export default function InboundDetailPage() {
                                 })()}
                               </span>
                             ) : (
-                              <span className="font-medium tabular-nums text-emerald-700">
-                                {line.kg_lead != null ? `+${formatWeight(line.kg_lead)}` : "—"}
-                              </span>
+                              <>
+                                <span className="font-medium tabular-nums text-emerald-700">
+                                  {line.kg_lead != null ? `+${formatWeight(line.kg_lead)}` : "—"}
+                                </span>
+                                {factorUsed(line) && (
+                                  <span className="block text-xs text-slate-500" data-testid="factor-usado">
+                                    {factorUsed(line)}
+                                  </span>
+                                )}
+                              </>
                             )}
                           </TableCell>
                         )}
@@ -1079,16 +1097,11 @@ export default function InboundDetailPage() {
       </Card>
 
       {/* Liquidar willard (verbo unico Ciclo C — el efecto es el confirm B.2) */}
-      <ConfirmDialog
+      <WillardLiquidateDialog
+        order={order}
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title={`Liquidar Entrada #${order.order_number}`}
         description="El material entra al inventario y mueve el libro kg con la fórmula vigente (sin efecto financiero — entrada Willard). Esta acción registra los efectos definitivos."
-        confirmLabel="Liquidar"
-        loading={confirmOrder.isPending}
-        onConfirm={() =>
-          confirmOrder.mutate(order.id, { onSuccess: () => setConfirmOpen(false) })
-        }
       />
 
       {/* #93 D10: marcar revisada */}

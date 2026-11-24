@@ -30,6 +30,7 @@ import {
   type WillardWorld,
 } from "@/types/sac-config";
 import type { MaterialResponse } from "@/types/material";
+import { factorListProblem, readFactors, type AlternativeDraft } from "@/utils/willardFactors";
 
 const BATTERY_REFS = ["07", "08", "1", "2", "3", "4", "5"];
 
@@ -65,7 +66,10 @@ function readableParams(f: MaterialConversionFormulaResponse): string {
     return `${p.kg_lead_per_unit} kg/unidad${ref}`;
   }
   if (f.formula_type === "drosses_to_lead") {
-    return `${(Number(p.lead_percentage) * 100).toFixed(1).replace(/\.0$/, "")}% plomo`;
+    const base = `${(Number(p.lead_percentage) * 100).toFixed(1).replace(/\.0$/, "")}% plomo`;
+    // plan-sac-factor-willard D7: los factores de Willard alternativos
+    const n = readFactors(f.parameters).alternatives.length;
+    return n > 0 ? `${base} · +${n} factor${n === 1 ? "" : "es"}` : base;
   }
   return JSON.stringify(p);
 }
@@ -181,6 +185,9 @@ export default function FormulasPage() {
   const [kgPerUnit, setKgPerUnit] = useState("");
   const [batteryRef, setBatteryRef] = useState<string>("none");
   const [leadPct, setLeadPct] = useState("");
+  // plan-sac-factor-willard D7: nombre del factor por defecto y alternativas
+  const [factorLabel, setFactorLabel] = useState("");
+  const [altDrafts, setAltDrafts] = useState<AlternativeDraft[]>([]);
   const [notes, setNotes] = useState("");
 
   const isWillard = classification !== "compra";
@@ -202,6 +209,8 @@ export default function FormulasPage() {
     setKgPerUnit("");
     setBatteryRef("none");
     setLeadPct("");
+    setFactorLabel("");
+    setAltDrafts([]);
     setNotes("");
     setDialogOpen(true);
   };
@@ -219,6 +228,8 @@ export default function FormulasPage() {
     setAlsoCompra(cls !== "compra" && cls !== "unclassified" ? (row.profile?.compra_regular ?? false) : false);
     setLeadProduct(row.profile?.lead_product ?? "none");
     const f = row.formula;
+    setFactorLabel("");
+    setAltDrafts([]);
     if (f?.formula_type === "battery_to_lead") {
       const p = f.parameters as Record<string, unknown>;
       setKgPerUnit(String(p.kg_lead_per_unit ?? ""));
@@ -227,6 +238,9 @@ export default function FormulasPage() {
     } else if (f?.formula_type === "drosses_to_lead") {
       const p = f.parameters as Record<string, unknown>;
       setLeadPct(String(Number(p.lead_percentage ?? 0) * 100));
+      const factors = readFactors(f.parameters);
+      setFactorLabel(factors.label ?? "");
+      setAltDrafts(factors.alternatives.map((a) => ({ label: a.label, pct: String(Math.round(a.lead_percentage * 100 * 10000) / 10000) })));
       setKgPerUnit("");
       setBatteryRef("none");
     } else {
@@ -250,8 +264,21 @@ export default function FormulasPage() {
     }
     const pct = parseFloat(leadPct);
     if (!pct || pct <= 0 || pct > 100) return null;
-    return { lead_percentage: pct / 100 };
-  }, [isWillard, derivedType, kgPerUnit, batteryRef, leadPct]);
+    if (factorListProblem(factorLabel, pct, altDrafts)) return null;
+    // D2: esta pantalla SIEMPRE manda la lista (vacía = null explícito, que la
+    // quita); el servidor solo la copia cuando la clave no viene.
+    if (altDrafts.length === 0) return { lead_percentage: pct / 100, label: null, alternatives: null };
+    return {
+      lead_percentage: pct / 100,
+      label: factorLabel.trim(),
+      alternatives: altDrafts.map((a) => ({ label: a.label.trim(), lead_percentage: parseFloat(a.pct) / 100 })),
+    };
+  }, [isWillard, derivedType, kgPerUnit, batteryRef, leadPct, factorLabel, altDrafts]);
+
+  const factorProblem =
+    isWillard && derivedType === "drosses_to_lead"
+      ? factorListProblem(factorLabel, parseFloat(leadPct), altDrafts)
+      : null;
 
   const factorValid = !isWillard || parameters !== null;
   const canSubmit =
@@ -276,7 +303,13 @@ export default function FormulasPage() {
         (p.material_reference ?? null) !== (parameters.material_reference ?? null)
       );
     }
-    return Number(p.lead_percentage) !== Number(parameters.lead_percentage);
+    if (Number(p.lead_percentage) !== Number(parameters.lead_percentage)) return true;
+    // D2: también cambia si cambió la lista de factores de Willard
+    const prev = readFactors(p);
+    const next = readFactors(parameters);
+    const key = (x: ReturnType<typeof readFactors>) =>
+      JSON.stringify([x.alternatives.length ? x.label : null, x.alternatives]);
+    return key(prev) !== key(next);
   };
 
   // Submit encadenado (QA-a: toast específico del paso que falla; el material
@@ -686,6 +719,78 @@ export default function FormulasPage() {
                         className="pr-8"
                       />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+                    </div>
+                    <div className="mt-3 space-y-2" data-testid="factores-willard">
+                      <p className="text-xs text-slate-500">
+                        Factores de Willard: si Willard maneja este material con más de un factor,
+                        agrégalos aquí y se escogen al liquidar la Entrada. El % de arriba es el que
+                        se usa por defecto y el que leen traslados, Salidas y crisol.
+                      </p>
+                      {altDrafts.length > 0 && (
+                        <div>
+                          <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                            Nombre del factor por defecto *
+                          </Label>
+                          <Input
+                            value={factorLabel}
+                            onChange={(e) => setFactorLabel(e.target.value)}
+                            placeholder="Ej: Seco pinza"
+                            maxLength={40}
+                            aria-label="Nombre del factor por defecto"
+                          />
+                        </div>
+                      )}
+                      {altDrafts.map((a, i) => (
+                        <div key={i} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                          <div className="sm:col-span-7">
+                            <Label className="text-xs text-slate-500">Factor alternativo</Label>
+                            <Input
+                              value={a.label}
+                              onChange={(e) => setAltDrafts((d) => d.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                              placeholder="Ej: Seco escurrido"
+                              maxLength={40}
+                              aria-label={`Nombre del factor alternativo ${i + 1}`}
+                            />
+                          </div>
+                          <div className="sm:col-span-3 relative">
+                            <Label className="text-xs text-slate-500">% de plomo</Label>
+                            <Input
+                              type="number"
+                              inputMode="decimal"
+                              step="0.1"
+                              min="0"
+                              max="100"
+                              value={a.pct}
+                              onChange={(e) => setAltDrafts((d) => d.map((x, j) => (j === i ? { ...x, pct: e.target.value } : x)))}
+                              placeholder="Ej: 56"
+                              aria-label={`Porcentaje del factor alternativo ${i + 1}`}
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="w-full"
+                              onClick={() => setAltDrafts((d) => d.filter((_, j) => j !== i))}
+                            >
+                              Quitar
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                      {altDrafts.length < 5 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full sm:w-auto"
+                          onClick={() => setAltDrafts((d) => [...d, { label: "", pct: "" }])}
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Agregar factor alternativo
+                        </Button>
+                      )}
+                      {factorProblem && <p className="text-xs text-rose-600">{factorProblem}</p>}
                     </div>
                   </div>
                 )}
