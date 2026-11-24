@@ -1,4 +1,4 @@
-# Plan: Ventas y Salidas, una opción por tarifa cuando un tipo tiene varias (v1.0)
+# Plan: Ventas y Salidas, una opción por tarifa cuando un tipo tiene varias (v1.1)
 
 - **Autor:** Eco Coder 1. **Fecha:** 23-nov-2026.
 - **Autorización:** Daniel, ventanita de las 20:19, vía el Coordinador: «Mostrar las dos (Recomendado)». Bug de #136, en develop y todavía no en producción; el deploy 5 lo espera.
@@ -6,6 +6,10 @@
 - **Base:** develop `abb414c`; rama nueva `coder-1/impuestos-opcion-por-tarifa`.
 - **Alcance:** solo frontend, en `frontend/src/utils/documentTaxRows.ts` y `frontend/src/components/shared/DocumentTaxesCard.tsx`. Backend sin cambios.
 - Escrito fuera del worktree; se commitea en `docs/planes/` antes de construir.
+- **v1.0 → v1.1** (GO de QA 1 a v1.0, `f537bd86…`; pedido del Coordinador sobre el recorrido de Coder 2, `informe_recorrido_deploy5.md` 90ece8ca §1):
+  - suma **R6**, el rótulo de la base en CADA fila a 1440, con su e2e **E15**;
+  - suma a la matriz la fila que pidió QA 1: `orphanTaxText` buscando solo entre las usables (V6);
+  - suma V9: una huérfana cuya tarifa ya no está en el catálogo lo dice sin nombrar una tarifa inventada. Es el texto de R4 con «esa tarifa» reescrito, porque «No hay una tarifa activa de esa tarifa» se leía mal.
 
 ## 1. El defecto, medido
 
@@ -47,6 +51,12 @@
   - `orphanTaxText` busca el `config_id` en el catálogo completo, que trae también las inactivas (`list_retention_rows` no filtra `is_active`, `retention_entities.py:146-150`), y arma el rótulo con tipo · municipio · concepto.
   - Si no está, dice «esa tarifa».
   - Cambia la firma: recibe `configs`. Sus únicos lectores están en este módulo.
+- **R6. El rótulo de la base es correcto en CADA fila a 1440** (pedido del Coordinador, sobre el recorrido de Coder 2).
+  - Hoy, en escritorio, `lineLabelClass(idx)` oculta (`md:hidden`) los rótulos de las filas 2 en adelante: el de la primera fila hace de encabezado de columna.
+  - Por eso una ReteIVA sobre el IVA en la fila 2 o 3 queda bajo el encabezado «% del subtotal» de la fila 1. Antes no se veía porque esa tarifa no se podía elegir.
+  - Arreglo: en las filas 2 en adelante, debajo de la casilla del %, una pista con la base de ESA fila («% del IVA» o «% del subtotal»), solo en escritorio (`hidden md:block`). En móvil cada fila ya muestra su rótulo.
+  - Debajo y no en el rótulo: un rótulo visible en las filas 2+ correría hacia abajo solo esa casilla, que no quedaría alineada con las demás. Debajo del input ya es el lugar de la pista del monto.
+  - La fila 1 no cambia: su rótulo es el encabezado.
 - **R5. El resto de #136 no cambia:**
   - `selectTaxType` trae el % de la tarifa ELEGIDA;
   - la base sale del `base_kind` de esa tarifa: «% del IVA», y como base el IVA efectivo de la fila (A2);
@@ -87,6 +97,7 @@ Las dos páginas que usan la tarjeta (`SaleLiquidatePage`, `WillardDeliveryDetai
   - no pasa a la general.
 - **V7.** Dos tarifas de ICA en el mismo municipio dan dos opciones. Municipios distintos siguen siendo grupos aparte.
 - **V8.** Dentro del grupo, la general va primero aunque venga después en el catálogo.
+- **V9.** Una huérfana cuya tarifa ya no está en el catálogo da «La tarifa de esta fila ya no está en el catálogo…» y bloquea.
 
 ### U de #136 re-semantizados (declarados)
 
@@ -102,6 +113,10 @@ Las dos páginas que usan la tarjeta (`SaleLiquidatePage`, `WillardDeliveryDetai
   - Se elige la de 15 %. El rótulo es «% del IVA», el monto 15.000 y el neto +85.000.
   - Se liquida, y la API devuelve la reteIVA con concepto «Sobre IVA E2E», `base_kind` iva, `base_amount` 100.000 y `amount` 15.000.
 - **E14, a 1440.** Lo mismo en una Salida tipo venta: la tarjeta es la misma, pero la página es otra.
+- **E15 (R6), a 1440 y 390.** Venta con tres filas: IVA, ReteFuente y la ReteIVA sobre el IVA en la fila 3.
+  - En cada fila, el texto VISIBLE de la columna del % dice su base: «% del subtotal» en las filas 1 y 2 y «% del IVA» en la 3. En ninguna aparece la otra base.
+  - Después se mueve la ReteIVA a la fila 2, borrando la ReteFuente, y se mide de nuevo.
+  - Se usa la tarifa de mi BD de dev («Sobre IVA E2E», 15 %, iva). La espejo de Coder 2 («Ventas (PRUEBA deploy5)», b114d899) está en otra base.
 - **#136 re-semantizado:**
   - E3 deja de desactivar la general y elige por el rótulo nuevo;
   - E4, con «No declarante» activa, ahora espera DOS opciones de ReteFuente. Las dos quedan deshabilitadas en la segunda fila después de elegir una (R3).
@@ -121,6 +136,9 @@ Las dos páginas que usan la tarjeta (`SaleLiquidatePage`, `WillardDeliveryDetai
 | `selectTaxType` con el % de la general del grupo | V3, E13 |
 | payload con el concepto de la general | V3, E13 |
 | ICA agrupada sin el municipio | V7 |
+| `orphanTaxText` buscando solo entre las tarifas usables (QA 1) | V6 |
+| sin la pista de base en las filas 2+ (R6) | E15 |
+| la pista de base de las filas 2+ con la base de la fila 1 (R6) | E15 |
 
 ### Otras verificaciones
 
