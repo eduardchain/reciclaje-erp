@@ -66,9 +66,13 @@ export default function PurchaseDetailPage() {
     );
   };
 
-  const canEdit = purchase?.status === "registered" && !purchase?.double_entry_id && hasPermission("purchases.edit");
-  const canLiquidate = purchase?.status === "registered" && !purchase?.double_entry_id && hasPermission("purchases.liquidate");
-  const canCancel = (purchase?.status === "registered" || purchase?.status === "liquidated") && !purchase?.double_entry_id && hasPermission("purchases.cancel");
+  // Una compra de Entrada se maneja SOLO desde su Entrada: el servidor
+  // rechaza editarla, liquidarla o cancelarla (D1/D2 de Daniel, 23-nov,
+  // plan-fix-compras-de-entrada.md B3). Queda el enlace a la Entrada.
+  const fromInbound = !!purchase?.inbound_order_id;
+  const canEdit = purchase?.status === "registered" && !purchase?.double_entry_id && !fromInbound && hasPermission("purchases.edit");
+  const canLiquidate = purchase?.status === "registered" && !purchase?.double_entry_id && !fromInbound && hasPermission("purchases.liquidate");
+  const canCancel = (purchase?.status === "registered" || purchase?.status === "liquidated") && !purchase?.double_entry_id && !fromInbound && hasPermission("purchases.cancel");
 
   if (isLoading) {
     return (
@@ -89,7 +93,7 @@ export default function PurchaseDetailPage() {
         title={`Compra #${purchase.purchase_number}`}
         description={`Proveedor: ${purchase.supplier_name}`}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canEdit && (
               <Button variant="outline" onClick={() => navigate(`/purchases/${id}/edit`)}>
                 <Pencil className="h-4 w-4 mr-2" />

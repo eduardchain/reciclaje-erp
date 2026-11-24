@@ -352,6 +352,10 @@ class TestInvoiceNumber:
             f"{INBOUND_URL}/{p['id']}", headers=org_headers, json={"invoice_number": "TARDE-9"}
         )
         assert direct.status_code == 422, direct.text
+        # C1 de QA 2 (plan-fix-compras-de-entrada O3/O4): en liquidada el
+        # aviso dice el camino real y que la liquidacion cambia de fecha
+        assert "revierta la liquidación" in direct.json()["detail"]
+        assert "fecha del día" in direct.json()["detail"]
 
         # La fecha en liquidada exige des-liquidar (idioma inbound: 422, #80)
         blocked = client.patch(

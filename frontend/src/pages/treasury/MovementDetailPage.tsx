@@ -139,7 +139,7 @@ export default function MovementDetailPage() {
   return (
     <div className="space-y-6">
       <PageHeader title={`Movimiento #${movement.movement_number}`} description={typeLabels[movement.movement_type] ?? movement.movement_type}>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {movement.status === "confirmed" && EDITABLE_EXPENSE_TYPES.includes(movement.movement_type) && hasPermission("treasury.edit_classification") && (
             <Button variant="outline" onClick={() => setShowEditClassification(true)}>
               <Pencil className="h-4 w-4 mr-2" />Editar Clasificacion

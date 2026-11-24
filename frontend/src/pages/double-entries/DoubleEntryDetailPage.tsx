@@ -42,7 +42,7 @@ export default function DoubleEntryDetailPage() {
   return (
     <div className="space-y-6">
       <PageHeader title={`Doble Partida #${de.double_entry_number}`} description={de.materials_summary}>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {de.status === "registered" && hasPermission("double_entries.edit") && (
               <Button onClick={() => navigate(`/double-entries/${de.id}/edit`)} variant="outline">
                 <Pencil className="h-4 w-4 mr-2" />Editar

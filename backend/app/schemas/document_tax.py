@@ -43,7 +43,10 @@ class DocumentTaxCreate(BaseModel):
         None, max_length=60,
         description="Venta de bien vs servicio — las facturas muestran 2,5 % y 4 % del MISMO cliente",
     )
-    rate: Optional[Decimal] = Field(None, gt=0, description="Tasa informativa con la que se precalculo")
+    # T12: tope en 100 (Numeric(7,4) desborda desde 1000 con un 500)
+    rate: Optional[Decimal] = Field(
+        None, gt=0, le=100, description="Tasa informativa con la que se precalculo",
+    )
     base_kind: Literal["subtotal", "iva"] = Field(
         "subtotal",
         description="Sobre que se aplica la tasa. El servidor deriva el monto de la base (D5)",
