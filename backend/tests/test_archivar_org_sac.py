@@ -338,9 +338,11 @@ class TestOrgVaciaSinReset:
         assert llamadas == [("org", False), "usuarios"]
 
     def test_reset_sigue_prohibido_contra_un_servidor_remoto(self, monkeypatch):
+        # La clave sale del entorno: por argv el seeder la rechaza (plan migrate-client-clave-entorno D1).
+        monkeypatch.setenv("SEED_SU_PASSWORD", "x")
         monkeypatch.setattr(sys, "argv", ["seed", "--apply", "--reset", "--org-vacia",
                                           "--api-url", "https://api.ejemplo.test",
-                                          "--superuser-email", "a@b", "--superuser-password", "x"])
+                                          "--superuser-email", "a@b"])
         with pytest.raises(SystemExit, match="prohibido"):
             seed.main()
 
@@ -592,9 +594,10 @@ class TestVerificarUsuarios:
 
     def test_main_con_la_bandera_no_corre_el_seeder(self, monkeypatch):
         # Con --apply incluido: la bandera es de solo lectura igual.
+        monkeypatch.setenv("SEED_SU_PASSWORD", "x")
         monkeypatch.setattr(sys, "argv", ["seed", "--apply", "--verificar-usuarios",
                                           "--api-url", "https://api.ejemplo.test",
-                                          "--superuser-email", "a@b", "--superuser-password", "x"])
+                                          "--superuser-email", "a@b"])
         monkeypatch.setattr(seed.APIClient, "login", lambda self, e, p: None)
         monkeypatch.setattr(seed.APIClient, "get", lambda self, path, params=None:
                             [{"email": u["email"]} for u in seed.USERS])

@@ -451,8 +451,12 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true", help="Escribir (default: solo imprime)")
     parser.add_argument("--api-url", default=seed.BASE_URL)
     parser.add_argument("--superuser-email", default=os.environ.get("SEED_SU_EMAIL"))
-    parser.add_argument("--superuser-password", default=os.environ.get("SEED_SU_PASSWORD"))
+    # D1 (plan migrate-client-clave-entorno): definido solo para rechazarlo sin
+    # repetir el valor; la clave sale de SEED_SU_PASSWORD.
+    parser.add_argument("--superuser-password", default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    seed.rechazar_clave_en_argv(args)
+    args.superuser_password = os.environ.get("SEED_SU_PASSWORD")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if args.modo in ("baja", "restaurar") and not args.org_id:
         raise SystemExit(f"--modo {args.modo} necesita --org-id")
