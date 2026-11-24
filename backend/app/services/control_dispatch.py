@@ -9,6 +9,7 @@ formula ni la categoria clasifican). La remision sale del MISMO talonario de
 las Entradas (Q-75); una repetida se AVISA (D8), nunca se rechaza.
 """
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -18,7 +19,6 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.control_dispatch import ControlDispatch, ControlDispatchLine
 from app.models.material import Material
-from app.models.material_kg_profile import MaterialKgProfile
 from app.models.third_party import ThirdParty
 from app.models.warehouse import Warehouse
 from app.schemas.control_dispatch import (
@@ -26,10 +26,18 @@ from app.schemas.control_dispatch import (
     ControlDispatchLineCreate,
     ControlDispatchUpdate,
 )
+from app.services.material_kg_profile import control_material_ids
 from app.services.remission_book import duplicate_remission_warning
 from app.services.transfer import validate_not_transit_warehouse
 from app.utils.advisory_locks import next_number
 from app.utils.dates import business_today_noon
+
+
+# Escalas de las columnas de la linea: Numeric(15,4) y Numeric(15,3). HALF_UP
+# porque es la regla de PostgreSQL al guardar (0,00005 -> 0,0001): asi el 422
+# sale exactamente cuando la columna guardaria un 0 (O7 de QA 2).
+QTY_Q = Decimal("0.0001")
+WEIGHT_Q = Decimal("0.001")
 
 
 def _err(detail: str, code: int = status.HTTP_422_UNPROCESSABLE_ENTITY) -> HTTPException:
@@ -205,8 +213,11 @@ class ControlDispatchService:
             dispatch.lines.append(ControlDispatchLine(
                 organization_id=organization_id,
                 material_id=l.material_id,
-                quantity=l.quantity,
-                scale_weight_kg=l.scale_weight_kg,
+                quantity=l.quantity.quantize(QTY_Q, rounding=ROUND_HALF_UP),
+                scale_weight_kg=(
+                    l.scale_weight_kg.quantize(WEIGHT_Q, rounding=ROUND_HALF_UP)
+                    if l.scale_weight_kg is not None else None
+                ),
             ))
         db.flush()
 
@@ -224,17 +235,23 @@ class ControlDispatchService:
                 raise _err(f"El material {material.code} no esta activo")
             if l.material_id in seen:
                 raise _err(f"El material {material.code} aparece en mas de una linea — una fila por material")
+            # gt=0 del schema valida ANTES de redondear: 0,00004 pasaba y la
+            # columna lo guardaba en 0 -> CHECK -> 500 (O7 de QA 2; #95).
+            if l.quantity.quantize(QTY_Q, rounding=ROUND_HALF_UP) <= 0:
+                raise _err(
+                    f"La cantidad de {material.code} queda en 0 con 4 decimales — revise la cifra"
+                )
+            if (
+                l.scale_weight_kg is not None
+                and l.scale_weight_kg.quantize(WEIGHT_Q, rounding=ROUND_HALF_UP) <= 0
+            ):
+                raise _err(
+                    f"El peso de bascula de {material.code} queda en 0 con 3 decimales — revise la cifra"
+                )
             seen.add(l.material_id)
             materials[l.material_id] = material
-        control = set(
-            db.execute(
-                select(MaterialKgProfile.material_id).where(
-                    MaterialKgProfile.organization_id == organization_id,
-                    MaterialKgProfile.material_id.in_(list(seen)),
-                    MaterialKgProfile.control_only.is_(True),
-                )
-            ).scalars()
-        )
+        # O6 de QA 2: el MISMO predicado de la Entrada y de los guards D5.
+        control = control_material_ids(db, organization_id, seen)
         not_control = sorted(m.code for mid, m in materials.items() if mid not in control)
         if not_control:
             raise _err(

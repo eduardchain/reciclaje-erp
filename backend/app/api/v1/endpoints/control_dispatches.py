@@ -6,7 +6,7 @@ Router gated por `kg_ledger_enabled` (403 incluso para admins, #75). Permisos
 de ventas (la salida de control es una captura de despacho, como la Salida
 de Plomo). NO entra a `SCOPED_ENDPOINTS` (#129): Ingrid recibe 403.
 """
-from datetime import datetime
+from datetime import date, datetime, time as dt_time, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -31,6 +31,18 @@ from app.services.remission_book import remission_book
 
 router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])
 remissions_router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])
+
+
+# O5 de QA 2: las fechas llegan como `date` y se combinan con el inicio y el
+# FINAL del dia, como en Entradas. Un `datetime` pelado cortaba «hasta el 24» a
+# las 00:00 del 24 y perdia lo de ese dia (las fechas de negocio son mediodia
+# UTC, #87; la trampa de #109).
+def _day_start(d: Optional[date]) -> Optional[datetime]:
+    return datetime.combine(d, dt_time.min, tzinfo=timezone.utc) if d else None
+
+
+def _day_end(d: Optional[date]) -> Optional[datetime]:
+    return datetime.combine(d, dt_time.max, tzinfo=timezone.utc) if d else None
 
 
 def _names(db: Session, dispatches: list[ControlDispatch]) -> dict:
@@ -80,14 +92,14 @@ def list_control_dispatches(
     context=Depends(require_permission("sales.view")),
     status_filter: Optional[str] = Query(None, alias="status", pattern="^(registered|annulled)$"),
     search: Optional[str] = Query(None, max_length=100),
-    date_from: Optional[datetime] = Query(None),
-    date_to: Optional[datetime] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
 ):
     rows, total = control_dispatch_service.get_multi(
         db, context["organization_id"], status_filter=status_filter, search=search,
-        date_from=date_from, date_to=date_to, skip=skip, limit=limit,
+        date_from=_day_start(date_from), date_to=_day_end(date_to), skip=skip, limit=limit,
     )
     names = _names(db, rows)
     return ControlDispatchListResponse(items=[_enrich(d, names) for d in rows], total=total)
@@ -148,8 +160,8 @@ def list_remissions(
     context=Depends(require_permission("purchases.view", "sales.view")),
     remission_from: Optional[int] = Query(None, ge=0),
     remission_to: Optional[int] = Query(None, ge=0),
-    date_from: Optional[datetime] = Query(None),
-    date_to: Optional[datetime] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     search: Optional[str] = Query(None, max_length=50),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     skip: int = Query(0, ge=0),
@@ -158,6 +170,6 @@ def list_remissions(
     return remission_book(
         db, context["organization_id"],
         remission_from=remission_from, remission_to=remission_to,
-        date_from=date_from, date_to=date_to, search=search,
+        date_from=_day_start(date_from), date_to=_day_end(date_to), search=search,
         desc=(order == "desc"), skip=skip, limit=limit,
     )

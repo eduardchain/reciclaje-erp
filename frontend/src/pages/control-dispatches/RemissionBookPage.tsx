@@ -20,12 +20,13 @@ import type { RemissionBookFilters } from "@/services/controlDispatches";
 
 const PAGE_SIZE = 100;
 
-// Estado de cada documento con el nombre que usa su propio módulo
+// Estado de cada documento con el nombre que usa su propio módulo. Una Willard
+// confirmada se ve «Liquidada» en Entradas (display_status, #82): acá igual (O8).
 const STATUS_LABELS: Record<string, string> = {
   draft: "Registrada",
   reviewed: "Revisada",
   liquidated: "Liquidada",
-  confirmed: "Confirmada",
+  confirmed: "Liquidada",
   closed: "Cerrada sin valor",
   registered: "Registrada",
   annulled: "Anulada",
@@ -98,8 +99,8 @@ export default function RemissionBookPage() {
     remission_from: toDigits(from),
     remission_to: toDigits(to),
     date_from: dateFrom || undefined,
-    // Hasta el final del día: la fecha de negocio es mediodía UTC (#87)
-    date_to: dateTo ? `${dateTo}T23:59:59` : undefined,
+    // La fecha sola: el servidor la combina con el final del día (O5 de QA 2).
+    date_to: dateTo || undefined,
     search: search || undefined,
     order,
     skip: page * PAGE_SIZE,

@@ -208,7 +208,17 @@ def remission_book(
     if searching:
         filtered = filtered.where(t.c.remission.ilike(f"%{search.strip()}%"))
 
-    order = remission_order(t.c.remission, desc=desc, tiebreak=[t.c.date.desc(), t.c.doc_number.desc()])
+    # O1 de QA 2: en la VISTA las remisiones de texto van al FINAL en los dos
+    # sentidos (plan §4.5): Johana abre el talonario y arriba ve la serie, no
+    # una remision de texto. `remission_order` es el orden de Entradas (#117,
+    # texto arriba en desc) y NO se toca: estas llaves son solo del talonario.
+    # (La vacia no llega aca: `base` la excluye.)
+    texto = k.texto.collate("C")
+    tiebreak = [t.c.date.desc(), t.c.doc_number.desc()]
+    if desc:
+        order = [k.numerica.is_(None).asc(), k.numerica.desc(), texto.desc(), *tiebreak]
+    else:
+        order = [k.numerica.is_(None).asc(), k.numerica.asc(), texto.asc(), *tiebreak]
     rows = db.execute(filtered.order_by(*order)).all()
     total = len(rows)
 

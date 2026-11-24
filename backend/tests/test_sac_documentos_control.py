@@ -311,7 +311,6 @@ class TestCerrar:
         _review(client, org_headers, rev["id"])
         draft = _capture(client, org_headers, wh, [_line(mat_tub, 25)])
         antes = _counts(db_session)
-        assert sum(antes.values()) >= 0
         for oid in (rev["id"], draft["id"]):
             body = _close(client, org_headers, oid)
             assert body["status"] == "closed"
@@ -382,6 +381,56 @@ class TestCerrar:
             assert cerr["id"] not in {i["id"] for i in bandeja}
         assert client.get(INBOUND, headers=org_headers,
                           params={"status": "closed"}).json()["total"] == 1
+
+    def test_r1_willard_no_se_cierra(self, client, org_headers, db_session, wh, mat_est):
+        """O2 de QA 2. La Willard se fabrica por ORM sobre una captura: la rama
+        de R1 mira solo `inbound_type` y va antes que cualquier otra."""
+        o = _capture(client, org_headers, wh, [_line(mat_est, 40)])
+        row = db_session.get(InboundOrder, UUID(o["id"]))
+        row.inbound_type = "willard"
+        db_session.commit()
+        r = client.post(f"{INBOUND}/{o['id']}/close", headers=org_headers)
+        assert r.status_code == 400, r.text
+        assert "Willard" in r.json()["detail"]
+        assert _get(client, org_headers, o["id"])["status"] == "draft"
+
+    @pytest.mark.parametrize("estado,texto", [
+        ("liquidated", "esta liquidada"),
+        ("annulled", "esta anulada"),
+        ("closed", "ya esta cerrada sin valor"),
+    ])
+    def test_r3_estados_que_no_se_cierran(
+        self, client, org_headers, db_session, wh, mat_est, mat_val, sup1, estado, texto,
+    ):
+        """O2 de QA 2: cada estado llega por su camino REAL (liquidar, anular,
+        cerrar), no por ORM."""
+        if estado == "liquidated":
+            o = _capture(client, org_headers, wh, [_line(mat_val, 100)])
+            _review(client, org_headers, o["id"])
+            _liquidate(client, org_headers, o["id"], [_liq_line(mat_val, [_alloc(sup1, 100)])])
+        else:
+            o = _capture(client, org_headers, wh, [_line(mat_est, 40)])
+            if estado == "annulled":
+                assert client.post(f"{INBOUND}/{o['id']}/annul", headers=org_headers,
+                                   json={"reason": "error"}).status_code == 200
+            else:
+                _close(client, org_headers, o["id"])
+        r = client.post(f"{INBOUND}/{o['id']}/close", headers=org_headers)
+        assert r.status_code == 400, r.text
+        assert texto in r.json()["detail"]
+        assert _get(client, org_headers, o["id"])["status"] == estado
+
+    def test_r7c_liquidar_una_cerrada_manda_a_reabrir(
+        self, client, org_headers, db_session, wh, mat_est, sup1,
+    ):
+        o = _capture(client, org_headers, wh, [_line(mat_est, 40)])
+        _close(client, org_headers, o["id"])
+        antes = _counts(db_session)
+        r = client.post(f"{INBOUND}/{o['id']}/liquidate", headers=org_headers,
+                        json=con_slots({"lines": [_liq_line(mat_est, [_alloc(sup1, 40)])]}))
+        assert r.status_code == 400, r.text
+        assert "reabrala para liquidarla" in r.json()["detail"]
+        assert _counts(db_session) == antes
 
     def test_t8_reabrir_vuelve_al_estado_de_antes(
         self, client, org_headers, wh, mat_est,
@@ -470,9 +519,16 @@ class TestMixta:
     ):
         o = _capture(client, org_headers, wh, [_line(mat_val, 100), _line(mat_est, 40)])
         _review(client, org_headers, o["id"])
+        antes = _counts(db_session)
         body = _liquidate(client, org_headers, o["id"],
                           [_liq_line(mat_val, [_alloc(sup1, 100, "1000")])])
         assert body["status"] == "liquidated"
+        # C2 de QA 2 — control positivo de `_counts`: los tests de «cero
+        # efectos» comparan `_counts == antes`, y eso solo prueba algo si
+        # `_counts` VE lo que la app escribe. Aca la app si escribe: crece.
+        despues = _counts(db_session)
+        assert despues["purchases"] > antes["purchases"]
+        assert despues["inventory_movements"] > antes["inventory_movements"]
         assert body["is_control_only"] is False
         assert {ln["material_code"]: ln["is_control"] for ln in body["lines"]} == {
             "MOTO-DC": False, "ESTIBAS-DC": True,
@@ -773,6 +829,47 @@ class TestSalidaDeControl:
 # T16 — D5: Ventas y Compras directas no llevan control (PAR con y sin flag)
 # ---------------------------------------------------------------------------
 
+class TestSalidaDeControlBordes:
+    def test_o5_date_to_con_la_fecha_sola_incluye_ese_dia(self, client, org_headers, wh, mat_est):
+        """O5 de QA 2: `date_to=<dia>` sin hora incluye lo de ese dia (la fecha
+        de negocio es mediodia UTC; un datetime pelado cortaba a las 00:00)."""
+        dia = _past(2)
+        d = _dispatch(client, org_headers, wh, [_dline(mat_est)], remission="16330")
+        r = client.get(DISPATCHES, headers=org_headers, params={"date_from": dia, "date_to": dia})
+        assert r.status_code == 200, r.text
+        assert [i["id"] for i in r.json()["items"]] == [d["id"]]
+        # control positivo: hasta el dia ANTERIOR no la trae
+        antes = (business_today() - timedelta(days=3)).isoformat()
+        r = client.get(DISPATCHES, headers=org_headers, params={"date_to": antes})
+        assert r.status_code == 200 and r.json()["items"] == []
+        # el talonario con la misma regla
+        b = _book(client, org_headers, date_from=dia, date_to=dia)
+        assert [i["remission"] for i in b["items"] if i["kind"] == "doc"] == ["16330"]
+        assert _book(client, org_headers, date_to=antes)["items"] == []
+
+    def test_o7_cantidad_que_redondea_a_cero_da_422_no_500(
+        self, client, org_headers, db_session, wh, mat_est,
+    ):
+        """O7 de QA 2: `gt=0` valida ANTES de redondear a la escala de la
+        columna; 0,00004 se guardaria en 0 y el CHECK daria 500."""
+        antes = _counts(db_session)
+        r = client.post(DISPATCHES, headers=org_headers, json={
+            "date": _past(), "warehouse_id": str(wh.id), "remission_number": "16340",
+            "lines": [_dline(mat_est, "0.00004")]})
+        assert r.status_code == 422, r.text
+        assert "ESTIBAS-DC" in r.json()["detail"] and "queda en 0" in r.json()["detail"]
+        r = client.post(DISPATCHES, headers=org_headers, json={
+            "date": _past(), "warehouse_id": str(wh.id), "remission_number": "16340",
+            "lines": [{**_dline(mat_est, "5"), "scale_weight_kg": "0.0004"}]})
+        assert r.status_code == 422, r.text
+        assert "peso de bascula" in r.json()["detail"]
+        assert client.get(DISPATCHES, headers=org_headers).json()["total"] == 0
+        assert _counts(db_session) == antes
+        # control positivo: 0,00005 redondea HALF_UP a 0,0001 (la regla de PG) y pasa
+        d = _dispatch(client, org_headers, wh, [_dline(mat_est, "0.00005")], remission="16341")
+        assert Decimal(d["lines"][0]["quantity"]) == Decimal("0.0001")
+
+
 def _venta(client, h, customer, wh, mat):
     return client.post(SALES, headers=h, json={
         "customer_id": str(customer.id), "warehouse_id": str(wh.id), "date": _past(),
@@ -814,11 +911,14 @@ class TestD5:
         r = client.patch(f"{SALES}/{v['id']}", headers=org_headers, json={
             "lines": [{"material_id": str(mat_est.id), "quantity": "1", "unit_price": "1"}]})
         assert r.status_code == 400, r.text
+        # O3 de QA 2: el texto, para que otro 400 futuro no lo tape
+        assert "ESTIBAS-DC" in r.json()["detail"] and "Salidas de control" in r.json()["detail"]
         c = _compra(client, org_headers, sup1, wh, mat_val).json()
         r = client.patch(f"{PURCHASES}/{c['id']}", headers=org_headers, json={
             "lines": [{"material_id": str(mat_est.id), "warehouse_id": str(wh.id),
                        "quantity": "1", "unit_price": "1"}]})
         assert r.status_code == 400, r.text
+        assert "ESTIBAS-DC" in r.json()["detail"] and "Entrada" in r.json()["detail"]
 
     def test_t16_sin_flag_el_guard_es_inerte(
         self, client, org_headers, db_session, test_organization, wh, mat_est, sup1, cliente,
@@ -870,6 +970,33 @@ class TestRemisionRepetida:
         r = client.patch(f"{DISPATCHES}/{d2['id']}", headers=org_headers,
                          json={"remission_number": "16302"})
         assert r.json()["warnings"]
+
+    def test_t20_update_de_la_entrada_avisa_por_http(
+        self, client, org_headers, wh, mat_est, mat_val,
+    ):
+        """C1 de QA 2: el aviso del PATCH de la Entrada, leido de la RESPUESTA
+        HTTP (leccion de #100), en sus tres casos."""
+        e1 = _capture(client, org_headers, wh, [_line(mat_val, 100)], remission_number="16300")
+        d = _dispatch(client, org_headers, wh, [_dline(mat_est)], remission="16310")
+        e2 = _capture(client, org_headers, wh, [_line(mat_val, 100)], remission_number="16320")
+        assert e2["warnings"] == []
+        # 1. A una ocupada: el aviso nombra el documento
+        r = client.patch(f"{INBOUND}/{e2['id']}", headers=org_headers,
+                         json={"remission_number": "16310"})
+        assert r.status_code == 200, r.text
+        assert len(r.json()["warnings"]) == 1
+        assert f"Salida de control #{d['dispatch_number']}" in r.json()["warnings"][0]
+        # 2. Reenviar la misma: sin aviso
+        r = client.patch(f"{INBOUND}/{e2['id']}", headers=org_headers,
+                         json={"remission_number": "16310", "notes": "x"})
+        assert r.status_code == 200, r.text
+        assert r.json()["warnings"] == []
+        # 3. «0016300» contra «16300»: la normalizacion es la de SQL tambien aca
+        r = client.patch(f"{INBOUND}/{e2['id']}", headers=org_headers,
+                         json={"remission_number": "0016300"})
+        assert r.status_code == 200, r.text
+        assert len(r.json()["warnings"]) == 1
+        assert f"Entrada #{e1['order_number']}" in r.json()["warnings"][0]
 
     def test_t23_paridad_de_la_llave_en_el_conjunto_de_frontera(
         self, client, org_headers, wh, mat_val, mat_est,
@@ -970,9 +1097,12 @@ class TestTalonario:
         assert docs[0]["materials"] == "MOTO-DC" and docs[1]["materials"] == "ESTIBAS-DC"
         assert v["inbound_without_remission"] == 1
         assert v["documents"] == 6
-        # Descendente: los tramos tambien se invierten
+        # Descendente: los tramos tambien se invierten, y el texto va al
+        # FINAL tambien aca (O1 de QA 2: solo en el talonario; Entradas #117
+        # conserva el texto arriba en desc)
         desc = _book(client, org_headers, order="desc")
-        assert _shape(desc["items"])[:1] == [("doc", "R-77")]
+        assert _shape(desc["items"])[:1] == [("doc", "16305")]
+        assert _shape(desc["items"])[-1:] == [("doc", "R-77")]
         assert ("gap", "16301", "16302", "2") in _shape(desc["items"])
 
     def test_t22_el_hueco_entre_paginas_sale_igual(self, client, org_headers, wh, mat_val):
@@ -991,9 +1121,9 @@ class TestTalonario:
         a = _capture(client, org_headers, wh, [_line(mat_val, 1)], remission_number="16304", date=dic)
         b = _capture(client, org_headers, wh, [_line(mat_val, 1)], remission_number="16306", date=dic)
         assert a and b
-        # date_to con hora: las fechas de negocio son mediodia UTC (#87) y un
-        # date_to pelado corta a las 00:00 del mismo dia.
-        rango = {"date_from": dic, "date_to": f"{dic}T23:59:59", "order": "asc"}
+        # O5 de QA 2: la fecha SOLA, como la manda la pantalla; el servidor la
+        # combina con el final del dia (las fechas de negocio son mediodia UTC).
+        rango = {"date_from": dic, "date_to": dic, "order": "asc"}
         # Sin la 16305 en ningun lado: hay hueco
         assert ("gap", "16305", "16305", "1") in _shape(_book(client, org_headers, **rango)["items"])
         # La 16305 fechada en otro mes lo tapa, aunque no se muestre

@@ -76,9 +76,11 @@ export default function ControlDispatchFormPage() {
     const list = Array.isArray(warehousesData) ? warehousesData : warehousesData?.items ?? [];
     return list.filter((w) => w.is_active && !w.is_transit);
   }, [warehousesData]);
-  // O2 de QA 2: ninguna entidad de sistema recibe estibas (el servidor da 422)
+  // O2 de QA 2: ninguna entidad de sistema recibe estibas (el servidor da 422).
+  // No hace falta filtrarlas acá: GET /third-parties ya las excluye por defecto
+  // (include_system=False), y `is_system_entity` no se serializa (#78; O4).
   const thirdParties = useMemo(
-    () => (thirdPartiesData?.items ?? []).filter((t) => t.is_active && !t.is_system_entity),
+    () => (thirdPartiesData?.items ?? []).filter((t) => t.is_active),
     [thirdPartiesData],
   );
 
