@@ -1,6 +1,6 @@
-# Plan: elegir el factor de conversión de Willard al liquidar (v1.2)
+# Plan: elegir el factor de conversión de Willard al liquidar (v1.3)
 
-> **v1.1 (24-nov):** Q-76 respondida por Daniel («está bien al 59»). Sale la acción propia de corregir una Willard liquidada (era D6 en v1.0). Un factor mal escogido se corrige por el camino que ya existe: anular y registrar de nuevo (D6 nuevo, medido). Cambian §1, D3, D5, D6, D7, §7, §8 y §10. **v1.2:** C1 y O1 del veredicto de QA 1 sobre la v1.1 (`veredicto_plan_v1.1.md`): los dos costos que faltaban en D6 y T8 con valores esperados. Entran también las notas de QA 1 sobre la v1.0 (`~/sac-evidencia/2026-11-24/qa-1-factor-willard/notas_plan_v1.0.md`): A1 y A2 en D3, A3 en D8, A4 en D5, A5 en D6, O1 en D1 y O2 en D1 y D2.
+> **v1.1 (24-nov):** Q-76 respondida por Daniel («está bien al 59»). Sale la acción propia de corregir una Willard liquidada (era D6 en v1.0). Un factor mal escogido se corrige por el camino que ya existe: anular y registrar de nuevo (D6 nuevo, medido). Cambian §1, D3, D5, D6, D7, §7, §8 y §10. **v1.3 (24-nov):** Daniel autorizó construir la v1.2 con las tres recomendadas: acepta D6 tal como está y decide que la carga en prod la hace el Coordinador por API. §8 gana el cuerpo exacto. **v1.2:** C1 y O1 del veredicto de QA 1 sobre la v1.1 (`veredicto_plan_v1.1.md`): los dos costos que faltaban en D6 y T8 con valores esperados. Entran también las notas de QA 1 sobre la v1.0 (`~/sac-evidencia/2026-11-24/qa-1-factor-willard/notas_plan_v1.0.md`): A1 y A2 en D3, A3 en D8, A4 en D5, A5 en D6, O1 en D1 y O2 en D1 y D2.
 
 - **Pedido:** SAC, 24-nov, autorizado por Daniel («esos dos, dale»). Inventario, sección D, filas del 24-nov.
 - **Nivel:** lógica (contrato del back, migración, regla de kilos).
@@ -214,7 +214,35 @@ Front (sin infra de test): casos puros del helper de opciones en un arnés `node
 
 - Daniel, 24-nov: «está bien al 59». Las 3 Willard con SCR-SG ya liquidadas (remisiones 16272, 16341, 16391) **se quedan al 59 %** (pinza, el defecto). No hay datos que corregir ni backfill: su `conversion_option` queda NULL = defecto.
 - Las 3 en Revisada (16300, 16415, 16436) las liquida SAC cuando exista la opción.
-- **Runbook del deploy, abierto para la autorización de Daniel:** quién agrega en producción, en Configuración → Materiales (kg), la alternativa «Seco escurrido 56 %» a SCR-SG y el nombre «Seco pinza» al defecto. No va en el seeder: el seeder no pisa lo que no puso él, y la lista es dato del cliente.
+- **D6 aceptado por Daniel (24-nov):** un factor mal escogido se corrige anulando y registrando de nuevo, con los tres costos de D6. No se programa nada para corregir.
+
+### Runbook del deploy (Daniel, 24-nov: lo ejecuta el Coordinador por API, con relectura)
+
+No va en el seeder: el seeder no pisa lo que no puso él, y la lista es dato del cliente. Todo contra `https://api.ecobalance.cc`, con el token del superusuario y `X-Organization-ID` de SAC.
+
+1. **Leer** (GET), y guardar las dos respuestas en la evidencia:
+   - `GET /api/v1/materials?search=SCR-SG&limit=50`: tomar el `id` del ítem cuyo `code` es exactamente `SCR-SG` y está activo. Si hay más de uno o ninguno, parar.
+   - `GET /api/v1/material-conversion-formulas/current`: la fila de `SCR-SG` tiene que ser `drosses_to_lead` con `parameters == {"lead_percentage": 0.59}`. Si es otra cosa, parar y avisar: alguien la cambió.
+2. **Escribir**, una sola vez: `POST /api/v1/material-conversion-formulas` con este cuerpo, poniendo en `material_id` el id del paso 1:
+
+   ```json
+   {
+     "material_id": "<id de SCR-SG del paso 1>",
+     "formula_type": "drosses_to_lead",
+     "parameters": {
+       "lead_percentage": 0.59,
+       "label": "Seco pinza",
+       "alternatives": [{"label": "Seco escurrido", "lead_percentage": 0.56}]
+     },
+     "notes": "Factores de Willard: Seco pinza 59 % (defecto) y Seco escurrido 56 % (pedido SAC, autorizado por Daniel 24-nov)"
+   }
+   ```
+
+   Respuesta esperada: 201. El `id` es distinto del de la vigente del paso 1, y `parameters` es igual a lo enviado.
+3. **Releer** `GET /api/v1/material-conversion-formulas/current`:
+   - la fila de `SCR-SG` es la nueva (mismo `id` que el 201) con esos `parameters`;
+   - las demás filas son idénticas a las del paso 1 (diff de los dos JSON sin la fila de SCR-SG = vacío).
+4. **Si algo sale mal:** no se borra (append-only). Se publica otra versión con `{"lead_percentage": 0.59, "label": null, "alternatives": null}`, que quita la lista (D2), y se avisa a Daniel.
 
 ## 9. Fuera de alcance
 
