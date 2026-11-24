@@ -1,8 +1,18 @@
-# Plan — Entradas y Salidas «de control» (SAC, v1.0)
+# Plan — Entradas y Salidas «de control» (SAC, v1.1)
 
 **Autor:** Eco Coder 2 · **Fecha:** 2026-11-24 · **Rama:** `coder-2/documentos-control` sobre develop `5139940`
 **Nivel:** lógica (migración, reglas de estado en un servicio con dinero, guards en servicios compartidos si se aprueba D5).
 **Autorización:** Daniel, 24-nov («esos dos, dale»), vía Coordinador. Este documento es SOLO el plan; construir exige el GO de QA 2 y después la autorización de Daniel.
+
+**Cambios v1.0 → v1.1:**
+- **Q-75 respondida** (Daniel, 24-nov, vía Coordinador): las salidas de control usan el **mismo talonario de remisiones** que las Entradas. Por eso:
+  - la remisión es obligatoria en la Salida de control (§4.3);
+  - se agrega la vista común «Talonario de remisiones» con los huecos marcados (§4.5);
+  - una remisión repetida entre los dos documentos se **avisa** (D8, §4.5);
+  - D7 cambia de pregunta.
+  Lo que anotan en cada salida (a quién, cantidad, peso) **no se preguntó** y sigue como supuesto.
+- **C1 de QA 2** (notas preliminares sobre la v1.0, `4f4ae08d`): una Entrada desliquidada conserva sus compras `registered` en el puente. Cerrarla sin valor dejaría compras vivas, que #134 congela. Se agregan R2b y D10, y T6 cubre la re-liquidación de una mixta.
+- Nota de QA 2: el guard de líneas y fecha de `update` es `== "liquidated"` (l.1755). R7 lo extiende a `closed` de forma explícita.
 
 ## 1. Qué pide el cliente
 
@@ -20,10 +30,16 @@ Hoy les ponen $1, y eso mete inventario y crea deuda con un proveedor. El repart
 - ESTIBAS existe y se mide en `unidad`. Tubulares y electrolito no existen como material.
 - No hay un documento de salida para lo que no es plomo.
 
-**Q-75 (🟠 abierta):** ¿la salida usa el talonario de remisiones de las entradas o uno propio? ¿Qué anotan en ella?
-- **Supuesto de este plan, a decidir por Daniel:** la Salida de control lleva su **consecutivo propio**. Además, la remisión va como **texto libre**, como en la Entrada (#93 D12), que no valida ni numera nada.
-- Si Johana responde que comparten talonario, el texto libre ya lo admite: se escribe el número del talonario y nada del modelo cambia.
-- Lo que la respuesta sí podría cambiar son los campos de la salida (§4.3). El plan los deja opcionales salvo fecha, bodega y líneas.
+**Q-75, respondida** (Daniel, 24-nov, vía Coordinador): las salidas de control usan el **MISMO talonario de remisiones** que las Entradas. Para revisar que el talonario no tenga huecos, Johana tiene que poder ver Entradas y Salidas de control **juntas, ordenadas por remisión**.
+- Lo que comparten es la **remisión**. El consecutivo interno del sistema puede seguir siendo propio de cada documento (D7).
+- **Sigue como supuesto** lo que anotan en cada salida (a quién, cantidad, peso), porque no se preguntó. Por eso el plan deja opcionales el tercero y el peso. Son obligatorios la fecha, la bodega, la remisión y las líneas.
+
+**Lo que valida hoy la Entrada sobre la remisión** (medido, `~/sac-evidencia/2026-11-24/documentos-control/remision_unica.log`):
+- **nada más que el largo**: `Field(None, max_length=50)` en create y update (`schemas/inbound_order.py` l.71 y l.105), sin strip, sin índice ni constraint en ninguna migración y sin guard en el servicio;
+- es opcional: en dev, la SAC activa tiene 27 Entradas no anuladas con remisión y 10 sin ella;
+- en dev **no hay remisiones repetidas** entre Entradas no anuladas (0 grupos). ⚠️ **Dev no es prod** (memoria `copia-dev-no-es-replica`), así que la medición de prod queda como G-prod 4 (§9);
+- en dev conviven remisiones de solo dígitos (13) y con texto (14). Las 14 de ESTIBAS en prod son numéricas (16267–16454).
+- ⚠️ La primera corrida del log falló porque `psql` no está en el PATH (EXIT=127). Se re-corrió con `docker exec` y las dos quedaron en el log.
 
 ## 2. Dirección aprobada (Coordinador, 24-nov)
 
@@ -34,6 +50,7 @@ Hoy les ponen $1, y eso mete inventario y crea deuda con un proveedor. El repart
    - tiene cero efectos: sin compras, inventario, kg ni saldos.
 3. En una Entrada mixta, las líneas de control quedan fuera del reparto y del descuadre.
 4. **«Salida de control»:** documento nuevo, sin efectos, con consecutivo propio. Lleva fecha, remisión, a quién, material de control, cantidad, peso y notas. **Salidas de Plomo y su guard #103 NO se tocan.**
+5. (v1.1, Q-75) La remisión de la Salida de control sale del **mismo talonario** que las Entradas, y Johana ve los dos documentos juntos, ordenados por remisión (§4.5).
 
 ## 3. Lo que el código ya dice (medido en `5139940`)
 
@@ -86,11 +103,12 @@ Hoy les ponen $1, y eso mete inventario y crea deuda con un proveedor. El repart
 |---|---|
 | R1 — tipo | Solo tipo compra. Willard → 400 («una recepción Willard no se cierra sin valor»). No ocurre en la práctica, porque Willard no acepta material de control, pero el 400 explica |
 | R2 — todas las líneas de control | Se lee `control_only` de cada material **al cerrar**. Si alguna línea no es de control → 422 que **nombra** los materiales con valor y dice «liquídela». Sin líneas → 400 (como en `review`) |
+| R2b — compras del puente (C1 de QA 2) | Una Entrada **desliquidada** vuelve a `reviewed` y conserva sus compras `registered` en el puente (`_revert_entrada_liquidation`, l.1103-1120). Si después sus materiales se marcan de control (el caso de G-prod 2: ESTIBAS liquidadas a $1), un cierre sin más la dejaría en `closed` con compras vivas y stock en tránsito. #134 congela esas compras porque la Entrada no está anulada. **Recomendada (D10): rechazar.** Si `_linked_purchases` trae alguna compra no `cancelled`, `close` → 422 que nombra las compras y ofrece los dos caminos: anular la Entrada (que las cancela, l.1707-1719) o liquidarla. También rechaza si `annul_cost_adjustment != 0`: ese residuo de una desliquidación solo entra al P&L al **anular** (`reports.py` filtra `status == 'annulled'`, l.933-946), y en una cerrada se perdería en silencio. Hoy las dos condiciones van juntas, porque el residuo solo existe si hubo compras liquidadas, que vuelven `registered`; el chequeo se escribe igual, defensivo y con su razón. La alternativa de D10 está en §5 |
 | R3 — estados de origen | `draft` y `reviewed` → `closed` (D2: no exige revisar). `liquidated`, `confirmed`, `annulled` o `closed` → 400 con el estado |
 | R4 — efectos | **Cero.** Solo cambian `status`, `closed_at` (`now(utc)`, timestamp de auditoría, #87) y `closed_by`. Ningún `Purchase`, `InventoryMovement`, `KgLedgerMovement`, `MoneyMovement`, `InventoryAdjustment` ni MCH |
 | R5 — número y remisión | Se conservan: no hay renumeración ni borrado |
 | R6 — reabrir (D3) | `POST /inbound-orders/{id}/reopen`, con `purchases.cancel` (el de desliquidar). Solo desde `closed`. Vuelve a `reviewed` si tiene `reviewed_at`, y si no a `draft`: el cierre no borra la revisión, así que reabrir devuelve exactamente el estado de antes. Limpia `closed_at` y `closed_by` |
-| R7 — editar una cerrada | Igual que una liquidada: `lines` y `date` dan 422 («reábrala primero»), y la sede ya da 422 por `_change_warehouse` (estado ∉ draft/reviewed). La cabecera (notas, remisión, vehículo, conductor, recolector) sigue editable |
+| R7 — editar una cerrada | Igual que una liquidada: `lines` y `date` dan 422 («reábrala primero»). Hoy el guard de `update` es `order.status == "liquidated"` (l.1755), así que **se extiende a `closed` de forma explícita** (nota de QA 2), con su propio mensaje. La sede ya da 422 por `_change_warehouse` (estado ∉ draft/reviewed). La cabecera (notas, remisión, vehículo, conductor, recolector) sigue editable. El recolector queda editable solo, porque su guard también es `== "liquidated"` (l.1795), y está bien: en una cerrada no hay comisión causada |
 | R7b — anular una cerrada | Se permite, y es solo status y auditoría (cero efectos que revertir). `annul` ya acepta cualquier estado menos `annulled`; el `for` de compras del puente no encuentra ninguna |
 | R7c — desliquidar o liquidar una cerrada | 400 con el estado, por los guards existentes más la rama nueva |
 
@@ -99,6 +117,7 @@ Hoy les ponen $1, y eso mete inventario y crea deuda con un proveedor. El repart
 | Regla | Dónde |
 |---|---|
 | R8 — el reparto ignora el control | `liquidate`: la completitud (l.534-539) excluye las líneas de control. Un material de control en `payload.lines` → 422 que lo nombra («es de control: no se reparte ni se liquida»). Esto también cubre el camino D16 (un material que la báscula no vio) |
+| R8a — re-liquidar una mixta (C1 de QA 2) | Caso: la Entrada se liquidó con la línea de ESTIBAS dentro de una compra, se desliquidó, se marcó ESTIBAS y se re-liquida. La sincronización por slot (#93 + #122) ya resuelve las dos variantes sin código nuevo. Si el slot conserva otras líneas, la firma cambia y la compra se edita (revert-and-reapply de registrada) **sin** la línea de control. Si el slot tenía solo control, desaparece del reparto y su compra se cancela (`from_inbound`). T6b y T6c lo afirman: no se supone |
 | R8b — sin descuadre del control | Como la línea de control nunca entra al `plan`, no genera descuadre, ajuste ni precio de referencia |
 | R8c — comisión | `suggested_collector_commission` (servidor, el de Ingrid) y `commissionBase` (pantalla) excluyen las líneas de control. «No tenerlas en cuenta» |
 | R8d — todo de control | Si todas las líneas son de control, `liquidate` → 422 «Esta Entrada es solo de control: ciérrela sin valor» |
@@ -115,8 +134,8 @@ Hoy les ponen $1, y eso mete inventario y crea deuda con un proveedor. El repart
   - `dispatch_number` int, con UNIQUE (org, número);
   - `date` (fecha de negocio, `BusinessDate`);
   - `warehouse_id` NOT NULL (FK RESTRICT), la bodega de donde sale;
-  - `third_party_id` nullable (FK RESTRICT), a quién;
-  - `remission_number` `String(50)` nullable, texto libre (Q-75);
+  - `third_party_id` nullable (FK RESTRICT), a quién (supuesto: no se preguntó qué anotan);
+  - `remission_number` `String(50)` **NOT NULL**: sale del mismo talonario de las Entradas (Q-75). Es obligatoria porque el talonario es la razón de ser del documento: una salida sin remisión no se puede ubicar en él. En el schema va `StringConstraints(strip_whitespace=True, min_length=1)`, porque `min_length` solo cuenta caracteres y `"  "` pasaría (lección de #100). El PATCH tampoco la deja vaciar. En la Entrada sigue opcional como hoy: volverla obligatoria es otro cambio, que no se pidió;
   - `notes` `String(1000)`;
   - `status` (`registered | annulled`, String más CHECK, sin pg_enum, por el parity);
   - `annulled_reason`, `annulled_at`, `annulled_by`, `created_by` y los timestamps.
@@ -169,6 +188,31 @@ Son los mismos permisos que Salidas de Plomo, así que no hace falta ningún per
   - se listan aparte, en solo lectura, con «control, no se liquida»;
   - `assertDraftShape` y la firma del borrador ignoran esas filas.
 
+### 4.5 Talonario de remisiones (Q-75): vista común y remisión repetida
+
+**Por qué una vista común y no un solo documento con dirección.** Meter la salida dentro de `inbound_orders` con una columna de dirección haría que cada camino de la Entrada tuviera que preguntarse «¿es de salida?»: liquidar, reparto, descuadre, comisión, puente de compras, Willard, alcance de recolector y `display_status`. Es la misma clase de defecto que #89/#93 (una columna con dos semánticas) y chocaría con el trabajo de Coder 1. Los dos documentos solo comparten la **remisión**, así que lo común es una **lectura**, no un modelo.
+
+**`GET /remissions`** (router con `require_org_flag("kg_ledger_enabled")`, permisos `purchases.view` **y** `sales.view`, fuera de `SCOPED_ENDPOINTS`):
+- Una fila por documento: Entradas (tipo compra y Willard) y Salidas de control. Las anuladas **también** salen, marcadas: una remisión anulada usó su papel, así que cubre el número y no es un hueco.
+- Columnas: remisión, documento («Entrada #N» o «Salida de control #N»), dirección (entra o sale), fecha, estado, materiales en una línea y enlace al detalle.
+- **Orden:** el mismo orden natural de #117 (`_remission_order`), que se generaliza a un helper que recibe la expresión de la remisión. Así la vista y el orden de la lista de Entradas no pueden divergir. Primero las numéricas por valor («0012» = 12), después las de texto con `lower() COLLATE "C"`, y las vacías al final. El desempate es por fecha y número de documento.
+- **Cómo se arma:** `UNION ALL` de dos `SELECT` mínimos (remisión, tipo, id, número, fecha, estado), paginado sobre la unión. Los materiales se cargan después, solo para las filas de la página (lookup por página, nunca un join 1:N: #89/#93 R2).
+- **Filtro:** rango de fechas (por defecto, el mes en curso) y una búsqueda por remisión.
+- **Huecos** (lo que Johana quiere revisar): entre dos remisiones **numéricas** vecinas del rango filtrado, si la diferencia es mayor que 1, el servidor intercala una fila «Faltan N: de A a B». Va sobre la lista entera del rango, no por página: una página sola no ve el vecino. El tamaño es acotado (en prod, ~190 remisiones en 18 días), y el cálculo es un recorrido lineal sobre los números ordenados. Las de texto no tienen vecino, así que no generan hueco; salen al final sin análisis.
+- Las Entradas **sin** remisión no están en el talonario: no salen en la vista, y el encabezado dice cuántas Entradas del rango no tienen remisión, para que no se pierdan en silencio.
+- **Pantalla:** «Talonario de remisiones», con un botón desde la lista de Entradas y otro desde la de Salidas de control. Dual render: tabla en escritorio y tarjetas a 390. Las filas de hueco van en ámbar.
+
+**Remisión repetida — se AVISA, no se rechaza (D8).**
+- **Normalización única**, `normalize_remission` (helper nuevo, junto al de la Entrada): solo dígitos → el entero sin ceros a la izquierda; si no, `trim()` + minúsculas. Es la misma igualdad que usa el orden (#117), así que en la vista dos remisiones «iguales» siempre quedan juntas.
+- En el **create y el update** (solo cuando cambia la remisión) de una Entrada **o** de una Salida de control, si otro documento **no anulado** de la org, de cualquiera de los dos tipos, tiene la misma remisión normalizada, la respuesta lleva un `warning` que **nombra** el otro documento («La remisión 16300 ya está en la Entrada #142»). El documento se guarda igual.
+- **Por qué avisar y no rechazar:**
+  1. Hoy la Entrada no valida nada (§1, medido). Un 422 nuevo podría trabar la edición de la cabecera de una Entrada que ya esté repetida en prod (G-prod 4 lo mide).
+  2. Un rechazo exigiría un lock o un índice único **entre dos tablas**, que PostgreSQL no tiene; habría que serializar con un advisory lock, y eso suma un rango a `RANK`.
+  3. Es la filosofía del repo: #17/#76, «avisar, no bloquear».
+  Además, la vista marca las repetidas con un badge «Repetida», así que el aviso no depende de que alguien lo lea en un toast.
+- **Los avisos llegan por HTTP** (lección de #100 D4d). El create de la Entrada ya devuelve `warnings` (`endpoints/inbound_orders.py` l.300-308); la Salida de control nace con el campo. Los tests leen el aviso **de la respuesta**, no del servicio.
+- La Entrada **Willard** comparte el talonario: las remisiones 16272, 16341 y 16391 de Q-76 están dentro del rango de las de ESTIBAS. Por eso entra a la vista y al aviso. Es lectura y aviso; el camino Willard no se toca.
+
 ## 5. Decisiones que pide el plan (las toma Daniel, vía Coordinador)
 
 | # | Pregunta | Recomendada | Alternativa y su costo |
@@ -179,7 +223,10 @@ Son los mismos permisos que Salidas de Plomo, así que no hace falta ningún per
 | D4 | ¿El peso de báscula es opcional en las líneas de control? | Sí | No: una Entrada mixta con estibas sin peso no se puede revisar |
 | D5 | ¿Ventas y Compras directas rechazan materiales de control? | Sí. Guard con flag en `sale.create/update` y en `purchase.create/update` (no DP), el mismo patrón de #104 y #80 B3. El selector de material de Nueva/Editar venta los oculta. Con eso «¿es de control? → Salida de control» deja de depender de la memoria | No: ESTIBAS sigue vendible desde Ventas (aparece porque `lead_product = 'none'`), y una venta así saca inventario que nunca entró, a un precio. **Toca código compartido** (con flag; las 3 orgs no lo ven, y el PAR con y sin flag es la red) |
 | D6 | ¿Dónde vive la Salida de control? | Entrada propia en el menú, «Salidas de control», junto a Salidas de Plomo | Pestaña dentro de Salidas de Plomo (como Crisol, #107): toca una página que el pedido dice no tocar, y su nombre dice «Plomo» |
-| D7 | Q-75: ¿consecutivo propio o el talonario de las entradas? | Consecutivo propio, con la remisión como texto libre (cubre las dos respuestas) | Compartir la secuencia de `inbound_order_number`: mezclaría dos documentos en un número y se rompería la numeración de las Entradas, que es lo que Johana cuida |
+| D7 | Q-75 ya está respondida: comparten el **talonario de remisiones**. Lo que queda por decidir es el **número interno** que da el sistema. ¿«Salida de control #N» propio o el de las Entradas? | Consecutivo propio (`control_dispatch_number`). Lo que Johana revisa es la remisión, y eso lo cubre la vista común (§4.5) | Compartir `inbound_order_number`: la numeración de Entradas pasaría a tener números que no son Entradas, y todas las pantallas que dicen «Entrada #N» tendrían huecos |
+| D8 | Remisión repetida entre Entradas y Salidas de control: ¿avisar o rechazar? | **Avisar** con el documento nombrado, y marcar «Repetida» en la vista del talonario (§4.5) | Rechazar con 422: hace falta medir antes que prod no tenga repetidas (G-prod 4), porque si las tiene se traba la edición de esas Entradas. Además exige un advisory lock entre dos tablas |
+| D9 | ¿Dónde vive la vista del talonario? | Página propia «Talonario de remisiones», con un botón desde la lista de Entradas y otro desde la de Salidas de control | Una pestaña dentro de Entradas: queda escondida para quien entra por Salidas, y la lista de Entradas ya tiene sus propias pestañas por estado |
+| D10 | Cerrar sin valor una Entrada que tiene compras registradas en el puente (desliquidada; C1 de QA 2) | **Rechazar** con 422, que nombra las compras y ofrece anular o liquidar. Es la única forma de no perder en silencio el residuo de costo de la desliquidación, que solo entra al P&L al anular | Cancelar las compras dentro del mismo cierre (como `annul`, l.1707-1719): el cierre deja de tener cero efectos, y el residuo de `annul_cost_adjustment` no entraría nunca al P&L, porque `reports.py` solo lo lee de las anuladas |
 
 R8c (la comisión excluye el control) no se pregunta: sale literal de «no tenerlas en cuenta».
 
@@ -194,7 +241,7 @@ R8c (la comisión excluye el control) no se pregunta: sale literal de «no tener
 ## 7. Golden, parity y no-regresión
 
 **Golden: NO APLICA, medido** (`~/sac-evidencia/2026-11-24/documentos-control/golden_medicion.log`).
-- Las rutas de `CAPTURES` son `/money-accounts`, `/money-movements`, `/reports/*` y `/warehouses`. Ninguna es de Entradas, perfiles ni salidas.
+- Las rutas de `CAPTURES` son `/money-accounts`, `/money-movements`, `/reports/*` y `/warehouses`. Ninguna es de Entradas, perfiles, salidas ni `/remissions`, que es nueva.
 - `reports.py` lee `InboundOrder` en dos sitios, los dos con `status == 'annulled'`. Una Entrada cerrada no entra en ninguno, y no escribe MCH ni `annul_cost_adjustment`. El plan no toca `reports.py`.
 - ⚠️ La predicción de ese log fue **0 coincidencias y salieron 2**: no conté los imports de `reports.py`. Quedan medidos y explicados en el mismo log.
 - Si D5 se aprueba, los guards nuevos de `purchase.py` y `sale.py` **solo leen** y van detrás del flag. `/purchases` y `/sales` no son capturas.
@@ -233,7 +280,14 @@ R8c (la comisión excluye el control) no se pregunta: sale literal de «no tener
 | T14 | Flag: sin `kg_ledger_enabled`, 403 en `close`, `/control` y `/control-dispatches` |
 | T15 | Locks: `control_dispatch_number` está en `SEQUENCES` y `RANK`, y la llave es crc32 estable (calco de `test_advisory_locks`) |
 | T16 (D5) | PAR con y sin flag: con flag, venta o compra directa con material de control → 400 que manda a la Salida o la Entrada de control; sin flag → 201 |
-| T17 | Permisos con **control positivo** (memoria `test-de-permiso-necesita-control-positivo`): un rol con `purchases.view` y sin `purchases.liquidate` → 403 en `close` y 200 en el GET. Lo mismo con `sales.view` sin `sales.create` en `/control-dispatches` |
+| T17 | Permisos con **control positivo** (memoria `test-de-permiso-necesita-control-positivo`): un rol con `purchases.view` y sin `purchases.liquidate` → 403 en `close` y 200 en el GET. Lo mismo con `sales.view` sin `sales.create` en `/control-dispatches`. En `/remissions`, un rol con `purchases.view` y sin `sales.view` → 403, y con los dos → 200 |
+| T6b (C1) | Mixta re-liquidada después de marcar el control, cuando el slot **conserva** otras líneas: la compra existente se edita sin la línea de control. Su número no cambia, y sus líneas y su total quedan solo con lo que tiene valor |
+| T6c (C1) | Mixta re-liquidada cuando el slot tenía **solo** la línea de control: su compra queda `cancelled` con el aviso «salió del reparto», y las otras compras se liquidan |
+| T18 (C1) | Cerrar una Entrada desliquidada que conserva compras `registered` → 422 que nombra las compras. Cero cambios: sigue `reviewed` y las compras siguen `registered`. Con `annul_cost_adjustment != 0` forzado por ORM, y sin compras vivas, → 422 también |
+| T19 | Salida de control sin remisión, con `""` o con `"  "` → 422. El PATCH tampoco la deja vaciar |
+| T20 | Remisión repetida: crear una Salida de control con la remisión de una Entrada no anulada → 201 con el aviso que **nombra** la Entrada, leído **de la respuesta HTTP**. Al revés también (una Entrada con la remisión de una salida). «0016300» se cruza con «16300». Contra una **anulada** no hay aviso |
+| T21 | Vista del talonario: Entradas y Salidas de control intercaladas por remisión, con la anulada incluida y marcada. Hay una fila de hueco «Faltan 2: de 16301 a 16302» entre 16300 y 16303. Las remisiones de texto van al final y sin hueco. Una repetida sale con la marca. El encabezado cuenta las Entradas sin remisión |
+| T22 | Vista del talonario con paginación: el hueco entre la última fila de una página y la primera de la siguiente sale igual (se calcula sobre el rango, no sobre la página) |
 
 **Plantado** (la matriz va commiteada ANTES de plantar, con la predicción escrita):
 
@@ -254,8 +308,15 @@ R8c (la comisión excluye el control) no se pregunta: sale literal de «no tener
 | P13 | Se agrega `close` a `SCOPED_ENDPOINTS` | T11 |
 | P14 (D5) | Se quita el flag del guard de ventas | T16 (rama sin flag) |
 | P15 | Se cambia el permiso de `close` a `purchases.view` | T17 |
+| P16 (C1) | `close` no mira el puente de compras | T18 |
+| P17 | La remisión de la Salida de control sin strip (pasa `"  "`) | T19 |
+| P18 | El aviso de remisión repetida se calcula pero no llega al response | T20 |
+| P19 | El aviso compara la remisión sin normalizar («0016300» ≠ «16300») | T20 |
+| P20 | La vista excluye las anuladas (aparece un hueco falso) | T21 |
+| P21 | Los huecos se calculan por página | T22 |
+| P22 | El aviso cuenta a las anuladas | T20 |
 
-**e2e** (Playwright, 1440 y 390): marcar ESTIBAS; capturar una Entrada solo de estibas; cerrar, ver el badge y que salió de la bandeja; reabrir; Entrada mixta con la fila de control fuera de la matriz; crear una Salida de control y anularla. Capturas con control positivo.
+**e2e** (Playwright, 1440 y 390): marcar ESTIBAS; capturar una Entrada solo de estibas; cerrar, ver el badge y que salió de la bandeja; reabrir; Entrada mixta con la fila de control fuera de la matriz; crear una Salida de control con la remisión de una Entrada y ver el aviso; anularla; abrir el Talonario de remisiones con una fila de hueco y una repetida. Capturas con control positivo.
 
 **Dirigidas:** salen del `grep` sobre la superficie tocada, con el comando escrito en el log, incluidos los importadores de los importadores (memoria `dirigidas-grep-del-simbolo`). Mínimo: `test_inbound_orders.py`, `test_sac_entrada_sin_proveedor.py`, `test_sac_ciclo_c.py`, los tests del perfil kg (`form_order`), `test_advisory_locks.py`, los tests de alcance (#129), los de ventas y compras si D5, y las tres guardas del árbol. La suite completa se difiere al checkpoint.
 
@@ -265,6 +326,8 @@ R8c (la comisión excluye el control) no se pregunta: sale literal de «no tener
 1. Perfil actual de ESTIBAS en SAC: `willard_world` y `lead_product` tienen que ser `none`, o la marca dará 422.
 2. ¿Hay compras o Entradas **liquidadas** con ESTIBAS, a $1? Si las hay, queda stock y deuda de antes. Decide Daniel, fuera de este ciclo.
 3. Stock actual de ESTIBAS por bodega.
+4. **Remisiones repetidas** entre Entradas no anuladas de SAC (Q-75, D8), y cuántas son de solo dígitos frente a texto. En dev hay 0 repetidas, pero dev no es prod. Si las hay, se listan para Daniel antes de construir el aviso: no cambia el diseño, cambia lo que Johana va a ver el primer día.
+5. Entradas de SAC no anuladas con ESTIBAS **y** compras en el puente que no estén canceladas (C1, D10): son las que el cierre rechazaría.
 
 **Después:**
 1. Marcar ESTIBAS como «Solo control» en Config → Materiales (kg).
@@ -274,5 +337,5 @@ R8c (la comisión excluye el control) no se pregunta: sale literal de «no tener
 ## 10. Coordinación con Coder 1
 
 Coder 1 trabaja el factor de Willard en `inbound_order.py` (`confirm`, `_apply_willard_effects`) y en las pantallas de la Entrada.
-- Este plan **no toca** esas funciones. Sí toca otras del mismo archivo (`liquidate`, `review`, `update`, `annul`, `display_status_of`, `get_multi`, `suggested_collector_commission`) y las páginas `InboundDetailPage`, `InboundLiquidatePage` e `InboundOrdersPage`.
+- Este plan **no toca** esas funciones. Sí toca otras del mismo archivo (`create` y `update` por el aviso de remisión, `liquidate`, `review`, `display_status_of`, `get_multi`, `_remission_order`, `suggested_collector_commission`) y las páginas `InboundDetailPage`, `InboundLiquidatePage` e `InboundOrdersPage`.
 - Es probable que haya conflictos de merge de texto, no de lógica. Propongo integrar primero el que termine antes, y que el segundo rebase antes de su pasada 2 de QA.
