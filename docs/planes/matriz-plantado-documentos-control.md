@@ -66,3 +66,6 @@ Para medir que T5 ve un `status_map` roto:
 | P | Defecto (archivo · cambio) | Debe caer |
 |---|---|---|
 | P2b | `services/inbound_order.py` · `status_map`: `"closed": ["closed"]` → `"closed": ["reviewed"]` (el filtro «Cerradas sin valor» trae las revisadas) | = {t5_paridad_del_filtro_con_el_campo} |
+| P2' (QA 2) | `services/inbound_order.py` · `status_map`: `"closed": ["closed"]` → `"closed": ["draft"]` (el filtro «Cerradas sin valor» trae las registradas) | = {t5_paridad_del_filtro_con_el_campo} |
+
+P2 queda con «no cae» y la causa de arriba, medida en el log y confirmada por QA 2 (`qa-2-documentos-control/pasada2/p2_lectura.md`).
