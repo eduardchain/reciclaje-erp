@@ -19,9 +19,10 @@ Que crea:
     maquila_intersede_cv_jm $1.500 per_kg_lead).
   - 3 configs de retencion (retefuente 2.5%, reteiva 2.0%, ICA Barranquilla 0.7%).
 
-Uso (default dry-run). Las credenciales del superusuario salen SOLO del entorno
-(SEED_SU_EMAIL / SEED_SU_PASSWORD), nunca de un argumento: se cargan de
-~/.config/sac-prod.env en el MISMO comando:
+Uso (default dry-run). La clave del superusuario sale SOLO del entorno
+(SEED_SU_PASSWORD), nunca de un argumento (#137); el email, de SEED_SU_EMAIL
+o de --superuser-email. Las dos se cargan de ~/.config/sac-prod.env en el
+MISMO comando:
     F=~/.config/sac-prod.env
     SEED_SU_EMAIL="$(sed -n 's/^SEED_SU_EMAIL=//p' "$F")" \\
     SEED_SU_PASSWORD="$(sed -n 's/^SEED_SU_PASSWORD=//p' "$F")" \\
@@ -29,7 +30,9 @@ Uso (default dry-run). Las credenciales del superusuario salen SOLO del entorno
 
 Reglas:
   - Todo via API REST (jamas SQL directo). SOLO contra dev (localhost:8000).
-  - Credenciales por CLI o env (SEED_SU_EMAIL / SEED_SU_PASSWORD); nunca hardcoded.
+  - La clave del superusuario sale SOLO del entorno (SEED_SU_PASSWORD; por
+    argumento se rechaza, #137) y el email, de SEED_SU_EMAIL o de
+    --superuser-email; nunca hardcoded.
   - Los 4 usuarios quedan con --users-password (default 12345678), incluso los
     que ya existian: _force_known_passwords los unifica por ORM. Eso es DEV-ONLY
     — en produccion se usa el endpoint de reseteo del superusuario.

@@ -42,7 +42,6 @@ import {
   formatCurrency,
   formatCurrencyDecimals,
   formatDate,
-  formatDateTime,
   formatTime,
   formatWeight,
 } from "@/utils/formatters";
@@ -101,10 +100,13 @@ function InfoRow({ label, value, long = false }: { label: string; value: React.R
  * con el separador. La fecha y la hora llegan ya formateadas porque en
  * «Liquidada por» salen de dos campos: la fecha es de NEGOCIO (liquidated_at →
  * formatDate, #87) y la hora es del instante real (liquidated_ts → formatTime).
+ * Sin nombre (la fila «Anulada» de la tarjeta de efectos) pinta solo
+ * «fecha, hora», con el mismo bloque; sin nombre ni fecha, «—».
  */
-function AuditValue({ name, date, time }: { name: string; date: string | null; time: string | null }) {
+function AuditValue({ name, date, time }: { name?: string; date: string | null; time: string | null }) {
   const when = [date, time].filter(Boolean).join(", ");
-  if (!when) return <>{name}</>;
+  if (!when) return <>{name ?? "—"}</>;
+  if (!name) return <span className="whitespace-nowrap">{when}</span>;
   return (
     <>
       {`${name}\u00A0·`} <span className="whitespace-nowrap">{when}</span>
@@ -749,7 +751,16 @@ export default function InboundDetailPage() {
             )}
             {order.status === "annulled" && (
               <>
-                <InfoRow label="Anulada" value={order.annulled_at ? formatDateTime(order.annulled_at) : "—"} />
+                <InfoRow
+                  label="Anulada"
+                  // annulled_at es un instante real (#87): lleva hora
+                  value={
+                    <AuditValue
+                      date={order.annulled_at ? formatDate(order.annulled_at) : null}
+                      time={order.annulled_at ? formatTime(order.annulled_at) : null}
+                    />
+                  }
+                />
                 <InfoRow label="Motivo" value={order.annulled_reason ?? "—"} long />
               </>
             )}
