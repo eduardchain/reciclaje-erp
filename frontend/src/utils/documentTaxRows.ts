@@ -3,8 +3,10 @@
  * Plomo (plan-sac-impuestos-ventas-libres v1.1). Funciones puras: las usa
  * `DocumentTaxesCard` y los casos U las prueban solas.
  *
- * Reglas (Daniel, 23-nov): el selector elige el TIPO de impuesto (R0), el %
- * viene de su tarifa y se edita a mano, y gana el último que se tocó (R2):
+ * Reglas (Daniel, 23-nov): el selector elige la TARIFA —una opción por tipo si
+ * el tipo tiene una sola, una por tarifa si tiene varias (plan
+ * opcion-por-tarifa R1)—, el % viene de ella y se edita a mano, y gana el último
+ * que se tocó (R2):
  * elegir el tipo o editar el % recalcula el monto; editar el monto lo deja fijo.
  * La reteIVA va sobre el IVA EFECTIVO de la fila de IVA (A2), que es lo que el
  * servidor guarda como base (`document_tax.py:133-152`).
@@ -16,7 +18,7 @@ import { pctOf, rateOutOfRange, toNum } from "@/utils/taxRows";
 
 export interface TaxFormRow {
   _key: number;
-  /** "" = sin elegir; si no, la clave del tipo (`taxKey`). */
+  /** "" = sin elegir; `IVA_KEY`; o el `config_id` de la tarifa elegida (R2). */
   source: string;
   /** % digitado (o el de la tarifa al elegir el tipo) */
   rate: number;
@@ -50,38 +52,70 @@ export const taxKey = (type: TaxType, municipality: string | null | undefined): 
 export const isUsableTaxConfig = (cfg: RetentionRow): boolean => !!cfg.config_id && cfg.is_active;
 
 export interface TaxTypeOption {
+  /** `IVA_KEY` o el `config_id` de la tarifa (R2: la opción ES la tarifa) */
   key: string;
+  /** la clave del servidor para «una fila por documento» (R3) */
+  serverKey: string;
   type: TaxType;
   /** la tarifa del tipo (null para el IVA, que sale de `iva_rate_pct`) */
   cfg: RetentionRow | null;
   label: string;
 }
 
-/** R0: IVA siempre; ReteFuente, ReteIVA y un ICA por municipio si hay tarifa
- * usable. La tarifa de cada tipo: la general (sin concepto) o, si no hay, la
- * primera en el orden del catálogo (O4). */
+/** El nombre de una tarifa: tipo · municipio (ICA) · concepto (si se pide) ·
+ * «(sobre el IVA)». */
+function configLabel(cfg: RetentionRow, withConcept: boolean): string {
+  const type = cfg.retention_type as TaxType;
+  return [
+    TAX_TYPE_LABELS[type] ?? cfg.retention_type,
+    type === "ica" ? cfg.municipality : null,
+    withConcept ? cfg.concept : null,
+  ].filter(Boolean).join(" · ") + (cfg.base_kind === "iva" ? " (sobre el IVA)" : "");
+}
+
+/** R1 (Daniel, 23-nov: «Mostrar las dos»): IVA siempre; las tarifas usables se
+ * agrupan por la clave del servidor (tipo, municipio en ICA). Un grupo con UNA
+ * tarifa da una opción con el rótulo de siempre; con VARIAS, una opción por
+ * tarifa con su concepto — la general primero, después el orden del catálogo.
+ * Antes se ofrecía solo la general y la reteIVA «Ventas» al 15 % sobre el IVA
+ * de producción no se podía elegir. */
 export function taxTypeOptions(configs: RetentionRow[]): TaxTypeOption[] {
-  const out: TaxTypeOption[] = [{ key: IVA_KEY, type: "iva", cfg: null, label: TAX_TYPE_LABELS.iva }];
-  const byKey = new Map<string, RetentionRow[]>();
+  const out: TaxTypeOption[] = [
+    { key: IVA_KEY, serverKey: IVA_KEY, type: "iva", cfg: null, label: TAX_TYPE_LABELS.iva },
+  ];
+  const groups = new Map<string, RetentionRow[]>();
   for (const c of configs) {
     if (!isUsableTaxConfig(c)) continue;
     const type = c.retention_type as TaxType;
     if (type === "ica" && !c.municipality) continue;
-    const key = taxKey(type, c.municipality);
-    byKey.set(key, [...(byKey.get(key) ?? []), c]);
+    const sk = taxKey(type, c.municipality);
+    groups.set(sk, [...(groups.get(sk) ?? []), c]);
   }
-  for (const [key, cands] of byKey) {
-    const cfg = cands.find((c) => !c.concept) ?? cands[0];
-    const type = cfg.retention_type as TaxType;
-    const label = [TAX_TYPE_LABELS[type], type === "ica" ? cfg.municipality : null]
-      .filter(Boolean).join(" · ") + (cfg.base_kind === "iva" ? " (sobre el IVA)" : "");
-    out.push({ key, type, cfg, label });
+  for (const [serverKey, cands] of groups) {
+    const ordered = [...cands.filter((c) => !c.concept), ...cands.filter((c) => c.concept)];
+    const many = ordered.length > 1;
+    for (const cfg of ordered) {
+      out.push({
+        key: cfg.config_id as string,
+        serverKey,
+        type: cfg.retention_type as TaxType,
+        cfg,
+        label: configLabel(cfg, many),
+      });
+    }
   }
   return out;
 }
 
 export const optionFor = (source: string, configs: RetentionRow[]): TaxTypeOption | null =>
   taxTypeOptions(configs).find((o) => o.key === source) ?? null;
+
+/** R3: la clave del servidor de una fila. Una huérfana devuelve su `source`,
+ * que ya bloquea por sí sola. */
+export function serverKeyOf(row: TaxFormRow, configs: RetentionRow[]): string {
+  if (row.source === IVA_KEY) return IVA_KEY;
+  return optionFor(row.source, configs)?.serverKey ?? row.source;
+}
 
 /** R1: elegir el tipo trae el % de su tarifa (o el IVA de la org) y recalcula. */
 export function selectTaxType(row: TaxFormRow, source: string, configs: RetentionRow[], ivaRatePct: number): TaxFormRow {
@@ -203,14 +237,18 @@ export function taxNetDelta(
 export const isOrphanTaxRow = (row: TaxFormRow, configs: RetentionRow[]): boolean =>
   !!row.source && row.source !== IVA_KEY && optionFor(row.source, configs) === null;
 
-/** El nombre de un tipo desde su clave, sin catálogo: «ICA bogota», «ReteFuente». */
-export function taxSourceLabel(source: string): string {
-  if (source.startsWith("ica:")) return `${TAX_TYPE_LABELS.ica} ${source.slice(4)}`;
-  return TAX_TYPE_LABELS[source as TaxType] ?? source;
+/** R4: el nombre de la tarifa de una fila, buscado en el catálogo COMPLETO
+ * (trae también las inactivas), con su concepto; null si ya no está. */
+export function taxSourceLabel(source: string, configs: RetentionRow[]): string | null {
+  const cfg = configs.find((c) => c.config_id === source);
+  return cfg ? configLabel(cfg, true) : null;
 }
 
-export const orphanTaxText = (source: string): string =>
-  `No hay una tarifa activa de ${taxSourceLabel(source)}: créela o reactívela en Tesorería → Retenciones, o quite la fila.`;
+export function orphanTaxText(source: string, configs: RetentionRow[]): string {
+  const label = taxSourceLabel(source, configs);
+  return `${label ? `La tarifa ${label} no está activa` : "La tarifa de esta fila ya no está en el catálogo"}: `
+    + "créela o reactívela en Tesorería → Retenciones, o quite la fila.";
+}
 
 /** R4b: el texto del servidor (`document_tax.py:137-145`). */
 export const RETEIVA_SIN_IVA =
@@ -226,11 +264,11 @@ export function taxRowsProblems(
   if (rows.some((r) => r.source && effectiveTaxAmount(r, rows, lineAmounts, configs) <= 0)) {
     out.push("Hay un impuesto con monto en cero.");
   }
-  // R6: una fila por (tipo, municipio), con la clave del servidor
-  const keys = rows.map((r) => r.source).filter(Boolean);
+  // R3: una fila por (tipo, municipio), con la clave del servidor — no por tarifa
+  const keys = rows.filter((r) => r.source).map((r) => serverKeyOf(r, configs));
   if (new Set(keys).size !== keys.length) out.push("Hay un impuesto repetido. Sume los montos en una sola línea.");
   if (!ivaRowOf(rows) && rows.some((r) => basedOnIva(r, configs))) out.push(RETEIVA_SIN_IVA);
-  for (const r of rows) if (isOrphanTaxRow(r, configs)) out.push(orphanTaxText(r.source));
+  for (const r of rows) if (isOrphanTaxRow(r, configs)) out.push(orphanTaxText(r.source, configs));
   return [...new Set(out)];
 }
 
