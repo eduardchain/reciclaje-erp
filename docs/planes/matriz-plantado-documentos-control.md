@@ -56,3 +56,13 @@ Los nombres van sin el prefijo `test_`.
 **P23 concreta** (punto 2 de los gates de QA 2): la fila del plan decía «isdigit() en Python, o regex sin anclas» y no tenía dónde plantarse, porque la llave vive solo en SQL. Se parte en P23a, el regex sin anclas, y P23b, un `isdigit()` previo al aviso.
 
 **Control de la corrida base:** antes de plantar, el archivo corre sin defectos en la copia: 54 passed.
+
+## Adenda (24-nov, después de correr P2; antes de plantar P2b)
+
+P2 dio 54 passed: cayó en la dirección peligrosa y se midió antes de clasificarla (`plantado/plantado_r1.log`). Es un defecto **equivalente**. `get_multi` filtra con `status_map.get(display_status, [display_status])`, y para «closed» el valor de pantalla y el de la columna son el mismo: sin la entrada, el fallback devuelve `["closed"]` igual. T5 sí pide `display_status=closed`. La fila de P2 queda como estaba: esta adenda no la reescribe.
+
+Para medir que T5 ve un `status_map` roto:
+
+| P | Defecto (archivo · cambio) | Debe caer |
+|---|---|---|
+| P2b | `services/inbound_order.py` · `status_map`: `"closed": ["closed"]` → `"closed": ["reviewed"]` (el filtro «Cerradas sin valor» trae las revisadas) | = {t5_paridad_del_filtro_con_el_campo} |
