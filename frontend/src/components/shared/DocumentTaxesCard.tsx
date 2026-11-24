@@ -8,9 +8,9 @@
  * D1: el sistema REGISTRA lo que Siigo emitio. Los montos se precalculan para
  * no tipear, pero son editables y el valor editado es la verdad (#79 F1).
  *
- * % libre (plan-sac-impuestos-ventas-libres v1.1): el selector elige el TIPO de
- * impuesto, cada fila tiene su % editable al lado del monto y gana el último
- * que se tocó. Las reglas viven, puras, en `utils/documentTaxRows.ts`.
+ * % libre (plan-sac-impuestos-ventas-libres v1.1): el selector elige la tarifa
+ * (una opción por tarifa cuando un tipo tiene varias, plan opcion-por-tarifa),
+ * cada fila tiene su % editable al lado del monto y gana el último que se tocó. Las reglas viven, puras, en `utils/documentTaxRows.ts`.
  *
  * ⚠️ El MONTO de la base lo deriva el SERVIDOR de lo que realmente facturo; lo
  * que se calcula acá es la SUGERENCIA. Con `subtotal = 0` —una Salida tipo
@@ -32,7 +32,7 @@ import { formatCurrency } from "@/utils/formatters";
 import type { RetentionRow } from "@/types/third-party";
 import { rateOutOfRange, rateWarning, rateWarningText } from "@/utils/taxRows";
 import {
-  IVA_KEY, createEmptyTax, effectiveTaxAmount, isOrphanTaxRow, optionFor, selectTaxType,
+  IVA_KEY, createEmptyTax, effectiveTaxAmount, isOrphanTaxRow, optionFor, selectTaxType, serverKeyOf,
   suggestedTaxAmount, sumLines, taxNetDelta, taxRateReference, taxRowBase,
   taxRowsProblems, taxTypeOptions, withTaxAmount, withTaxRate,
 } from "@/utils/documentTaxRows";
@@ -69,7 +69,6 @@ export function DocumentTaxesCard({
 }: Props) {
   const subtotal = sumLines(lineAmounts);
   const options = taxTypeOptions(configs);
-  const used = new Set(rows.map((r) => r.source));
 
   const setRow = (key: number, fn: (r: TaxFormRow) => TaxFormRow) =>
     onChange(rows.map((r) => (r._key === key ? fn(r) : r)));
@@ -101,6 +100,12 @@ export function DocumentTaxesCard({
             const onIva = row.source !== IVA_KEY
               && optionFor(row.source, configs)?.cfg?.base_kind === "iva";
             const ref = taxRateReference(row, configs, ivaRatePct);
+            const rateBaseLabel = onIva ? "% del IVA" : "% del subtotal";
+            // R3: lo que ya ocupan las OTRAS filas, con la clave del servidor:
+            // elegir «ReteIVA» deshabilita también «ReteIVA · Ventas»
+            const usedByOthers = new Set(
+              rows.filter((r) => r._key !== row._key && r.source).map((r) => serverKeyOf(r, configs)),
+            );
             // El patrón del repo: rótulos en todas las filas en móvil, solo en la
             // primera en escritorio (estilo tabla).
             const labelCls = cn(
@@ -131,8 +136,8 @@ export function DocumentTaxesCard({
                         <SelectItem
                           key={o.key}
                           value={o.key}
-                          // R6: una fila por (tipo, municipio), la clave del servidor
-                          disabled={used.has(o.key) && row.source !== o.key}
+                          // R3: una fila por (tipo, municipio), la clave del servidor
+                          disabled={usedByOthers.has(o.serverKey)}
                         >
                           {o.label}
                         </SelectItem>
@@ -141,7 +146,7 @@ export function DocumentTaxesCard({
                   </Select>
                 </div>
                 <div className="md:col-span-2">
-                  <Label className={labelCls}>{onIva ? "% del IVA" : "% del subtotal"}</Label>
+                  <Label className={labelCls}>{rateBaseLabel}</Label>
                   <div className="relative" data-field="tax-rate">
                     <MoneyInput
                       value={row.rate}
@@ -156,6 +161,14 @@ export function DocumentTaxesCard({
                       %
                     </span>
                   </div>
+                  {/* R6 (plan opcion-por-tarifa): en escritorio el rótulo de las filas
+                      2+ está oculto y el de la fila 1 hace de encabezado; la base de
+                      ESTA fila va debajo, para no desalinear la casilla */}
+                  {idx > 0 && (
+                    <p className="hidden md:block text-xs text-slate-400 mt-0.5" data-testid="tax-rate-base">
+                      {rateBaseLabel}
+                    </p>
+                  )}
                 </div>
                 <div className="md:col-span-3" data-field="tax-amount">
                   <Label className={labelCls}>Monto *</Label>
