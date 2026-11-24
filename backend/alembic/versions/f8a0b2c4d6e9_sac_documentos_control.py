@@ -18,7 +18,9 @@ codigo anterior no conoce (lo pinta como Liquidada): antes de bajar, hay que
 reabrirlas.
 
 Revision ID: f8a0b2c4d6e9
-Revises: e7f9a1b3c5d8
+Revises: f8b0c2d4e6a9
+(Rebasada: nacio sobre e7f9a1b3c5d8 en paralelo con el factor Willard
+f8b0c2d4e6a9, que se integro primero; se cuelga de ella, 24-nov.)
 """
 from alembic import op
 import sqlalchemy as sa
@@ -26,7 +28,7 @@ import sqlalchemy as sa
 from app.models.base import GUID
 
 revision = "f8a0b2c4d6e9"
-down_revision = "e7f9a1b3c5d8"
+down_revision = "f8b0c2d4e6a9"
 branch_labels = None
 depends_on = None
 
