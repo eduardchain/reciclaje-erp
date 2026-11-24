@@ -27,16 +27,20 @@ Uso:
     # admin es nuevo, el script le genera una al azar en memoria que nadie conoce, y
     # la real se la pone soporte desde Sistema -> Usuarios -> Resetear contrasena (#85).
     # Si el email ya existia, el admin conserva la suya.
+    # El dry-run es offline: no hace login ni necesita credenciales.
     ./venv/bin/python scripts/migrate_org.py \\
         --file ../data/migration_<org>.xlsx \\
         --org-name "Mi Empresa SAS" \\
-        --superuser-email superadmin@ecobalance.com \\
-        --superuser-password '<pwd>' \\
         --admin-email admin@miempresa.com \\
         --admin-name "Admin Owner" \\
         --dry-run
 
-    # Aplicar:
+    # Aplicar: la clave del superusuario sale SOLO del entorno (SEED_SU_PASSWORD),
+    # nunca de un argumento (quedaria a la vista de ps y en el historial). Se carga
+    # de ~/.config/sac-prod.env en el MISMO comando que corre el script:
+    F=~/.config/sac-prod.env
+    SEED_SU_EMAIL="$(sed -n 's/^SEED_SU_EMAIL=//p' "$F")" \\
+    SEED_SU_PASSWORD="$(sed -n 's/^SEED_SU_PASSWORD=//p' "$F")" \\
     ./venv/bin/python scripts/migrate_org.py [...] --apply
 
 Hojas del Excel (12; MapeoUN es read-only, las otras 11 escriben):
@@ -63,6 +67,7 @@ Hojas del Excel (12; MapeoUN es read-only, las otras 11 escriben):
                             cuenta_pago, unidad_negocio, unidades_negocio (CSV), notas
 """
 import argparse
+import os
 import secrets
 import sys
 from datetime import date
@@ -1325,6 +1330,30 @@ def run_verification(api: APIClient, expected: dict, tolerance: Decimal) -> tupl
 # Main
 # ---------------------------------------------------------------------------
 
+CLAVE_EN_ARGV = (
+    "ERROR: --superuser-password ya no se acepta: en la línea de comandos la clave "
+    "queda a la vista de ps y en el historial. Cárguela en SEED_SU_PASSWORD "
+    "(ver ~/.config/sac-prod.env)."
+)
+
+
+def credenciales_faltantes(email: Optional[str], password: Optional[str]) -> str:
+    """Primera linea del error cuando faltan credenciales, o "" si estan las dos.
+
+    Nombra SOLO lo que falta y nunca un valor.
+    """
+    falta_email, falta_clave = not email, not password
+    if falta_email and falta_clave:
+        cuerpo = "faltan SEED_SU_EMAIL y SEED_SU_PASSWORD en el entorno."
+    elif falta_email:
+        cuerpo = "falta SEED_SU_EMAIL en el entorno (o --superuser-email)."
+    elif falta_clave:
+        cuerpo = "falta SEED_SU_PASSWORD en el entorno."
+    else:
+        return ""
+    return f"ERROR: {cuerpo} La clave del superusuario ya no va por la línea de comandos."
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Migracion generica de organizaciones a EcoBalance",
@@ -1335,10 +1364,13 @@ def main():
     parser.add_argument(
         "--superuser-email",
         required=False,
-        default=None,
-        help="Email del superuser. Obligatorio con --apply, opcional con --dry-run.",
+        default=os.environ.get("SEED_SU_EMAIL"),
+        help="Email del superuser (por defecto SEED_SU_EMAIL). Solo con --apply.",
     )
-    parser.add_argument("--superuser-password", required=False, default=None)
+    # D1 del plan migrate-client-clave-entorno: el argumento queda DEFINIDO para
+    # rechazarlo sin repetir el valor. Si se quitara, argparse cortaria con
+    # "unrecognized arguments: --superuser-password <VALOR>" y la clave iria al log.
+    parser.add_argument("--superuser-password", default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--org-name",
         required=True,
@@ -1373,6 +1405,9 @@ def main():
         help="Lista CSV de fases a saltar (ej: '11,12' para no resemilla inventario y activos)",
     )
     args = parser.parse_args()
+    if args.superuser_password is not None:
+        print(CLAVE_EN_ARGV, file=sys.stderr)
+        sys.exit(2)
 
     dry_run = args.dry_run
     skip_phases = {int(p.strip()) for p in args.skip_phase.split(",") if p.strip()}
@@ -1409,11 +1444,13 @@ def main():
     # Login (solo si --apply)
     api = APIClient(args.api_url)
     if not dry_run:
-        if not args.superuser_email or not args.superuser_password:
-            print("ERROR: --apply requiere --superuser-email y --superuser-password")
+        su_password = os.environ.get("SEED_SU_PASSWORD")
+        faltan = credenciales_faltantes(args.superuser_email, su_password)
+        if faltan:
+            print(f"{faltan} (--apply hace login; ver ~/.config/sac-prod.env)")
             sys.exit(1)
         print(f"[*] Autenticando como superuser '{args.superuser_email}'...")
-        if not api.login(args.superuser_email, args.superuser_password):
+        if not api.login(args.superuser_email, su_password):
             sys.exit(1)
         print("    OK\n")
     else:

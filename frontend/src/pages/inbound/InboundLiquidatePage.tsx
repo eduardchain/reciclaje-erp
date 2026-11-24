@@ -27,6 +27,7 @@ import {
   buildRetentionPayload,
   defaultRetentionConfig,
   effAmount,
+  effIva,
   isUsableConfig,
   ivaPayload,
   ivaRatePatch,
@@ -148,6 +149,13 @@ interface PurchaseCol {
   ivaRate: number;
   ivaAmount: number;
   ivaTouched: boolean;
+  /** Retención-sigue v1.3 R1: el IVA vino de lo guardado, con su %, sin editar */
+  ivaFromSaved: boolean;
+  /** R0: el subtotal de esta compra en pantalla al abrir, con la misma cuenta
+   *  (`colSubtotal`) aplicada UNA vez al reparto recién precargado. Viaja en
+   *  el borrador y NO se recalcula al revivirlo (R8). null = compra nueva o
+   *  borrador anterior al cambio (R6). */
+  openSubtotal: number | null;
   retentions: RetRow[];
   /** null = a crédito (el camino normal); "" = marcó contado sin cuenta */
   paymentAccount: string | null;
@@ -190,6 +198,8 @@ const newCol = (slot: number, third_party_id = ""): PurchaseCol => ({
   ivaRate: IVA_RATE_PCT,
   ivaAmount: 0,
   ivaTouched: false,
+  ivaFromSaved: false,
+  openSubtotal: null,
   retentions: [],
   paymentAccount: null,
 });
@@ -266,6 +276,14 @@ const cellUnit = (c: CellState, col: PurchaseCol | undefined, l: LineState): num
 /** Lo que la compra suma por esta celda, a centavos como `total_price` de la línea. */
 const cellTotal = (c: CellState, col: PurchaseCol | undefined, l: LineState): number =>
   Math.round(c.quantity * cellUnit(c, col, l) * 100) / 100;
+
+/** El subtotal de una compra en pantalla. Retención-sigue v1.3 R0: la MISMA
+ *  cuenta da la apertura y el subtotal actual. */
+const colSubtotal = (lines: LineState[], col: PurchaseCol): number =>
+  lines.reduce((acc, l) => {
+    const c = l.cells[col.slot];
+    return c && c.quantity > 0 ? acc + cellTotal(c, col, l) : acc;
+  }, 0);
 
 const cellPriced = (c: CellState, col: PurchaseCol | undefined, l: LineState): boolean => {
   const m = cellMode(c, col, l);
@@ -446,6 +464,9 @@ function assertDraftShape(d: Draft): void {
         // T8: un borrador de antes del cambio no trae `ivaRate`
         !(col.ivaRate === undefined || typeof col.ivaRate === "number") ||
         typeof col.ivaTouched !== "boolean" || !Array.isArray(col.retentions) ||
+        // Retención-sigue R8: un borrador de antes del cambio no los trae (R6)
+        !(col.ivaFromSaved === undefined || typeof col.ivaFromSaved === "boolean") ||
+        !(col.openSubtotal === undefined || isNumOrNull(col.openSubtotal)) ||
         !(col.paymentAccount === null || typeof col.paymentAccount === "string")) bad();
     for (const r of col.retentions as unknown[]) {
       if (!isObj(r) || typeof r._key !== "number" || typeof r.config_id !== "string" ||
@@ -453,7 +474,8 @@ function assertDraftShape(d: Draft): void {
           // T2b: `rate` falta en un borrador de antes del cambio
           !(r.rate === undefined || typeof r.rate === "number") ||
           !(r.staleRate === undefined || isNumOrNull(r.staleRate)) ||
-          !(r.staleLabel === undefined || typeof r.staleLabel === "string")) bad();
+          !(r.staleLabel === undefined || typeof r.staleLabel === "string") ||
+          !(r.fromSaved === undefined || typeof r.fromSaved === "boolean")) bad();
     }
   }
 }
@@ -650,6 +672,8 @@ export default function InboundLiquidatePage() {
       // T8: «editado» se mide contra la tasa guardada, no contra 19
       if (iva) Object.assign(col, precargaIva(iva));
     }
+    // R0: la apertura, una sola vez, sobre el reparto recién precargado
+    for (const col of bySlot.values()) col.openSubtotal = colSubtotal(initial, col);
     const initialCols = [...bySlot.values()];
     const startCols = initialCols.length > 0 ? initialCols : [newCol(1)];
     setCols(startCols);
@@ -669,6 +693,10 @@ export default function InboundLiquidatePage() {
           // otra usable de su tipo, o queda sin tarifa con la nota
           const draftCols = d.cols.map((c) => ({
             ...c,
+            // R8: la apertura del borrador se usa tal cual, NO se recalcula
+            // sobre su reparto ya editado; sin ella (borrador de antes), R6
+            ivaFromSaved: c.ivaFromSaved === true,
+            openSubtotal: typeof c.openSubtotal === "number" ? c.openSubtotal : null,
             ivaRate: reviveDraftIvaRate(c.ivaRate),
             retentions: reviveDraftRetentions(c.retentions, retentionCatalog, scoped),
           }));
@@ -924,6 +952,7 @@ export default function InboundLiquidatePage() {
       ivaRate: IVA_RATE_PCT,
       ivaAmount: 0,
       ivaTouched: false,
+      ivaFromSaved: false,
     });
     if (had && prev?.third_party_id) {
       toast.info(`Compra ${slot}: se quitaron la factura, el IVA, las retenciones y el contado del proveedor anterior`);
@@ -1029,7 +1058,9 @@ export default function InboundLiquidatePage() {
   // ---------- retenciones / IVA por compra ----------
 
   // T4: el último que se tocó gana (funciones puras de taxRows)
-  const effRetAmount = (r: RetRow, base: number) => effAmount(r, base);
+  // Retención-sigue R7: la apertura de la compra decide si lo guardado sigue al %
+  const effRetAmount = (r: RetRow, base: number, col: PurchaseCol) =>
+    effAmount(r, base, col.openSubtotal);
 
   const updateRet = (slot: number, key: number, fn: (r: RetRow) => RetRow) =>
     setCols((prev) =>
@@ -1074,9 +1105,10 @@ export default function InboundLiquidatePage() {
     const rows = orderedLines
       .map((l) => ({ l, c: l.cells[col.slot] }))
       .filter(({ c }) => c && c.quantity > 0) as { l: LineState; c: CellState }[];
-    const subtotal = rows.reduce((acc, { l, c }) => acc + cellTotal(c, col, l), 0);
-    const iva = col.withIva ? (col.ivaTouched ? col.ivaAmount : pctOf(subtotal, col.ivaRate)) : 0;
-    const ret = col.retentions.reduce((acc, r) => acc + effRetAmount(r, subtotal), 0);
+    const subtotal = colSubtotal(orderedLines, col);
+    // R7: el IVA sale de effIva, el mismo que lee el payload (st.iva)
+    const iva = effIva(col, subtotal, col.openSubtotal);
+    const ret = col.retentions.reduce((acc, r) => acc + effRetAmount(r, subtotal, col), 0);
     const qtyByUnit: Record<string, number> = {};
     for (const { l, c } of rows) {
       qtyByUnit[l.material_unit] = q3((qtyByUnit[l.material_unit] ?? 0) + c.quantity);
@@ -1152,7 +1184,7 @@ export default function InboundLiquidatePage() {
       problems.push(`${tag}: el % de ${cfg ? retentionRowLabel(cfg) : "una retención"} debe estar entre 0 y 100`);
     } else if (col.retentions.length > 0 && st.subtotal <= 0) {
       problems.push(`${tag}: su subtotal es $0, no hay base sobre la cual retener`);
-    } else if (col.retentions.some((r) => effRetAmount(r, st.subtotal) <= 0)) {
+    } else if (col.retentions.some((r) => effRetAmount(r, st.subtotal, col) <= 0)) {
       problems.push(`${tag}: una retención quedó en $0`);
     } else if (st.ret > 0 && st.ret >= st.subtotal + st.iva) {
       problems.push(`${tag}: las retenciones deben ser menores al total (${fmtMoney(st.subtotal + st.iva)})`);
@@ -1228,7 +1260,7 @@ export default function InboundLiquidatePage() {
           purchase_slot: col.slot,
           third_party_id: col.third_party_id,
           // T4: va el % digitado, no el del catálogo; el monto es la verdad (#79 F1)
-          retentions: rows.map(({ r, cfg }) => buildRetentionPayload(r, cfg, st.subtotal)),
+          retentions: rows.map(({ r, cfg }) => buildRetentionPayload(r, cfg, st.subtotal, col.openSubtotal)),
         });
       }
       if (col.paymentAccount) {
@@ -1606,7 +1638,9 @@ export default function InboundLiquidatePage() {
             <Checkbox
               checked={col.withIva}
               onCheckedChange={(v) =>
-                updateCol(col.slot, { withIva: v === true, ivaRate: IVA_RATE_PCT, ivaTouched: false, ivaAmount: 0 })
+                updateCol(col.slot, {
+                  withIva: v === true, ivaRate: IVA_RATE_PCT, ivaTouched: false, ivaAmount: 0, ivaFromSaved: false,
+                })
               }
             />
             Con IVA
@@ -1622,7 +1656,9 @@ export default function InboundLiquidatePage() {
                 },
                 amount: st.iva,
                 // C5: solo un valor DISTINTO congela el IVA; un Tab no
-                onAmount: (v) => v !== st.iva && updateCol(col.slot, { ivaAmount: v, ivaTouched: true }),
+                // R5: editar el monto le quita la marca de guardado
+                onAmount: (v) =>
+                  v !== st.iva && updateCol(col.slot, { ivaAmount: v, ivaTouched: true, ivaFromSaved: false }),
                 amountInvalid: st.iva <= 0,
                 rateLabel: "% del subtotal",
               })}
@@ -1655,7 +1691,7 @@ export default function InboundLiquidatePage() {
           {col.retentions.map((r) => {
             const cfg = configById.get(r.config_id);
             const ref = cfg?.rate_pct != null ? Number(cfg.rate_pct) : null;
-            const amount = effRetAmount(r, st.subtotal);
+            const amount = effRetAmount(r, st.subtotal, col);
             const suggested = pctOf(st.subtotal, r.rate);
             return (
               <div key={r._key} className="space-y-1">

@@ -8,17 +8,15 @@
  * D1: el sistema REGISTRA lo que Siigo emitio. Los montos se precalculan para
  * no tipear, pero son editables y el valor editado es la verdad (#79 F1).
  *
- * D5: cada tipo dice sobre QUE se aplica. La reteIVA va sobre el IVA y las
- * demas sobre el subtotal. Guardar una reteIVA como "2,85 % del subtotal" da
- * el numero correcto SOLO mientras el IVA sea 19 %.
+ * % libre (plan-sac-impuestos-ventas-libres v1.1): el selector elige la tarifa
+ * (una opción por tarifa cuando un tipo tiene varias, plan opcion-por-tarifa),
+ * cada fila tiene su % editable al lado del monto y gana el último que se tocó. Las reglas viven, puras, en `utils/documentTaxRows.ts`.
  *
  * ⚠️ El MONTO de la base lo deriva el SERVIDOR de lo que realmente facturo; lo
  * que se calcula acá es la SUGERENCIA. Con `subtotal = 0` —una Salida tipo
  * abono, donde la maquila y el flete salen de las tarifas vigentes al
- * liquidar— la sugerencia es 0 y el usuario digita lo que dice la factura. Eso
- * es correcto y no es un hueco: el sistema registra, no emite.
+ * liquidar— la sugerencia es 0 y el usuario digita lo que dice la factura (R8).
  */
-import { useMemo } from "react";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -27,28 +25,24 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { FormLineGrid } from "@/components/shared/FormLineGrid";
+import { FormLineGrid, lineLabelClass } from "@/components/shared/FormLineGrid";
 import { MoneyInput } from "@/components/shared/MoneyInput";
 import { cn } from "@/utils";
 import { formatCurrency } from "@/utils/formatters";
-import type { DocumentTaxCreate, TaxType } from "@/types/document-tax";
-import { TAX_SIGN_ON_CUSTOMER, TAX_TYPE_LABELS } from "@/types/document-tax";
 import type { RetentionRow } from "@/types/third-party";
+import { rateOutOfRange, rateWarning, rateWarningText } from "@/utils/taxRows";
+import {
+  IVA_KEY, createEmptyTax, effectiveTaxAmount, isOrphanTaxRow, optionFor, selectTaxType, serverKeyOf,
+  suggestedTaxAmount, sumLines, taxNetDelta, taxRateReference, taxRowBase,
+  taxRowsProblems, taxTypeOptions, withTaxAmount, withTaxRate,
+} from "@/utils/documentTaxRows";
+import type { TaxFormRow } from "@/utils/documentTaxRows";
 
-export interface TaxFormRow {
-  _key: number;
-  /** `iva`, o el `config_id` de una tarifa del catalogo. */
-  source: string;
-  amount: number;
-  touched: boolean;
-}
-
-let taxKeySeq = 0;
-export const createEmptyTax = (): TaxFormRow => ({
-  _key: ++taxKeySeq, source: "", amount: 0, touched: false,
-});
-
-const IVA_SOURCE = "__iva__";
+// Los dos llamadores importan de acá: su interfaz no cambia.
+export type { TaxFormRow } from "@/utils/documentTaxRows";
+export {
+  buildTaxPayload, createEmptyTax, taxNetDelta, taxRowsValid,
+} from "@/utils/documentTaxRows";
 
 interface Props {
   /**
@@ -57,8 +51,9 @@ interface Props {
    * usuario tendria que corregirlo a mano todos los dias.
    */
   lineAmounts: number[];
+  /** El IVA habitual de la org: el % con que arranca la fila de IVA (R1). */
   ivaRatePct: number;
-  /** Catalogo de tarifas activas (reusa `retention_configs`, #79). */
+  /** Catalogo de tarifas (reusa `retention_configs`, #79). */
   configs: RetentionRow[];
   rows: TaxFormRow[];
   onChange: (rows: TaxFormRow[]) => void;
@@ -66,130 +61,20 @@ interface Props {
   baseHint: string;
 }
 
-/** Fila de catalogo, legible: "ReteFuente · Venta de bienes (2,5%)". */
-function configLabel(cfg: RetentionRow): string {
-  const parts = [TAX_TYPE_LABELS[cfg.retention_type as TaxType] ?? cfg.retention_type];
-  if (cfg.municipality) parts.push(cfg.municipality);
-  if (cfg.concept) parts.push(cfg.concept);
-  return parts.join(" · ");
-}
-
-export const sumLines = (lineAmounts: number[]): number =>
-  lineAmounts.reduce((a, b) => a + b, 0);
-
-/**
- * IVA sugerido: se redondea CADA LINEA y se suman (D6), que es lo que hace
- * Siigo. Sobre el total el resultado difiere en centavos y, con el sistema
- * REGISTRANDO lo que la factura dice, esa diferencia la tendria que corregir
- * el usuario a mano en cada venta.
- */
-export function suggestedIva(lineAmounts: number[], ivaRatePct: number): number {
-  return lineAmounts.reduce(
-    (sum, amount) => sum + Math.round(amount * ivaRatePct) / 100,
-    0,
-  );
-}
-
-/**
- * Monto sugerido de una fila. El IVA sale de las lineas; una retencion sale de
- * su base declarada (`base_kind`), que es toda la razon de ser de D5.
- */
-export function suggestedTaxAmount(
-  row: TaxFormRow, lineAmounts: number[], ivaRatePct: number, configs: RetentionRow[],
-): number {
-  if (row.source === IVA_SOURCE) return suggestedIva(lineAmounts, ivaRatePct);
-  const cfg = configs.find((c) => c.config_id === row.source);
-  if (!cfg || cfg.rate_pct == null) return 0;
-  const base = cfg.base_kind === "iva"
-    ? suggestedIva(lineAmounts, ivaRatePct)
-    : sumLines(lineAmounts);
-  return Math.round(base * cfg.rate_pct) / 100;
-}
-
-export function effectiveTaxAmount(
-  row: TaxFormRow, lineAmounts: number[], ivaRatePct: number, configs: RetentionRow[],
-): number {
-  return row.touched
-    ? row.amount
-    : suggestedTaxAmount(row, lineAmounts, ivaRatePct, configs);
-}
-
-/** Payload del backend. Devuelve `undefined` si no hay nada: ausente = byte a byte. */
-export function buildTaxPayload(
-  rows: TaxFormRow[], lineAmounts: number[], ivaRatePct: number, configs: RetentionRow[],
-): DocumentTaxCreate[] | undefined {
-  const out: DocumentTaxCreate[] = [];
-  for (const row of rows) {
-    const amount = effectiveTaxAmount(row, lineAmounts, ivaRatePct, configs);
-    if (!row.source || amount <= 0) continue;
-    if (row.source === IVA_SOURCE) {
-      out.push({ tax_type: "iva", rate: ivaRatePct, base_kind: "subtotal", amount });
-      continue;
-    }
-    const cfg = configs.find((c) => c.config_id === row.source);
-    if (!cfg) continue;
-    out.push({
-      tax_type: cfg.retention_type as TaxType,
-      ...(cfg.retention_type === "ica" && cfg.municipality
-        ? { municipality: cfg.municipality }
-        : {}),
-      ...(cfg.concept ? { concept: cfg.concept } : {}),
-      rate: cfg.rate_pct ?? undefined,
-      // El MONTO de la base lo deriva el servidor (D5). Acá solo viaja sobre
-      // QUE se aplica: en un abono la pantalla no conoce la base.
-      base_kind: cfg.base_kind === "iva" ? "iva" : "subtotal",
-      amount,
-    });
-  }
-  return out.length > 0 ? out : undefined;
-}
-
-/** Delta neto sobre el cliente: el IVA suma y las retenciones restan. */
-export function taxNetDelta(
-  rows: TaxFormRow[], lineAmounts: number[], ivaRatePct: number, configs: RetentionRow[],
-): number {
-  let net = 0;
-  for (const row of rows) {
-    if (!row.source) continue;
-    const amount = effectiveTaxAmount(row, lineAmounts, ivaRatePct, configs);
-    const type: TaxType = row.source === IVA_SOURCE
-      ? "iva"
-      : ((configs.find((c) => c.config_id === row.source)?.retention_type ?? "retefuente") as TaxType);
-    net += TAX_SIGN_ON_CUSTOMER[type] * amount;
-  }
-  return net;
-}
-
-/** Una fila sin tarifa elegida, o en cero, bloquea. */
-export function taxRowsValid(
-  rows: TaxFormRow[], lineAmounts: number[], ivaRatePct: number, configs: RetentionRow[],
-): boolean {
-  if (rows.some((r) => !r.source)) return false;
-  if (rows.some((r) => effectiveTaxAmount(r, lineAmounts, ivaRatePct, configs) <= 0)) return false;
-  // Duplicados: dos IVA sobre la misma factura es captura repetida, y el
-  // servidor la rechaza. Avisar acá evita el 422 despues de llenar todo.
-  const sources = rows.map((r) => r.source).filter(Boolean);
-  return new Set(sources).size === sources.length;
-}
+const fmtRate = (v: number): string =>
+  new Intl.NumberFormat("es-CO", { maximumFractionDigits: 4 }).format(v);
 
 export function DocumentTaxesCard({
   lineAmounts, ivaRatePct, configs, rows, onChange, baseHint,
 }: Props) {
   const subtotal = sumLines(lineAmounts);
-  const activeConfigs = useMemo(
-    () => configs.filter((c) => c.config_id && c.is_active),
-    [configs],
-  );
-  const used = new Set(rows.map((r) => r.source));
+  const options = taxTypeOptions(configs);
 
-  const setRow = (key: number, patch: Partial<TaxFormRow>) =>
-    onChange(rows.map((r) => (r._key === key ? { ...r, ...patch } : r)));
+  const setRow = (key: number, fn: (r: TaxFormRow) => TaxFormRow) =>
+    onChange(rows.map((r) => (r._key === key ? fn(r) : r)));
 
   const net = taxNetDelta(rows, lineAmounts, ivaRatePct, configs);
-  const duplicated = (() => {
-    const s = rows.map((r) => r.source).filter(Boolean);
-    return new Set(s).size !== s.length;
-  })();
+  const problems = taxRowsProblems(rows, lineAmounts, configs);
 
   return (
     <Card className="shadow-sm">
@@ -199,6 +84,7 @@ export function DocumentTaxesCard({
         </CardTitle>
         <Button
           variant="outline" size="sm"
+          // A1 (Daniel): la fila nueva arranca vacía, como hoy
           onClick={() => onChange([...rows, createEmptyTax()])}
           className="w-full sm:w-auto"
         >
@@ -208,82 +94,111 @@ export function DocumentTaxesCard({
       {rows.length > 0 && (
         <CardContent className="space-y-0">
           {rows.map((row, idx) => {
-            const amount = effectiveTaxAmount(row, lineAmounts, ivaRatePct, configs);
-            const suggested = suggestedTaxAmount(row, lineAmounts, ivaRatePct, configs);
-            const cfg = configs.find((c) => c.config_id === row.source);
-            const ratePct = row.source === IVA_SOURCE ? ivaRatePct : cfg?.rate_pct;
-            const baseAmount = row.source === IVA_SOURCE
-              ? subtotal
-              : cfg?.base_kind === "iva"
-                ? suggestedIva(lineAmounts, ivaRatePct)
-                : subtotal;
+            const amount = effectiveTaxAmount(row, rows, lineAmounts, configs);
+            const suggested = suggestedTaxAmount(row, rows, lineAmounts, configs);
+            const base = taxRowBase(row, rows, lineAmounts, configs);
+            const onIva = row.source !== IVA_KEY
+              && optionFor(row.source, configs)?.cfg?.base_kind === "iva";
+            const ref = taxRateReference(row, configs, ivaRatePct);
+            const rateBaseLabel = onIva ? "% del IVA" : "% del subtotal";
+            // R3: lo que ya ocupan las OTRAS filas, con la clave del servidor:
+            // elegir «ReteIVA» deshabilita también «ReteIVA · Ventas»
+            const usedByOthers = new Set(
+              rows.filter((r) => r._key !== row._key && r.source).map((r) => serverKeyOf(r, configs)),
+            );
+            // El patrón del repo: rótulos en todas las filas en móvil, solo en la
+            // primera en escritorio (estilo tabla).
+            const labelCls = cn(
+              "text-xs font-semibold uppercase tracking-wider text-slate-500",
+              lineLabelClass(idx),
+            );
             return (
               <FormLineGrid
                 key={row._key}
                 isFirst={idx === 0}
                 isLast={idx === rows.length - 1}
                 onDelete={() => onChange(rows.filter((r) => r._key !== row._key))}
+                // arriba: la pista bajo el monto no desalinea las casillas
+                className="md:items-start"
               >
-                <div className="md:col-span-6">
-                  <Label className={cn(
-                    "text-xs font-semibold uppercase tracking-wider text-slate-500",
-                    idx > 0 && "sr-only md:not-sr-only",
-                  )}>
-                    Impuesto *
-                  </Label>
+                {/* en móvil, espacio para la papelera absoluta de FormLineGrid */}
+                <div className="pr-10 md:pr-0 md:col-span-6">
+                  <Label className={labelCls}>Impuesto *</Label>
                   <Select
                     value={row.source || undefined}
-                    onValueChange={(v) => setRow(row._key, { source: v, touched: false })}
+                    onValueChange={(v) => setRow(row._key, (r) => selectTaxType(r, v, configs, ivaRatePct))}
                   >
-                    <SelectTrigger className={!row.source ? "border-red-300" : ""}>
+                    <SelectTrigger className={!row.source || isOrphanTaxRow(row, configs) ? "border-red-300" : ""}>
                       <SelectValue placeholder="Seleccionar impuesto..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem
-                        value={IVA_SOURCE}
-                        disabled={used.has(IVA_SOURCE) && row.source !== IVA_SOURCE}
-                      >
-                        IVA ({ivaRatePct}%)
-                      </SelectItem>
-                      {activeConfigs.map((c) => (
+                      {options.map((o) => (
                         <SelectItem
-                          key={c.config_id}
-                          value={c.config_id as string}
-                          disabled={used.has(c.config_id as string) && row.source !== c.config_id}
+                          key={o.key}
+                          value={o.key}
+                          // R3: una fila por (tipo, municipio), la clave del servidor
+                          disabled={usedByOthers.has(o.serverKey)}
                         >
-                          {configLabel(c)} ({c.rate_pct}%)
-                          {c.base_kind === "iva" ? " sobre IVA" : ""}
+                          {o.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="md:col-span-4">
-                  <Label className={cn(
-                    "text-xs font-semibold uppercase tracking-wider text-slate-500",
-                    idx > 0 && "sr-only md:not-sr-only",
-                  )}>
-                    Monto *
-                  </Label>
+                <div className="md:col-span-2">
+                  <Label className={labelCls}>{rateBaseLabel}</Label>
+                  <div className="relative" data-field="tax-rate">
+                    <MoneyInput
+                      value={row.rate}
+                      onChange={(v) => setRow(row._key, (r) => withTaxRate(r, v, base))}
+                      decimals={4}
+                      // R2: el monto se recalcula mientras se escribe el %
+                      liveChange
+                      disabled={!row.source}
+                      className={cn("pr-6", row.source && rateOutOfRange(row.rate) && "border-red-300")}
+                    />
+                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                      %
+                    </span>
+                  </div>
+                  {/* R6 (plan opcion-por-tarifa): en escritorio el rótulo de las filas
+                      2+ está oculto y el de la fila 1 hace de encabezado; la base de
+                      ESTA fila va debajo, para no desalinear la casilla */}
+                  {idx > 0 && (
+                    <p className="hidden md:block text-xs text-slate-400 mt-0.5" data-testid="tax-rate-base">
+                      {rateBaseLabel}
+                    </p>
+                  )}
+                </div>
+                <div className="md:col-span-3" data-field="tax-amount">
+                  <Label className={labelCls}>Monto *</Label>
                   <MoneyInput
                     value={amount}
-                    onChange={(v) => setRow(row._key, { amount: v, touched: true })}
+                    // un blur sin cambio no cuenta como tocar el monto
+                    onChange={(v) => v !== amount && setRow(row._key, (r) => withTaxAmount(r, v))}
                     decimals={2}
                     placeholder="0"
                     className={amount <= 0 ? "border-red-300" : ""}
                   />
+                  {/* R9: la pista y el texto usan el % de la fila */}
                   {row.source && row.touched && amount !== suggested && suggested > 0 && (
                     <button
                       type="button"
                       className="text-xs text-indigo-600 hover:underline mt-0.5"
-                      onClick={() => setRow(row._key, { touched: false })}
+                      onClick={() => setRow(row._key, (r) => ({ ...r, touched: false }))}
                     >
-                      Sugerido: {formatCurrency(suggested)} ({ratePct}%)
+                      Sugerido: {formatCurrency(suggested)} ({fmtRate(row.rate)}%)
                     </button>
                   )}
                   {row.source && !row.touched && (
                     <p className="text-xs text-slate-400 mt-0.5">
-                      {ratePct}% de {formatCurrency(baseAmount)} — editable
+                      {fmtRate(row.rate)}% de {formatCurrency(base)} — editable
+                    </p>
+                  )}
+                  {/* R5: aviso ×5, no bloquea */}
+                  {ref && rateWarning(row.rate, ref.ref) && (
+                    <p className="text-xs text-amber-700 mt-0.5" data-testid="tax-rate-warning">
+                      {rateWarningText(row.rate, ref.ref, ref.label)}
                     </p>
                   )}
                 </div>
@@ -297,18 +212,14 @@ export function DocumentTaxesCard({
               el IVA se le suma y las retenciones se le restan. Cada impuesto crea su
               contrapartida con la entidad <strong>[Impuestos]</strong>.
             </p>
-            {rows.length > 0 && (
-              <p className="text-slate-600 font-medium">
-                Efecto neto sobre el cliente: {net >= 0 ? "+" : "−"}
-                {formatCurrency(Math.abs(net))} → total a pagar {formatCurrency(subtotal + net)}
-              </p>
-            )}
-            {duplicated && (
-              <p className="text-red-500 font-medium">
-                Hay un impuesto repetido. Sume los montos en una sola linea.
-              </p>
-            )}
-            {subtotal + net <= 0 && rows.length > 0 && (
+            <p className="text-slate-600 font-medium">
+              Efecto neto sobre el cliente: {net >= 0 ? "+" : "−"}
+              {formatCurrency(Math.abs(net))} → total a pagar {formatCurrency(subtotal + net)}
+            </p>
+            {problems.map((p) => (
+              <p key={p} className="text-red-500 font-medium" data-testid="tax-problem">{p}</p>
+            ))}
+            {subtotal + net <= 0 && (
               <p className="text-red-500 font-medium">
                 Las retenciones no pueden igualar ni superar el total facturado.
               </p>

@@ -33,6 +33,10 @@ export interface RetRow {
   staleRate?: number | null;
   /** T2: «Retención en la Fuente», «ICA — Barranquilla» */
   staleLabel?: string;
+  /** Plan retención-sigue v1.3 R1: vino de la liquidación guardada, con su %, y
+   * nadie editó el monto en esta sesión. Mientras siga así, si el subtotal de la
+   * compra cambió respecto de la apertura, el monto sigue al % (R2). */
+  fromSaved?: boolean;
 }
 
 /** Retención guardada de la compra (InboundRetentionDetail; Decimal llega string). */
@@ -60,6 +64,28 @@ const round4 = (x: number) => Math.round(x * 10000) / 10000;
 
 /** % × base a 2 decimales (el mismo redondeo de siempre). */
 export const pctOf = (base: number, rate: number): number => Math.round(base * rate) / 100;
+
+/** R4: la comparación del subtotal es a centavos. */
+const cents = (x: number): number => Math.round(x * 100);
+
+/** Plan retención-sigue v1.3 R0–R6, el ÚNICO predicado (R7) para la retención
+ * y el IVA precargados: ¿el monto guardado deja de valer y sigue al %?
+ * Solo si la fila vino de lo guardado con su % (R1, R6), hay subtotal de
+ * apertura (R6: un borrador de antes no lo trae) y el subtotal actual de la
+ * compra en pantalla es distinto de la apertura, a centavos (R0, R4). Los dos
+ * lados salen de la misma cuenta de la pantalla: sin cambios, dan igual y el
+ * monto guardado se conserva, aunque esté escrito a mano (R3). */
+export function followsSubtotal(
+  fromSaved: boolean | undefined,
+  openSubtotal: number | null | undefined,
+  subtotal: number,
+  rate: number | null | undefined,
+): boolean {
+  if (!fromSaved) return false;
+  if (typeof openSubtotal !== "number" || !Number.isFinite(openSubtotal)) return false;
+  if (typeof rate !== "number" || !Number.isFinite(rate)) return false;
+  return cents(subtotal) !== cents(openSubtotal);
+}
 
 /** Mismo criterio que normalize_entity_name para comparar municipios. */
 const normMuni = (s: string | null | undefined): string | null =>
@@ -101,6 +127,8 @@ export function precargaRetention(saved: SavedRetention, catalog: RetentionRow[]
   const savedRate = saved.rate == null || saved.rate === "" ? null : toNum(saved.rate);
   const amount = toNum(saved.amount);
   const cfg = pickTypeConfig(saved.retention_type, saved.municipality, catalog);
+  // R6: sin % guardado el % es el de la tarifa, no el de lo guardado: queda fija
+  const fromSaved = savedRate != null;
   if (cfg) {
     return {
       _key: key,
@@ -108,6 +136,7 @@ export function precargaRetention(saved: SavedRetention, catalog: RetentionRow[]
       rate: savedRate ?? toNum(cfg.rate_pct),
       amount,
       touched: true,
+      fromSaved,
     };
   }
   return {
@@ -116,6 +145,7 @@ export function precargaRetention(saved: SavedRetention, catalog: RetentionRow[]
     rate: savedRate ?? 0,
     amount,
     touched: true,
+    fromSaved,
     staleRate: savedRate,
     staleLabel: typeLabel(saved.retention_type, saved.municipality),
   };
@@ -182,12 +212,20 @@ export const withConfig = (row: RetRow, cfg: RetentionRow): RetRow => ({
 export const withRate = (row: RetRow, rate: number): RetRow =>
   round4(rate) === round4(row.rate) ? row : { ...row, rate, amount: 0, touched: false };
 
-/** T4: editar el monto lo deja fijo. */
-export const withAmount = (row: RetRow, amount: number): RetRow => ({ ...row, amount, touched: true });
+/** T4: editar el monto lo deja fijo; R5: deja de ser «lo guardado». */
+export const withAmount = (row: RetRow, amount: number): RetRow => ({
+  ...row,
+  amount,
+  touched: true,
+  fromSaved: false,
+});
 
-/** El monto que vale: el editado, o el % × base. */
-export const effAmount = (row: RetRow, base: number): number =>
-  row.touched ? row.amount : pctOf(base, row.rate);
+/** El monto que vale: el editado, o el % × base. R2: el guardado sigue al %
+ * si el subtotal cambió respecto de la apertura (`followsSubtotal`). */
+export const effAmount = (row: RetRow, base: number, openSubtotal?: number | null): number =>
+  row.touched && !followsSubtotal(row.fromSaved, openSubtotal, base, row.rate)
+    ? row.amount
+    : pctOf(base, row.rate);
 
 /** T7: ¿el % se aleja más de 5 veces de la referencia, por arriba o por abajo? */
 export const rateWarning = (rate: number, ref: number | null | undefined): boolean =>
@@ -214,13 +252,18 @@ export const staleNote = (staleLabel: string | undefined): string =>
 export const rateOutOfRange = (rate: number): boolean => !(rate > 0) || rate > 100;
 
 /** El bloque que va al servidor (`rate` es el % digitado, no el del catálogo). */
-export function buildRetentionPayload(row: RetRow, cfg: RetentionRow, base: number) {
+export function buildRetentionPayload(
+  row: RetRow,
+  cfg: RetentionRow,
+  base: number,
+  openSubtotal?: number | null,
+) {
   return {
     retention_type: cfg.retention_type,
     // CC-013 C2: la tarifa, para que el servidor rechace una `base_kind='iva'`
     config_id: cfg.config_id as string,
     municipality: cfg.retention_type === "ica" ? cfg.municipality ?? null : undefined,
-    amount: effAmount(row, base),
+    amount: effAmount(row, base, openSubtotal),
     rate: row.rate,
     base: base > 0 ? base : undefined,
   };
@@ -233,17 +276,24 @@ export interface IvaState {
   ivaRate: number;
   ivaAmount: number;
   ivaTouched: boolean;
+  /** R1, igual que `RetRow.fromSaved` */
+  ivaFromSaved?: boolean;
 }
 
-/** T8: el IVA guardado vuelve con su tasa; «editado» se mide contra ESA tasa. */
+/** T8: el IVA guardado vuelve con su tasa. Retención-sigue v1.3: vuelve FIJO
+ * (R3: el monto guardado vale tal cual, calculado o a mano) y marcado como
+ * guardado; si el subtotal cambia respecto de la apertura, sigue al % (R2).
+ * `base_amount` (la base del servidor) NO se compara: es de otra fuente (C1). */
 export function precargaIva(tax: SavedTax): IvaState {
-  const ivaRate = tax.rate == null || tax.rate === "" ? IVA_DEFAULT_RATE_PCT : toNum(tax.rate);
-  const ivaAmount = toNum(tax.amount);
+  const hasRate = !(tax.rate == null || tax.rate === "");
+  const ivaRate = hasRate ? toNum(tax.rate) : IVA_DEFAULT_RATE_PCT;
   return {
     withIva: true,
     ivaRate,
-    ivaAmount,
-    ivaTouched: ivaAmount !== pctOf(toNum(tax.base_amount), ivaRate),
+    ivaAmount: toNum(tax.amount),
+    ivaTouched: true,
+    // R6: sin % guardado queda fijo
+    ivaFromSaved: hasRate,
   };
 }
 
@@ -255,8 +305,14 @@ export const reviveDraftIvaRate = (ivaRate: unknown): number =>
 export const ivaRatePatch = (current: number, rate: number): Partial<IvaState> | null =>
   round4(rate) === round4(current) ? null : { ivaRate: rate, ivaAmount: 0, ivaTouched: false };
 
-export const effIva = (s: IvaState, base: number): number =>
-  !s.withIva ? 0 : s.ivaTouched ? s.ivaAmount : pctOf(base, s.ivaRate);
+/** R7: el único lugar que decide el monto del IVA (la tarjeta, el pie y el
+ * payload leen este). */
+export const effIva = (s: IvaState, base: number, openSubtotal?: number | null): number =>
+  !s.withIva
+    ? 0
+    : s.ivaTouched && !followsSubtotal(s.ivaFromSaved, openSubtotal, base, s.ivaRate)
+      ? s.ivaAmount
+      : pctOf(base, s.ivaRate);
 
 export const ivaPayload = (rate: number, amount: number) => ({
   tax_type: "iva" as const,

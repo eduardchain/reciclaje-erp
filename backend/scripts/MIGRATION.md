@@ -15,26 +15,29 @@ Este playbook documenta como migrar los datos maestros de un cliente nuevo a una
 1. **Dry-run sin --apply** — valida sin tocar la BD ni requerir login:
    ```bash
    ./venv/bin/python3 scripts/migrate_org.py \
-     --excel <path/al/excel.xlsx> \
+     --file <path/al/excel.xlsx> \
      --org-name "<Nombre del cliente>" \
-     --admin-email <email>
+     --admin-email <email> \
+     --admin-name "<Nombre del admin>"
    ```
 2. **Revisar warnings/errors** en el output. `Errores: 0` es prerequisito para apply.
-3. **Aplicar** (requiere superuser + confirmacion manual):
+3. **Aplicar** (requiere superuser + confirmacion manual). La clave del superusuario sale **solo del entorno** (`SEED_SU_PASSWORD`), nunca de un argumento: en la linea de comandos quedaria a la vista de `ps` y en el historial, y el script rechaza `--superuser-password`. Se carga de `~/.config/sac-prod.env` en el MISMO comando:
    ```bash
+   F=~/.config/sac-prod.env
+   SEED_SU_EMAIL="$(sed -n 's/^SEED_SU_EMAIL=//p' "$F")" \
+   SEED_SU_PASSWORD="$(sed -n 's/^SEED_SU_PASSWORD=//p' "$F")" \
    ./venv/bin/python3 scripts/migrate_org.py \
-     --excel <path> \
+     --file <path> \
      --org-name "<Nombre>" \
      --admin-email <email> \
      --admin-name "<Nombre del admin>" \
-     --superuser-email <super>@ecobalance.com \
-     --superuser-password '<pwd>' \
      --apply
    ```
+   `--superuser-email <email>` sigue aceptandose como override del email (no es secreto).
 4. **Verificacion automatica** corre al final: conteos exactos + sumas con tolerancia (default $100, ajustable con `--balance-tolerance`) + Balance Sheet `is_balanced == true`. Si algun check falla, exit code 1 con dump del diff.
 5. **Verificacion manual UI** (~15 min): login con el admin user, validar Balance Sheet, conteos de entidades en cada modulo, una compra de prueba que descuenta stock y mueve balances.
 
-Para apply en produccion, el script se corre **localmente apuntando al api-url remoto** (`--api-url https://api.ecobalance.com`), nunca desde el VPS.
+Para apply en produccion, el script se corre **localmente apuntando al api-url remoto** (`--api-url https://api.ecobalance.cc`), nunca desde el VPS.
 
 ## Hoja por hoja (referencia detallada)
 

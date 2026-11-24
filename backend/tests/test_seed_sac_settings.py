@@ -151,8 +151,8 @@ class TestPatchSettings:
 
         monkeypatch.setattr(seed, "APIClient", lambda dry_run, base_url: api)
         monkeypatch.setattr(seed.SacSeeder, "run", run)
-        monkeypatch.setattr(sys, "argv", ["seed", "--apply", "--superuser-email", "a@b",
-                                          "--superuser-password", "x"])
+        monkeypatch.setenv("SEED_SU_PASSWORD", "x")  # la clave sale del entorno (D1)
+        monkeypatch.setattr(sys, "argv", ["seed", "--apply", "--superuser-email", "a@b"])
 
         with caplog.at_level(logging.WARNING), pytest.raises(SystemExit) as exc:
             seed.main()

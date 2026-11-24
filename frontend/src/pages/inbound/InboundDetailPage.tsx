@@ -42,7 +42,6 @@ import {
   formatCurrency,
   formatCurrencyDecimals,
   formatDate,
-  formatDateTime,
   formatTime,
   formatWeight,
 } from "@/utils/formatters";
@@ -89,6 +88,29 @@ function InfoRow({ label, value, long = false }: { label: string; value: React.R
       <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</span>
       <span className="text-sm text-slate-800 sm:text-right">{value}</span>
     </div>
+  );
+}
+
+/**
+ * Valor de una fila de auditoría («Registrada/Revisada/Liquidada/Anulada por»):
+ * «nombre · fecha, hora», con el mismo formato en todas las filas. El bloque
+ * «fecha, hora» no se parte (whitespace-nowrap): a 1440 la hora se cortaba
+ * antes de «p. m.». El «·» va pegado al nombre (espacio de no separación), así
+ * que si el renglón no alcanza, la fecha baja entera y ningún renglón empieza
+ * con el separador. La fecha y la hora llegan ya formateadas porque en
+ * «Liquidada por» salen de dos campos: la fecha es de NEGOCIO (liquidated_at →
+ * formatDate, #87) y la hora es del instante real (liquidated_ts → formatTime).
+ * Sin nombre (la fila «Anulada» de la tarjeta de efectos) pinta solo
+ * «fecha, hora», con el mismo bloque; sin nombre ni fecha, «—».
+ */
+function AuditValue({ name, date, time }: { name?: string; date: string | null; time: string | null }) {
+  const when = [date, time].filter(Boolean).join(", ");
+  if (!when) return <>{name ?? "—"}</>;
+  if (!name) return <span className="whitespace-nowrap">{when}</span>;
+  return (
+    <>
+      {`${name}\u00A0·`} <span className="whitespace-nowrap">{when}</span>
+    </>
   );
 }
 
@@ -514,7 +536,13 @@ export default function InboundDetailPage() {
             {order.created_by_name && (
               <InfoRow
                 label="Registrada por"
-                value={`${order.created_by_name} · ${formatDateTime(order.created_at)}`}
+                value={
+                  <AuditValue
+                    name={order.created_by_name}
+                    date={formatDate(order.created_at)}
+                    time={formatTime(order.created_at)}
+                  />
+                }
                 long
               />
             )}
@@ -522,7 +550,13 @@ export default function InboundDetailPage() {
             {order.reviewed_by_name && order.display_status !== "annulled" && (
               <InfoRow
                 label="Revisada por"
-                value={`${order.reviewed_by_name}${order.reviewed_at ? ` · ${formatDateTime(order.reviewed_at)}` : ""}`}
+                value={
+                  <AuditValue
+                    name={order.reviewed_by_name}
+                    date={order.reviewed_at ? formatDate(order.reviewed_at) : null}
+                    time={order.reviewed_at ? formatTime(order.reviewed_at) : null}
+                  />
+                }
                 long
               />
             )}
@@ -531,17 +565,27 @@ export default function InboundDetailPage() {
                 label="Liquidada por"
                 // liquidated_at es fecha de NEGOCIO → formatDate (#87); la hora
                 // real del clic vive aparte en liquidated_ts (null en entradas
-                // liquidadas antes de que existiera la columna)
-                value={`${order.liquidated_by_name}${
-                  order.liquidated_at ? ` · ${formatDate(order.liquidated_at)}` : ""
-                }${order.liquidated_ts ? ` a las ${formatTime(order.liquidated_ts)}` : ""}`}
+                // liquidadas antes de que existiera la columna: sale solo la fecha)
+                value={
+                  <AuditValue
+                    name={order.liquidated_by_name}
+                    date={order.liquidated_at ? formatDate(order.liquidated_at) : null}
+                    time={order.liquidated_ts ? formatTime(order.liquidated_ts) : null}
+                  />
+                }
                 long
               />
             )}
             {order.display_status === "annulled" && (order.annulled_by_name || order.annulled_at) && (
               <InfoRow
                 label="Anulada por"
-                value={`${order.annulled_by_name ?? "—"}${order.annulled_at ? ` · ${formatDateTime(order.annulled_at)}` : ""}`}
+                value={
+                  <AuditValue
+                    name={order.annulled_by_name ?? "—"}
+                    date={order.annulled_at ? formatDate(order.annulled_at) : null}
+                    time={order.annulled_at ? formatTime(order.annulled_at) : null}
+                  />
+                }
                 long
               />
             )}
@@ -707,7 +751,16 @@ export default function InboundDetailPage() {
             )}
             {order.status === "annulled" && (
               <>
-                <InfoRow label="Anulada" value={order.annulled_at ? formatDateTime(order.annulled_at) : "—"} />
+                <InfoRow
+                  label="Anulada"
+                  // annulled_at es un instante real (#87): lleva hora
+                  value={
+                    <AuditValue
+                      date={order.annulled_at ? formatDate(order.annulled_at) : null}
+                      time={order.annulled_at ? formatTime(order.annulled_at) : null}
+                    />
+                  }
+                />
                 <InfoRow label="Motivo" value={order.annulled_reason ?? "—"} long />
               </>
             )}
