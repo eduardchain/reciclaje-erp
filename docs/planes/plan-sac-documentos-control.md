@@ -1,8 +1,14 @@
-# Plan — Entradas y Salidas «de control» (SAC, v1.3)
+# Plan — Entradas y Salidas «de control» (SAC, v1.3.1)
 
 **Autor:** Eco Coder 2 · **Fecha:** 2026-11-24 · **Rama:** `coder-2/documentos-control` sobre develop `5139940`
 **Nivel:** lógica (migración, reglas de estado en un servicio con dinero, guards en servicios compartidos si se aprueba D5).
 **Autorización:** Daniel, 24-nov («esos dos, dale»), vía Coordinador. Este documento es SOLO el plan; construir exige el GO de QA 2 y después la autorización de Daniel.
+
+**Cambios v1.3 → v1.3.1** (GO condicionado de QA 2, `veredicto_v1.3_f2b77587.md`, `45e3c7a6`):
+- **C1:** `is_control_only` pasa a incluir el estado. Vale solo en `draft`, `reviewed` y `closed`. Una liquidada a $1 cuyos materiales se marcaron después sigue siendo «Compra», con su total. El filtro lo espeja, y T26 lo prueba por el camino real (§11.2).
+- **O1:** P34a/P34b, quitar el estado del predicado.
+- **O2:** la cita de Salidas de Plomo (§11.7).
+- **Corrección propia:** la §11.1 decía que ESTIBAS ya estaba marcada en prod. Es falso: la columna `control_only` no está desplegada, y ESTIBAS se marca después del deploy (§9, «Después» 1). G-prod 2 y G-prod 6 pasan a ser prerrequisitos del deploy, y los corre el Coordinador (§11.6).
 
 **Cambios v1.2 → v1.3** (24-nov, después de la primera vista en localhost): Daniel aprobó 5 ajustes antes del deploy (ventanita de las ~21:15, vía Coordinador). Van en la §11, con su cómo, sus tests y su plantado. Las secciones 1–10 no cambian. Rama `coder-2/control-ajustes` sobre develop `7a3cb78`.
 
@@ -439,20 +445,26 @@ Hoy un material de control se guarda como «Compra regular» (`willard_world='no
   `compra_regular` ya no se lee como «el usuario eligió Compra regular»: para un material de control solo dice «la captura lo deja pasar». La Compra directa la sigue frenando D5.
 - **Lo que no se ofrece con «Control»** (nota 3): «También entra por compra regular» (solo existe en Willard) y el selector «Plomo entregable» (se oculta y se fuerza `none`). El factor tampoco: `isWillard` es false.
 - **El orden del guardado no cambia** (§4.1): desmarcar → perfil → marcar → fórmula. Entrar a «Control» desde Willard o desde plomo primero guarda el perfil en `none` y después marca. Salir de «Control» desmarca primero y después reclasifica. `effControlOnly` pasa a ser `classification === "control"`, y `controlBlockedReason` desaparece: la exclusión ahora la da el selector.
-- **Filas existentes sin re-guardar** (nota 4): ESTIBAS en dev (`compra_regular=true`, `control_only=true`) y en prod (marcada por el runbook, que solo usa `PUT /control`, así que conserva su `compra_regular`) se ven como «Control» apenas carga la pantalla, porque `classificationOf` mira la marca primero.
+- **Filas existentes sin re-guardar** (nota 4): ESTIBAS en dev (`compra_regular=true`, `control_only=true`) se ve como «Control» apenas carga la pantalla, porque `classificationOf` mira la marca primero. En prod todavía no hay marca: la columna llega con el deploy, y ESTIBAS se marca después (§9, «Después» 1) eligiendo «Control» en la Clasificación. Eso guarda `compra_regular=true` y `willard_world='none'`, lo mismo que G-prod 6 espera que tenga hoy.
   - Si alguna fila de control tuviera `compra_regular=false` (solo por API), también se ve como «Control». Re-guardarla sin cambios la pasa a `compra_regular=true`: `profileChanged` compara ese campo. Lo declaro; no hay ninguna así en dev, y prod se mide en G-prod 6 (abajo).
 - **Backend:** no cambia.
 
 ### 11.2 Tipo «Control» deducido en la lista y el detalle (Entradas)
 
 **Cómo:**
+- **C1 de QA 2 — el predicado incluye el estado.** El campo `is_control_only` de la respuesta (endpoint l.298) pasa a ser: tiene líneas, todas de material con `control_only`, **y** `status ∈ {draft, reviewed, closed}`, o sea, sin efectos. Una Entrada liquidada a $1 cuyos materiales se marcaron después (el caso de G-prod 2) tiene compras y deuda: sigue siendo «Compra», con su total, sin «Sin valor» y fuera del filtro «Control». Una anulada tampoco cuenta.
+  - Es UN predicado del lado del servidor. La pantalla no le agrega estado: la píldora «Sin valor» (l.405 y l.569), el «—» del total (l.371 y l.588), el tipo, `closableControl`, el detalle (`isControlOnly`) y la liquidación (l.837) leen el campo y quedan bien por construcción.
+  - La nota «N líneas de control no se liquidan» del detalle (l.988) pasa a verse solo en `draft` y `reviewed`. Habla en futuro, y en una liquidada antes de la marca sería falsa.
+  - Declarado: una desliquidada vuelve a `reviewed` con sus compras `registered` (R2b), y si sus materiales son todos de control ahora se ve «Control» y «Sin valor». No tiene compras liquidadas y `close` la rechaza (R2b), así que el «Sin valor» es cierto: hoy no carga plata.
 - `EntradaTypeBadge` (que usan la lista y el detalle) y la tarjeta de 390 (l.579) muestran «Control», con badge gris, cuando `order.is_control_only` es true y la Entrada no es Willard. Si no, muestran lo de hoy. El pesador no elige nada nuevo: la Entrada se sigue capturando como tipo compra.
 - **Filtro «Todos los tipos»:** gana «Control». La paginación es del servidor, así que el filtro va al backend.
   - `GET /inbound-orders` gana `control_only: Optional[bool]`. `get_multi` lo aplica con una sola expresión SQL que espeja el campo de la respuesta (`is_control_only` = tiene líneas y todas son de material con `control_only`, endpoint l.298):
     ```
-    es_control = EXISTS(línea de la Entrada)
-                 AND NOT EXISTS(línea cuyo material no tiene perfil de la org con control_only = true)
+    es_control = status IN ('draft', 'reviewed', 'closed')
+                 AND EXISTS(línea de la Entrada)
+                 AND NOT EXISTS(línea cuyo material no tiene perfil DE LA MISMA ORG con control_only = true)
     ```
+    El perfil se filtra por la org, como en `control_material_ids`.
     `true` filtra `es_control`; `false` filtra `NOT es_control`. Todo va por EXISTS, sin join (trampa 1:N de #89/#93).
   - Pantalla: «Control» manda `control_only=true`. **«Compra regular» pasa a mandar `inbound_type=purchase&control_only=false`**: si la lista muestra el tipo «Control», el filtro «Compra regular» no puede traer esas Entradas (paridad filtro ↔ lo que se ve, como T5). Los filtros Willard no cambian; una Willard nunca es de control (§4.1).
 - **Backend:** un parámetro opcional. Sin él, la consulta es la misma de hoy.
@@ -487,11 +499,14 @@ Hoy un material de control se guarda como «Compra regular» (`willard_world='no
   - una mixta;
   - una compra normal;
   - una Willard;
-  - una Entrada sin líneas, armada por ORM (N2 de QA 2: sin líneas no es solo de control).
+  - una Entrada sin líneas, armada por ORM (N2 de QA 2: sin líneas no es solo de control);
+  - **C1:** una solo de un material **sin** la marca, liquidada a $1 por la API, y el material marcado **después**;
+  - una solo de control anulada desde Registrada.
   Afirma:
   - `control_only=true` da exactamente los ids con `is_control_only=true`, leídos de la misma lista sin filtro;
   - `false` da el complemento;
-  - las dos son distintas de vacío (guarda anti-vacuidad, #110).
+  - las dos son distintas de vacío (guarda anti-vacuidad, #110);
+  - por nombre: la liquidada a $1 tiene `is_control_only=false`, sale en `false` y no en `true`, y su `total_value` sigue llegando. La anulada, igual.
 - **T27, «Compra regular» de la pantalla.** `inbound_type=purchase&control_only=false` trae la mixta y la compra normal, y no trae ni las de control ni la Willard. Combinado con `display_status=closed`, da vacío.
 
 **Plantado:** la matriz va en adenda a `matriz-plantado-documentos-control.md`, commiteada antes de plantar.
@@ -502,6 +517,8 @@ Hoy un material de control se guarda como «Compra regular» (`willard_world='no
 | P31 | quitar el `EXISTS(línea)` | = {t26}, por la Entrada sin líneas |
 | P32 | la rama `true` sin el `NOT EXISTS` (solo «tiene líneas») | = {t26}: trae la mixta y la compra normal |
 | P33 | `true` y `false` invertidos | = {t26, t27} |
+| P34a (O1) | quitar el estado del campo `is_control_only` (endpoint) | = {t26} |
+| P34b (O1) | quitar el estado del filtro (servicio) | = {t26} |
 
 **Front:**
 - lint (37 = techo), `tsc` y `build`, más las 3 guardas del árbol;
@@ -513,4 +530,18 @@ Hoy un material de control se guarda como «Compra regular» (`willard_world='no
 
 **Dirigidas:** set rehecho con `dirigidas_set.sh` sobre el árbol final, con la predicción escrita antes. **Golden:** no aplica, y se mide: el parámetro es opcional y ninguna captura toca `/inbound-orders`.
 
-**G-prod 6 (lectura, la corre el Coordinador antes del deploy):** materiales de SAC con `control_only=true`, con su `compra_regular` y su `willard_world`. Esperado: ESTIBAS con `compra_regular=true` y `willard_world='none'`.
+**Prerrequisitos del deploy (lectura en prod; los corre el Coordinador, el único que toca prod):**
+- **G-prod 2:** no está medido. Hay que contar las Entradas de SAC no anuladas, liquidadas, cuyas líneas son todas de ESTIBAS, y también las anuladas, con su remisión y su total. Con la v1.3.1 esas Entradas siguen viéndose como «Compra», con su total, así que la pantalla no las esconde. Si existen, qué hacer con ellas lo decide Daniel (§6).
+- **G-prod 6:** el `compra_regular` y el `willard_world` de ESTIBAS hoy. La columna `control_only` todavía no existe en prod. Se espera `true` y `'none'`: marcarla «Control» después del deploy no los cambia.
+
+### 11.7 La cita de Salidas de Plomo (O2, pedido del Coordinador)
+
+La §4.5 (l.212) y el docstring de `remission_book.py` (l.14-15) dicen que la remisión de Salidas de Plomo es «el número de Willard, digitado a mano (#105, Q-27)». Está mal por dos razones:
+- Q-27 es la pregunta de la maquila.
+- «Número de Willard» lo dijo Daniel, no Hugo.
+
+Lo que dijo Hugo (28-ago, 00:13:03): «para los abonos tenemos un consecutivo y para la venta otro consecutivo […] un consecutivo de abono, que es el que llevo con Wila[rd]». Son los dos consecutivos de planta, la serie de #105.
+
+Que sean distintos del talonario de las Entradas es lectura nuestra: Hugo no los comparó.
+
+La exclusión de O3 no cambia. El docstring se corrige en el delta de construcción como cambio solo de texto, con `ast` sin docstrings idéntico. La §4.5 queda como estaba, y esta nota la corrige.
