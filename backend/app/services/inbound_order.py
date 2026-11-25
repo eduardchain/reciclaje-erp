@@ -45,6 +45,7 @@ from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.inventory_movement import InventoryMovement
 from app.models.kg_ledger import KgLedgerAccount, KgLedgerMovement
 from app.services.kg_ledger import add_kg_movement
+from app.services.retention_entities import normalize_entity_name
 from app.models.material import Material
 from app.models.material_conversion_formula import MaterialConversionFormula
 from app.models.material_kg_profile import MaterialKgProfile
@@ -83,6 +84,12 @@ WORLD_LABELS = {
 
 def _err(detail: str, code: int = status.HTTP_422_UNPROCESSABLE_ENTITY):
     return HTTPException(status_code=code, detail=detail)
+
+
+def _fmt_pct(fraction) -> str:
+    """0.56 -> '56 %', 0.565 -> '56,5 %' (descripcion del movimiento kg, D4)."""
+    pct = (Decimal(str(fraction)) * 100).normalize()
+    return f"{pct:f}".replace(".", ",") + " %"
 
 
 class InboundOrderService:
@@ -1308,6 +1315,7 @@ class InboundOrderService:
         order_id: UUID,
         organization_id: UUID,
         user_id: UUID,
+        conversion_options: Optional[list] = None,
     ) -> InboundOrder:
         """Reviewed -> confirmed: borra las lineas y re-aplica via
         _apply_willard_effects (el MISMO camino de efectos del 1-paso previo:
@@ -1344,6 +1352,19 @@ class InboundOrderService:
         self._validate_warehouse(db, order.warehouse_id, organization_id)
         self._validate_third_party(db, order.third_party_id, organization_id)
 
+        # plan-sac-factor-willard D3: factor escogido por material (A1: un
+        # material repetido es 422; uno que no esta en la Entrada, tambien)
+        chosen: dict = {}
+        order_materials = {l.material_id for l in order.lines}
+        for item in conversion_options or []:
+            if item.material_id in chosen:
+                raise _err(
+                    "Un material aparece mas de una vez en los factores escogidos"
+                )
+            if item.material_id not in order_materials:
+                raise _err("Escogio un factor para un material que no esta en la Entrada")
+            chosen[item.material_id] = item.option
+
         # Reconstruir lines_in desde las lineas draft persistidas (patron D18)
         lines_in = [
             SimpleNamespace(
@@ -1352,9 +1373,11 @@ class InboundOrderService:
                 unit_price=l.unit_price,
                 scale_weight_kg=l.scale_weight_kg,
                 quality_notes=l.quality_notes,
+                conversion_option=chosen.get(l.material_id),
             )
             for l in order.lines
         ]
+        self._preflight_lead_factors(db, organization_id, lines_in)
         # Borrar las draft — _apply_willard_effects las recrea con unit_cost
         db.query(InboundOrderLine).filter(
             InboundOrderLine.inbound_order_id == order.id
@@ -1494,6 +1517,17 @@ class InboundOrderService:
         )
         today = business_today()
 
+        # plan-sac-factor-willard D3: todos los factores se resuelven ANTES de
+        # la primera escritura — un 422 no deja la mitad de las lineas hechas
+        factors = {}
+        for line_in in lines_in:
+            material = self._validate_material(db, line_in.material_id, organization_id)
+            factors[line_in.material_id] = self._resolve_lead_factor(
+                formulas[line_in.material_id], material,
+                getattr(line_in, "conversion_option", None),
+                from_saved=getattr(line_in, "option_from_saved", False),
+            )
+
         for line_in in lines_in:
             material = self._validate_material(db, line_in.material_id, organization_id)
             qty = Decimal(str(line_in.quantity))
@@ -1502,7 +1536,8 @@ class InboundOrderService:
             kg_source = KG_SOURCE_BY_WORLD[world]
             label = WORLD_LABELS[world]
             formula = formulas[line_in.material_id]
-            delta_kg = self._compute_kg_lead(formula, qty)
+            lead_pct, stored_option, applied = factors[line_in.material_id]
+            delta_kg = self._compute_kg_lead(formula, qty, lead_pct)
 
             # D2: entrada a identidad — adjustment 0 y avg intacto por construccion
             old_liq = material.current_stock_liquidated
@@ -1524,6 +1559,7 @@ class InboundOrderService:
                 unit_cost=avg.quantize(Decimal("0.01")),  # snapshot D8
                 scale_weight_kg=line_in.scale_weight_kg,
                 quality_notes=line_in.quality_notes,
+                conversion_option=stored_option,
             )
             db.add(line)
 
@@ -1560,24 +1596,31 @@ class InboundOrderService:
             # D5: un KgLedgerMovement POR LINEA con snapshot de formula propio
             # Escritor unico del libro kg (#107 D1, F1 de QA): cuentas Willard,
             # sin etapa (solo intersede se parte en horno y crisol).
+            snapshot = {
+                "formula_id": str(formula.id),
+                "formula_type": formula.formula_type,
+                "parameters": formula.parameters,
+            }
+            description = (
+                f"Recepcion {label} #{order.order_number} — "
+                f"{material.code} x {qty:g} {material.default_unit or 'kg'}"
+            )
+            if applied is not None:
+                # plan-sac-factor-willard D4: solo si la formula tiene factores
+                # alternativos; sin ellos, snapshot y descripcion como siempre
+                snapshot["applied"] = applied
+                description += f" · {applied['label']} {_fmt_pct(applied['lead_percentage'])}"
             add_kg_movement(
                 db,
                 organization_id=organization_id,
                 account=account,
                 delta_kg=delta_kg,
                 transaction_date=order.date,
-                description=(
-                    f"Recepcion {label} #{order.order_number} — "
-                    f"{material.code} x {qty:g} {material.default_unit or 'kg'}"
-                ),
+                description=description,
                 source_type=kg_source,
                 source_id=order.id,
                 inventory_movement_id=movement.id,
-                conversion_formula_snapshot={
-                    "formula_id": str(formula.id),
-                    "formula_type": formula.formula_type,
-                    "parameters": formula.parameters,
-                },
+                conversion_formula_snapshot=snapshot,
                 created_by=user_id,
             )
 
@@ -1863,6 +1906,10 @@ class InboundOrderService:
                 if decert:
                     warnings.append(decert)
         if needs_reapply:
+            # plan-sac-factor-willard D5: cada material conserva el factor que
+            # tenia su linea; el PATCH no puede cambiarlo (no tiene el campo) y
+            # un material nuevo entra con el defecto
+            saved_options = {l.material_id: l.conversion_option for l in order.lines}
             old_lines = [
                 SimpleNamespace(
                     material_id=l.material_id,
@@ -1870,9 +1917,26 @@ class InboundOrderService:
                     unit_price=l.unit_price,
                     scale_weight_kg=l.scale_weight_kg,
                     quality_notes=l.quality_notes,
+                    conversion_option=l.conversion_option,
+                    option_from_saved=True,
                 )
                 for l in order.lines
             ]
+            new_lines = old_lines if obj_in.lines is None else [
+                SimpleNamespace(
+                    material_id=l.material_id,
+                    quantity=l.quantity,
+                    unit_price=l.unit_price,
+                    scale_weight_kg=l.scale_weight_kg,
+                    quality_notes=l.quality_notes,
+                    conversion_option=saved_options.get(l.material_id),
+                    option_from_saved=True,
+                )
+                for l in obj_in.lines
+            ]
+            # El 422 de un factor que ya no esta en la lista (D5) sale ANTES
+            # de revertir nada
+            self._preflight_lead_factors(db, organization_id, new_lines)
             revert_adj, rev_warnings = self._revert_willard_effects(
                 db, order, organization_id, user_id,
                 reason=f"Edicion de orden #{order.order_number}",
@@ -1896,7 +1960,6 @@ class InboundOrderService:
             if obj_in.date is not None:
                 order.date = obj_in.date
 
-            new_lines = obj_in.lines if obj_in.lines is not None else old_lines
             self._apply_willard_effects(db, order, new_lines, organization_id, user_id)
 
         # Cabecera sin efectos
@@ -2467,14 +2530,18 @@ class InboundOrderService:
 
     def kg_deltas_by_movement(
         self, db: Session, organization_id: UUID, order_ids: list[UUID]
-    ) -> dict[UUID, Decimal]:
-        """Mapa inventory_movement_id -> delta_kg (confirmed) para enriquecer lineas."""
+    ) -> dict[UUID, tuple[Decimal, Optional[dict]]]:
+        """Mapa inventory_movement_id -> (delta_kg, snapshot de formula) de los
+        kg CONFIRMADOS, para enriquecer lineas. El snapshot alimenta
+        `lead_percentage_applied` (plan-sac-factor-willard D8, A3 de QA 1) en
+        la MISMA query: el listado no gana una consulta por orden."""
         if not order_ids:
             return {}
         rows = db.execute(
             select(
                 KgLedgerMovement.inventory_movement_id,
                 KgLedgerMovement.delta_kg,
+                KgLedgerMovement.conversion_formula_snapshot,
             ).where(
                 KgLedgerMovement.organization_id == organization_id,
                 KgLedgerMovement.source_id.in_(order_ids),
@@ -2482,7 +2549,29 @@ class InboundOrderService:
                 KgLedgerMovement.inventory_movement_id.is_not(None),
             )
         ).all()
-        return {row[0]: row[1] for row in rows}
+        return {row[0]: (row[1], row[2]) for row in rows}
+
+    @staticmethod
+    def applied_lead_percentage(snapshot: Optional[dict]) -> Optional[Decimal]:
+        """Factor de plomo que uso una linea Willard, leido de su snapshot:
+        `applied` si la formula tenia factores alternativos, si no el
+        `lead_percentage` de la formula. None en baterias o sin snapshot."""
+        if not snapshot:
+            return None
+        applied = snapshot.get("applied") or {}
+        pct = applied.get("lead_percentage")
+        if pct is None:
+            pct = (snapshot.get("parameters") or {}).get("lead_percentage")
+        return Decimal(str(pct)) if pct is not None else None
+
+    @staticmethod
+    def applied_lead_label(snapshot: Optional[dict]) -> Optional[str]:
+        """Nombre del factor que uso una linea Willard (`applied.label` del
+        snapshot, O1 de QA 1 en la pasada 1). None si la formula no tenia
+        factores alternativos al liquidar: ahi no hubo nada que escoger."""
+        if not snapshot:
+            return None
+        return (snapshot.get("applied") or {}).get("label")
 
     def receipt_movements(
         self, db: Session, organization_id: UUID, order_id: UUID
@@ -2587,14 +2676,113 @@ class InboundOrderService:
         return {f.material_id: f for f in rows}
 
     @staticmethod
-    def _compute_kg_lead(formula: MaterialConversionFormula, qty: Decimal) -> Decimal:
+    def _resolve_lead_factor(
+        formula: MaterialConversionFormula,
+        material: Material,
+        option: Optional[str],
+        *,
+        from_saved: bool = False,
+    ) -> tuple[Optional[Decimal], Optional[str], Optional[dict]]:
+        """plan-sac-factor-willard D3: UN solo lugar decide que factor usa una
+        linea Willard. Retorna (factor, lo que se guarda en la linea, `applied`
+        del snapshot).
+
+        - factor None = el defecto (`lead_percentage`, lo de siempre).
+        - Se guarda NULL si se escogio el defecto, aunque sea por su nombre, y
+          el nombre CANONICO de la formula si es una alternativa (A2 de QA 1).
+        - `applied` existe solo si la formula tiene alternativas (D4): sin
+          ellas el snapshot queda byte a byte como antes.
+        - La comparacion es con normalize_entity_name, el criterio de la
+          unicidad de los nombres en el schema (D1)."""
+        params = formula.parameters or {}
+        alternatives = params.get("alternatives") or []
+        default_applied = (
+            {"label": params.get("label"), "lead_percentage": params.get("lead_percentage")}
+            if alternatives else None
+        )
+        if option is None:
+            return None, None, default_applied
+
+        def _saved_gone():
+            # D5: la opcion venia guardada en la linea (edicion D18) y la
+            # vigente ya no la tiene — nunca se vuelve al defecto en silencio
+            return _err(
+                f"El factor «{option}» de {material.code} ya no esta en la lista "
+                "vigente — vuelva a agregarlo en Configuracion -> Materiales (kg), "
+                "o anule la Entrada y registrela de nuevo"
+            )
+
+        if from_saved and (formula.formula_type != "drosses_to_lead" or not alternatives):
+            raise _saved_gone()
+        if formula.formula_type != "drosses_to_lead":
+            raise _err(
+                f"{material.code} no tiene factores de Willard que escoger "
+                "(solo los materiales en kg los tienen)"
+            )
+        if not alternatives:
+            raise _err(
+                f"{material.code} no tiene factores de Willard alternativos — "
+                "liquidelo sin escoger factor"
+            )
+        wanted = normalize_entity_name(option)
+        if wanted == normalize_entity_name(params.get("label") or ""):
+            return None, None, default_applied
+        for alt in alternatives:
+            if normalize_entity_name(alt["label"]) == wanted:
+                pct = Decimal(str(alt["lead_percentage"]))
+                return pct, alt["label"], {
+                    "label": alt["label"], "lead_percentage": alt["lead_percentage"],
+                }
+        if from_saved:
+            raise _saved_gone()
+        valid = [params.get("label")] + [a["label"] for a in alternatives]
+        raise _err(
+            f"El factor «{option}» no esta en la lista de {material.code} — "
+            f"opciones: {', '.join(v for v in valid if v)}"
+        )
+
+    def _preflight_lead_factors(
+        self, db: Session, organization_id: UUID, lines_in
+    ) -> None:
+        """Resuelve los factores ANTES de escribir nada (T5): un 422 por un
+        factor no puede llegar despues de borrar las lineas o revertir."""
+        chosen = [
+            l for l in lines_in if getattr(l, "conversion_option", None) is not None
+        ]
+        if not chosen:
+            return
+        formulas = self._load_current_formulas(
+            db, organization_id, [l.material_id for l in chosen]
+        )
+        for l in chosen:
+            material = self._validate_material(db, l.material_id, organization_id)
+            formula = formulas.get(l.material_id)
+            if formula is None:
+                raise _err(
+                    f"No hay formula de conversion vigente para {material.code} — "
+                    "creela primero en el maestro de materiales"
+                )
+            self._resolve_lead_factor(
+                formula, material, l.conversion_option,
+                from_saved=getattr(l, "option_from_saved", False),
+            )
+
+    @staticmethod
+    def _compute_kg_lead(
+        formula: MaterialConversionFormula,
+        qty: Decimal,
+        lead_pct: Optional[Decimal] = None,
+    ) -> Decimal:
         """delta_kg = qty x kg_lead_per_unit (baterias) / kg x lead_percentage
-        (drosses). Params viven como numeros JSON -> Decimal(str())."""
+        (drosses). Params viven como numeros JSON -> Decimal(str()).
+
+        `lead_pct` (plan-sac-factor-willard D3): el factor de Willard escogido,
+        ya resuelto por `_resolve_lead_factor`; None = el defecto."""
         params = formula.parameters or {}
         if formula.formula_type == "battery_to_lead":
             factor = Decimal(str(params["kg_lead_per_unit"]))
         elif formula.formula_type == "drosses_to_lead":
-            factor = Decimal(str(params["lead_percentage"]))
+            factor = lead_pct if lead_pct is not None else Decimal(str(params["lead_percentage"]))
         else:
             raise _err(
                 f"Tipo de formula '{formula.formula_type}' no soportado en recepcion"

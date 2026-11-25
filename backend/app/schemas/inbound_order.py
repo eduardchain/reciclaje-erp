@@ -113,6 +113,24 @@ class InboundOrderUpdate(BaseModel):
         return v
 
 
+class InboundConversionOption(BaseModel):
+    """plan-sac-factor-willard D3: el factor de Willard escogido para UN material
+    de la Entrada. `option` es el nombre del factor (el del defecto o el de una
+    alternativa de la formula vigente); null = el defecto."""
+    model_config = ConfigDict(extra="forbid")
+
+    material_id: UUID
+    option: Optional[str] = Field(None, max_length=40)
+
+
+class InboundConfirmRequest(BaseModel):
+    """Cuerpo OPCIONAL de POST /{id}/confirm. Sin cuerpo, o un material que no
+    viene, = factor por defecto (el comportamiento de antes, byte a byte)."""
+    model_config = ConfigDict(extra="forbid")
+
+    conversion_options: list[InboundConversionOption] = Field(default_factory=list)
+
+
 class InboundOrderAnnulRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
 
@@ -334,6 +352,20 @@ class InboundOrderLineResponse(BaseModel):
     quality_notes: Optional[str] = None
     kg_lead: Optional[Decimal] = Field(
         None, description="delta_kg emitido al KgLedger por esta linea (tipos Willard)"
+    )
+    # plan-sac-factor-willard D8
+    conversion_option: Optional[str] = Field(
+        None, description="Factor de Willard escogido; null = el defecto de la formula"
+    )
+    lead_percentage_applied: Optional[Decimal] = Field(
+        None,
+        description="Factor usado, leido del snapshot del kg CONFIRMADO de la linea "
+        "(None si no hay kg vivo, p. ej. en una Entrada anulada)",
+    )
+    lead_factor_label_applied: Optional[str] = Field(
+        None,
+        description="Nombre del factor usado, del mismo snapshot (`applied.label`); "
+        "None si la formula no tenia factores alternativos al liquidar",
     )
     # #93: reparto y descuadre (tipo compra)
     reference_unit_price: Optional[Decimal] = None

@@ -8,6 +8,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,9 +17,14 @@ from app.models.material_conversion_formula import MaterialConversionFormula
 from app.models.user import User
 from app.schemas.material_conversion_formula import (
     EXPECTED_UNIT_BY_FORMULA_TYPE,
+    DrossesToLeadParams,
+    _json_native,
     MaterialConversionFormulaCreate,
     MaterialConversionFormulaResponse,
 )
+
+
+FACTOR_KEYS = ("label", "alternatives")
 
 
 class MaterialConversionFormulaService:
@@ -55,11 +61,13 @@ class MaterialConversionFormulaService:
                 f"Corrige la unidad del material o el tipo de formula",
             )
 
+        parameters = self._carry_over_factors(db, obj_in, organization_id)
+
         db_obj = MaterialConversionFormula(
             organization_id=organization_id,
             material_id=obj_in.material_id,
             formula_type=obj_in.formula_type,
-            parameters=obj_in.canonical_parameters,
+            parameters=parameters,
             notes=obj_in.notes,
             created_by=user_id,
         )
@@ -67,6 +75,46 @@ class MaterialConversionFormulaService:
         db.commit()
         db.refresh(db_obj)
         return self._enrich(db_obj, material, None)
+
+    def _carry_over_factors(
+        self,
+        db: Session,
+        obj_in: MaterialConversionFormulaCreate,
+        organization_id: UUID,
+    ) -> dict:
+        """D2 de plan-sac-factor-willard: ningun escritor borra la lista sin querer.
+
+        FormulasPage y el seeder arman `{lead_percentage}` solo. Si el cuerpo NO
+        trae `label`/`alternatives` (clave ausente) y la vigente si, se copian
+        de la vigente; para quitarlos hay que mandarlos en null explicito (que
+        `exclude_none` no deja llegar al JSONB). La copia se re-valida entera:
+        si choca (el defecto nuevo es igual a una alternativa), 422."""
+        parameters = obj_in.canonical_parameters
+        if obj_in.formula_type != "drosses_to_lead":
+            return parameters
+        missing = [k for k in FACTOR_KEYS if k not in obj_in.params_fields_set]
+        if not missing:
+            return parameters
+        current = self.get_current(db, organization_id, obj_in.material_id)
+        if not current or current[0].formula_type != "drosses_to_lead":
+            return parameters
+        carried = {k: current[0].parameters[k] for k in missing if k in (current[0].parameters or {})}
+        if not carried:
+            return parameters
+        merged = {**parameters, **carried}
+        try:
+            reparsed = DrossesToLeadParams(**merged)
+        except ValidationError as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "La version nueva choca con los factores de Willard que tiene la "
+                    "vigente y que se conservan al no mandarlos: "
+                    + "; ".join(err["msg"] for err in e.errors())
+                    + ". Edite la lista de factores en el mismo cambio."
+                ),
+            )
+        return _json_native(reparsed.model_dump(exclude_none=True))
 
     def get_all(
         self,

@@ -239,6 +239,12 @@ export interface InboundOrderLineResponse {
   quality_notes: string | null;
   /** delta_kg emitido al KgLedger por esta línea (solo tipos Willard) */
   kg_lead: number | null;
+  /** plan-sac-factor-willard D8: factor de Willard escogido; null = el defecto */
+  conversion_option?: string | null;
+  /** factor usado, del snapshot del kg confirmado (null sin kg vivo) */
+  lead_percentage_applied?: number | string | null;
+  /** Nombre del factor usado, del snapshot (`applied.label`); null sin alternativas */
+  lead_factor_label_applied?: string | null;
   /** #93: reparto y descuadre (tipo compra) */
   reference_unit_price: number | null;
   unallocated_intentional: boolean;
