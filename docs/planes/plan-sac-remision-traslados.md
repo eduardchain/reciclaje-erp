@@ -1,8 +1,10 @@
 # Plan — Remisión en los traslados + entrada propia del Talonario (SAC)
 
-Versión 1.2 · 25-nov-2026 · autor: Eco Coder 2 · **nivel: lógica** · base: `7829411` (rama `coder-2/control-ajustes`)
+Versión 1.3 · 25-nov-2026 · autor: Eco Coder 2 · **nivel: lógica** · base: `7829411` (rama `coder-2/control-ajustes`)
 Pedido: Daniel, 25-nov, vía el Coordinador (brief en `~/sac-evidencia/2026-11-25/traslados-remision/brief.md`).
 Estado: **solo plan. No se construye hasta el GO de QA 2 y el OK de Daniel.**
+
+v1.3: aplica C1–C4 del veredicto de QA 2 sobre la v1.2 (`31f082d`; `~/sac-evidencia/2026-11-25/qa-2-traslados-remision/veredicto_plan_v12_31f082d.md`): TP12 y P31 (traslado viejo con remisión NULL), el control de TP8 escrito por tabla con P32 y P33, P24 a «≥ {TP1}», y T15 con las tres rutas con P18b y P18c. El diseño no cambia. Números: tests nuevos 48, dirigido 703. QA 2 revisa solo el delta contra `31f082d`.
 
 v1.2: Daniel respondió O1–O3 (vía el Coordinador, 25-nov): O2 y O3 con la recomendada y **O1 = incluir el `PATCH` de la remisión en este ciclo** (contra la recomendada). Esta versión agrega solo eso (§1.1 punto 7, D-e, D-f, el PATCH en §2–§9) y una corrección que salió al diseñarlo (D-f, la caché). Lo de v1.1 no cambia, salvo los números que el PATCH mueve: tests nuevos 47, dirigido 702, filas P21–P30 y PF6–PF9, caso e2e E5. QA 2 lee esta v1.2 directamente.
 
@@ -47,7 +49,7 @@ v1.1: aplica C1 y C2 y las observaciones O1–O5 del veredicto de QA 2 sobre `4e
   - **Permiso: `inventory.transfer`**, el mismo de despachar y anular. Argumento: la remisión es el número del papel que acompañó el despacho, así que corregirla es una corrección de quien despacha. `inventory.view` no basta (es de lectura) y `inventory.transfer_receive` tampoco (quien recibe en el destino no es quien despacha; recibir no incluye reescribir el documento de salida). No se crea un permiso nuevo (política D4: un permiso nuevo exige migración y no se asigna a roles).
   - **Estados permitidos: `dispatched`, `held_discrepancy` y `received`.** La remisión no cambia ningún efecto, y un traslado recibido es justamente donde se descubre el error (el destino compara el papel con el sistema). Incluye los intra-sede, que nacen `received`.
   - **Anulado: 400, no se corrige** (decisión del plan, argumentada). Es lo que hacen los otros dos documentos del talonario (Salida de control: 400 «está anulada — no se edita»; Entrada: 404, «anuladas no se editan», D18). Un anulado es un registro congelado con su razón y su autor, y su número **cubre** lo que cubrió al anularse (D-b y T9); cambiarlo después movería qué números están cubiertos con efecto retroactivo. **Costo declarado:** si alguien anula un traslado por una remisión mal digitada, el número equivocado sigue cubierto por el anulado y el correcto aparecería como hueco hasta que se registre el traslado nuevo; el camino sano es corregir con este PATCH **antes** de anular. El mensaje del 400 lo dice.
-  - **Sin cambio = sin aviso.** Si la remisión nueva (con strip) es igual a la guardada, responde 200 igual que hoy y no avisa (igual que `control_dispatch.update`, que avisa solo si cambió).
+  - **Sin cambio = sin aviso.** Si la remisión nueva (con strip) es igual a la guardada, responde 200 igual que hoy y no avisa (igual que `control_dispatch.update`, que avisa solo si cambió). La guardada puede ser NULL (traslados anteriores a este ciclo): se compara contra `(transfer.remission_number or "").strip()`, como `control_dispatch`; un traslado viejo siempre «cambia» al primer PATCH (TP12).
   - **«Repetida»**: `duplicate_remission_warning(..., exclude_transfer_id=transfer.id)` después del `flush`, el mismo orden Entrada → Salida de control → Traslado, y el aviso va en `warnings` de la respuesta. Se avisa, no se bloquea.
   - **Sin efectos**: el servicio solo escribe `transfers.remission_number`. No llama a `_recompute_status`, no toca líneas, movimientos, kg, ajustes, MCH ni pares de maquila. No toma locks de numeración (no hay secuencia). Un traslado de otra org o inexistente da 404 (`_get_or_404` por org).
   - **Sin historial**: no se guarda el valor anterior (las Entradas y las Salidas de control tampoco lo guardan). Se anota en §11.
@@ -97,8 +99,9 @@ v1.1: aplica C1 y C2 y las observaciones O1–O5 del veredicto de QA 2 sobre `4e
 | R8 | La remisión de un traslado ya registrado es NULL; no debe romper listas, detalle ni el talonario. | T14. |
 | R9 | `remission_key` y los huecos con la tercera fuente (anulados, texto, 20 dígitos). | Todo pasa por la MISMA `remission_key`; T7, T9, T10, T16 (y se reusan los 3 casos de frontera de #141). |
 | R10 | Fricción operativa: el molino traslada seguido y ahora cada uno pide remisión. | Decisión de Daniel (#1 del brief). Se anota en el informe. |
-| R11 | Alcance de recolector (#129): el talonario y los traslados no deben abrirse a Ingrid. | No se agrega nada a `SCOPED_ENDPOINTS` ni a `SCOPE_PATHS`; T15 afirma 403 en `/remissions`, en `POST /transfers` y en `PATCH /transfers/{id}/remission` (el mismo test, una aserción más). |
-| R12 | El `PATCH` mueve algo que no debe (inventario, kg, merma, maquila, estado). | El servicio solo escribe una columna; TP8 compara, antes y después, las tablas de efectos de un traslado cruzado recibido con merma y par de maquila (con un control positivo: las tablas no están vacías antes) y P26 planta una fila de efectos. |
+| R11 | Alcance de recolector (#129): el talonario y los traslados no deben abrirse a Ingrid. | No se agrega nada a `SCOPED_ENDPOINTS` ni a `SCOPE_PATHS`; T15 afirma 403 en `/remissions`, en `POST /transfers` y en `PATCH /transfers/{id}/remission` (el mismo test, tres aserciones; el PATCH apunta a un traslado que **existe**, para que un 404 no tape el 403); P18, P18b y P18c plantan cada ruta. |
+| R12 | El `PATCH` mueve algo que no debe (inventario, kg, merma, maquila, estado). | El servicio solo escribe una columna; TP8 compara, antes y después, las tablas de efectos de un traslado cruzado recibido con merma y par de maquila (con un control positivo **por tabla**, ver TP8) y P26, P32 y P33 plantan una fila de efectos en tres tablas distintas, la última la más débil. |
+| R16 | El `PATCH` a un traslado anterior a este ciclo (remisión NULL, el diálogo arranca vacío): la comparación «igual a la guardada» sobre NULL. | `update_remission` compara contra `(transfer.remission_number or "").strip()`; TP12, P31 y E5 con un traslado viejo. |
 | R13 | Un permiso demasiado bajo deja que cualquiera reescriba el papel de salida. | `inventory.transfer` (D-e); TP7a usa un rol con `inventory.view` e `inventory.transfer_receive` y sin `inventory.transfer` → 403; TP7b es el control positivo. |
 | R14 | Corregir una remisión de un traslado ya recibido cambia qué números cubre el talonario hacia atrás. | Es lo pedido (corregir un error). Los huecos y las marcas se recalculan solos porque salen de la columna; TP11 lo mide. El anulado queda congelado (D-e). Sin historial del valor anterior (§11). |
 | R15 | La caché del talonario queda vieja tras despachar, anular o corregir. | D-f; E3 y E5, PF9. |
@@ -129,7 +132,7 @@ v1.1: aplica C1 y C2 y las observaciones O1–O5 del veredicto de QA 2 sobre `4e
 
 ---
 
-## 6. Tests nuevos — `backend/tests/test_sac_remision_traslados.py` (47)
+## 6. Tests nuevos — `backend/tests/test_sac_remision_traslados.py` (48)
 
 Todo se lee **por HTTP** (un warning se prueba en la respuesta, lección de #100/#141). Los permisos se prueban con roles que tienen uno y no el otro, más una lectura en 200 como control positivo.
 
@@ -152,10 +155,10 @@ Todo se lee **por HTTP** (un warning se prueba en la respuesta, lección de #100
 | T12d | Un rol con `inventory.view` y sin `sales.view` recibe 403 en `/remissions`, y uno con `purchases.view` y `sales.view` recibe 200 | 1 |
 | T13 | El PAR del flag: con `kg_ledger_enabled` sin `two_step_transfers_enabled` las filas de traslado no salen aunque el usuario tenga `inventory.view` (la fila existe, cargada por el ORM); con el flag, sí | 2 |
 | T14 | Un traslado ya registrado, sin remisión: lista y detalle devuelven `null` (sin 500), no sale en el talonario y no entra a `inbound_without_remission` | 2 |
-| T15 | Alcance de recolector: `/remissions` y `POST /transfers` dan 403 | 1 |
+| T15 | Alcance de recolector (#129): `GET /remissions`, `POST /transfers` y `PATCH /transfers/{id}/remission` dan 403; el PATCH apunta a un traslado **existente** (con id inexistente el 404 podría taparlo) | 1 |
 | T16 | Orden: una remisión de texto de un traslado va al final en los dos sentidos, como las otras | 1 |
 
-**PATCH de la remisión (18 tests, v1.2).** Mismo archivo; todo por HTTP; los efectos se miden con tablas, no con la respuesta.
+**PATCH de la remisión (19 tests: 18 de v1.2 + TP12 de v1.3).** Mismo archivo; todo por HTTP; los efectos se miden con tablas, no con la respuesta.
 
 | T | Qué prueba | # |
 |---|---|---|
@@ -167,8 +170,9 @@ Todo se lee **por HTTP** (un warning se prueba en la respuesta, lección de #100
 | TP6 | Anulado: 400 que lo nombra y dice que se corrija antes de anular; la remisión no cambia | 1 |
 | TP7a | Permiso: un rol con `inventory.view` e `inventory.transfer_receive` y **sin** `inventory.transfer` recibe 403 y la remisión no cambia | 1 |
 | TP7b | Control positivo: un rol con `inventory.transfer` (y sin `inventory.transfer_receive`) recibe 200 | 1 |
-| TP8 | **No mueve nada**: un traslado cruzado, recibido con merma y con par de maquila; se vuelcan (conteo + huella de cada fila) `inventory_movements`, `kg_ledger_movements`, `money_movements`, `inventory_adjustments`, `material_cost_histories`, `discrepancy_tasks`, `transfer_lines`, las existencias y el costo promedio de los materiales, y las columnas del traslado menos `remission_number`; tras el PATCH son idénticos. Antes se afirma que las tablas **no están vacías** (si lo estuvieran, la igualdad no diría nada) | 1 |
+| TP8 | **No mueve nada.** Dos traslados en la misma org: A, cruzado y recibido con merma y par de maquila; B, recibido fuera de tolerancia (`held_discrepancy`, con su `DiscrepancyTask` abierta). Antes de despacharlos se siembra un MCH del mismo material (una compra liquidada). Se vuelcan (conteo + huella de cada fila) las ocho tablas y las existencias y el costo promedio de los materiales, más las columnas de los dos traslados menos `remission_number`; se hace el PATCH a A **y** a B; tras eso todo es idéntico. **Control positivo por tabla** (se afirma antes de comparar, tabla por tabla; si alguna estuviera vacía, su igualdad sería `0 == 0`): `inventory_movements`, `kg_ledger_movements` y `transfer_lines` por A; `money_movements` por el par de maquila de A; `inventory_adjustments` por la merma de A; `material_cost_histories` por el MCH sembrado (un traslado nunca escribe MCH, B1 de #84, así que sin siembra estaría vacía); `discrepancy_tasks` por B (sin discrepancia no hay tarea) | 1 |
 | TP10 | Aislamiento por org: un traslado de otra organización y un id inexistente dan 404; la remisión del otro no cambia | 1 |
+| TP12 | Traslado viejo (C1): uno sin remisión (se carga con el ORM tras crearlo, como los anteriores a este ciclo): el PATCH la fija, responde 200 con `warnings == []`, el detalle la muestra y el talonario lo trae | 1 |
 | TP11 | El talonario sigue la corrección: tras el PATCH, `/remissions` muestra el traslado con la remisión nueva, el número viejo ya no lo cubre (aparece como hueco si queda entre dos) y el nuevo sí | 1 |
 
 (TP9 no existe: el 403 de alcance de recolector va en T15, una aserción más.)
@@ -209,7 +213,7 @@ Resultado y set final (19 archivos existentes + el nuevo):
 - D (importan de un archivo del set, o son importados por él): `test_inbound_orders` (lo importa `test_sac_factor_willard`), `test_seed_sac_settings` y `test_seed_sac_retention_configs` (importan `test_archivar_org_sac`), `test_redondeo_precio_compras` (importa `test_sac_entrada_sin_proveedor`).
 - Guardas del árbol, siempre: `test_reloj_de_negocio` (rglob de `frontend/src`), `test_advisory_locks` (ya está), `test_crucible_charges`.
 
-**Predicción escrita antes**: `--collect-only` de los 19 existentes = **655** (medido sobre `7829411` por mí y sobre `4efead9` por QA 2; el commit del plan no toca tests). El archivo nuevo suma **47** (§6: 29 de la remisión en el despacho y el talonario, con T12 partido en cuatro, y 18 del PATCH). Los tests re-semantizados no cambian de número. Predicción del set dirigido: **702**. **El PATCH no cambia el set**: vive en `services/transfer.py`, `endpoints/transfers.py` y `schemas/transfer.py`, que ya cubre el grep C; no hay archivos de test nuevos fuera de `test_sac_remision_traslados.py` ni importadores nuevos (se repiten los cuatro greps al construir). Se compara con `--collect-only` del set final y con la corrida.
+**Predicción escrita antes**: `--collect-only` de los 19 existentes = **655** (medido sobre `7829411` por mí y sobre `4efead9` por QA 2; el commit del plan no toca tests). El archivo nuevo suma **48** (§6: 29 de la remisión en el despacho y el talonario, con T12 partido en cuatro, y 19 del PATCH). Los tests re-semantizados no cambian de número. Predicción del set dirigido: **703**. **El PATCH no cambia el set**: vive en `services/transfer.py`, `endpoints/transfers.py` y `schemas/transfer.py`, que ya cubre el grep C; no hay archivos de test nuevos fuera de `test_sac_remision_traslados.py` ni importadores nuevos (se repiten los cuatro greps al construir). Se compara con `--collect-only` del set final y con la corrida.
 
 Frontend: sin infra de test. `tsc`, `eslint` (37 = techo) y `build`, más un e2e con Playwright (§9).
 Suite completa: **diferida al checkpoint** (regla del 19-nov). La predicción del checkpoint saldrá de `git diff --name-only 7e2ee4f -- backend/tests`, no de memoria.
@@ -241,6 +245,8 @@ Se planta en una copia sacada con `git archive` del commit de esta matriz, no en
 | P16 | `remission_book` · `base` excluye `status == "annulled"` de los traslados | ≥ {T9} |
 | P17 | `schemas/control_dispatch.py` · `RemissionBookItem.doc_type` sin `"transfer"` (500 al serializar) | ≥ {T8, T9, T10, T11, T16} |
 | P18 | `services/collector_scope.py` · `SCOPED_ENDPOINTS` gana `control_dispatches.list_remissions` | = {T15} |
+| P18b | ídem · `SCOPED_ENDPOINTS` gana `transfers.dispatch_transfer` | = {T15} |
+| P18c | ídem · `SCOPED_ENDPOINTS` gana el endpoint del PATCH (`transfers.update_transfer_remission`) | = {T15} |
 | P19 | `endpoints/transfers.py` · `_enrich` sin `remission_number` (el POST lo guarda y la respuesta no lo devuelve) | ≥ {T1, T14} |
 | P20 | `remission_book` · `inbound_without_remission` cuenta también los traslados sin remisión | = {T14 (contador)} |
 
@@ -251,13 +257,16 @@ Se planta en una copia sacada con `git archive` del commit de esta matriz, no en
 | P21 | `endpoints/transfers.py` · el permiso del PATCH pasa de `inventory.transfer` a `inventory.view` | = {TP7a} |
 | P22 | `services/transfer.py` · `update_remission`: se quita el guard de anulado | = {TP6} |
 | P23 | `services/transfer.py` · `update_remission`: se quita `warnings.append(dup)` (se calcula y no llega) | = {TP4 ×3} |
-| P24 | `services/transfer.py` · `update_remission`: se quita `exclude_transfer_id=transfer.id` (se avisa a sí mismo; tras el `flush` ya tiene el valor nuevo) | ≥ {TP1 ×3, TP5} |
+| P24 | `services/transfer.py` · `update_remission`: se quita `exclude_transfer_id=transfer.id` (se avisa a sí mismo; tras el `flush` ya tiene el valor nuevo) | ≥ {TP1 ×3}. TP5 no puede caer (sin cambio el servicio no hace la consulta): se mide con P25 |
 | P25 | `services/transfer.py` · `update_remission`: se quita la comparación `changed` (avisa aunque no cambie) | = {TP5} |
 | P26 | `services/transfer.py` · `update_remission`: se agrega un `InventoryMovement` de la primera línea (una fila de efectos) | = {TP8} |
 | P27 | `services/transfer.py` · `update_remission`: `self._get_or_404(db, id, org)` → `db.get(Transfer, id)` (sin filtro de org; un id inexistente da `None`) | ≥ {TP10} |
 | P28 | `services/transfer.py` · `update_remission`: escribe en `transfer.notes` y no en `remission_number` | ≥ {TP1 ×3, TP11} |
 | P29 | `schemas/transfer.py` · `TransferRemissionUpdate`: se quita `extra="forbid"` | = {TP3} |
 | P30 | `schemas/transfer.py` · `TransferRemissionUpdate.remission_number` pasa a `Optional[RemissionStr] = None` | = {TP2 `null`, TP2 clave ausente} |
+| P31 | `services/transfer.py` · `update_remission`: la comparación `(transfer.remission_number or "").strip()` → `transfer.remission_number.strip()` (asume una guardada; sobre NULL da 500) | = {TP12} |
+| P32 | `services/transfer.py` · `update_remission`: se agrega una fila de `MaterialCostHistory` (copia de la sembrada) | = {TP8} (la tabla más débil: no la toca ningún traslado) |
+| P33 | `services/transfer.py` · `update_remission`: se borra la `DiscrepancyTask` de la línea retenida | = {TP8} |
 
 **Frontend (e2e, mismo método, contra el árbol servido; los casos E1–E5 están definidos en el §9):**
 
@@ -272,6 +281,7 @@ Se planta en una copia sacada con `git archive` del commit de esta matriz, no en
 | PF7 | `TransferDetailPage.tsx` · el botón se pinta también en un traslado anulado | = {E5 (traslado anulado)} |
 | PF8 | `services/transfers.ts` · `updateRemission` manda `remision_number` (clave mal escrita) | = {E5: el PATCH real da 422 y la petición capturada no lleva `remission_number`} |
 | PF9 | `utils/queryInvalidation.ts` · se quita `["remissions"]` de `invalidateAfterTransfer` (D-f) | = {E3 (talonario fresco tras despachar), E5 (tras corregir)} |
+| PF10 | `TransferDetailPage.tsx` · el diálogo arranca con `t.remission_number.trim()` (asume una remisión guardada; revienta sobre NULL) | = {E5 con el traslado viejo} |
 
 Cada fila se mide por su NÚMERO de caídas y no solo por si cae; una predicción que falle se anota con su causa (las de «vía compartida» caen de más y es la dirección barata).
 
@@ -291,7 +301,7 @@ Cada fila se mide por su NÚMERO de caídas y no solo por si cae; una predicció
 | E1 | **Menú.** La entrada «Talonario de remisiones» aparece con `purchases.view` + `sales.view` + `kg_ledger_enabled`; **no** aparece con solo uno de los dos permisos, ni en una org sin `kg_ledger_enabled` (con el registro de red de esa org igual al de antes: cero requests de más), ni con alcance de recolector | el usuario con los dos permisos y el flag la ve y entra | PF1, PF2 |
 | E2 | **Talonario.** La fila «Traslado #n» sale con su remisión, badge «Traslado» y estado en español (Por recibir / En discrepancia / Recibido / Anulada); el enlace abre el detalle **del traslado** (no una Entrada); un usuario sin `inventory.view` no ve la fila | el mismo talonario con `inventory.view` la muestra | PF3 |
 | E3 | **Nuevo Traslado, cruzado e intra-sede.** El botón está deshabilitado sin remisión y con solo espacios; con ella, el POST real sale con `remission_number` (se lee de la petición capturada, no del código) y el traslado se crea; el talonario (visitado antes, navegando sin recargar) muestra el traslado nuevo; una remisión repetida muestra el toast ámbar con el documento | el mismo formulario con remisión llena queda habilitado y registra | PF4, PF5 |
-| E5 | **Corregir remisión.** En el detalle de un traslado `received` el botón «Corregir remisión» está con `inventory.transfer` y **no** está sin él ni en un traslado anulado; el diálogo no deja guardar vacío ni igual a la actual; guardar con otro valor manda un PATCH con `{remission_number}` y solo esa clave (se lee de la petición capturada), el detalle muestra el valor nuevo, y el talonario (visitado antes, navegando sin recargar) lo muestra también; una remisión que repite otra muestra el toast ámbar con el documento | el mismo detalle con `inventory.transfer` y un traslado no anulado muestra el botón y guarda | PF6, PF7, PF8, PF9 |
+| E5 | **Corregir remisión.** En el detalle de un traslado `received` el botón «Corregir remisión» está con `inventory.transfer` y **no** está sin él ni en un traslado anulado; el diálogo no deja guardar vacío ni igual a la actual; guardar con otro valor manda un PATCH con `{remission_number}` y solo esa clave (se lee de la petición capturada), el detalle muestra el valor nuevo, y el talonario (visitado antes, navegando sin recargar) lo muestra también; una remisión que repite otra muestra el toast ámbar con el documento; **y un traslado viejo, sin remisión** (cargado por el ORM): el botón está, el diálogo arranca vacío, Guardar está deshabilitado hasta escribir y luego guarda | el mismo detalle con `inventory.transfer` y un traslado no anulado muestra el botón y guarda | PF6, PF7, PF8, PF9, PF10 |
 | E4 | **Lista y detalle.** La columna «Remisión» (y la línea de la tarjeta a 390) muestra el valor, y «—» en un traslado viejo sin remisión | un traslado nuevo con remisión en la misma lista | (red de lectura) |
 
 6. QA pasada 2 → OK de commit → commit en mi rama. Integración a develop y deploy: los hace el Coordinador con el OK de Daniel.
@@ -310,10 +320,12 @@ Sin preguntas abiertas.
 - **O2 — Quién abre el Talonario:** como hoy, `purchases.view` Y `sales.view`.
 - **O3 — Números cubiertos por un documento que el usuario no ve:** huecos y marcas contra toda la org. El costo alcanza también a los avisos: una Entrada o una Salida de control que se captura con la remisión de un traslado avisa «Traslado #n» aunque quien captura no tenga `inventory.view`; en los dos casos solo se revela que ese número existe.
 
+**Observación abierta de QA 2 (no condiciona el GO; decide Daniel):** con el PATCH el valor anterior de la remisión se pierde, y la remisión es obligatoria «para que no me alteren el consecutivo» (Hugo). Una línea de log al estilo de #85 D5 (actor, traslado, valor anterior y nuevo; sin tabla ni migración) cuesta poco. **(Recomendado)** incluirla; si Daniel dice que sí, va en una adenda con su test (`caplog`) y su fila de plantado, y el conteo pasa a 49 / 704. Mientras no responda, no se construye.
+
 ## 11. Fuera de este ciclo (se anota, no se hace)
 
 - El inventario (`inventario-preguntas-cliente.md`) y CLAUDE.md los escribe el Coordinador al integrar: la lectura (c) de Q-75 «los traslados salen del mismo talonario» (decisión de Daniel, no respuesta de Johana) y la decisión nueva.
 - Los traslados de Salidas de Plomo y las conversiones del crisol no llevan remisión de este talonario.
-- No se guarda el valor anterior de una remisión corregida (ni en traslados, ni en Entradas, ni en Salidas de control). Si hace falta auditoría, es un ciclo propio.
+- No se guarda el valor anterior de una remisión corregida (ni en traslados, ni en Entradas, ni en Salidas de control). Si hace falta auditoría de verdad, es un ciclo propio; la línea de log es la observación abierta del §10.
 - El `PATCH` no edita nada más del traslado (notas, fecha, bodegas, líneas).
 - Una venta no tiene campo de remisión (anotado en #141); sigue como hueco.
