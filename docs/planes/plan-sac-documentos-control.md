@@ -1,8 +1,10 @@
-# Plan — Entradas y Salidas «de control» (SAC, v1.3.1)
+# Plan — Entradas y Salidas «de control» (SAC, v1.3.2)
 
 **Autor:** Eco Coder 2 · **Fecha:** 2026-11-24 · **Rama:** `coder-2/documentos-control` sobre develop `5139940`
 **Nivel:** lógica (migración, reglas de estado en un servicio con dinero, guards en servicios compartidos si se aprueba D5).
 **Autorización:** Daniel, 24-nov («esos dos, dale»), vía Coordinador. Este documento es SOLO el plan; construir exige el GO de QA 2 y después la autorización de Daniel.
+
+**Cambios v1.3.1 → v1.3.2:** G-prod 2 y G-prod 6, medidos en prod por el Coordinador (§11.6). Nada más cambia.
 
 **Cambios v1.3 → v1.3.1** (GO condicionado de QA 2, `veredicto_v1.3_f2b77587.md`, `45e3c7a6`):
 - **C1:** `is_control_only` pasa a incluir el estado. Vale solo en `draft`, `reviewed` y `closed`. Una liquidada a $1 cuyos materiales se marcaron después sigue siendo «Compra», con su total. El filtro lo espeja, y T26 lo prueba por el camino real (§11.2).
@@ -530,9 +532,15 @@ Hoy un material de control se guarda como «Compra regular» (`willard_world='no
 
 **Dirigidas:** set rehecho con `dirigidas_set.sh` sobre el árbol final, con la predicción escrita antes. **Golden:** no aplica, y se mide: el parámetro es opcional y ninguna captura toca `/inbound-orders`.
 
-**Prerrequisitos del deploy (lectura en prod; los corre el Coordinador, el único que toca prod):**
-- **G-prod 2:** no está medido. Hay que contar las Entradas de SAC no anuladas, liquidadas, cuyas líneas son todas de ESTIBAS, y también las anuladas, con su remisión y su total. Con la v1.3.1 esas Entradas siguen viéndose como «Compra», con su total, así que la pantalla no las esconde. Si existen, qué hacer con ellas lo decide Daniel (§6).
-- **G-prod 6:** el `compra_regular` y el `willard_world` de ESTIBAS hoy. La columna `control_only` todavía no existe en prod. Se espera `true` y `'none'`: marcarla «Control» después del deploy no los cambia.
+**G-prod 2 y G-prod 6, medidos en prod.** Los leyó el Coordinador, el único que toca prod, solo con GET, a las 21:19 del 24-nov (`~/sac-evidencia/2026-11-24/coordinador-control/leer_gprod_1236_prod.log`, sha256 `4db0143b…`).
+
+- **G-prod 2:**
+  - 14 Entradas con ESTIBAS de 205, las 14 en `reviewed`; 0 liquidadas y 0 anuladas. El control positivo da 132 Entradas liquidadas en total, así que la lectura sí ve las liquidadas.
+  - 0 compras con ESTIBAS de 251.
+  - Stock de ESTIBAS en 0, liquidado y en tránsito.
+
+  O sea, el caso de C1 (liquidada a $1 y marcada después) hoy no existe en prod. El predicado con estado se construye igual, por las Entradas que se marquen después de liquidarlas.
+- **G-prod 6:** el perfil de ESTIBAS tiene `willard_world='none'`, `compra_regular=true` y `lead_product='none'`, y no está en el formato. La clave `control_only` está en 0 de los 45 perfiles: la columna llega con el deploy. Marcarla «Control» después no cambia esos campos y no da 422 (§4.1).
 
 ### 11.7 La cita de Salidas de Plomo (O2, pedido del Coordinador)
 
