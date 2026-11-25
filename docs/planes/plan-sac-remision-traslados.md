@@ -1,8 +1,10 @@
 # Plan — Remisión en los traslados + entrada propia del Talonario (SAC)
 
-Versión 1.0 · 25-nov-2026 · autor: Eco Coder 2 · **nivel: lógica** · base: `7829411` (rama `coder-2/control-ajustes`)
+Versión 1.1 · 25-nov-2026 · autor: Eco Coder 2 · **nivel: lógica** · base: `7829411` (rama `coder-2/control-ajustes`)
 Pedido: Daniel, 25-nov, vía el Coordinador (brief en `~/sac-evidencia/2026-11-25/traslados-remision/brief.md`).
 Estado: **solo plan. No se construye hasta el GO de QA 2 y el OK de Daniel.**
+
+v1.1: aplica C1 y C2 y las observaciones O1–O5 del veredicto de QA 2 sobre `4efead9` (`~/sac-evidencia/2026-11-25/qa-2-traslados-remision/veredicto_plan_4efead9.md`). El diseño no cambia: se parte P12, se define el e2e, y se corrigen cuatro afirmaciones del texto.
 
 ---
 
@@ -10,7 +12,7 @@ Estado: **solo plan. No se construye hasta el GO de QA 2 y el OK de Daniel.**
 
 | Pregunta | Hallazgo (leído en el código, no de memoria) |
 |---|---|
-| ¿Dónde está hoy el Talonario en el menú? | **En ninguna parte del menú lateral.** `Sidebar.tsx` no tiene la ruta. Se llega por un botón «Talonario de remisiones» dentro de *Salidas de control*: la lista (`ControlDispatchesPage.tsx:89-97`) y el detalle (`ControlDispatchDetailPage.tsx:140`). |
+| ¿Dónde está hoy el Talonario en el menú? | **En ninguna parte del menú lateral.** `Sidebar.tsx` no tiene la ruta. Se llega por un botón «Talonario de remisiones» en **tres** pantallas: la lista de *Salidas de control* (`ControlDispatchesPage.tsx:89-97`), el detalle de una Salida de control (`ControlDispatchDetailPage.tsx:140`) y la lista de *Entradas* (`InboundOrdersPage.tsx:507`, con `unscoped && sales.view`). |
 | ¿Qué permiso exige hoy? | **Ruta:** `App.tsx:192` → `FP flag="kg_ledger_enabled" permission="purchases.view"` + `P permission="sales.view"` (los dos, AND). **API:** `GET /remissions` → `require_permission("purchases.view", "sales.view")` (`control_dispatches.py:156-160`), router con `require_org_flag("kg_ledger_enabled")`. El botón se pinta solo con los dos permisos. |
 | ¿Quedan fuera de `/remissions` los usuarios con alcance de recolector? | Sí: `/remissions` no está en `SCOPED_ENDPOINTS` (deny-by-default, #129), ni la ruta en `SCOPE_PATHS` del Sidebar. No cambia. |
 | ¿Quién despacha un traslado y con qué permiso? | `POST /transfers` → `inventory.transfer`; `GET` lista y detalle → `inventory.view`; recibir/resolver → `inventory.transfer_receive`; anular → `inventory.transfer`. Router con `require_org_flag("two_step_transfers_enabled")`. |
@@ -35,8 +37,8 @@ Estado: **solo plan. No se construye hasta el GO de QA 2 y el OK de Daniel.**
 
 - **D-a — Quién ve las filas de traslado.** `inventory.view` (el permiso de leer traslados) **Y** el flag `two_step_transfers_enabled`. La vista sigue exigiendo `purchases.view` y `sales.view` como hoy; el permiso de inventario solo decide si salen las filas de traslado. Admin pasa por el bypass de `require_permission` (`is_admin`).
 - **D-b — Ver y medir son dos cosas** (principio de C2 de #141: «el filtro decide qué filas se MUESTRAN; nunca qué números existen»). Las marcas «Repetida», los huecos y el aviso al capturar se calculan sobre **todos** los documentos de la org, vean o no el traslado. Así, quien no tiene `inventory.view` no recibe un hueco falso («Sin documento») donde en realidad hay un traslado. Costo declarado: ve un salto en la serie sin fila, o una «Repetida» sin su pareja visible; solo se revela que ese número existe. Ver O3.
-- **D-c — Entrada en el menú.** Después de «Traslados», sección OPERACIONES, ícono `BookOpen`, ruta `ROUTES.REMISSION_BOOK`, `orgFlag: "kg_ledger_enabled"`. El Sidebar hoy solo sabe `permission` (un string; un arreglo es «alguno»). El Talonario necesita **los dos** (purchases.view Y sales.view), así que `NavItem` gana un campo opcional `permissionAll?: string[]` con su `every()`. Ningún otro ítem lo usa. Los dos botones actuales en Salidas de control se quedan.
-- **D-d — `RemissionStr` se define una sola vez.** Hoy vive en `schemas/control_dispatch.py`. Pasa a `schemas/remission.py` y `control_dispatch.py` lo importa con el mismo nombre. Una sola definición de strip + `min_length=1` + `max_length=50`.
+- **D-c — Entrada en el menú.** Después de «Traslados», sección OPERACIONES, ícono `BookOpen`, ruta `ROUTES.REMISSION_BOOK`, `orgFlag: "kg_ledger_enabled"`. El Sidebar hoy solo sabe `permission` (un string; un arreglo es «alguno»). El Talonario necesita **los dos** (purchases.view Y sales.view), así que `NavItem` gana un campo opcional `permissionAll?: string[]` con su `every()`. Ningún otro ítem lo usa. Los tres botones actuales (lista y detalle de Salidas de control, lista de Entradas) se quedan.
+- **D-d — `RemissionStr` pasa a un módulo compartido.** Hoy vive en `schemas/control_dispatch.py`. Pasa a `schemas/remission.py`; `control_dispatch.py` y `transfer.py` lo importan. **Quedan dos definiciones, no una:** `schemas/willard_delivery.py:77` tiene su propia copia inline de las mismas restricciones (strip + `min_length=1` + `max_length=50`) y no se toca: Salidas de Plomo está fuera del talonario y fuera de este ciclo. Si alguna vez cambian las restricciones, se cambian en los dos sitios.
 - **D-e — Sin PATCH ni «editar remisión».** Corregir una remisión mal digitada es anular el traslado y registrarlo de nuevo. No se agrega nada (ver O1).
 
 ---
@@ -70,7 +72,7 @@ Estado: **solo plan. No se construye hasta el GO de QA 2 y el OK de Daniel.**
 
 | # | Riesgo | Cobertura |
 |---|---|---|
-| R1 | Volver obligatoria la remisión rompe a todo cliente de `POST /transfers`. | Medido por grep (§7): un solo llamador en `app/` (el endpoint), cero scripts, 3 archivos de tests con **28** puntos de `POST` (21 + 6 + 1), que se re-semantizan con un helper que da una remisión distinta por llamada (para que ningún `warnings` cambie por un aviso de repetida). Front y back salen en el MISMO deploy: un front viejo contra el back nuevo da 422 al despachar (igual que #132); lo dice el informe. |
+| R1 | Volver obligatoria la remisión rompe a todo cliente de `POST /transfers`. | Medido por grep (§7): un solo llamador en `app/` (el endpoint), cero scripts. En los tests, 3 archivos y **6 sitios de edición**: los helpers `_dispatch` de `test_sac_transfer_two_step.py` (40 llamadas) y de `test_sac_planta_proveedor.py` (4 llamadas) y los 3 `POST` directos (`test_sac_transfer_two_step.py` L305 y L364, `test_pnl_by_warehouse.py` L143). Cada uno pasa una remisión distinta por llamada, para que ningún `warnings` cambie por un aviso de repetida. Ningún negativo espera 422 por otra causa. Front y back salen en el MISMO deploy: un front viejo contra el back nuevo da 422 al despachar (igual que #132); lo dice el informe. |
 | R2 | El aviso nuevo cambia el comportamiento de las Entradas y las Salidas de control (ahora también avisan contra un traslado). | Es lo pedido (mismo talonario). Se cubre en las dos direcciones (T4, T5). Sin traslados el tercer bloque no encuentra nada: las Entradas de las demás orgs quedan igual. |
 | R3 | Un traslado intra-sede nace `received` en un salto; la remisión debe quedar igual. | T1 cubre cruzado e intra-sede. |
 | R4 | `RemissionStr` movido: `min_length` cuenta caracteres y `"  "` pasaba (lección #100). | El strip va ANTES del `min_length` (como hoy); T2 manda `""` y `"   "`. |
@@ -106,7 +108,7 @@ Estado: **solo plan. No se construye hasta el GO de QA 2 y el OK de Daniel.**
 
 ---
 
-## 6. Tests nuevos — `backend/tests/test_sac_remision_traslados.py` (28)
+## 6. Tests nuevos — `backend/tests/test_sac_remision_traslados.py` (29)
 
 Todo se lee **por HTTP** (un warning se prueba en la respuesta, lección de #100/#141). Los permisos se prueban con roles que tienen uno y no el otro, más una lectura en 200 como control positivo.
 
@@ -123,13 +125,25 @@ Todo se lee **por HTTP** (un warning se prueba en la respuesta, lección de #100
 | T9 | Un traslado anulado sigue en el talonario y cubre su número (sin hueco falso entre sus vecinos) | 1 |
 | T10 | Los huecos se miden contra toda la org con un traslado en medio, y un filtro por fecha no crea huecos falsos | 1 |
 | T11 | «Repetida» entre un traslado y una Entrada en las dos filas; una anulada no cuenta | 1 |
-| T12 | Permiso: sin `inventory.view` no salen las filas de traslado pero el número queda **cubierto** (sin hueco falso) y la marca «Repetida» se conserva; con `inventory.view` salen; un rol con `inventory.view` y sin `sales.view` recibe 403 | 3 |
+| T12a | Cobertura sin permiso (C1): un usuario sin `inventory.view`; un traslado con remisión 101 **entre** dos Entradas visibles de números consecutivos en la serie (100 y 102): no sale la fila del traslado y **no sale un hueco** en el 101 | 1 |
+| T12b | «Repetida» sin permiso (C1): un usuario sin `inventory.view`; un traslado con la **misma** remisión que una Entrada visible, sin vecinos en la serie (para que no haya huecos que medir): no sale la fila del traslado y la fila de la Entrada sigue marcada «Repetida» | 1 |
+| T12c | Control positivo del permiso: con `inventory.view` salen las filas de traslado de T12a y T12b | 1 |
+| T12d | Un rol con `inventory.view` y sin `sales.view` recibe 403 en `/remissions`, y uno con `purchases.view` y `sales.view` recibe 200 | 1 |
 | T13 | El PAR del flag: con `kg_ledger_enabled` sin `two_step_transfers_enabled` las filas de traslado no salen aunque el usuario tenga `inventory.view` (la fila existe, cargada por el ORM); con el flag, sí | 2 |
 | T14 | Un traslado ya registrado, sin remisión: lista y detalle devuelven `null` (sin 500), no sale en el talonario y no entra a `inbound_without_remission` | 2 |
 | T15 | Alcance de recolector: `/remissions` y `POST /transfers` dan 403 | 1 |
 | T16 | Orden: una remisión de texto de un traslado va al final en los dos sentidos, como las otras | 1 |
 
-Re-semantización (no suman tests): `_dispatch` y los `POST` directos de `test_sac_transfer_two_step.py` (21), `test_pnl_by_warehouse.py` (6) y `test_sac_planta_proveedor.py` (1) pasan una remisión única por llamada. La lista sale del grep en el momento de construir; no de memoria.
+Re-semantización (no suman tests): los 6 sitios de R1 pasan una remisión única por llamada. La lista sale de este grep, que se repite al construir y se pega en el log (medido sobre `4efead9`):
+
+```
+cd backend
+grep -n "def _dispatch" tests/test_sac_transfer_two_step.py tests/test_sac_planta_proveedor.py   # los 2 helpers
+grep -c "_dispatch(" tests/test_sac_transfer_two_step.py     # 41 = la definición + 40 llamadas
+grep -c "_dispatch(" tests/test_sac_planta_proveedor.py      # 5 = la definición + 4 llamadas
+grep -n -A1 "client.post(" tests/test_sac_transfer_two_step.py tests/test_pnl_by_warehouse.py tests/test_sac_planta_proveedor.py | grep "TRANSFERS_URL"
+                                                             # POST directos: 2 + 1 fuera de los helpers (más el de cada helper)
+```
 
 ---
 
@@ -156,7 +170,7 @@ Resultado y set final (19 archivos existentes + el nuevo):
 - D (importan de un archivo del set, o son importados por él): `test_inbound_orders` (lo importa `test_sac_factor_willard`), `test_seed_sac_settings` y `test_seed_sac_retention_configs` (importan `test_archivar_org_sac`), `test_redondeo_precio_compras` (importa `test_sac_entrada_sin_proveedor`).
 - Guardas del árbol, siempre: `test_reloj_de_negocio` (rglob de `frontend/src`), `test_advisory_locks` (ya está), `test_crucible_charges`.
 
-**Predicción escrita antes**: `--collect-only` de los 19 existentes sobre `7829411` = **655**. El archivo nuevo suma **28** (§6). Los tests re-semantizados no cambian de número. Predicción del set dirigido: **683**. Se compara con `--collect-only` del set final y con la corrida.
+**Predicción escrita antes**: `--collect-only` de los 19 existentes = **655** (medido sobre `7829411` por mí y sobre `4efead9` por QA 2; el commit del plan no toca tests). El archivo nuevo suma **29** (§6, con T12 partido en cuatro). Los tests re-semantizados no cambian de número. Predicción del set dirigido: **684**. Se compara con `--collect-only` del set final y con la corrida.
 
 Frontend: sin infra de test. `tsc`, `eslint` (37 = techo) y `build`, más un e2e con Playwright (§9).
 Suite completa: **diferida al checkpoint** (regla del 19-nov). La predicción del checkpoint saldrá de `git diff --name-only 7e2ee4f -- backend/tests`, no de memoria.
@@ -173,16 +187,17 @@ Se planta en una copia sacada con `git archive` del commit de esta matriz, no en
 | P2 | `schemas/remission.py` · `strip_whitespace=True` → `False` | ≥ {T1, T2} y los de control (`t19_remision_obligatoria`, `t19_el_patch_no_la_deja_vaciar`) |
 | P3 | `services/transfer.py` · se quita `remission_number=data.remission_number` (se pierde) | ≥ {T1, T8, T11} |
 | P4 | `services/transfer.py` · se quita `warnings.append(dup)` (se calcula y no llega) | = {T4 ×3} |
-| P5 | `services/transfer.py` · se quita `exclude_transfer_id=transfer.id` (se avisa a sí mismo) | ≥ {T1, T4 ×3} |
+| P5 | `services/transfer.py` · se quita `exclude_transfer_id=transfer.id` (se avisa a sí mismo) | ≥ {T1}. Los T4 contra una Entrada o una Salida de control no pueden caer (esos bloques chocan antes y nombran bien) y T4 traslado-contra-traslado tampoco (la consulta ordena por número y nombra al más viejo): si no caen, se anota, no es la dirección peligrosa |
 | P6 | `services/remission_book.py` · `duplicate_remission_warning`: se quita el bloque de traslados | ≥ {T4 (traslado vs traslado), T5 ×3} |
 | P7 | ídem · se quita `Transfer.status != "annulled"` | = {T6} |
 | P8 | ídem · la llave del traslado sin normalizar (`lower(trim)` en vez de `remission_key`) | ≥ {T7} |
 | P9 | `remission_book._union` · sin la tercera fuente | ≥ {T8, T9, T10, T11, T13, T16} |
-| P10 | `remission_book` · `show_transfers` ignorado (siempre se ven) | = {T12 sin permiso, T13 sin flag} |
-| P11 | `remission_book` · `show_transfers` siempre False | ≥ {T8, T12 con permiso, T13 con flag} |
-| P12 | `remission_book` · `dup_keys` y `all_nums` salen de las filas visibles | = {T12 (cobertura y «Repetida» sin permiso)} |
+| P10 | `remission_book` · `show_transfers` ignorado (siempre se ven) | = {T12a, T12b, T13 sin flag} |
+| P11 | `remission_book` · `show_transfers` siempre False | ≥ {T8, T12c, T13 con flag} |
+| P12a | `remission_book` · `all_nums` sale de las filas visibles (el traslado oculto no cubre su número) | = {T12a} |
+| P12b | `remission_book` · `dup_keys` sale de las filas visibles (el traslado oculto no marca «Repetida») | = {T12b} |
 | P13 | `endpoints/control_dispatches.py` · `show_transfers` no mira el flag | = {T13 sin flag} |
-| P14 | `endpoints/control_dispatches.py` · `show_transfers` no mira el permiso | = {T12 sin permiso} |
+| P14 | `endpoints/control_dispatches.py` · `show_transfers` no mira el permiso | = {T12a, T12b} |
 | P15 | `remission_book._attach_materials` · sin la rama de traslados | ≥ {T8} |
 | P16 | `remission_book` · `base` excluye `status == "annulled"` de los traslados | ≥ {T9} |
 | P17 | `schemas/control_dispatch.py` · `RemissionBookItem.doc_type` sin `"transfer"` (500 al serializar) | ≥ {T8, T9, T10, T11, T16} |
@@ -190,15 +205,15 @@ Se planta en una copia sacada con `git archive` del commit de esta matriz, no en
 | P19 | `endpoints/transfers.py` · `_enrich` sin `remission_number` (el POST lo guarda y la respuesta no lo devuelve) | ≥ {T1, T14} |
 | P20 | `remission_book` · `inbound_without_remission` cuenta también los traslados sin remisión | = {T14 (contador)} |
 
-**Frontend (e2e, mismo método, contra el árbol servido):**
+**Frontend (e2e, mismo método, contra el árbol servido; los casos E1–E4 están definidos en el §9):**
 
 | P | Defecto | Debe caer |
 |---|---|---|
-| PF1 | `Sidebar.tsx` · `permissionAll` evaluado como «alguno» | = {E2 (usuario con una sola de las dos)} |
-| PF2 | `Sidebar.tsx` · la entrada sin `orgFlag` | = {E2 (org sin el flag)} |
-| PF3 | `RemissionBookPage.tsx` · el enlace del traslado va a `INBOUND_DETAIL` | = {E3} |
-| PF4 | `TransferCreatePage.tsx` · el botón no exige la remisión | = {E4} |
-| PF5 | `TransferCreatePage.tsx` · el payload manda `remision_number` (clave mal escrita) | = {E4: el POST da 422 y el toast lo dice} |
+| PF1 | `Sidebar.tsx` · `permissionAll` evaluado como «alguno» | = {E1 con uno solo de los dos permisos} |
+| PF2 | `Sidebar.tsx` · la entrada sin `orgFlag` | = {E1 en la org sin `kg_ledger_enabled`, y su registro de red} |
+| PF3 | `RemissionBookPage.tsx` · el enlace del traslado va a `INBOUND_DETAIL` | = {E2} |
+| PF4 | `TransferCreatePage.tsx` · el botón no exige la remisión | = {E3, cruzado e intra-sede} |
+| PF5 | `TransferCreatePage.tsx` · el payload manda `remision_number` (clave mal escrita) | = {E3: el POST real da 422 y la petición capturada no lleva `remission_number`} |
 
 Cada fila se mide por su NÚMERO de caídas y no solo por si cae; una predicción que falle se anota con su causa (las de «vía compartida» caen de más y es la dirección barata).
 
@@ -210,7 +225,16 @@ Cada fila se mide por su NÚMERO de caídas y no solo por si cae; una predicció
 2. Construcción: código y tests nuevos; el autor corre solo el lint y los tests nuevos. Migración en dev (5434) y test (5433, la BD de este coder).
 3. **QA pasada 1**: el delta como patch con su sha256, la base y el sha256 de cada archivo; el árbol queda quieto.
 4. Correcciones; QA relee el delta.
-5. Gates: dirigidas del §7 (predicción escrita antes), plantado del §8, `ruff`, `tsc`, `eslint`, `build`, `schema_parity_check.py` (DIFF CERO esperado, +0 divergencias), migración up/down/up a archivo, smoke con POST real contra un backend arrancado DESPUÉS del último cambio de `app/` (con su procedencia impresa), y el e2e a 1440 y 390 con registro de red de una org sin flag (cero requests de más).
+5. Gates: dirigidas del §7 (predicción escrita antes), plantado del §8, `ruff`, `tsc`, `eslint`, `build`, `schema_parity_check.py` (DIFF CERO esperado, +0 divergencias), migración up/down/up a archivo, smoke con POST real contra un backend arrancado DESPUÉS del último cambio de `app/` (con su procedencia impresa), y el e2e de abajo.
+**E2e (Playwright, contra un backend y un front arrancados DESPUÉS del último cambio, con su procedencia impresa).** Cada caso corre a **1440 y a 390** y lleva su **control positivo** (la misma pantalla con el permiso o el dato que sí lo habilita); sin él, un «no aparece» no distingue «funciona» de «no cargó». A 390: sin scroll horizontal. Los usuarios son roles con un permiso y no el otro; los datos de prueba se revierten al final con deltas.
+
+| E | Caso | Control positivo | Lo mide |
+|---|---|---|---|
+| E1 | **Menú.** La entrada «Talonario de remisiones» aparece con `purchases.view` + `sales.view` + `kg_ledger_enabled`; **no** aparece con solo uno de los dos permisos, ni en una org sin `kg_ledger_enabled` (con el registro de red de esa org igual al de antes: cero requests de más), ni con alcance de recolector | el usuario con los dos permisos y el flag la ve y entra | PF1, PF2 |
+| E2 | **Talonario.** La fila «Traslado #n» sale con su remisión, badge «Traslado» y estado en español (Por recibir / En discrepancia / Recibido / Anulada); el enlace abre el detalle **del traslado** (no una Entrada); un usuario sin `inventory.view` no ve la fila | el mismo talonario con `inventory.view` la muestra | PF3 |
+| E3 | **Nuevo Traslado, cruzado e intra-sede.** El botón está deshabilitado sin remisión y con solo espacios; con ella, el POST real sale con `remission_number` (se lee de la petición capturada, no del código) y el traslado se crea; una remisión repetida muestra el toast ámbar con el documento | el mismo formulario con remisión llena queda habilitado y registra | PF4, PF5 |
+| E4 | **Lista y detalle.** La columna «Remisión» (y la línea de la tarjeta a 390) muestra el valor, y «—» en un traslado viejo sin remisión | un traslado nuevo con remisión en la misma lista | (red de lectura) |
+
 6. QA pasada 2 → OK de commit → commit en mi rama. Integración a develop y deploy: los hace el Coordinador con el OK de Daniel.
 
 **Golden: no aplica — medido, no argumentado.** Comandos que se repiten al construir y se pegan en el log:
@@ -222,9 +246,9 @@ Cada fila se mide por su NÚMERO de caídas y no solo por si cae; una predicció
 
 ## 10. Preguntas para Daniel (no frenan el plan; la recomendada es la del plan)
 
-- **O1 — Corregir una remisión.** Hoy no hay forma de editar un traslado. Una remisión mal digitada obliga a anular y registrar de nuevo (se revierte el inventario). **(Recomendado)** no agregar nada ahora y anotarlo; si pasa más de una vez, un `PATCH` solo de la remisión (sin tocar inventario) es un ciclo corto. Alternativa: incluirlo en este ciclo.
+- **O1 — Corregir una remisión.** Hoy no hay forma de editar un traslado. Una remisión mal digitada obliga a anular y registrar de nuevo (se revierte el inventario). **(Recomendado)** no agregar nada ahora y anotarlo; si pasa más de una vez, un `PATCH` solo de la remisión (sin tocar inventario) es un ciclo corto. Alternativa: incluirlo en este ciclo (según QA 2, chico: sin efectos, unos 6 tests). Dos datos para decidir: el traslado será el **único** documento del talonario sin forma de corregir su remisión (Entradas y Salidas de control se editan), y anular uno ya recibido revierte también kg, merma y maquila.
 - **O2 — Quién abre el Talonario.** Hoy `purchases.view` Y `sales.view`. **(Recomendado)** dejarlo igual: quien tiene solo `inventory.view` no ve el Talonario. Alternativa: abrirlo también con `inventory.view` solo (vería solo los traslados).
-- **O3 — Números cubiertos por un documento que el usuario no ve** (D-b). **(Recomendado)** medir contra toda la org: se ve un salto sin hueco falso. Alternativa: medir solo contra lo visible, que puede mostrar un «Sin documento» donde hay un traslado.
+- **O3 — Números cubiertos por un documento que el usuario no ve** (D-b). **(Recomendado)** medir contra toda la org: se ve un salto sin hueco falso. Alternativa: medir solo contra lo visible, que puede mostrar un «Sin documento» donde hay un traslado. El costo de la recomendada también alcanza a los avisos: una Entrada o una Salida de control que se captura con la remisión de un traslado avisa «Traslado #n» aunque quien captura no tenga `inventory.view`. En los dos casos solo se revela que ese número existe.
 
 ## 11. Fuera de este ciclo (se anota, no se hace)
 
