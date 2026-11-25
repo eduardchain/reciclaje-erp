@@ -69,3 +69,25 @@ Para medir que T5 ve un `status_map` roto:
 | P2' (QA 2) | `services/inbound_order.py` · `status_map`: `"closed": ["closed"]` → `"closed": ["draft"]` (el filtro «Cerradas sin valor» trae las registradas) | = {t5_paridad_del_filtro_con_el_campo} |
 
 P2 queda con «no cae» y la causa de arriba, medida en el log y confirmada por QA 2 (`qa-2-documentos-control/pasada2/p2_lectura.md`).
+
+## Adenda 2 (24-nov, ajustes del plan v1.3.2 §11.6; antes de plantar P30–P34b)
+
+Mismo método que la matriz: copia con `git archive` del commit de esta adenda, un defecto por fila, archivo entero (`tests/test_sac_documentos_control.py`, 56 tests desde T26/T27), restauración con sha256. Base: 56 passed.
+
+Los defectos viven en el filtro `control_only` de `get_multi` (servicio) y en el campo `is_control_only` (endpoint).
+
+| P | Defecto (archivo · cambio exacto) | Debe caer |
+|---|---|---|
+| P30 | `services/inbound_order.py` · `es_control if control_only else ~es_control` → `es_control if control_only else es_control` (sin el NOT en la rama `false`) | = {t26_paridad_del_filtro_control_only_con_el_campo, t27_compra_regular_excluye_el_control} |
+| P31 | `services/inbound_order.py` · `InboundOrder.status.in_(CONTROL_ONLY_STATUSES), has_line, ~unmarked_line` → `InboundOrder.status.in_(CONTROL_ONLY_STATUSES), ~unmarked_line` (sin el EXISTS de línea) | = {t26_paridad_del_filtro_control_only_con_el_campo} |
+| P32 | `services/inbound_order.py` · `…, has_line, ~unmarked_line` → `…, has_line` (la rama `true` sin el NOT EXISTS) | = {t26_paridad_del_filtro_control_only_con_el_campo, t27_compra_regular_excluye_el_control} |
+| P33 | `services/inbound_order.py` · `es_control if control_only else ~es_control` → `~es_control if control_only else es_control` | = {t26_paridad_del_filtro_control_only_con_el_campo, t27_compra_regular_excluye_el_control} |
+| P34a | `api/v1/endpoints/inbound_orders.py` · `is_control_only=order.status in CONTROL_ONLY_STATUSES\n        and bool(order.lines)` → `is_control_only=bool(order.lines)` (el campo sin el estado) | = {t26_paridad_del_filtro_control_only_con_el_campo, t27_compra_regular_excluye_el_control} |
+| P34b | `services/inbound_order.py` · `InboundOrder.status.in_(CONTROL_ONLY_STATUSES), has_line, ~unmarked_line` → `has_line, ~unmarked_line` (el filtro sin el estado) | = {t26_paridad_del_filtro_control_only_con_el_campo, t27_compra_regular_excluye_el_control} |
+
+**Tres filas difieren de la tabla del plan v1.3.2 §11.6** (P32, P34a y P34b decían «= {t26}»). La predicción de arriba sale de leer T27 en el árbol construido, y el plan no se edita:
+- **P32:** la mixta y la compra normal pasan a ser «de control» en el filtro, así que `inbound_type=purchase&control_only=false` deja de traerlas, y T27 afirma `{mixta, compra, liq_a_1} <= got`.
+- **P34a:** la liquidada a $1 (`liq_a_1`) pasa a tener `is_control_only=true` en el campo y sigue saliendo en el filtro `false`. T27 afirma `all(not i["is_control_only"] …)` sobre esa lista.
+- **P34b:** el filtro `false` deja de traer `liq_a_1`, y T27 la exige en `got`.
+
+Las tres caen en T27 *además* de T26: es la dirección barata. La peligrosa sería que T26 no cayera.
