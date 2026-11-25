@@ -49,6 +49,8 @@ const TABS: { value: string; label: string }[] = [
   { value: "reviewed", label: "Revisadas" },
   { value: "liquidated", label: "Liquidadas" },
   { value: "annulled", label: "Anuladas" },
+  // Documentos de control v1.3 (§11.3): pestaña propia, al lado de Anuladas
+  { value: "closed", label: "Cerradas sin valor" },
 ];
 
 // Estado UNICO visible (#93, columna-driven) — femenino para "entrada"
@@ -93,6 +95,16 @@ const WORLD_BADGE_STYLES: Record<string, string> = {
 
 export function EntradaTypeBadge({ order }: { order: InboundOrderResponse }) {
   const isWillard = WILLARD_INBOUND_TYPES.includes(order.inbound_type);
+  // Documentos de control v1.3 (§11.2): tipo deducido, no elegido. El campo
+  // ya trae el estado (C1: solo sin efectos), así que una liquidada a $1 sigue
+  // siendo «Compra regular».
+  if (!isWillard && order.is_control_only) {
+    return (
+      <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-200">
+        Control
+      </Badge>
+    );
+  }
   if (isWillard) {
     const world = order.willard_world ? WORLD_LABELS[order.willard_world] ?? order.willard_world : null;
     const style = (order.willard_world && WORLD_BADGE_STYLES[order.willard_world]) ||
@@ -202,9 +214,6 @@ export default function InboundOrdersPage() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  // Documentos de control: las pestanas no cambian (plan §4.4); en «Todas» un
-  // selector de estado deja aislar las cerradas sin valor.
-  const [closedOnly, setClosedOnly] = useState(false);
   // Plan columna Remision D3: la Remision la ordena el SERVIDOR sobre toda la
   // lista; las demas columnas siguen ordenando la pagina. Un solo orden a la
   // vez [C1]: Shift+clic agregaria un segundo orden y la tabla reordenaria la
@@ -228,6 +237,10 @@ export default function InboundOrdersPage() {
       return { inbound_type: "willard", willard_world: "postconsumo" as const };
     if (typeFilter === "willard_drosses")
       return { inbound_type: "willard", willard_world: "drosses" as const };
+    // Documentos de control v1.3 (§11.2): «Control» es deducido, y «Compra
+    // regular» no trae las de control (paridad filtro ↔ tipo que se ve)
+    if (typeFilter === "control") return { control_only: true };
+    if (typeFilter === "purchase") return { inbound_type: "purchase", control_only: false };
     return { inbound_type: typeFilter };
   }, [typeFilter]);
 
@@ -235,10 +248,7 @@ export default function InboundOrdersPage() {
     skip: page * PAGE_SIZE,
     limit: PAGE_SIZE,
     ...typeParams,
-    display_status:
-      tab === "all"
-        ? (closedOnly ? "closed" : undefined)
-        : (tab as InboundDisplayStatus),
+    display_status: tab === "all" ? undefined : (tab as InboundDisplayStatus),
     search: search.trim() || undefined,
     warehouse_id: warehouseFilter === "all" ? undefined : warehouseFilter,
     third_party_id: tpFilter === "all" ? undefined : tpFilter,
@@ -577,7 +587,9 @@ export default function InboundOrdersPage() {
             }${
               WILLARD_INBOUND_TYPES.includes(o.inbound_type)
                 ? `Willard${o.willard_world ? ` · ${WORLD_LABELS[o.willard_world] ?? o.willard_world}` : ""}`
-                : INBOUND_TYPE_LABELS[o.inbound_type] ?? o.inbound_type
+                : o.is_control_only
+                  ? "Control"
+                  : INBOUND_TYPE_LABELS[o.inbound_type] ?? o.inbound_type
             }${o.remission_number ? ` · Rem. ${o.remission_number}` : ""}${o.warehouse_name ? ` · ${o.warehouse_name}` : ""}${o.vehicle_plate ? ` · ${o.vehicle_plate.toUpperCase()}` : ""}`}
             extras={
               <span className="flex items-center gap-2">
@@ -662,25 +674,12 @@ export default function InboundOrdersPage() {
               <SelectContent>
                 <SelectItem value="all">Todos los tipos</SelectItem>
                 <SelectItem value="purchase">Compra regular</SelectItem>
+                <SelectItem value="control">Control</SelectItem>
                 <SelectItem value="willard">Willard (todos)</SelectItem>
                 <SelectItem value="willard_postconsumo">Willard · Postconsumo</SelectItem>
                 <SelectItem value="willard_drosses">Willard · Drosses</SelectItem>
               </SelectContent>
             </Select>
-            {tab === "all" && (
-              <Select
-                value={closedOnly ? "closed" : "all"}
-                onValueChange={(v) => { setClosedOnly(v === "closed"); setPage(0); }}
-              >
-                <SelectTrigger className="w-full sm:w-48">
-                  <SelectValue placeholder="Todos los estados" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los estados</SelectItem>
-                  <SelectItem value="closed">Cerradas sin valor</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
             {!scoped && (
             <Select value={warehouseFilter} onValueChange={(v) => { setWarehouseFilter(v); setPage(0); }}>
               <SelectTrigger className="w-full sm:w-44">

@@ -19,6 +19,7 @@ from app.api.deps import get_db, require_org_flag, require_permission
 from app.models.inbound_order import InboundOrder
 from app.models.user import User
 from app.schemas.inbound_order import (
+    CONTROL_ONLY_STATUSES,
     InboundAllocationResponse,
     InboundConfirmRequest,
     InboundLiquidateRequest,
@@ -294,10 +295,12 @@ def _enrich(
         liquidated_at=liquidated_at,
         liquidated_ts=order.liquidated_ts,
         annulled_by_name=names.get(order.annulled_by),
-        # N2 de QA 2: sin lineas no es «solo de control»
-        is_control_only=bool(order.lines) and all(
-            l.material_id in control for l in order.lines
-        ),
+        # N2 de QA 2: sin lineas no es «solo de control». C1 de la v1.3.1: y
+        # solo sin efectos (CONTROL_ONLY_STATUSES); el filtro `control_only`
+        # de get_multi espeja este mismo predicado (T26).
+        is_control_only=order.status in CONTROL_ONLY_STATUSES
+        and bool(order.lines)
+        and all(l.material_id in control for l in order.lines),
         closed_at=order.closed_at,
         closed_by_name=names.get(order.closed_by),
         lines=lines,
@@ -454,6 +457,10 @@ def list_inbound_orders(
         description="remission_*: orden natural de la remision sobre TODA la lista (plan columna Remision)",
     ),
     willard_world: Optional[str] = Query(None, pattern="^(postconsumo|drosses)$"),
+    control_only: Optional[bool] = Query(
+        None,
+        description="Documentos de control v1.3: true = solo de control y sin efectos (el campo is_control_only); false = el resto",
+    ),
     warehouse_id: Optional[UUID] = Query(None),
     third_party_id: Optional[UUID] = Query(None),
     date_from: Optional[date] = Query(None),
@@ -475,6 +482,7 @@ def list_inbound_orders(
         search=search,
         sort=sort,
         willard_world=willard_world,
+        control_only=control_only,
         warehouse_id=warehouse_id,
         third_party_id=third_party_id,
         date_from=datetime.combine(date_from, dt_time.min, tzinfo=timezone.utc) if date_from else None,

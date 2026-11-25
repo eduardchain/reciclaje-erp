@@ -26,6 +26,13 @@ InboundType = Literal["purchase", "willard"]
 WILLARD_INBOUND_TYPES = {"willard"}
 PURCHASE_INBOUND_TYPES = {"purchase"}
 
+# Documentos de control v1.3.1 (C1 de QA 2): una Entrada es «solo de control»
+# mientras NO tiene efectos. Una liquidada a $1 cuyos materiales se marcaron
+# despues tiene compras y deuda: sigue siendo «Compra», con su total. UN solo
+# conjunto para el campo `is_control_only` (endpoint) y el filtro `control_only`
+# (servicio).
+CONTROL_ONLY_STATUSES = ("draft", "reviewed", "closed")
+
 
 class InboundOrderLineCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")

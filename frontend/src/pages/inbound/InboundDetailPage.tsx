@@ -444,7 +444,10 @@ export default function InboundDetailPage() {
     <div className="space-y-6">
       <PageHeader
         title={`Entrada #${order.order_number}`}
-        description={INBOUND_TYPE_LABELS[order.inbound_type] ?? order.inbound_type}
+        description={
+          // C1 de QA 2: el subtitulo dice lo mismo que el badge de Tipo
+          isControlOnly ? "Control" : (INBOUND_TYPE_LABELS[order.inbound_type] ?? order.inbound_type)
+        }
       >
         <Button variant="outline" onClick={handleBack}>
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -464,7 +467,9 @@ export default function InboundDetailPage() {
             también pasa por revisión — el revisor certifica el peso de
             báscula, que es la carta con la que Hugo renegocia el kg/unidad
             con Willard. La compra legacy 1:1 conserva su flujo viejo. */}
-        {isRegistered && !isLegacy && canReview && (
+        {/* Documentos de control v1.3 (§11.4): una solo de control pasa de
+            Registrada a Cerrada sin valor, sin revisión */}
+        {isRegistered && !isLegacy && canReview && !isControlOnly && (
           <Button
             onClick={() => setReviewOpen(true)}
             className="bg-sky-600 hover:bg-sky-700"
@@ -985,7 +990,9 @@ export default function InboundDetailPage() {
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Líneas</CardTitle>
-          {isPurchaseType && !isControlOnly && controlLineCount > 0 && (
+          {/* v1.3.1: habla en futuro — en una liquidada antes de marcar el
+              material sería falsa, así que solo en Registrada y Revisada */}
+          {isPurchaseType && !isControlOnly && controlLineCount > 0 && (isRegistered || isReviewed) && (
             <p className="text-xs text-slate-500">
               {controlLineCount === 1
                 ? "1 línea de control no se liquida"
