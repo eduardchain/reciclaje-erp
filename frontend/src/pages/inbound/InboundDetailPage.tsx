@@ -444,7 +444,10 @@ export default function InboundDetailPage() {
     <div className="space-y-6">
       <PageHeader
         title={`Entrada #${order.order_number}`}
-        description={INBOUND_TYPE_LABELS[order.inbound_type] ?? order.inbound_type}
+        description={
+          // C1 de QA 2: el subtitulo dice lo mismo que el badge de Tipo
+          isControlOnly ? "Control" : (INBOUND_TYPE_LABELS[order.inbound_type] ?? order.inbound_type)
+        }
       >
         <Button variant="outline" onClick={handleBack}>
           <ArrowLeft className="h-4 w-4 mr-2" />
