@@ -172,7 +172,7 @@ Todo se lee **por HTTP** (un warning se prueba en la respuesta, lección de #100
 | TP6 | Anulado: 400 que lo nombra y dice que se corrija antes de anular; la remisión no cambia | 1 |
 | TP7a | Permiso: un rol con `inventory.view` e `inventory.transfer_receive` y **sin** `inventory.transfer` recibe 403 y la remisión no cambia | 1 |
 | TP7b | Control positivo: un rol con `inventory.transfer` (y sin `inventory.transfer_receive`) recibe 200 | 1 |
-| TP8 | **No mueve nada.** Dos traslados en la misma org: A, cruzado y recibido con merma y par de maquila; B, recibido fuera de tolerancia (`held_discrepancy`, con su `DiscrepancyTask` abierta). Antes de despacharlos se siembra un MCH del mismo material (una compra liquidada). Se vuelcan (conteo + huella de cada fila) las ocho tablas y las existencias y el costo promedio de los materiales, más las columnas de los dos traslados menos `remission_number`; se hace el PATCH a A **y** a B; tras eso todo es idéntico. **Control positivo por tabla** (se afirma antes de comparar, tabla por tabla; si alguna estuviera vacía, su igualdad sería `0 == 0`): `inventory_movements`, `kg_ledger_movements` y `transfer_lines` por A; `money_movements` por el par de maquila de A; `inventory_adjustments` por la merma de A; `material_cost_histories` por el MCH sembrado (un traslado nunca escribe MCH, B1 de #84, así que sin siembra estaría vacía); `discrepancy_tasks` por B (sin discrepancia no hay tarea) | 1 |
+| TP8 | **No mueve nada.** Dos traslados en la misma org: A, cruzado y recibido con merma y par de maquila; B, recibido fuera de tolerancia (`held_discrepancy`, con su `DiscrepancyTask` abierta). Antes de despacharlos se siembra un MCH del mismo material (una compra liquidada). Se vuelcan (conteo + huella de cada fila) las siete tablas (las de abajo) y las existencias y el costo promedio de los materiales, más las columnas de los dos traslados menos `remission_number`; se hace el PATCH a A **y** a B; tras eso todo es idéntico. **Control positivo por tabla** (se afirma antes de comparar, tabla por tabla; si alguna estuviera vacía, su igualdad sería `0 == 0`): `inventory_movements`, `kg_ledger_movements` y `transfer_lines` por A; `money_movements` por el par de maquila de A; `inventory_adjustments` por la merma de A; `material_cost_histories` por el MCH sembrado (un traslado nunca escribe MCH, B1 de #84, así que sin siembra estaría vacía); `discrepancy_tasks` por B (sin discrepancia no hay tarea) | 1 |
 | TP10 | Aislamiento por org: un traslado de otra organización y un id inexistente dan 404; la remisión del otro no cambia | 1 |
 | TP12 | Traslado viejo (C1): uno sin remisión (se carga con el ORM tras crearlo, como los anteriores a este ciclo): el PATCH la fija, responde 200 con `warnings == []`, el detalle la muestra y el talonario lo trae | 1 |
 | TP11 | El talonario sigue la corrección: tras el PATCH, `/remissions` muestra el traslado con la remisión nueva, el número viejo ya no lo cubre (aparece como hueco si queda entre dos) y el nuevo sí | 1 |
@@ -322,13 +322,13 @@ Sin preguntas abiertas.
 - **O2 — Quién abre el Talonario:** como hoy, `purchases.view` Y `sales.view`.
 - **O3 — Números cubiertos por un documento que el usuario no ve:** huecos y marcas contra toda la org. El costo alcanza también a los avisos: una Entrada o una Salida de control que se captura con la remisión de un traslado avisa «Traslado #n» aunque quien captura no tenga `inventory.view`; en los dos casos solo se revela que ese número existe.
 
-**Observación abierta de QA 2 (no condiciona el GO; decide Daniel):** con el PATCH el valor anterior de la remisión se pierde, y la remisión es obligatoria «para que no me alteren el consecutivo» (Hugo). Una línea de log al estilo de #85 D5 (actor, traslado, valor anterior y nuevo; sin tabla ni migración) cuesta poco. **(Recomendado)** incluirla; si Daniel dice que sí, va en una adenda con su test (`caplog`) y su fila de plantado, y el conteo pasa a 49 / 704. Mientras no responda, no se construye.
+**Observación de QA 2 sobre la v1.2, resuelta (25-nov):** con el PATCH el valor anterior de la remisión se pierde, y la remisión es obligatoria «para que no me alteren el consecutivo» (Hugo). Daniel aceptó la línea de log al estilo de #85 D5 (actor, traslado, valor anterior y nuevo; sin tabla ni migración, nunca el cuerpo). Está incluida: adenda 1, §12 (TP13, P34–P37; 49 tests, dirigido 704).
 
 ## 11. Fuera de este ciclo (se anota, no se hace)
 
 - El inventario (`inventario-preguntas-cliente.md`) y CLAUDE.md los escribe el Coordinador al integrar: la lectura (c) de Q-75 «los traslados salen del mismo talonario» (decisión de Daniel, no respuesta de Johana) y la decisión nueva.
 - Los traslados de Salidas de Plomo y las conversiones del crisol no llevan remisión de este talonario.
-- No se guarda el valor anterior de una remisión corregida (ni en traslados, ni en Entradas, ni en Salidas de control). Si hace falta auditoría de verdad, es un ciclo propio; la línea de log es la observación abierta del §10.
+- No se guarda el valor anterior de una remisión corregida (ni en traslados, ni en Entradas, ni en Salidas de control). Si hace falta auditoría de verdad, es un ciclo propio; la línea de log quedó incluida en el ciclo (adenda 1, §12).
 - El `PATCH` no edita nada más del traslado (notas, fecha, bodegas, líneas).
 - Una venta no tiene campo de remisión (anotado en #141); sigue como hueco.
 
@@ -350,7 +350,7 @@ Sin preguntas abiertas.
 1. PATCH que cambia la remisión (con espacios alrededor) → **exactamente una** línea `transfer_remission_changed`, que contiene el id y el email del actor, el id y el número del traslado, el valor anterior y el nuevo (ya con strip).
 2. La línea **no** contiene la cadena `remission_number` ni el cuerpo JSON del request (la misma aserción de H3 de #85: el corazón del test).
 3. Un PATCH con el mismo valor → sigue habiendo una sola línea (no se agregó otra).
-4. Un PATCH con `""` (422) y un PATCH a un traslado anulado (400, un segundo traslado que se anula antes) → siguen siendo una sola línea.
+4. Un PATCH con `""` (422) y un PATCH a un traslado anulado (400, un segundo traslado que se anula antes) → siguen siendo una sola línea. **Esta aserción es control, no red** (O4 de QA 2): el 422 sale en la validación del schema, antes de entrar al servicio, y no puede dejar línea; la red del caso del 400 es P37.
 5. Un PATCH a un traslado viejo sin remisión (cargado por el ORM) → una línea más, con `previous=None`.
 
 **Matriz de plantado (filas nuevas; no se reescriben las anteriores).** Se mide con el mismo método (copia con `git archive`, respaldo por ruta, `PYTHONDONTWRITEBYTECODE=1`, el archivo entero, exit 0 antes de leer la diagonal).
