@@ -367,3 +367,21 @@ Los cuatro caen solo en TP13: ningún otro test lee el log. Si alguno cayera de 
 **Números.** Tests nuevos: **49** (48 + TP13). Predicción del set dirigido: **704** (655 + 49). El set no cambia de archivos: el log vive en `services/transfer.py` y `endpoints/transfers.py`, que ya cubre el grep C.
 
 **Riesgos.** (1) Loguear el cuerpo: P35 y la aserción 2 de TP13. (2) Loguear lo que no se guardó: P36, P37 y las aserciones 3 y 4. (3) Un `user_email` ausente (contexto sin usuario): el endpoint siempre lo trae; el parámetro es opcional para no romper llamadas directas del servicio en los tests, y en ese caso el log dice `actor_email=None`. (4) Volumen: una línea por corrección, no por lectura.
+
+---
+
+## 13. Adenda 2 — el desempate del talonario incluye el tipo de documento (C1 de QA 2, pasada 1; sobre la adenda 1 `5677423`)
+
+**Qué.** El desempate de la vista del talonario era `[date desc, doc_number desc]`. Con tres fuentes que llevan contador propio, Entrada #5, Traslado #5 y Salida de control #5 con la misma remisión y fecha empatan del todo y su orden quedaba a cargo de Postgres, contra lo que dice el docstring de `remission_order` («orden TOTAL»). Se agrega `t.c.doc_type.desc()` al final del desempate de `remission_book.py` (`tiebreak = [date desc, doc_number desc, doc_type desc]`). Sin cambio de contrato, de esquema ni de pantalla; el orden entre tipos (traslado, entrada, salida de control) es arbitrario pero fijo. El orden de Entradas (#117) no se toca.
+
+**Test nuevo (1) — T17**, en el mismo archivo: Entrada #1, Traslado #1 y Salida de control #1 con la remisión `777` y el mismo día; el test **afirma la premisa del empate** (3 documentos, una sola remisión, una sola fecha, `doc_number == 1` en los tres) y después que el orden de los tipos es `transfer, inbound, control_dispatch` con `order=asc` y con `order=desc`, y que una segunda lectura devuelve la misma lista.
+
+**Matriz de plantado (fila nueva; no se reescriben las anteriores).**
+
+| P | Defecto (archivo · cambio) | Debe caer |
+|---|---|---|
+| P38 | `services/remission_book.py` · se quita `t.c.doc_type.desc()` del `tiebreak` | = {T17} (medido antes de entregar: cae con `inbound` primero, el orden de la unión; `t17_sin_fix.log`) |
+
+**Números.** Tests nuevos: **50** (49 + T17). Predicción del set dirigido: **705** (655 + 50). El set no cambia de archivos.
+
+**Riesgos.** (1) Un test que no mide el desempate: T17 afirma la premisa y su caída con el defecto quedó medida. (2) Orden «raro» entre tipos para el usuario: solo se ve con remisión, fecha y número idénticos; es un caso de borde y queda fijo.
