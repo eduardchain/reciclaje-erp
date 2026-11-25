@@ -1,8 +1,10 @@
 # Plan — Remisión en los traslados + entrada propia del Talonario (SAC)
 
-Versión 1.3 · 25-nov-2026 · autor: Eco Coder 2 · **nivel: lógica** · base: `7829411` (rama `coder-2/control-ajustes`)
+Versión 1.3 + adenda 1 (§12) · 25-nov-2026 · autor: Eco Coder 2 · **nivel: lógica** · base: `7829411` (rama `coder-2/control-ajustes`)
 Pedido: Daniel, 25-nov, vía el Coordinador (brief en `~/sac-evidencia/2026-11-25/traslados-remision/brief.md`).
 Estado: **solo plan. No se construye hasta el GO de QA 2 y el OK de Daniel.**
+
+**Adenda 1 (§12, al final):** Daniel aceptó la línea de log del PATCH (observación de QA 2 sobre la v1.2). Es un solo delta sobre la v1.3 (`b66b7d8`): donde el plan dice **48 tests / 703**, léase **49 / 704**; se agregan TP13 y las filas P34–P37. Nada más cambia.
 
 v1.3: aplica C1–C4 del veredicto de QA 2 sobre la v1.2 (`31f082d`; `~/sac-evidencia/2026-11-25/qa-2-traslados-remision/veredicto_plan_v12_31f082d.md`): TP12 y P31 (traslado viejo con remisión NULL), el control de TP8 escrito por tabla con P32 y P33, P24 a «≥ {TP1}», y T15 con las tres rutas con P18b y P18c. El diseño no cambia. Números: tests nuevos 48, dirigido 703. QA 2 revisa solo el delta contra `31f082d`.
 
@@ -329,3 +331,39 @@ Sin preguntas abiertas.
 - No se guarda el valor anterior de una remisión corregida (ni en traslados, ni en Entradas, ni en Salidas de control). Si hace falta auditoría de verdad, es un ciclo propio; la línea de log es la observación abierta del §10.
 - El `PATCH` no edita nada más del traslado (notas, fecha, bodegas, líneas).
 - Una venta no tiene campo de remisión (anotado en #141); sigue como hueco.
+
+---
+
+## 12. Adenda 1 — línea de log del PATCH (decisión de Daniel, 25-nov; sobre la v1.3 `b66b7d8`)
+
+**Qué.** Cuando el PATCH cambia la remisión de un traslado, queda una línea de log con el usuario, el traslado y el número anterior y el nuevo. Estilo de #85 D5: sin tabla, sin migración, sin pantalla. **Nunca el cuerpo del request**: solo los cinco datos, cada uno por su nombre.
+
+**Dónde y cuándo.**
+- En `TransferService.update_remission`, **después del `commit`** y solo si el valor cambió. `logger = logging.getLogger(__name__)` en `services/transfer.py` (el archivo hoy no tiene logger; se agrega).
+- `logger.warning(...)`, como #85 D5 (el nivel que sale con la configuración de producción). El mensaje, con estos nombres y ninguno más:
+  `transfer_remission_changed actor_id=%s actor_email=%s transfer_id=%s transfer_number=%s previous=%r new=%r`
+- `previous` es `None` en un traslado viejo sin remisión (TP12) y `new` es el valor ya con strip. Los números de remisión no son secretos; lo que no se loguea es el payload (si algún día el cuerpo llevara otra cosa, no viajaría al log).
+- No se loguea: un PATCH sin cambio (200 sin aviso), un 400 (anulado), un 403, un 404 ni un 422. La línea sale solo cuando la corrección quedó guardada.
+- El servicio gana dos parámetros opcionales, `user_id` y `user_email`; el endpoint los pasa de `org_context["user_id"]` y `org_context["user"].email`.
+
+**Test nuevo (1) — TP13**, en el mismo archivo, con `caplog` a nivel WARNING sobre el logger `app.services.transfer`:
+1. PATCH que cambia la remisión (con espacios alrededor) → **exactamente una** línea `transfer_remission_changed`, que contiene el id y el email del actor, el id y el número del traslado, el valor anterior y el nuevo (ya con strip).
+2. La línea **no** contiene la cadena `remission_number` ni el cuerpo JSON del request (la misma aserción de H3 de #85: el corazón del test).
+3. Un PATCH con el mismo valor → sigue habiendo una sola línea (no se agregó otra).
+4. Un PATCH con `""` (422) y un PATCH a un traslado anulado (400, un segundo traslado que se anula antes) → siguen siendo una sola línea.
+5. Un PATCH a un traslado viejo sin remisión (cargado por el ORM) → una línea más, con `previous=None`.
+
+**Matriz de plantado (filas nuevas; no se reescriben las anteriores).** Se mide con el mismo método (copia con `git archive`, respaldo por ruta, `PYTHONDONTWRITEBYTECODE=1`, el archivo entero, exit 0 antes de leer la diagonal).
+
+| P | Defecto (archivo · cambio) | Debe caer |
+|---|---|---|
+| P34 | `services/transfer.py` · `update_remission`: se quita la línea de log | = {TP13} |
+| P35 | `services/transfer.py` · `update_remission`: el log agrega `body=%s` con `{"remission_number": new}` (el cuerpo del request en el log) | = {TP13} |
+| P36 | `services/transfer.py` · `update_remission`: el log se emite también cuando no cambió (se mueve antes del `if changed`) | = {TP13} |
+| P37 | `services/transfer.py` · `update_remission`: el log se emite antes del guard de anulado (queda una línea de un PATCH que dio 400) | = {TP13} |
+
+Los cuatro caen solo en TP13: ningún otro test lee el log. Si alguno cayera de más o no cayera, se anota con su causa.
+
+**Números.** Tests nuevos: **49** (48 + TP13). Predicción del set dirigido: **704** (655 + 49). El set no cambia de archivos: el log vive en `services/transfer.py` y `endpoints/transfers.py`, que ya cubre el grep C.
+
+**Riesgos.** (1) Loguear el cuerpo: P35 y la aserción 2 de TP13. (2) Loguear lo que no se guardó: P36, P37 y las aserciones 3 y 4. (3) Un `user_email` ausente (contexto sin usuario): el endpoint siempre lo trae; el parámetro es opcional para no romper llamadas directas del servicio en los tests, y en ese caso el log dice `actor_email=None`. (4) Volumen: una línea por corrección, no por lectura.
