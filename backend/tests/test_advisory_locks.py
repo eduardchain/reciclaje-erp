@@ -209,6 +209,7 @@ class TestMapa:
         from app.services.transfer import transfer_service
         from app.services.willard_delivery import willard_delivery
         from app.services.crucible_charge import crucible_charge_service
+        from app.services.control_dispatch import control_dispatch_service
 
         casos = [
             (purchase._generate_purchase_number, ("purchase_number", None)),
@@ -222,6 +223,8 @@ class TestMapa:
             # #107 (T15): el documento de crisol numera con su propia secuencia
             (crucible_charge_service._generate_charge_number, ("crucible_number", None)),
             (lambda db, org: willard_delivery._next_number(db, org, "venta"), ("willard_delivery", "venta")),
+            # Documentos de control: la Salida de control numera con su secuencia propia (D7)
+            (control_dispatch_service._generate_dispatch_number, ("control_dispatch_number", None)),
         ]
         org = uuid4()
         vistos = []

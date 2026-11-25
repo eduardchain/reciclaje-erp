@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_org_flag, require_permission
 from app.schemas.material_kg_profile import (
+    MaterialControlUpdate,
     MaterialFormOrderUpdate,
     MaterialKgProfileListResponse,
     MaterialKgProfileResponse,
@@ -54,6 +55,24 @@ def set_material_form_order(
         db, organization_id=org_context["organization_id"], obj_in=order_in
     )
     return MaterialKgProfileListResponse(items=items, total=len(items))
+
+
+@router.put("/{material_id}/control", response_model=MaterialKgProfileResponse)
+def set_material_control(
+    material_id: UUID,
+    control_in: MaterialControlUpdate,
+    org_context: dict = Depends(require_permission("materials.edit")),
+    db: Session = Depends(get_db),
+):
+    """Marca o desmarca un material como solo de control (documentos de
+    control §4.1). La marca NO viaja por el upsert del perfil (#103 D4)."""
+    return material_kg_profile_service.set_control(
+        db,
+        material_id=material_id,
+        organization_id=org_context["organization_id"],
+        obj_in=control_in,
+        user_id=org_context["user_id"],
+    )
 
 
 @router.get("/{material_id}", response_model=MaterialKgProfileResponse)

@@ -182,6 +182,10 @@ export interface MaterialKgProfileResponse {
   form_order: number | null;
   /** F3: un material del formato puede desactivarse despues. */
   material_is_active: boolean | null;
+  /** Documentos de control: material que se registra solo por el
+   *  consecutivo (estibas, tubulares, electrolito a $0). Solo lectura aca: se
+   *  escribe por `setKgControl`, nunca por el upsert (#103 D4). */
+  control_only: boolean;
   created_at: string;
 }
 

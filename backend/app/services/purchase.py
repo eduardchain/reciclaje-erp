@@ -32,6 +32,7 @@ from app.schemas.purchase import PurchaseCreate, PurchaseUpdate, PurchaseFullUpd
 from app.services.base import CRUDBase
 from app.services.inventory_costing import incorporate_into_pool, remove_from_pool
 from app.services.material_cost_history import material_cost_history_service
+from app.services.material_kg_profile import guard_no_control_materials
 from app.services.money_movement import money_movement as mm_service
 
 
@@ -257,6 +258,12 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
         if not is_double_entry:
             self._guard_willard_pure_materials(
                 db, organization_id, [l.material_id for l in obj_in.lines]
+            )
+            # D5 (documentos de control): estibas/tubulares/electrolito no se
+            # compran — van por la Entrada, que las cierra sin valor.
+            guard_no_control_materials(
+                db, organization_id, [l.material_id for l in obj_in.lines],
+                "registrelo en una Entrada y cierrela sin valor",
             )
 
         # SAC E2 D11: bodega de cabecera opcional — valida y fuerza las lineas
@@ -1339,6 +1346,10 @@ class CRUDPurchase(CRUDBase[Purchase, PurchaseCreate, PurchaseUpdate]):
             # material valido y se editaria a Willard-puro (hueco de ruteo)
             self._guard_willard_pure_materials(
                 db, organization_id, [l.material_id for l in obj_in.lines]
+            )
+            guard_no_control_materials(
+                db, organization_id, [l.material_id for l in obj_in.lines],
+                "registrelo en una Entrada y cierrela sin valor",
             )
             # 3a. Detectar stock negativo al revertir (warning, no bloquea —
             # decision #76: inventario negativo es valido en toda la app)

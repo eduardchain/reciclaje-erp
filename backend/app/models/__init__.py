@@ -36,6 +36,7 @@ from .material_conversion_formula import MaterialConversionFormula
 from .material_kg_profile import MaterialKgProfile
 from .retention_config import RetentionConfig
 from .willard_delivery import WillardDelivery, WillardDeliveryLine
+from .control_dispatch import ControlDispatch, ControlDispatchLine
 from .attachment import Attachment
 from .document_tax import DocumentTax
 from .inbound_order import (
@@ -105,6 +106,8 @@ __all__ = [
     "WillardDelivery",
     "Attachment",
     "WillardDeliveryLine",
+    "ControlDispatch",
+    "ControlDispatchLine",
     "InboundOrder",
     "InboundOrderLine",
     "InboundOrderPurchase",

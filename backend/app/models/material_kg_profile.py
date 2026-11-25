@@ -79,6 +79,20 @@ class MaterialKgProfile(Base, OrganizationMixin, TimestampMixin):
         comment="Renglon del formato en papel «Materiales recolectados» (NULL = no esta en el formato)",
     )
 
+    # Documentos de control (plan-sac-documentos-control §4.1): material que
+    # entra o sale SOLO por el consecutivo (estibas, tubulares, electrolito) —
+    # no se liquida, no toca inventario, kg ni saldos. Se escribe SOLO por
+    # PUT /material-kg-profiles/{id}/control: el upsert del perfil no la
+    # conoce, asi que no la puede borrar (#103 D4). Exige willard_world y
+    # lead_product en 'none' (coherencia en las dos direcciones, #112 D4d).
+    control_only: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        comment="Material solo de control: se registra por el consecutivo, sin valor ni efectos",
+    )
+
     created_by: Mapped[Optional[UUID]] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

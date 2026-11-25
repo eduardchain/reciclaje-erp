@@ -39,6 +39,8 @@ class MaterialKgProfileResponse(BaseModel):
     compra_regular: bool
     willard_world: str
     lead_product: str
+    # Documentos de control (solo lectura; se escribe por /{id}/control).
+    control_only: bool = False
     # Orden del formato en papel (solo lectura; se escribe por /form-order).
     form_order: Optional[int] = None
     # F3: un material del formato puede desactivarse despues y conserva su
@@ -59,3 +61,11 @@ class MaterialFormOrderUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     material_ids: list[Optional[UUID]]
+
+
+class MaterialControlUpdate(BaseModel):
+    """Marca o desmarca un material como solo de control (documentos de
+    control §4.1). Endpoint propio: el upsert del perfil no la conoce."""
+    model_config = ConfigDict(extra="forbid")
+
+    control_only: bool

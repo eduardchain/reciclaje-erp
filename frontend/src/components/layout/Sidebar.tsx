@@ -39,6 +39,7 @@ import {
   Landmark,
   Percent,
   PackageOpen,
+  PackageMinus,
   MapPin,
 } from "lucide-react";
 import { cn } from "@/utils";
@@ -165,6 +166,16 @@ const orgNavItems: NavItem[] = [
     name: "Salidas de Plomo",
     path: ROUTES.WILLARD_DELIVERIES,
     icon: <Send className="w-5 h-5" />,
+    section: "OPERACIONES",
+    permission: "sales.view",
+    orgFlag: "kg_ledger_enabled",
+  },
+  {
+    // Documentos de control (D6): estibas, tubulares y electrolito salen con
+    // su remision y sin valor. Entrada propia, al lado de Salidas de Plomo.
+    name: "Salidas de control",
+    path: ROUTES.CONTROL_DISPATCHES,
+    icon: <PackageMinus className="w-5 h-5" />,
     section: "OPERACIONES",
     permission: "sales.view",
     orgFlag: "kg_ledger_enabled",

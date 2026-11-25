@@ -11,7 +11,10 @@ export type InboundOrderStatus =
   | "reviewed"
   | "liquidated"
   | "confirmed"
-  | "annulled";
+  | "annulled"
+  // Documentos de control: Entrada solo de estibas/tubulares, cerrada sin
+  // valor (conserva numero y remision, cero efectos).
+  | "closed";
 
 export const INBOUND_TYPE_LABELS: Record<InboundType, string> = {
   purchase: "Compra regular",
@@ -252,6 +255,9 @@ export interface InboundOrderLineResponse {
   allocated_quantity: number | null;
   /** pesado - repartido (D5): + sobrante, - faltante */
   discrepancy: number | null;
+  /** Documentos de control: material marcado `control_only`, leído AL
+   *  MOMENTO. No se reparte ni se liquida. */
+  is_control: boolean;
 }
 
 /** #93 D4: estado ÚNICO visible, columna-driven. registered=Registrada,
@@ -260,13 +266,15 @@ export type InboundDisplayStatus =
   | "registered"
   | "reviewed"
   | "liquidated"
-  | "annulled";
+  | "annulled"
+  | "closed";
 
 export const DISPLAY_STATUS_LABELS: Record<InboundDisplayStatus, string> = {
   registered: "Registrada",
   reviewed: "Revisada",
   liquidated: "Liquidada",
   annulled: "Anulada",
+  closed: "Cerrada sin valor",
 };
 
 export interface InboundOrderResponse {
@@ -322,6 +330,11 @@ export interface InboundOrderResponse {
   /** Instante real del clic — este SÍ con formatDateTime */
   liquidated_ts?: string | null;
   annulled_by_name: string | null;
+  /** Documentos de control: cierre sin valor (instante real → formatDateTime) */
+  closed_at: string | null;
+  closed_by_name: string | null;
+  /** TODAS sus líneas son de control (false sin líneas) — se cierra, no se liquida */
+  is_control_only: boolean;
   lines: InboundOrderLineResponse[];
   warnings: string[];
 }

@@ -63,6 +63,8 @@ def _page_context(db: Session, org_id: UUID, orders: list[InboundOrder]) -> dict
             user_ids.add(o.annulled_by)
         if o.reviewed_by:
             user_ids.add(o.reviewed_by)
+        if o.closed_by:
+            user_ids.add(o.closed_by)
     for plist in purchases.values():
         for p in plist:
             if p.liquidated_by:
@@ -77,9 +79,14 @@ def _page_context(db: Session, org_id: UUID, orders: list[InboundOrder]) -> dict
             select(User.id, User.full_name, User.email).where(User.id.in_(user_ids))
         ).all()
         names = {uid: (full_name or email) for uid, full_name, email in rows}
+    # Documentos de control: UNA consulta para los materiales de la pagina
+    # (lookup por pagina, sin N+1), leida al momento (R2).
+    control = inbound_order_service.control_material_ids(
+        db, org_id, [l.material_id for o in orders for l in o.lines]
+    )
     return {
         "audit": audit, "worlds": worlds, "names": names, "purchases": purchases,
-        "purchase_slots": slots, "purchase_batches": batches,
+        "purchase_slots": slots, "purchase_batches": batches, "control": control,
     }
 
 
@@ -104,6 +111,7 @@ def _enrich(
             kg_by_signature[(mov.material_id, mov.quantity)].append(kg)
 
     is_purchase_type = order.inbound_type == "purchase"
+    control = (ctx or {}).get("control", set())
     lines = []
     total_kg = None
     for line in order.lines:
@@ -173,6 +181,7 @@ def _enrich(
                 allocations=allocations,
                 allocated_quantity=allocated_qty,
                 discrepancy=discrepancy,
+                is_control=line.material_id in control,
             )
         )
 
@@ -285,6 +294,12 @@ def _enrich(
         liquidated_at=liquidated_at,
         liquidated_ts=order.liquidated_ts,
         annulled_by_name=names.get(order.annulled_by),
+        # N2 de QA 2: sin lineas no es «solo de control»
+        is_control_only=bool(order.lines) and all(
+            l.material_id in control for l in order.lines
+        ),
+        closed_at=order.closed_at,
+        closed_by_name=names.get(order.closed_by),
         lines=lines,
         warnings=warnings or [],
     )
@@ -426,10 +441,10 @@ def _scoped_liquidation_payload(
 @router.get("", response_model=InboundOrderListResponse)
 def list_inbound_orders(
     inbound_type: Optional[str] = Query(None),
-    status_filter: Optional[str] = Query(None, alias="status", pattern="^(draft|reviewed|liquidated|confirmed|annulled)$"),
+    status_filter: Optional[str] = Query(None, alias="status", pattern="^(draft|reviewed|liquidated|confirmed|closed|annulled)$"),
     display_status: Optional[str] = Query(
         None,
-        pattern="^(registered|reviewed|liquidated|annulled)$",
+        pattern="^(registered|reviewed|liquidated|closed|annulled)$",
         description="#93 D4: estado unico columna-driven",
     ),
     search: Optional[str] = Query(None, max_length=100),
@@ -597,6 +612,43 @@ def liquidate_inbound_order(
     )
     order = inbound_order_service.get(db, order.id, org_context["organization_id"])
     return _enrich_one(db, order, org_context["organization_id"], warnings)
+
+
+@router.post("/{order_id}/close", response_model=InboundOrderResponse)
+def close_inbound_order(
+    order_id: UUID,
+    org_context: dict = Depends(require_permission("purchases.liquidate")),
+    db: Session = Depends(get_db),
+):
+    """Documentos de control §4.2: cierre SIN VALOR de una Entrada con todos
+    sus materiales de control — estado terminal propio, cero efectos. Fuera de
+    SCOPED_ENDPOINTS a proposito (#129): Ingrid no la ve."""
+    order = inbound_order_service.close(
+        db,
+        order_id=order_id,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    order = inbound_order_service.get(db, order.id, org_context["organization_id"])
+    return _enrich_one(db, order, org_context["organization_id"])
+
+
+@router.post("/{order_id}/reopen", response_model=InboundOrderResponse)
+def reopen_inbound_order(
+    order_id: UUID,
+    org_context: dict = Depends(require_permission("purchases.cancel")),
+    db: Session = Depends(get_db),
+):
+    """R6 (D3): deshace un cierre sin valor por error, sin anular (anular
+    romperia el consecutivo). Vuelve al estado de antes del cierre."""
+    order = inbound_order_service.reopen(
+        db,
+        order_id=order_id,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+    )
+    order = inbound_order_service.get(db, order.id, org_context["organization_id"])
+    return _enrich_one(db, order, org_context["organization_id"])
 
 
 @router.post("/{order_id}/unliquidate", response_model=InboundOrderResponse)

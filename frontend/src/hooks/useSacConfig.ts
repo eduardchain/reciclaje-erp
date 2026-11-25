@@ -160,6 +160,20 @@ export function useSetFormOrder() {
   });
 }
 
+export function useSetKgControl() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ materialId, controlOnly }: { materialId: string; controlOnly: boolean }) =>
+      sacConfigService.setKgControl(materialId, controlOnly),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["kg-profiles"] });
+      // R2: la marca se lee al momento — una Entrada abierta cambia de forma
+      qc.invalidateQueries({ queryKey: ["inbound-orders"] });
+    },
+    onError: (e: unknown) => toast.error(getApiErrorMessage(e, "Error al guardar la marca de control")),
+  });
+}
+
 export function useUpsertKgProfile() {
   const qc = useQueryClient();
   return useMutation({

@@ -96,6 +96,11 @@ const WillardDeliveryDetailPage = lazy(() => import("@/pages/willard/WillardDeli
 const WillardDeliveryEditPage = lazy(() => import("@/pages/willard/WillardDeliveryEditPage"));
 const CrucibleChargeCreatePage = lazy(() => import("@/pages/willard/CrucibleChargeCreatePage"));
 const CrucibleChargeDetailPage = lazy(() => import("@/pages/willard/CrucibleChargeDetailPage"));
+// Documentos de control: Salidas de control y Talonario de remisiones (SAC)
+const ControlDispatchesPage = lazy(() => import("@/pages/control-dispatches/ControlDispatchesPage"));
+const ControlDispatchFormPage = lazy(() => import("@/pages/control-dispatches/ControlDispatchFormPage"));
+const ControlDispatchDetailPage = lazy(() => import("@/pages/control-dispatches/ControlDispatchDetailPage"));
+const RemissionBookPage = lazy(() => import("@/pages/control-dispatches/RemissionBookPage"));
 const TransfersPage = lazy(() => import("@/pages/transfers/TransfersPage"));
 const TransferCreatePage = lazy(() => import("@/pages/transfers/TransferCreatePage"));
 const TransferDetailPage = lazy(() => import("@/pages/transfers/TransferDetailPage"));
@@ -179,6 +184,12 @@ function App() {
               <Route path={ROUTES.CRUCIBLE_CHARGE_DETAIL} element={<FP flag="kg_ledger_enabled" permission="sales.view"><CrucibleChargeDetailPage /></FP>} />
               <Route path={ROUTES.WILLARD_DELIVERY_DETAIL} element={<FP flag="kg_ledger_enabled" permission="sales.view"><WillardDeliveryDetailPage /></FP>} />
               <Route path={ROUTES.WILLARD_DELIVERY_EDIT} element={<FP flag="kg_ledger_enabled" permission="sales.edit"><WillardDeliveryEditPage /></FP>} />
+              <Route path={ROUTES.CONTROL_DISPATCHES} element={<FP flag="kg_ledger_enabled" permission="sales.view"><ControlDispatchesPage /></FP>} />
+              <Route path={ROUTES.CONTROL_DISPATCH_NEW} element={<FP flag="kg_ledger_enabled" permission="sales.create"><ControlDispatchFormPage /></FP>} />
+              <Route path={ROUTES.CONTROL_DISPATCH_DETAIL} element={<FP flag="kg_ledger_enabled" permission="sales.view"><ControlDispatchDetailPage /></FP>} />
+              <Route path={ROUTES.CONTROL_DISPATCH_EDIT} element={<FP flag="kg_ledger_enabled" permission="sales.edit"><ControlDispatchFormPage /></FP>} />
+              {/* Talonario: purchases.view Y sales.view (un arreglo en PermissionGate es OR) */}
+              <Route path={ROUTES.REMISSION_BOOK} element={<FP flag="kg_ledger_enabled" permission="purchases.view"><P permission="sales.view"><RemissionBookPage /></P></FP>} />
               <Route path={ROUTES.INBOUND_NEW} element={<FP flag="kg_ledger_enabled" permission="purchases.create"><InboundCreatePage /></FP>} />
               <Route path={ROUTES.INBOUND_EDIT} element={<FP flag="kg_ledger_enabled" permission="purchases.edit"><InboundEditPage /></FP>} />
               <Route path={ROUTES.INBOUND_LIQUIDATE} element={<FP flag="kg_ledger_enabled" permission="purchases.liquidate"><InboundLiquidatePage /></FP>} />

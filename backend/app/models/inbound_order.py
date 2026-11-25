@@ -148,13 +148,15 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
     # espejo SQL<->Python del Ciclo C). Vocabularios por tipo:
     #   compra : draft (registrada) -> reviewed (revisada) -> liquidated | annulled
     #   willard: draft (registrada) -> confirmed (liquidada en display) | annulled
+    #   control: draft | reviewed -> closed (cerrada sin valor) -> reviewed|draft (reabrir)
+    #            — solo tipo compra con TODAS sus lineas de control (documentos de control)
     # 'confirmed' queda EXCLUSIVO de willard; las filas legacy tipo compra las
     # re-mapea la migracion b8c9d0e1f2a3 desde el estado de su compra derivada.
     status: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
         default="draft",
-        comment="draft | reviewed | liquidated | confirmed (solo willard) | annulled",
+        comment="draft | reviewed | liquidated | confirmed (solo willard) | closed (sin valor, solo compra) | annulled",
     )
 
     # #93 D10: quien reviso (permiso purchases.review) — auditoria minima
@@ -176,6 +178,17 @@ class InboundOrder(Base, OrganizationMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
         comment="Instante real de la liquidacion (auditoria) — NO usar para cortes",
+    )
+
+    # Documentos de control (plan-sac-documentos-control §4.2): cierre sin
+    # valor de una Entrada SOLO de materiales de control. Timestamps de
+    # AUDITORIA (now(utc), #87) — nunca para cortes. Reabrir los limpia.
+    closed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Instante real del cierre sin valor (auditoria)",
+    )
+    closed_by: Mapped[Optional[UUID]] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
 
     # Columna INERTE desde #93 (regla sin-DROP): el enlace entrada<->compras

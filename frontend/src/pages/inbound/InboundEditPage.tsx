@@ -159,6 +159,11 @@ export default function InboundEditPage() {
     for (const p of profilesData?.items ?? []) map.set(p.material_id, p.willard_world);
     return map;
   }, [profilesData]);
+  // Documentos de control: etiqueta «(control)» en el selector
+  const controlIds = useMemo(
+    () => new Set((profilesData?.items ?? []).filter((p) => p.control_only).map((p) => p.material_id)),
+    [profilesData]
+  );
   const orderWorld = useMemo(() => {
     for (const l of order?.lines ?? []) {
       const w = worldById.get(l.material_id);
@@ -634,7 +639,10 @@ export default function InboundEditPage() {
                           // deshabilitado: no se pierde de la pantalla)
                           : !formatoIds.has(m.id) || m.id === line.material_id
                       )
-                      .map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
+                      .map((m) => ({
+                        id: m.id,
+                        label: `${m.code} - ${m.name}${controlIds.has(m.id) ? " (control)" : ""}`,
+                      }))}
                     placeholder="Material..."
                   />
                 </div>
