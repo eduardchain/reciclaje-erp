@@ -133,11 +133,15 @@ export default function InboundCreatePage() {
   const worldByMaterial = useMemo(() => {
     const compra = new Map<string, boolean>();
     const world = new Map<string, WillardWorld>();
+    // Documentos de control: estibas/tubulares/electrolito se capturan (por el
+    // consecutivo) aunque no sean compra regular.
+    const control = new Set<string>();
     for (const p of profilesData?.items ?? []) {
       compra.set(p.material_id, p.compra_regular);
       world.set(p.material_id, p.willard_world);
+      if (p.control_only) control.add(p.material_id);
     }
-    return { compra, world };
+    return { compra, world, control };
   }, [profilesData]);
 
   const [inboundType, setInboundType] = useState<InboundType>("purchase");
@@ -257,7 +261,7 @@ export default function InboundCreatePage() {
       // «Otros materiales» excluye los del formato: un material en dos
       // lugares sumaria dos lineas que la Entrada rechaza
       if (conFormato && formatoIds.has(m.id)) return false;
-      return worldByMaterial.compra.get(m.id) ?? true;
+      return (worldByMaterial.compra.get(m.id) ?? true) || worldByMaterial.control.has(m.id);
     });
   }, [materials, worldByMaterial, isWillard, willardWorld, conFormato, formatoIds]);
 
@@ -778,7 +782,10 @@ export default function InboundCreatePage() {
                   <EntitySelect
                     value={line.material_id}
                     onChange={(v) => updateLine(line._key, "material_id", v)}
-                    options={materialsForType.map((m) => ({ id: m.id, label: `${m.code} - ${m.name}` }))}
+                    options={materialsForType.map((m) => ({
+                      id: m.id,
+                      label: `${m.code} - ${m.name}${worldByMaterial.control.has(m.id) ? " (control)" : ""}`,
+                    }))}
                     placeholder="Material..."
                   />
                 </div>

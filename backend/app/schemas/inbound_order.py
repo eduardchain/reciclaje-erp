@@ -26,6 +26,13 @@ InboundType = Literal["purchase", "willard"]
 WILLARD_INBOUND_TYPES = {"willard"}
 PURCHASE_INBOUND_TYPES = {"purchase"}
 
+# Documentos de control v1.3.1 (C1 de QA 2): una Entrada es «solo de control»
+# mientras NO tiene efectos. Una liquidada a $1 cuyos materiales se marcaron
+# despues tiene compras y deuda: sigue siendo «Compra», con su total. UN solo
+# conjunto para el campo `is_control_only` (endpoint) y el filtro `control_only`
+# (servicio).
+CONTROL_ONLY_STATUSES = ("draft", "reviewed", "closed")
+
 
 class InboundOrderLineCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -377,6 +384,9 @@ class InboundOrderLineResponse(BaseModel):
     discrepancy: Optional[Decimal] = Field(
         None, description="pesado - repartido (D5): + sobrante, - faltante"
     )
+    # Documentos de control: el material es solo de control (marca leida al
+    # momento, R2) — no se reparte, no tiene descuadre ni comision.
+    is_control: bool = False
 
 
 class InboundOrderResponse(BaseModel):
@@ -445,6 +455,12 @@ class InboundOrderResponse(BaseModel):
     # inbound_orders, ver el modelo). Null en entradas liquidadas antes de #93.
     liquidated_ts: Optional[datetime] = None
     annulled_by_name: Optional[str] = None
+    # Documentos de control (§4.2/§4.4): TODAS las lineas son de control (N2:
+    # false sin lineas). La lista ofrece «Cerrar sin valor» en vez de
+    # «Liquidar» (O1). Auditoria del cierre (timestamp real, #87).
+    is_control_only: bool = False
+    closed_at: Optional[datetime] = None
+    closed_by_name: Optional[str] = None
     lines: list[InboundOrderLineResponse] = []
     warnings: list[str] = []
 

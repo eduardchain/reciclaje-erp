@@ -35,13 +35,21 @@ import { factorListProblem, readFactors, type AlternativeDraft } from "@/utils/w
 const BATTERY_REFS = ["07", "08", "1", "2", "3", "4", "5"];
 
 // C3: el concepto se presenta como "Clasificación" (genérico, sin marca de cliente)
-type Classification = "compra" | "postconsumo" | "drosses";
+// Documentos de control v1.3 (§11.1): «Control» es una clasificación más.
+// Se guarda willard_world='none', lead_product='none', compra_regular=true y
+// control_only=true: compra_regular sigue en true para que el formato en papel
+// y la captura de la Entrada lo dejen pasar (B3 de #80 es inerte con mundo none).
+type Classification = "compra" | "postconsumo" | "drosses" | "control";
 
 const CLASSIFICATION_LABELS: Record<Classification, string> = {
   compra: "Compra regular",
   postconsumo: "Postconsumo (baterías)",
   drosses: "Drosses",
+  control: "Control (sin valor)",
 };
+
+const isWillardClass = (c: Classification | "unclassified") =>
+  c === "postconsumo" || c === "drosses";
 
 /** Fila material-céntrica (C5): material + perfil + fórmula vigente. */
 interface MaterialKgRow {
@@ -54,6 +62,9 @@ interface MaterialKgRow {
 function classificationOf(row: MaterialKgRow): Classification | "unclassified" {
   const p = row.profile;
   if (!p) return "unclassified";
+  // La marca PRIMERO (nota 2 de QA 2): un material de control con
+  // compra_regular=true no se pinta «Compra regular»
+  if (p.control_only) return "control";
   if (p.willard_world === "postconsumo" || p.willard_world === "drosses") return p.willard_world;
   return p.compra_regular ? "compra" : "unclassified";
 }
@@ -74,8 +85,19 @@ function readableParams(f: MaterialConversionFormulaResponse): string {
   return JSON.stringify(p);
 }
 
+/** Documentos de control: badge gris de la marca, al lado de la clasificación. */
+function ControlPill() {
+  return (
+    <span className="inline-flex px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-xs font-medium">
+      Control
+    </span>
+  );
+}
+
 function ClassificationBadge({ row }: { row: MaterialKgRow }) {
   const cls = classificationOf(row);
+  // v1.3 §11.1: un material de control lleva solo «Control»
+  if (cls === "control") return <ControlPill />;
   if (cls === "unclassified") {
     return (
       <span className="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-xs font-medium">
@@ -91,7 +113,7 @@ function ClassificationBadge({ row }: { row: MaterialKgRow }) {
   return (
     <span className="inline-flex items-center gap-1 flex-wrap">
       <ClassPill cls={cls} />
-      {cls !== "compra" && row.profile?.compra_regular && <ClassPill cls="compra" />}
+      {isWillardClass(cls) && row.profile?.compra_regular && <ClassPill cls="compra" />}
     </span>
   );
 }
@@ -102,6 +124,7 @@ function ClassPill({ cls }: { cls: Classification }) {
     compra: "bg-emerald-50 text-emerald-700",
     postconsumo: "bg-sky-50 text-sky-700",
     drosses: "bg-amber-50 text-amber-700",
+    control: "bg-slate-200 text-slate-700",
   };
   return (
     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${colors[cls]}`}>
@@ -161,7 +184,7 @@ export default function FormulasPage() {
         // también los Willard que además entran por compra (llevan ese tag)
         const matches =
           cls === classFilter ||
-          (classFilter === "compra" && cls !== "unclassified" && (r.profile?.compra_regular ?? false));
+          (classFilter === "compra" && isWillardClass(cls) && (r.profile?.compra_regular ?? false));
         if (!matches) return false;
       }
       return true;
@@ -190,7 +213,11 @@ export default function FormulasPage() {
   const [altDrafts, setAltDrafts] = useState<AlternativeDraft[]>([]);
   const [notes, setNotes] = useState("");
 
-  const isWillard = classification !== "compra";
+  const isWillard = isWillardClass(classification);
+  // v1.3 §11.1: la marca la da el selector. §4.1 (Willard o plomo con marca =
+  // 422) queda cubierto por construcción: «Control» guarda mundo y plomo en none.
+  const effControlOnly = classification === "control";
+  const effLeadProduct: LeadProduct = effControlOnly ? "none" : leadProduct;
   const derivedType = formulaTypeForUnit(unit);
   // Guard F3 (frontend-only): con fórmula vigente la unidad no se cambia
   const unitLocked = !!editRow?.formula;
@@ -225,7 +252,7 @@ export default function FormulasPage() {
     setBusinessUnitId(row.material.business_unit_id);
     const cls = classificationOf(row);
     setClassification(cls === "unclassified" ? "compra" : cls);
-    setAlsoCompra(cls !== "compra" && cls !== "unclassified" ? (row.profile?.compra_regular ?? false) : false);
+    setAlsoCompra(isWillardClass(cls) ? (row.profile?.compra_regular ?? false) : false);
     setLeadProduct(row.profile?.lead_product ?? "none");
     const f = row.formula;
     setFactorLabel("");
@@ -288,6 +315,8 @@ export default function FormulasPage() {
     qc.invalidateQueries({ queryKey: ["materials"] });
     qc.invalidateQueries({ queryKey: ["kg-profiles"] });
     qc.invalidateQueries({ queryKey: ["conversion-formulas"] });
+    // La marca de control cambia lo que las Entradas muestran (is_control)
+    qc.invalidateQueries({ queryKey: ["inbound-orders"] });
   };
 
   /** ¿La fórmula del form difiere de la vigente? (sin cambio → no se postea: append-only) */
@@ -317,8 +346,8 @@ export default function FormulasPage() {
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setSaving(true);
-    const willardWorld: WillardWorld = classification === "compra" ? "none" : classification;
-    const compraRegular = classification === "compra" ? true : alsoCompra;
+    const willardWorld: WillardWorld = isWillard ? (classification as WillardWorld) : "none";
+    const compraRegular = isWillard ? alsoCompra : true;
 
     try {
       let materialId: string;
@@ -357,17 +386,32 @@ export default function FormulasPage() {
       }
 
       const prevProfile = editRow?.profile;
+      const prevControl = prevProfile?.control_only ?? false;
+      const setControl = async (value: boolean): Promise<boolean> => {
+        try {
+          await sacConfigService.setKgControl(materialId, value);
+          return true;
+        } catch (e) {
+          toast.error(
+            getApiErrorMessage(e, "Falló la marca de control") +
+              " — el material quedó guardado; corríjala desde Editar"
+          );
+          return false;
+        }
+      };
+      // Desmarcar ANTES de reclasificar (Willard/plomo con la marca puesta = 422)
+      if (prevControl && !effControlOnly && !(await setControl(false))) return;
       const profileChanged =
         !prevProfile ||
         prevProfile.willard_world !== willardWorld ||
         prevProfile.compra_regular !== compraRegular ||
-        prevProfile.lead_product !== leadProduct;
+        prevProfile.lead_product !== effLeadProduct;
       if (profileChanged) {
         try {
           await sacConfigService.upsertKgProfile(materialId, {
             compra_regular: compraRegular,
             willard_world: willardWorld,
-            lead_product: leadProduct,
+            lead_product: effLeadProduct,
           });
         } catch (e) {
           toast.error(
@@ -377,6 +421,9 @@ export default function FormulasPage() {
           return;
         }
       }
+
+      // Marcar DESPUÉS: la clasificación ya quedó sin Willard ni plomo
+      if (!prevControl && effControlOnly && !(await setControl(true))) return;
 
       if (factorChanged() && parameters) {
         try {
@@ -421,7 +468,7 @@ export default function FormulasPage() {
         category: row.material.category_name ?? "",
         businessUnit: row.material.business_unit_name ?? "",
         classification: cl(row),
-        alsoCompra: classificationOf(row) !== "compra" && (row.profile?.compra_regular ?? false),
+        alsoCompra: isWillardClass(classificationOf(row)) && (row.profile?.compra_regular ?? false),
         factor: row.formula ? readableParams(row.formula) : "",
         since: row.formula ? formatDate(row.formula.created_at) : "",
         by: row.formula?.created_by_name ?? "",
@@ -450,6 +497,7 @@ export default function FormulasPage() {
               <SelectItem value="compra">Compra regular</SelectItem>
               <SelectItem value="postconsumo">Postconsumo (baterías)</SelectItem>
               <SelectItem value="drosses">Drosses</SelectItem>
+              <SelectItem value="control">Control</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -631,15 +679,20 @@ export default function FormulasPage() {
                   <SelectItem value="compra">Compra regular</SelectItem>
                   <SelectItem value="postconsumo">Postconsumo (baterías)</SelectItem>
                   <SelectItem value="drosses">Drosses</SelectItem>
+                  <SelectItem value="control">Control (sin valor)</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-slate-400 mt-1">
                 {isWillard
                   ? "Los kg de una recepción Willard van a la cuenta kg según esta clasificación."
-                  : "Se recibe como Compra regular (deriva una compra registrada)."}
+                  : effControlOnly
+                    ? "Estibas, tubulares, electrolito: entran y salen con su remisión, sin precio, sin inventario ni plata. Una Entrada con solo estos materiales se cierra sin valor."
+                    : "Se recibe como Compra regular (deriva una compra registrada)."}
               </p>
             </div>
 
+            {/* v1.3 §11.1: un material de control no es plomo entregable */}
+            {!effControlOnly && (
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Plomo entregable a Willard
@@ -657,6 +710,7 @@ export default function FormulasPage() {
                 El crudo se entrega en las tres modalidades; el puro normalmente se vende.
               </p>
             </div>
+            )}
 
             {isWillard && (
               <label className="flex items-center gap-2 text-sm">

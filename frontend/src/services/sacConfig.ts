@@ -146,6 +146,19 @@ export const sacConfigService = {
     return response.data;
   },
 
+  /** Documentos de control: endpoint propio de la marca (el upsert reemplaza
+   *  el perfil entero y la borraria). Crea el perfil si falta. */
+  setKgControl: async (
+    materialId: string,
+    controlOnly: boolean
+  ): Promise<MaterialKgProfileResponse> => {
+    const response = await apiClient.put<MaterialKgProfileResponse>(
+      `/api/v1/material-kg-profiles/${materialId}/control`,
+      { control_only: controlOnly }
+    );
+    return response.data;
+  },
+
   upsertKgProfile: async (
     materialId: string,
     data: MaterialKgProfileUpsert

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
-import { Plus } from "lucide-react";
+import { BookOpen, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,6 +32,7 @@ import { formatLinesTotalQuantity } from "@/utils/operationLines";
 import { countsAsLiquidated } from "@/utils/inboundPurchases";
 import { buildRoute, ROUTES } from "@/utils/constants";
 import { cn } from "@/utils";
+import { CloseControlDialog } from "./CloseControlDialog";
 import {
   DISPLAY_STATUS_LABELS,
   INBOUND_TYPE_LABELS,
@@ -48,6 +49,8 @@ const TABS: { value: string; label: string }[] = [
   { value: "reviewed", label: "Revisadas" },
   { value: "liquidated", label: "Liquidadas" },
   { value: "annulled", label: "Anuladas" },
+  // Documentos de control v1.3 (§11.3): pestaña propia, al lado de Anuladas
+  { value: "closed", label: "Cerradas sin valor" },
 ];
 
 // Estado UNICO visible (#93, columna-driven) — femenino para "entrada"
@@ -56,7 +59,19 @@ const DISPLAY_STATUS_STYLES: Record<InboundDisplayStatus, string> = {
   reviewed: "bg-sky-100 text-sky-800 border-sky-200",
   liquidated: "bg-emerald-100 text-emerald-800 border-emerald-200",
   annulled: "bg-red-100 text-red-800 border-red-200",
+  // Documentos de control: cerrada sin valor (terminal, sin efectos)
+  closed: "bg-slate-100 text-slate-700 border-slate-200",
 };
+
+/** Documentos de control: badge gris «Sin valor» — todas sus lineas son de
+ *  control. Se lee al momento (R2): marcar un material cambia la fila. */
+function SinValorBadge() {
+  return (
+    <Badge variant="outline" className="bg-slate-100 text-slate-600 border-slate-200">
+      Sin valor
+    </Badge>
+  );
+}
 
 export function EntradaStatusBadge({ status, className }: { status: InboundDisplayStatus; className?: string }) {
   return (
@@ -80,6 +95,16 @@ const WORLD_BADGE_STYLES: Record<string, string> = {
 
 export function EntradaTypeBadge({ order }: { order: InboundOrderResponse }) {
   const isWillard = WILLARD_INBOUND_TYPES.includes(order.inbound_type);
+  // Documentos de control v1.3 (§11.2): tipo deducido, no elegido. El campo
+  // ya trae el estado (C1: solo sin efectos), así que una liquidada a $1 sigue
+  // siendo «Compra regular».
+  if (!isWillard && order.is_control_only) {
+    return (
+      <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-200">
+        Control
+      </Badge>
+    );
+  }
   if (isWillard) {
     const world = order.willard_world ? WORLD_LABELS[order.willard_world] ?? order.willard_world : null;
     const style = (order.willard_world && WORLD_BADGE_STYLES[order.willard_world]) ||
@@ -142,6 +167,16 @@ export function entradaPartyLabel(order: InboundOrderResponse): string {
   return `Varios (${live.length})`;
 }
 
+/** Una Entrada solo de control abierta no se revisa ni se liquida: se cierra
+ *  (R8d — liquidarla llevaria a una matriz vacia y a un 422). */
+function closableControl(o: InboundOrderResponse): boolean {
+  return (
+    o.is_control_only &&
+    !WILLARD_INBOUND_TYPES.includes(o.inbound_type) &&
+    (o.display_status === "registered" || o.display_status === "reviewed")
+  );
+}
+
 export default function InboundOrdersPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -202,6 +237,10 @@ export default function InboundOrdersPage() {
       return { inbound_type: "willard", willard_world: "postconsumo" as const };
     if (typeFilter === "willard_drosses")
       return { inbound_type: "willard", willard_world: "drosses" as const };
+    // Documentos de control v1.3 (§11.2): «Control» es deducido, y «Compra
+    // regular» no trae las de control (paridad filtro ↔ tipo que se ve)
+    if (typeFilter === "control") return { control_only: true };
+    if (typeFilter === "purchase") return { inbound_type: "purchase", control_only: false };
     return { inbound_type: typeFilter };
   }, [typeFilter]);
 
@@ -236,6 +275,7 @@ export default function InboundOrdersPage() {
   // legacy 1:1 = formulario de la compra derivada (W-C1)
   const reviewOrder = useReviewInboundOrder();
   const [willardToLiquidate, setWillardToLiquidate] = useState<InboundOrderResponse | null>(null);
+  const [controlToClose, setControlToClose] = useState<InboundOrderResponse | null>(null);
 
   const startLiquidate = (order: InboundOrderResponse) => {
     if (WILLARD_INBOUND_TYPES.includes(order.inbound_type)) {
@@ -338,7 +378,10 @@ export default function InboundOrdersPage() {
               </span>
             );
           }
-          if (!canViewPrices) return <span className="text-slate-400 text-sm">—</span>;
+          if (!canViewPrices || o.is_control_only) {
+            // Sin valor: no hay total que mostrar (ni un $0 que se lea como precio)
+            return <span className="text-slate-400 text-sm">—</span>;
+          }
           return (
             <span className="font-medium tabular-nums">{formatCurrency(purchaseTotal(o))}</span>
           );
@@ -366,7 +409,12 @@ export default function InboundOrdersPage() {
     cols.push({
       accessorKey: "display_status",
       header: "Estado",
-      cell: ({ row }) => <EntradaStatusBadge status={row.original.display_status} />,
+      cell: ({ row }) => (
+        <div className="flex flex-wrap gap-1">
+          <EntradaStatusBadge status={row.original.display_status} />
+          {row.original.is_control_only && row.original.display_status !== "closed" && <SinValorBadge />}
+        </div>
+      ),
     });
 
     if (canLiquidate || canReview) {
@@ -375,6 +423,23 @@ export default function InboundOrdersPage() {
         header: "",
         cell: ({ row }) => {
           const o = row.original;
+          if (closableControl(o)) {
+            // Cerrar no está en la lista del alcance de recolector (#129): 403
+            if (!canLiquidate || !unscoped) return null;
+            return (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 border-slate-300 text-slate-700 hover:bg-slate-50"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setControlToClose(o);
+                }}
+              >
+                Cerrar sin valor
+              </Button>
+            );
+          }
           const isWillardRow = WILLARD_INBOUND_TYPES.includes(o.inbound_type);
           const isLegacyRow = !isWillardRow && !!o.purchase_id;
           // Registrada -> Revisar; revisada -> Liquidar. Desde el ciclo de
@@ -432,6 +497,18 @@ export default function InboundOrdersPage() {
             className="border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 w-full sm:w-auto"
           >
             Por liquidar: {pendingCount}
+          </Button>
+        )}
+        {/* El talonario exige purchases.view Y sales.view (lo cruza con las
+            Salidas de control) y no está en la lista del alcance de recolector (#129) */}
+        {unscoped && hasPermission("sales.view") && (
+          <Button
+            variant="outline"
+            onClick={() => navigate(ROUTES.REMISSION_BOOK)}
+            className="w-full sm:w-auto"
+          >
+            <BookOpen className="h-4 w-4 mr-2" />
+            Talonario de remisiones
           </Button>
         )}
         {canCreate && (
@@ -496,7 +573,12 @@ export default function InboundOrdersPage() {
             operationNumber={o.order_number}
             date={o.date}
             partyName={entradaPartyLabel(o)}
-            statusBadge={<EntradaStatusBadge status={o.display_status} />}
+            statusBadge={
+              <span className="flex flex-wrap gap-1 justify-end">
+                <EntradaStatusBadge status={o.display_status} />
+                {o.is_control_only && o.display_status !== "closed" && <SinValorBadge />}
+              </span>
+            }
             cancelled={o.display_status === "annulled"}
             description={`${
               o.lines.length > 0
@@ -505,7 +587,9 @@ export default function InboundOrdersPage() {
             }${
               WILLARD_INBOUND_TYPES.includes(o.inbound_type)
                 ? `Willard${o.willard_world ? ` · ${WORLD_LABELS[o.willard_world] ?? o.willard_world}` : ""}`
-                : INBOUND_TYPE_LABELS[o.inbound_type] ?? o.inbound_type
+                : o.is_control_only
+                  ? "Control"
+                  : INBOUND_TYPE_LABELS[o.inbound_type] ?? o.inbound_type
             }${o.remission_number ? ` · Rem. ${o.remission_number}` : ""}${o.warehouse_name ? ` · ${o.warehouse_name}` : ""}${o.vehicle_plate ? ` · ${o.vehicle_plate.toUpperCase()}` : ""}`}
             extras={
               <span className="flex items-center gap-2">
@@ -513,13 +597,28 @@ export default function InboundOrdersPage() {
                   <span className="text-[11px] font-medium tabular-nums text-emerald-700">
                     Plomo: {o.total_kg_lead != null ? `+${formatWeight(o.total_kg_lead)}` : "—"}
                   </span>
-                ) : canViewPrices ? (
+                ) : canViewPrices && !o.is_control_only ? (
                   <span className="text-[11px] font-medium tabular-nums text-slate-700">
                     {formatCurrency(purchaseTotal(o))}
                   </span>
                 ) : null}
                 {isBandeja && <AgingBadge createdAt={o.created_at} />}
                 {(() => {
+                  if (closableControl(o)) {
+                    return canLiquidate && unscoped ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-2 text-[11px] border-slate-300 text-slate-700"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setControlToClose(o);
+                        }}
+                      >
+                        Cerrar sin valor
+                      </Button>
+                    ) : null;
+                  }
                   const isWillardRow = WILLARD_INBOUND_TYPES.includes(o.inbound_type);
                   const isLegacyRow = !isWillardRow && !!o.purchase_id;
                   // Espejo mobile de la columna de acciones (ítem 4: Willard
@@ -575,6 +674,7 @@ export default function InboundOrdersPage() {
               <SelectContent>
                 <SelectItem value="all">Todos los tipos</SelectItem>
                 <SelectItem value="purchase">Compra regular</SelectItem>
+                <SelectItem value="control">Control</SelectItem>
                 <SelectItem value="willard">Willard (todos)</SelectItem>
                 <SelectItem value="willard_postconsumo">Willard · Postconsumo</SelectItem>
                 <SelectItem value="willard_drosses">Willard · Drosses</SelectItem>
@@ -612,6 +712,8 @@ export default function InboundOrdersPage() {
           </div>
         }
       />
+
+      <CloseControlDialog order={controlToClose} onClose={() => setControlToClose(null)} />
 
       {/* Liquidar willard desde la fila (verbo unico — el efecto es el confirm B.2) */}
       <WillardLiquidateDialog

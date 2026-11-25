@@ -13,9 +13,9 @@ import type {
 
 export interface InboundOrderFilters {
   inbound_type?: string;
-  status?: "draft" | "reviewed" | "liquidated" | "confirmed" | "annulled";
-  /** #93: estado UNICO visible (columna-driven) */
-  display_status?: "registered" | "reviewed" | "liquidated" | "annulled";
+  status?: "draft" | "reviewed" | "liquidated" | "confirmed" | "annulled" | "closed";
+  /** #93: estado UNICO visible (columna-driven). closed = cerrada sin valor */
+  display_status?: "registered" | "reviewed" | "liquidated" | "annulled" | "closed";
   /** Ciclo C: busca por #, placa, conductor, tercero o material */
   search?: string;
   /** Ciclo C: oldest = FIFO para la bandeja. remission_*: orden natural de la
@@ -23,6 +23,9 @@ export interface InboundOrderFilters {
   sort?: "newest" | "oldest" | "remission_asc" | "remission_desc";
   /** Ciclo C: filtra entradas willard por mundo */
   willard_world?: "postconsumo" | "drosses";
+  /** Documentos de control v1.3: true = solo de control y sin efectos (el
+   * campo is_control_only); false = el resto */
+  control_only?: boolean;
   warehouse_id?: string;
   third_party_id?: string;
   date_from?: string;
@@ -94,6 +97,23 @@ export const inboundOrderService = {
 
   // #93 D20: reversa completa del evento de liquidacion (vuelve a Revisada,
   // conserva el reparto, sin quemar consecutivos)
+  /** Documentos de control: cierre sin valor (solo una Entrada con TODAS sus
+   *  lineas de control). Cero efectos: solo estado y auditoria. */
+  close: async (id: string): Promise<InboundOrderResponse> => {
+    const response = await apiClient.post<InboundOrderResponse>(
+      `/api/v1/inbound-orders/${id}/close`
+    );
+    return response.data;
+  },
+
+  /** Deshace un cierre por error: vuelve a Revisada o Registrada. */
+  reopen: async (id: string): Promise<InboundOrderResponse> => {
+    const response = await apiClient.post<InboundOrderResponse>(
+      `/api/v1/inbound-orders/${id}/reopen`
+    );
+    return response.data;
+  },
+
   unliquidate: async (id: string): Promise<InboundOrderResponse> => {
     const response = await apiClient.post<InboundOrderResponse>(
       `/api/v1/inbound-orders/${id}/unliquidate`

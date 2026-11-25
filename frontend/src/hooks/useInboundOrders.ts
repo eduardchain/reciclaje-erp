@@ -120,6 +120,34 @@ export function useAnnulInboundOrder() {
   });
 }
 
+/** Documentos de control: cerrar sin valor. Sale de la bandeja; cero efectos
+ *  (no toca inventario, kg ni plata), asi que basta la invalidacion del create. */
+export function useCloseInboundOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => inboundOrderService.close(id),
+    onSuccess: (order) => {
+      invalidateAfterInboundOrder(qc);
+      toast.success(`Entrada #${order.order_number} cerrada sin valor`);
+    },
+    onError: (e: unknown) =>
+      toast.error(getApiErrorMessage(e, "Error al cerrar la entrada")),
+  });
+}
+
+export function useReopenInboundOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => inboundOrderService.reopen(id),
+    onSuccess: (order) => {
+      invalidateAfterInboundOrder(qc);
+      toast.success(`Entrada #${order.order_number} reabierta`);
+    },
+    onError: (e: unknown) =>
+      toast.error(getApiErrorMessage(e, "Error al reabrir la entrada")),
+  });
+}
+
 /** #93 D10: marcar revisada (permiso purchases.review) — ambos tipos desde
  *  el ciclo de Entradas: Willard también pasa por revisión */
 export function useReviewInboundOrder() {
