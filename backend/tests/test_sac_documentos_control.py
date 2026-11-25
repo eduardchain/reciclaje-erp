@@ -18,7 +18,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.core.security import create_access_token, get_password_hash
-from app.models.inbound_order import InboundOrder, InboundOrderPurchase
+from app.models.inbound_order import InboundOrder, InboundOrderLine, InboundOrderPurchase
 from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.inventory_movement import InventoryMovement
 from app.models.kg_ledger import KgLedgerMovement
@@ -1168,3 +1168,96 @@ class TestTalonario:
                             remission_from="12345678901234567893",
                             remission_to="12345678901234567893")["items"])
         assert solo == [("doc", "12345678901234567893")]
+
+
+class TestTipoControl:
+    """Plan v1.3.2 §11.2 y §11.6: tipo «Control» deducido. El campo
+    `is_control_only` vale solo sin efectos (C1 de QA 2, CONTROL_ONLY_STATUSES)
+    y el filtro `control_only` espeja ese mismo predicado."""
+
+    def _escenario(self, client, h, db, wh, mat_est, mat_tub, mat_val, sup1, test_organization):
+        ids = {}
+        ids["ctrl_draft"] = _capture(client, h, wh, [_line(mat_est, 40)])["id"]
+        ids["ctrl_closed"] = _capture(client, h, wh, [_line(mat_tub, 10)])["id"]
+        _close(client, h, ids["ctrl_closed"])
+        ids["mixta"] = _capture(client, h, wh, [_line(mat_val, 100), _line(mat_est, 5)])["id"]
+        ids["compra"] = _capture(client, h, wh, [_line(mat_val, 100)])["id"]
+        # Willard por ORM sobre una captura (como R1): nunca es de control
+        w = _capture(client, h, wh, [_line(mat_val, 50)])
+        row = db.get(InboundOrder, UUID(w["id"]))
+        row.inbound_type = "willard"
+        row.status = "confirmed"
+        ids["willard"] = w["id"]
+        # N2 de QA 2: sin lineas no es solo de control (por ORM; la API exige 1)
+        vacia = _capture(client, h, wh, [_line(mat_est, 3)])
+        for ln in db.execute(select(InboundOrderLine).where(
+                InboundOrderLine.inbound_order_id == UUID(vacia["id"]))).scalars():
+            db.delete(ln)
+        ids["sin_lineas"] = vacia["id"]
+        db.commit()
+        # C1 de QA 2, por el camino real: liquidada a $1 con el material SIN la
+        # marca, y el material marcado DESPUES (el caso de G-prod 2)
+        mat_liq = _mat(db, test_organization.id, "ESTIBAS-LIQ", unit="unidad")
+        assert _profile(client, h, mat_liq).status_code == 200
+        liq = _capture(client, h, wh, [_line(mat_liq, 40)])
+        _review(client, h, liq["id"])
+        _liquidate(client, h, liq["id"], [_liq_line(mat_liq, [_alloc(sup1, 40, price="1")])])
+        _mark(client, h, mat_liq)
+        ids["liq_a_1"] = liq["id"]
+        ann = _capture(client, h, wh, [_line(mat_est, 7)])
+        assert client.post(f"{INBOUND}/{ann['id']}/annul", headers=h,
+                           json={"reason": "prueba"}).status_code == 200
+        ids["ctrl_anulada"] = ann["id"]
+        return ids
+
+    def test_t26_paridad_del_filtro_control_only_con_el_campo(
+        self, client, org_headers, db_session, wh, mat_est, mat_tub, mat_val, sup1,
+        test_organization,
+    ):
+        ids = self._escenario(client, org_headers, db_session, wh, mat_est, mat_tub,
+                              mat_val, sup1, test_organization)
+        todas = client.get(INBOUND, headers=org_headers, params={"limit": 100}).json()["items"]
+        campo = {i["id"]: i["is_control_only"] for i in todas}
+        assert set(ids.values()) <= set(campo)
+        por_campo_true = {k for k, v in campo.items() if v}
+        por_campo_false = {k for k, v in campo.items() if not v}
+        # Guarda anti-vacuidad (#110): las dos ramas traen algo
+        assert por_campo_true and por_campo_false
+        for valor, esperado in (("true", por_campo_true), ("false", por_campo_false)):
+            filtrado = client.get(INBOUND, headers=org_headers,
+                                  params={"control_only": valor, "limit": 100}).json()
+            assert {i["id"] for i in filtrado["items"]} == esperado, valor
+            assert filtrado["total"] == len(esperado), valor
+        # Por nombre: que es de control y que no
+        assert por_campo_true == {ids["ctrl_draft"], ids["ctrl_closed"]}
+        for k in ("mixta", "compra", "willard", "sin_lineas", "liq_a_1", "ctrl_anulada"):
+            assert ids[k] in por_campo_false, k
+        # C1: la liquidada a $1 sigue con su compra viva y su total
+        liq = next(i for i in todas if i["id"] == ids["liq_a_1"])
+        assert liq["display_status"] == "liquidated"
+        assert liq["is_control_only"] is False
+        vivas = [c for c in liq["purchases"] if c["status"] != "cancelled"]
+        assert len(vivas) == 1 and vivas[0]["total_amount"] == 40.0
+        # ... aunque todas sus lineas ya son de control (la marca se lee al momento)
+        assert all(ln["is_control"] for ln in _get(client, org_headers, ids["liq_a_1"])["lines"])
+
+    def test_t27_compra_regular_excluye_el_control(
+        self, client, org_headers, db_session, wh, mat_est, mat_tub, mat_val, sup1,
+        test_organization,
+    ):
+        ids = self._escenario(client, org_headers, db_session, wh, mat_est, mat_tub,
+                              mat_val, sup1, test_organization)
+        compra = client.get(INBOUND, headers=org_headers, params={
+            "inbound_type": "purchase", "control_only": "false", "limit": 100}).json()["items"]
+        got = {i["id"] for i in compra}
+        assert {ids["mixta"], ids["compra"], ids["liq_a_1"]} <= got
+        assert not ({ids["ctrl_draft"], ids["ctrl_closed"], ids["willard"]} & got)
+        assert all(not i["is_control_only"] and i["inbound_type"] == "purchase" for i in compra)
+        # El filtro Control combinado con la pestana «Cerradas sin valor»
+        cerradas = client.get(INBOUND, headers=org_headers, params={
+            "control_only": "true", "display_status": "closed", "limit": 100}).json()["items"]
+        assert {i["id"] for i in cerradas} == {ids["ctrl_closed"]}
+        # «Compra regular» en la pestana «Cerradas sin valor»: vacio
+        assert client.get(INBOUND, headers=org_headers, params={
+            "inbound_type": "purchase", "control_only": "false",
+            "display_status": "closed"}).json()["total"] == 0

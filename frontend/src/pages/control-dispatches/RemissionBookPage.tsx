@@ -32,13 +32,19 @@ const STATUS_LABELS: Record<string, string> = {
   annulled: "Anulada",
 };
 
-/** Texto del tramo sin documento (desviación (b), aprobada por el Coordinador):
- *  un número sin documento no es por fuerza una remisión perdida. */
-export function gapText(item: RemissionBookItem): string {
-  if (item.gap_from === item.gap_to) return `Sin documento: ${item.gap_from} (1 número)`;
+/** Tramo sin documento (desviación (b), aprobada por el Coordinador): un
+ *  número sin documento no es por fuerza una remisión perdida. Plan v1.3 §11.5:
+ *  el rango va en la columna Remisión y el conteo en Documento. */
+export function gapRange(item: RemissionBookItem): string {
+  if (item.gap_from === item.gap_to) return item.gap_from ?? "";
+  return `${item.gap_from} – ${item.gap_to}`;
+}
+
+export function gapCountText(item: RemissionBookItem): string {
+  if (item.gap_from === item.gap_to) return "Sin documento · 1 número";
   // El conteo llega como texto exacto; se agrupa por miles sin pasar por number.
   const n = (item.count ?? "0").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `Sin documento: ${item.gap_from} a ${item.gap_to} (${n} números)`;
+  return `Sin documento · ${n} números`;
 }
 
 const GAP_NOTE =
@@ -205,10 +211,13 @@ export default function RemissionBookPage() {
                 <TableBody>
                   {items.map((item, i) =>
                     item.kind === "gap" ? (
-                      <TableRow key={`gap-${item.gap_from}-${i}`} className="bg-amber-50 hover:bg-amber-50">
-                        <TableCell colSpan={6} className="text-amber-800 font-medium">
-                          {gapText(item)}
-                        </TableCell>
+                      <TableRow key={`gap-${item.gap_from}-${i}`} className="bg-amber-50 hover:bg-amber-50 text-amber-800">
+                        <TableCell className="whitespace-nowrap font-medium tabular-nums">{gapRange(item)}</TableCell>
+                        <TableCell className="whitespace-nowrap font-medium">{gapCountText(item)}</TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
                       </TableRow>
                     ) : (
                       <TableRow key={`${item.doc_type}-${item.doc_id}`}>
@@ -241,9 +250,10 @@ export default function RemissionBookPage() {
               item.kind === "gap" ? (
                 <div
                   key={`gap-${item.gap_from}-${i}`}
-                  className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800"
+                  className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 space-y-0.5"
                 >
-                  {gapText(item)}
+                  <div className="font-semibold tabular-nums break-all">{gapRange(item)}</div>
+                  <div>{gapCountText(item)}</div>
                 </div>
               ) : (
                 <Card key={`${item.doc_type}-${item.doc_id}`}>

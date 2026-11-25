@@ -23,6 +23,9 @@ export interface InboundOrderFilters {
   sort?: "newest" | "oldest" | "remission_asc" | "remission_desc";
   /** Ciclo C: filtra entradas willard por mundo */
   willard_world?: "postconsumo" | "drosses";
+  /** Documentos de control v1.3: true = solo de control y sin efectos (el
+   * campo is_control_only); false = el resto */
+  control_only?: boolean;
   warehouse_id?: string;
   third_party_id?: string;
   date_from?: string;

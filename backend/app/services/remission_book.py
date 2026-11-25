@@ -11,8 +11,12 @@ y la marca «Repetida» del talonario, y el aviso de remision repetida. No hay
 normalizacion en Python: el regex de PostgreSQL '^[0-9]+$' es ASCII («١٢» y «²»
 son texto), mientras que `str.isdigit()` los tomaria como numeros.
 
-Salidas de Plomo NO esta en el talonario: su remision es el numero de Willard,
-digitado a mano (#105, Q-27), no el talonario de SAC (O3 de QA 2).
+Salidas de Plomo NO esta en el talonario (O3 de QA 2): sus remisiones son
+los dos consecutivos de planta, la serie de #105 (Hugo, 28-ago 00:13:03: «para
+los abonos tenemos un consecutivo y para la venta otro consecutivo [...] un
+consecutivo de abono, que es el que llevo con Wila[rd]»). Que sean distintos
+del talonario de las Entradas es lectura nuestra: Hugo no los comparo
+(plan v1.3.2 §11.7).
 """
 from dataclasses import dataclass
 from datetime import datetime

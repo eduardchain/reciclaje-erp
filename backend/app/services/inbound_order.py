@@ -56,6 +56,7 @@ from app.models.fleet import Driver, Vehicle
 from app.models.third_party import ThirdParty
 from app.models.warehouse import Warehouse
 from app.schemas.inbound_order import (
+    CONTROL_ONLY_STATUSES,
     PURCHASE_INBOUND_TYPES,
     WILLARD_INBOUND_TYPES,
     InboundLiquidateRequest,
@@ -2264,6 +2265,7 @@ class InboundOrderService:
         skip: int = 0,
         limit: int = 100,
         collector_id: Optional[UUID] = None,
+        control_only: Optional[bool] = None,
     ) -> tuple[list[InboundOrder], int]:
         q = select(InboundOrder).where(InboundOrder.organization_id == organization_id)
         # Alcance de recolector (SAC, fila 7): un WHERE propio, en AND con todo
@@ -2380,6 +2382,35 @@ class InboundOrderService:
             q = q.where(
                 InboundOrder.inbound_type.in_(WILLARD_INBOUND_TYPES), world_match
             )
+        # Documentos de control v1.3 (§11.2): tipo «Control» deducido. Espeja
+        # el campo `is_control_only` del endpoint: sin efectos
+        # (CONTROL_ONLY_STATUSES), con lineas, y ninguna linea de un material
+        # sin la marca en el perfil DE ESTA org (el predicado de
+        # `control_material_ids`). Todo por EXISTS, sin join (trampa 1:N).
+        if control_only is not None:
+            has_line = (
+                select(InboundOrderLine.id)
+                .where(InboundOrderLine.inbound_order_id == InboundOrder.id)
+                .exists()
+            )
+            marked = (
+                select(MaterialKgProfile.material_id)
+                .where(
+                    MaterialKgProfile.organization_id == organization_id,
+                    MaterialKgProfile.material_id == InboundOrderLine.material_id,
+                    MaterialKgProfile.control_only.is_(True),
+                )
+                .exists()
+            )
+            unmarked_line = (
+                select(InboundOrderLine.id)
+                .where(InboundOrderLine.inbound_order_id == InboundOrder.id, ~marked)
+                .exists()
+            )
+            es_control = and_(
+                InboundOrder.status.in_(CONTROL_ONLY_STATUSES), has_line, ~unmarked_line
+            )
+            q = q.where(es_control if control_only else ~es_control)
         if warehouse_id:
             q = q.where(InboundOrder.warehouse_id == warehouse_id)
         if third_party_id:
