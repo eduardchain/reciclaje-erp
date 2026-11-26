@@ -81,7 +81,7 @@ export interface ControlDispatchListResponse {
 /** Una fila del talonario: un documento o un tramo de numeros sin documento. */
 export interface RemissionBookItem {
   kind: "doc" | "gap";
-  doc_type: "inbound" | "control_dispatch" | null;
+  doc_type: "inbound" | "control_dispatch" | "transfer" | null;
   doc_id: string | null;
   doc_number: number | null;
   remission: string | null;

@@ -92,6 +92,20 @@ export function useResolveTransfer() {
   });
 }
 
+export function useUpdateTransferRemission() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, remission_number }: { id: string; remission_number: string }) =>
+      transferService.updateRemission(id, remission_number),
+    onSuccess: (t) => {
+      invalidateAfterTransfer(qc);
+      toast.success(`Remisión del traslado #${t.transfer_number} corregida`);
+      showWarnings(t.warnings);
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+}
+
 export function useAnnulTransfer() {
   const qc = useQueryClient();
   return useMutation({

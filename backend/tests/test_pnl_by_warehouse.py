@@ -142,7 +142,7 @@ def scenario(db_session, test_organization, test_user, client, org_headers):
     resp = client.post(
         TRANSFERS_URL, headers=org_headers,
         json={"from_warehouse_id": str(wh_cv.id), "to_warehouse_id": str(wh_jm.id),
-              "dispatch_date": OP_DATE,
+              "dispatch_date": OP_DATE, "remission_number": "RT-PNL-1",
               "lines": [{"material_id": str(mat.id), "quantity_dispatched": 40}]},
     )
     assert resp.status_code == 201, resp.text

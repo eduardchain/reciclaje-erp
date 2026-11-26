@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, AlertTriangle, Ban } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Ban, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +30,7 @@ import {
   useReceiveTransfer,
   useResolveTransfer,
   useTransfer,
+  useUpdateTransferRemission,
 } from "@/hooks/useTransfers";
 import {
   formatCurrency,
@@ -96,6 +97,7 @@ export default function TransferDetailPage() {
   const receive = useReceiveTransfer();
   const resolve = useResolveTransfer();
   const annul = useAnnulTransfer();
+  const updateRemission = useUpdateTransferRemission();
 
   const [recvQty, setRecvQty] = useState<Record<string, number>>({});
   const [receiptDate, setReceiptDate] = useState(toLocalDateInput(new Date()));
@@ -105,6 +107,8 @@ export default function TransferDetailPage() {
   const [resolveNotes, setResolveNotes] = useState("");
   const [annulOpen, setAnnulOpen] = useState(false);
   const [annulReason, setAnnulReason] = useState("");
+  const [remOpen, setRemOpen] = useState(false);
+  const [remValue, setRemValue] = useState("");
 
   const canReceive = isAdmin || hasPermission("inventory.transfer_receive");
   const canManage = isAdmin || hasPermission("inventory.transfer");
@@ -122,6 +126,14 @@ export default function TransferDetailPage() {
   }
 
   const t: TransferResponse = transfer;
+
+  // Un traslado anterior a la remisión obligatoria la trae NULL: el diálogo arranca vacío
+  const currentRemission = (t.remission_number ?? "").trim();
+  const openRemissionDialog = () => {
+    setRemValue(t.remission_number ?? "");
+    setRemOpen(true);
+  };
+  const remissionReady = !!remValue.trim() && remValue.trim() !== currentRemission;
 
   const submitReceive = () => {
     receive.mutate({
@@ -176,6 +188,15 @@ export default function TransferDetailPage() {
           {canManage && t.status !== "annulled" && (
             <Button
               variant="outline"
+              className="w-full sm:w-auto"
+              onClick={openRemissionDialog}
+            >
+              <Pencil className="w-4 h-4 mr-2" /> Corregir remisión
+            </Button>
+          )}
+          {canManage && t.status !== "annulled" && (
+            <Button
+              variant="outline"
               className="text-red-600 border-red-200 hover:bg-red-50 w-full sm:w-auto"
               onClick={() => setAnnulOpen(true)}
             >
@@ -197,7 +218,7 @@ export default function TransferDetailPage() {
 
       <Card className="mb-4">
         <CardContent className="pt-6">
-          <dl className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 text-sm">
+          <dl className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-6 gap-y-2 text-sm">
             <div className="flex justify-between gap-3 sm:block">
               <dt className="text-slate-500">Origen</dt>
               <dd className="font-medium">{t.from_warehouse_name}</dd>
@@ -205,6 +226,10 @@ export default function TransferDetailPage() {
             <div className="flex justify-between gap-3 sm:block">
               <dt className="text-slate-500">Destino</dt>
               <dd className="font-medium">{t.to_warehouse_name}</dd>
+            </div>
+            <div className="flex justify-between gap-3 sm:block">
+              <dt className="text-slate-500">Remisión</dt>
+              <dd className="font-medium break-all">{t.remission_number || "—"}</dd>
             </div>
             <div className="flex justify-between gap-3 sm:block">
               <dt className="text-slate-500">Despacho</dt>
@@ -374,6 +399,33 @@ export default function TransferDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={remOpen}
+        onOpenChange={setRemOpen}
+        title={`Corregir remisión del traslado #${t.transfer_number}`}
+        description="No cambia inventario ni kg: solo el número del papel."
+        confirmLabel="Guardar"
+        loading={updateRemission.isPending}
+        disabled={!remissionReady}
+        onConfirm={() =>
+          updateRemission.mutate(
+            { id: t.id, remission_number: remValue.trim() },
+            { onSuccess: () => setRemOpen(false) }
+          )
+        }
+      >
+        <div className="space-y-1.5">
+          <Label>Remisión *</Label>
+          <Input
+            className="w-full"
+            value={remValue}
+            maxLength={50}
+            placeholder="Número del papel"
+            onChange={(e) => setRemValue(e.target.value)}
+          />
+        </div>
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={annulOpen}

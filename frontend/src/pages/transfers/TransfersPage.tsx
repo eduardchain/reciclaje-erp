@@ -143,6 +143,7 @@ export default function TransfersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>#</TableHead>
+                  <TableHead>Remisión</TableHead>
                   <TableHead>Despacho</TableHead>
                   <TableHead>Origen → Destino</TableHead>
                   <TableHead>Materiales</TableHead>
@@ -158,6 +159,7 @@ export default function TransfersPage() {
                     onClick={() => goDetail(t)}
                   >
                     <TableCell className="font-medium">#{t.transfer_number}</TableCell>
+                    <TableCell className="text-sm">{t.remission_number || "—"}</TableCell>
                     <TableCell>{formatDate(t.dispatch_date)}</TableCell>
                     <TableCell>
                       {t.from_warehouse_name} → {t.to_warehouse_name}
@@ -189,6 +191,9 @@ export default function TransfersPage() {
                   {t.from_warehouse_name} → {t.to_warehouse_name}
                 </p>
                 <p className="mt-0.5 text-xs text-slate-500">{linesSummary(t)}</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Remisión: {t.remission_number || "—"}
+                </p>
                 <p className="mt-0.5 text-xs text-slate-400">
                   Despacho: {formatDate(t.dispatch_date)}
                   {t.received_date ? ` · Recibido: ${formatDate(t.received_date)}` : ""}

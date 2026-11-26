@@ -9,14 +9,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from app.schemas.remission import RemissionStr
 from app.utils.dates import BusinessDate
 
-# La remision sale del MISMO talonario de las Entradas (Q-75): obligatoria.
-# strip ANTES de min_length: «  » no pasa (min_length solo cuenta caracteres,
-# leccion de #100).
-RemissionStr = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)
-]
+# `RemissionStr` (obligatoria, con strip) vive en `schemas/remission.py`: la comparten
+# la Salida de control y el traslado (Q-75, mismo talonario).
 
 
 class ControlDispatchLineCreate(BaseModel):
@@ -99,7 +96,7 @@ class RemissionBookItem(BaseModel):
     """Una fila del talonario: un documento o un hueco («Faltan N»)."""
     kind: Literal["doc", "gap"]
     # doc
-    doc_type: Optional[Literal["inbound", "control_dispatch"]] = None
+    doc_type: Optional[Literal["inbound", "control_dispatch", "transfer"]] = None
     doc_id: Optional[UUID] = None
     doc_number: Optional[int] = None
     remission: Optional[str] = None
