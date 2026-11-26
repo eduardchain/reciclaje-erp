@@ -385,3 +385,33 @@ Los cuatro caen solo en TP13: ningún otro test lee el log. Si alguno cayera de 
 **Números.** Tests nuevos: **50** (49 + T17). Predicción del set dirigido: **705** (655 + 50). El set no cambia de archivos.
 
 **Riesgos.** (1) Un test que no mide el desempate: T17 afirma la premisa y su caída con el defecto quedó medida. (2) Orden «raro» entre tipos para el usuario: solo se ve con remisión, fecha y número idénticos; es un caso de borde y queda fijo.
+
+---
+
+## 14. Adenda 3 — los dos huecos que dejó el plantado (P8 y P19), pasada 2 de QA 2; sobre la adenda 2 `cf16307`
+
+**Qué.** Al plantar contra el v2 (`gates/plantado/plantado_r1.log`) dos filas de §8 no cayeron:
+
+- **P8** (`lower(trim)` en el bloque de traslados de `duplicate_remission_warning`, 50 passed). Causa, medida por QA 2 en copia propia: el existente de T7 es una **Entrada**, así que el aviso choca en el bloque de Entradas y nunca llega al de traslados. La rama que agregó este ciclo no tenía ningún caso con un TRASLADO existente y otra grafía.
+- **P19** cayó (20 tests), pero **T14 no** y la fila lo pedía: con el campo omitido en `_enrich`, un traslado viejo con remisión NULL sigue dando `None`, así que T14 no puede verlo. Era un error de predicción mío (que QA 2 había aprobado), no un hueco de cobertura: lo que sí cubre ese defecto es T1.
+
+Solo tests y matriz: **cero cambios en `app/` y en el frontend** (los 22 archivos del v2 que no son el de tests conservan su sha256).
+
+**Tests nuevos (3), en `TestRepetida`, al lado de los T7 que ya existen (esos no se tocan: el existente es una Entrada y siguen midiendo ese bloque):**
+
+- `t7c_traslado_contra_traslado_normaliza_ceros_iniciales`: traslado existente «16300»; traslado nuevo «0016300» → 1 aviso, que nombra «Traslado #n» del existente.
+- `t7c_traslado_contra_traslado_en_la_otra_direccion`: traslado existente «0016300»; traslado nuevo «16300» → 1 aviso, que nombra «Traslado #n» del existente.
+- `t7d_traslado_contra_traslado_doce_punto_cero_no_choca`: traslado existente «12»; traslado nuevo «12.0» → `warnings == []` (la misma llave NO: el punto no se cruza).
+
+**Matriz de plantado (filas nuevas y correcciones; no se reescribe §8, esto lo corrige por adenda).**
+
+| P | Defecto (archivo · cambio) | Debe caer |
+|---|---|---|
+| P8 (corrige la predicción de §8) | `services/remission_book.py` · la llave del traslado sin normalizar (`lower(trim)` en vez de `remission_key`) | ≥ {t7c ×2}. T7 (existente = Entrada) no puede caer: choca antes, en el bloque de Entradas. t7d tampoco: «12» y «12.0» siguen siendo distintas con `lower(trim)` |
+| P8b (nueva) | ídem · el bloque de traslados con una llave demasiado laxa: `regexp_replace(lower(trim(x)), '(^0+)|(\.0$)', '', 'g')` a los dos lados (sin ceros iniciales **y** sin «.0» final) | = {t7d}. Los dos t7c no pueden caer: con la llave laxa «16300» y «0016300» siguen chocando |
+| P19 (corrige la predicción de §8) | `endpoints/transfers.py` · `_enrich` sin `remission_number` | ≥ {t1_}. T14 no puede caer (con el campo omitido un NULL sigue dando `None`) |
+| P19b (nueva) | `endpoints/transfers.py` · `_enrich`: `remission_number=transfer.remission_number` → `remission_number=transfer.remission_number.strip()` (asume una guardada; sobre NULL es 500) | = {`t14_un_traslado_viejo_devuelve_null_sin_500`}. No deben caer el segundo T14 (lee `/remissions`, que no pasa por `_enrich`) ni TP12 ni TP13: el PATCH de un traslado viejo responde con la remisión ya escrita, no con el NULL |
+
+**Números.** Tests nuevos: **3**. El archivo `test_sac_remision_traslados.py` pasa de 50 a **53** y el set dirigido de 705 a **708**. No se repite el set de 705: nada importa ese archivo (grep vacío), `app/` y `frontend/src` no cambian; se corre el archivo entero, las guardas del árbol y ruff, a archivo.
+
+**Riesgos.** (1) Un t7c que vuelva a chocar en otro bloque: el existente es un Traslado y el test afirma que el aviso nombra «Traslado #n», así que si el bloque de traslados no avisa, el test no puede pasar por otro camino. (2) t7d vacuo: «12» y «12.0» tienen que ser dos traslados vivos con esas dos remisiones guardadas; se afirma antes de comparar (la guarda es la misma lectura `_tget` que ya usa T14).
