@@ -12,6 +12,8 @@ Bloqueantes clave:
 - E9: par se anula desde el traslado; annul() de Tesorería → 422.
 - Gating E10 (4 combinaciones) + guard operar-contra-tránsito (E12).
 """
+import itertools
+
 import pytest
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -176,6 +178,15 @@ def _seed_stock(client, headers, material_id, warehouse_id, qty, cost):
 # Helpers
 # ---------------------------------------------------------------------------
 
+_REM = itertools.count(1)
+
+
+def _remission() -> str:
+    """Remision unica por llamada: obligatoria al despachar (plan de traslados) y
+    distinta cada vez para que ningun `warnings` cambie por un aviso de repetida."""
+    return f"RT-{next(_REM)}"
+
+
 def _dispatch(client, headers, wh_from, wh_to, lines, date=DISPATCH_DATE, expect=201):
     resp = client.post(
         TRANSFERS_URL,
@@ -184,6 +195,7 @@ def _dispatch(client, headers, wh_from, wh_to, lines, date=DISPATCH_DATE, expect
             "from_warehouse_id": str(wh_from.id),
             "to_warehouse_id": str(wh_to.id),
             "dispatch_date": date,
+            "remission_number": _remission(),
             "lines": lines,
         },
     )
@@ -307,6 +319,7 @@ class TestTransferGating:
             json={
                 "from_warehouse_id": "00000000-0000-0000-0000-000000000001",
                 "to_warehouse_id": "00000000-0000-0000-0000-000000000002",
+                "remission_number": _remission(),
                 "lines": [{"material_id": "00000000-0000-0000-0000-000000000003",
                            "quantity_dispatched": 1}],
             },
@@ -367,6 +380,7 @@ class TestTransferDispatch:
                 "from_warehouse_id": str(wh_cv.id),
                 "to_warehouse_id": str(wh_bog.id),
                 "dispatch_date": DISPATCH_DATE,
+                "remission_number": _remission(),
                 "lines": [{"material_id": str(mat_contrib.id), "quantity_dispatched": 10}],
             },
         )

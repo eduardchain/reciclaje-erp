@@ -41,6 +41,7 @@ import {
   PackageOpen,
   PackageMinus,
   MapPin,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/utils";
 import { ROUTES } from "@/utils/constants";
@@ -103,6 +104,9 @@ interface NavItem {
   icon: React.ReactNode;
   section?: string;
   permission?: string;
+  // AND: exige TODOS los permisos de la lista (`permission` es uno solo; un
+  // arreglo en NavChild es «cualquiera»). Talonario: el endpoint pide los dos.
+  permissionAll?: string[];
   children?: NavChild[];
   superuserOnly?: boolean;
   // Feature flag de la org (SAC E2, plan §5): NavItem hoja gated por flag.
@@ -189,6 +193,17 @@ const orgNavItems: NavItem[] = [
     permission: "inventory.view",
     orgFlag: "two_step_transfers_enabled",
     transferBadge: true,
+  },
+  {
+    // Talonario de remisiones (Entradas, Salidas de control y Traslados): el
+    // endpoint exige compras Y ventas; con alcance de recolector no se ve
+    // (SCOPE_PATHS no lo lleva) porque la ruta le daria 403
+    name: "Talonario de remisiones",
+    path: ROUTES.REMISSION_BOOK,
+    icon: <BookOpen className="w-5 h-5" />,
+    section: "OPERACIONES",
+    permissionAll: ["purchases.view", "sales.view"],
+    orgFlag: "kg_ledger_enabled",
   },
   {
     name: "Ventas",
@@ -359,6 +374,8 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
       return hasPermission(perm);
     };
 
+    const checkAll = (perms?: string[]) => !perms || perms.every((p) => hasPermission(p));
+
     // Regla de no-regresion (plan E1 §5.1): SOLO las entradas CON orgFlag
     // consultan flagEnabled — en loading/error/settings NULL se ocultan ellas
     // y el resto del sidebar se renderiza identico a hoy.
@@ -377,7 +394,7 @@ export default function Sidebar({ mode = "desktop", onNavigate }: SidebarProps =
           if (filteredChildren.length === 0) return null;
           return { ...item, children: filteredChildren };
         }
-        if (!checkPerm(item.permission) || !checkFlag(item.orgFlag) || !checkHide(item.hideWhenOrgFlag) || !checkScope(item.path)) return null;
+        if (!checkPerm(item.permission) || !checkAll(item.permissionAll) || !checkFlag(item.orgFlag) || !checkHide(item.hideWhenOrgFlag) || !checkScope(item.path)) return null;
         return item;
       })
       .filter(Boolean) as NavItem[];

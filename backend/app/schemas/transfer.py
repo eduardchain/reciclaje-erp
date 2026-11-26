@@ -12,6 +12,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.remission import RemissionStr
 from app.utils.dates import BusinessDate
 
 
@@ -32,8 +33,18 @@ class TransferDispatchCreate(BaseModel):
     from_warehouse_id: UUID
     to_warehouse_id: UUID
     dispatch_date: Optional[BusinessDate] = None
+    # Obligatoria, tambien en el intra-sede (Daniel, 25-nov): sale del mismo
+    # talonario de las Entradas (Q-75).
+    remission_number: RemissionStr
     notes: Optional[str] = Field(None, max_length=500)
     lines: list[TransferLineCreate] = Field(..., min_length=1)
+
+
+class TransferRemissionUpdate(BaseModel):
+    """PATCH de la remision: solo ese campo, obligatorio (no se puede vaciar)."""
+    model_config = ConfigDict(extra="forbid")
+
+    remission_number: RemissionStr
 
 
 class TransferReceiveLine(BaseModel):
@@ -117,6 +128,8 @@ class TransferResponse(BaseModel):
     received_date: Optional[datetime] = None
     status: str
     notes: Optional[str] = None
+    # NULL en los traslados anteriores al campo (Q-75)
+    remission_number: Optional[str] = None
     created_by_name: Optional[str] = None
     received_by_name: Optional[str] = None
     annulled_reason: Optional[str] = None

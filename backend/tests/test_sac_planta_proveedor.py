@@ -19,6 +19,7 @@ Lo que se vigila de verdad:
 - El invariante de #55 (saldo corrido del estado de cuenta == saldo vivo) en
   PLANTA y en WILLARD, a la ida y a la vuelta (O5).
 """
+import itertools
 from decimal import Decimal
 from uuid import uuid4
 
@@ -243,10 +244,14 @@ def _seed_stage(client, headers, account_id, kg, stage):
     assert r.status_code == 201, r.text
 
 
+_REM = itertools.count(1)
+
+
 def _dispatch(client, headers, wh_from, wh_to, mat, qty=40):
+    # Remision obligatoria al despachar (plan de traslados), unica por llamada.
     r = client.post(TRANSFERS_URL, headers=headers, json={
         "from_warehouse_id": str(wh_from.id), "to_warehouse_id": str(wh_to.id),
-        "dispatch_date": DISPATCH_DATE,
+        "dispatch_date": DISPATCH_DATE, "remission_number": f"RT-PP-{next(_REM)}",
         "lines": [{"material_id": str(mat.id), "quantity_dispatched": qty}],
     })
     assert r.status_code == 201, r.text

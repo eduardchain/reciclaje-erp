@@ -56,6 +56,15 @@ export const transferService = {
     return response.data;
   },
 
+  // La clave va como propiedad DIRECTA: TS no revisa claves de más dentro de un spread
+  updateRemission: async (id: string, remission_number: string): Promise<TransferResponse> => {
+    const response = await apiClient.patch<TransferResponse>(
+      `/api/v1/transfers/${id}/remission`,
+      { remission_number }
+    );
+    return response.data;
+  },
+
   annul: async (id: string, reason: string): Promise<TransferResponse> => {
     const response = await apiClient.post<TransferResponse>(
       `/api/v1/transfers/${id}/annul`,

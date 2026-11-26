@@ -29,6 +29,10 @@ const STATUS_LABELS: Record<string, string> = {
   confirmed: "Liquidada",
   closed: "Cerrada sin valor",
   registered: "Registrada",
+  // Traslados: los mismos nombres que su bandeja (TRANSFER_STATUS_LABELS)
+  dispatched: "Por recibir",
+  held_discrepancy: "En discrepancia",
+  received: "Recibido",
   annulled: "Anulada",
 };
 
@@ -52,18 +56,28 @@ const GAP_NOTE =
   "Una remisión fuera de serie o repetida suele ser la otra mitad del mismo error.";
 
 function docLabel(item: RemissionBookItem): string {
-  return item.doc_type === "control_dispatch"
-    ? `Salida de control #${item.doc_number}`
-    : `Entrada #${item.doc_number}`;
+  if (item.doc_type === "control_dispatch") return `Salida de control #${item.doc_number}`;
+  if (item.doc_type === "transfer") return `Traslado #${item.doc_number}`;
+  return `Entrada #${item.doc_number}`;
 }
 
 function docLink(item: RemissionBookItem): string {
-  return item.doc_type === "control_dispatch"
-    ? buildRoute(ROUTES.CONTROL_DISPATCH_DETAIL, { id: item.doc_id! })
-    : buildRoute(ROUTES.INBOUND_DETAIL, { id: item.doc_id! });
+  if (item.doc_type === "control_dispatch")
+    return buildRoute(ROUTES.CONTROL_DISPATCH_DETAIL, { id: item.doc_id! });
+  if (item.doc_type === "transfer")
+    return buildRoute(ROUTES.TRANSFER_DETAIL, { id: item.doc_id! });
+  return buildRoute(ROUTES.INBOUND_DETAIL, { id: item.doc_id! });
 }
 
 function Direction({ item }: { item: RemissionBookItem }) {
+  // El traslado no entra ni sale de la empresa: mueve entre bodegas (color propio)
+  if (item.doc_type === "transfer") {
+    return (
+      <Badge variant="secondary" className="bg-violet-50 text-violet-700">
+        Traslado
+      </Badge>
+    );
+  }
   const out = item.doc_type === "control_dispatch";
   return (
     <Badge variant="secondary" className={out ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-emerald-700"}>
@@ -89,8 +103,8 @@ const toDigits = (v: string): string | undefined => {
   return /^[0-9]+$/.test(t) ? t : undefined;
 };
 
-/** Talonario de remisiones (Q-75): Entradas y Salidas de control en una sola
- *  lista por remisión, con los números sin documento intercalados. */
+/** Talonario de remisiones (Q-75): Entradas, Salidas de control y Traslados en
+ *  una sola lista por remisión, con los números sin documento intercalados. */
 export default function RemissionBookPage() {
   const navigate = useNavigate();
   const [from, setFrom] = useState("");
@@ -124,7 +138,7 @@ export default function RemissionBookPage() {
     <div className="space-y-4">
       <PageHeader
         title="Talonario de remisiones"
-        description="Entradas y Salidas de control por número de remisión"
+        description="Entradas, Salidas de control y Traslados por número de remisión"
       >
         <Button variant="outline" onClick={() => navigate(-1)} className="w-full sm:w-auto">
           <ArrowLeft className="h-4 w-4 mr-2" /> Volver

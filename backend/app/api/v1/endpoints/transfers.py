@@ -21,6 +21,7 @@ from app.schemas.transfer import (
     TransferLineResponse,
     TransferListResponse,
     TransferReceiveRequest,
+    TransferRemissionUpdate,
     TransferResolveRequest,
     TransferResponse,
 )
@@ -77,6 +78,7 @@ def _enrich(transfer: Transfer, warnings: Optional[list[str]] = None) -> Transfe
         received_date=transfer.received_date,
         status=transfer.status,
         notes=transfer.notes,
+        remission_number=transfer.remission_number,
         created_by_name=_user_name(transfer.created_by_user),
         received_by_name=_user_name(transfer.received_by_user),
         annulled_reason=transfer.annulled_reason,
@@ -191,6 +193,26 @@ def annul_transfer(
         db, transfer_id, payload.reason,
         organization_id=org_context["organization_id"],
         user_id=org_context["user_id"],
+    )
+    transfer = transfer_service.get(db, transfer_id, org_context["organization_id"])
+    return _enrich(transfer, warnings)
+
+
+@router.patch("/{transfer_id}/remission", response_model=TransferResponse)
+def update_transfer_remission(
+    transfer_id: UUID,
+    payload: TransferRemissionUpdate,
+    db: Session = Depends(get_db),
+    # El permiso de despachar y anular: la remision es el numero del papel del
+    # despacho (plan de traslados, D-e). Quien solo recibe o solo lee no basta.
+    org_context: dict = Depends(require_permission("inventory.transfer")),
+):
+    """Corrige SOLO la remision. No toca inventario, kg, merma ni maquila."""
+    _, warnings = transfer_service.update_remission(
+        db, transfer_id, payload.remission_number,
+        organization_id=org_context["organization_id"],
+        user_id=org_context["user_id"],
+        user_email=org_context["user"].email,
     )
     transfer = transfer_service.get(db, transfer_id, org_context["organization_id"])
     return _enrich(transfer, warnings)

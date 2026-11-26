@@ -43,6 +43,8 @@ export default function TransferCreatePage() {
   const [fromId, setFromId] = useState("");
   const [toId, setToId] = useState("");
   const [date, setDate] = useState(toLocalDateInput(new Date()));
+  // El mismo talonario de las Entradas: obligatoria, también dentro de una sede
+  const [remission, setRemission] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineDraft[]>([{ material_id: "", quantity: 0 }]);
 
@@ -63,6 +65,7 @@ export default function TransferCreatePage() {
     !!toId &&
     fromId !== toId &&
     !!date &&
+    !!remission.trim() &&
     lines.length > 0 &&
     lines.every((ln) => ln.material_id && ln.quantity > 0) &&
     !dispatch.isPending;
@@ -82,6 +85,7 @@ export default function TransferCreatePage() {
         from_warehouse_id: fromId,
         to_warehouse_id: toId,
         dispatch_date: `${date}T12:00:00`,
+        remission_number: remission.trim(),
         notes: notes.trim() || undefined,
         lines: lines.map((ln) => ({
           material_id: ln.material_id,
@@ -105,7 +109,7 @@ export default function TransferCreatePage() {
           <CardTitle className="text-base">Datos del despacho</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             <div className="space-y-1.5">
               <Label>Bodega origen *</Label>
               <Select value={fromId} onValueChange={setFromId}>
@@ -143,6 +147,16 @@ export default function TransferCreatePage() {
                 value={date}
                 max={toLocalDateInput(new Date())}
                 onChange={(e) => setDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Remisión *</Label>
+              <Input
+                className="w-full"
+                value={remission}
+                maxLength={50}
+                placeholder="Número del papel"
+                onChange={(e) => setRemission(e.target.value)}
               />
             </div>
           </div>

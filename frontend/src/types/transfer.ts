@@ -9,8 +9,15 @@ export interface TransferDispatchCreate {
   from_warehouse_id: string;
   to_warehouse_id: string;
   dispatch_date?: string;
+  /** Obligatoria: la remisión sale del mismo talonario de las Entradas */
+  remission_number: string;
   notes?: string;
   lines: TransferLineCreate[];
+}
+
+/** PATCH /transfers/{id}/remission: solo corrige la remisión, sin efectos */
+export interface TransferRemissionUpdate {
+  remission_number: string;
 }
 
 export interface TransferReceiveLine {
@@ -72,6 +79,8 @@ export interface TransferResponse {
   dispatch_date: string;
   received_date?: string | null;
   status: TransferStatus;
+  /** null en los traslados anteriores a la remisión obligatoria */
+  remission_number?: string | null;
   notes?: string | null;
   created_by_name?: string | null;
   received_by_name?: string | null;
