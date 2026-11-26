@@ -2,8 +2,10 @@
 
 Q-75 (Daniel, 24-nov): las Salidas de control usan el MISMO talonario de
 remisiones que las Entradas, Willard incluidas (D11, confirmado por Daniel).
-Los dos documentos solo comparten la remision, asi que lo comun es una
-LECTURA, no un modelo.
+Desde el 25-nov los TRASLADOS (dos pasos e intra-sede) salen del mismo
+talonario: decision de Daniel, no respuesta de Johana (lectura nuestra).
+Los documentos solo comparten la remision, asi que lo comun es una LECTURA,
+no un modelo.
 
 UNA sola llave, en SQL (C1 de QA 2): `remission_key` arma las expresiones que
 usan TODOS los consumidores — el orden de la lista de Entradas (#117), el orden
@@ -29,6 +31,7 @@ from sqlalchemy.orm import Session
 from app.models.control_dispatch import ControlDispatch, ControlDispatchLine
 from app.models.inbound_order import InboundOrder, InboundOrderLine
 from app.models.material import Material
+from app.models.transfer import Transfer, TransferLine
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,7 @@ def duplicate_remission_warning(
     remission: Optional[str],
     exclude_inbound_id: Optional[UUID] = None,
     exclude_dispatch_id: Optional[UUID] = None,
+    exclude_transfer_id: Optional[UUID] = None,
 ) -> Optional[str]:
     """Si otro documento del talonario NO anulado tiene la misma llave,
     devuelve el aviso que lo NOMBRA. La remision nueva se normaliza EN SQL
@@ -126,6 +130,19 @@ def duplicate_remission_warning(
     hit = db.execute(q_cd.order_by(ControlDispatch.dispatch_number).limit(1)).scalar_one_or_none()
     if hit is not None:
         return f"La remision {remission.strip()} ya esta en la Salida de control #{hit}"
+
+    # Traslados (25-nov): la misma llave. Un traslado anulado no cuenta.
+    tr_key = remission_key(Transfer.remission_number).llave
+    q_tr = select(Transfer.transfer_number).where(
+        Transfer.organization_id == organization_id,
+        Transfer.status != "annulled",
+        tr_key == key_new,
+    )
+    if exclude_transfer_id is not None:
+        q_tr = q_tr.where(Transfer.id != exclude_transfer_id)
+    hit = db.execute(q_tr.order_by(Transfer.transfer_number).limit(1)).scalar_one_or_none()
+    if hit is not None:
+        return f"La remision {remission.strip()} ya esta en el Traslado #{hit}"
     return None
 
 
@@ -134,8 +151,10 @@ def duplicate_remission_warning(
 # ---------------------------------------------------------------------------
 
 def _union(organization_id: UUID):
-    """UNION ALL de los dos documentos del talonario, con columnas minimas.
-    Entradas de los dos tipos (D11); Salidas de Plomo fuera (O3)."""
+    """UNION ALL de los tres documentos del talonario, con columnas minimas.
+    Entradas de los dos tipos (D11), Salidas de control y Traslados; Salidas de
+    Plomo fuera (O3). Siempre trae los tres: QUE SE VE lo decide `remission_book`
+    (permiso y flag), pero los huecos y las marcas se miden sobre todo."""
     io = select(
         literal("inbound", String).label("doc_type"),
         InboundOrder.id.label("doc_id"),
@@ -154,7 +173,16 @@ def _union(organization_id: UUID):
         ControlDispatch.status.label("status"),
         literal(None, String).label("inbound_type"),
     ).where(ControlDispatch.organization_id == organization_id)
-    return union_all(io, cd).subquery("talonario")
+    tr = select(
+        literal("transfer", String).label("doc_type"),
+        Transfer.id.label("doc_id"),
+        Transfer.transfer_number.label("doc_number"),
+        Transfer.remission_number.label("remission"),
+        Transfer.dispatch_date.label("date"),
+        Transfer.status.label("status"),
+        literal(None, String).label("inbound_type"),
+    ).where(Transfer.organization_id == organization_id)
+    return union_all(io, cd, tr).subquery("talonario")
 
 
 def remission_book(
@@ -168,6 +196,7 @@ def remission_book(
     desc: bool = True,
     skip: int = 0,
     limit: int = 100,
+    show_transfers: bool = True,
 ) -> dict:
     """Filas del talonario + huecos + conteo de Entradas sin remision.
 
@@ -179,7 +208,12 @@ def remission_book(
     huecos: el resultado de una busqueda no es un tramo del talonario.
 
     N1 de QA 2: con el filtro desde/hasta (numerico), las remisiones de texto
-    NO salen — el filtro es un tramo de numeros."""
+    NO salen — el filtro es un tramo de numeros.
+
+    Ver y medir son dos cosas (D-b del plan de traslados): `show_transfers`
+    decide si las filas de TRASLADO salen en la lista (permiso de inventario y
+    flag de traslados). Los huecos (`all_nums`) y «Repetida» (`dup_keys`) salen
+    de la union ENTERA: quien no ve un traslado no recibe un hueco falso."""
     t = _union(organization_id)
     k = remission_key(t.c.remission)
 
@@ -200,6 +234,8 @@ def remission_book(
     }
 
     filtered = base
+    if not show_transfers:
+        filtered = filtered.where(t.c.doc_type != "transfer")
     if remission_from is not None:
         filtered = filtered.where(k.numerica >= remission_from)
     if remission_to is not None:
@@ -218,7 +254,10 @@ def remission_book(
     # texto arriba en desc) y NO se toca: estas llaves son solo del talonario.
     # (La vacia no llega aca: `base` la excluye.)
     texto = k.texto.collate("C")
-    tiebreak = [t.c.date.desc(), t.c.doc_number.desc()]
+    # Tres fuentes con contador PROPIO: Entrada #5 y Traslado #5 con la misma
+    # remision y fecha empatarian del todo y el orden quedaria al azar de
+    # Postgres; `doc_type` cierra el orden TOTAL (C1 de QA 2, pasada 1).
+    tiebreak = [t.c.date.desc(), t.c.doc_number.desc(), t.c.doc_type.desc()]
     if desc:
         order = [k.numerica.is_(None).asc(), k.numerica.desc(), texto.desc(), *tiebreak]
     else:
@@ -308,6 +347,7 @@ def _attach_materials(db: Session, organization_id: UUID, items: list[dict]) -> 
     pagina, nunca un join 1:N — #89/#93 R2)."""
     io_ids = [i["doc_id"] for i in items if i["kind"] == "doc" and i["doc_type"] == "inbound"]
     cd_ids = [i["doc_id"] for i in items if i["kind"] == "doc" and i["doc_type"] == "control_dispatch"]
+    tr_ids = [i["doc_id"] for i in items if i["kind"] == "doc" and i["doc_type"] == "transfer"]
     by_doc: dict = {}
     if io_ids:
         for doc_id, code in db.execute(
@@ -325,6 +365,14 @@ def _attach_materials(db: Session, organization_id: UUID, items: list[dict]) -> 
             .order_by(Material.code)
         ).all():
             by_doc.setdefault(("control_dispatch", doc_id), []).append(code)
+    if tr_ids:
+        for doc_id, code in db.execute(
+            select(TransferLine.transfer_id, Material.code)
+            .join(Material, Material.id == TransferLine.material_id)
+            .where(TransferLine.transfer_id.in_(tr_ids))
+            .order_by(Material.code)
+        ).all():
+            by_doc.setdefault(("transfer", doc_id), []).append(code)
     for i in items:
         if i["kind"] == "doc":
             i["materials"] = ", ".join(by_doc.get((i["doc_type"], i["doc_id"]), []))

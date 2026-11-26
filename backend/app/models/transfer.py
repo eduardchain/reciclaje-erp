@@ -111,6 +111,11 @@ class Transfer(Base, OrganizationMixin, TimestampMixin):
 
     notes: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # Numero de remision del papel de despacho (Q-75: el mismo talonario de las
+    # Entradas). Obligatoria al despachar (la exige el schema); NULL en los
+    # traslados anteriores a este campo.
+    remission_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
     created_by: Mapped[Optional[UUID]] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

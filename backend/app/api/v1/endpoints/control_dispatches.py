@@ -28,6 +28,7 @@ from app.schemas.control_dispatch import (
 )
 from app.services.control_dispatch import control_dispatch_service
 from app.services.remission_book import remission_book
+from app.utils.org_settings import get_org_setting
 
 router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])
 remissions_router = APIRouter(dependencies=[Depends(require_org_flag("kg_ledger_enabled"))])
@@ -167,9 +168,17 @@ def list_remissions(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
 ):
+    # Las filas de TRASLADO salen solo con el permiso de leer traslados Y el flag
+    # de traslados (plan de traslados, D-a). Ver y medir son dos cosas (D-b): los
+    # huecos y «Repetida» se calculan sobre todo, lo vea o no este usuario.
+    # La regla depende de un dato que la dependency estatica no ve (patron #102).
+    show_transfers = (
+        context["is_admin"] or "inventory.view" in context["user_permissions"]
+    ) and bool(get_org_setting(db, context["organization_id"], "two_step_transfers_enabled"))
     return remission_book(
         db, context["organization_id"],
         remission_from=remission_from, remission_to=remission_to,
         date_from=_day_start(date_from), date_to=_day_end(date_to), search=search,
         desc=(order == "desc"), skip=skip, limit=limit,
+        show_transfers=show_transfers,
     )

@@ -110,9 +110,11 @@ export const invalidateAfterKgMovement = (qc: QueryClient) => {
 
 // Traslados dos pasos (SAC E3.1, N1): la recepcion emite par de maquila +
 // intersede kg + posible ajuste de merma; el despacho solo inventario — un
-// solo helper mantiene la regla simple (#27).
+// solo helper mantiene la regla simple (#27). El traslado es tercera fuente del
+// talonario de remisiones (despachar, corregir la remisión o anular lo cambian).
 export const invalidateAfterTransfer = (qc: QueryClient) => {
   qc.invalidateQueries({ queryKey: ["transfers"] });
+  qc.invalidateQueries({ queryKey: ["remissions"] });
   qc.invalidateQueries({ queryKey: ["kg-ledger"] });
   qc.invalidateQueries({ queryKey: ["money-movements"] });
   qc.invalidateQueries({ queryKey: ["reports"] });

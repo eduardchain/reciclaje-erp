@@ -15,6 +15,7 @@ annul canonico (#66, reingreso ponderado).
 Gating (E10): el router gatea two_step_transfers_enabled; el par de maquila
 se gatea INLINE con internal_maquila_enabled (get_org_setting).
 """
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -37,6 +38,7 @@ from app.models.transfer import Transfer, TransferLine
 from app.models.user import User
 from app.models.warehouse import Warehouse
 from app.schemas.inventory_adjustment import DecreaseCreate, IncreaseCreate
+from app.services.remission_book import duplicate_remission_warning
 from app.schemas.transfer import (
     TransferDispatchCreate,
     TransferReceiveRequest,
@@ -44,6 +46,8 @@ from app.schemas.transfer import (
 )
 from app.utils.org_settings import get_org_setting
 from app.utils.dates import business_today, business_today_noon
+
+logger = logging.getLogger(__name__)
 
 MAQUILA_TARIFF_CODE = "maquila_intersede_cv_jm"
 MAQUILA_CATEGORY_NAME = "Maquila Intersede"
@@ -174,10 +178,20 @@ class TransferService:
             received_date=None if crosses_sede else dispatch_date,
             received_by=None if crosses_sede else user_id,
             notes=data.notes,
+            remission_number=data.remission_number,
             created_by=user_id,
         )
         db.add(transfer)
         db.flush()
+
+        # Remision repetida (D8: se AVISA, no se rechaza). Con el traslado ya en
+        # la BD, se excluye por id para que no se avise a si mismo.
+        dup = duplicate_remission_warning(
+            db, organization_id, data.remission_number,
+            exclude_transfer_id=transfer.id,
+        )
+        if dup:
+            warnings.append(dup)
 
         # Formulas vigentes en batch (snapshot AL DESPACHO, E7)
         material_ids = [ln.material_id for ln in data.lines]
@@ -759,6 +773,63 @@ class TransferService:
         )
         adjustment.transfer_id = transfer.id
         warnings.extend(adj_warnings)
+
+    # ================================================================== #
+    # Correccion de la remision (PATCH; plan de traslados, D-e)           #
+    # ================================================================== #
+
+    def update_remission(
+        self,
+        db: Session,
+        transfer_id: UUID,
+        remission_number: str,
+        organization_id: UUID,
+        user_id: Optional[UUID] = None,
+        user_email: Optional[str] = None,
+    ) -> tuple[Transfer, list[str]]:
+        """Corrige SOLO `transfers.remission_number`: no toca lineas, inventario,
+        kg, merma, maquila ni estado (la remision es el numero del papel).
+
+        - Un traslado anulado es un registro congelado: 400 (igual que la Salida
+          de control y la Entrada). Se corrige ANTES de anular.
+        - La guardada puede ser NULL (traslados anteriores al campo): se compara
+          contra `(x or "")`, jamas `x.strip()` sobre NULL.
+        - Sin cambio = sin aviso y sin log. «Repetida» se AVISA (D8), no se rechaza.
+        - Una linea de log (estilo #85 D5) cuando la correccion QUEDO guardada:
+          actor, traslado, numero anterior y nuevo. Jamas el cuerpo del request.
+        """
+        transfer = self._get_or_404(db, transfer_id, organization_id)
+        if transfer.status == "annulled":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"El traslado #{transfer.transfer_number} está anulado: no se "
+                    "corrige su remisión (su número queda cubierto como está). "
+                    "Se corrige antes de anular."
+                ),
+            )
+
+        warnings: list[str] = []
+        previous = transfer.remission_number
+        if remission_number == (previous or "").strip():
+            return transfer, warnings
+
+        transfer.remission_number = remission_number
+        db.flush()
+        dup = duplicate_remission_warning(
+            db, organization_id, remission_number, exclude_transfer_id=transfer.id,
+        )
+        if dup:
+            warnings.append(dup)
+
+        tid, number = transfer.id, transfer.transfer_number
+        db.commit()
+        logger.warning(
+            "transfer_remission_changed actor_id=%s actor_email=%s "
+            "transfer_id=%s transfer_number=%s previous=%r new=%r",
+            user_id, user_email, tid, number, previous, remission_number,
+        )
+        return transfer, warnings
 
     # ================================================================== #
     # Anulacion (cascade E9/§2.7)                                         #
