@@ -17,6 +17,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -38,7 +39,9 @@ import {
   formatDateTime,
   formatWeight,
   toLocalDateInput,
+  utcToLocalDateInput,
 } from "@/utils/formatters";
+import { transferTotals, type ColumnTotal } from "@/utils/transferTotals";
 import { ROUTES } from "@/utils/constants";
 import {
   TRANSFER_STATUS_LABELS,
@@ -88,6 +91,31 @@ function LineRow({ line }: { line: TransferLineResponse }) {
   );
 }
 
+// Celda de la fila de totales: la suma con su formato, o la etiqueta de «sin valor».
+// Un `null` NUNCA pasa por el formateador (formatWeight(null) daría «0 kg»).
+function TotalValue({
+  total,
+  render,
+}: {
+  total: ColumnTotal;
+  render: (value: number) => string;
+}) {
+  if (total.value == null) return <>{total.emptyLabel}</>;
+  return (
+    <>
+      {render(total.value)}
+      {total.partial && (
+        <span
+          className="block text-xs font-normal text-amber-700"
+          title="Las líneas pendientes de resolver no están en la suma"
+        >
+          parcial: faltan {total.pending} de {total.contributors} líneas
+        </span>
+      )}
+    </>
+  );
+}
+
 export default function TransferDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -100,7 +128,11 @@ export default function TransferDetailPage() {
   const updateRemission = useUpdateTransferRemission();
 
   const [recvQty, setRecvQty] = useState<Record<string, number>>({});
-  const [receiptDate, setReceiptDate] = useState(toLocalDateInput(new Date()));
+  // Fecha de recepción editada por el usuario, AMARRADA al traslado: `null` = «sigue
+  // al despacho». Si React Router reutiliza este componente al cambiar de :id, la
+  // fecha editada de un traslado no se aplica a otro (esa fecha mueve inventario,
+  // merma, kg intersede y maquila).
+  const [receiptEdit, setReceiptEdit] = useState<{ id: string; value: string } | null>(null);
   const [resolutions, setResolutions] = useState<
     Record<string, { resolution: "justify" | "correct"; final?: number }>
   >({});
@@ -127,6 +159,16 @@ export default function TransferDetailPage() {
 
   const t: TransferResponse = transfer;
 
+  // La fecha de recepción arranca igual a la del despacho (BusinessDate → yyyy-mm-dd).
+  // Valor derivado, no estado inicial: el estado se crea antes de cargar el traslado.
+  // Solo se valida el formato; `min`/`max` son ayuda del selector y el servidor es el
+  // árbitro (responde 400 con mensaje claro si la fecha no sirve).
+  const dispatchDateInput = utcToLocalDateInput(t.dispatch_date);
+  const receiptDate = receiptEdit?.id === t.id ? receiptEdit.value : dispatchDateInput;
+  const receiptDateValid = /^\d{4}-\d{2}-\d{2}$/.test(receiptDate);
+  // Sin hooks aquí: estamos después del `return` temprano (#93).
+  const totals = transferTotals(t.lines);
+
   // Un traslado anterior a la remisión obligatoria la trae NULL: el diálogo arranca vacío
   const currentRemission = (t.remission_number ?? "").trim();
   const openRemissionDialog = () => {
@@ -148,7 +190,7 @@ export default function TransferDetailPage() {
     });
   };
 
-  const receiveReady = t.lines.every((ln) => recvQty[ln.id] != null);
+  const receiveReady = t.lines.every((ln) => recvQty[ln.id] != null) && receiptDateValid;
 
   const submitResolve = () => {
     resolve.mutate({
@@ -272,6 +314,22 @@ export default function TransferDetailPage() {
                   <LineRow key={ln.id} line={ln} />
                 ))}
               </TableBody>
+              {/* Anulado: las líneas conservan lo que se revirtió y un «Total» ahí
+                  diría que existe una deuda que ya no existe. Despachado/Recibido no
+                  se suman: mezclan kg y unidades (#54). */}
+              {t.status !== "annulled" && (
+                <TableFooter>
+                  <TableRow>
+                    <TableCell colSpan={3}>Total</TableCell>
+                    <TableCell className="text-right">
+                      <TotalValue total={totals.kg} render={(v) => formatWeight(v, "kg")} />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <TotalValue total={totals.maquila} render={formatCurrency} />
+                    </TableCell>
+                  </TableRow>
+                </TableFooter>
+              )}
             </Table>
           </div>
         </CardContent>
@@ -290,9 +348,14 @@ export default function TransferDetailPage() {
                 <Input
                   type="date"
                   value={receiptDate}
+                  min={dispatchDateInput}
                   max={toLocalDateInput(new Date())}
-                  onChange={(e) => setReceiptDate(e.target.value)}
+                  onChange={(e) => setReceiptEdit({ id: t.id, value: e.target.value })}
                 />
+                <p className="text-xs text-slate-500">
+                  Fecha del despacho: {formatDate(t.dispatch_date)}. Cámbiala si el material
+                  llegó otro día.
+                </p>
               </div>
             </div>
             <div className="space-y-2">
